@@ -37,14 +37,21 @@ Status DummyBackend::start(const BackendConfig& config, Callback callback) {
                     std::this_thread::sleep_until(next);
                 }
             }
+            float* out[2] = {outL_.data(), outR_.data()};
+            callback_(nullptr, out, 0);  // the final callback (Backend::stop contract)
         });
     }
     return okStatus();
 }
 
 void DummyBackend::stop() {
-    running_ = false;
-    if (thread_.joinable()) thread_.join();
+    const bool wasRunning = running_.exchange(false);
+    if (thread_.joinable()) {
+        thread_.join();
+    } else if (wasRunning && callback_) {
+        float* out[2] = {outL_.data(), outR_.data()};
+        callback_(nullptr, out, 0);  // Manual: the caller is the audio thread
+    }
 }
 
 void DummyBackend::run(std::int64_t n) {
@@ -84,18 +91,14 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
 
 void Engine::stop() {
     if (!backend_) return;
-    // Ask the audio thread to stop processing every instance (a flag: never
-    // dropped), then stop the backend. A manual backend has no thread: its
-    // caller is the audio thread and no cycle is running, so stop here.
+    // Silence from the next cycle on, then stop the backend: its final
+    // zero-frame callback stops every plugin on the audio thread.
     shutdownRequested_.store(true, std::memory_order_release);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    while (backend_->ownsThread() && !shutDown_.load() &&
-           std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
+    stoppedOnAudioThread_ = false;
     backend_->stop();
     if (!shutDown_.load()) {
-        // No cycle acknowledged (manual backend, or a stalled device thread
-        // that the backend has now joined): nothing else touches the plugins.
+        // A backend that broke its stop() contract has already joined its
+        // thread, so nothing else touches the plugins: recover here.
         for (host::Instance* in : processing_) in->stopProcessing();
     }
     processing_.clear();
@@ -180,6 +183,16 @@ void Engine::resetInstances(detail::Plan* plan) SUPPLE_RT {
 }
 
 void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames) SUPPLE_RT {
+    if (frames == 0) {  // the backend's final callback: stop every plugin here
+        if (!shutDown_.load()) {
+            for (host::Instance* in : processing_) in->stopProcessing();
+            processing_.clear();
+            playing_ = false;
+            stoppedOnAudioThread_ = true;
+            shutDown_.store(true);
+        }
+        return;
+    }
     detail::Plan* plan = handoff_.acquire();
     if (plan != plan_) {
         adopt(plan);
@@ -193,6 +206,7 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
         for (host::Instance* in : processing_) in->stopProcessing();
         processing_.clear();
         playing_ = false;
+        stoppedOnAudioThread_ = true;
         shutDown_.store(true);
     }
     if (const std::uint64_t seq = seekSeq_.load(std::memory_order_acquire); seq != seekSeen_) {

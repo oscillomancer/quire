@@ -352,6 +352,8 @@ TEST_CASE(
     const Error e1 = parseError(R"("drive": {"type": "off", "amount": 99, "bogus": 1})");
     CHECK_MESSAGE(mentions(e1, "orrery.field_not_for_type", "/drive/amount"), all(e1));
     CHECK_MESSAGE(mentions(e1, "orrery.field_not_for_type", "/drive/bogus"), all(e1));
+    CHECK(all(e1).find("\"amount\" does nothing while drive is off") != std::string::npos);
+    CHECK(all(e1).find("\"bogus\" does nothing while drive is off") != std::string::npos);
     const Error e2 = parseError(R"("steps": {"step1": {"values": []}})");
     CHECK_MESSAGE(mentions(e2, "orrery.steps.empty", "/steps/step1/values"), all(e2));
     const Error e3 =

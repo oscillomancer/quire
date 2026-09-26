@@ -302,10 +302,11 @@ granted, and CPU governor (read-only facts).
   Plans share ownership of the session's TimeMap (a session version may be
   freed while its plan plays).
 - **Transport:** play/pause/seek/shutdown are coalescing atomics (the latest
-  request wins, none is dropped however many arrive between callbacks); the
-  audio thread stops every plugin on shutdown, and the main thread does so
-  only when no cycle ran (manual backend, or a stalled device thread already
-  joined). Pause and
+  request wins, none is dropped however many arrive between callbacks).
+  Shutdown: `Backend::stop()` promises one final zero-frame callback on the
+  audio thread (a manual driver makes it on its caller, which is its audio
+  thread), and the engine stops every plugin there — no timeout, no stop from
+  the main thread however long the device's period. Pause and
   seek `reset()` the plugins (no hanging notes); seek re-locates event and
   automation cursors and clears delay lines. The live output lags the
   render position by the plan's output latency.

@@ -533,9 +533,7 @@ class Decoder {
         for (const auto& m : v.asObject())
             if (m.key != "type")
                 fail(Error("orrery.field_not_for_type",
-                           ""
-                           " + m.key + "
-                           " does nothing while drive is off",
+                           "\"" + m.key + "\" does nothing while drive is off",
                            pointer({"drive", m.key}),
                            "choose a drive type (soft, tape, fold, hard) or remove the field"));
     }

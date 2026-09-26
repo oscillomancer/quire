@@ -259,3 +259,36 @@ TEST_CASE("a plugin that refuses to start is passed through, not processed") {
     CHECK(peak > 0.1);  // the sine passes through the stage that did not start
     engine.stop();
 }
+
+TEST_CASE("stop() stops plugins on the audio thread even with second-long gaps between callbacks" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    // 8192 frames at 8 kHz: a callback about once a second, paced like a device.
+    DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
+    Engine engine(pool, media);
+    model::Session s = synthSession(0.0);
+    model::Project project = *s.project;
+    project.sampleRate = 8000;
+    s.project = std::make_shared<const model::Project>(project);
+    REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 8192}).ok());
+    REQUIRE(engine.load(s).ok());
+    engine.play();
+    while (backend.cycles() < 1) std::this_thread::yield();
+    engine.stop();  // lands mid-gap: no timeout, no stop from this thread
+    CHECK(engine.lastStopOnAudioThread());
+    CHECK(engine.processErrors() == 0);
+}
+
+TEST_CASE("a manual backend's stop is the audio thread's stop") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    backend.run(2);
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());
+}

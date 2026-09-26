@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
 #include "orrery/engine.h"
 #include "orrery/patch.h"
+#include "supple/base/spsc.h"
 #include "supple/clap/plugin_support.h"
 #include "supple/clap/semantic_model.h"
 
@@ -78,7 +80,16 @@ class Model final : public clapx::SemanticModel {
     PatchType type_;
 };
 
-struct Plugin {
+// An editor edit on its way to the audio thread and the host.
+struct EditItem {
+    enum Kind : std::uint8_t { Begin, Value, End };
+    std::uint16_t index = 0;
+    Kind kind = Value;
+    double value = 0.0;  // physical
+};
+using EditRing = SpscRing<EditItem, 4096>;
+
+struct Plugin final : EditorBridge {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
     const clap_host_params_t* hostParams = nullptr;
@@ -94,6 +105,18 @@ struct Plugin {
     bool active = false;
     std::atomic<bool> processing{false};
 
+    // Editor (main thread unless noted).
+    const ClapExtensions* ext = nullptr;
+    void* extData = nullptr;
+    EditRing edits;                       // main → audio thread (or params.flush)
+    std::atomic<bool> retryFlush{false};  // audio thread asks main to request_flush
+    std::uint64_t structureRevision = 0;
+    std::int32_t gestureIndex = -1;
+    bool gestureQueued = false;
+    std::atomic<bool> telemetryOn{false};
+    std::atomic<float> peakL{0.0f}, peakR{0.0f};  // written by the audio thread
+    std::atomic<int> voices{0};
+
     Plugin() {
         indexOfId.fill(-1);
         const auto t = orrery::table();
@@ -107,7 +130,6 @@ struct Plugin {
 
     // CLAP events → engine events (audio thread, no allocation: capacity reserved).
     void translate(const clap_input_events_t* in) SUPPLE_RT {
-        events.clear();
         const std::uint32_t n = in ? in->size(in) : 0;
         for (std::uint32_t i = 0; i < n && events.size() < kMaxEvents; ++i) {
             const clap_event_header_t* h = in->get(in, i);
@@ -183,6 +205,122 @@ struct Plugin {
         }
     }
 
+    // Editor edits → host events (and engine events when `toEngine`). Stops
+    // at the first event the host refuses and asks the main thread to request
+    // another flush. Returns whether any value edit was drained.
+    bool drainEdits(const clap_output_events_t* out, bool toEngine) SUPPLE_RT {
+        bool values = false;
+        EditItem item;
+        const auto t = orrery::table();
+        while (edits.peek(item)) {
+            const params::ParamSpec& spec = t[item.index];
+            bool pushed = false;
+            if (out) {
+                if (item.kind == EditItem::Value) {
+                    clap_event_param_value_t ev{};
+                    ev.header = {sizeof(ev), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+                                 0};
+                    ev.param_id = spec.id;
+                    ev.note_id = -1;
+                    ev.port_index = -1;
+                    ev.channel = -1;
+                    ev.key = -1;
+                    ev.value = params::toClap(spec, item.value);
+                    pushed = out->try_push(out, &ev.header);
+                } else {
+                    clap_event_param_gesture_t ev{};
+                    ev.header = {sizeof(ev), 0, CLAP_CORE_EVENT_SPACE_ID,
+                                 static_cast<uint16_t>(item.kind == EditItem::Begin
+                                                           ? CLAP_EVENT_PARAM_GESTURE_BEGIN
+                                                           : CLAP_EVENT_PARAM_GESTURE_END),
+                                 0};
+                    ev.param_id = spec.id;
+                    pushed = out->try_push(out, &ev.header);
+                }
+            }
+            if (!pushed) {
+                if (!retryFlush.exchange(true) && host->request_callback)
+                    host->request_callback(host);
+                break;
+            }
+            edits.consume();
+            if (item.kind != EditItem::Value) continue;
+            values = true;
+            if (toEngine && events.size() < kMaxEvents) {
+                Event e;
+                e.type = Event::Type::Param;
+                e.index = item.index;
+                e.value = item.value;
+                events.push_back(e);
+            }
+        }
+        return values;
+    }
+
+    void requestFlush() {
+        if (hostParams && hostParams->request_flush) hostParams->request_flush(host);
+    }
+
+    // --- EditorBridge ------------------------------------------------------------------
+
+    const Structure& structure() const override { return model.structure; }
+    double value(std::size_t index) const override { return store.get(index); }
+    std::uint64_t revision() const override { return structureRevision + store.generation(); }
+
+    void beginEdit(std::size_t index) override {
+        gestureIndex = static_cast<std::int32_t>(index);
+        // A gesture starts only with room for its final value and end.
+        gestureQueued = edits.free() >= 3 &&
+                        edits.push({static_cast<std::uint16_t>(index), EditItem::Begin, 0.0});
+        requestFlush();
+    }
+
+    void edit(std::size_t index, double physical) override {
+        if (index >= store.size() || (orrery::table()[index].flags & params::kReadonly)) return;
+        store.set(index, physical);  // clamps; the editor reads it back at once
+        const double v = store.get(index);
+        const auto i = static_cast<std::uint16_t>(index);
+        if (gestureQueued && gestureIndex == static_cast<std::int32_t>(index)) {
+            if (edits.free() > 2) edits.push({i, EditItem::Value, v});  // else: endEdit sends it
+        } else if (gestureIndex != static_cast<std::int32_t>(index) && edits.free() >= 3) {
+            edits.push({i, EditItem::Begin, 0.0});
+            edits.push({i, EditItem::Value, v});
+            edits.push({i, EditItem::End, 0.0});
+        }
+        requestFlush();
+    }
+
+    void endEdit(std::size_t index) override {
+        const auto i = static_cast<std::uint16_t>(index);
+        if (gestureQueued && gestureIndex == static_cast<std::int32_t>(index)) {
+            edits.push({i, EditItem::Value, store.get(index)});
+            edits.push({i, EditItem::End, 0.0});
+        } else if (edits.free() >= 3) {  // the begin found no room: send it whole
+            edits.push({i, EditItem::Begin, 0.0});
+            edits.push({i, EditItem::Value, store.get(index)});
+            edits.push({i, EditItem::End, 0.0});
+        }
+        gestureIndex = -1;
+        gestureQueued = false;
+        requestFlush();
+    }
+
+    Status merge(const json::Value& patch) override {
+        return model.apply(CLAP_SUPPLE_SET_MERGE, patch);
+    }
+    std::string patchText(bool changedOnly) const override { return model.patchJson(changedOnly); }
+    std::string describe() const override { return model.describe(true); }
+
+    void setTelemetryEnabled(bool on) override { telemetryOn.store(on, std::memory_order_relaxed); }
+    Telemetry telemetry() override {
+        Telemetry t;
+        t.peakL = peakL.exchange(0.0f);
+        t.peakR = peakR.exchange(0.0f);
+        t.voices = voices.load();
+        t.processing = processing.load();
+        return t;
+    }
+
     void valuesChanged(bool structural) {
         if (hostParams) hostParams->rescan(host, CLAP_PARAM_RESCAN_VALUES);
         if (hostSemantic) {
@@ -205,6 +343,7 @@ Patch Model::current() const {
 }
 
 void Model::install(const Patch& p) {
+    ++p_.structureRevision;
     meta = p.meta;
     structure = p.body.structure;
     p_.store.assign(patch::FlatBody{p.body.values});
@@ -236,15 +375,20 @@ const clap_plugin_params_t kParams = {
     [](const clap_plugin_t*, clap_id id, const char* t, double* v) {
         return clapx::ClapParams::textToValue(orrery::table(), id, t, v);
     },
-    [](const clap_plugin_t* p, const clap_input_events_t* in, const clap_output_events_t*) {
+    [](const clap_plugin_t* p, const clap_input_events_t* in, const clap_output_events_t* out) {
         Plugin* s = self(p);
         if (s->processing.load()) {
             // [audio thread] apply without rendering.
+            s->events.clear();
+            s->drainEdits(out, true);
             s->translate(in);
             s->engine.process(s->events, Transport{}, nullptr, nullptr, 0);
-        } else if (clapx::ClapParams::applyEvents(s->store, in) && s->active) {
-            // [main thread] values reach the engine with the next program.
-            s->engine.setPatch(s->model.current());
+        } else {
+            // [main thread] the store already holds editor values; they and
+            // the host's reach the engine with the next program.
+            const bool edited = s->drainEdits(out, false);
+            if ((clapx::ClapParams::applyEvents(s->store, in) || edited) && s->active)
+                s->engine.setPatch(s->model.current());
         }
     }};
 
@@ -292,6 +436,7 @@ bool init(const clap_plugin_t* p) {
         static_cast<const clap_host_params_t*>(s->host->get_extension(s->host, CLAP_EXT_PARAMS));
     s->hostSemantic = static_cast<const clap_host_supple_semantic_params_t*>(
         s->host->get_extension(s->host, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));
+    if (s->ext && s->ext->create) s->extData = s->ext->create(p, s->host, *s);
     return true;
 }
 
@@ -306,6 +451,8 @@ bool activate(const clap_plugin_t* p, double sampleRate, uint32_t, uint32_t maxF
 
 clap_process_status process(const clap_plugin_t* p, const clap_process_t* pr) {
     Plugin* s = self(p);
+    s->events.clear();
+    s->drainEdits(pr->out_events, true);  // editor values first (time 0), then the host's
     s->translate(pr->in_events);
     Transport t;
     if (pr->transport && (pr->transport->flags & CLAP_TRANSPORT_HAS_TEMPO))
@@ -316,6 +463,18 @@ clap_process_status process(const clap_plugin_t* p, const clap_process_t* pr) {
     float* right = pr->audio_outputs[0].channel_count > 1 ? pr->audio_outputs[0].data32[1] : left;
     // CLAP guarantees frames_count <= the activation's max_frames_count.
     s->engine.process(s->events, t, left, right, pr->frames_count);
+    if (!s->telemetryOn.load(std::memory_order_relaxed))
+        return s->events.empty() && s->engine.silent() ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
+    float pl = 0.0f, pr2 = 0.0f;
+    for (std::uint32_t i = 0; i < pr->frames_count; ++i) {
+        pl = std::max(pl, std::fabs(left[i]));
+        pr2 = std::max(pr2, std::fabs(right[i]));
+    }
+    if (pl > s->peakL.load(std::memory_order_relaxed))
+        s->peakL.store(pl, std::memory_order_relaxed);
+    if (pr2 > s->peakR.load(std::memory_order_relaxed))
+        s->peakR.store(pr2, std::memory_order_relaxed);
+    s->voices.store(s->engine.activeVoices(), std::memory_order_relaxed);
     return s->events.empty() && s->engine.silent() ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
 
@@ -323,14 +482,21 @@ clap_process_status process(const clap_plugin_t* p, const clap_process_t* pr) {
 
 const clap_plugin_descriptor_t* clapDescriptor() { return &kDescriptor; }
 
-const clap_plugin_t* createClapPlugin(const clap_host_t* host) {
+void* extensionData(const clap_plugin_t* plugin) { return self(plugin)->extData; }
+
+const clap_plugin_t* createClapPlugin(const clap_host_t* host, const ClapExtensions* extensions) {
     if (!host || !clap_version_is_compatible(host->clap_version)) return nullptr;
     auto* s = new Plugin();
     s->host = host;
+    s->ext = extensions;
     s->plugin = {&kDescriptor,
                  s,
                  init,
-                 [](const clap_plugin_t* p) { delete self(p); },
+                 [](const clap_plugin_t* p) {
+                     Plugin* me = self(p);
+                     if (me->ext && me->ext->destroy && me->extData) me->ext->destroy(me->extData);
+                     delete me;
+                 },
                  activate,
                  [](const clap_plugin_t* p) { self(p)->active = false; },
                  [](const clap_plugin_t* p) {
@@ -340,7 +506,7 @@ const clap_plugin_t* createClapPlugin(const clap_host_t* host) {
                  [](const clap_plugin_t* p) { self(p)->processing = false; },
                  [](const clap_plugin_t* p) { self(p)->engine.reset(); },
                  process,
-                 [](const clap_plugin_t*, const char* id) -> const void* {
+                 [](const clap_plugin_t* p, const char* id) -> const void* {
                      if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kParams;
                      if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
                      if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
@@ -348,9 +514,15 @@ const clap_plugin_t* createClapPlugin(const clap_host_t* host) {
                      if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kLatency;
                      if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS))
                          return clapx::SemanticAdapter::extension<adapterOf>();
-                     return nullptr;
+                     const ClapExtensions* e = self(p)->ext;
+                     return e && e->get ? e->get(id) : nullptr;
                  },
-                 [](const clap_plugin_t* p) { self(p)->engine.collect(); }};
+                 [](const clap_plugin_t* p) {
+                     Plugin* me = self(p);
+                     me->engine.collect();
+                     if (me->retryFlush.exchange(false)) me->requestFlush();
+                     if (me->ext && me->ext->onMainThread) me->ext->onMainThread(me->extData);
+                 }};
     return &s->plugin;
 }
 

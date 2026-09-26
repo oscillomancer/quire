@@ -39,6 +39,10 @@ struct BackendConfig {
 };
 
 // An audio device driver. The callback runs on the backend's audio thread.
+// Contract for stop(): after the last audio cycle and before stop() returns,
+// the backend calls the callback once more with frames == 0 on its audio
+// thread (a Manual driver: on the caller, which is its audio thread), so the
+// engine can stop every plugin where CLAP requires it.
 class Backend {
   public:
     using Callback =
@@ -123,6 +127,9 @@ class Engine {
     std::uint32_t outputLatency() const { return outputLatency_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
     std::uint64_t processErrors() const { return processErrors_.load(); }
+    // True when the last stop() stopped the plugins in the backend's final
+    // (audio-thread) callback, as the Backend contract promises.
+    bool lastStopOnAudioThread() const { return stoppedOnAudioThread_.load(); }
 
   private:
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
@@ -162,6 +169,7 @@ class Engine {
     std::atomic<std::int64_t> reportedPos_{0};
     std::atomic<bool> reportedPlaying_{false};
     std::atomic<bool> shutDown_{false};
+    std::atomic<bool> stoppedOnAudioThread_{false};
     std::atomic<std::uint64_t> processErrors_{0};
 };
 
