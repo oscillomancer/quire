@@ -91,9 +91,35 @@ host, daw or plugins; plugins use only header-light libs.
 
 Model → audio: immutable `RenderPlan` swapped with an atomic pointer;
 parameter changes and transport commands via bounded SPSC queues. Audio →
-model: meters, xrun counts, plugin output events and param changes via SPSC
-rings, drained on the model thread. Overflow drops the newest item and counts
-it; nothing ever blocks the RT thread.
+model: two kinds of channel, never confused:
+
+- **Reliable, coalescing** channels for anything that is state: parameter
+  changes made inside plugin GUIs, plugin "state dirty" and "latency changed"
+  notifications, recording progress. Implemented as atomic latest-value
+  slots plus dirty bits (per parameter, per node), so they cannot overflow:
+  intermediate values may be coalesced, the final value never lost. The
+  model thread drains them and turns them into versions (undo steps).
+- **Lossy** channels for telemetry only (meters, scopes, analysis frames):
+  SPSC rings that drop the newest item on overflow and count drops.
+
+Nothing ever blocks the RT thread. The one sanctioned RT syscall is a
+non-blocking wake (`FUTEX_WAKE` / eventfd write) through a single reviewed
+wrapper `supple::rt::wake()` (rtsan-exempted inside it), used to wake worker
+threads and plugin bridge processes; RT threads never *wait* on anything
+but bounded spins with deadlines.
+
+**Main-thread budget.** The main thread is the UI thread, the model writer
+and CLAP's plugin main thread (plugin GUIs require it). It stays responsive
+because nothing long runs on it synchronously: edit commands are pure and
+fast; `RenderPlan` compilation, rendering, analysis, file I/O, peak building,
+plugin scanning and Lua scripts run on worker threads and commit results back
+as ordered commands; the target is no synchronous main-thread task over
+2 ms, measured in Phase 4/5 benchmarks.
+
+**Event delivery to clients.** Every event carries a per-topic sequence
+number. A subscriber whose queue overflows receives one `event.dropped
+{topic, from_seq, to_seq}` and re-synchronises with a snapshot query — the
+only case where a client reads state instead of receiving it.
 
 ## 4. Session model, undo and branches (ADR-0008)
 
@@ -136,10 +162,22 @@ transport/meter/analysis topics) replace polling.
 
 CLAP first (including `com.suppleaudio.semantic-params`), VST3 second, LV2
 later. Isolation modes per plugin instance, REAPER-style: in-process, shared
-bridge process, dedicated process. Bridged plugins run their own RT thread
-pinned to the engine's cycle via shared-memory audio buffers and futex
-signalling; a crash marks the node failed (silence + error event), and the
-session survives. Plugin GUIs are X11 windows embedded into the DAW's X11
+bridge process, dedicated process. Bridged plugins exchange audio and events with the
+engine through shared-memory rings. The engine's RT thread writes block n's
+input, wakes the bridge (`rt::wake`, non-blocking) and never waits
+unboundedly: in the default *pipelined* mode it consumes block n−1's output
+(one block of added, compensated latency); in *synchronous* mode it spins up
+to a deadline (a fraction of the block period) and, on a miss, outputs
+silence for that node and counts a bridge xrun. A control thread watches the
+bridge process; a crash marks the node failed (silence + error event) and the
+session survives.
+
+**Runtime latency changes.** CLAP only lets an active plugin change latency
+via `request_restart`. The engine then prepares a new plan on a worker thread
+(the plugin reactivated with its new latency, all delay-compensation lines
+recomputed) while the old plan keeps playing, and swaps at a block boundary
+with a short crossfade (default 10 ms) on affected paths. Offline renders are
+unaffected (plans are fixed per render). Full contract: Phase 4 engine spec. Plugin GUIs are X11 windows embedded into the DAW's X11
 windows (ADR-0005), including from bridge processes (X11 child windows work
 across processes).
 

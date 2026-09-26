@@ -70,3 +70,30 @@ dependency the plugins can include without pulling the host stack.
 template's CMake — prefix functions, cache options, dependency ownership —
 which would drift from the template); one multi-plugin CLAP binary (not how
 the template works; complicates per-plugin validation and GUI identity).
+
+## Clarifications (2026-09-26, from design review)
+
+- **What stays identical to the template vs what the product owns.** Kept
+  byte-identical apart from namespace/licence header (the template's own
+  shared-code rule): `Telemetry.h` (`Ring`), `test/host_contract.h`, the GUI
+  stack (`Window.*`, `Gui.h`, renderer backends, Pugl/NanoVG integration),
+  the clap-wrapper patches, the probes. Product-owned, as the template
+  itself expects: the parameter table, the DSP core, the `*_clap.cpp`
+  sections for params/state/extensions, `Theme.h`/`Widgets.h`/`Editor.cpp`,
+  CMake identity. The semantic-params hook, the JSON state and transactional
+  loading are product-owned changes in our copies, each with tests; the
+  generally useful ones are *also* offered to Nate as template patches
+  (`HUMAN_REVIEW.md`). Work does not pause on those proposals.
+- **C++20.** The template sets C++17. Our copies set C++20 for their own
+  targets (a product build setting); raising the template itself is offered
+  as a template patch.
+- **Clean-clone builds.** The template fetches clap-wrapper, Pugl and NanoVG
+  (and, via CPM, the CLAP and VST3 SDKs) from the network. For the
+  one-command offline build, their sources are vendored under
+  `third_party/` at the template's pins and passed to each plugin's
+  configure with `FETCHCONTENT_SOURCE_DIR_*` / `CLAP_SDK_ROOT` /
+  `FETCHCONTENT_FULLY_DISCONNECTED=ON`. The default monorepo build produces
+  **CLAP** (what Quire hosts and REAPER loads). VST3 is built when
+  `SUPPLE_PLUGIN_VST3=ON` and the VST3 SDK is vendored or present (it is
+  large; vendoring it is deferred until VST3 builds are needed). A clean
+  `/tmp` clone + build is the gate (`tools/ci/clean-clone.sh`).

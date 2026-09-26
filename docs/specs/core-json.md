@@ -67,7 +67,7 @@ class Value {
     // Checked accessors: assert on wrong type in debug; UB-free defaults in release
     // (false / 0 / empty) -- callers validate with a schema first.
     bool asBool() const;
-    std::int64_t asInt() const;                   // Double -> truncation only if integral, else 0
+    std::int64_t asInt() const;                   // Double: integral values saturate to the int64 range; non-integral -> 0
     double asDouble() const;                      // Int converts exactly (|v| <= 2^53) or nearest
     const std::string& asString() const;
     const Array& asArray() const;  Array& asArray();
@@ -85,6 +85,11 @@ class Value {
     // (1 == 1.0). Object equality ignores member order.
     friend bool operator==(const Value&, const Value&);
 };
+
+// Strict structural identity: same types (Int vs Double distinct), same
+// member order, bitwise-equal doubles. Use it to test serialization
+// invariants. *(Amended 2026-09-26.)*
+bool identical(const Value&, const Value&);
 
 std::string_view typeName(Type);                  // "null", "boolean", "integer", "number", "string", "array", "object"
 }
@@ -143,8 +148,12 @@ struct WriteOptions {
     int maxLineWidth = 100;      // for the scalar-array one-line rule
 };
 Result<std::string> write(const Value&, const WriteOptions& = {});  // error only for NaN/Inf
-std::string writeCompact(const Value&);    // asserts finite; pretty=false
+std::string writeCompact(const Value&);    // pretty=false
 std::string writeCanonical(const Value&);  // pretty, insertion order, ADR-0009 rules
+// writeCompact/writeCanonical require finite numbers (callers validate
+// documents through a schema first). A non-finite double trips a debug
+// assertion and is written as `null` in release builds; use write() when
+// the input is untrusted. *(Amended 2026-09-26.)*
 std::string formatDouble(double);          // the canonical double text
 ```
 
@@ -159,8 +168,7 @@ needed), `-0.0` prints `0.0`, exponent form as `to_chars` produces it (e.g.
 `"`, `\\`, `\n`, `\t`, `\r`, `\b`, `\f`, other controls `\u00XX` (lowercase hex).
 
 **Invariant (tested, fuzzed):** for any `v` that writes successfully,
-`parse(writeCanonical(v))` equals `v` exactly (same types, same member
-order), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
+`identical(parse(writeCanonical(v)), v)` (same types, same member order), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
 
 ### A.4 JSON Pointer (RFC 6901)
 
@@ -176,8 +184,13 @@ const Value* resolve(const Value& root, std::string_view pointer);  // nullptr i
 
 ```cpp
 Value mergePatch(const Value& target, const Value& patch);   // RFC 7396 exactly
-Value createMergePatch(const Value& from, const Value& to);  // minimal patch p with mergePatch(from, p) == to;
-                                                             // arrays replaced whole; for non-object `to`, p = to
+// Minimal patch p with mergePatch(from, p) == to; arrays replaced whole;
+// for non-object `to`, p = to. RFC 7396 cannot set an object member to null,
+// so if `to` has a null object-member value that the patch would need to
+// set, returns error `json.merge.unrepresentable_null` (path = that member).
+// Nulls inside arrays are fine (arrays are replaced whole).
+// *(Amended 2026-09-26.)*
+Result<Value> createMergePatch(const Value& from, const Value& to);
 struct Change {
     enum class Op { Add, Remove, Replace } op;
     std::string path;           // JSON Pointer
@@ -362,6 +375,13 @@ Error codes (all `schema.*`), each with the stated hint content:
 | `schema.check.<name>` | custom `.check` failure | whatever the check supplies |
 | `schema.too_many_errors` | error cap reached | — |
 
+When no close match exists, `unknown_member`/`enum`/`unknown_variant` hints
+list the valid names (all of them if ≤ 12, else the first 12 and "…");
+`schema.type` hints use the field's `.example()`, else its default, else a
+generated example (number: the range minimum or 0; string: `"text"`;
+boolean: `true`; enum: the first choice; object/array: `{…}`/`[…]`).
+*(Amended 2026-09-26.)*
+
 Closest-match: Damerau–Levenshtein distance ≤ max(2, len/3), case-insensitive,
 ties broken by declaration order; also match when one is a prefix of the
 other. Exposed as `supple::schema::closestMatch(std::string_view, std::span<const std::string_view>)`
@@ -418,10 +438,50 @@ variants (with `"discriminator"` hint member ignored by validators),
 `items`, `minItems`/`maxItems`/`uniqueItems`, `additionalProperties` +
 `propertyNames.pattern` for maps, `examples`, `deprecated`, and extension
 keywords `x-unit` (canonical unit string) and `x-unit-strings: true` when
-unit strings are accepted — in which case `type` is `["number", "string"]`.
+unit strings are accepted. In that case the field exports as
+`anyOf: [{"type": "number", minimum…}, {"type": "string", "pattern": <quantity
+pattern for the field's dimension>}]` so standard validators reject
+non-quantity strings; the numeric range for strings is checked server-side
+only (the description says so). Server-side validation is always
+authoritative; exported schemas are for clients and documentation.
+*(Amended 2026-09-26.)*
 `named()` schemas go to `$defs` and are referenced with `$ref`.
 
-### B.5 Performance and safety
+### B.5 Versioned documents *(added 2026-09-26)*
+
+ADR-0009's version rules implemented once, reused by core-patch, project
+files, reports and profiles (`supple/schema/document.h`):
+
+```cpp
+struct DocumentId { std::string ns = "supple"; std::string type; int major; int minor; };
+Result<DocumentId> parseDocumentId(std::string_view);   // "supple.eq-patch/1.0"
+std::string formatDocumentId(const DocumentId&);
+
+using Migration = std::function<Result<json::Value>(json::Value)>;  // whole doc, major k -> k+1
+
+template <class T>
+class DocumentType {
+  public:
+    DocumentType(std::string type, int major, int minor, Schema<T> body, std::vector<Migration> migrations = {});
+    // Reads "schema" (must be the first member when written; any position accepted on read),
+    // checks type, applies the version policy (same major: strict if minor <= current, Ignore
+    // unknown + warnings if newer; older major: migrations; newer major: document.too_new),
+    // then decodes the remaining members with `body`.
+    Result<T> fromJson(const json::Value&, std::vector<Warning>* = nullptr) const;
+    Result<T> parse(std::string_view text, std::vector<Warning>* = nullptr) const;
+    json::Value toJson(const T&) const;          // {"schema": id, ...body members in schema order}
+    std::string serialize(const T&) const;       // canonical text
+    json::Value jsonSchema() const;              // body schema + "schema": {"const": id}
+    const DocumentId& id() const;
+};
+```
+
+Error codes: `document.bad_id`, `document.wrong_type`, `document.too_new`,
+`document.migration_failed`, `document.missing_id`. Warnings are returned to
+the caller, who forwards them (command results carry a `warnings` array;
+files log them).
+
+### B.6 Performance and safety
 
 Decoding a 1 MB document must take well under 50 ms in Release. No global
 state; schemas are immutable after `build()` and safe to share across
@@ -435,8 +495,9 @@ threads. Recursion depth bounded by core-json's parse depth.
   RFC 8259 conformance cases (a corpus of accept/reject files in
   `libs/core-json/tests/corpus/`); round-trip and idempotence invariants;
   canonical formatting golden files; RFC 6901 examples; RFC 7396 appendix A
-  examples verbatim; `createMergePatch` property test (random documents:
-  `mergePatch(a, createMergePatch(a, b)) == b`); diff cases.
+  examples verbatim; `createMergePatch` property test (random documents
+  without null object members: `mergePatch(a, *createMergePatch(a, b)) == b`;
+  plus the null error case); diff cases.
 - A libFuzzer target `core-json.fuzz` (clang `-fsanitize=fuzzer,address`)
   exercising parse → write → parse under `tests/fuzz/`, built only when
   `SUPPLE_BUILD_FUZZERS=ON`, plus a short deterministic smoke run in CTest

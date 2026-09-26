@@ -42,10 +42,10 @@ struct Control {
 
 struct Sysex { std::int64_t tick = 0; std::vector<std::uint8_t> bytes; };  // includes F0 ... F7
 
-struct Meter { int numerator = 4; int denominator = 4; };  // denominator power of two
+struct Meter { int numerator = 4; int denominator = 4; };  // numerator 1..64, denominator 1,2,4,..,64
 
 struct Sequence {
-    int ppq = 960;                    // ticks per quarter note
+    int ppq = 960;                    // ticks per quarter note, 1..32767 (SMF limit)
     std::int64_t length = 0;          // item length in ticks (>= end of last event)
     std::vector<Note> notes;
     std::vector<Control> controls;
@@ -55,10 +55,23 @@ struct Sequence {
     friend bool operator==(const Sequence&, const Sequence&);   // after canonicalize
 };
 
-// Standard MIDI File I/O (format 0 and 1; all tracks merged, channels kept).
-struct SmfInfo { int ppq; std::optional<Meter> meter; std::optional<double> bpm; std::vector<std::string> trackNames; int skippedEvents; };
-Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info = nullptr);
-std::vector<std::uint8_t> writeSmf(const Sequence&, const std::optional<Meter>& meter, double bpm);  // format 0
+// Standard MIDI File I/O, scoped to *clips*: one Sequence per call. (Full
+// multi-track SMF import into tracks/tempo map is a Phase 4 engine feature
+// built on readSmf with `track`.)
+struct SmfInfo {
+    int ppq = 960;
+    int format = 0;
+    int trackCount = 0;
+    std::vector<std::pair<std::int64_t, Meter>> meters;      // tick, meter (from all tracks)
+    std::vector<std::pair<std::int64_t, double>> tempos;     // tick, BPM
+    std::vector<std::string> trackNames;
+    int skippedEvents = 0;                                    // meta/other events not represented
+};
+struct SmfReadOptions { std::optional<int> track; };          // nullopt: merge all tracks
+Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info = nullptr, const SmfReadOptions& = {});
+// Validates the Sequence (ranges, sysex framing, start+length overflow) and returns structured errors.
+Result<std::vector<std::uint8_t>> writeSmf(const Sequence&, const std::vector<std::pair<std::int64_t, Meter>>& meters,
+                                           const std::vector<std::pair<std::int64_t, double>>& tempos);  // format 0
 }
 ```
 
@@ -113,7 +126,8 @@ checked bar by bar.
 
 ```
 document   := [ "notation 1" ] { header } { section }
-header     := "meter" N "/" D | "ppq" INT | "tempo" NUMBER | "length" BARS
+header     := "meter" N "/" D [ "at" BAR ] | "ppq" INT | "tempo" NUMBER
+            | "length" BARS [ "+" INT "t" ] | "pickup" DUR | "octave" INT
 section    := voice | lane | events
 ```
 
@@ -125,18 +139,26 @@ section    := voice | lane | events
   A `meter` line may also appear *between bar lines inside a voice* only when
   standalone (sandbox); see B.10.
 - `ppq 960` — tick resolution of the compiled item (default 960, or the
-  host's).
+  host's), 1..32767. Every bar length must be a whole number of ticks
+  (`ppq·4·N/D`), else `notation.tick_fraction`.
+- `pickup q` — the item starts with an anacrusis of that duration: bar `0:`
+  exists, holds exactly that duration, and precedes bar 1 (the item starts
+  that much before bar 1's downbeat). Without `pickup`, bar 0 is an error.
+  *(Amended 2026-09-26.)*
 - `tempo 120` — only used when there is no host tempo map (the sandbox);
   otherwise it must agree with the host at the item start or it is a warning.
-- `length 8` — item length in whole bars; `length 8+480t` adds ticks (fewer
+- `length 8` — item length in whole bars (bars counted from bar 1); `length 8+480t` adds ticks (fewer
   than one bar). Default: the end of the last written bar. The length must
-  be ≥ the end of the last event; it may be shorter than the last written
-  bar (trailing rests beyond it are simply cut).  *(Amended 2026-09-26.)*
+  be ≥ the end of the last event (including layered `&` notes that extend
+  past their bar); it may be shorter than the last written bar (trailing
+  rests beyond it are simply cut). Without `length`, the item ends at the
+  later of the last written bar's end and the last event's end rounded up to
+  a bar line.  *(Amended 2026-09-26.)*
 
 ### B.4 Voices
 
 ```
-voice NAME [ch 1..16] [vel 1..127] [grid DUR [len DUR]] [accent 1..127] [ghost 1..127]
+voice NAME [ch 1..16] [vel 1..127] [octave -1..8] [grid DUR [len DUR]] [accent 1..127] [ghost 1..127]
 BAR ":" events [ "|" events ]...
 BARS "=" BARS
 ```
@@ -219,15 +241,18 @@ holds a C2 under a moving line. Layered events do not count toward the bar
 sum and may extend past the bar end.
 
 **Rests.** `r:DUR` advances the cursor silently. `r:*` fills the rest of the
-bar and may only be the last event of a bar.
+bar and may only be the last event of a bar (on an already full bar it is a
+no-op).
 
 **Chords.** `[C4 E4 G4]:h` — all pitches start together with the same
 duration and velocity. Duplicate pitches are errors.
 
 **Chord symbols.** `{Cm7}:h` voices a chord symbol deterministically: close
-position, root position, with the root in the voice's chord octave (default
-3; set with `voice keys ... octave 4`). Slash chords `{C/E}` add the bass
-note in the octave below the root. Qualities (intervals in semitones from
+position, root position: the root in the voice's `octave` (default 3), each
+further chord tone the interval above the root from the table (so 9ths etc.
+sit above the octave), pitches sorted ascending. Slash chords `{C/E}` add
+the bass note in the octave below the root. `octave` applies to chord
+symbols only. Qualities (intervals in semitones from
 the root):
 
 | symbol | intervals | symbol | intervals |
@@ -326,9 +351,14 @@ the same tick in the order written (the last one wins, as in MIDI).
   semitones with `st` (`+2st`, `-0.5st`), converted with the lane's range.
 - **Shape** of the segment *arriving* at this point: `step` (default — jump
   at the point), `lin` (linear ramp from the previous point), `slow`
-  (ease-in: quadratic), `fast` (ease-out). Ramps compile to events every
-  `ppq / 16` ticks (a 64th note), plus the exact endpoint, dropping events
-  whose value equals the previous event's.
+  (ease-in: quadratic), `fast` (ease-out). With x ∈ (0, 1] the fraction of
+  the segment: lin `v0+(v1−v0)x`, slow `v0+(v1−v0)x²`, fast
+  `v0+(v1−v0)(1−(1−x)²)`. Ramps compile to intermediate events at
+  `t0 + k·max(1, ppq/16)` (integer division) for `t0 < t < t1`, values
+  rounded half away from zero, **intermediate** events dropped when equal to
+  the previous event's value; the endpoint event at `t1` with `v1` is always
+  emitted. A `step` point always emits its event, even if the value repeats
+  (the decompiler relies on this).
 - CC names: `mod` 1, `breath` 2, `foot` 4, `porta_time` 5, `volume` 7,
   `pan` 10, `expression` 11, `sustain` 64, `porta` 65, `sostenuto` 66,
   `soft` 67, `legato` 68, `resonance` 71, `release` 72, `attack` 73,
@@ -356,13 +386,26 @@ events [ch 1..16]
 `program 0..127` (bank select is `lane cc 0` / `lane cc 32`), `sysex` bytes in
 hex including `F0`/`F7`.
 
-### B.10 Standalone meter changes
+### B.10 Meter changes
 
-Without a host meter map (sandbox), `meter N/D` may appear on its own line
-inside a voice before a bar line; it applies to every voice from that bar on
-and must be identical in every voice that reaches that bar
-(`notation.meter_conflict` otherwise). In the DAW, meter changes belong to
-the project (`timesig.*` commands) and notation must match them.
+*(Amended 2026-09-26.)* Meter changes are header statements, not voice
+content: `meter 3/4 at 5` applies from bar 5 to every voice (a plain
+`meter N/D` is `at 1`). They must be in increasing bar order. Without a host
+meter map (sandbox), they define the bar lengths. In the DAW, meter changes
+belong to the project (`timesig.*` commands); the host's `meterAt` maps
+local bars to project bars through the item's placement (bar 1 of the
+notation sits on the project bar the command names), and every `meter` line
+must agree with it (`notation.meter_mismatch`).
+
+```
+meter 4/4
+meter 3/4 at 3
+voice lead
+1: C4:w
+2: D4:w
+3: E4:h.
+4: F4:q G4:q A4:q
+```
 
 ---
 
@@ -381,6 +424,7 @@ struct Compiled {
     midi::Sequence sequence;                // canonicalized
     std::vector<midi::Meter> barMeters;     // meter per bar, bars 1..N
     std::optional<double> tempo;            // from a tempo header
+    std::int64_t pickupTicks = 0;           // item starts this many ticks before bar 1 (`pickup`)
     std::vector<Warning> warnings;          // supple::schema::Warning shape: code, message, path("line:col")
 };
 Result<Compiled> compile(std::string_view text, const CompileContext& = {});
@@ -409,7 +453,9 @@ rest would fix it), `bar_order`, `bar_overlap` (bar written twice),
 `unknown_drum` (closest names), `unknown_chord` (closest quality),
 `velocity_range`, `channel_range`, `lane_order` (positions must not decrease),
 `lane_value`, `position` (beat beyond the meter), `meter_mismatch`,
-`meter_conflict`, `duplicate_voice`, `duplicate_pitch`.
+`meter_order`, `pickup_length` (bar 0 must equal the pickup), `no_pickup`
+(bar 0 without a `pickup` header), `length_short` (explicit length before
+the last event), `duplicate_voice`, `duplicate_pitch`.
 
 ### C.2 Canonical form (what `decompile` writes)
 
@@ -428,16 +474,21 @@ Canonical output, in order:
    common, if needed) or digits exactly; one row per instrument per bar,
    instruments in drum-map note order. If any note does not fit, channel 10
    decompiles like any other channel.
-3. Per channel (ascending), notes are assigned to voices greedily: sort notes
-   canonically; each note goes to the lowest-numbered voice of that channel
-   whose cursor is ≤ the note's start; notes with identical start, length
-   and velocities form a chord in the same voice. A note that crosses a bar
+3. Per channel (ascending), notes are assigned to voices greedily: first
+   group notes with identical start, length, velocity **and** off-velocity
+   into chords (pitches ascending); then, in canonical order, each group goes
+   to the lowest-numbered voice of that channel whose cursor is ≤ its start. A note that crosses a bar
    line is split and tied (`~`). Voices are named `c<ch>v<n>`
    (`c1v1`, `c1v2`), with `vel` set to the voice's most common velocity.
    Gaps become rests. Durations are written as the shortest correct token:
    single symbolic (`q`, `e.`, `e3`, ...), else a `+` sum of at most two
    symbolic values, else `Nt`. Velocities different from the voice's `vel`
-   are written `:NN`; off-velocities other than 0 as `/MM`. No dynamics,
+   are written `:NN`; a non-zero off-velocity is written `:NN/MM` (with the
+   on-velocity always present in that case). Token spelling preference when
+   several are exact: plain (`w h q e s t x`), then dotted, double-dotted,
+   tuplets (3, 5, 6, 7, 9); a `+` sum uses the largest possible first term.
+   Copy lines refer to the earliest identical bar, merged into maximal
+   ranges. No dynamics,
    articulations, chord symbols, layering or copies are emitted — except
    that a bar identical to an earlier bar of the same voice is written as a
    copy line (`5 = 1`, or merged ranges `5-8 = 1-4`), checked by recompile.

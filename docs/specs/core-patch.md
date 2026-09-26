@@ -72,6 +72,10 @@ class PatchType {
 }
 ```
 
+`PatchType` is built on `schema::DocumentType` (core-json spec B.5), which
+implements the version policy; core-patch adds the envelope, merge, diff,
+flat patches, state framing and descriptions. *(Amended 2026-09-26.)*
+
 **Version handling** (ADR-0009): `schema` must be present and name this
 plugin's patch type (`patch.wrong_type` otherwise, naming the expected type).
 Same major and minor ≤ current: strict (unknown members are errors). Same

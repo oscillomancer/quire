@@ -98,3 +98,17 @@ model code and a reconciler between model versions and live plugin instances.
 - Three-way field-level merge instead of replay: more automatic, but replay
   re-validates with the same rules the agent faced and keeps merge semantics
   explainable.
+
+## Clarifications (2026-09-26, from design review)
+
+- **Memory bounds.** Undo history is bounded per branch by a configurable
+  byte budget (default 512 MiB of *unique* payload) and version count
+  (default 1000); the oldest versions beyond the bound are released. Large
+  payloads (plugin state blobs, MIDI chunks, envelope chunks) are immutable
+  and deduplicated by content hash, so re-capturing identical state costs
+  nothing. Unreachable versions are freed immediately (reference counting).
+  Saving a project writes branch heads; history persistence is optional
+  (`project.save {history: true}`), capped by the same budget.
+- **Coalescing.** Continuous gestures (a fader drag, an agent sweeping a
+  value through many `fx.param.set` calls in one batch) coalesce into one
+  version per gesture/batch, not one per event.
