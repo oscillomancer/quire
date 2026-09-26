@@ -561,8 +561,16 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
                                             const char* id) {
     if (!std::strcmp(id, gainDescriptor()->id))
         return make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt);
-    if (!std::strcmp(id, sineDescriptor()->id))
-        return make<Sine>(host, sineDescriptor(), sineActivate, sineProcess, sineExt);
+    if (!std::strcmp(id, sineDescriptor()->id)) {
+        const clap_plugin_t* p =
+            make<Sine>(host, sineDescriptor(), sineActivate, sineProcess, sineExt);
+        // clap_plugin.reset: silence every voice (a reused instance must not
+        // carry a hanging note into the next render).
+        const_cast<clap_plugin_t*>(p)->reset = [](const clap_plugin_t* pl) {
+            for (auto& v : S(pl)->voices) v = {};
+        };
+        return p;
+    }
     if (!std::strcmp(id, edgeDescriptor()->id)) {
         const clap_plugin_t* p =
             make<Edge>(host, edgeDescriptor(), edgeActivate, edgeProcess, edgeExt);
