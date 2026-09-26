@@ -168,7 +168,8 @@ needed), `-0.0` prints `0.0`, exponent form as `to_chars` produces it (e.g.
 `"`, `\\`, `\n`, `\t`, `\r`, `\b`, `\f`, other controls `\u00XX` (lowercase hex).
 
 **Invariant (tested, fuzzed):** for any `v` that writes successfully,
-`identical(parse(writeCanonical(v)), v)` (same types, same member order), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
+`identical(parse(writeCanonical(v)), v)` (same types, same member order;
+the one exception is `-0.0`, which canonicalizes to `0.0`), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
 
 ### A.4 JSON Pointer (RFC 6901)
 
