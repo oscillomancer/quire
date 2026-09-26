@@ -1,6 +1,9 @@
 # Compares the sandbox's generator output with the files committed under
 # skill/generated/. Regenerate with tools/gen/update-generated.sh.
-foreach(pair "--markdown;sandbox-commands.md" "--mcp-tools;sandbox-mcp-tools.json")
+if(NOT DEFINED PREFIX)
+  set(PREFIX sandbox)
+endif()
+foreach(pair "--markdown;${PREFIX}-commands.md" "--mcp-tools;${PREFIX}-mcp-tools.json")
   list(GET pair 0 flag)
   list(GET pair 1 file)
   execute_process(COMMAND ${TOOL} registry ${flag} OUTPUT_VARIABLE out RESULT_VARIABLE rc)

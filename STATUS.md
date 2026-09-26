@@ -76,14 +76,14 @@ reports committed in docs.
 | P4.1 | core-json `compactRows` writer option for bulk arrays in project files | not needed so far: the canonical writer already prints MIDI rows one per line |
 | P4.2 | `libs/timeline`: tempo/meter maps, closed-form ramps, bar/beat, pickups | **done** (orchestrator, ba816c6) |
 | P4.3 | `host/engine/model`: ids, IdMap, object types + schemas, EditTxn, invariants, diff, project file, VersionStore (undo/redo/coalescing/branches/replay merge with field-level conflicts) | **done** (orchestrator, 4a327ac); review queued (scout-5) |
-| P4.4 | `host/engine` offline renderer: plan compile (topological, fixed summation order), MIDI items, FX chains via clap-host, mixer (width/volume/pan law/mute, master balance), routes with taps, PDC, mixer automation (track volume/trim/pan/width/mute, route volume/pan/mute; shapes), solo, engine.graph lines | **done** (orchestrator, 275682b + automation/solo). Next: audio items (native rate; resampling when core-dsp lands), plugin-parameter automation, stems, then the real-time engine (JACK dlopen, plan swap, anticipative processing) |
-| P4.5 | engine command catalogue on the bus (session-model §7) | planned — well specified; a Sol task once the model review is in |
+| P4.4 | `host/engine` offline renderer: plan compile (topological, fixed summation order), MIDI items, audio items (native rate), FX chains via clap-host, mixer (width/volume/pan law/mute, master balance), routes with taps, PDC, mixer automation (track volume/trim/pan/width/mute, route volume/pan/mute; shapes), solo, engine.graph lines; real-time `Engine` on the same plan (RtHandoff plan swap, transport commands over SPSC, instance start/stop on the audio thread, prune after adoption) with a `DummyBackend` (manual / threaded) — offline and real-time output are bit-identical | **done** (orchestrator, 275682b, 52e29cc, b14ce97, fe7ee89). Next: plugin-parameter automation, stems, resampling (needs core-dsp), JACK backend via dlopen, anticipative processing |
+| P4.5 | engine command catalogue on the bus (session-model §7) | **core done** (orchestrator, bbb694c, 42b45e2): `EngineApp` (a `cmd::Host`: one version per bus transaction, invocations recorded for replay, plugin catalogue, scratch instances for patch validation, save/open, render) and 32 commands (plus the bus built-ins) — project.get/set/save/open, session.describe, tempo.set, timesig.set, track.add/remove/set/list, item.add/remove/move, midi.write/get, fx.add/remove/set/describe, fx.patch.merge, fx.param.set, render.mix, history.undo/redo/list, branch.create/switch/list/diff/merge/delete (merges replay invocations; field-level conflicts reported). `quire-engine exec`/`registry` CLI and generated `skill/generated/engine-*.{md,json}` with a drift test. Long tail (route.*, env.*, marker/region, take.*, item.set/split/duplicate, fx.move, fx.patch.get/set, fx.param.get, plugin.list/scan, time.convert, transport.*, render.stems) is a Sol task |
 
 ## Team (Codex workers via Herdr)
 
 Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded; the old
 session scratchpad is retired). Codex 5h window used up 05:45→06:05 by five
-workers; resets 10:45. Weekly budget is the binding constraint (84% at 05:45,
+workers; resets 10:45 (weekly 69% left at 07:20). Weekly budget is the binding constraint (84% at 05:45,
 ~16–18% per full window), so Codex goes to critical-path work and reviews.
 
 - **json** (Sol) — P1.11 done and merged. Next: Task B (control protocol + MCP).

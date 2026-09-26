@@ -1,0 +1,1468 @@
+[
+  {
+    "name": "batch",
+    "title": "Run commands atomically.",
+    "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "object"
+              },
+              "as": {
+                "type": "string"
+              }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+          },
+          "maxItems": 256
+        }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "branch_create",
+    "title": "Start a branch from a branch's head (default: the current one) and switch to it.",
+    "description": "Start a branch from a branch's head (default: the current one) and switch to it. Agents: work on agent/<you>/<topic> branches, then branch.diff and branch.merge into main. Merging replays your edits onto main even if main moved; conflicting edits are reported. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "branch_create_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        },
+        "switch": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "branch_name",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "branch_delete",
+    "title": "Delete a branch (not main, not the current one).",
+    "description": "Delete a branch (not main, not the current one).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "branch_name",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "branch_diff",
+    "title": "What differs between two branch heads: objects added, removed, changed (fields).",
+    "description": "What differs between two branch heads: objects added, removed, changed (fields).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "branch_diff_args",
+      "properties": {
+        "a": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        },
+        "b": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        }
+      },
+      "required": ["a", "b"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "branch_diff",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "diff_entry",
+            "properties": {
+              "op": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["op", "id", "fields"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["changes"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "branch_list",
+    "title": "List branches and the current one.",
+    "description": "List branches and the current one.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "branch_list",
+      "properties": {
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "current": {
+          "type": "string"
+        }
+      },
+      "required": ["branches", "current"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "branch_merge",
+    "title": "Merge a branch into another (default: main) by replaying its edits.",
+    "description": "Merge a branch into another (default: main) by replaying its edits. Fast-forwards when the target has not moved. Otherwise replays the branch's edits; IDs it created are renumbered where needed (see remapped). If both sides changed the same field of an object, nothing is merged and the error lists each conflict. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "branch_merge_args",
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        },
+        "into": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        }
+      },
+      "required": ["from"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "branch_merge",
+      "properties": {
+        "fast_forward": {
+          "type": "boolean"
+        },
+        "up_to_date": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "remapped": {}
+      },
+      "required": ["fast_forward", "up_to_date", "version", "remapped"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "branch_switch",
+    "title": "Make another branch current (edits, undo and playback follow it).",
+    "description": "Make another branch current (edits, undo and playback follow it).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "branch_name",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "branch_name",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_add",
+    "title": "Insert a plugin into a track's FX chain and return its id.",
+    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_add_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        },
+        "plugin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "patch": {}
+      },
+      "required": ["track", "plugin"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_add",
+      "properties": {
+        "fx": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "semantic": {
+          "type": "boolean"
+        },
+        "chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["fx", "name", "semantic", "chain"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_describe",
+    "title": "Describe a plugin instance in words; full adds its parameters and patch.",
+    "description": "Describe a plugin instance in words; full adds its parameters and patch.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_describe_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        },
+        "full": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_description",
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "params": {},
+        "patch": {}
+      },
+      "required": ["plugin", "name", "description"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_param_set",
+    "title": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.",
+    "description": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_param_set_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        },
+        "values": {}
+      },
+      "required": ["fx", "values"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "merge_result",
+      "properties": {
+        "changed": {},
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["changed", "description"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "fx_patch_merge",
+    "title": "Merge a partial patch into a plugin instance; returns the effective change.",
+    "description": "Merge a partial patch into a plugin instance; returns the effective change. Semantic plugins only. Values in physical units: {\"params\": {\"gain\": \"-6 dB\"}}. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_patch_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        },
+        "patch": {}
+      },
+      "required": ["fx", "patch"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "merge_result",
+      "properties": {
+        "changed": {},
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["changed", "description"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "fx_remove",
+    "title": "Remove a plugin instance (and its envelopes).",
+    "description": "Remove a plugin instance (and its envelopes).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_ref",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_set",
+    "title": "Set instance options: bypass, offline, wet (%), label.",
+    "description": "Set instance options: bypass, offline, wet (%), label.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_set_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        },
+        "bypass": {
+          "type": "boolean"
+        },
+        "offline": {
+          "type": "boolean"
+        },
+        "wet": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "history_list",
+    "title": "List the current branch's recent versions (newest first).",
+    "description": "List the current branch's recent versions (newest first).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "history_list",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "history_entry",
+            "properties": {
+              "version": {
+                "type": "integer"
+              },
+              "label": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["version", "label", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "can_undo": {
+          "type": "boolean"
+        },
+        "can_redo": {
+          "type": "boolean"
+        }
+      },
+      "required": ["versions", "can_undo", "can_redo"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "history_redo",
+    "title": "Redo the last undone change.",
+    "description": "Redo the last undone change.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "history_result",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": ["version", "label"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "history_undo",
+    "title": "Undo the last change on the current branch.",
+    "description": "Undo the last change on the current branch.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "history_result",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": ["version", "label"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "item_add",
+    "title": "Add an item on a track: MIDI written in notation, or an audio file.",
+    "description": "Add an item on a track: MIDI written in notation, or an audio file. position in beats (quarter notes from the start) or bar (1-based). notation: e.g. \"voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h\" — every bar must add up; the item is as long as the written bars unless length (beats) is given. audio_file: a path at the project's sample rate. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_add_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0,
+          "description": "Beats."
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0,
+          "description": "Start at this bar (1-based)."
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "description": "Beats."
+        },
+        "notation": {
+          "type": "string"
+        },
+        "audio_file": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "item_add",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "take": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "position": {
+          "type": "number"
+        },
+        "length": {
+          "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["item", "take", "position", "length"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "item_move",
+    "title": "Move an item in time (position in beats or bar) and/or to another track.",
+    "description": "Move an item in time (position in beats or bar) and/or to another track.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_move_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$",
+          "description": "Item id, e.g. \"it_1\"."
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "item_remove",
+    "title": "Remove an item with its takes (unpooled sources go too).",
+    "description": "Remove an item with its takes (unpooled sources go too).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_ref",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$",
+          "description": "Item id, e.g. \"it_1\"."
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "midi_get",
+    "title": "Read an item's MIDI as notation.",
+    "description": "Read an item's MIDI as notation.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "midi_get_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$",
+          "description": "Item id, e.g. \"it_1\"."
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "text",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": ["text"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "midi_write",
+    "title": "Replace an item's MIDI with notation (the item keeps its position and length).",
+    "description": "Replace an item's MIDI with notation (the item keeps its position and length).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "midi_write_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$",
+          "description": "Item id, e.g. \"it_1\"."
+        },
+        "notation": {
+          "type": "string"
+        }
+      },
+      "required": ["item", "notation"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_get",
+    "title": "Show the project: name, rate, tempo, meter, file, version and branch.",
+    "description": "Show the project: name, rate, tempo, meter, file, version and branch.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "project_info",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "sample_rate": {
+          "type": "number"
+        },
+        "tempo": {
+          "type": "number"
+        },
+        "meter": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_open",
+    "title": "Open a project file (replaces the current project and its history).",
+    "description": "Open a project file (replaces the current project and its history).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "path_args",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "project_info",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "sample_rate": {
+          "type": "number"
+        },
+        "tempo": {
+          "type": "number"
+        },
+        "meter": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_save",
+    "title": "Save the project (canonical JSON) to its file or a new path.",
+    "description": "Save the project (canonical JSON) to its file or a new path. path: where to save (becomes the project's file); omit to save in place. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "path_args",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "path",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_set",
+    "title": "Change project metadata (name, title, author, notes, pan law).",
+    "description": "Change project metadata (name, title, author, notes, pan law).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "project_set_args",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "pan_law_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -6.0,
+              "maximum": 0.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "render_mix",
+    "title": "Render the mix offline to a float WAV (default: start to the last item's end).",
+    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_mix_args",
+      "properties": {
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tail_s": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 60.0
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9 _.+-]{1,64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "render_mix",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "peak_dbfs": {
+          "type": "number"
+        },
+        "output_latency": {
+          "type": "integer"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["path", "seconds", "peak_dbfs", "output_latency"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "session_describe",
+    "title": "Describe the whole session in compact text (tracks, items, fx, routes).",
+    "description": "Describe the whole session in compact text (tracks, items, fx, routes). The quickest way to see where things are; use the IDs it shows with other commands. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "text",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": ["text"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "tempo_set",
+    "title": "Replace the tempo map: points {beat, bpm, ramp?}; the first must be at beat 0.",
+    "description": "Replace the tempo map: points {beat, bpm, ramp?}; the first must be at beat 0. ramp: true changes the tempo linearly (in beats) to the next point; otherwise it steps. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "tempo_set_args",
+      "properties": {
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "tempo_point",
+            "properties": {
+              "beat": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "bpm": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 1.0,
+                    "maximum": 1000.0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*bpm)?\\s*$"
+                  }
+                ],
+                "x-unit": "bpm",
+                "x-unit-strings": true,
+                "description": "Quantity strings are range-checked by the server."
+              },
+              "ramp": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": ["beat", "bpm"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "count",
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": ["count"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "timesig_set",
+    "title": "Set the meter from a bar on, e.g. {\"bar\": 9, \"meter\": \"3/4\"}.",
+    "description": "Set the meter from a bar on, e.g. {\"bar\": 9, \"meter\": \"3/4\"}.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "timesig_set_args",
+      "properties": {
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "meter": {
+          "type": "string",
+          "pattern": "^[0-9]{1,2}/[0-9]{1,2}$"
+        }
+      },
+      "required": ["bar", "meter"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "track_add",
+    "title": "Add a track (under the master, or inside a folder track) and return its id.",
+    "description": "Add a track (under the master, or inside a folder track) and return its id. parent: a track id to nest under (it becomes a folder); index: position among its siblings. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_add_args",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Parent track id, e.g. \"tr_1\"."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 64.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_ref",
+      "properties": {
+        "track": {
+          "type": "string"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_list",
+    "title": "List tracks in tree order with their level, mute/solo, fx and items.",
+    "description": "List tracks in tree order with their level, mute/solo, fx and items.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_list",
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "track_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parent": {
+                "type": "string"
+              },
+              "depth": {
+                "type": "integer"
+              },
+              "volume_db": {
+                "type": "number"
+              },
+              "mute": {
+                "type": "boolean"
+              },
+              "solo": {
+                "type": "string"
+              },
+              "fx": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "parent",
+              "depth",
+              "volume_db",
+              "mute",
+              "solo",
+              "fx",
+              "items"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["tracks"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_remove",
+    "title": "Remove a track with its items, fx, routes and envelopes (not a folder).",
+    "description": "Remove a track with its items, fx, routes and envelopes (not a folder).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_ref",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_set",
+    "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes.",
+    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes. Only the given fields change. solo: off | on | in_place | defeat. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_set_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "phase_invert": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "string",
+          "pattern": "^(off|on|in_place|defeat)$"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  }
+]
+

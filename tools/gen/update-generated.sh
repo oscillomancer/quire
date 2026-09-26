@@ -8,4 +8,8 @@ tool=build/dev/host/sandbox/${slug}-sandbox
 cmake --build --preset dev --target "${slug}-sandbox" >/dev/null
 "$tool" registry --markdown > skill/generated/sandbox-commands.md
 "$tool" registry --mcp-tools > skill/generated/sandbox-mcp-tools.json
-echo "updated skill/generated/sandbox-commands.md and sandbox-mcp-tools.json"
+engine=build/dev/host/engine/${slug}-engine
+cmake --build --preset dev --target "${slug}-engine" >/dev/null
+"$engine" registry --markdown > skill/generated/engine-commands.md
+"$engine" registry --mcp-tools > skill/generated/engine-mcp-tools.json
+echo "updated skill/generated/{sandbox,engine}-{commands.md,mcp-tools.json}"
