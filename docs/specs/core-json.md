@@ -197,7 +197,7 @@ the null state).
 
 ## Part B — core-schema
 
-Header layout: `supple/schema/schema.h` (builders), `units.h`, `export.h`
+Header layout: `supple/schema/schema.h` (builders), `export.h`
 (JSON Schema), `errors.h` (error codes, closest-match helper).
 
 core-schema binds JSON to C++ types and back, validates with complete,
@@ -369,7 +369,11 @@ for reuse (command names, plugin keys, notation).
 
 ### B.3 Units
 
-`supple/schema/units.h` defines the closed unit set used across Quire. Each
+*(Amended 2026-09-26: units live in core-base as `supple/base/units.h`,
+namespace `supple::units`, so plugins can use them without core-schema;
+`closestMatch` likewise lives in core-base as `supple/base/closest.h`.)*
+
+`supple/base/units.h` defines the closed unit set used across Quire. Each
 unit belongs to a dimension; each dimension has one canonical unit; strings
 may use any alias of a compatible unit.
 

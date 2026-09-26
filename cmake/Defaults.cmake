@@ -33,6 +33,9 @@ function(supple_target_defaults target)
   if(_type STREQUAL "INTERFACE_LIBRARY")
     return()
   endif()
+  # Determinism (Principle 5): no FMA contraction, so Clang and GCC compute
+  # identical DSP and analysis results. Never add -ffast-math.
+  target_compile_options(${target} PRIVATE -ffp-contract=off)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow
                                            -Wnon-virtual-dtor -Wold-style-cast
                                            -Wcast-align -Woverloaded-virtual
