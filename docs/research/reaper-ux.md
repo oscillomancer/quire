@@ -222,3 +222,78 @@ extras — they belong in the Phase 4 session schema.
 and popup menus render translucent (compositor inactive-opacity applied to
 X11 windows). Quire's X11 windows will get the same treatment; worth a
 window-rule recommendation in Phase 5 docs rather than a code workaround.
+
+## Addendum 2 (2026-09-26, orchestrator): render, routing matrix, buffering — GUI pass
+
+All [verified: REAPER 7.80 GUI on this machine, temporary config, test
+project `reaper/generated.RPP`].
+
+**Render dialog.** Source: *Master mix*, *Selected tracks (stems)*, *Master
+mix and stems*, *Region render matrix*, *Selected media items*, *Razor edit
+areas*. Bounds: *Custom time range*, *Entire project*, *Time selection*, *All
+project regions*, *Selected regions*, *All project markers*, *Selected
+markers*; plus a tail (ms). Output: directory + file-name pattern (default
+`$project`) with a live "Render to:" preview and file count ("1 file"),
+wildcards menu. Options: sample rate, channels, speed (*Full-speed
+Offline*…), "Mix/process FX at project or hardware sample rate", "Preserve
+source media sample rate", resample mode (*Sinc Interpolation: 192pt*), mono
+detection for stems, multichannel stems, pre-fader stems, "Render only
+channels sent to parent", 2nd-pass render, delayed start, embed take/stretch
+markers, metadata, dither, postprocess (normalize/limit) with parallel
+option. Primary and secondary output formats (e.g. WAV + MP3 in one pass).
+Silently increment names, skip likely-silent files, save a project copy /
+render stats HTML next to the render, add renders back to the project,
+auto-close/auto-return, **Queue…**, **Dry run (no output)**, Save settings.
+
+**Wildcards** (help text read via the clipboard; the raw REAPER help text is
+not committed). Categories: project info (`$project`, `$title`, `$author`,
+`$track`, `$tracknumber`, `$folders`, `$parent`, `$tempo`,
+`$timesignature`, `$fx`…), regions/markers (`$region`, `$regionnumber`,
+`$marker`, per-ruler-lane `{lane}`), media items (`$item`, `$itemnumber`,
+`$itemnotes`, `$takemarker`, `$lane`), position/length (seconds, beats,
+timecode, frames), numbering (`$filenumber[N]`, `$filecount`,
+`$timelineorder`, `$namenumber`, `$note` for sampler-style note names),
+format (`$format`, `$samplerate`, `$bitdepth`), channels (`$channels`,
+`$chid(L,R,...)`), date/time/`$uniqueid[N]`, `$user`, `$computer`.
+Notable mini-language features: case control via the wildcard's own
+capitalization, character replacement/removal suffixes (`$track< _>`),
+zero-padded counters (`[001]`), truncation (`[<N]`), automatic removal of a
+dangling separator when a wildcard is empty, `/` in substitutions creating
+directories (opt-in), and `name=value` extraction from region/marker/notes
+text (`$region(key)[;]`).
+*Quire takeaway:* render naming is a real feature agents need (stems at
+`$project/$track`), but the pattern language should be typed and
+documented in the render command's schema (a small, closed set of
+variables with explicit formatting args), with a dry-run that returns the
+resolved file list — REAPER's "Dry run" + live preview is exactly right.
+
+**Routing matrix** (Alt+R, docked). One grid: rows are sources (tracks in
+folder hierarchy, then hardware inputs, MIDI inputs), columns are
+destinations (master/parent, every track, hardware outputs). Cells show parent
+(folder) sends ("F"), master sends, track sends with a channel-mapping
+glyph, hardware outputs, and **record-input assignments** (hardware input →
+track) in the same view. Modes: *Routing*, *Wiring*, *Track Grouping*,
+*Region Render*. *Quire takeaway:* routing, input assignment and hardware
+outs are one edge set in the model (`route` objects with source,
+destination, channel mapping, tap point), which the GUI shows as one matrix.
+
+**Region render matrix.** Columns: *Entire project* + each region; rows:
+*Master mix*, *All tracks*, each track (hierarchical). A cell = render that
+track for that region. *Quire takeaway:* a render job is a set of
+(source, bounds) pairs — model it that way in `render.*`.
+
+**Buffering / anticipative FX** (Preferences > Audio > Buffering). Audio
+reading/processing thread count (auto-detect option; "recommended 1 per CPU
+core"), thread priority/behaviour, media buffer size 1200 ms with 100 %
+prebuffer, media buffering disabled for tracks with open MIDI editors (and
+optionally selected tracks), 200 ms media buffer when a per-take FX UI is
+open. **Anticipative FX processing** on by default with **render-ahead
+200 ms**; opt-ins: allow on tracks without FX, allow on tracks with open MIDI
+editors ("will increase MIDI preview latency"), allow on tracks in
+touch/latch/write automation mode (on by default); separately, *live FX
+multiprocessing on N CPUs* for input-monitored paths (off by default).
+*Quire takeaway (Phase 4 engine):* the same knobs — render-ahead window
+(default 200 ms), eligibility rules (not armed/monitored; editors open;
+automation-writing), and a separate policy for live paths — should be engine
+settings, and "which tracks are anticipative right now" should be queryable
+state for benchmarks and for agents diagnosing xruns.
