@@ -1,0 +1,109 @@
+[
+  {
+    "name": "batch",
+    "title": "Run commands atomically.",
+    "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "object"
+              },
+              "as": {
+                "type": "string"
+              }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+          },
+          "maxItems": 256
+        }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "toy_add",
+    "title": "Add to the toy counter.",
+    "description": "Add to the toy counter. Returns the new counter value. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "amount",
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      },
+      "required": ["value"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "count",
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": ["count"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "toy_set",
+    "title": "Set the toy counter.",
+    "description": "Set the toy counter.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "amount",
+      "properties": {
+        "value": {
+          "type": "integer"
+        }
+      },
+      "required": ["value"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "count",
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": ["count"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  }
+]

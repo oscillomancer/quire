@@ -1,0 +1,1 @@
+{"steps":[{"command":"toy.add","args":{"amount":"${missing.total}"}}]}

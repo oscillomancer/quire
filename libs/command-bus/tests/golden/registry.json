@@ -1,0 +1,653 @@
+{
+  "schema": "supple.command-registry/1.0",
+  "product": "Quire",
+  "version": "0.1.0",
+  "commands": {
+    "batch@1": {
+      "name": "batch",
+      "version": 1,
+      "kind": "edit",
+      "exposure": "mcp-tool",
+      "summary": "Run commands atomically.",
+      "description": "Run commands atomically.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
+                },
+                "as": {
+                  "type": "string"
+                }
+              },
+              "required": ["command"],
+              "additionalProperties": false
+            },
+            "maxItems": 256
+          }
+        },
+        "required": ["steps"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Empty batch",
+          "args": {
+            "steps": []
+          },
+          "result": {
+            "label": "",
+            "results": []
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "job.cancel@1": {
+      "name": "job.cancel",
+      "version": 1,
+      "kind": "action",
+      "exposure": "mcp-exec",
+      "summary": "Cancel a job.",
+      "description": "Cancel a job.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string"
+          }
+        },
+        "required": ["job"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Cancel job",
+          "args": {
+            "job": "jb_1"
+          },
+          "result": {
+            "job": "jb_1",
+            "status": "cancelled",
+            "progress": {
+              "fraction": 0.0,
+              "message": ""
+            }
+          },
+          "fixture": "job_running"
+        }
+      ]
+    },
+    "job.list@1": {
+      "name": "job.list",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "List session jobs.",
+      "description": "List session jobs.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "List jobs",
+          "args": {},
+          "result": {
+            "jobs": []
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "job.status@1": {
+      "name": "job.status",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "Get a job's status.",
+      "description": "Get a job's status.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string"
+          }
+        },
+        "required": ["job"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Get job",
+          "args": {
+            "job": "jb_1"
+          },
+          "result": {
+            "job": "jb_1",
+            "status": "running",
+            "progress": {
+              "fraction": 0.0,
+              "message": ""
+            }
+          },
+          "fixture": "job_running"
+        }
+      ]
+    },
+    "job.wait@1": {
+      "name": "job.wait",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "Wait for a job.",
+      "description": "Wait for a job.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string"
+          },
+          "timeout_s": {
+            "type": "number"
+          }
+        },
+        "required": ["job"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Wait for job",
+          "args": {
+            "job": "jb_1",
+            "timeout_s": 0
+          },
+          "result": {
+            "job": "jb_1",
+            "status": "running",
+            "progress": {
+              "fraction": 0.0,
+              "message": ""
+            }
+          },
+          "fixture": "job_running"
+        }
+      ]
+    },
+    "registry.describe@1": {
+      "name": "registry.describe",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "Describe a command.",
+      "description": "Describe a command.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Describe registry.list",
+          "args": {
+            "command": "registry.list"
+          },
+          "result": {
+            "name": "registry.list",
+            "version": 1,
+            "kind": "query",
+            "exposure": "mcp-exec",
+            "summary": "List available commands.",
+            "description": "List available commands.",
+            "tags": [],
+            "args": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "result": {
+              "type": "object"
+            },
+            "errors": [],
+            "examples": [
+              {
+                "title": "List commands",
+                "args": {
+                  "text": "registry.list"
+                },
+                "result": {
+                  "commands": [
+                    {
+                      "name": "registry.list",
+                      "version": 1,
+                      "kind": "query",
+                      "summary": "List available commands."
+                    }
+                  ]
+                },
+                "fixture": "empty"
+              }
+            ]
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "registry.list@1": {
+      "name": "registry.list",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "List available commands.",
+      "description": "List available commands.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "List commands",
+          "args": {
+            "text": "registry.list"
+          },
+          "result": {
+            "commands": [
+              {
+                "name": "registry.list",
+                "version": 1,
+                "kind": "query",
+                "summary": "List available commands."
+              }
+            ]
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "toy.add@1": {
+      "name": "toy.add",
+      "version": 1,
+      "kind": "edit",
+      "exposure": "mcp-tool",
+      "summary": "Add to the toy counter.",
+      "description": "Returns the new counter value.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "amount",
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Add three",
+          "args": {
+            "value": 3
+          },
+          "result": {
+            "count": 3
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "toy.bad@1": {
+      "name": "toy.bad",
+      "version": 1,
+      "kind": "query",
+      "exposure": "internal",
+      "summary": "Return an invalid result.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "message",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 2
+          }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    },
+    "toy.fail@1": {
+      "name": "toy.fail",
+      "version": 1,
+      "kind": "edit",
+      "exposure": "internal",
+      "summary": "Fail after changing the toy.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    },
+    "toy.get@1": {
+      "name": "toy.get",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "Get the toy counter.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Get zero",
+          "args": {},
+          "result": {
+            "count": 0
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "toy.safe@1": {
+      "name": "toy.safe",
+      "version": 1,
+      "kind": "action",
+      "exposure": "internal",
+      "summary": "Run a safe action.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    },
+    "toy.set@1": {
+      "name": "toy.set",
+      "version": 1,
+      "kind": "edit",
+      "exposure": "mcp-tool",
+      "summary": "Set the toy counter.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "amount",
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Set five",
+          "args": {
+            "value": 5
+          },
+          "result": {
+            "count": 5
+          },
+          "fixture": "empty"
+        }
+      ]
+    },
+    "toy.start@1": {
+      "name": "toy.start",
+      "version": 1,
+      "kind": "action",
+      "exposure": "internal",
+      "summary": "Start a long toy job.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "job_started",
+        "properties": {
+          "job": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": ["job", "status"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    },
+    "toy.target.get@1": {
+      "name": "toy.target.get",
+      "version": 1,
+      "kind": "query",
+      "exposure": "internal",
+      "summary": "Get a toy by reference.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "target",
+        "properties": {
+          "target": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": ["target"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    },
+    "toy.unsafe@1": {
+      "name": "toy.unsafe",
+      "version": 1,
+      "kind": "action",
+      "exposure": "internal",
+      "summary": "Run an unsafe action.",
+      "description": "",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "title": "no_args",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "title": "count",
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": ["count"],
+        "additionalProperties": false
+      },
+      "errors": [],
+      "examples": []
+    }
+  }
+}

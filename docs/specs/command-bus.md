@@ -318,3 +318,31 @@ A scripted MCP client (C++ test or Python tooling in `tests/integration/`)
 runs initialize → tools/list → a sequence of calls against the sandbox, and
 checks results; its transcript (requests/responses, pretty-printed) is the
 Phase 2 demo committed to `docs/demos/`.
+
+## Implementation notes (2026-09-26, Task A)
+
+- The host implements `Host::makeContext` and registers typed services with
+  `Context::provide(service)`. The dispatcher adds `const Registry` and
+  `JobManager` services before invoking a handler. The sandbox can therefore
+  register its session and render services without a bus dependency on host
+  code. `Host::actionTransactional(name)` declares whether an Action can run
+  inside a batch; it defaults to false.
+- `Ref` accepts an ID string or selector object. A host supplies
+  `RefResolver`; commands with selectors use the optional `Command::resolve`
+  hook before the handler. The hook replaces selectors in the typed args with
+  IDs, and the command log stores the resolved encoding.
+- The bus owns job state for each `Dispatcher`. A handler may create a job via
+  `ctx.service<JobManager>().create()` and return its ID; the host owns the
+  worker and must stop/join workers before destroying the dispatcher. Job
+  updates are thread-safe. Progress and completion events queue for the model
+  thread, which calls `Dispatcher::flushJobEvents()` (also called after every
+  `execute`). `job.cancel` marks a job cancelled immediately and sets its
+  cancellation flag for the worker. The most recent progress is retained even
+  when progress events are throttled to 2 Hz.
+- `runExamples` calls `Host::setupFixture(dispatcher, fixture)` after creating
+  the host. This lets fixtures seed jobs and host services as well as ordinary
+  session state. The test library commits deterministic registry, MCP tool and
+  Markdown output under `libs/command-bus/tests/golden/` and compares them on
+  every run.
+- A libFuzzer target exercises JSON invocations, including batches and step
+  references. Its smoke corpus runs in CTest when `SUPPLE_BUILD_FUZZERS=ON`.
