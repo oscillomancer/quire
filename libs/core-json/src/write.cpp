@@ -158,16 +158,30 @@ class Writer {
         return false;
     }
 };
+Value finiteOrNull(const Value& input) {
+    if (input.isDouble() && !std::isfinite(input.asDouble())) return {};
+    if (input.isArray()) {
+        Value result = Value::array();
+        for (const auto& item : input.asArray()) result.push_back(finiteOrNull(item));
+        return result;
+    }
+    if (input.isObject()) {
+        Value result = Value::object();
+        for (const auto& member : input.asObject()) result[member.key] = finiteOrNull(member.value);
+        return result;
+    }
+    return input;
+}
 }  // namespace
 Result<std::string> write(const Value& v, const WriteOptions& o) { return Writer(o).run(v); }
 std::string writeCompact(const Value& v) {
     auto r = write(v, {false});
     assert(r);
-    return r ? *r : std::string{};
+    return r ? *r : *write(finiteOrNull(v), {false});
 }
 std::string writeCanonical(const Value& v) {
     auto r = write(v);
     assert(r);
-    return r ? *r : std::string{};
+    return r ? *r : *write(finiteOrNull(v));
 }
 }  // namespace supple::json

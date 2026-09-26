@@ -14,18 +14,30 @@ Value mergePatch(const Value& target, const Value& patch) {
     }
     return out;
 }
-Value createMergePatch(const Value& from, const Value& to) {
+namespace {
+Result<Value> makePatch(const Value& from, const Value& to, const std::string& path) {
     if (!to.isObject()) return to;
-    if (!from.isObject()) return to;
     Value patch = Value::object();
-    for (const auto& m : from.asObject())
-        if (!to.find(m.key)) patch[m.key] = nullptr;
+    if (from.isObject())
+        for (const auto& m : from.asObject())
+            if (!to.find(m.key)) patch[m.key] = nullptr;
     for (const auto& m : to.asObject()) {
         const Value* old = from.find(m.key);
-        if (!old || !(*old == m.value))
-            patch[m.key] = old ? createMergePatch(*old, m.value) : m.value;
+        if (old && *old == m.value) continue;
+        const auto memberPath = pointerJoin(path, m.key);
+        if (m.value.isNull())
+            return Error("json.merge.unrepresentable_null",
+                         "merge patch cannot set an object member to null", memberPath,
+                         "remove the null member or use a full document replacement");
+        auto nested = makePatch(old ? *old : Value{}, m.value, memberPath);
+        if (!nested) return nested.error();
+        patch[m.key] = std::move(*nested);
     }
     return patch;
+}
+}  // namespace
+Result<Value> createMergePatch(const Value& from, const Value& to) {
+    return makePatch(from, to, "");
 }
 namespace {
 void collect(const Value& a, const Value& b, std::string path, std::vector<Change>& out) {

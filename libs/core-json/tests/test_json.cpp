@@ -11,6 +11,7 @@ TEST_CASE("parse and canonical output") {
     CHECK(out.find("2.0") != std::string::npos);
     auto again = parse(out);
     REQUIRE(again);
+    CHECK(identical(*again, *v));
     CHECK(writeCanonical(*again) == out);
 }
 TEST_CASE("parser errors") {
@@ -36,7 +37,9 @@ TEST_CASE("pointer merge and diff") {
     auto b = mergePatch(*a, *patch);
     CHECK(b.find("x") == nullptr);
     CHECK(b.find("y")->asInt() == 3);
-    CHECK(mergePatch(*a, createMergePatch(*a, b)) == b);
+    auto created = createMergePatch(*a, b);
+    REQUIRE(created);
+    CHECK(mergePatch(*a, *created) == b);
     CHECK(diff(*a, b).size() == 2);
 }
 TEST_CASE("all parse diagnostics") {
@@ -138,10 +141,56 @@ TEST_CASE("merge patch property for document values") {
             if (next() % 3) a[key] = static_cast<int>(next() % 100);
             if (next() % 3) b[key] = static_cast<int>(next() % 100);
         }
-        CHECK(mergePatch(a, createMergePatch(a, b)) == b);
+        auto patch = createMergePatch(a, b);
+        REQUIRE(patch);
+        CHECK(mergePatch(a, *patch) == b);
     }
 }
 TEST_CASE("numeric equality preserves large integer precision") {
     CHECK(Value(1) == Value(1.0));
     CHECK_FALSE(Value(9007199254740993LL) == Value(9007199254740992.0));
+}
+TEST_CASE("strict identity and saturated integers") {
+    Value ordered = Value::object();
+    ordered["a"] = 1;
+    ordered["b"] = 1.0;
+    Value reversed = Value::object();
+    reversed["b"] = 1.0;
+    reversed["a"] = 1;
+    CHECK(ordered == reversed);
+    CHECK_FALSE(identical(ordered, reversed));
+    CHECK(Value(1) == Value(1.0));
+    CHECK_FALSE(identical(Value(1), Value(1.0)));
+    CHECK_FALSE(identical(Value(-0.0), Value(0.0)));
+    CHECK(Value(0x1p63).asInt() == std::numeric_limits<std::int64_t>::max());
+    CHECK(Value(-0x1p64).asInt() == std::numeric_limits<std::int64_t>::min());
+    CHECK(Value(1.5).asInt() == 0);
+}
+TEST_CASE("merge patch reports unrepresentable null") {
+    auto from = parse("{\"a\":1}");
+    auto to = parse("{\"a\":null}");
+    REQUIRE(from);
+    REQUIRE(to);
+    auto patch = createMergePatch(*from, *to);
+    REQUIRE_FALSE(patch);
+    CHECK(patch.error().code == "json.merge.unrepresentable_null");
+    CHECK(patch.error().path == "/a");
+    auto arrayFrom = parse("{\"a\":[]}");
+    auto arrayTo = parse("{\"a\":[null]}");
+    REQUIRE(arrayFrom);
+    REQUIRE(arrayTo);
+    auto valid = createMergePatch(*arrayFrom, *arrayTo);
+    REQUIRE(valid);
+    CHECK(mergePatch(*arrayFrom, *valid) == *arrayTo);
+}
+TEST_CASE("release writer replaces non-finite numbers with null") {
+    Value nested = Value::object();
+    nested["bad"] = std::numeric_limits<double>::infinity();
+    auto safe = write(nested);
+    REQUIRE_FALSE(safe);
+    CHECK(safe.error().code == "json.write.not_finite");
+#ifdef NDEBUG
+    CHECK(writeCompact(nested) == "{\"bad\":null}");
+    CHECK(writeCanonical(nested) == "{\n  \"bad\": null\n}\n");
+#endif
 }

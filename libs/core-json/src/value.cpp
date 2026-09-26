@@ -1,5 +1,6 @@
 #include <supple/json/value.h>
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -68,8 +69,11 @@ std::int64_t Value::asInt() const {
     if (isInt()) return std::get<std::int64_t>(data_);
     if (isDouble()) {
         double d = std::get<double>(data_);
-        if (std::isfinite(d) && std::trunc(d) == d && d >= -0x1p63 && d < 0x1p63)
+        if (std::isfinite(d) && std::trunc(d) == d) {
+            if (d >= 0x1p63) return std::numeric_limits<std::int64_t>::max();
+            if (d < -0x1p63) return std::numeric_limits<std::int64_t>::min();
             return static_cast<std::int64_t>(d);
+        }
     }
     return 0;
 }
@@ -204,6 +208,36 @@ bool operator==(const Value& a, const Value& b) {
                 if (!p || !(m.value == *p)) return false;
             }
             return true;
+    }
+    return false;
+}
+bool identical(const Value& a, const Value& b) {
+    if (a.type() != b.type()) return false;
+    switch (a.type()) {
+        case Type::Null:
+            return true;
+        case Type::Bool:
+            return a.asBool() == b.asBool();
+        case Type::Int:
+            return a.asInt() == b.asInt();
+        case Type::Double:
+            return std::bit_cast<std::uint64_t>(a.asDouble()) ==
+                   std::bit_cast<std::uint64_t>(b.asDouble());
+        case Type::String:
+            return a.asString() == b.asString();
+        case Type::Array:
+            if (a.size() != b.size()) return false;
+            for (std::size_t i = 0; i < a.size(); ++i)
+                if (!identical(a.at(i), b.at(i))) return false;
+            return true;
+        case Type::Object: {
+            if (a.size() != b.size()) return false;
+            auto left = a.asObject().begin();
+            auto right = b.asObject().begin();
+            for (; left != a.asObject().end(); ++left, ++right)
+                if (left->key != right->key || !identical(left->value, right->value)) return false;
+            return true;
+        }
     }
     return false;
 }

@@ -94,5 +94,7 @@ class Object {
     mutable bool indexValid_ = false;
     void ensureIndex() const;
 };
+// Unlike operator==, compares JSON types, object order, and double bits.
+bool identical(const Value& a, const Value& b);
 std::string_view typeName(Type type);
 }  // namespace supple::json
