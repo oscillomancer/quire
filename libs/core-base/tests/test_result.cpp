@@ -1,4 +1,6 @@
 #include <doctest/doctest.h>
+#include <supple/base/closest.h>
+#include <supple/base/units.h>
 
 #include <supple/base/result.h>
 #include <supple/product.h>
@@ -31,4 +33,15 @@ TEST_CASE("Result carries value or structured error") {
 TEST_CASE("product identity comes from the generated header") {
     CHECK(!supple::product::kName.empty());
     CHECK(supple::product::kVendorId == "com.suppleaudio");
+}
+
+TEST_CASE("base units and closest match") {
+    using namespace supple;
+    auto hz = units::parseQuantity("1.2 kHz", units::Unit::Hz);
+    REQUIRE(hz);
+    CHECK(*hz == 1200);
+    CHECK(units::formatQuantity(1200, units::Unit::Hz) == "1.20 kHz");
+    CHECK(units::formatQuantity(4, units::Unit::ratio) == "4.00:1");
+    const std::string_view names[] = {"cutoff", "resonance"};
+    CHECK(closestMatch("cuttoff", names) == "cutoff");
 }
