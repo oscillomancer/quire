@@ -163,3 +163,21 @@ migration; merge success, merge failure leaving the patch unchanged with
 correct paths; `diff` then `merge` reproduces the target; Changed-detail
 output and re-read; state framing round trip and every framing error;
 `describeFlat` golden strings.
+
+## Implementation notes (2026-09-26, orchestrator)
+
+- `PatchType` and `FlatPatchType` share a non-template `Codec` that owns the
+  document ID, the ADR-0009 version policy, migrations and the envelope. It
+  reuses core-schema's `DocumentId`/`parseDocumentId`/`formatDocumentId`
+  rather than wrapping `DocumentType`, because the envelope members must be
+  present during migrations and removed before the body is decoded; error
+  codes are `patch.*` (`missing_schema`, `bad_schema_id`, `wrong_type`,
+  `too_new`, `migration_failed`, `not_object`, `merge_not_object`).
+- For plugins with randomness a missing `seed` means 0, and `seed` is always
+  written, so documents with and without an explicit `"seed": 0` are one patch.
+- `FlatPatchType` errors carry paths `/params/<key>` (JSON Pointer escaped)
+  and codes from core-params (`params.unknown_key`, `params.out_of_range`,
+  `params.enum`, `params.type`) plus `params.readonly` for meter keys.
+- `describeFlat` groups by the first key segment in table order:
+  `band1: Freq 90.0 Hz; band2: Freq 250 Hz, Gain -3.0 dB; Mix 80.0 %`, and
+  returns `default settings` when nothing differs.
