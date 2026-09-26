@@ -1,0 +1,8 @@
+execute_process(COMMAND ${TOOL} OUTPUT_VARIABLE generated RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "notation-ref failed (${status})")
+endif()
+file(READ ${REFERENCE} committed)
+if(NOT generated STREQUAL committed)
+  message(FATAL_ERROR "skill/generated/notation-reference.md is out of date: run tools/gen/update-generated.sh")
+endif()

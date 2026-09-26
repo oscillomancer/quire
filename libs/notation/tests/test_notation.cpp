@@ -97,6 +97,14 @@ TEST_CASE("compile a simple voice") {
     CHECK(result->sequence.length == 3840);
 }
 
+TEST_CASE("thirty-second duration is distinct from exact tick suffix") {
+    auto result = compile("voice lead\n1: C4:t D4:120t r:*\n");
+    REQUIRE(result.ok());
+    REQUIRE(result->sequence.notes.size() == 2);
+    CHECK(result->sequence.notes[0].length == 120);
+    CHECK(result->sequence.notes[1].length == 120);
+}
+
 TEST_CASE("implicit main voice matches an explicit declaration") {
     const auto implicit = compile("notation 1\n1: C4:q E4:q G4:h\n");
     const auto explicitVoice = compile("notation 1\nvoice main\n1: C4:q E4:q G4:h\n");

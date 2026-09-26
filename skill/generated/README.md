@@ -12,8 +12,8 @@ edited by hand:
 
 Regenerate with `tools/gen/update-generated.sh`.
 - `plugins/<plugin>.md` — from each stock plugin's semantic schema.
-- `notation-reference.md` — from `docs/specs/notation.md` Part B plus the
-  drum map and chord tables compiled into `libs/notation`.
+- `notation-reference.md` — from the syntax and tables compiled into
+  `libs/notation`, with examples compiled and decompiled by the generator.
 
 A test regenerates these files and fails when they differ from what is
 committed, so the skill can never drift from the installed version.
