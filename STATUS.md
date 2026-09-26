@@ -44,8 +44,8 @@ reports committed in docs.
 
 | ID | Task | State |
 |---|---|---|
-| P2.1 | `specs/semantic-params-extension.md` (CLAP ext `com.suppleaudio.semantic-params/1`) | spec frozen |
-| P2.2 | host/clap-host: load, instantiate, activate, process with note/param events, state, semantic ext | planned |
+| P2.1 | `specs/semantic-params-extension.md` (CLAP ext `com.suppleaudio.semantic-params/1`) | spec frozen; ABI header in `plugins/common/include/supple/clap/semantic_params.h` |
+| P2.2 | host/clap-host: load, instantiate, activate, process with note/param events, state, semantic ext | **done** (orchestrator; fixtures + checked against the template's Starter.clap); review pending |
 | P2.3 | probe synth from the template (instrument, CLAP-only offline build, C++20) + `plugins/common` extension helper | brief ready (probe worker, after 05:38); clap-wrapper/Pugl vendored with template patches pre-applied |
 | P2.4 | host/sandbox: render notation/MIDI/audio through a plugin offline, analyze, write WAV + report; CLI | planned |
 | P2.5 | control-protocol: JSON-RPC 2.0 NDJSON over Unix socket | planned |

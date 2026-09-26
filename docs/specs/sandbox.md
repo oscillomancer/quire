@@ -191,3 +191,34 @@ render again → compare → save preset. Its transcript is committed to
 `docs/demos/phase2-mcp-loop.md`. A second test runs the same flow with an
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
+
+## Implementation notes — `host/clap-host` (2026-09-26, orchestrator)
+
+- Output events go to a caller-preallocated `OutputEvents` sink (fixed
+  storage + count + dropped), never a growing container, so `process()` is
+  allocation-free; it is `SUPPLE_RT` and exercised under rtsan.
+- `setParam()` flushes immediately through `params.flush` while the plugin is
+  inactive (main thread); while active it queues into an SPSC ring delivered
+  at time 0 of the next `process()`, or by `flushParams()` on the audio thread
+  (CLAP requires the audio thread for flush while active).
+- `serviceMainThread()` answers `request_callback`, performs `request_restart`
+  (deactivate + activate with the same rate and max block) when not
+  processing, handles `request_flush` while inactive, and fires due timers.
+  `takeNotifications()` reports state-dirty, params-rescan, latency-changed
+  and semantic-changed flags.
+- Plugin log calls on the audio thread go to a lock-free ring (copied by
+  hand, no formatting calls); other threads use a mutex-protected list;
+  `takeLog()` drains both on the main thread.
+- `scan()` loads each binary once (a path-keyed library cache shared with
+  instances keeps each `.clap` loaded exactly while needed) and instantiates
+  each plugin briefly to detect the semantic extension.
+- Instances select a stereo `audio-ports-config` when offered; notes use the
+  CLAP dialect unless the plugin only supports MIDI.
+- The semantic-params ABI header lives at
+  `plugins/common/include/supple/clap/semantic_params.h` (exported as the
+  CMake target `supple::semantic-params-abi`).
+- Hermetic tests use in-tree fixture plugins (`host/clap-host/tests/
+  fixture_plugins.cpp`): a gain effect with the semantic extension,
+  restartable latency and JSON state, and a sine instrument. The host was also
+  checked by hand against the template's `Starter.clap` (scan, text I/O,
+  flush, processing, state).

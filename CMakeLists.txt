@@ -31,6 +31,7 @@ add_library(supple::product-info ALIAS product-info)
 
 add_subdirectory(third_party)
 add_subdirectory(libs)
+add_subdirectory(host)
 add_subdirectory(tests)
 if(SUPPLE_BUILD_SPIKES)
   add_subdirectory(tools/spikes/gui-shell)

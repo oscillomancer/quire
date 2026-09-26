@@ -1,0 +1,24 @@
+# The semantic-params extension header is shared with the plugins.
+add_library(semantic-params-abi INTERFACE)
+target_include_directories(semantic-params-abi INTERFACE ${CMAKE_SOURCE_DIR}/plugins/common/include)
+target_link_libraries(semantic-params-abi INTERFACE supple::clap)
+add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
+
+supple_add_library(clap-host
+  SOURCES src/clap_host.cpp
+  DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi
+  PRIVATE_DEPS ${CMAKE_DL_LIBS})
+
+if(SUPPLE_BUILD_TESTS)
+  # Hermetic CLAP fixtures for the host tests.
+  add_library(clap-host-fixtures MODULE tests/fixture_plugins.cpp)
+  target_link_libraries(clap-host-fixtures PRIVATE supple::core-params supple::core-patch
+                        supple::semantic-params-abi)
+  set_target_properties(clap-host-fixtures PROPERTIES PREFIX "" SUFFIX ".clap" OUTPUT_NAME "test-fixtures")
+  supple_target_defaults(clap-host-fixtures)
+  target_compile_options(clap-host-fixtures PRIVATE -Wno-old-style-cast)
+
+  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp LABELS rt)
+  add_dependencies(clap-host.tests clap-host-fixtures)
+  target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+endif()

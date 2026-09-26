@@ -1,0 +1,490 @@
+// Test fixtures: two small, deterministic CLAP plugins built in-tree so the
+// host tests are hermetic.
+//
+//   com.suppleaudio.test.gain  — stereo effect; params "gain" (dB, ADR-0010
+//     normalized CLAP value) and "latency" (0/64 samples, stepped; changing it
+//     while active requests a restart); versioned state; the semantic-params
+//     extension implemented with core-params + core-patch.
+//   com.suppleaudio.test.sine  — instrument; 0 inputs, stereo output, CLAP and
+//     MIDI note dialects; one sine voice per key at velocity * 0.25, stops at
+//     note off and reports NOTE_END.
+#include <clap/clap.h>
+
+#include <atomic>
+#include <cmath>
+#include <cstring>
+#include <string>
+
+#include "supple/clap/semantic_params.h"
+#include "supple/json/json.h"
+#include "supple/params/params.h"
+#include "supple/patch/patch.h"
+
+namespace {
+
+using namespace supple;
+
+// --- gain -----------------------------------------------------------------------
+
+constexpr params::Choice kLatencyChoices[] = {{"none", "0 samples"}, {"short", "64 samples"}};
+constexpr params::ParamSpec kGainTable[] = {
+    {.id = 0,
+     .key = "gain",
+     .name = "Gain",
+     .type = params::Type::Float,
+     .unit = units::Unit::dB,
+     .min = -60,
+     .max = 12,
+     .def = 0,
+     .digits = 2,
+     .description = "Output gain.",
+     .flags = params::kAutomatable | params::kModulatable | params::kOffAtMin},
+    {.id = 1,
+     .key = "latency",
+     .name = "Latency",
+     .type = params::Type::Enum,
+     .max = 1,
+     .def = 0,
+     .choices = kLatencyChoices,
+     .description = "Adds a fixed delay (restart required).",
+     .flags = params::kAutomatable},
+};
+constexpr params::Table kGainT{kGainTable};
+
+const patch::FlatPatchType& gainPatchType() {
+    static const patch::FlatPatchType t("test-gain", 1, 0, kGainT, false);
+    return t;
+}
+
+const clap_plugin_descriptor_t* gainDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_STEREO,
+                                     nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.gain",
+                                               "Test Gain",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Gain fixture",
+                                               features};
+    return &d;
+}
+
+struct Gain {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+    std::atomic<double> gainDb{0.0};
+    std::atomic<int> latencyChoice{0};
+    int activeLatency = 0;  // latency in samples at activation
+    double gain = 1.0;      // audio thread
+    float delay[2][64] = {};
+    int delayPos = 0;
+
+    void applyParam(clap_id id, double clapValue) {
+        if (const auto* p = params::findById(kGainT, id)) {
+            const double v = params::fromClap(*p, clapValue);
+            if (id == 0) gainDb = v;
+            if (id == 1 && static_cast<int>(v) != latencyChoice.load()) {
+                latencyChoice = static_cast<int>(v);
+                if (host && host->request_restart) host->request_restart(host);
+            }
+        }
+    }
+    static double dbToGain(double db) { return db <= -60 ? 0.0 : std::pow(10.0, db / 20.0); }
+
+    patch::Patch<patch::FlatBody> current() const {
+        auto p = gainPatchType().defaults();
+        p.body.values[0] = gainDb.load();
+        p.body.values[1] = latencyChoice.load();
+        return p;
+    }
+};
+
+Gain* G(const clap_plugin_t* p) { return static_cast<Gain*>(p->plugin_data); }
+
+uint32_t CLAP_ABI gainParamCount(const clap_plugin_t*) { return 2; }
+bool CLAP_ABI gainParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
+    if (index >= 2) return false;
+    const auto& p = kGainTable[index];
+    std::memset(info, 0, sizeof(*info));
+    info->id = p.id;
+    info->flags = params::clapFlags(p);
+    std::snprintf(info->name, sizeof(info->name), "%.*s", static_cast<int>(p.name.size()),
+                  p.name.data());
+    const auto r = params::clapRange(p);
+    info->min_value = r.min;
+    info->max_value = r.max;
+    info->default_value = r.def;
+    return true;
+}
+bool CLAP_ABI gainParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+    auto* g = G(pl);
+    if (id == 0)
+        *out = params::toClap(kGainTable[0], g->gainDb);
+    else if (id == 1)
+        *out = g->latencyChoice;
+    else
+        return false;
+    return true;
+}
+bool CLAP_ABI gainValueToText(const clap_plugin_t*, clap_id id, double v, char* out,
+                              uint32_t size) {
+    const auto* p = params::findById(kGainT, id);
+    if (!p) return false;
+    std::snprintf(out, size, "%s", params::format(*p, params::fromClap(*p, v)).c_str());
+    return true;
+}
+bool CLAP_ABI gainTextToValue(const clap_plugin_t*, clap_id id, const char* text, double* out) {
+    const auto* p = params::findById(kGainT, id);
+    if (!p) return false;
+    auto v = params::parse(*p, text);
+    if (!v) return false;
+    *out = params::toClap(*p, *v);
+    return true;
+}
+void CLAP_ABI gainFlush(const clap_plugin_t* pl, const clap_input_events_t* in,
+                        const clap_output_events_t*) {
+    for (uint32_t i = 0; i < in->size(in); ++i) {
+        const auto* h = in->get(in, i);
+        if (h->type == CLAP_EVENT_PARAM_VALUE)
+            G(pl)->applyParam(reinterpret_cast<const clap_event_param_value_t*>(h)->param_id,
+                              reinterpret_cast<const clap_event_param_value_t*>(h)->value);
+    }
+}
+const clap_plugin_params_t kGainParams = {gainParamCount,  gainParamInfo,   gainParamValue,
+                                          gainValueToText, gainTextToValue, gainFlush};
+
+uint32_t CLAP_ABI gainLatency(const clap_plugin_t* pl) {
+    return static_cast<uint32_t>(G(pl)->activeLatency);
+}
+const clap_plugin_latency_t kGainLatency = {gainLatency};
+
+bool CLAP_ABI gainStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
+    const std::string doc = gainPatchType().serialize(G(pl)->current());
+    auto bytes = patch::encodeState(doc, 0x54474e31);  // "TGN1"
+    return os->write(os, bytes.data(), bytes.size()) == static_cast<int64_t>(bytes.size());
+}
+bool CLAP_ABI gainStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
+    std::vector<std::uint8_t> buf;
+    std::uint8_t tmp[512];
+    for (;;) {
+        const int64_t n = is->read(is, tmp, sizeof(tmp));
+        if (n < 0) return false;
+        if (n == 0) break;
+        buf.insert(buf.end(), tmp, tmp + n);
+    }
+    auto text = patch::decodeState(buf, 0x54474e31);
+    if (!text) return false;
+    auto p = gainPatchType().parse(*text);
+    if (!p) return false;
+    G(pl)->gainDb = p->body.values[0];
+    G(pl)->latencyChoice = static_cast<int>(p->body.values[1]);
+    return true;
+}
+const clap_plugin_state_t kGainState = {gainStateSave, gainStateLoad};
+
+uint32_t CLAP_ABI gainPortCount(const clap_plugin_t*, bool) { return 1; }
+bool CLAP_ABI gainPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
+                          clap_audio_port_info_t* info) {
+    if (index != 0) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->id = 0;
+    std::snprintf(info->name, sizeof(info->name), "%s", isInput ? "In" : "Out");
+    info->flags = CLAP_AUDIO_PORT_IS_MAIN;
+    info->channel_count = 2;
+    info->port_type = CLAP_PORT_STEREO;
+    info->in_place_pair = CLAP_INVALID_ID;
+    return true;
+}
+const clap_plugin_audio_ports_t kGainPorts = {gainPortCount, gainPortGet};
+
+// semantic extension
+bool writeString(const clap_ostream_t* os, const std::string& s) {
+    return os->write(os, s.data(), s.size()) == static_cast<int64_t>(s.size());
+}
+std::string errorsJson(const Error& e) {
+    json::Value arr = json::Value::array();
+    auto one = [](const Error& x) {
+        json::Value v = json::Value::object();
+        v["code"] = x.code;
+        v["message"] = x.message;
+        v["path"] = x.path;
+        v["hint"] = x.hint;
+        return v;
+    };
+    if (e.details.empty()) arr.push_back(one(e));
+    for (const auto& d : e.details) arr.push_back(one(d));
+    return json::writeCompact(arr);
+}
+bool CLAP_ABI semSchema(const clap_plugin_t*, const clap_ostream_t* out) {
+    json::Value doc = json::Value::object();
+    doc["schema"] = "supple.semantic-schema/1.0";
+    doc["plugin"]["id"] = gainDescriptor()->id;
+    doc["patch_type"] = gainPatchType().schemaId();
+    doc["params"] = *params::describeTable(kGainT).find("params");
+    doc["patch"] = gainPatchType().jsonSchema();
+    return writeString(out, json::writeCompact(doc));
+}
+bool CLAP_ABI semGetPatch(const clap_plugin_t* pl, uint32_t detail, const clap_ostream_t* out) {
+    return writeString(
+        out, gainPatchType().serialize(G(pl)->current(), detail == CLAP_SUPPLE_PATCH_DETAIL_CHANGED
+                                                             ? patch::Detail::Changed
+                                                             : patch::Detail::Full));
+}
+bool CLAP_ABI semSetPatch(const clap_plugin_t* pl, uint32_t mode, const char* text, uint32_t size,
+                          const clap_ostream_t* errors) {
+    auto doc = json::parse(std::string_view(text, size));
+    if (!doc) {
+        if (errors) writeString(errors, errorsJson(doc.error()));
+        return false;
+    }
+    auto result = mode == CLAP_SUPPLE_SET_REPLACE ? gainPatchType().fromJson(*doc)
+                                                  : gainPatchType().merge(G(pl)->current(), *doc);
+    if (!result) {
+        if (errors) writeString(errors, errorsJson(result.error()));
+        return false;
+    }
+    if (mode == CLAP_SUPPLE_SET_VALIDATE_ONLY) return true;
+    G(pl)->gainDb = result->body.values[0];
+    const int latency = static_cast<int>(result->body.values[1]);
+    if (latency != G(pl)->latencyChoice.exchange(latency) && G(pl)->host->request_restart)
+        G(pl)->host->request_restart(G(pl)->host);
+    return true;
+}
+bool CLAP_ABI semDescribe(const clap_plugin_t* pl, uint32_t detail, const clap_ostream_t* out) {
+    return writeString(out,
+                       "Gain: " + patch::describeFlat(gainPatchType(), G(pl)->current(),
+                                                      detail == CLAP_SUPPLE_PATCH_DETAIL_CHANGED
+                                                          ? patch::Detail::Changed
+                                                          : patch::Detail::Full));
+}
+const clap_plugin_supple_semantic_params_t kGainSemantic = {
+    sizeof(clap_plugin_supple_semantic_params_t), semSchema, semGetPatch, semSetPatch, semDescribe};
+
+const void* CLAP_ABI gainExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kGainParams;
+    if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kGainLatency;
+    if (!std::strcmp(id, CLAP_EXT_STATE)) return &kGainState;
+    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kGainPorts;
+    if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS)) return &kGainSemantic;
+    return nullptr;
+}
+
+bool CLAP_ABI gainActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) {
+    auto* g = G(pl);
+    g->activeLatency = g->latencyChoice ? 64 : 0;
+    std::memset(g->delay, 0, sizeof(g->delay));
+    g->delayPos = 0;
+    g->gain = Gain::dbToGain(g->gainDb);
+    return true;
+}
+
+clap_process_status CLAP_ABI gainProcess(const clap_plugin_t* pl, const clap_process_t* p) {
+    auto* g = G(pl);
+    const uint32_t n = p->frames_count;
+    const uint32_t nev = p->in_events->size(p->in_events);
+    uint32_t ev = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+        while (ev < nev) {
+            const auto* h = p->in_events->get(p->in_events, ev);
+            if (h->time > i) break;
+            if (h->type == CLAP_EVENT_PARAM_VALUE) {
+                const auto* pv = reinterpret_cast<const clap_event_param_value_t*>(h);
+                g->applyParam(pv->param_id, pv->value);
+            }
+            ++ev;
+        }
+        g->gain = Gain::dbToGain(g->gainDb);  // no smoothing: tests check sample-exact changes
+        for (int c = 0; c < 2; ++c) {
+            float x = p->audio_inputs[0].data32[c][i];
+            if (g->activeLatency) {
+                float& slot = g->delay[c][g->delayPos];
+                const float delayed = slot;
+                slot = x;
+                x = delayed;
+            }
+            p->audio_outputs[0].data32[c][i] = static_cast<float>(static_cast<double>(x) * g->gain);
+        }
+        if (g->activeLatency) g->delayPos = (g->delayPos + 1) % 64;
+    }
+    return CLAP_PROCESS_CONTINUE;
+}
+
+// --- sine -------------------------------------------------------------------------
+
+const clap_plugin_descriptor_t* sineDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT,
+                                     CLAP_PLUGIN_FEATURE_SYNTHESIZER, nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.sine",
+                                               "Test Sine",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Sine fixture",
+                                               features};
+    return &d;
+}
+
+struct Voice {
+    bool on = false;
+    int key = 0, channel = 0;
+    int32_t noteId = -1;
+    double phase = 0, inc = 0, amp = 0;
+};
+struct Sine {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+    double sampleRate = 48000;
+    Voice voices[8];
+};
+Sine* S(const clap_plugin_t* p) { return static_cast<Sine*>(p->plugin_data); }
+
+uint32_t CLAP_ABI sinePortCount(const clap_plugin_t*, bool isInput) { return isInput ? 0 : 1; }
+bool CLAP_ABI sinePortGet(const clap_plugin_t* p, uint32_t index, bool isInput,
+                          clap_audio_port_info_t* info) {
+    if (isInput) return false;
+    return gainPortGet(p, index, false, info);
+}
+const clap_plugin_audio_ports_t kSinePorts = {sinePortCount, sinePortGet};
+uint32_t CLAP_ABI sineNoteCount(const clap_plugin_t*, bool isInput) { return isInput ? 1 : 0; }
+bool CLAP_ABI sineNoteGet(const clap_plugin_t*, uint32_t index, bool isInput,
+                          clap_note_port_info_t* info) {
+    if (!isInput || index != 0) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
+    info->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
+    std::snprintf(info->name, sizeof(info->name), "Notes");
+    return true;
+}
+const clap_plugin_note_ports_t kSineNotes = {sineNoteCount, sineNoteGet};
+const void* CLAP_ABI sineExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kSinePorts;
+    if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
+    return nullptr;
+}
+bool CLAP_ABI sineActivate(const clap_plugin_t* pl, double sr, uint32_t, uint32_t) {
+    S(pl)->sampleRate = sr;
+    for (auto& v : S(pl)->voices) v = {};
+    return true;
+}
+void noteOn(Sine* s, int channel, int key, int32_t id, double velocity) {
+    for (auto& v : s->voices) {
+        if (v.on) continue;
+        v = {true,
+             key,
+             channel,
+             id,
+             0.0,
+             440.0 * std::pow(2.0, (key - 69) / 12.0) / s->sampleRate,
+             0.25 * velocity};
+        return;
+    }
+}
+void noteOff(Sine* s, const clap_output_events_t* out, uint32_t time, int channel, int key) {
+    for (auto& v : s->voices) {
+        if (!v.on || v.key != key || v.channel != channel) continue;
+        v.on = false;
+        clap_event_note_t end{};
+        end.header = {sizeof(end), time, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_END, 0};
+        end.note_id = v.noteId;
+        end.key = static_cast<int16_t>(key);
+        end.channel = static_cast<int16_t>(channel);
+        out->try_push(out, &end.header);
+    }
+}
+clap_process_status CLAP_ABI sineProcess(const clap_plugin_t* pl, const clap_process_t* p) {
+    auto* s = S(pl);
+    const uint32_t n = p->frames_count;
+    const uint32_t nev = p->in_events->size(p->in_events);
+    uint32_t ev = 0;
+    float* L = p->audio_outputs[0].data32[0];
+    float* R = p->audio_outputs[0].data32[1];
+    for (uint32_t i = 0; i < n; ++i) {
+        while (ev < nev) {
+            const auto* h = p->in_events->get(p->in_events, ev);
+            if (h->time > i) break;
+            if (h->type == CLAP_EVENT_NOTE_ON || h->type == CLAP_EVENT_NOTE_OFF) {
+                const auto* ne = reinterpret_cast<const clap_event_note_t*>(h);
+                if (h->type == CLAP_EVENT_NOTE_ON)
+                    noteOn(s, ne->channel, ne->key, ne->note_id, ne->velocity);
+                else
+                    noteOff(s, p->out_events, i, ne->channel, ne->key);
+            } else if (h->type == CLAP_EVENT_MIDI) {
+                const auto* m = reinterpret_cast<const clap_event_midi_t*>(h);
+                const int status = m->data[0] & 0xf0, ch = m->data[0] & 0x0f;
+                if (status == 0x90 && m->data[2] > 0)
+                    noteOn(s, ch, m->data[1], -1, m->data[2] / 127.0);
+                else if (status == 0x80 || (status == 0x90 && m->data[2] == 0))
+                    noteOff(s, p->out_events, i, ch, m->data[1]);
+            }
+            ++ev;
+        }
+        double y = 0;
+        for (auto& v : s->voices) {
+            if (!v.on) continue;
+            y += v.amp * std::sin(2.0 * M_PI * v.phase);
+            v.phase += v.inc;
+            v.phase -= std::floor(v.phase);
+        }
+        L[i] = R[i] = static_cast<float>(y);
+    }
+    return CLAP_PROCESS_CONTINUE;
+}
+
+// --- shared lifecycle ------------------------------------------------------------------
+
+bool CLAP_ABI initOk(const clap_plugin_t*) { return true; }
+void CLAP_ABI deactivateNop(const clap_plugin_t*) {}
+bool CLAP_ABI startOk(const clap_plugin_t*) { return true; }
+void CLAP_ABI stopNop(const clap_plugin_t*) {}
+void CLAP_ABI resetNop(const clap_plugin_t*) {}
+void CLAP_ABI mainNop(const clap_plugin_t*) {}
+
+template <class T>
+void CLAP_ABI destroyT(const clap_plugin_t* p) {
+    delete static_cast<T*>(p->plugin_data);
+}
+
+template <class T>
+const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_t* desc,
+                          bool(CLAP_ABI* activate)(const clap_plugin_t*, double, uint32_t,
+                                                   uint32_t),
+                          clap_process_status(CLAP_ABI* process)(const clap_plugin_t*,
+                                                                 const clap_process_t*),
+                          const void*(CLAP_ABI* ext)(const clap_plugin_t*, const char*)) {
+    auto* self = new T();
+    self->host = host;
+    self->plugin = {desc,    self,    initOk,   destroyT<T>, activate, deactivateNop,
+                    startOk, stopNop, resetNop, process,     ext,      mainNop};
+    return &self->plugin;
+}
+
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 2; }
+const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
+    return i == 0 ? gainDescriptor() : i == 1 ? sineDescriptor() : nullptr;
+}
+const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
+                                            const char* id) {
+    if (!std::strcmp(id, gainDescriptor()->id))
+        return make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt);
+    if (!std::strcmp(id, sineDescriptor()->id))
+        return make<Sine>(host, sineDescriptor(), sineActivate, sineProcess, sineExt);
+    return nullptr;
+}
+const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};
+
+bool CLAP_ABI entryInit(const char*) { return true; }
+void CLAP_ABI entryDeinit() {}
+const void* CLAP_ABI entryFactory(const char* id) {
+    return !std::strcmp(id, CLAP_PLUGIN_FACTORY_ID) ? &kFactory : nullptr;
+}
+
+}  // namespace
+
+extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {CLAP_VERSION_INIT, entryInit,
+                                                               entryDeinit, entryFactory};

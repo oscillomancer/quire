@@ -1,0 +1,211 @@
+// CLAP hosting (spec: docs/specs/sandbox.md §1). Shared by the Phase 2
+// sandbox and the Phase 4 engine.
+//
+// Threading follows CLAP: an Instance is created, configured, activated,
+// saved/loaded and destroyed on the thread that created it (its main
+// thread); process() and start/stopProcessing() run on one audio thread.
+// The host callbacks a plugin makes are answered according to that split;
+// audio-thread callbacks never allocate or lock.
+#pragma once
+
+#include <clap/clap.h>
+
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "supple/base/result.h"
+#include "supple/base/rt.h"
+#include "supple/base/spsc.h"
+#include "supple/clap/semantic_params.h"
+#include "supple/json/value.h"
+
+namespace supple::host {
+
+struct PluginInfo {
+    std::string id, name, vendor, version, description;
+    std::filesystem::path path;
+    std::vector<std::string> features;
+    bool instrument = false;  // declares the "instrument" feature
+    bool semantic = false;    // implements com.suppleaudio.semantic-params/1
+};
+
+// Scans files or directories (recursively) for .clap binaries.
+Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);
+// $CLAP_PATH, ~/.clap, /usr/lib/clap, /usr/local/lib/clap (existing ones only).
+std::vector<std::filesystem::path> defaultSearchPath();
+
+struct HostIdentity {
+    std::string name = "supple-host";  // callers pass the product name
+    std::string vendor = "Supple Audio";
+    std::string url;
+    std::string version = "0.1.0";
+};
+
+struct ParamInfo {
+    std::uint32_t id;
+    std::string name, module;
+    double min, max, def;
+    std::uint32_t flags;  // CLAP_PARAM_IS_*
+};
+
+// --- events ----------------------------------------------------------------------
+
+struct Event {
+    enum class Kind : std::uint8_t { NoteOn, NoteOff, NoteChoke, Param, Midi };
+    Kind kind = Kind::NoteOn;
+    std::uint32_t time = 0;  // sample offset within the block
+    // notes
+    std::int16_t port = 0, channel = 0, key = 60;
+    std::int32_t noteId = -1;
+    double velocity = 1.0;  // 0..1
+    // params
+    std::uint32_t paramId = 0;
+    double value = 0.0;  // CLAP value
+    // MIDI 1.0
+    std::uint8_t midi[3] = {0, 0, 0};
+};
+
+struct Transport {
+    bool playing = true;
+    double tempo = 120.0;  // BPM
+    double beat = 0.0;     // song position in quarter-note beats at block start
+    double barStartBeat = 0.0;
+    std::int32_t bar = 0;  // 0-based bar index
+    std::uint16_t numerator = 4, denominator = 4;
+    double seconds = 0.0;  // song position in seconds at block start
+};
+
+struct ProcessBlock {
+    const float* const* inputs = nullptr;  // main input channels (may be null for instruments)
+    std::uint32_t inputChannels = 0;
+    float* const* outputs = nullptr;  // main output channels
+    std::uint32_t outputChannels = 0;
+    std::uint32_t frames = 0;
+    std::span<const Event> events;         // sorted by time
+    const Transport* transport = nullptr;  // null: no transport info
+    std::int64_t steadyTime = -1;          // sample counter, or -1
+};
+
+// Events the plugin emits while processing (param gestures/values, notes end).
+struct OutputEvent {
+    enum class Kind : std::uint8_t { ParamValue, GestureBegin, GestureEnd, NoteEnd };
+    Kind kind;
+    std::uint32_t time;
+    std::uint32_t paramId;
+    double value;
+    std::int32_t noteId;
+};
+
+// Caller-owned, preallocated sink for output events (the audio thread never
+// allocates): events beyond storage.size() are dropped and counted.
+struct OutputEvents {
+    std::span<OutputEvent> storage;
+    std::size_t count = 0;
+    std::size_t dropped = 0;
+    void clear() { count = dropped = 0; }
+};
+
+class Library;  // a loaded .clap binary (shared by its instances)
+
+class Instance {
+  public:
+    static Result<std::unique_ptr<Instance>> create(const PluginInfo& info,
+                                                    const HostIdentity& host);
+    ~Instance();
+    Instance(const Instance&) = delete;
+    Instance& operator=(const Instance&) = delete;
+
+    const PluginInfo& info() const { return info_; }
+
+    // --- lifecycle (main thread) ---
+    Status activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames);
+    void deactivate();
+    bool active() const { return active_; }
+    std::uint32_t latency() const;
+    std::uint32_t tail() const;  // UINT32_MAX = infinite
+
+    // --- ports (valid after create; a stereo configuration is selected when offered) ---
+    std::uint32_t audioInputChannels() const { return inChannels_; }
+    std::uint32_t audioOutputChannels() const { return outChannels_; }
+    bool acceptsNotes() const { return acceptsNotes_; }
+
+    // --- standard parameters (main thread) ---
+    std::vector<ParamInfo> params() const;
+    Result<double> paramValue(std::uint32_t id) const;
+    Result<std::string> paramText(std::uint32_t id, double clapValue) const;
+    Result<double> paramFromText(std::uint32_t id, std::string_view text) const;
+    // Queues a value change for the next processed block; when not processing,
+    // applies it at once through params.flush.
+    Status setParam(std::uint32_t id, double clapValue);
+
+    // --- semantic view (only when info().semantic) ---
+    Result<json::Value> semanticSchema();
+    Result<std::string> getPatch(bool changedOnly);
+    Status setPatch(std::string_view json, std::uint32_t mode);  // CLAP_SUPPLE_SET_*
+    Result<std::string> describe(bool changedOnly);
+
+    // --- state (main thread) ---
+    Result<std::vector<std::uint8_t>> saveState();
+    Status loadState(std::span<const std::uint8_t> bytes);
+
+    // --- processing (audio thread) ---
+    void startProcessing() SUPPLE_RT;
+    void stopProcessing() SUPPLE_RT;
+    bool processing() const { return processing_; }
+    // Returns false on CLAP_PROCESS_ERROR. Output events are appended to `out`
+    // (may be null). Queued setParam() changes are delivered first, at time 0.
+    bool process(const ProcessBlock& block, OutputEvents* out = nullptr) SUPPLE_RT;
+    // Delivers queued setParam() changes through params.flush while active but
+    // not processing (CLAP requires the audio thread for that case).
+    void flushParams() SUPPLE_RT;
+    void reset();  // clap_plugin.reset (audio thread or main thread while not processing)
+
+    // --- main-thread servicing (call regularly: after renders, from the app loop) ---
+    // Handles request_callback, request_restart (while active), pending flushes
+    // and due timers. Returns true if anything was done.
+    bool serviceMainThread();
+    // Flags the plugin raised since the last call (cleared on read).
+    struct Notifications {
+        bool stateDirty = false, paramsRescan = false, latencyChanged = false,
+             semanticChanged = false;
+        std::uint32_t paramsRescanFlags = 0;
+    };
+    Notifications takeNotifications();
+
+    // Log lines the plugin wrote (from any thread), drained on the main thread.
+    std::vector<std::string> takeLog();
+
+    const clap_plugin_t* raw() const { return plugin_; }
+
+    struct HostState;  // opaque host-side state (callbacks, queues, event arena)
+
+  private:
+    Instance() = default;
+    friend struct HostCallbacks;
+
+    PluginInfo info_;
+    std::shared_ptr<Library> library_;
+    std::unique_ptr<HostState> hostState_;
+    const clap_plugin_t* plugin_ = nullptr;
+    const clap_plugin_params_t* extParams_ = nullptr;
+    const clap_plugin_state_t* extState_ = nullptr;
+    const clap_plugin_latency_t* extLatency_ = nullptr;
+    const clap_plugin_tail_t* extTail_ = nullptr;
+    const clap_plugin_timer_support_t* extTimer_ = nullptr;
+    const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
+    std::uint32_t inChannels_ = 0, outChannels_ = 0;
+    bool acceptsNotes_ = false;
+    bool active_ = false;
+    bool processing_ = false;
+    std::uint32_t maxFrames_ = 0;
+    double sampleRate_ = 0.0;
+};
+
+}  // namespace supple::host
