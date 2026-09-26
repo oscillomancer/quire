@@ -414,7 +414,10 @@ class Schema {
                             }
                 }
         }
-        if constexpr (requires(T t) { typename T::mapped_type; })
+        if constexpr (requires(T t) {
+                          typename T::mapped_type;
+                          requires std::is_convertible_v<typename T::key_type, std::string>;
+                      })
             if (keyPattern_)
                 for (const auto& [key, item] : out) {
                     (void)item;
