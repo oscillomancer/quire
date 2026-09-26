@@ -23,15 +23,16 @@ TEST_CASE("SMF format zero round trip") {
                   {900, ControlKind::PitchBend, 0, 0, -300},
                   {1000, ControlKind::ProgramChange, 0, 0, 5}};
     s.sysex = {{1200, {0xf0, 0x7e, 0x7f, 0xf7}}};
-    auto encoded = writeSmf(s, Meter{4, 4}, 120.0);
+    auto encoded = writeSmf(s, {{0, Meter{4, 4}}}, {{0, 120.0}});
+    REQUIRE(encoded.ok());
     SmfInfo info;
-    auto decoded = readSmf(encoded, &info);
+    auto decoded = readSmf(*encoded, &info);
     REQUIRE(decoded.ok());
     s.canonicalize();
     CHECK(decoded.value() == s);
-    CHECK(info.meter == Meter{4, 4});
-    REQUIRE(info.bpm.has_value());
-    CHECK(*info.bpm == doctest::Approx(120.0));
+    CHECK(info.meters == std::vector<std::pair<std::int64_t, Meter>>{{0, Meter{4, 4}}});
+    REQUIRE(info.tempos.size() == 1);
+    CHECK(info.tempos[0].second == doctest::Approx(120.0));
 }
 
 TEST_CASE("running status, zero-velocity off, and unterminated note") {
@@ -58,4 +59,27 @@ TEST_CASE("format one merges tracks before pairing notes") {
     CHECK(result->notes[0].offVelocity == 40);
     CHECK(result->length == 20);
     CHECK(info.trackNames == std::vector<std::string>{"A"});
+    CHECK(info.format == 1);
+    CHECK(info.trackCount == 2);
+    auto selected = readSmf(smf, nullptr, SmfReadOptions{0});
+    REQUIRE(selected.ok());
+    REQUIRE(selected->notes.size() == 1);
+    CHECK(selected->notes[0].length == 20);
+    auto badTrack = readSmf(smf, nullptr, SmfReadOptions{2});
+    REQUIRE_FALSE(badTrack.ok());
+    CHECK(badTrack.error().code == "midi.track_range");
+}
+
+TEST_CASE("SMF writer validates the clip and metadata") {
+    Sequence s;
+    s.ppq = 0;
+    CHECK_FALSE(writeSmf(s, {}, {}).ok());
+    s.ppq = 960;
+    s.notes = {{0, 100, 0, 60, 0, 0}};
+    s.length = 100;
+    CHECK_FALSE(writeSmf(s, {}, {}).ok());
+    s.notes[0].velocity = 96;
+    CHECK_FALSE(writeSmf(s, {{0, Meter{3, 3}}}, {}).ok());
+    CHECK_FALSE(writeSmf(s, {}, {{0, -10.0}}).ok());
+    CHECK(writeSmf(s, {{0, Meter{3, 4}}}, {{0, 120.0}}).ok());
 }

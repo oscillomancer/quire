@@ -115,7 +115,8 @@ struct NoteAction {
 
 }  // namespace
 
-Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
+Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info,
+                         const SmfReadOptions& options) {
     Reader file{bytes};
     std::span<const std::uint8_t> tag;
     std::uint32_t headerSize = 0;
@@ -124,16 +125,24 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
         !file.be16(format) || !file.be16(tracks) || !file.be16(division))
         return badSmf("The MIDI header is incomplete.");
     if (format > 1 || tracks == 0 || (format == 0 && tracks != 1) || division == 0 ||
-        (division & 0x8000) != 0)
+        division > 32767 || (division & 0x8000) != 0)
         return badSmf("The MIDI format or time division is unsupported.");
+    if (options.track && (*options.track < 0 || *options.track >= tracks))
+        return Error{"midi.track_range",
+                     "Requested SMF track is out of range.",
+                     {},
+                     "Choose a zero-based track index below trackCount."};
     if (!file.take(headerSize - 6, tag)) return badSmf("The MIDI header is truncated.");
     Sequence out;
     out.ppq = division;
     SmfInfo metadata{};
     metadata.ppq = division;
+    metadata.format = format;
+    metadata.trackCount = tracks;
     std::map<std::pair<int, int>, std::deque<std::size_t>> active;
     std::vector<NoteAction> noteActions;
     std::int64_t lastTick = 0;
+    std::int64_t selectedLastTick = 0;
     for (int tr = 0; tr < tracks; ++tr) {
         std::uint32_t trackSize = 0;
         if (!file.take(4, tag) || !tagIs(tag, "MTrk") || !file.be32(trackSize) ||
@@ -142,6 +151,7 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
         Reader track{tag};
         std::int64_t tick = 0;
         std::uint8_t running = 0;
+        std::optional<Sysex> pendingSysex;
         while (track.at < track.bytes.size()) {
             std::uint32_t delta = 0;
             std::uint8_t first = 0;
@@ -159,9 +169,9 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
                 if (type == 0x51 && n == 3) {
                     const std::uint32_t micros = (std::uint32_t(payload[0]) << 16) |
                                                  (std::uint32_t(payload[1]) << 8) | payload[2];
-                    if (micros != 0) metadata.bpm = 60000000.0 / micros;
+                    if (micros != 0) metadata.tempos.emplace_back(tick, 60000000.0 / micros);
                 } else if (type == 0x58 && n >= 2 && payload[1] < 31) {
-                    metadata.meter = Meter{payload[0], 1 << payload[1]};
+                    metadata.meters.emplace_back(tick, Meter{payload[0], 1 << payload[1]});
                 } else if (type == 0x03) {
                     metadata.trackNames.emplace_back(reinterpret_cast<const char*>(payload.data()),
                                                      payload.size());
@@ -176,11 +186,21 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
                 std::span<const std::uint8_t> payload;
                 if (!track.vlq(n) || !track.take(n, payload))
                     return badSmf("A sysex event is truncated.");
-                Sysex sx;
-                sx.tick = tick;
-                sx.bytes.push_back(first);
-                sx.bytes.insert(sx.bytes.end(), payload.begin(), payload.end());
-                out.sysex.push_back(std::move(sx));
+                if (first == 0xf0) {
+                    if (pendingSysex) ++metadata.skippedEvents;
+                    pendingSysex = Sysex{tick, {0xf0}};
+                } else if (!pendingSysex) {
+                    ++metadata.skippedEvents;
+                }
+                if (pendingSysex) {
+                    pendingSysex->bytes.insert(pendingSysex->bytes.end(), payload.begin(),
+                                               payload.end());
+                    if (!pendingSysex->bytes.empty() && pendingSysex->bytes.back() == 0xf7) {
+                        if (!options.track || *options.track == tr)
+                            out.sysex.push_back(std::move(*pendingSysex));
+                        pendingSysex.reset();
+                    }
+                }
                 running = 0;
                 continue;
             }
@@ -202,6 +222,7 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
             if (data1 >= 128 || data2 >= 128)
                 return badSmf("A channel event has an invalid data byte.");
             const std::uint8_t ch = status & 0x0f;
+            if (options.track && *options.track != tr) continue;
             if (kind == 0x9 && data2 != 0) {
                 noteActions.push_back({tick, tr, noteActions.size(), ch, data1, data2, true});
             } else if (kind == 0x8 || kind == 0x9) {
@@ -220,7 +241,10 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
                                         static_cast<std::int32_t>((data2 << 7) | data1) - 8192});
             }
         }
+        if (pendingSysex) ++metadata.skippedEvents;
+        if (options.track && *options.track == tr) selectedLastTick = tick;
     }
+    if (options.track) lastTick = selectedLastTick;
     std::stable_sort(
         noteActions.begin(), noteActions.end(), [](const NoteAction& a, const NoteAction& b) {
             return std::tie(a.tick, a.track, a.order) < std::tie(b.tick, b.track, b.order);
@@ -250,24 +274,63 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info) {
     return out;
 }
 
-std::vector<std::uint8_t> writeSmf(const Sequence& source, const std::optional<Meter>& meter,
-                                   double bpm) {
+Result<std::vector<std::uint8_t>> writeSmf(
+    const Sequence& source, const std::vector<std::pair<std::int64_t, Meter>>& meters,
+    const std::vector<std::pair<std::int64_t, double>>& tempos) {
+    auto invalid = [](std::string what, std::string hint) -> Error {
+        return {"midi.smf_invalid", std::move(what), {}, std::move(hint)};
+    };
+    if (source.ppq < 1 || source.ppq > 32767 || source.length < 0)
+        return invalid("Invalid PPQ or item length.", "Use PPQ 1..32767 and a nonnegative length.");
+    std::int64_t lastEvent = 0;
+    for (const auto& n : source.notes) {
+        if (n.start < 0 || n.length < 0 ||
+            n.start > std::numeric_limits<std::int64_t>::max() - n.length || n.channel > 15 ||
+            n.pitch > 127 || n.velocity < 1 || n.velocity > 127 || n.offVelocity > 127)
+            return invalid("Invalid note.",
+                           "Check note time, channel, pitch, and velocity ranges.");
+        lastEvent = std::max(lastEvent, n.start + n.length);
+    }
+    for (const auto& c : source.controls) {
+        const bool bend = c.kind == ControlKind::PitchBend;
+        if (c.tick < 0 || c.channel > 15 || c.number > 127 || c.kind > ControlKind::PitchBend ||
+            c.value < (bend ? -8192 : 0) || c.value > (bend ? 8191 : 127))
+            return invalid("Invalid control.",
+                           "Check control time, kind, channel, number, and value.");
+        lastEvent = std::max(lastEvent, c.tick);
+    }
+    for (const auto& sx : source.sysex) {
+        if (sx.tick < 0 || sx.bytes.size() < 2 || sx.bytes.front() != 0xf0 ||
+            sx.bytes.back() != 0xf7)
+            return invalid("Invalid sysex.",
+                           "Frame sysex bytes with F0 and F7 at a nonnegative tick.");
+        lastEvent = std::max(lastEvent, sx.tick);
+    }
+    if (source.length < lastEvent)
+        return invalid("Item length ends before an event.",
+                       "Extend the item length past every event.");
     Sequence sequence = source;
     sequence.canonicalize();
     std::vector<Event> events;
-    if (meter && meter->denominator > 0) {
+    for (const auto& [tick, meter] : meters) {
+        if (tick < 0 || meter.numerator < 1 || meter.numerator > 64 || meter.denominator < 1 ||
+            meter.denominator > 64 || (meter.denominator & (meter.denominator - 1)) != 0)
+            return invalid("Invalid meter event.",
+                           "Use tick >= 0 and a valid meter with denominator 1..64.");
         int power = 0;
-        for (int d = meter->denominator; d > 1; d >>= 1) ++power;
-        events.push_back({0,
+        for (int d = meter.denominator; d > 1; d >>= 1) ++power;
+        events.push_back({tick,
                           0,
-                          {0xff, 0x58, 0x04, static_cast<std::uint8_t>(meter->numerator),
+                          {0xff, 0x58, 0x04, static_cast<std::uint8_t>(meter.numerator),
                            static_cast<std::uint8_t>(power), 24, 8}});
     }
-    if (std::isfinite(bpm) && bpm > 0) {
+    for (const auto& [tick, bpm] : tempos) {
+        if (tick < 0 || !std::isfinite(bpm) || bpm < 60000000.0 / 16777215.0 || bpm > 60000000.0)
+            return invalid("Invalid tempo event.", "Use a positive BPM encodable by SMF.");
         auto micros =
             static_cast<std::uint32_t>(std::clamp(std::llround(60000000.0 / bpm), 1LL, 16777215LL));
         events.push_back(
-            {0,
+            {tick,
              0,
              {0xff, 0x51, 0x03, static_cast<std::uint8_t>(micros >> 16),
               static_cast<std::uint8_t>(micros >> 8), static_cast<std::uint8_t>(micros)}});

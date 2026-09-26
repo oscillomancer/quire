@@ -61,15 +61,22 @@ struct Sequence {
 };
 
 struct SmfInfo {
-    int ppq = 0;
-    std::optional<Meter> meter;
-    std::optional<double> bpm;
+    int ppq = 960;
+    int format = 0;
+    int trackCount = 0;
+    std::vector<std::pair<std::int64_t, Meter>> meters;
+    std::vector<std::pair<std::int64_t, double>> tempos;
     std::vector<std::string> trackNames;
     int skippedEvents = 0;
 };
 
-Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info = nullptr);
-std::vector<std::uint8_t> writeSmf(const Sequence& sequence, const std::optional<Meter>& meter,
-                                   double bpm);
+struct SmfReadOptions {
+    std::optional<int> track;
+};
+Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info = nullptr,
+                         const SmfReadOptions& options = {});
+Result<std::vector<std::uint8_t>> writeSmf(
+    const Sequence& sequence, const std::vector<std::pair<std::int64_t, Meter>>& meters,
+    const std::vector<std::pair<std::int64_t, double>>& tempos);
 
 }  // namespace supple::midi
