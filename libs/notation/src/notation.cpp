@@ -310,6 +310,8 @@ class Compiler {
         for (const auto& line : lines_) {
             const auto& t = line.tokens;
             const auto& head = t[0].text;
+            const bool barLike = !head.empty() && head.front() >= '0' && head.front() <= '9' &&
+                                 head.back() == ':';
             if (head == "notation") {
                 if (t.size() != 2 || t[1].text != "1")
                     add("syntax", "Unsupported notation version.", t[0], "Write 'notation 1'.");
@@ -548,6 +550,12 @@ class Compiler {
                     add("syntax", "Invalid events header.", t[0], "Use events or events ch N.");
                 continue;
             }
+            if (section == Section::Header && barLike) {
+                voices_.push_back({});
+                currentVoice = &voices_.back();
+                currentVoice->name = "main";
+                section = Section::Voice;
+            }
             if (section == Section::Voice && currentVoice) {
                 if (t.size() >= 3 && t[1].text == "=") {
                     auto dest = barRange(t[0], false), source = barRange(t[2], false);
@@ -633,6 +641,11 @@ class Compiler {
                     currentVoice->lastBar = bar - 1;
                 }
                 maxBar_ = std::max(maxBar_, currentVoice->lastBar);
+                continue;
+            }
+            if (barLike) {
+                add("syntax", "Numbered bar needs a voice section.", t[0],
+                    "Add a voice NAME line before this bar.");
                 continue;
             }
             if (section == Section::Lane && currentLane)
