@@ -1,6 +1,6 @@
 # Spec: Orrery — the flagship synth
 
-**Status:** Draft for review (2026-09-26); frozen before P3.2 starts.
+**Status:** Frozen for P3.2 (2026-09-26; amendments recorded at the end). Nate's review (HUMAN_REVIEW #6, #7) can still change it.
 **Plugin:** `plugins/orrery`, CLAP id `com.suppleaudio.orrery`, instrument.
 Built from the template per ADR-0011. The name is a proposal (an orrery is a
 clockwork model of orbiting bodies — modulators orbiting a voice); Nate may
@@ -402,3 +402,66 @@ tail). Measured in `docs/benchmarks/`.
   scored by descriptor distance and LTAS RMS difference.
 - Success rates are tracked per plugin and skill revision in
   `docs/benchmarks/synth-eval.md`; listening checks go to `HUMAN_REVIEW.md`.
+
+## Amendments (2026-09-26, implementation of P3.2 core)
+
+Recorded while building `plugins/orrery/engine` (params table, patch codec,
+real-time engine). The code is the reference; these notes explain the choices.
+
+- **Structure fields** (not CLAP parameters): slot existence and `type`
+  (oscillators, filters, drive), `to`, `filters.routing`, `voice.quality`, LFO
+  and step `retrigger` (it decides whether the modulator is a voice or a global
+  source, which route validation depends on), `steps.*.values`, macro names,
+  `fx.chain`, `routes`. Everything else is a parameter.
+- **`to: "none"`** — an oscillator that is only heard through FM/AM routes
+  (the usual FM modulator). The default target `filter1` passes straight
+  through when no filter exists; an explicit `to` naming an absent filter is
+  an error. Absent filters are wires (serial: an oscillator sent to `filter2`
+  without a `filter2` goes to the section output).
+- **Oscillator `wave`** is one parameter with the union of choices; each type
+  allows its subset (va: saw..sine; fm: sine, half_sine, abs_sine,
+  square_sine; sub: sine, triangle, square) and has its own default (va saw,
+  others sine). Fields a type does not have are errors listing the valid ones.
+- **FM/AM routes** take only oscillator sources, and oscillator sources only
+  go to `oscN.fm`/`oscN.am`. An oscillator's output (after its level) is the
+  modulation signal, so the FM depth envelope is a route to the modulator's
+  level (`env2>osc2.level`). The amount of `oscN.fm` is the peak phase
+  deviation in radians per unit signal (`x`, ±20). Processing order is
+  topological (modulators first); edges inside a cycle use the modulator's
+  previous sample.
+- **Route amounts** for `ct` destinations (e.g. `osc1.fine`) are in semitones
+  like other pitch destinations; `st`, `ct` and `oct` strings convert into
+  each other (`"8 ct"` → 0.08). Limits: ±10 oct, ±96 st, ±96 dB, ±20 x,
+  ±100 %. Routes are written in canonical order (by source, then destination).
+- **FX blocks** for FX not in `fx.chain` are errors (not silently ignored). A
+  merge that removes an FX from the chain drops its block; a merge that changes
+  a slot's `type` drops the old type's fields.
+- **Choice labels in patches:** note values and the ladder slope are written
+  with their labels (`"1/8."`, `"24 dB"`); the CLAP/core-params keys are
+  `n1_8d`, `db24`. Both spellings parse.
+- **Voice modes:** legato never restarts envelopes on overlapping keys; mono
+  restarts envelopes whose `retrigger` is `always` (the default) — so the
+  envelope `retrigger` field only matters in mono mode. Envelopes restart from
+  their current level (no click).
+- **Gain staging:** one voice with one oscillator at 0 dB peaks near
+  −12 dBFS (fixed internal headroom); unison voices are normalized by
+  1/√count. Oscillator and amp pan are constant power with unity at centre.
+- **Control grid:** modulation is evaluated every 16 base-rate samples on a
+  grid anchored at each voice's start (global modulators and FX parameters at
+  absolute multiples of 16) and interpolated per sample; events apply at
+  their sample time; parameter changes glide over the parameter's smoothing
+  time from the event's sample. Renders are therefore bit-identical across
+  host block sizes (tested for 1, 7, 16, 64, 333, 1024, 4096).
+- **Oversampling:** voices are summed at the oversampled rate and decimated
+  once by polyphase IIR half-band filters (−96 dB stopband from 28 kHz at 2×;
+  4× cascades a 3-section first stage). No reported latency.
+- **Voices:** at most 64 sounding voices (notes × unison) plus 16 spares that
+  fade stolen notes out over 64 samples; stealing prefers the oldest released
+  note.
+
+**Performance (first measurement, 2026-09-26):** the §9 reference patch
+(8 notes × 3 unison, 2 va + sub, ladder, tape drive, 2 envs, 1 LFO, chorus +
+reverb, `normal`) costs ≈ 10.7 % of one core at 48 kHz / 256 frames (-O2),
+against the 3 % target. Split: oscillators and mixing ≈ 5 %, ladder ≈ 3 %,
+drive ≈ 2.6 %. Next: process voices in SIMD groups, hoist per-sample
+invariants; tracked in `docs/benchmarks/`.
