@@ -1384,10 +1384,13 @@ bool ClapAsVst3::track_info_get(clap_track_info_t *info)
 // ext-timer
 bool ClapAsVst3::register_timer(uint32_t period_ms, clap_id *timer_id)
 {
-  // restrict the timer to 30ms
-  if (period_ms < 30)
+  // Restrict the timer to a sane floor. 30ms was chosen conservatively, but
+  // it caps every VST3 editor at 33fps regardless of what the plugin asked
+  // for, which is visible on any animated meter or scope. 8ms still guards
+  // against a plugin asking for 0 or 1 while leaving room for a 60fps editor.
+  if (period_ms < 8)
   {
-    period_ms = 30;
+    period_ms = 8;
   }
 
   auto l = _timersObjects.size();
