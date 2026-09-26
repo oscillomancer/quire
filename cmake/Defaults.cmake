@@ -37,9 +37,10 @@ function(supple_target_defaults target)
   # identical DSP and analysis results. Never add -ffast-math.
   target_compile_options(${target} PRIVATE -ffp-contract=off)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow
-                                           -Wnon-virtual-dtor -Wold-style-cast
-                                           -Wcast-align -Woverloaded-virtual
-                                           -Wnull-dereference -Wdouble-promotion)
+                                           -Wcast-align -Wnull-dereference -Wdouble-promotion
+                                           $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
+                                           $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
+                                           $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>)
   # Parameter tables use designated initializers with default member values
   # on purpose (docs/specs/core-params.md); Clang's -Wextra would flag every
   # omitted field.
