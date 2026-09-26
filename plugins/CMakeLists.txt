@@ -1,5 +1,6 @@
 add_subdirectory(common)
 add_subdirectory(orrery/engine)
+add_subdirectory(orrery/clap)
 
 if(SUPPLE_BUILD_PLUGINS)
   include(ExternalProject)

@@ -415,8 +415,8 @@ real-time engine). The code is the reference; these notes explain the choices.
   `fx.chain`, `routes`. Everything else is a parameter.
 - **`to: "none"`** — an oscillator that is only heard through FM/AM routes
   (the usual FM modulator). The default target `filter1` passes straight
-  through when no filter exists; an explicit `to` naming an absent filter is
-  an error. Absent filters are wires (serial: an oscillator sent to `filter2`
+  through when no filter exists; `to` naming an absent `filter2` (or `both`
+  without it) is an error. Absent filters are wires (serial: an oscillator sent to `filter2`
   without a `filter2` goes to the section output).
 - **Oscillator `wave`** is one parameter with the union of choices; each type
   allows its subset (va: saw..sine; fm: sine, half_sine, abs_sine,

@@ -47,7 +47,8 @@
     { "name": "ubsan", "inherits": "base", "configurePreset": "ubsan",
       "environment": { "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1" } },
     { "name": "tsan", "inherits": "base", "configurePreset": "tsan",
-      "environment": { "TSAN_OPTIONS": "halt_on_error=1" } },
+      "environment": { "TSAN_OPTIONS": "halt_on_error=1" },
+      "filter": { "exclude": { "label": "tsan-skip" } } },
     { "name": "rtsan", "inherits": "base", "configurePreset": "rtsan",
       "environment": { "RTSAN_OPTIONS": "halt_on_error=1" } }
   ],

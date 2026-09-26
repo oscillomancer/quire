@@ -6,7 +6,7 @@ add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
 
 # Plugin-side support for stock plugins (ParamStore, ClapParams, FlatSemantic).
 supple_add_library(plugin-support
-  SOURCES src/plugin_support.cpp
+  SOURCES src/plugin_support.cpp src/semantic_model.cpp
   DEPS supple::core-params supple::core-patch supple::semantic-params-abi)
 
 if(SUPPLE_BUILD_TESTS)

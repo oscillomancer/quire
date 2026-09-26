@@ -1241,6 +1241,8 @@ void Engine::prepare(double sampleRate, std::uint32_t maxBlock) {
     m.decFactor = 0;
     m.fx.prepare(sampleRate);
     m.now = 0;
+    // Re-adopt the current program on the next block (values snap to it).
+    m.prog = nullptr;
 }
 
 void Engine::setPatch(const Patch& patch) { impl_->handoff.publish(compileProgram(patch)); }

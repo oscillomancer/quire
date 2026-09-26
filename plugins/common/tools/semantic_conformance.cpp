@@ -113,13 +113,29 @@ int main(int argc, char** argv) {
     check(in.setPatch(full, CLAP_SUPPLE_SET_REPLACE).ok(), "full patch re-applies");
     check(get(in, false) == full, "get/set round trip is the identity");
 
+    // Flat plugins keep values in "params"; structured ones (slots, routes)
+    // are exercised through whole-document replaces that differ in the
+    // envelope's "name".
+    const auto fullDoc = json::parse(full);
+    const bool flat = fullDoc && fullDoc->find("params") && fullDoc->find("params")->isObject();
+    auto renamed = [&](const std::string& name) {
+        json::Value doc = fullDoc ? *fullDoc : json::Value::object();
+        doc["name"] = name;
+        return json::writeCompact(doc);
+    };
+    auto nameOf = [](const std::string& text) {
+        const auto doc = json::parse(text);
+        const json::Value* n = doc ? doc->find("name") : nullptr;
+        return n && n->isString() ? n->asString() : std::string();
+    };
+
     // 3. The CHANGED detail is a complete patch describing the same state.
     const std::string changed = get(in, true);
     check(in.setPatch(changed, CLAP_SUPPLE_SET_REPLACE).ok() && get(in, false) == full,
           "changed-detail patch reproduces the same state");
 
     // 4. Merging one value changes only that value.
-    if (!firstFloat.empty()) {
+    if (flat && !firstFloat.empty()) {
         const double target = floatMin + (floatMax - floatMin) * 0.37;
         json::Value merge = json::Value::object();
         merge["params"][firstFloat] = target;
@@ -138,19 +154,26 @@ int main(int argc, char** argv) {
 
     // 5. Invalid documents fail with paths and change nothing.
     const std::string snapshot = get(in, false);
-    auto bad = in.setPatch(R"({"params": {"no_such_param_xyz": 1}})", CLAP_SUPPLE_SET_MERGE);
+    auto bad = in.setPatch(
+        flat ? R"({"params": {"no_such_param_xyz": 1}})" : R"({"no_such_member_xyz": 1})",
+        CLAP_SUPPLE_SET_MERGE);
     check(!bad.ok(), "unknown parameter is rejected");
     if (!bad.ok())
-        check(bad.error().path == "/params/no_such_param_xyz", "error carries a JSON Pointer path");
+        check(bad.error().path == (flat ? "/params/no_such_param_xyz" : "/no_such_member_xyz"),
+              "error carries a JSON Pointer path");
     auto junk = in.setPatch("{not json", CLAP_SUPPLE_SET_MERGE);
     check(!junk.ok(), "malformed JSON is rejected");
     check(get(in, false) == snapshot, "rejected patches leave the patch unchanged");
 
     // 6. VALIDATE_ONLY never changes state.
-    if (!firstFloat.empty()) {
+    if (flat && !firstFloat.empty()) {
         json::Value merge = json::Value::object();
         merge["params"][firstFloat] = floatMax;
         check(in.setPatch(json::writeCompact(merge), CLAP_SUPPLE_SET_VALIDATE_ONLY).ok(),
+              "validate-only accepts");
+        check(get(in, false) == snapshot, "validate-only changes nothing");
+    } else if (!flat) {
+        check(in.setPatch(R"({"name": "validate only"})", CLAP_SUPPLE_SET_VALIDATE_ONLY).ok(),
               "validate-only accepts");
         check(get(in, false) == snapshot, "validate-only changes nothing");
     }
@@ -159,7 +182,7 @@ int main(int argc, char** argv) {
     // main thread merges patches. Under the rtsan preset the plugin's process()
     // is checked for RT violations; here we require no process errors and the
     // last patch to be the one in effect.
-    if (!firstFloat.empty()) {
+    if (!flat || !firstFloat.empty()) {
         check(in.activate(48000.0, 1, 256).ok(), "activates for the processing test");
         std::atomic<bool> stop{false}, failed{false}, started{false};
         std::atomic<long> blocks{0};
@@ -188,23 +211,35 @@ int main(int argc, char** argv) {
         bool allOk = true;
         std::string last;
         for (int i = 0; i < 200 && !failed.load(); ++i) {
-            json::Value merge = json::Value::object();
-            merge["params"][firstFloat] =
-                floatMin + (floatMax - floatMin) * ((i % 2) ? 0.25 : 0.75);
-            last = json::writeCompact(merge);
-            allOk = in.setPatch(last, CLAP_SUPPLE_SET_MERGE).ok() && allOk;
+            if (flat) {
+                json::Value merge = json::Value::object();
+                merge["params"][firstFloat] =
+                    floatMin + (floatMax - floatMin) * ((i % 2) ? 0.25 : 0.75);
+                last = json::writeCompact(merge);
+                allOk = in.setPatch(last, CLAP_SUPPLE_SET_MERGE).ok() && allOk;
+            } else {
+                last = renamed("conformance " + std::to_string(i));
+                allOk = in.setPatch(last, CLAP_SUPPLE_SET_REPLACE).ok() && allOk;
+            }
             if (i % 20 == 0) std::this_thread::yield();
         }
         stop = true;
         audio.join();
         check(!failed.load() && allOk, "set_patch during processing: no errors (" +
                                            std::to_string(blocks.load()) + " blocks)");
-        const auto now = json::parse(get(in, false));
-        const auto want = json::parse(last);
-        check(now && want &&
-                  now->find("params")->find(firstFloat)->asDouble() ==
-                      want->find("params")->find(firstFloat)->asDouble(),
-              "the last patch applied during processing is in effect");
+        bool inEffect = false;
+        if (flat) {
+            const auto now = json::parse(get(in, false));
+            const auto want = json::parse(last);
+            const json::Value* a =
+                now && now->find("params") ? now->find("params")->find(firstFloat) : nullptr;
+            const json::Value* b =
+                want && want->find("params") ? want->find("params")->find(firstFloat) : nullptr;
+            inEffect = a && b && a->asDouble() == b->asDouble();
+        } else {
+            inEffect = nameOf(get(in, false)) == nameOf(last);
+        }
+        check(inEffect, "the last patch applied during processing is in effect");
         in.deactivate();
         check(in.setPatch(snapshot, CLAP_SUPPLE_SET_REPLACE).ok(), "restore");
     }

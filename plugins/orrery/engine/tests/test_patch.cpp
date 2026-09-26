@@ -310,3 +310,13 @@ TEST_CASE("the JSON Schema covers every block") {
                        "lfos", "steps", "routes", "macros", "fx", "output"})
         CHECK_MESSAGE(props->find(block) != nullptr, block);
 }
+
+TEST_CASE("the default patch round-trips in both forms") {
+    const Patch d = type().defaults();
+    for (auto detail : {patch::Detail::Full, patch::Detail::Changed}) {
+        const std::string text = type().serialize(d, detail);
+        auto q = type().parse(text);
+        REQUIRE_MESSAGE(q, (q ? "" : all(q.error()) + text));
+        CHECK(q->body == d.body);
+    }
+}

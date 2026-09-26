@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-09-26 07:05 by the orchestrator. Compact and current: what's done,
+Updated 2026-09-26 11:50 by the orchestrator. Compact and current: what's done,
 in progress, blocked, next. Task IDs are stable (P<phase>.<n>).
 
 ## Phase 0 — Reconnaissance and foundations
@@ -27,13 +27,13 @@ asan, ubsan, tsan, rtsan + license + format; ADRs 0004/0005/0006 recorded.
 | P1.1 | core-json (value, parser w/ locations, canonical writer, pointer, merge patch, diff, fuzz) | `specs/core-json.md` A | **done** (json; merged ecd8b7d; orchestrator review fixed 2 bugs). Follow-up: larger RFC 8259 corpus, canonical golden files |
 | P1.2 | core-schema (typed binding, validation with hints, units, JSON Schema export, DocumentType) | `specs/core-json.md` B | **done** (json; merged). Follow-up: test every error code's hint text |
 | P1.3 | midi (model, canonical order, SMF I/O) | `specs/notation.md` A | **done** (notation; merged 999c0b2). Review by scout pending |
-| P1.4 | notation (compiler, decompiler, round-trip law, corpus, fuzz) | `specs/notation.md` B–C | **done** (notation; merged 999c0b2: 45 valid + 32 invalid corpus docs, 2000-case round trip, fuzz). Review by scout pending. Queued amendment: bars before any `voice` line = implicit `voice main`, and a correct hint for that case (today: "did you mean 'ppq'?") |
+| P1.4 | notation (compiler, decompiler, round-trip law, corpus, fuzz) | `specs/notation.md` B–C | **done** (notation; merged 999c0b2; amendment merged b567154: implicit `voice main`, `bar_after_pipe` hint, generated `skill/generated/notation-reference.md` with a drift test). Review by scout pending |
 | P1.5 | core-params (semantic params, units, curves, normalization, text) | `specs/core-params.md` | **done** (orchestrator); reviewed (scout round 2), fixes in 6d62923 |
 | P1.6 | core-patch (patch documents, merge, validate, canonical, describe) | `specs/core-patch.md` | **done** (orchestrator); reviewed (scout round 2), fixes in 15b7324 |
-| P1.7 | core-analysis: loudness (BS.1770/R128, true peak, LRA) validated against Tech 3341/3342 signals | `specs/core-analysis.md` | in progress (analysis, branch p1-analysis; uncommitted core-dsp + resampler + loudness work; paused at the Codex limit 06:05) |
-| P1.8 | core-analysis: spectral, harmonic, envelope, stereo, comparison, masking, reports | `specs/core-analysis.md` | after P1.7 |
-| P1.9 | core-dsp: oversampling, filters, smoothing, interpolation, denormals | — | after P1.7 |
-| P1.10 | audio-file: WAV read/write, FLAC/MP3 decode, resampler | `specs/core-analysis.md` §9 | **done** except the resampler (orchestrator; reviewed, fixes: truncated-WAV flag, NaN PCM, atomic writes). Resampler in progress on p1-analysis |
+| P1.7 | core-analysis: loudness (BS.1770/R128, true peak, LRA) validated against Tech 3341/3342 signals | `specs/core-analysis.md` | **done** (analysis; merged 514cf5d): Tech 3341 cases 1–23 and Tech 3342 LRA 1–4 within tolerance at 44.1/48/96 kHz; histogram and exact modes. Follow-ups: exact-mode overflow flag, stream flush, running-sum drift over hours |
+| P1.8 | core-analysis: spectral, harmonic, envelope, stereo, comparison, masking, reports | `specs/core-analysis.md` | next for analysis (brief analysis-1 §2) when Codex budget allows |
+| P1.9 | core-dsp: oversampling, filters, smoothing, interpolation, denormals | — | **done** (analysis; merged 514cf5d): biquads/bilinear/K-weighting, windows, polyphase upsampler, FFT (pocketfft + RT radix-2), one-pole, denormal guard |
+| P1.10 | audio-file: WAV read/write, FLAC/MP3 decode, resampler | `specs/core-analysis.md` §9 | **done** (orchestrator; resampler by analysis, merged 514cf5d) |
 | P1.11 | command-bus: registry, descriptors, dispatcher, batch, doc/schema export, example-tests, jobs | `specs/command-bus.md`, `specs/optimizer.md` §4 | **done** (json; merged bd33e44; reviewed by the orchestrator: dispatch/batch/transactions/error paths sound). Follow-up: the meta commands' summaries are terse ("Run commands atomically.") — batch is an MCP tool, give it a real description |
 
 Acceptance: unit tests per library; loudness validated against EBU R128
@@ -46,18 +46,18 @@ reports committed in docs.
 |---|---|---|
 | P2.1 | `specs/semantic-params-extension.md` (CLAP ext `com.suppleaudio.semantic-params/1`) | spec frozen; ABI header in `plugins/common/include/supple/clap/semantic_params.h` |
 | P2.2 | host/clap-host: load, instantiate, activate, process with note/param events, state, semantic ext | **done** (orchestrator); reviewed (scout round 2); fixes 15b7324: enforced lifecycle, pending restart/flush requests, event-arena overflow, tail notifications; new `test.edge` fixture |
-| P2.3 | probe synth from the template (instrument, CLAP-only offline build, C++20) | stage 1 **done and merged** (11e3892; `build/<preset>/plugins/clap/ProbeSynth.clap`, its 6 ctests run as `plugin.probe-synth.ctest`; `supple_add_plugin(<dir> <PREFIX>)` made generic). Review pending. Stage 2 (semantic params via plugin_support — now with `ParamStore::readAll()`) at the reset |
+| P2.3 | probe synth from the template (instrument, CLAP-only offline build, C++20) | stage 1 **done and merged** (11e3892). Stage 2 (semantic params; reusable `plugins/common/cmake/LinkMonorepo.cmake` for ExternalProject plugins) nearly done on p2-probe-2 — paused at the Codex limit (dev + rtsan green, uncommitted) |
 | P2.4 | host/sandbox: render notation/MIDI/audio through a plugin offline, analyze, write WAV + report; CLI | **done except analysis** (orchestrator): renderer (147336b + review fixes), `Session` (107f7f4: instances/chain/params/patches/presets/renders/transactions), 16 commands on the bus + `SandboxHost` with NDJSON command log, `quire-sandbox exec`/`registry` CLI, generated `skill/generated/sandbox-*.{md,json}` with a drift test. Examples use the test fixtures until the probe synth is semantic. Missing: `analyze`/`compare`/`masking`/`profile.evaluate` + render `analyze` levels (need core-analysis), audio-file resampling, `--mcp` (needs P2.6) |
-| P2.5 | control-protocol: JSON-RPC 2.0 NDJSON over Unix socket | next for json (brief json-2 Task B) |
-| P2.6 | mcp adapter (stdio) generated from the registry; sandbox tools | next for json (Task B), then `--mcp` in the sandbox CLI (orchestrator) |
+| P2.5 | control-protocol: JSON-RPC 2.0 NDJSON over Unix socket | in progress (json, p2-rpc, uncommitted): dev/gcc/asan/ubsan green incl. the MCP scripts; TSan failures in control-protocol/mcp tests to fix — paused at the Codex limit |
+| P2.6 | mcp adapter (stdio) generated from the registry; sandbox tools | in progress with P2.5 (json), incl. `--mcp` for quire-sandbox and quire-engine |
 | P2.7 | scripted end-to-end MCP test + transcript in `docs/demos/` | planned |
 
 ## Phase 3 — Stock plugins
 
 | ID | Task | State |
 |---|---|---|
-| P3.1 | flagship synth "Orrery": architecture + patch format spec | draft `specs/synth.md`; Nate's review queued (HUMAN_REVIEW #6, #7) |
-| P3.2 | synth DSP modules (VA/wavetable/FM/noise/sub osc; ladder/SVF/comb/formant filters; envs, LFOs, step mods; mod matrix; drive; post-FX; poly/unison/glide/MPE) | planned |
+| P3.1 | flagship synth "Orrery": architecture + patch format spec | **frozen** for P3.2 (`specs/synth.md` + Amendments); Nate's review (HUMAN_REVIEW #6, #7) can still change it |
+| P3.2 | synth DSP modules (VA/wavetable/FM/noise/sub osc; ladder/SVF/comb/formant filters; envs, LFOs, step mods; mod matrix; drive; post-FX; poly/unison/glide/MPE) | **core done** (orchestrator, 3663fe4): `plugins/orrery/engine` — 230-param table, patch codec (whole-patch validation, merge, describe, JSON Schema), real-time engine (bit-identical across block sizes, seeded, wait-free program swap), all module types except real wavetables (sine placeholder), FX rack, IIR half-band decimation; 37 tests. CLAP core + headless module in progress. Open: wavetables, ADAA drive, per-stage ladder saturation, noise tilt, aliasing measurements, performance (10.7 % vs the 3 % target for the reference patch) |
 | P3.3 | parameter optimizer (CMA-ES, multi-descriptor loss) as a sandbox tool | draft `specs/optimizer.md` |
 | P3.4 | synth evaluation suite (descriptive + reference-matching tasks) and listening queue | draft `specs/eval-harness.md`; model/budget choice queued (HUMAN_REVIEW #8) |
 | P3.5 | EQ | planned |
@@ -81,19 +81,19 @@ reports committed in docs.
 
 ## Team (Codex workers via Herdr)
 
-Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded; the old
-session scratchpad is retired). Codex 5h window used up 05:45→06:05 by five
-workers; resets 10:45 (weekly 69% left at 07:20). Weekly budget is the binding constraint (84% at 05:45,
-~16–18% per full window), so Codex goes to critical-path work and reviews.
+Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). The Codex
+5h window lasts ~1–1.25 h with four workers; the weekly budget is the binding
+constraint (53 % left at 11:15 on Sep 26, resets Oct 3 ≈ 3 windows), so
+Codex goes to finishing in-flight work and to reviews; the orchestrator
+writes most new code.
 
-- **json** (Sol) — P1.11 done and merged. Next: Task B (control protocol + MCP).
-- **notation** (Sol) — P1.3/P1.4 done and merged. Next: the implicit-voice amendment.
-- **analysis** (Sol) — P1.7–P1.9 + resampler in progress (uncommitted in its worktree; resume with "continue", then commit via escalation).
-- **probe** (Sol) — stage 1 done (on p2-probe). Next: rebase onto main, stage 2.
-- **scout** (Sol) — code review round 2 done (all findings fixed or noted). Next: review notation, command-bus, sandbox Session/commands, probe stage 1.
-- **reaper** (Sol) — idle; later: design review of Phase 3/4 draft specs.
-- Codex workers cannot write the worktrees' shared `.git` without sandbox
-  escalation; they are told they may escalate for git in their own worktree.
+- **json** (Sol) — P2.5/P2.6 in progress (paused at the limit, uncommitted on p2-rpc).
+- **probe** (Sol) — P2.3 stage 2 nearly done (paused, uncommitted on p2-probe-2).
+- **notation** (Sol) — notation-2 done and merged; idle.
+- **analysis** (Sol) — P1.7/P1.9/resampler done and merged; next P1.8 when budget allows.
+- **scout** (Sol) — next: review round 3 (Orrery engine, engine RT path, VersionStore merges).
+- **reaper** (Sol) — idle.
+- Next Codex window 4:00 PM: json and probe finish and commit; scout reviews.
 
 Not yet fixed from review round 2 (minor, recorded): describeFlat skips hidden
 params in Full detail; core-params formatting of extreme magnitudes (>6

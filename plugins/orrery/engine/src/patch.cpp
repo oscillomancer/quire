@@ -648,7 +648,7 @@ class Decoder {
         }
     }
 
-    // After the other blocks: explicit oscillator targets must exist.
+    // After the other blocks: explicit targets other than filter1 must exist.
     void checkTargets() {
         for (int o = 0; o < kOscCount; ++o) {
             if (!st_.osc[o] || !explicitTo_[o]) continue;
@@ -664,7 +664,8 @@ class Decoder {
                                "add filters." + std::string(slotInfo(filter(f)).name) +
                                    ", or set \"to\" to \"direct\""));
             };
-            if (t == OscTarget::Filter1) need(0);
+            // filter1 is the default target and passes straight through when
+            // no filter exists, so naming it is never an error.
             if (t == OscTarget::Filter2) need(1);
             if (t == OscTarget::Both) {
                 need(0);
