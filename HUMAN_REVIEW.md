@@ -41,6 +41,22 @@ The prompt's allow-list is for code. Your template ships Inter and IBM Plex
 with software under any license). Tell me if you want fonts treated
 differently.
 
+### 6. Name for the flagship synth — decision (low effort)
+Proposed: **Orrery** (a clockwork model of orbiting bodies: modulators
+orbiting a voice). Spec: `docs/specs/synth.md`. Veto or suggest another; it
+is cheap to change before P3.2 starts.
+*Meanwhile:* the spec and code use "Orrery".
+
+### 7. Synth design review — decision (medium effort, when convenient)
+`docs/specs/synth.md` is the draft of the synth's module set, patch format
+and modulation model. You know what makes a synth good to program; a 15-minute
+read now is worth more than a rewrite later. Especially: the slot pool (4 osc
+/ 2 filters / 4 env / 4 LFO / 2 step / 8 macros / 5 FX), routes as patch
+structure rather than CLAP parameters (macros are the automation surface),
+and modulation amounts in oct/st/dB/%.
+*Meanwhile:* Phase 1–2 work continues; P3.2 waits for this spec to be frozen,
+with or without your comments.
+
 ## Resolved
 
 (none yet)
