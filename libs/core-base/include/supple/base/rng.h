@@ -8,6 +8,7 @@
 // the optimizer) derives from an explicit seed stored in state.
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 
 #include "supple/base/rt.h"
@@ -50,7 +51,10 @@ class Rng {
     }
 
     // Uniform integer in [0, n) without modulo bias (Lemire's method), n > 0.
+    // Rejection sampling: each extra draw happens with probability < n / 2^64,
+    // so the loop almost never runs (for n <= 2^32, below 2^-32 per call).
     std::uint64_t below(std::uint64_t n) SUPPLE_RT {
+        assert(n > 0 && "Rng::below(0)");
         U128 m = static_cast<U128>(next()) * n;
         auto low = static_cast<std::uint64_t>(m);
         if (low < n) {

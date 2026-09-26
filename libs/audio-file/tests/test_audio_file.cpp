@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <limits>
 
 #include <supple/audio/audio_file.h>
 
@@ -108,4 +109,38 @@ TEST_CASE("writeWav is atomic and creates directories") {
     REQUIRE(back);
     CHECK(back->frames() == 100);
     fs::remove_all(dir);
+}
+
+TEST_CASE("truncated WAV data decodes what is there and is flagged") {
+    AudioData a;
+    a.sampleRate = 48000;
+    a.channels.assign(2, std::vector<float>(1000, 0.25f));
+    WavOptions o;
+    o.format = SampleFormat::Pcm16;
+    auto bytes = encodeWav(a, o).value();
+    CHECK_FALSE(readAudio(bytes).value().truncated);
+    bytes.resize(bytes.size() - 100);
+    auto r = readAudio(bytes);
+    REQUIRE(r);
+    CHECK(r->truncated);
+    CHECK(r->frames() == 975);
+}
+
+TEST_CASE("PCM encoding maps NaN to zero and clamps infinities") {
+    AudioData a;
+    a.sampleRate = 48000;
+    a.channels = {{std::nanf(""), std::numeric_limits<float>::infinity(),
+                   -std::numeric_limits<float>::infinity(), 0.5f}};
+    for (auto f : {SampleFormat::Pcm16, SampleFormat::Pcm24}) {
+        WavOptions o;
+        o.format = f;
+        o.dither = false;
+        auto back = readAudio(encodeWav(a, o).value());
+        REQUIRE(back);
+        const auto& c = back->channels[0];
+        CHECK(c[0] == 0.0f);
+        CHECK(c[1] == doctest::Approx(1.0).epsilon(1e-4));
+        CHECK(c[2] == -1.0f);
+        CHECK(c[3] == 0.5f);
+    }
 }

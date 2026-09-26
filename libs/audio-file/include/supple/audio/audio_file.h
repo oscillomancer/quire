@@ -3,7 +3,10 @@
 // Reading: WAV (PCM 8/16/24/32, float 32/64, RF64/BW64), FLAC and MP3, detected
 // by content (not extension), decoded to planar float at the file's own rate.
 // Writing: WAV as 16/24-bit PCM with seeded TPDF dither, or 32-bit float.
-// Writes are atomic (temporary file + rename).
+// Writes are atomic (temporary file + rename, see writeFileAtomic). PCM
+// encoding maps NaN to 0 and clamps infinities to full scale; float32 stores
+// samples unchanged. A WAV whose data is shorter than its header declares
+// decodes to the audio present with AudioData::truncated set.
 #pragma once
 
 #include <cstdint>
@@ -19,6 +22,9 @@ namespace supple::audio {
 struct AudioData {
     double sampleRate = 48000.0;
     std::vector<std::vector<float>> channels;  // planar; all the same length
+    // Set by readAudio when the file holds less audio than its header declares
+    // (e.g. an interrupted recording): the audio is what was there.
+    bool truncated = false;
 
     std::size_t channelCount() const { return channels.size(); }
     std::size_t frames() const { return channels.empty() ? 0 : channels.front().size(); }

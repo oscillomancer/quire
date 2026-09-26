@@ -2,8 +2,10 @@
 #include <supple/base/files.h>
 
 #include <unistd.h>
+#include <atomic>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace supple;
@@ -61,5 +63,31 @@ TEST_CASE("files: atomic write, read back, errors") {
     REQUIRE(writeFileAtomic(p, std::string_view("12345")).ok());
     CHECK(readFile(p, 4).error().code == "file.too_large");
     CHECK(readFile(dir / "missing").error().code == "file.open");
+    // Concurrent writers of one target: every write succeeds, the result is
+    // one writer's complete content, and no temporary files are left.
+    {
+        std::vector<std::thread> ts;
+        std::atomic<int> failures{0};
+        for (int w = 0; w < 4; ++w)
+            ts.emplace_back([&, w] {
+                const std::string body(1000, static_cast<char>('a' + w));
+                for (int i = 0; i < 50; ++i)
+                    if (!writeFileAtomic(p, std::string_view(body)).ok()) ++failures;
+            });
+        for (auto& th : ts) th.join();
+        CHECK(failures == 0);
+        const std::string got = readTextFile(p).value();
+        REQUIRE(got.size() == 1000);
+        CHECK(got == std::string(1000, got[0]));
+        int files = 0;
+        for (const auto& e : fs::directory_iterator(p.parent_path())) {
+            (void)e;
+            ++files;
+        }
+        CHECK(files == 1);
+    }
+    CHECK(
+        writeFileAtomic(dir / "sub" / "a.txt" / "not-a-dir", std::string_view("x")).error().code ==
+        "file.write");
     fs::remove_all(dir);
 }

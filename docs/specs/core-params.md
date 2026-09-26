@@ -182,3 +182,15 @@ property tests for every curve kind; CLAP mapping per type; format/parse
 round trips and every parse error with its hint; JSON I/O; `describeTable`
 golden output for a fixture table; an rtsan-labelled test exercising the
 RT-safe conversions inside a `SUPPLE_RT` function.
+
+## Implementation notes (2026-09-26, orchestrator, after review round 2)
+
+- Range checks in `parse`/`fromJson` allow a relative 1e-9 slack local to each
+  boundary (`1e-9 · max(1, |boundary|)`), so a boundary value that went
+  through text or JSON still counts, while a wide range no longer widens the
+  slack at the other end (`[0, 1e9]` rejects `-0.5`).
+- `validateTable` also requires a finite `max - min` (`params.table.range_span`)
+  and log curves spanning at most 15 decades (`params.table.log_range`), so
+  normalization never overflows.
+- OffAtMin accepts `off`, `-inf`, `-inf dB`, `-∞` (and `-∞ dB`); a bare `inf`
+  is no longer an alias for off.

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <new>
 #include <type_traits>
@@ -27,8 +28,9 @@ template <typename T, std::size_t Capacity>
 class SpscRing {
     static_assert(Capacity >= 2 && (Capacity & (Capacity - 1)) == 0,
                   "SpscRing capacity must be a power of two >= 2");
-    static_assert(std::is_nothrow_copy_assignable_v<T>,
-                  "SpscRing items must be nothrow copy-assignable");
+    // Trivially copyable: copying an item can never allocate, lock or throw,
+    // which is what makes push/peek real-time safe.
+    static_assert(std::is_trivially_copyable_v<T>, "SpscRing items must be trivially copyable");
 
   public:
     static constexpr std::size_t kCapacity = Capacity;
@@ -62,9 +64,11 @@ class SpscRing {
         return true;
     }
 
-    // Commits the item returned by the last successful peek().
+    // Commits the item returned by the last successful peek(). Precondition:
+    // that peek() returned true (calling it on an empty ring corrupts the ring).
     void consume() SUPPLE_RT {
         const std::size_t tail = tail_.load(std::memory_order_relaxed);
+        assert(tail != head_.load(std::memory_order_acquire) && "consume() without peek()");
         tail_.store(tail + 1, std::memory_order_release);
     }
 

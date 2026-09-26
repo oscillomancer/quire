@@ -135,6 +135,17 @@ std::span<const std::string_view> roleVocabulary() { return kRoles; }
 
 // --- validation ------------------------------------------------------------------
 
+namespace {
+// In range, allowing a relative 1e-9 slack local to each boundary (so a
+// boundary value that went through text or JSON still counts), never a slack
+// scaled by the other, possibly much larger, endpoint.
+bool withinRange(const ParamSpec& p, double v) {
+    const double lo = 1e-9 * std::max(1.0, std::fabs(p.min));
+    const double hi = 1e-9 * std::max(1.0, std::fabs(p.max));
+    return v >= p.min - lo && v <= p.max + hi;
+}
+}  // namespace
+
 Status validateTable(Table table) {
     std::vector<Error> errors;
     std::set<std::uint32_t> ids;
@@ -159,8 +170,12 @@ Status validateTable(Table table) {
         switch (p.type) {
             case Type::Float:
                 if (!(p.min < p.max)) fail("range", "min must be below max");
+                if (!std::isfinite(p.max - p.min))
+                    fail("range_span", "max - min must be finite", "use a smaller range");
                 if (p.curve.kind == CurveKind::Log && !(p.min > 0.0))
                     fail("log_min", "a log curve needs min > 0");
+                else if (p.curve.kind == CurveKind::Log && !(p.max / p.min <= 1e15))
+                    fail("log_range", "a log curve spans at most 15 decades (max/min <= 1e15)");
                 if ((p.curve.kind == CurveKind::Pow || p.curve.kind == CurveKind::Bipolar) &&
                     !(p.curve.k > 0.0))
                     fail("curve_k", "pow/bipolar curves need k > 0");
@@ -399,7 +414,7 @@ Result<double> parse(const ParamSpec& p, std::string_view text) {
                      "use on, off, true or false");
     }
     if (p.flags & kOffAtMin) {
-        if (low == "off" || low == "-inf" || low == "-inf db" || low == "inf" || low == "-∞")
+        if (low == "off" || low == "-inf" || low == "-inf db" || low == "-∞" || low == "-∞ db")
             return p.min;
     }
     auto q = units::parseQuantity(t, p.unit);
@@ -409,8 +424,7 @@ Result<double> parse(const ParamSpec& p, std::string_view text) {
                          std::string(units::dimensionName(p.unit)),
                      {}, "e.g. \"" + exampleText(p) + "\"");
     const double v = *q;
-    const double tolerance = 1e-9 * std::max(1.0, std::max(std::fabs(p.min), std::fabs(p.max)));
-    if (v < p.min - tolerance || v > p.max + tolerance) return rangeError(p, v, {});
+    if (!withinRange(p, v)) return rangeError(p, v, {});
     return clampPhysical(p, v);
 }
 
@@ -458,9 +472,7 @@ Result<double> fromJson(const ParamSpec& p, const json::Value& v, bool acceptUni
             if (v.isNumber()) {
                 const double x = v.asDouble();
                 if (!std::isfinite(x)) return typeError();
-                const double tolerance =
-                    1e-9 * std::max(1.0, std::max(std::fabs(p.min), std::fabs(p.max)));
-                if (x < p.min - tolerance || x > p.max + tolerance) return rangeError(p, x, {});
+                if (!withinRange(p, x)) return rangeError(p, x, {});
                 return clampPhysical(p, x);
             }
             if (v.isString() && acceptUnitStrings) return parse(p, v.asString());

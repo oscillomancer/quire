@@ -1,5 +1,7 @@
 #include "supple/audio/audio_file.h"
 
+#include "supple/base/files.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -62,14 +64,38 @@ Result<AudioData> readAudio(std::span<const std::uint8_t> bytes) {
             drwav wav;
             if (!drwav_init_memory(&wav, bytes.data(), bytes.size(), nullptr))
                 return decodeError("WAV");
-            const std::size_t frames = static_cast<std::size_t>(wav.totalPCMFrameCount);
-            std::vector<float> interleaved(frames * wav.channels);
-            const auto got = drwav_read_pcm_frames_f32(&wav, frames, interleaved.data());
             const unsigned channels = wav.channels;
             const double rate = wav.sampleRate;
+            // dr_wav clamps a data chunk that runs past the end of the file
+            // (interrupted recordings are common); keep what is there but say so.
+            // RIFF/RIFX store the declared size just before the data.
+            bool truncated = false;
+            if ((wav.container == drwav_container_riff || wav.container == drwav_container_rifx) &&
+                wav.dataChunkDataPos >= 4 && wav.dataChunkDataPos <= bytes.size()) {
+                const std::size_t at = static_cast<std::size_t>(wav.dataChunkDataPos) - 4;
+                const bool be = wav.container == drwav_container_rifx;
+                std::uint32_t declared = 0;
+                for (int b = 0; b < 4; ++b)
+                    declared |= std::uint32_t(bytes[at + static_cast<std::size_t>(be ? 3 - b : b)])
+                                << (8 * b);
+                truncated = declared != 0xFFFFFFFFu && wav.dataChunkDataPos + declared >
+                                                           static_cast<drwav_uint64>(bytes.size());
+            }
+            // No encoding stores more than two frames per byte (4-bit ADPCM,
+            // mono): anything larger is a lying header; this also bounds the allocation.
+            if (channels == 0 ||
+                wav.totalPCMFrameCount > 2 * static_cast<drwav_uint64>(bytes.size())) {
+                drwav_uninit(&wav);
+                return decodeError("WAV");
+            }
+            const std::size_t frames = static_cast<std::size_t>(wav.totalPCMFrameCount);
+            std::vector<float> interleaved(frames * channels);
+            const auto got = drwav_read_pcm_frames_f32(&wav, frames, interleaved.data());
             drwav_uninit(&wav);
-            if (channels == 0) return decodeError("WAV");
-            return deinterleave(interleaved.data(), static_cast<std::size_t>(got), channels, rate);
+            auto out =
+                deinterleave(interleaved.data(), static_cast<std::size_t>(got), channels, rate);
+            out.truncated = truncated || got < frames;
+            return out;
         }
         case Container::Flac: {
             unsigned int channels = 0, rate = 0;
@@ -154,6 +180,8 @@ Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOpti
                 for (std::size_t c = 0; c < channels; ++c) {
                     double x = static_cast<double>(data.channels[c][i]) * scale;
                     if (options.dither) x += rng.uniform() - rng.uniform();  // TPDF, +-1 LSB
+                    if (!std::isfinite(x))
+                        x = std::isnan(x) ? 0.0 : x;  // NaN -> 0; inf clamps below
                     auto q = static_cast<std::int32_t>(std::clamp(
                         std::floor(x + 0.5), static_cast<double>(minV), static_cast<double>(maxV)));
                     for (std::size_t b = 0; b < bytesPer; ++b)
@@ -182,23 +210,12 @@ Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOpti
 Status writeWav(const fs::path& path, const AudioData& data, const WavOptions& options) {
     auto bytes = encodeWav(data, options);
     if (!bytes) return std::move(bytes).error();
-    std::error_code ec;
-    if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
-    const fs::path tmp = path.string() + ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out)
-            return Error("audio.write", "cannot write " + tmp.string(), {}, "check the directory");
-        out.write(reinterpret_cast<const char*>(bytes->data()),
-                  static_cast<std::streamsize>(bytes->size()));
-        out.flush();
-        if (!out)
-            return Error("audio.write", "short write to " + tmp.string(), {},
-                         "check free disk space");
+    auto st = writeFileAtomic(path, *bytes);
+    if (!st) {
+        Error e = std::move(st).error();
+        e.code = "audio.write";
+        return e;
     }
-    fs::rename(tmp, path, ec);
-    if (ec)
-        return Error("audio.write", "cannot move " + tmp.string() + " into place: " + ec.message());
     return okStatus();
 }
 

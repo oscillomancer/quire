@@ -1,6 +1,12 @@
 #include "supple/base/files.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <array>
+#include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
 
 namespace supple {
@@ -32,25 +38,47 @@ Result<std::string> readTextFile(const fs::path& path, std::size_t maxBytes) {
 
 Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes) {
     std::error_code ec;
-    if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
-    const fs::path tmp = path.string() + ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out)
-            return Error("file.write", "cannot write " + tmp.string(), {},
-                         "check that the directory exists and is writable");
-        if (!bytes.empty())
-            out.write(reinterpret_cast<const char*>(bytes.data()),
-                      static_cast<std::streamsize>(bytes.size()));
-        out.flush();
-        if (!out)
-            return Error("file.write", "short write to " + tmp.string(), {},
-                         "check free disk space");
-    }
-    fs::rename(tmp, path, ec);
-    if (ec) {
+    const fs::path dir = path.has_parent_path() ? path.parent_path() : fs::path(".");
+    fs::create_directories(dir, ec);
+    // A unique temporary name per writer (pid + counter), created exclusively,
+    // so concurrent writers of the same target never share a temp file.
+    static std::atomic<std::uint64_t> counter{0};
+    const fs::path tmp = path.string() + "." + std::to_string(::getpid()) + "." +
+                         std::to_string(counter.fetch_add(1)) + ".tmp";
+    const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (fd < 0)
+        return Error("file.write", "cannot create " + tmp.string() + ": " + std::strerror(errno),
+                     {}, "check that the directory exists and is writable");
+    auto fail = [&](const std::string& what) {
+        const std::string reason = std::strerror(errno);
+        ::close(fd);
         fs::remove(tmp, ec);
-        return Error("file.write", "cannot move " + tmp.string() + " into place");
+        return Error("file.write", what + " " + tmp.string() + ": " + reason, {},
+                     "check free disk space and permissions");
+    };
+    std::size_t off = 0;
+    while (off < bytes.size()) {
+        const ssize_t n = ::write(fd, bytes.data() + off, bytes.size() - off);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return fail("cannot write");
+        off += static_cast<std::size_t>(n);
+    }
+    // Durability: the data reaches the disk before the rename makes it visible.
+    if (::fsync(fd) != 0) return fail("cannot sync");
+    if (::close(fd) != 0) {
+        fs::remove(tmp, ec);
+        return Error("file.write", "cannot close " + tmp.string());
+    }
+    if (::rename(tmp.c_str(), path.c_str()) != 0) {
+        const std::string reason = std::strerror(errno);
+        fs::remove(tmp, ec);
+        return Error("file.write", "cannot move " + tmp.string() + " into place: " + reason);
+    }
+    // And the directory entry: sync the directory (best effort).
+    const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd >= 0) {
+        (void)::fsync(dfd);
+        ::close(dfd);
     }
     return okStatus();
 }

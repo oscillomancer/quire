@@ -402,3 +402,29 @@ TEST_CASE("conversions are real-time safe" * doctest::description("rt")) {
         for (int i = 0; i < 100; ++i) sum += rtConvert(p, p.min + (p.max - p.min) * i / 99.0);
     CHECK(std::isfinite(sum));
 }
+
+TEST_CASE("review fixes: boundary-local range slack, log range limit, no bare inf") {
+    // A wide range must not widen the slack at the other boundary.
+    constexpr ParamSpec wide{.id = 0, .key = "wide", .name = "Wide", .min = 0, .max = 1e9};
+    CHECK(parse(wide, "-0.5").error().code == "params.out_of_range");
+    CHECK(fromJson(wide, json::Value(-0.5)).error().code == "params.out_of_range");
+    CHECK(*parse(wide, "0") == 0.0);
+    CHECK(*parse(wide, "1000000000.0000001") == 1e9);  // within 1e-9 of the boundary itself
+
+    constexpr ParamSpec extreme{.id = 0,
+                                .key = "x",
+                                .name = "X",
+                                .min = 1e-300,
+                                .max = 1e300,
+                                .def = 1,
+                                .curve = {CurveKind::Log}};
+    auto bad = validateTable(Table(&extreme, 1));
+    REQUIRE_FALSE(bad);
+    CHECK(json::writeCompact(json::Value(bad.error().toString())).find("log_range") !=
+          std::string::npos);
+    constexpr ParamSpec span{.id = 0, .key = "x", .name = "X", .min = -1.7e308, .max = 1.7e308};
+    CHECK_FALSE(validateTable(Table(&span, 1)).ok());
+
+    CHECK_FALSE(parse(P("out.level"), "inf").ok());  // "+inf" is not "off"
+    CHECK(*parse(P("out.level"), "off") == -60);
+}

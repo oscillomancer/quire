@@ -18,9 +18,11 @@ Result<std::vector<std::uint8_t>> readFile(const std::filesystem::path& path,
 Result<std::string> readTextFile(const std::filesystem::path& path,
                                  std::size_t maxBytes = std::size_t(1) << 30);
 
-// Writes to "<path>.tmp" in the same directory, then renames over `path`, so
-// readers see the old or the new file, never a partial one. Creates missing
-// parent directories. Error code: "file.write".
+// Writes a uniquely named temporary file in the same directory, fsyncs it,
+// renames it over `path` and fsyncs the directory: readers see the old or the
+// new file, never a partial one, concurrent writers never share a temp file,
+// and a successful return survives a crash. Creates missing parent
+// directories. Error code: "file.write".
 Status writeFileAtomic(const std::filesystem::path& path, std::span<const std::uint8_t> bytes);
 Status writeFileAtomic(const std::filesystem::path& path, std::string_view text);
 
