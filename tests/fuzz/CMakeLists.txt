@@ -16,3 +16,21 @@ supple_target_defaults(core-json.fuzz)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/corpus DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME core-json.fuzz-smoke COMMAND core-json.fuzz -runs=100 ${CMAKE_CURRENT_BINARY_DIR}/corpus)
 set_tests_properties(core-json.fuzz-smoke PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+
+add_library(notation-fuzzlib STATIC ${PROJECT_SOURCE_DIR}/libs/notation/src/notation.cpp)
+target_include_directories(notation-fuzzlib PUBLIC ${PROJECT_SOURCE_DIR}/libs/notation/include
+  PRIVATE ${PROJECT_SOURCE_DIR}/libs/notation/src)
+target_link_libraries(notation-fuzzlib PUBLIC supple::midi supple::core-base)
+target_compile_options(notation-fuzzlib PRIVATE -fsanitize=fuzzer-no-link,address)
+supple_target_defaults(notation-fuzzlib)
+add_executable(notation.fuzz notation_fuzz.cpp)
+target_link_libraries(notation.fuzz PRIVATE notation-fuzzlib)
+target_compile_options(notation.fuzz PRIVATE -fsanitize=fuzzer,address)
+target_link_options(notation.fuzz PRIVATE -fsanitize=fuzzer,address)
+supple_target_defaults(notation.fuzz)
+file(COPY ${PROJECT_SOURCE_DIR}/libs/notation/tests/corpus/valid/
+  DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/notation-corpus FILES_MATCHING PATTERN "*.note")
+add_test(NAME notation.fuzz-smoke COMMAND notation.fuzz -runs=100
+  ${CMAKE_CURRENT_BINARY_DIR}/notation-corpus)
+set_tests_properties(notation.fuzz-smoke PROPERTIES
+  ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0")

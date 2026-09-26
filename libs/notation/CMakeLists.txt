@@ -1,0 +1,5 @@
+supple_add_library(notation SOURCES src/notation.cpp src/decompile.cpp DEPS supple::midi supple::core-base)
+supple_add_tests(notation SOURCES tests/test_notation.cpp)
+if(SUPPLE_BUILD_TESTS)
+  target_compile_definitions(notation.tests PRIVATE NOTATION_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus")
+endif()
