@@ -310,6 +310,8 @@ class Compiler {
         for (const auto& line : lines_) {
             const auto& t = line.tokens;
             const auto& head = t[0].text;
+            const bool barLike =
+                !head.empty() && head.front() >= '0' && head.front() <= '9' && head.back() == ':';
             if (head == "notation") {
                 if (t.size() != 2 || t[1].text != "1")
                     add("syntax", "Unsupported notation version.", t[0], "Write 'notation 1'.");
@@ -496,17 +498,11 @@ class Compiler {
                         currentLane->kind = midi::ControlKind::PolyPressure;
                         if (auto p = pitch(t[i])) currentLane->number = *p;
                     } else {
-                        static const std::map<std::string, int> names = {
-                            {"mod", 1},         {"breath", 2},   {"foot", 4},
-                            {"porta_time", 5},  {"volume", 7},   {"pan", 10},
-                            {"expression", 11}, {"sustain", 64}, {"porta", 65},
-                            {"sostenuto", 66},  {"soft", 67},    {"legato", 68},
-                            {"resonance", 71},  {"release", 72}, {"attack", 73},
-                            {"cutoff", 74}};
                         auto n = internal::integer(t[i].text);
                         if (n && *n >= 0 && *n <= 127)
                             currentLane->number = static_cast<int>(*n);
-                        else if (auto it = names.find(t[i].text); it != names.end())
+                        else if (auto it = internal::ccNames().find(t[i].text);
+                                 it != internal::ccNames().end())
                             currentLane->number = it->second;
                         else
                             add("syntax", "Unknown CC name or number.", t[i],
@@ -547,6 +543,12 @@ class Compiler {
                 } else if (t.size() != 1)
                     add("syntax", "Invalid events header.", t[0], "Use events or events ch N.");
                 continue;
+            }
+            if (section == Section::Header && barLike) {
+                voices_.push_back({});
+                currentVoice = &voices_.back();
+                currentVoice->name = "main";
+                section = Section::Voice;
             }
             if (section == Section::Voice && currentVoice) {
                 if (t.size() >= 3 && t[1].text == "=") {
@@ -627,12 +629,23 @@ class Compiler {
                             currentVoice->bars[bar].line = t[0].line;
                             row.clear();
                             ++bar;
+                        } else if (i > 1 && t[i - 1].text == "|" && t[i].text.ends_with(':') &&
+                                   internal::integer(std::string_view(t[i].text).substr(
+                                       0, t[i].text.size() - 1))) {
+                            add("bar_after_pipe", "Bar number follows a pipe.", t[i],
+                                "After `|` the next bar continues without a number: `... | D3:h "
+                                "A2:h`, or start a new line `2: ...`.");
                         } else
                             row.push_back(t[i]);
                     }
                     currentVoice->lastBar = bar - 1;
                 }
                 maxBar_ = std::max(maxBar_, currentVoice->lastBar);
+                continue;
+            }
+            if (barLike) {
+                add("syntax", "Numbered bar needs a voice section.", t[0],
+                    "Add a voice NAME line before this bar.");
                 continue;
             }
             if (section == Section::Lane && currentLane)
@@ -706,38 +719,7 @@ class Compiler {
             return std::nullopt;
         }
         const std::string quality(symbol.substr(i));
-        static const std::map<std::string, std::vector<int>> qualities = {
-            {"", {0, 4, 7}},
-            {"maj", {0, 4, 7}},
-            {"m", {0, 3, 7}},
-            {"min", {0, 3, 7}},
-            {"dim", {0, 3, 6}},
-            {"aug", {0, 4, 8}},
-            {"+", {0, 4, 8}},
-            {"sus2", {0, 2, 7}},
-            {"sus4", {0, 5, 7}},
-            {"sus", {0, 5, 7}},
-            {"6", {0, 4, 7, 9}},
-            {"m6", {0, 3, 7, 9}},
-            {"7", {0, 4, 7, 10}},
-            {"maj7", {0, 4, 7, 11}},
-            {"M7", {0, 4, 7, 11}},
-            {"m7", {0, 3, 7, 10}},
-            {"min7", {0, 3, 7, 10}},
-            {"mMaj7", {0, 3, 7, 11}},
-            {"dim7", {0, 3, 6, 9}},
-            {"m7b5", {0, 3, 6, 10}},
-            {"ø", {0, 3, 6, 10}},
-            {"7sus4", {0, 5, 7, 10}},
-            {"add9", {0, 4, 7, 14}},
-            {"9", {0, 4, 7, 10, 14}},
-            {"maj9", {0, 4, 7, 11, 14}},
-            {"m9", {0, 3, 7, 10, 14}},
-            {"7b9", {0, 4, 7, 10, 13}},
-            {"7#9", {0, 4, 7, 10, 15}},
-            {"11", {0, 7, 10, 14, 17}},
-            {"13", {0, 4, 10, 14, 21}},
-            {"5", {0, 7}}};
+        const auto& qualities = internal::chordQualities();
         auto it = qualities.find(quality);
         if (it == qualities.end()) {
             std::vector<std::string> names;
@@ -791,10 +773,7 @@ class Compiler {
                 for (std::size_t i = 0; i < row.size(); ++i) {
                     const Token& token = row[i];
                     const auto& s = token.text;
-                    static const std::map<std::string, int> dynamics = {
-                        {"ppp", 16}, {"pp", 32}, {"p", 48},   {"mp", 64},
-                        {"mf", 80},  {"f", 96},  {"ff", 112}, {"fff", 127}};
-                    if (auto it = dynamics.find(s); it != dynamics.end()) {
+                    if (auto it = internal::dynamics().find(s); it != internal::dynamics().end()) {
                         running = it->second;
                         continue;
                     }
@@ -849,8 +828,9 @@ class Compiler {
                     const bool tied = !tail.empty() && tail.back() == '~';
                     if (tied) tail.pop_back();
                     bool staccato = false, accent = false;
-                    while (!tail.empty() && (tail.back() == '\'' || tail.back() == '>')) {
-                        if (tail.back() == '\'')
+                    while (!tail.empty() && (tail.back() == internal::kStaccato ||
+                                             tail.back() == internal::kAccent)) {
+                        if (tail.back() == internal::kStaccato)
                             staccato = true;
                         else
                             accent = true;

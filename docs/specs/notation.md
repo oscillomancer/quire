@@ -459,7 +459,8 @@ collects all errors (up to 50) as `details` of one `notation.invalid` error
 `bar_length` (says how many beats the bar has and needs, and what single
 rest would fix it), `bar_order`, `bar_overlap` (bar written twice),
 `copy_source` (copy from unwritten bars), `dangling_tie`, `tie_mismatch`,
-`fill_not_last`, `grid_steps` (states the step count needed), `grid_char`,
+`fill_not_last`, `bar_after_pipe` (omit the next bar number after `|`),
+`grid_steps` (states the step count needed), `grid_char`,
 `unknown_drum` (closest names), `unknown_chord` (closest quality),
 `velocity_range`, `channel_range`, `lane_order` (positions must not decrease),
 `lane_value`, `position` (beat beyond the meter), `meter_mismatch`,

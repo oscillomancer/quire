@@ -97,6 +97,31 @@ TEST_CASE("compile a simple voice") {
     CHECK(result->sequence.length == 3840);
 }
 
+TEST_CASE("thirty-second duration is distinct from exact tick suffix") {
+    auto result = compile("voice lead\n1: C4:t D4:120t r:*\n");
+    REQUIRE(result.ok());
+    REQUIRE(result->sequence.notes.size() == 2);
+    CHECK(result->sequence.notes[0].length == 120);
+    CHECK(result->sequence.notes[1].length == 120);
+}
+
+TEST_CASE("implicit main voice matches an explicit declaration") {
+    const auto implicit = compile("notation 1\n1: C4:q E4:q G4:h\n");
+    const auto explicitVoice = compile("notation 1\nvoice main\n1: C4:q E4:q G4:h\n");
+    REQUIRE(implicit.ok());
+    REQUIRE(explicitVoice.ok());
+    CHECK(implicit->sequence == explicitVoice->sequence);
+    auto written = decompile(implicit->sequence);
+    REQUIRE(written.ok());
+    CHECK(written->find("voice ") != std::string::npos);
+}
+
+TEST_CASE("numbered bar outside a voice suggests a voice declaration") {
+    auto result = compile("lane cc 74\n1: C4:w\n");
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.error().hint.find("voice NAME") != std::string::npos);
+}
+
 TEST_CASE("exact item length and repeated lane point") {
     auto result = compile("notation 1\nppq 960\nlength 0+1t\nlane cc 1\n1.1 10\n1.1 20\n");
     REQUIRE(result.ok());
