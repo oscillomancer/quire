@@ -101,6 +101,12 @@ def main() -> int:
             if p.name == "CMakeLists.txt" or p.suffix == ".cmake":
                 for m in FETCH_RE.finditer(text):
                     dep = m.group(1).lower()
+                    # Template-derived plugins are local first-party sources,
+                    # built in isolation to avoid CMake target collisions.
+                    if (dep == "plugin-" and rel == pathlib.Path("plugins/CMakeLists.txt")
+                            and "SOURCE_DIR \"${CMAKE_CURRENT_SOURCE_DIR}/${dir}\""
+                            in text[m.end():m.end() + 160]):
+                        continue
                     if dep not in names:
                         errors.append(f"{rel}: fetches '{m.group(1)}', which is not in third_party/manifest.json")
 

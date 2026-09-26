@@ -1,0 +1,38 @@
+diff --git a/src/detail/vst3/process.cpp b/src/detail/vst3/process.cpp
+index 68f1ba0..a89f78b 100644
+--- a/src/detail/vst3/process.cpp
++++ b/src/detail/vst3/process.cpp
+@@ -298,10 +298,13 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+         {
+           auto nums = k->getPointCount();
+ 
+-          Vst::ParamValue value;
+-          int32 offset;
+-          if (k->getPoint(nums - 1, offset, value) == kResultOk)
++          for (decltype(nums) j = 0; j < nums; ++j)
+           {
++            Vst::ParamValue value;
++            int32 offset;
++            if (k->getPoint(j, offset, value) != kResultOk)
++              continue;
++
+             // create MIDI event
+             clap_multi_event_t n;
+             n.param.header.type = CLAP_EVENT_MIDI;
+@@ -349,10 +352,13 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
+         {
+           auto nums = k->getPointCount();
+ 
+-          Vst::ParamValue value;
+-          int32 offset;
+-          if (k->getPoint(nums - 1, offset, value) == kResultOk)
++          for (decltype(nums) j = 0; j < nums; ++j)
+           {
++            Vst::ParamValue value;
++            int32 offset;
++            if (k->getPoint(j, offset, value) != kResultOk)
++              continue;
++
+             clap_multi_event_t n;
+             n.param.header.type = CLAP_EVENT_PARAM_VALUE;
+             n.param.header.flags = 0;
