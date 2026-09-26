@@ -2,6 +2,7 @@
 #include <supple/base/closest.h>
 #include <supple/base/units.h>
 #include <supple/json/json.h>
+#include <algorithm>
 #include <any>
 #include <cmath>
 #include <functional>
@@ -47,6 +48,97 @@ struct DecodeCtx {
                                 std::move(hint));
     }
 };
+inline std::string quantityPattern(Unit unit) {
+    std::string suffix;
+    switch (unit) {
+        case Unit::Hz:
+            suffix = "(?:[hH][zZ]|[kK][hH][zZ]|[kK])";
+            break;
+        case Unit::ms:
+            suffix = "(?:ms|s|sec|us|µs)";
+            break;
+        case Unit::dB:
+            suffix = "(?:dB|db)";
+            break;
+        case Unit::LUFS:
+            suffix = "(?:LUFS|LKFS)";
+            break;
+        case Unit::LU:
+            suffix = "LU";
+            break;
+        case Unit::st:
+            suffix = "(?:st|semi|semitones)";
+            break;
+        case Unit::ct:
+            suffix = "(?:ct|cent|cents)";
+            break;
+        case Unit::oct:
+            suffix = "(?:oct|octave|octaves)";
+            break;
+        case Unit::percent:
+            suffix = "%";
+            break;
+        case Unit::ratio:
+            suffix = "(?::1|ratio)";
+            break;
+        case Unit::x:
+            suffix = "(?:x|×)";
+            break;
+        case Unit::deg:
+            suffix = "(?:deg|°)";
+            break;
+        case Unit::bpm:
+            suffix = "bpm";
+            break;
+        case Unit::beats:
+            suffix = "(?:beats|qn)";
+            break;
+        case Unit::samples:
+            suffix = "(?:samples|smp)";
+            break;
+        case Unit::none:
+            suffix.clear();
+            break;
+    }
+    const std::string number = "[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?";
+    return "^\\s*" + number + (suffix.empty() ? "" : "(?:\\s*" + suffix + ")?") + "\\s*$";
+}
+inline json::Value generatedExample(const json::Value& exported) {
+    if (const auto* choices = exported.find("enum");
+        choices && choices->isArray() && choices->size())
+        return choices->at(0);
+    const auto* type = exported.find("type");
+    if (type && type->isString()) {
+        if (type->asString() == "boolean") return true;
+        if (type->asString() == "string") return "text";
+        if (type->asString() == "array") return json::Value::array();
+        if (type->asString() == "object") return json::Value::object();
+        if (type->asString() == "integer") {
+            if (const auto* minimum = exported.find("minimum"))
+                return static_cast<long long>(minimum->asInt());
+            return 0;
+        }
+    }
+    if (const auto* minimum = exported.find("minimum")) return *minimum;
+    return 0.0;
+}
+inline std::string generatedExampleText(const json::Value& exported) {
+    const auto* type = exported.find("type");
+    if (type && type->isString()) {
+        if (type->asString() == "object") return "{…}";
+        if (type->asString() == "array") return "[…]";
+    }
+    return json::writeCompact(generatedExample(exported));
+}
+inline std::string listNames(std::span<const std::string_view> names) {
+    std::string result;
+    for (std::size_t i = 0; i < std::min<std::size_t>(names.size(), 12); ++i) {
+        if (!result.empty()) result += ", ";
+        result += names[i];
+    }
+    if (names.size() > 12) result += ", …";
+    return result;
+}
 template <class T>
 struct IsOptional : std::false_type {};
 template <class T>
@@ -64,6 +156,7 @@ class Schema {
           encoder_(std::move(e)),
           export_(std::move(s)) {}
     bool decodeInto(const json::Value& v, T& out, DecodeCtx& c, const std::string& path) const {
+        const auto previousErrors = c.errors.size();
         bool ok = false;
         if constexpr (std::is_floating_point_v<T>) {
             if (unit_ && v.isString() && c.options.acceptUnitStrings) {
@@ -80,6 +173,14 @@ class Schema {
                 ok = decoder_(v, out, c, path);
         } else
             ok = decoder_(v, out, c, path);
+        if (!ok) {
+            for (std::size_t i = previousErrors; i < c.errors.size(); ++i)
+                if (c.errors[i].code == "schema.type" && c.errors[i].path == path) {
+                    c.errors[i].hint =
+                        "expected " + title_ + "; example: " +
+                        (example_ ? json::writeCompact(*example_) : generatedExampleText(export_));
+                }
+        }
         if (ok) {
             ok = constraints(v, out, c, path);
             CheckCtx check{&c.errors, path, c.options.maxErrors};
@@ -105,7 +206,31 @@ class Schema {
         auto r = decode(v, o);
         return r ? Status{} : Status{r.error()};
     }
-    json::Value jsonSchema() const { return export_; }
+    json::Value jsonSchema() const {
+        if (!unit_) return export_;
+        json::Value result = json::Value::object();
+        json::Value numeric = json::Value::object();
+        numeric["type"] = "number";
+        for (const auto& member : export_.asObject()) {
+            if (member.key == "minimum" || member.key == "maximum" ||
+                member.key == "exclusiveMinimum" || member.key == "exclusiveMaximum")
+                numeric[member.key] = member.value;
+        }
+        json::Value quantity = json::Value::object();
+        quantity["type"] = "string";
+        quantity["pattern"] = quantityPattern(*unit_);
+        result["anyOf"] = json::Array{std::move(numeric), std::move(quantity)};
+        for (const auto& member : export_.asObject()) {
+            if (member.key == "type" || member.key == "minimum" || member.key == "maximum" ||
+                member.key == "exclusiveMinimum" || member.key == "exclusiveMaximum")
+                continue;
+            result[member.key] = member.value;
+        }
+        const auto* description = result.find("description");
+        result["description"] = (description ? description->asString() + " " : std::string{}) +
+                                "Quantity strings are range-checked by the server.";
+        return result;
+    }
     Schema doc(std::string text) const {
         auto s = *this;
         s.export_["description"] = std::move(text);
@@ -437,9 +562,8 @@ Schema<E> enumeration(std::initializer_list<std::pair<E, std::string_view>> choi
                 for (const auto& [e, s] : list) {
                     (void)e;
                     opts.push_back(s);
-                    if (!all.empty()) all += ", ";
-                    all += s;
                 }
+                all = listNames(opts);
                 auto match = closestMatch(v.asString(), opts);
                 c.error(
                     "schema.enum", "unknown enum choice", p,
@@ -529,7 +653,7 @@ Schema<std::map<std::string, T>> mapOf(Schema<T> value) {
 template <class T>
 class ObjectBuilder {
     struct Field {
-        std::string name, doc;
+        std::string name, doc, expected;
         bool optional = false, omitDefault = false, hasDefault = false;
         json::Value schema, defaultJson;
         std::function<void(const json::Value*, T&, DecodeCtx&, const std::string&)> decode;
@@ -555,6 +679,7 @@ class ObjectBuilder {
         f.name = std::move(name);
         f.optional = IsOptional<M>::value;
         f.schema = schema.jsonSchema();
+        f.expected = schema.title();
         if (auto* d = f.schema.find("description")) f.doc = d->asString();
         auto fieldName = f.name;
         auto fieldDoc = f.doc;
@@ -658,8 +783,15 @@ class ObjectBuilder {
                 auto path = json::pointerJoin(p, f.name);
                 if (!member && f.hasDefault)
                     f.applyDefault(out);
-                else
+                else {
+                    auto previous = c.errors.size();
                     f.decode(member, out, c, path);
+                    if (f.hasDefault && !f.schema.find("examples"))
+                        for (std::size_t i = previous; i < c.errors.size(); ++i)
+                            if (c.errors[i].code == "schema.type")
+                                c.errors[i].hint = "expected " + f.expected + "; example: " +
+                                                   json::writeCompact(f.defaultJson);
+                }
             }
             for (const auto& m : v.asObject()) {
                 bool known = false;
@@ -677,14 +809,10 @@ class ObjectBuilder {
                     continue;
                 }
                 std::vector<std::string_view> names;
-                std::string hint;
                 for (const auto& f : fields) {
                     names.push_back(f.name);
-                    if (fields.size() <= 12) {
-                        if (!hint.empty()) hint += ", ";
-                        hint += f.name;
-                    }
                 }
+                std::string hint = listNames(names);
                 auto match = closestMatch(m.key, names);
                 if (!match.empty())
                     hint = "did you mean \"" + match + "\"? valid members: " + hint;
@@ -770,13 +898,11 @@ class VariantBuilder {
                 return false;
             }
             const auto* t = v.find(tag);
-            std::string all;
             std::vector<std::string_view> names;
             for (const auto& a : alts) {
                 names.push_back(a.tag);
-                if (!all.empty()) all += ", ";
-                all += a.tag;
             }
+            const auto all = listNames(names);
             if (!t || !t->isString()) {
                 c.error("schema.missing_tag", "missing variant tag", json::pointerJoin(p, tag),
                         "add \"" + tag + "\" with one of: " + all);

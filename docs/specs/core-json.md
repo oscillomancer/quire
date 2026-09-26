@@ -511,4 +511,7 @@ threads. Recursion depth bounded by core-json's parse depth.
 
 ## Implementation notes (not specification changes)
 
+- Canonical output normalizes `-0.0` to `0.0`. Per the orchestrator clarification, negative zero is excluded from the bitwise `identical` round-trip invariant; canonical-output idempotence still applies.
+- `DocumentType` migration entry `k - 1` upgrades major version `k` to `k + 1` (major versions start at 1).
+
 - The unit table mentions `dBFS` only for absolute level fields, but the closed `Unit` set has no distinct absolute-level tag. `parseQuantity` rejects `dBFS` until the caller has an explicit way to declare that distinction.

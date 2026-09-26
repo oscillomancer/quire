@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <supple/schema/document.h>
 #include <supple/schema/schema.h>
 #include <filesystem>
 #include <fstream>
@@ -210,4 +211,134 @@ TEST_CASE("float field binding") {
     REQUIRE(decoded);
     CHECK(decoded->level == -3.0f);
     CHECK(schema.encode(*decoded).find("level")->asDouble() == -3.0);
+}
+TEST_CASE("document IDs and version policy") {
+    struct Config {
+        double frequency = 0;
+    };
+    auto body = object<Config>("config")
+                    .field("frequency", &Config::frequency, number().unit(Unit::Hz))
+                    .build();
+    DocumentType<Config> doc("config", 1, 0, body);
+    auto parsedId = parseDocumentId("supple.config/1.0");
+    REQUIRE(parsedId);
+    CHECK(formatDocumentId(*parsedId) == "supple.config/1.0");
+    auto invalidId = parseDocumentId("supple.config/0.x");
+    REQUIRE_FALSE(invalidId);
+    CHECK(invalidId.error().code == "document.bad_id");
+    auto parsed = doc.parse("{\"frequency\":\"1 kHz\",\"schema\":\"supple.config/1.0\"}");
+    REQUIRE(parsed);
+    CHECK(parsed->frequency == 1000);
+    auto saved = doc.serialize(*parsed);
+    CHECK(saved.find("\"schema\"") < saved.find("\"frequency\""));
+    auto roundTrip = doc.parse(saved);
+    REQUIRE(roundTrip);
+    CHECK(roundTrip->frequency == 1000);
+    auto exportSchema = doc.jsonSchema();
+    CHECK(exportSchema.find("properties")->asObject().begin()->key == "schema");
+    CHECK(exportSchema.find("required")->at(0).asString() == "schema");
+    std::vector<Warning> warnings;
+    auto future = doc.parse("{\"schema\":\"supple.config/1.1\",\"frequency\":1000,\"newField\":2}",
+                            &warnings);
+    REQUIRE(future);
+    CHECK(warnings.size() == 1);
+    CHECK(warnings.front().path == "/newField");
+    auto strict = doc.parse("{\"schema\":\"supple.config/1.0\",\"frequency\":1000,\"newField\":2}");
+    REQUIRE_FALSE(strict);
+    CHECK(strict.error().code == "schema.unknown_member");
+}
+TEST_CASE("document boundary errors and migration") {
+    struct Config {
+        double frequency = 0;
+    };
+    auto body = object<Config>("config").field("frequency", &Config::frequency, number()).build();
+    DocumentType<Config> current("config", 2, 0, body, {[](json::Value old) -> Result<json::Value> {
+                                     old["schema"] = "supple.config/2.0";
+                                     return old;
+                                 }});
+    auto migrated = current.parse("{\"schema\":\"supple.config/1.0\",\"frequency\":500}");
+    REQUIRE(migrated);
+    CHECK(migrated->frequency == 500);
+    struct Bad {
+        const char* text;
+        const char* code;
+    };
+    const Bad bad[] = {{"{}", "document.missing_id"},
+                       {"{\"schema\":\"bad\"}", "document.bad_id"},
+                       {"{\"schema\":\"supple.other/2.0\"}", "document.wrong_type"},
+                       {"{\"schema\":\"supple.config/3.0\"}", "document.too_new"}};
+    for (const auto& item : bad) {
+        auto result = current.parse(item.text);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == item.code);
+        CHECK(!result.error().hint.empty());
+    }
+    DocumentType<Config> missing("config", 2, 0, body);
+    auto failure = missing.parse("{\"schema\":\"supple.config/1.0\",\"frequency\":500}");
+    REQUIRE_FALSE(failure);
+    CHECK(failure.error().code == "document.migration_failed");
+    DocumentType<Config> broken("config", 2, 0, body, {[](json::Value) -> Result<json::Value> {
+                                    return Error("test.fail", "failed migration");
+                                }});
+    auto fail = broken.parse("{\"schema\":\"supple.config/1.0\",\"frequency\":500}");
+    REQUIRE_FALSE(fail);
+    CHECK(fail.error().code == "document.migration_failed");
+    CHECK(fail.error().details.size() == 1);
+}
+TEST_CASE("type hints and unit schema export") {
+    auto numberSchema = number().range(20, 20000).unit(Unit::Hz);
+    auto exported = numberSchema.jsonSchema();
+    auto* variants = exported.find("anyOf");
+    REQUIRE(variants);
+    CHECK(variants->size() == 2);
+    CHECK(variants->at(0).find("minimum")->asDouble() == 20);
+    CHECK(variants->at(1).find("pattern") != nullptr);
+    auto typeError = numberSchema.decode(json::Value(true));
+    REQUIRE_FALSE(typeError);
+    CHECK(typeError.error().hint.find("20") != std::string::npos);
+    auto explicitExample = string().example("example").decode(json::Value(1));
+    REQUIRE_FALSE(explicitExample);
+    CHECK(explicitExample.error().hint.find("example") != std::string::npos);
+}
+TEST_CASE("fallback hints list names and examples") {
+    struct Small {
+        int level = 0;
+    };
+    auto s = object<Small>("small")
+                 .field("level", &Small::level, integerOf<int>().doc("Gain level"))
+                 .build();
+    auto unknown = json::parse("{\"level\":1,\"xyz\":2}");
+    REQUIRE(unknown);
+    auto e = s.decode(*unknown);
+    REQUIRE_FALSE(e);
+    CHECK(e.error().hint.find("level") != std::string::npos);
+    auto absent = s.decode(json::Value::object());
+    REQUIRE_FALSE(absent);
+    CHECK(absent.error().code == "schema.required");
+    CHECK(absent.error().hint.find("Gain level") != std::string::npos);
+    auto choice = enumeration<int>({{0, "first"}, {1, "second"}});
+    auto mismatch = choice.decode(json::Value("xyz"));
+    REQUIRE_FALSE(mismatch);
+    CHECK(mismatch.error().hint.find("first") != std::string::npos);
+    CHECK(mismatch.error().hint.find("second") != std::string::npos);
+}
+TEST_CASE("default type hint and quantity pattern") {
+    struct Cutoff {
+        double value = 0;
+    };
+    auto body = object<Cutoff>("cutoff")
+                    .field("value", &Cutoff::value, number().range(20, 20000))
+                    .defaultValue(1000.0)
+                    .build();
+    auto bad = json::parse("{\"value\":true}");
+    REQUIRE(bad);
+    auto decoded = body.decode(*bad);
+    REQUIRE_FALSE(decoded);
+    CHECK(decoded.error().code == "schema.type");
+    CHECK(decoded.error().hint.find("1000") != std::string::npos);
+    auto exported = number().unit(Unit::Hz).jsonSchema();
+    const auto& expression = exported.find("anyOf")->at(1).find("pattern")->asString();
+    std::regex pattern(expression);
+    CHECK(std::regex_match(std::string("1.2 kHz"), pattern));
+    CHECK_FALSE(std::regex_match(std::string("2 ms"), pattern));
 }
