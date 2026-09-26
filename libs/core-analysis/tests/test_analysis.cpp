@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -151,6 +152,58 @@ TEST_CASE("stereo: anti-phase and balance") {
     CHECK(run(panned).stereo->balanceDb == doctest::Approx(-6.02).epsilon(0.01));
 }
 
+TEST_CASE("hard-panned stereo balance keeps its infinite sign") {
+    Options o;
+    o.loudness = o.spectral = o.harmonic = o.envelope = false;
+    Audio left = make(0.5, [](double t, std::size_t) {
+        return std::pair{0.4 * std::sin(2 * kPi * 440.0 * t), 0.0};
+    });
+    const Report l = run(left, true, o);
+    REQUIRE(l.stereo);
+    CHECK(std::isinf(l.stereo->balanceDb));
+    CHECK(l.stereo->balanceDb < 0.0);
+    CHECK(toJson(l)["stereo"]["balance_db"].isNull());
+    Audio right = make(0.5, [](double t, std::size_t) {
+        return std::pair{0.0, 0.4 * std::sin(2 * kPi * 440.0 * t)};
+    });
+    const Report r = run(right, true, o);
+    REQUIRE(r.stereo);
+    CHECK(std::isinf(r.stereo->balanceDb));
+    CHECK(r.stereo->balanceDb > 0.0);
+}
+
+TEST_CASE("5.0 mono downmix includes the left surround") {
+    constexpr std::size_t n = 24000;
+    std::array<std::vector<float>, 5> channels;
+    for (auto& c : channels) c.resize(n);
+    for (std::size_t i = 0; i < n; ++i)
+        channels[3][i] = static_cast<float>(0.5 * std::sin(2 * kPi * 1000.0 * i / kFs));
+    const float* ptr[5];
+    for (std::size_t c = 0; c < 5; ++c) ptr[c] = channels[c].data();
+    Signal s{ptr, static_cast<std::int64_t>(n), kFs, Layout::Surround50};
+    Options o;
+    o.loudness = o.harmonic = o.envelope = o.stereo = false;
+    auto r = analyze(s, o);
+    REQUIRE(r);
+    REQUIRE(r->spectral);
+    CHECK(r->spectral->centroidHz.median == doctest::Approx(1000.0).epsilon(0.05));
+}
+
+TEST_CASE("analysis rejects inconsistent layouts and invalid pitch ranges") {
+    Audio a = sine(440.0, 0.5, 0.2);
+    Options o;
+    o.loudness = o.spectral = o.envelope = o.stereo = false;
+    for (const auto range : {std::pair{400.0, 100.0}, std::pair{0.0, 4000.0},
+                             std::pair{30.0, std::numeric_limits<double>::infinity()}}) {
+        o.f0RangeHz = range;
+        CHECK_FALSE(analyze(a.signal(), o));
+    }
+    o.harmonic = false;
+    a.ptr = {a.l.data()};
+    Signal wrong{a.ptr, static_cast<std::int64_t>(a.l.size()), kFs, Layout::Stereo};
+    CHECK_FALSE(analyze(wrong, o));
+}
+
 TEST_CASE("envelope: attack, decay20, release with extrapolation") {
     // 20 ms linear attack, then exponential decay with τ = 100 ms.
     Audio pluck = make(1.5, [](double t, std::size_t) {
@@ -216,6 +269,28 @@ TEST_CASE("compare: a gain change is loud, not timbral; a filter change is timbr
     CHECK(summarize(c2).find("Timbre difference") != std::string::npos);
 }
 
+TEST_CASE("compare applies descriptor thresholds to each statistic") {
+    Report a, b;
+    a.spectral.emplace();
+    b.spectral.emplace();
+    a.spectral->centroidHz.mean = 1000.0;
+    b.spectral->centroidHz.mean = 1200.0;
+    a.spectral->flatness.p90 = 0.2;
+    b.spectral->flatness.p90 = 0.3;
+    a.stereo.emplace();
+    b.stereo.emplace();
+    a.stereo->correlationMean = 0.1;
+    b.stereo->correlationMean = 0.3;
+    const auto c = compare(a, b);
+    for (const auto& key :
+         {"spectral.centroid_hz.mean", "spectral.flatness.p90", "stereo.correlation_mean"}) {
+        bool found = false;
+        for (const auto& delta : c.deltas)
+            if (delta.key == key) found = delta.notable;
+        CHECK(found);
+    }
+}
+
 TEST_CASE("profiles: targets, ranges, LTAS, unknown keys") {
     Audio a = sine(1000.0, 0.5);
     const Report r = run(a);
@@ -238,6 +313,30 @@ TEST_CASE("profiles: targets, ranges, LTAS, unknown keys") {
     CHECK(err.error().hint.find("spectral.centroid_hz") != std::string::npos);
 }
 
+TEST_CASE("profiles reject invalid weights and bounds") {
+    Report r;
+    r.spectral.emplace();
+    r.spectral->centroidHz.median = 1000.0;
+    for (const char* target : {R"({"target": 2000, "tolerance": 100, "weight": -1})",
+                               R"({"target": 2000, "tolerance": 100, "weight": 0})",
+                               R"({"min": 2000, "max": 1000})", R"({"min": "100", "max": 2000})"}) {
+        const std::string source =
+            std::string(
+                R"({"schema":"supple.analysis-profile/1.0","targets":{"spectral.centroid_hz.median":)") +
+            target + "}}";
+        auto profile = json::parse(source);
+        REQUIRE(profile);
+        auto result = evaluate(r, *profile);
+        CHECK_FALSE(result);
+    }
+    std::string ltas = R"({"schema":"supple.analysis-profile/1.0","ltas":["bad")";
+    for (int i = 1; i < kThirdOctaves; ++i) ltas += ",0";
+    ltas += "]}";
+    auto profile = json::parse(ltas);
+    REQUIRE(profile);
+    CHECK_FALSE(evaluate(r, *profile));
+}
+
 TEST_CASE("masking: a loud tone masks a quiet neighbour, not a distant one") {
     Audio masker = sine(1000.0, 0.5);
     Audio near = sine(1050.0, 0.005), far = sine(5000.0, 0.005);
@@ -249,6 +348,21 @@ TEST_CASE("masking: a loud tone masks a quiet neighbour, not a distant one") {
     auto m2 = masking(masker.signal(), far.signal());
     REQUIRE(m2);
     CHECK(m2->maskedEnergyPct < 10.0);
+}
+
+TEST_CASE("masking uses surround channels in its mono downmix") {
+    constexpr std::size_t n = 24000;
+    std::array<std::vector<float>, 5> channels;
+    for (auto& c : channels) c.resize(n);
+    for (std::size_t i = 0; i < n; ++i)
+        channels[3][i] = static_cast<float>(0.5 * std::sin(2 * kPi * 1000.0 * i / kFs));
+    const float* ptr[5];
+    for (std::size_t c = 0; c < 5; ++c) ptr[c] = channels[c].data();
+    Signal surround{ptr, static_cast<std::int64_t>(n), kFs, Layout::Surround50};
+    Audio quiet = sine(1000.0, 0.001, 0.5);
+    auto m = masking(surround, quiet.signal(false));
+    REQUIRE(m);
+    CHECK(m->maskedEnergyPct > 90.0);
 }
 
 TEST_CASE("report JSON: summary is compact, deterministic, and rounded") {
