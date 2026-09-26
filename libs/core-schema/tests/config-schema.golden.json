@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "title": "config",
+  "description": "Filter configuration",
+  "properties": {
+    "cutoff": {
+      "type": ["number", "string"],
+      "minimum": 20.0,
+      "maximum": 20000.0,
+      "x-unit": "Hz",
+      "x-unit-strings": true,
+      "default": 1000.0
+    },
+    "mode": {
+      "type": "string"
+    }
+  },
+  "required": ["mode"],
+  "additionalProperties": false
+}

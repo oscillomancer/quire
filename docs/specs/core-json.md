@@ -384,7 +384,7 @@ boolean: `true`; enum: the first choice; object/array: `{…}`/`[…]`).
 
 Closest-match: Damerau–Levenshtein distance ≤ max(2, len/3), case-insensitive,
 ties broken by declaration order; also match when one is a prefix of the
-other. Exposed as `supple::schema::closestMatch(std::string_view, std::span<const std::string_view>)`
+other. Exposed as `supple::closestMatch(std::string_view, std::span<const std::string_view>)` in core-base
 for reuse (command names, plugin keys, notation).
 
 ### B.3 Units
@@ -508,3 +508,7 @@ threads. Recursion depth bounded by core-json's parse depth.
   with correct JSON Pointer paths, unit strings (every alias row above),
   unknown-member policies with warnings, and exported JSON Schema checked
   against golden JSON files.
+
+## Implementation notes (not specification changes)
+
+- The unit table mentions `dBFS` only for absolute level fields, but the closed `Unit` set has no distinct absolute-level tag. `parseQuantity` rejects `dBFS` until the caller has an explicit way to declare that distinction.
