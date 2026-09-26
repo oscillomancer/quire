@@ -1,0 +1,25 @@
+<REAPER_PROJECT 0.1 "7.80/linux-x86_64" 0
+  RIPPLE 0 0
+  AUTOXFADE 1
+  TEMPO 120 4 4 0
+  SAMPLERATE 44100 0 0
+  RENDER_FILE "/tmp/reaper-ux-render.wav"
+  RENDER_PATTERN "research"
+  RENDER_RANGE 1 0 0 0 1000
+  RENDER_FMT 0 2 0
+  <TRACK {A0000000-0000-0000-0000-000000000001}
+    NAME "MIDI source"
+    NCHAN 4
+    MAINSEND 1 0
+    <ITEM
+      POSITION 0
+      LENGTH 2
+      GUID {B0000000-0000-0000-0000-000000000001}
+      <SOURCE MIDI
+        HASDATA 1 960 QN
+        E 0 90 3c 64
+        E 960 80 3c 00
+      >
+    >
+  >
+>

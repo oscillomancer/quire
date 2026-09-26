@@ -1,0 +1,15 @@
+// Generated from cmake/Product.cmake. Do not edit; do not hard-code these
+// values anywhere else.
+#pragma once
+
+#include <string_view>
+
+namespace supple::product {
+
+inline constexpr std::string_view kName = "@PRODUCT_NAME@";
+inline constexpr std::string_view kSlug = "@PRODUCT_SLUG@";
+inline constexpr std::string_view kVendor = "@PRODUCT_VENDOR@";
+inline constexpr std::string_view kVendorId = "@PRODUCT_VENDOR_ID@";
+inline constexpr std::string_view kVersion = "@PRODUCT_VERSION@";
+
+}  // namespace supple::product

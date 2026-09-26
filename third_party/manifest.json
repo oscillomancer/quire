@@ -1,0 +1,26 @@
+{
+  "schema": "supple.third-party/1",
+  "allowed_licenses": ["MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib",
+                       "Apache-2.0", "BSL-1.0", "CC0-1.0", "Unlicense", "OFL-1.1"],
+  "dependencies": [
+    { "name": "clap", "dir": "clap", "license": "MIT", "license_file": "clap/LICENSE",
+      "version": "1.2.10", "source": "https://github.com/free-audio/clap",
+      "commit": "195b42a004144fab0b3cf95e9c067187d15365b7",
+      "purpose": "CLAP plugin ABI headers (hosting and stock plugins)", "linkage": "headers" },
+    { "name": "doctest", "dir": "doctest", "license": "MIT", "license_file": "doctest/LICENSE.txt",
+      "version": "2.5.3", "source": "https://github.com/doctest/doctest",
+      "commit": "2d0a9359a60c51affe2a9bebb1be1dca47868151",
+      "purpose": "Unit test framework (tests only, never shipped)", "linkage": "tests" },
+    { "name": "dr_libs", "dir": "dr_libs", "license": "Unlicense OR MIT-0", "license_file": "dr_libs/LICENSE",
+      "version": "dr_wav 0.14.5 (dr_flac, dr_mp3 same commit)", "source": "https://github.com/mackron/dr_libs",
+      "commit": "fa931f3285ced10ace628f7f1ac951e1951e7ea6",
+      "purpose": "WAV read/write, FLAC and MP3 decode", "linkage": "static" },
+    { "name": "pocketfft", "dir": "pocketfft", "license": "BSD-3-Clause", "license_file": "pocketfft/LICENSE.md",
+      "version": "cpp branch", "source": "https://github.com/mreineck/pocketfft",
+      "commit": "c90e55b3d529f8efa40ed01a20de22405f45fc65",
+      "purpose": "FFT for offline analysis and analyzer displays", "linkage": "headers" }
+  ],
+  "system_libraries": [
+    { "name": "libc/libstdc++", "license": "system", "purpose": "C/C++ runtime" }
+  ]
+}

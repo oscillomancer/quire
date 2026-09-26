@@ -1,0 +1,86 @@
+# Shared target helpers. Every first-party target goes through
+# supple_target_defaults(); third-party targets never do.
+
+set(SUPPLE_SANITIZE "" CACHE STRING
+    "Sanitizer set for first-party targets: '', address, undefined, thread, realtime (comma-separated)")
+option(SUPPLE_WERROR "Treat warnings as errors on first-party targets" OFF)
+
+set(_supple_sanitize_flags "")
+if(SUPPLE_SANITIZE)
+  string(REPLACE "," ";" _san_list "${SUPPLE_SANITIZE}")
+  foreach(_san IN LISTS _san_list)
+    if(_san STREQUAL "address")
+      list(APPEND _supple_sanitize_flags -fsanitize=address -fno-omit-frame-pointer)
+    elseif(_san STREQUAL "undefined")
+      list(APPEND _supple_sanitize_flags -fsanitize=undefined -fno-sanitize-recover=undefined)
+    elseif(_san STREQUAL "thread")
+      list(APPEND _supple_sanitize_flags -fsanitize=thread)
+    elseif(_san STREQUAL "realtime")
+      if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "RealtimeSanitizer requires Clang")
+      endif()
+      list(APPEND _supple_sanitize_flags -fsanitize=realtime)
+    else()
+      message(FATAL_ERROR "Unknown sanitizer '${_san}'")
+    endif()
+  endforeach()
+endif()
+
+function(supple_target_defaults target)
+  target_compile_features(${target} PUBLIC cxx_std_20)
+  set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+  get_target_property(_type ${target} TYPE)
+  if(_type STREQUAL "INTERFACE_LIBRARY")
+    return()
+  endif()
+  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow
+                                           -Wnon-virtual-dtor -Wold-style-cast
+                                           -Wcast-align -Woverloaded-virtual
+                                           -Wnull-dereference -Wdouble-promotion)
+  if(SUPPLE_WERROR)
+    target_compile_options(${target} PRIVATE -Werror)
+  endif()
+  if(_supple_sanitize_flags)
+    target_compile_options(${target} PRIVATE ${_supple_sanitize_flags})
+    target_link_options(${target} PRIVATE ${_supple_sanitize_flags})
+  endif()
+endfunction()
+
+# supple_add_library(<name> [SOURCES ...] [DEPS ...])
+# Creates target <name> (e.g. core-json) with alias supple::<name>.
+# Header-only when SOURCES is empty.
+function(supple_add_library name)
+  cmake_parse_arguments(ARG "" "" "SOURCES;DEPS;PRIVATE_DEPS" ${ARGN})
+  if(ARG_SOURCES)
+    add_library(${name} STATIC ${ARG_SOURCES})
+    target_include_directories(${name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                       PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(${name} PUBLIC ${ARG_DEPS} PRIVATE ${ARG_PRIVATE_DEPS})
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  else()
+    add_library(${name} INTERFACE)
+    target_include_directories(${name} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(${name} INTERFACE ${ARG_DEPS})
+  endif()
+  supple_target_defaults(${name})
+  add_library(supple::${name} ALIAS ${name})
+endfunction()
+
+# supple_add_tests(<lib> SOURCES ... [DEPS ...] [LABELS ...])
+# Builds <lib>.tests (doctest) and registers it with CTest.
+function(supple_add_tests lib)
+  if(NOT SUPPLE_BUILD_TESTS)
+    return()
+  endif()
+  cmake_parse_arguments(ARG "" "" "SOURCES;DEPS;LABELS" ${ARGN})
+  set(t ${lib}.tests)
+  add_executable(${t} ${ARG_SOURCES})
+  target_link_libraries(${t} PRIVATE ${lib} ${ARG_DEPS} supple::doctest-main)
+  supple_target_defaults(${t})
+  add_test(NAME ${t} COMMAND ${t})
+  set_tests_properties(${t} PROPERTIES LABELS "${lib};${ARG_LABELS}")
+  if(ARG_LABELS MATCHES "rt")
+    set_tests_properties(${t} PROPERTIES ENVIRONMENT
+      "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")
+  endif()
+endfunction()
