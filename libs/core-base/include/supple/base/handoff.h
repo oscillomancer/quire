@@ -19,6 +19,10 @@
 //   ring); otherwise it keeps using the current object and tries again next
 //   block — it never frees and never waits.
 // - collect() frees retired objects on the control thread.
+// - Once acquire() returns a new object, the previous one belongs to the
+//   control thread and may be freed at any moment: the audio thread must not
+//   touch it again (copy what it needs from the old object first, or keep its
+//   own record — see the engine's list of processing plugin instances).
 // - Generations let the control thread observe adoption (e.g. to know that a
 //   render plan is live) without extra synchronization.
 //

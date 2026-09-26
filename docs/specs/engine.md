@@ -278,3 +278,33 @@ Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 
 Results are recorded with kernel, PipeWire version, quantum actually
 granted, and CPU governor (read-only facts).
+
+## Implementation notes (2026-09-26, orchestrator)
+
+- **Code layout:** `host/engine/src/plan.{h,cpp}` is the shared compiled plan
+  (compile on the main thread, prepare = activation/latency/buffers/events,
+  `processBlock` and `locate` on the audio thread); `offline.cpp` drives it
+  for `renderOffline`, `realtime.cpp` for the `Engine`. Real-time output is
+  bit-identical to the offline render for block-size-invariant plugins
+  (tested at 128-frame device blocks against 512-frame offline blocks, with
+  and without plugin latency).
+- **Plan hand-off:** `RtHandoff<Plan>`. `acquire()` returns the previous plan
+  to the main thread immediately, so the audio thread keeps its own
+  preallocated list of the instances it is processing; on adoption it stops
+  instances the new plan dropped and starts new ones. The main thread prunes
+  the instance pool only after the newest plan is adopted (`service()`).
+  Plans share ownership of the session's TimeMap (a session version may be
+  freed while its plan plays).
+- **Transport:** play/pause/seek/shutdown on an SPSC command queue; pause and
+  seek `reset()` the plugins (no hanging notes); seek re-locates event and
+  automation cursors and clears delay lines. The live output lags the
+  render position by the plan's output latency.
+- **Mixing decisions:** instruments add their output to the track's input;
+  effects mix wet/dry against the input delayed by their latency; bypass is
+  compensated (a delay of the stage's latency); the pan law applies to tracks,
+  the master pans as a balance; mute silences the post-fader tap only; a
+  solo-silenced track is still processed.
+- **Not yet:** anticipative processing and the worker pool (every node runs
+  in the callback), the JACK backend, plugin-parameter automation, stems and
+  render jobs, resampling/stretching of audio items, the 10 ms crossfade on
+  structural swaps.
