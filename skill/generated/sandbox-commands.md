@@ -2,6 +2,66 @@
 
 Generated from the command registry.
 
+## `analyze@1`
+
+Analyze a render or audio file: loudness, spectrum, pitch, envelope, stereo.
+
+source: rd_<n> or a file path. Report supple.analysis-report/1.0: loudness (LUFS, LRA, true peak), spectral (centroid, rolloff, flatness, tilt, named band levels relative to the total), harmonic (f0, note, harmonics in dB relative to the fundamental), envelope (attack, decay to -20 dB, release after note-off, onsets), stereo (width, correlation). note_off_s defaults to the end of a render's input. Envelope values (attack, decay, release) describe single notes: render one note to measure them.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `source` | string |  |  |  | A render id (rd_1) or an audio file path. |
+| `detail` | string |  |  | "summary" | summary: key scalars (≤ 400 tokens); standard: + percentiles, band shares, 1/3-octave spectrum; full: + time series. |
+| `note_off_s` | number |  | 0.0..3600.0 |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "analysis",
+  "properties": {
+    "report": {},
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["report", "summary"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_render`: no such render Hint: session.get lists the renders
+- `audio.*`: the file cannot be read Hint: WAV, FLAC or MP3
+
+### Examples
+
+**Analyze the last render** (`synth_and_render`)
+
+```json
+{
+  "source": "rd_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "report": "<any>",
+  "summary": "<any>"
+}
+
+```
+
 ## `batch@1`
 
 Run commands atomically.
@@ -43,6 +103,65 @@ Result:
 {
   "label": "",
   "results": []
+}
+
+```
+
+## `compare@1`
+
+Compare two renders or files: notable descriptor changes and timbre distance.
+
+Notable changes use fixed thresholds (loudness 1 LU, centroid 10 %, band levels 1.5 dB, harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the 1/3-octave spectra after removing the level offset: a pure gain change reads 0.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `reference` | string |  |  |  | A render id (rd_1) or an audio file path. |
+| `test` | string |  |  |  | A render id (rd_1) or an audio file path. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "comparison",
+  "properties": {
+    "notable": {},
+    "ltas_rms_db": {
+      "type": "number"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["notable", "ltas_rms_db", "summary"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**A render against itself** (`synth_and_render`)
+
+```json
+{
+  "reference": "rd_1",
+  "test": "rd_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "notable": [],
+  "ltas_rms_db": 0.0,
+  "summary": "<any>"
 }
 
 ```
@@ -229,6 +348,57 @@ Result:
     "fraction": 0.0,
     "message": ""
   }
+}
+
+```
+
+## `masking@1`
+
+Estimate where one sound masks another (critical bands).
+
+masker (e.g. the kick) and maskee (e.g. the bass): renders or files at the same sample rate. Per Bark band: % of the maskee's active frames masked and by how much; the three worst bands. An estimate for corrective mixing, not a psychoacoustic model of record.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `masker` | string |  |  |  | A render id (rd_1) or an audio file path. |
+| `maskee` | string |  |  |  | A render id (rd_1) or an audio file path. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "masking",
+  "properties": {
+    "result": {}
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**A render masking itself** (`synth_and_render`)
+
+```json
+{
+  "masker": "rd_1",
+  "maskee": "rd_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "result": "<any>"
 }
 
 ```
@@ -1034,6 +1204,65 @@ Result:
 
 ```
 
+## `profile.evaluate@1`
+
+Score a render against a target descriptor profile.
+
+profile: {"schema": "supple.analysis-profile/1.0", "targets": {"<report key>": {"target": x, "tolerance": t, "weight"?: w} | {"min"?: a, "max"?: b}}, "ltas"?: [31 relative dB]}. Keys are dotted report paths such as spectral.centroid_hz.median or harmonic.harmonics_db.3. Returns per-target pass and normalized distance, and a weighted loss (0 = on target).
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `source` | string |  |  |  | A render id (rd_1) or an audio file path. |
+| `profile` | value |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "profile_result",
+  "properties": {
+    "result": {}
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**A brightness target** (`synth_and_render`)
+
+```json
+{
+  "source": "rd_1",
+  "profile": {
+    "schema": "supple.analysis-profile/1.0",
+    "targets": {
+      "spectral.centroid_hz.median": {
+        "target": 1500,
+        "tolerance": 500
+      }
+    }
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "result": "<any>"
+}
+
+```
+
 ## `registry.describe@1`
 
 Describe a command.
@@ -1194,7 +1423,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `tempo` | value | bpm | 1.0..999.0 |  | Quantity strings are range-checked by the server. |
 | `tail_s` | number |  | 0.0..60.0 |  |  |
 | `name` | string |  |  |  |  |
-| `analyze` | string |  |  | "none" | Analysis detail (more levels arrive with core-analysis). |
+| `analyze` | string |  |  | "none" | Also analyze the render (see the analyze command); summary is compact (≤ 400 tokens). |
 
 ### Result
 
@@ -1235,7 +1464,8 @@ Kind: `action`. Exposure: `mcp-tool`.
       "items": {
         "type": "string"
       }
-    }
+    },
+    "analysis": {}
   },
   "required": ["render", "path", "seconds", "peak_dbfs", "tail_s", "tail_capped", "latency_samples"],
   "additionalProperties": false

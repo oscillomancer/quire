@@ -444,7 +444,7 @@ real-time engine). The code is the reference; these notes explain the choices.
   envelope `retrigger` field only matters in mono mode. Envelopes restart from
   their current level (no click).
 - **Gain staging:** one voice with one oscillator at 0 dB peaks near
-  −12 dBFS (fixed internal headroom); unison voices are normalized by
+  −6 dBFS (fixed internal headroom); unison voices are normalized by
   1/√count. Oscillator and amp pan are constant power with unity at centre.
 - **Control grid:** modulation is evaluated every 16 base-rate samples on a
   grid anchored at each voice's start (global modulators and FX parameters at

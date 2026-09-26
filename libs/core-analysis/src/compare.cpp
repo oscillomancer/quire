@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdlib>
 #include <set>
 #include <sstream>
 
@@ -35,27 +36,34 @@ std::string unitOf(std::string_view key) {
     return "";
 }
 
-// Whether a change from a to b is notable (spec §6 thresholds).
-bool notable(std::string_view key, double a, double b) {
+// How large a change from a to b is relative to its notability threshold
+// (spec §6); ≥ 1 is notable, 0 for descriptors without a threshold.
+double score(std::string_view key, double a, double b) {
     const double d = std::fabs(b - a);
-    auto rel = [&](double frac) { return std::fabs(a) > 0.0 ? d / std::fabs(a) >= frac : d > 0.0; };
+    auto rel = [&](double frac) {
+        return std::fabs(a) > 0.0 ? d / std::fabs(a) / frac : (d > 0.0 ? 1.0 : 0.0);
+    };
     if (startsWith(key, "loudness.true_peak") || startsWith(key, "loudness.sample_peak"))
-        return d >= 0.5;
-    if (startsWith(key, "loudness.")) return d >= 1.0;
+        return d / 0.5;
+    if (startsWith(key, "loudness.")) return d / 1.0;
     if (startsWith(key, "spectral.centroid_hz") || startsWith(key, "spectral.rolloff_hz"))
-        return endsWith(key, ".median") && rel(0.10);
-    if (startsWith(key, "spectral.bands.") && endsWith(key, ".level_db")) return d >= 1.5;
-    if (key == "spectral.tilt_db_per_oct") return d >= 1.0;
-    if (key == "spectral.flatness.median") return d >= 0.05;
-    if (key == "stereo.correlation") return d >= 0.1;
+        return endsWith(key, ".median") ? rel(0.10) : 0.0;
+    if (startsWith(key, "spectral.bands.") && endsWith(key, ".level_db")) return d / 1.5;
+    if (key == "spectral.tilt_db_per_oct") return d / 1.0;
+    if (key == "spectral.flatness.median") return d / 0.05;
+    if (key == "stereo.correlation") return d / 0.1;
     if (key == "stereo.width" || (startsWith(key, "stereo.bands.") && endsWith(key, ".width")))
-        return d >= 0.05;
+        return d / 0.05;
     if (key == "envelope.attack_ms" || key == "envelope.decay20_ms" || key == "envelope.release_ms")
         return rel(0.20);
     if (key == "harmonic.f0_hz")
-        return a > 0.0 && b > 0.0 && std::fabs(1200.0 * std::log2(b / a)) >= 10.0;
-    if (startsWith(key, "harmonic.harmonics_db.")) return d >= 3.0;
-    return false;
+        return a > 0.0 && b > 0.0 ? std::fabs(1200.0 * std::log2(b / a)) / 10.0 : 0.0;
+    if (startsWith(key, "harmonic.harmonics_db.")) {
+        // Harmonics 2..8 (the summary's set); higher ones are too weak to lead.
+        const int k = std::atoi(std::string(key.substr(key.rfind('.') + 1)).c_str());
+        return k <= 8 ? d / 3.0 : 0.0;
+    }
+    return 0.0;
 }
 
 // Every key a report can carry (profiles are validated against it).
@@ -190,11 +198,14 @@ Comparison compare(const Report& reference, const Report& test) {
         auto it = b.find(key);
         if (it == b.end()) continue;
         c.deltas.push_back(
-            {key, va, it->second, it->second - va, unitOf(key), notable(key, va, it->second)});
+            {key, va, it->second, it->second - va, unitOf(key), score(key, va, it->second) >= 1.0});
     }
+    // Notable first, largest relative to its threshold first.
     std::stable_sort(
-        c.deltas.begin(), c.deltas.end(),
-        [](const DescriptorDelta& x, const DescriptorDelta& y) { return x.notable > y.notable; });
+        c.deltas.begin(), c.deltas.end(), [](const DescriptorDelta& x, const DescriptorDelta& y) {
+            if (x.notable != y.notable) return x.notable;
+            return score(x.key, x.reference, x.test) > score(y.key, y.reference, y.test);
+        });
     if (reference.spectral && test.spectral)
         c.ltasRmsDb = ltasRms(reference.spectral->ltasDb, test.spectral->ltasDb, &c.ltasDeltaDb);
     return c;

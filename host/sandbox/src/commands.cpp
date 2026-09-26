@@ -6,6 +6,7 @@
 #include <cmath>
 #include <fstream>
 
+#include "analysis_commands.h"
 #include "supple/base/files.h"
 #include "supple/notation/notation.h"
 
@@ -128,7 +129,7 @@ struct PresetListResult {
     std::vector<PresetEntry> presets;
 };
 
-enum class Analyze { None };
+enum class Analyze { None, Summary, Standard, Full };
 struct RenderArgs {
     std::optional<std::string> notation, midiFile, audioFile;
     std::optional<double> bars, seconds, tempo, tailS;
@@ -141,6 +142,7 @@ struct RenderResultArgs {
     bool tailCapped = false;
     std::int64_t latencySamples = 0;
     std::optional<std::vector<std::string>> warnings, log;
+    std::optional<json::Value> analysis;
 };
 
 struct SessionSetArgs {
@@ -780,8 +782,12 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                 .field("tail_s", &RenderArgs::tailS, schema::number().range(0, 60))
                 .field("name", &RenderArgs::name, schema::string().maxLength(200))
                 .field("analyze", &RenderArgs::analyze,
-                       schema::enumeration<Analyze>({{Analyze::None, "none"}})
-                           .doc("Analysis detail (more levels arrive with core-analysis)."))
+                       schema::enumeration<Analyze>({{Analyze::None, "none"},
+                                                     {Analyze::Summary, "summary"},
+                                                     {Analyze::Standard, "standard"},
+                                                     {Analyze::Full, "full"}})
+                           .doc("Also analyze the render (see the analyze command); summary is "
+                                "compact (≤ 400 tokens)."))
                 .defaultValue(Analyze::None)
                 .build();
         c.result =
@@ -795,6 +801,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                 .field("latency_samples", &RenderResultArgs::latencySamples, schema::integer())
                 .field("warnings", &RenderResultArgs::warnings, stringList())
                 .field("log", &RenderResultArgs::log, stringList())
+                .field("analysis", &RenderResultArgs::analysis, schema::any())
                 .build();
         c.errors = {
             {"notation.*", "the notation does not compile", "the error has line:col and a hint"},
@@ -826,6 +833,15 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
             out.latencySamples = r.latency;
             if (!warnings.empty()) out.warnings = std::move(warnings);
             if (!r.log.empty()) out.log = r.log;
+            if (a.analyze != Analyze::None) {
+                const auto detail = a.analyze == Analyze::Full       ? analysis::Detail::Full
+                                    : a.analyze == Analyze::Standard ? analysis::Detail::Standard
+                                                                     : analysis::Detail::Summary;
+                auto report = analyzeRender(s, r.id, detail);
+                if (!report) return std::move(report).error();
+                if (RenderRecord* rec2 = s.mutableRender(r.id)) rec2->analysis = *report;
+                out.analysis = std::move(*report);
+            }
             return out;
         };
         registry.add(std::move(c));
@@ -927,6 +943,8 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         };
         registry.add(std::move(c));
     }
+
+    registerAnalysisCommands(registry);
 }
 
 // --- host ------------------------------------------------------------------------------

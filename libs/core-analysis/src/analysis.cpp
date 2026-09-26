@@ -926,8 +926,9 @@ std::string summarize(const Report& r) {
     o.setf(std::ios::fixed);
     o.precision(1);
     if (r.loudness && std::isfinite(r.loudness->integrated)) {
-        o << r.loudness->integrated << " LUFS (LRA " << r.loudness->lra << " LU), true peak "
-          << r.loudness->truePeak << " dBTP. ";
+        o << r.loudness->integrated << " LUFS";
+        if (std::isfinite(r.loudness->lra)) o << " (LRA " << r.loudness->lra << " LU)";
+        o << ", true peak " << r.loudness->truePeak << " dBTP. ";
     } else if (r.loudness) {
         o << "Silent. ";
     }

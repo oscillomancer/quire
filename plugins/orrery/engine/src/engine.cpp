@@ -33,7 +33,7 @@ constexpr int kMaxMods = 96;                         // modulated destinations p
 constexpr std::uint32_t kFadeSamples = 64;           // base-rate samples
 constexpr std::size_t kSourceCount = static_cast<std::size_t>(Source::Count);
 constexpr int kMaxHeld = 16;
-constexpr double kVoiceGain = 0.25;  // -12 dB internal headroom per voice
+constexpr double kVoiceGain = 0.5;  // -6 dB internal headroom per voice
 
 // --- program: a compiled patch -------------------------------------------------------
 
@@ -591,7 +591,7 @@ struct Engine::Impl {
             p += eff(v, index(kVoice, VoiceF::unison_spread), te, f) / 100.0 *
                  (2.0 * v.unison / (v.unisonCount - 1) - 1.0);
         const auto pg = dsp::pan(p);
-        // Headroom: one voice with one oscillator at 0 dB peaks at -12 dBFS;
+        // Headroom: one voice with one oscillator at 0 dB peaks at -6 dBFS;
         // unison voices are normalized by 1/sqrt(count).
         const double stage = kVoiceGain / std::sqrt(static_cast<double>(v.unisonCount));
         out.ampL = amp * pg.l * std::numbers::sqrt2 * stage;
