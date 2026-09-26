@@ -28,8 +28,8 @@ asan, ubsan, tsan, rtsan + license + format; ADRs 0004/0005/0006 recorded.
 | P1.2 | core-schema (typed binding, validation with hints, units, JSON Schema export, DocumentType) | `specs/core-json.md` B | **done** (json; merged). Follow-up: test every error code's hint text |
 | P1.3 | midi (model, canonical order, SMF I/O) | `specs/notation.md` A | first cut committed on p1-notation; being revised for the amended SMF API (paused: Codex usage limit until 05:38) |
 | P1.4 | notation (compiler, decompiler, round-trip law, corpus, fuzz) | `specs/notation.md` B–C | in progress (notation; paused, uncommitted work in its worktree) |
-| P1.5 | core-params (semantic params, units, curves, normalization, text) | `specs/core-params.md` | spec frozen; queued (params worker, after 05:38) |
-| P1.6 | core-patch (patch documents, merge, validate, canonical, describe) | `specs/core-patch.md` | spec frozen; queued (params worker) |
+| P1.5 | core-params (semantic params, units, curves, normalization, text) | `specs/core-params.md` | **done** (orchestrator); review by scout pending |
+| P1.6 | core-patch (patch documents, merge, validate, canonical, describe) | `specs/core-patch.md` | **done** (orchestrator); review by scout pending |
 | P1.7 | core-analysis: loudness (BS.1770/R128, true peak, LRA) validated against Tech 3341/3342 signals | `specs/core-analysis.md` | spec frozen (exact EBU cases); queued (analysis worker) |
 | P1.8 | core-analysis: spectral, harmonic, envelope, stereo, comparison, masking, reports | `specs/core-analysis.md` | after P1.7 |
 | P1.9 | core-dsp: oversampling, filters, smoothing, interpolation, denormals | — | after P1.7 |
@@ -84,7 +84,8 @@ works alone on specs and review.
 - **reaper** (Sol) — REAPER research; idle.
 - **json** (Sol) — P1.1/P1.2 done; next P1.11 command-bus.
 - **notation** (Sol) — P1.3/P1.4, paused mid-task.
-- Queued: **analysis** (P1.7–P1.10), **params** (P1.5–P1.6), **probe** (P2.3).
+- Queued: **analysis** (P1.7–P1.10), **probe** (P2.3).
+- core-base RT primitives (SpscRing, RtHandoff, Rng): done (orchestrator); concurrency review by scout pending.
 
 ## Blocked / waiting on Nate
 
