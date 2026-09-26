@@ -1,0 +1,161 @@
+#include <supple/cmd/bus.h>
+#include <algorithm>
+#include <cmath>
+
+namespace supple::cmd {
+namespace {
+json::Value errorJson(const Error& error) {
+    json::Value value = json::Value::object();
+    value["code"] = error.code;
+    value["message"] = error.message;
+    value["path"] = error.path;
+    value["hint"] = error.hint;
+    if (!error.details.empty()) {
+        value["details"] = json::Value::array();
+        for (const auto& detail : error.details) value["details"].push_back(errorJson(detail));
+    }
+    return value;
+}
+}  // namespace
+
+json::Value JobManager::snapshot(const Job& job) {
+    json::Value value = json::Value::object();
+    value["job"] = job.id;
+    value["status"] = job.status;
+    value["progress"] = job.progress;
+    if (job.status == "done") value["result"] = job.result;
+    if (job.status == "failed") value["error"] = errorJson(job.error);
+    return value;
+}
+std::string JobManager::create() {
+    std::lock_guard lock(mutex_);
+    std::string id = "jb_" + std::to_string(next_++);
+    Job job;
+    job.id = id;
+    job.progress["fraction"] = 0.0;
+    job.progress["message"] = "";
+    jobs_.emplace(id, std::move(job));
+    order_.push_back(id);
+    prune();
+    return id;
+}
+bool JobManager::cancelled(std::string_view id) const {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    return it == jobs_.end() || it->second.cancelRequested;
+}
+Status JobManager::progress(std::string_view id, double fraction, std::string message,
+                            json::Value extra) {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    auto& job = it->second;
+    if (job.status != "running") return Error("job.finished", "job is no longer running", "/job");
+    if (!std::isfinite(fraction) || fraction < 0 || fraction > 1)
+        return Error("job.progress", "fraction must be between 0 and 1", "/fraction");
+    job.progress = extra.isObject() ? std::move(extra) : json::Value::object();
+    job.progress["fraction"] = fraction;
+    job.progress["message"] = std::move(message);
+    auto now = std::chrono::steady_clock::now();
+    if (job.lastProgressEvent.time_since_epoch().count() == 0 ||
+        now - job.lastProgressEvent >= std::chrono::milliseconds(500)) {
+        events_.emplace_back("job.progress", snapshot(job));
+        job.lastProgressEvent = now;
+    }
+    cv_.notify_all();
+    return {};
+}
+Status JobManager::complete(std::string_view id, json::Value result) {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    if (it->second.status != "running")
+        return Error("job.finished", "job is no longer running", "/job");
+    it->second.status = it->second.cancelRequested ? "cancelled" : "done";
+    it->second.result = std::move(result);
+    events_.emplace_back("job.done", snapshot(it->second));
+    cv_.notify_all();
+    prune();
+    return {};
+}
+Status JobManager::fail(std::string_view id, Error error) {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    if (it->second.status != "running")
+        return Error("job.finished", "job is no longer running", "/job");
+    it->second.status = it->second.cancelRequested ? "cancelled" : "failed";
+    it->second.error = std::move(error);
+    events_.emplace_back("job.done", snapshot(it->second));
+    cv_.notify_all();
+    prune();
+    return {};
+}
+Status JobManager::cancel(std::string_view id) {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    if (it->second.status == "running") {
+        it->second.cancelRequested = true;
+        it->second.status = "cancelled";
+        events_.emplace_back("job.done", snapshot(it->second));
+        cv_.notify_all();
+        prune();
+    }
+    return {};
+}
+Result<json::Value> JobManager::status(std::string_view id) const {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    return snapshot(it->second);
+}
+Result<json::Value> JobManager::wait(std::string_view id, double timeoutSeconds) {
+    if (!std::isfinite(timeoutSeconds) || timeoutSeconds < 0 || timeoutSeconds > 30)
+        return Error("job.timeout", "timeout_s must be between 0 and 30", "/timeout_s");
+    std::unique_lock lock(mutex_);
+    auto key = std::string(id);
+    auto it = jobs_.find(key);
+    if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
+    cv_.wait_for(lock, std::chrono::duration<double>(timeoutSeconds), [&] {
+        auto found = jobs_.find(key);
+        return found == jobs_.end() || found->second.status != "running";
+    });
+    it = jobs_.find(key);
+    if (it == jobs_.end()) return Error("job.unknown", "job expired", "/job", "use job.list");
+    return snapshot(it->second);
+}
+json::Value JobManager::list() const {
+    std::lock_guard lock(mutex_);
+    json::Value result = json::Value::object();
+    result["jobs"] = json::Value::array();
+    for (const auto& id : order_) {
+        auto it = jobs_.find(id);
+        if (it != jobs_.end()) result["jobs"].push_back(snapshot(it->second));
+    }
+    return result;
+}
+std::vector<std::pair<std::string, json::Value>> JobManager::drainEvents() {
+    std::lock_guard lock(mutex_);
+    auto events = std::move(events_);
+    events_.clear();
+    return events;
+}
+void JobManager::prune() {
+    std::size_t finished = 0;
+    for (const auto& id : order_) {
+        auto it = jobs_.find(id);
+        if (it != jobs_.end() && it->second.status != "running") ++finished;
+    }
+    while (finished > 100) {
+        auto it = std::find_if(order_.begin(), order_.end(), [&](const std::string& id) {
+            auto found = jobs_.find(id);
+            return found != jobs_.end() && found->second.status != "running";
+        });
+        if (it == order_.end()) break;
+        jobs_.erase(*it);
+        order_.erase(it);
+        --finished;
+    }
+}
+}  // namespace supple::cmd

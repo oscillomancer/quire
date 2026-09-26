@@ -1,0 +1,1 @@
+{"steps":[{"command":"toy.add","args":{"amount":4},"as":"first"},{"command":"toy.add","args":{"amount":"${first.total}"}}]}
