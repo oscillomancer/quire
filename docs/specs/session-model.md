@@ -260,8 +260,11 @@ markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ### 5.1 Shape
 
 Canonical JSON (ADR-0009) with members in this order: `schema`, `project`,
-`tempo`, `rulers`, `tracks`, `items`, `takes`, `sources`, `routes`,
-`envelopes`, `groups`, `blobs`, `ui`. Objects keyed by ID in ID order
+`tempo` (`points`, `meters`), `rulers` (`markers`, `regions`), `tracks`,
+`items`, `takes`, `fx`, `sources` (`media`, `midi`), `routes`, `envelopes`,
+`groups`, `blobs`, `ui`. *(Amended 2026-09-26: `fx` — plugin instances are
+ID-keyed objects like the rest; chains reference them by id.)* Members equal
+to their defaults are omitted (the schema fills them in on load). Objects keyed by ID in ID order
 (numeric by kind). Compact array forms for bulk data:
 
 - MIDI notes: `[[start, length, channel, pitch, velocity, off_velocity], …]`

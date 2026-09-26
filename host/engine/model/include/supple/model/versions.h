@@ -1,0 +1,129 @@
+// Versions, undo/redo, branches and merge by replay (ADR-0008,
+// session-model §6). Every committed transaction is a Version holding the
+// resulting immutable Session plus what produced it (the resolved command
+// invocations, for replay) and what it changed.
+//
+// Branches (`main`, `agent/<agent>/<topic>`, user branches) each have a head,
+// the version they started from (undo stops there) and a redo stack.
+// Merging replays the source branch's transactions onto the target: IDs the
+// branch created are remapped to whatever the replay created (matched by
+// creation order), and an object the target changed since the fork is a
+// concurrent-edit conflict. On any conflict the target is left untouched.
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "supple/json/json.h"
+#include "supple/model/session.h"
+
+namespace supple::model {
+
+struct Invocation {
+    std::string command;
+    json::Value args;
+};
+
+struct TxnRecord {
+    std::string label;
+    std::string origin;                   // "mcp:claude-code", "gui", "lua:tidy.lua", …
+    std::vector<Invocation> invocations;  // resolved (IDs, not selectors), in order
+    // Consecutive commits with the same non-empty key replace the head
+    // instead of stacking (one fader gesture = one undo step).
+    std::string coalesceKey;
+};
+
+struct Version {
+    std::uint64_t id = 0;
+    std::vector<std::uint64_t> parents;  // none (root), one, or two (the last step of a merge)
+    std::shared_ptr<const Session> session;
+    TxnRecord txn;
+    std::vector<Change> changes;  // relative to parents[0]
+    std::vector<Id> created;      // IDs this version added, in creation order
+    std::uint64_t timeMs = 0;
+};
+
+struct Conflict {
+    enum class Kind : std::uint8_t { Invalid, ConcurrentEdit };
+    Kind kind;
+    std::size_t step = 0;       // index into the replayed transactions (0 = first after the fork)
+    std::uint64_t version = 0;  // the branch version being replayed
+    std::optional<Id> object;   // the contested object (on the target), if any
+    std::string message;
+};
+
+struct MergeOutcome {
+    bool fastForward = false;
+    bool upToDate = false;   // nothing to merge
+    std::uint64_t head = 0;  // the target's head afterwards (unchanged on conflicts)
+    std::vector<Conflict> conflicts;
+    std::map<Id, Id> remap;  // branch ID -> ID on the target
+};
+
+// Re-executes a transaction's invocations on `base` (the command layer
+// provides this), building the result as `version`.
+struct Replayed {
+    Session session;
+    std::vector<Change> changes;
+    std::vector<Id> created;  // in creation order
+};
+using Replayer = std::function<Result<Replayed>(
+    const Session& base, const std::vector<Invocation>& invocations, std::uint64_t version)>;
+
+class VersionStore {
+  public:
+    // `initial` becomes version `initial.version` on branch "main".
+    explicit VersionStore(Session initial);
+
+    const std::string& branch() const { return current_; }
+    std::shared_ptr<const Session> head() const { return head(current_); }
+    std::shared_ptr<const Session> head(std::string_view branch) const;
+    std::uint64_t headVersion(std::string_view branch) const;
+    // The version number the next commit must use (EditTxn(base, nextVersion())).
+    std::uint64_t nextVersion() const { return next_; }
+
+    // Commits on the current branch. `session.version` must be nextVersion().
+    Result<std::uint64_t> commit(Session session, TxnRecord txn, std::vector<Change> changes,
+                                 std::vector<Id> created, std::uint64_t timeMs = 0);
+
+    bool canUndo() const;
+    bool canRedo() const;
+    Status undo();  // history.nothing_to_undo
+    Status redo();  // history.nothing_to_redo
+    // The current branch's versions, newest first (up to `limit`).
+    std::vector<const Version*> history(std::size_t limit = 50) const;
+    const Version* version(std::uint64_t id) const;
+
+    Status createBranch(const std::string& name, std::string_view from);  // at from's head
+    Status switchBranch(std::string_view name);
+    Status deleteBranch(std::string_view name);  // not "main", not the current branch
+    std::vector<std::string> branches() const;
+
+    MergeOutcome merge(std::string_view from, std::string_view into, const Replayer& replay,
+                       std::uint64_t timeMs = 0);
+
+  private:
+    struct Branch {
+        std::uint64_t head = 0, base = 0;
+        std::vector<std::uint64_t> redo;
+    };
+    Result<Branch*> find(std::string_view name);
+    const Branch* lookup(std::string_view name) const;
+    std::uint64_t forkPoint(std::uint64_t a, std::uint64_t b) const;
+
+    std::map<std::uint64_t, Version> versions_;
+    std::map<std::string, Branch, std::less<>> branches_;
+    std::string current_ = "main";
+    std::uint64_t next_ = 1;
+};
+
+// Rewrites every JSON string equal to a remapped ID (used for replayed
+// arguments): IDs have a unique textual form, so exact string matches are IDs.
+json::Value remapIds(const json::Value& v, const std::map<Id, Id>& remap);
+
+}  // namespace supple::model
