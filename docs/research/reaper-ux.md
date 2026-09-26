@@ -177,3 +177,48 @@ Priority tags: **P0** for daily editing/routing needed early, **P1** for serious
 5. Inspect plugin compatibility settings through UI and copied config, then crash-test a disposable plugin bridge; do not infer isolation from scan-cache numeric fields.
 6. Inspect anticipative FX preferences in a fresh temporary config and establish key names/defaults and monitored-track behavior.
 7. `ARCHITECTURE.md`, `STATUS.md`, ADRs and component specs were absent at research start; reconcile these recommendations when those documents are available.
+
+## Addendum (2026-09-26, orchestrator): action inventory and a GUI pass
+
+**Action inventory** [verified: `reaper.kbd_enumerateActions` over sections
+0/32060/32061/32062/32063 in a temporary-config REAPER 7.80 run]: main
+section **4,367** actions (section 100 enumerates the same list), MIDI editor
+**1,103**, MIDI event list 299, inline MIDI editor 187, media explorer 293.
+Largest main-section prefixes: Track 1,331, Automation 352, Group 256, Item
+255, Item properties 204, View 133, Toolbar(s) 218, Options 118, Envelope 84,
+Ruler 77, Markers 71, Transport 61, Track lanes 61, Project tabs 60.
+Replacing digits with `N` collapses the main section to **2,018** distinct
+action *shapes*: e.g. "Track: Toggle mute for track N" exists 99 times (one
+per track number). Implication for Quire: parameterized typed commands
+(`track.mute {track, value}`) plus REAPER-style *actions* = command + bound
+arguments cover this surface with roughly an order of magnitude fewer
+registry entries, and the actions list can still present bindable, named
+entries (generated from command + argument presets).
+
+**FX chain window** [verified: GUI, ReaComp on the sidechain-return track]:
+chain list on the left with Add/Remove and a CPU/PDC readout ("0.01%/0.01%
+0/0 spls"); per-FX header with preset menu, `Param` (learn/modulation/
+envelopes), a pin-connector button labelled with the channel configuration
+("4 in 2 out" — the 3/4 sidechain input), `UI` toggle, wet/dry knob and
+bypass. The stock plugin UI already shows physical units (ms, dB, Hz, :1).
+The FX context menu contains: Add/Replace FX, **Add container / Move FX to
+container**, **Run selected FX in parallel with previous FX** (and a
+merge-MIDI variant), **Build multi-mono / multi-stereo FX**, FX chains ▸,
+Freeze track ▸, copy/cut/paste FX (with or without automation), remove, **FX
+bypass (Ctrl+B) vs FX offline (Ctrl+Alt+B)**, rename FX instance (F2), float
+window, **show embedded UI in TCP / MCP**, send all keyboard input to
+plug-in, **Chain PDC mode ▸**, **Chain oversampling ▸, FX instance
+oversampling ▸**, **Force auto-bypass on silence**, build multichannel
+routing for outputs, build 16 channels of MIDI routing, dock/close. Process
+isolation is not in this menu (it is chosen per plugin in the FX browser's
+"Run as" submenu and in plug-in preferences; not re-verified in this pass).
+
+Quire takeaways: per-FX and per-chain oversampling, parallel FX within a
+chain, containers, per-FX PDC policy, bypass ≠ offline, and auto-bypass on
+silence are all FX-chain *model* features (commands on `fx.*`), not GUI
+extras — they belong in the Phase 4 session schema.
+
+**XWayland note:** on this Hyprland setup REAPER's unfocused floating windows
+and popup menus render translucent (compositor inactive-opacity applied to
+X11 windows). Quire's X11 windows will get the same treatment; worth a
+window-rule recommendation in Phase 5 docs rather than a code workaround.
