@@ -42,8 +42,9 @@ struct Timeline {
         const auto m = meter(b);
         const auto beatTicks = std::int64_t(ppq) * 4 / m.denominator;
         const auto within = tick - start(b);
-        const auto beat = within / beatTicks + 1;
-        const auto offset = within % beatTicks;
+        const bool wholeBeat = (std::int64_t(ppq) * 4) % m.denominator == 0;
+        const auto beat = wholeBeat ? within / beatTicks + 1 : 1;
+        const auto offset = wholeBeat ? within % beatTicks : within;
         std::string result = std::to_string(b) + "." + std::to_string(beat);
         if (offset != 0) result += "+" + std::to_string(offset) + "t";
         return result;

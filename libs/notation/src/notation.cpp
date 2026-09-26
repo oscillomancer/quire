@@ -671,21 +671,26 @@ class Compiler {
             return std::nullopt;
         }
         const auto m = meter(static_cast<int>(*bar));
-        if (!validMeter(m) || (std::int64_t(result_.sequence.ppq) * 4) % m.denominator != 0) {
-            add("tick_fraction", "Position falls on a fractional beat tick.", token,
-                "Use a PPQ divisible by this meter denominator.");
+        if (!validMeter(m) || *beat < 1 || *beat > m.numerator) {
+            add("position", "Beat exceeds this bar's meter.", token,
+                "Choose a beat within the meter.");
             return std::nullopt;
         }
-        const auto beatTicks = std::int64_t(result_.sequence.ppq) * 4 / m.denominator;
-        if (*beat < 1 || *beat > m.numerator || beatTicks < 1 || *offset >= beatTicks) {
-            add("position", "Beat or tick offset exceeds this bar's meter.", token,
-                "Choose a beat within the meter and an offset below one beat.");
+        const auto beatNumerator = (*beat - 1) * std::int64_t(result_.sequence.ppq) * 4;
+        if (beatNumerator % m.denominator != 0) {
+            add("tick_fraction", "Position falls on a fractional tick.", token,
+                "Use a beat with a whole-tick onset, or use beat 1 with a tick offset.");
+            return std::nullopt;
+        }
+        const auto within = beatNumerator / m.denominator + *offset;
+        if (within >= internal::barTicks(m, result_.sequence.ppq)) {
+            add("position", "Tick offset exceeds this bar.", token,
+                "Use an offset that stays within the bar.");
             return std::nullopt;
         }
         maxBar_ = std::max(maxBar_, static_cast<int>(*bar));
-        return std::pair<int, std::int64_t>{
-            static_cast<int>(*bar),
-            barStart(static_cast<int>(*bar)) + (*beat - 1) * beatTicks + *offset};
+        return std::pair<int, std::int64_t>{static_cast<int>(*bar),
+                                            barStart(static_cast<int>(*bar)) + within};
     }
 
     std::optional<std::vector<int>> chord(std::string_view text, int octave, const Token& at) {

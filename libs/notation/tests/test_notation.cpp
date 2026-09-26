@@ -154,6 +154,25 @@ TEST_CASE("same-tick lane writes retain order through decompile") {
     CHECK(compiled->sequence == s);
 }
 
+TEST_CASE("fractional denominator beats retain integer tick controls") {
+    for (int ppq : {1, 3}) {
+        supple::midi::Sequence s;
+        s.ppq = ppq;
+        s.length = ppq * 3;
+        s.controls = {{2, supple::midi::ControlKind::CC, 0, 1, 80}};
+        DecompileOptions options;
+        options.meterAt = [](int) { return supple::midi::Meter{6, 8}; };
+        CompileContext context;
+        context.meterAt = options.meterAt;
+        auto written = decompile(s, options);
+        REQUIRE(written.ok());
+        CHECK(written->find("1.1+2t 80") != std::string::npos);
+        auto compiled = compile(*written, context);
+        REQUIRE(compiled.ok());
+        CHECK(compiled->sequence == s);
+    }
+}
+
 TEST_CASE("round-trip random canonical sequences") {
     constexpr std::uint32_t seed = 0x5a17c0de;
     std::mt19937 rng(seed);

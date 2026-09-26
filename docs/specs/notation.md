@@ -524,6 +524,9 @@ Canonical output, in order:
   a pitch or chord spelling, as in `F#4` and `{C7#9}`.
 - With a `pickup`, `length B[+Nt]` counts the pickup and then B complete bars
   from bar 1. The item starts at tick 0, so bar 1 starts at `pickupTicks`.
+- A lane's `+Nt` offset may span denominator beats but stays within its bar.
+  This lets `1.1+1t` name tick 1 in a 6/8 bar at PPQ 1: the bar is three
+  whole ticks even though individual eighth-note beat onsets can be fractional.
 - A tie retains the first segment's note-on velocity and takes the final
   segment's note-off velocity. Intermediate segments emit no separate MIDI
   note. An exact duplicate controller write may be removed only when adjacent
