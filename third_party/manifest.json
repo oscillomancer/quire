@@ -22,7 +22,7 @@
       "version": "1.2.10",
       "source": "https://github.com/free-audio/clap",
       "commit": "195b42a004144fab0b3cf95e9c067187d15365b7",
-      "purpose": "CLAP plugin ABI headers (hosting and stock plugins)",
+      "purpose": "CLAP plugin ABI headers + CMake project (hosting, stock plugins; CLAP_SDK_ROOT for clap-wrapper)",
       "linkage": "headers"
     },
     {
@@ -68,6 +68,28 @@
       "commit": "ce3bf745eb2d2dbc14a50bf2446783f691ac4353",
       "purpose": "Vector rendering for the DAW GUI (GL3); bundles stb_truetype/stb_image (public domain or MIT)",
       "linkage": "static"
+    },
+    {
+      "name": "clap-wrapper",
+      "dir": "clap-wrapper",
+      "license": "MIT",
+      "license_file": "clap-wrapper/LICENSE",
+      "version": "0.16.0 (template pin)",
+      "source": "https://github.com/free-audio/clap-wrapper",
+      "commit": "1cca996e96f29ab2be7ae9f8cfe532bbc92e1dd6",
+      "purpose": "Builds template-derived plugins as CLAP (and VST3/AUv2 when enabled). Bundles fmt (MIT, license in libs/fmt/fmt/format.h) and the PreSonus gain-reduction header (public domain).",
+      "linkage": "static (plugins only)"
+    },
+    {
+      "name": "pugl",
+      "dir": "pugl",
+      "license": "ISC AND (0BSD OR ISC)",
+      "license_file": "pugl/COPYING",
+      "version": "0.5.7 (template pin)",
+      "source": "https://github.com/lv2/pugl",
+      "commit": "b7637149ebe53124e5be90559e02a0185bbcbd73",
+      "purpose": "Plugin editor windowing (template GUI stack); not used by the DAW shell",
+      "linkage": "static (plugins only)"
     }
   ],
   "system_libraries": [
