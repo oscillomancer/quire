@@ -15,7 +15,7 @@ rather than picking one silently.
    /AGPL project, and do not read GPL source while implementing. Research of
    GPL source produces prose notes in `docs/research/` only, and a *different*
    agent implements from those notes. Dependencies must be MIT, BSD-2/3, ISC,
-   Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense, must be listed
+   Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense (fonts: OFL-1.1), must be listed
    in `THIRD_PARTY.md`, and live under `third_party/` with their license file.
    `tools/license-check` fails the build otherwise. LGPL/MPL need an approved
    entry in `HUMAN_REVIEW.md` first.

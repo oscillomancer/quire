@@ -1,26 +1,105 @@
 {
   "schema": "supple.third-party/1",
-  "allowed_licenses": ["MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib",
-                       "Apache-2.0", "BSL-1.0", "CC0-1.0", "Unlicense", "OFL-1.1"],
+  "allowed_licenses": [
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Apache-2.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "OFL-1.1"
+  ],
   "dependencies": [
-    { "name": "clap", "dir": "clap", "license": "MIT", "license_file": "clap/LICENSE",
-      "version": "1.2.10", "source": "https://github.com/free-audio/clap",
+    {
+      "name": "clap",
+      "dir": "clap",
+      "license": "MIT",
+      "license_file": "clap/LICENSE",
+      "version": "1.2.10",
+      "source": "https://github.com/free-audio/clap",
       "commit": "195b42a004144fab0b3cf95e9c067187d15365b7",
-      "purpose": "CLAP plugin ABI headers (hosting and stock plugins)", "linkage": "headers" },
-    { "name": "doctest", "dir": "doctest", "license": "MIT", "license_file": "doctest/LICENSE.txt",
-      "version": "2.5.3", "source": "https://github.com/doctest/doctest",
+      "purpose": "CLAP plugin ABI headers (hosting and stock plugins)",
+      "linkage": "headers"
+    },
+    {
+      "name": "doctest",
+      "dir": "doctest",
+      "license": "MIT",
+      "license_file": "doctest/LICENSE.txt",
+      "version": "2.5.3",
+      "source": "https://github.com/doctest/doctest",
       "commit": "2d0a9359a60c51affe2a9bebb1be1dca47868151",
-      "purpose": "Unit test framework (tests only, never shipped)", "linkage": "tests" },
-    { "name": "dr_libs", "dir": "dr_libs", "license": "Unlicense OR MIT-0", "license_file": "dr_libs/LICENSE",
-      "version": "dr_wav 0.14.5 (dr_flac, dr_mp3 same commit)", "source": "https://github.com/mackron/dr_libs",
+      "purpose": "Unit test framework (tests only, never shipped)",
+      "linkage": "tests"
+    },
+    {
+      "name": "dr_libs",
+      "dir": "dr_libs",
+      "license": "Unlicense OR MIT-0",
+      "license_file": "dr_libs/LICENSE",
+      "version": "dr_wav 0.14.5 (dr_flac, dr_mp3 same commit)",
+      "source": "https://github.com/mackron/dr_libs",
       "commit": "fa931f3285ced10ace628f7f1ac951e1951e7ea6",
-      "purpose": "WAV read/write, FLAC and MP3 decode", "linkage": "static" },
-    { "name": "pocketfft", "dir": "pocketfft", "license": "BSD-3-Clause", "license_file": "pocketfft/LICENSE.md",
-      "version": "cpp branch", "source": "https://github.com/mreineck/pocketfft",
+      "purpose": "WAV read/write, FLAC and MP3 decode",
+      "linkage": "static"
+    },
+    {
+      "name": "pocketfft",
+      "dir": "pocketfft",
+      "license": "BSD-3-Clause",
+      "license_file": "pocketfft/LICENSE.md",
+      "version": "cpp branch",
+      "source": "https://github.com/mreineck/pocketfft",
       "commit": "c90e55b3d529f8efa40ed01a20de22405f45fc65",
-      "purpose": "FFT for offline analysis and analyzer displays", "linkage": "headers" }
+      "purpose": "FFT for offline analysis and analyzer displays",
+      "linkage": "headers"
+    },
+    {
+      "name": "nanovg",
+      "dir": "nanovg",
+      "license": "Zlib",
+      "license_file": "nanovg/LICENSE.txt",
+      "version": "master @ 2026-02-19 (same pin as the plugin template)",
+      "source": "https://github.com/memononen/nanovg",
+      "commit": "ce3bf745eb2d2dbc14a50bf2446783f691ac4353",
+      "purpose": "Vector rendering for the DAW GUI (GL3); bundles stb_truetype/stb_image (public domain or MIT)",
+      "linkage": "static"
+    }
   ],
   "system_libraries": [
-    { "name": "libc/libstdc++", "license": "system", "purpose": "C/C++ runtime" }
+    {
+      "name": "libc/libstdc++",
+      "license": "system",
+      "purpose": "C/C++ runtime"
+    },
+    {
+      "name": "SDL3",
+      "license": "Zlib",
+      "purpose": "DAW application window, input, clipboard, DnD, dialogs (system package sdl3)"
+    },
+    {
+      "name": "libjack (pipewire-jack)",
+      "license": "MIT",
+      "purpose": "JACK audio/MIDI API, dlopen'ed at runtime"
+    },
+    {
+      "name": "libpipewire-0.3",
+      "license": "MIT",
+      "purpose": "native PipeWire backend (planned)"
+    },
+    {
+      "name": "alsa-lib",
+      "license": "LGPL-2.1-or-later (OS library, dynamic only)",
+      "purpose": "ALSA fallback backend (planned)"
+    },
+    {
+      "name": "libX11 / libGL",
+      "license": "MIT / system",
+      "purpose": "X11 windows, plugin GUI embedding, OpenGL"
+    }
   ]
 }
