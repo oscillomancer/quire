@@ -66,6 +66,13 @@ and how many runs per week are acceptable cost-wise? A local model on the Arc
 B580 is free but weaker; a frontier model is the real target user.
 *Meanwhile:* the harness is built and dry-run tested without calling models.
 
+### 9. Names for the stock effects — decision (low effort)
+Working names (craft nouns, in the family of your products): EQ **Facet**,
+compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
+**Flint**, saturation **Kiln**, delay **Echelon**, reverb **Nave**,
+utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
+uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
+
 ## Resolved
 
 (none yet)
