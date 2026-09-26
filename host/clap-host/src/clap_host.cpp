@@ -688,7 +688,10 @@ void Instance::stopProcessing() SUPPLE_RT {
     processing_ = false;
 }
 
-void Instance::reset() { plugin_->reset(plugin_); }
+void Instance::reset() SUPPLE_RT {
+    AudioThreadScope scope;  // CLAP: [audio-thread & active]
+    if (active_) plugin_->reset(plugin_);
+}
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
     if (!active_) return false;

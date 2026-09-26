@@ -1,0 +1,165 @@
+#include <doctest/doctest.h>
+
+#include <cmath>
+
+#include <supple/clap/semantic_params.h>
+#include <supple/sandbox/render.h>
+
+using namespace supple;
+using namespace supple::sandbox;
+
+namespace {
+
+const std::filesystem::path kFixture = FIXTURE_CLAP_PATH;
+
+std::unique_ptr<host::Instance> make(const std::string& id) {
+    auto list = host::scan(std::span<const std::filesystem::path>(&kFixture, 1));
+    REQUIRE(list);
+    for (const auto& p : *list)
+        if (p.id == id) {
+            auto inst = host::Instance::create(p, {});
+            REQUIRE(inst);
+            return std::move(*inst);
+        }
+    FAIL("fixture missing: ", id);
+    return nullptr;
+}
+
+TimedEvent note(std::int64_t at, bool on, int key = 69) {
+    TimedEvent e;
+    e.sample = at;
+    e.event.kind = on ? host::Event::Kind::NoteOn : host::Event::Kind::NoteOff;
+    e.event.key = static_cast<std::int16_t>(key);
+    e.event.velocity = 1.0;
+    return e;
+}
+
+double energy(const std::vector<float>& v, std::size_t from, std::size_t to) {
+    double e = 0;
+    for (std::size_t i = from; i < to && i < v.size(); ++i)
+        e += static_cast<double>(v[i]) * static_cast<double>(v[i]);
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("instrument render: notes at exact samples, silent tail detection" *
+          doctest::description("rt")) {
+    auto sine = make("com.suppleaudio.test.sine");
+    host::Instance* chain[] = {sine.get()};
+    RenderSettings s;
+    RenderRequest req;
+    req.events = {note(1000, true), note(5000, false)};
+    auto r = render(chain, s, req);
+    REQUIRE(r);
+    const auto& L = r->audio.channels[0];
+    CHECK(energy(L, 0, 1001) == 0.0);  // sine starts at phase 0 at sample 1000
+    CHECK(energy(L, 1001, 5000) > 10.0);
+    CHECK(energy(L, 5000, L.size()) == 0.0);
+    CHECK(r->latency == 0);
+    CHECK_FALSE(r->tailCapped);
+    // Musical length 5001 + a 0.2 s silent hold, rounded to whole blocks.
+    CHECK(L.size() >= 5001 + 9600);
+    CHECK(L.size() < 5001 + 9600 + 2 * 256);
+    CHECK(r->peakDbfs == doctest::Approx(20 * std::log10(0.25)).epsilon(0.001));
+}
+
+TEST_CASE("renders are deterministic and block-size invariant") {
+    auto sine = make("com.suppleaudio.test.sine");
+    host::Instance* chain[] = {sine.get()};
+    RenderRequest req;
+    req.events = {note(10, true, 60), note(333, true, 64), note(4000, false, 60),
+                  note(4500, false, 64)};
+    req.lengthSamples = 6000;
+    RenderSettings s;
+    s.tailLimitSeconds = 0.0;  // fixed length
+    auto a = render(chain, s, req);
+    auto b = render(chain, s, req);
+    REQUIRE(a);
+    REQUIRE(b);
+    CHECK(a->audio.channels == b->audio.channels);
+    for (std::uint32_t bs : {1u, 64u, 1000u, 4096u}) {
+        s.blockSize = bs;
+        auto c = render(chain, s, req);
+        REQUIRE(c);
+        CHECK(c->audio.channels == a->audio.channels);
+    }
+}
+
+TEST_CASE("chain latency is compensated") {
+    auto sine = make("com.suppleaudio.test.sine");
+    auto gain = make("com.suppleaudio.test.gain");
+    RenderRequest req;
+    req.events = {note(100, true), note(2000, false)};
+    req.lengthSamples = 3000;
+    RenderSettings s;
+    s.tailLimitSeconds = 0.0;
+    host::Instance* dry[] = {sine.get()};
+    auto reference = render(dry, s, req);
+    REQUIRE(reference);
+    REQUIRE(gain->setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    host::Instance* chain[] = {sine.get(), gain.get()};
+    auto r = render(chain, s, req);
+    REQUIRE(r);
+    CHECK(r->latency == 64);
+    REQUIRE(r->audio.frames() == reference->audio.frames());
+    CHECK(r->audio.channels == reference->audio.channels);  // 0 dB gain, aligned
+}
+
+TEST_CASE("effect render with input audio and a targeted parameter event") {
+    auto gain = make("com.suppleaudio.test.gain");
+    audio::AudioData in;
+    in.sampleRate = 48000;
+    in.channels.assign(2, std::vector<float>(4000, 0.5f));
+    RenderRequest req;
+    req.input = &in;
+    TimedEvent mute;
+    mute.sample = 2000;
+    mute.target = 0;
+    mute.event.kind = host::Event::Kind::Param;
+    mute.event.paramId = 0;
+    mute.event.value = 0.0;  // normalized 0 = -60 dB = off
+    req.events = {mute};
+    RenderSettings s;
+    s.tailLimitSeconds = 0.0;
+    host::Instance* chain[] = {gain.get()};
+    auto r = render(chain, s, req);
+    REQUIRE(r);
+    REQUIRE(r->audio.frames() == 4000);
+    CHECK(static_cast<double>(r->audio.channels[0][1999]) == doctest::Approx(0.5));
+    CHECK(r->audio.channels[0][2000] == 0.0f);
+    // Wrong input rate is rejected.
+    in.sampleRate = 44100;
+    auto bad = render(chain, s, req);
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "render.input_rate");
+}
+
+TEST_CASE("layout and settings validation") {
+    auto sine = make("com.suppleaudio.test.sine");
+    auto gain = make("com.suppleaudio.test.gain");
+    RenderSettings s;
+    RenderRequest req;
+    host::Instance* wrongOrder[] = {gain.get(), sine.get()};
+    auto e = render(wrongOrder, s, req);
+    REQUIRE_FALSE(e);
+    CHECK(e.error().code == "render.layout");
+    CHECK(render(std::span<host::Instance* const>{}, s, req).error().code == "render.empty_chain");
+    s.blockSize = 0;
+    host::Instance* chain[] = {sine.get()};
+    CHECK(render(chain, s, req).error().code == "render.block_size");
+}
+
+TEST_CASE("transport positions") {
+    RenderSettings s;
+    s.tempo = 120;
+    auto t = transportAt(s, 48000 * 3);  // 3 s at 120 BPM = 6 beats
+    CHECK(t.beat == doctest::Approx(6.0));
+    CHECK(t.bar == 1);
+    CHECK(t.barStartBeat == doctest::Approx(4.0));
+    s.numerator = 6;
+    s.denominator = 8;  // 3 quarter-note beats per bar
+    auto u = transportAt(s, 48000 * 3);
+    CHECK(u.bar == 2);
+    CHECK(u.barStartBeat == doctest::Approx(6.0));
+}

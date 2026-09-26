@@ -128,6 +128,8 @@ class Instance {
     Status activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames);
     void deactivate();
     bool active() const { return active_; }
+    double sampleRate() const { return sampleRate_; }  // of the current/last activation
+    std::uint32_t maxFrames() const { return maxFrames_; }
     std::uint32_t latency() const;
     std::uint32_t tail() const;  // UINT32_MAX = infinite
 
@@ -165,7 +167,7 @@ class Instance {
     // Delivers queued setParam() changes through params.flush while active but
     // not processing (CLAP requires the audio thread for that case).
     void flushParams() SUPPLE_RT;
-    void reset();  // clap_plugin.reset (audio thread or main thread while not processing)
+    void reset() SUPPLE_RT;  // clap_plugin.reset: [audio-thread & active]
 
     // --- main-thread servicing (call regularly: after renders, from the app loop) ---
     // Handles request_callback, request_restart (while active), pending flushes
