@@ -323,3 +323,31 @@ simple synthesis code) committed to `docs/specs/examples/analysis/`.
   use because pocketfft allocates transform scratch per call. `Fft::forwardRt`
   uses a prepared radix-2 plan and preallocated scratch for RT processing;
   spectral analysis uses power-of-two sizes.
+
+## Implementation notes (P1.8, 2026-09-26, orchestrator)
+
+- **Flatness of white noise** is ≈ e^−γ ≈ 0.56 for a raw periodogram
+  (exponentially distributed bin powers), not 1; tests assert > 0.5.
+- **Tilt** is the slope of 1/3-octave *band power*: white noise reads about
+  +3 dB/oct, pink noise about 0 dB/oct.
+- **Band power** integrates the long-term spectrum with bins as intervals
+  (fractional overlap), so narrow low bands still get energy; with the
+  2048-point frame a low sine spreads over neighbouring 1/3-octave bands.
+- **Onsets** additionally require the frame energy to rise by ≥ 6 dB over the
+  frames before the peak; without it, decays and the beating of detuned
+  partials (pads) produced false onsets.
+- **YIN** computes the difference function through an FFT cross-correlation
+  and running energies (same values as the direct sum).
+- **Harmonics** use up to 64 evenly spaced voiced frames; a partial counts
+  towards inharmonicity when it is within 60 dB of the fundamental.
+- **Rounding:** values are rounded by scaling with a power of ten, so JSON
+  prints the decimal value ("-9.2"); non-finite values are `null` (e.g. LRA
+  of a render shorter than 3 s).
+- **Profiles:** a key known to the report vocabulary but absent from this
+  report (f0 of unpitched audio) fails with distance 10; an unknown key is an
+  error with the closest key as hint. The `ltas` target counts 3 dB RMS
+  (level removed) as one tolerance.
+- **Masking** power-sums the spread masker contributions before the 10 dB
+  offset. Worst bands are ranked by masked maskee energy.
+- Example reports: `docs/specs/examples/analysis/{pluck,pad,drums}.json`,
+  regenerated with `SUPPLE_UPDATE_EXAMPLES=1 core-analysis.tests`.

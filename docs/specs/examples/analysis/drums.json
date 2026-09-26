@@ -1,0 +1,140 @@
+{
+  "schema": "supple.analysis-report/1.0",
+  "source": {
+    "seconds": 4.0,
+    "sample_rate": 48000.0,
+    "channels": 2,
+    "layout": "stereo"
+  },
+  "loudness": {
+    "integrated_lufs": -18.2,
+    "lra_lu": 0.0,
+    "max_momentary_lufs": -17.1,
+    "max_short_term_lufs": -18.1,
+    "true_peak_dbtp": -3.3,
+    "sample_peak_dbfs": -3.3,
+    "plr_lu": 14.9
+  },
+  "spectral": {
+    "centroid_hz": {
+      "mean": 1710.0,
+      "median": 51.0,
+      "p10": 47.0,
+      "p90": 10500.0
+    },
+    "rolloff_hz": {
+      "mean": 1730.0,
+      "median": 70.0,
+      "p10": 47.0,
+      "p90": 277.0
+    },
+    "flatness": {
+      "mean": 0.037,
+      "median": 0.0,
+      "p10": 0.0,
+      "p90": 0.062
+    },
+    "flux": {
+      "mean": 0.087,
+      "median": 0.005,
+      "p10": 0.001,
+      "p90": 0.31
+    },
+    "tilt_db_per_oct": -1.6,
+    "bands": {
+      "sub": {
+        "level_db": -2.0,
+        "share_pct": 63.0,
+        "width": 0.0
+      },
+      "low": {
+        "level_db": -4.4,
+        "share_pct": 35.9,
+        "width": 0.0
+      },
+      "low_mid": {
+        "level_db": -28.8,
+        "share_pct": 0.1,
+        "width": 0.0
+      },
+      "mid": {
+        "level_db": -29.9,
+        "share_pct": 0.1,
+        "width": 0.0
+      },
+      "high_mid": {
+        "level_db": -30.3,
+        "share_pct": 0.1,
+        "width": 0.0
+      },
+      "presence": {
+        "level_db": -29.9,
+        "share_pct": 0.1,
+        "width": 0.0
+      },
+      "air": {
+        "level_db": -21.7,
+        "share_pct": 0.7,
+        "width": 0.0
+      }
+    },
+    "ltas_db": [
+      -29.1,
+      -28.1,
+      -27.1,
+      -21.6,
+      -20.5,
+      -21.9,
+      -22.9,
+      -26.0,
+      -29.6,
+      -33.9,
+      -39.2,
+      -43.7,
+      -47.4,
+      -50.4,
+      -51.9,
+      -52.8,
+      -54.5,
+      -54.1,
+      -50.4,
+      -51.4,
+      -50.2,
+      -50.3,
+      -49.4,
+      -47.8,
+      -46.7,
+      -45.4,
+      -45.6,
+      -43.6,
+      -42.8,
+      -41.8,
+      -41.3
+    ]
+  },
+  "harmonic": {
+    "pitched": true,
+    "voiced_pct": 67.1,
+    "f0_hz": 50.0,
+    "note": "G1+34c",
+    "stability_cents": 104.2,
+    "harmonics_db": [0.0, -40.7, -63.0, -74.5, -84.5, -90.2, -96.1, -100.7],
+    "inharmonicity": 0.08,
+    "hnr_db": 41.9
+  },
+  "envelope": {
+    "attack_ms": 0.0,
+    "decay20_ms": 136.0,
+    "crest_db": 13.7,
+    "onsets_per_s": 3.8
+  },
+  "stereo": {
+    "correlation": 1.0,
+    "width": 0.0,
+    "balance_db": 0.0,
+    "mono_loss_lu": 0.0,
+    "correlation_mean": 1.0,
+    "correlation_p5": 1.0
+  }
+}
+
