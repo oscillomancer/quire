@@ -180,6 +180,17 @@ bool Fft::forward(std::span<const double> input, std::span<std::complex<double>>
         return false;
     }
 }
+bool Fft::inverse(std::span<const std::complex<double>> input, std::span<double> output) {
+    if (input.size() < size_ / 2 + 1 || output.size() != size_ || !size_) return false;
+    try {
+        pocketfft::c2r<double>({size_}, {sizeof(std::complex<double>)}, {sizeof(double)}, 0, false,
+                               input.data(), output.data(), 1.0 / static_cast<double>(size_), 1);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 bool Fft::forwardRt(std::span<const double> input,
                     std::span<std::complex<double>> output) SUPPLE_RT {
     if (bitReverse_.size() != size_ || input.size() != size_ || output.size() < size_ / 2 + 1 ||

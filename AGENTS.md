@@ -66,6 +66,11 @@ cmake --workflow --preset dev
 tools/ci/run-all.sh          # every preset: dev, gcc, asan, ubsan, tsan, rtsan + license + format
 ```
 
+CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
+from the tsan preset: timing-heavy tests TSan makes impractically slow), `slow`
+(minutes-long end-to-end tests: run in dev, gcc and asan only). A test that
+depends on wall-clock time must not decide pass/fail by it.
+
 ## Definition of done
 
 Code, tests, docs updated, `STATUS.md` updated (by the orchestrator unless the

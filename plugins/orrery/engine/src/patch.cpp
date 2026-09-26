@@ -270,6 +270,54 @@ static bool fieldApplies(const Structure& st, Slot s, std::uint16_t field) {
     }
 }
 
+bool paramActive(const Structure& st, std::size_t index) {
+    const ParamLocation loc = locate(index);
+    if (!fieldApplies(st, loc.slot, loc.field)) return false;
+    // A macro does something only when a route uses it.
+    if (slotInfo(loc.slot).block == Block::Macro) {
+        const auto src =
+            static_cast<Source>(static_cast<int>(Source::Macro1) + (loc.slot - kMacro1));
+        return std::ranges::any_of(st.routes,
+                                   [&](const Route& r) { return r.source == src || r.via == src; });
+    }
+    // The filter balance applies to parallel routing.
+    if (loc.slot == kFilters) return st.routing == FilterRouting::Parallel;
+    return true;
+}
+
+std::vector<std::string> patchPath(std::size_t index) {
+    const ParamLocation loc = locate(index);
+    const SlotInfo& info = slotInfo(loc.slot);
+    const std::string field(fieldName(info.block, loc.field));
+    const std::string slot(info.name);
+    switch (info.block) {
+        case Block::Voice:
+            return {"voice", field};
+        case Block::Osc:
+            return {"oscillators", slot, field};
+        case Block::Filters:
+            return {"filters", field};
+        case Block::Filter:
+            return {"filters", slot, field};
+        case Block::Drive:
+            return {"drive", field};
+        case Block::Amp:
+            return {"amp", field};
+        case Block::Env:
+            return {"envelopes", slot, field};
+        case Block::Lfo:
+            return {"lfos", slot, field};
+        case Block::Step:
+            return {"steps", slot, field};
+        case Block::Macro:
+            return {"macros", slot, "value"};
+        case Block::Output:
+            return {"output", field};
+        default:
+            return {"fx", slot.substr(3), field};  // "fx.chorus" → fx/chorus
+    }
+}
+
 // Normalizes values so equal patches have equal bodies: absent slots and
 // fields a slot's type does not have hold their defaults.
 static void normalize(Body& b) {
@@ -1159,8 +1207,43 @@ std::string PatchType::serialize(const Patch& p, patch::Detail detail) const {
     return json::writeCanonical(toJson(p, detail));
 }
 
-Result<Patch> PatchType::merge(const Patch& current, const json::Value& mergePatch) const {
-    SUPPLE_TRY(codec_.checkMergePatch(mergePatch));
+Result<Patch> PatchType::merge(const Patch& current, const json::Value& incoming) const {
+    SUPPLE_TRY(codec_.checkMergePatch(incoming));
+    // Flat "params" (keys as in the parameter table) → nested members.
+    Value mergePatch = incoming;
+    if (const Value* flat = incoming.find("params")) {
+        if (!flat->isObject())
+            return Error("orrery.params", "params must be an object of parameter keys", "/params",
+                         R"(e.g. {"params": {"filter1.cutoff": "800 Hz"}})");
+        Value nested = mergePatch;
+        nested.asObject().erase("params");
+        std::vector<std::string_view> keys;
+        for (const ParamSpec& p : table()) keys.push_back(p.key);
+        for (const auto& m : flat->asObject()) {
+            const std::string path = pointer({"params", m.key});
+            const ParamSpec* p = params::findByKey(table(), m.key);
+            if (!p)
+                return Error("orrery.unknown_param", "unknown parameter \"" + m.key + "\"", path,
+                             didYouMean(m.key, keys));
+            const std::size_t i = params::indexOf(table(), *p);
+            if (!paramActive(current.body.structure, i)) {
+                const Slot s = locate(i).slot;
+                return Error("orrery.param_inactive",
+                             m.key + " belongs to " + std::string(slotInfo(s).name) +
+                                 ", which is not in this patch (or has no such field for its type)",
+                             path, "add the slot (or change its type) with a patch merge first");
+            }
+            Value* at = &nested;
+            const auto parts = patchPath(i);
+            for (std::size_t k = 0; k + 1 < parts.size(); ++k) {
+                if (!at->find(parts[k]) || !(*at)[parts[k]].isObject())
+                    (*at)[parts[k]] = Value::object();
+                at = &(*at)[parts[k]];
+            }
+            (*at)[parts.back()] = m.value;
+        }
+        mergePatch = std::move(nested);
+    }
     Value base = toJson(current, patch::Detail::Changed);
     // A new slot type drops the old type's fields (and a wave the new type
     // cannot take); FX leaving the chain drop their blocks.

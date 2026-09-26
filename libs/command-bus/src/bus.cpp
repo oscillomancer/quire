@@ -478,6 +478,8 @@ std::uint64_t Host::clockMs() const {
                                           .count());
 }
 
+Dispatcher::~Dispatcher() { host_.stopJobs(); }
+
 Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     auto result = dispatch(invocation, false);
     flushJobEvents();

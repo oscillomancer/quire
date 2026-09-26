@@ -31,6 +31,9 @@ class SemanticModel {
     // point into the submitted (or merged) document.
     virtual Status apply(std::uint32_t mode, const json::Value& document) = 0;
     virtual std::string describe(bool changedOnly) const = 0;  // ≤ 600 chars when changedOnly
+    // False for parameters the current structure does not use (a slot that is
+    // absent); the schema marks them "active": false.
+    virtual bool paramActive(std::size_t /*index*/) const { return true; }
 };
 
 class SemanticAdapter {

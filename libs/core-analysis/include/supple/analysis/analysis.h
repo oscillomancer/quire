@@ -23,6 +23,11 @@ struct Options {
     bool loudness = true, spectral = true, harmonic = true, envelope = true, stereo = true;
     std::optional<double> noteOffSeconds;
     std::optional<std::pair<double, double>> f0RangeHz;  // default 30..4000 Hz
+    // Cost controls for repeated analysis (the optimizer): analyze at most
+    // this many evenly spaced pitch frames (0 = every 10 ms hop), and skip the
+    // two extra loudness passes of stereo mono-loss.
+    int pitchFrames = 0;
+    bool monoLoss = true;
 };
 
 // Summary statistics over non-silent frames (NaN when there are none).

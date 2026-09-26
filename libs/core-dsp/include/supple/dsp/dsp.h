@@ -75,6 +75,9 @@ class Fft {
     std::size_t size() const { return size_; }
     // PocketFFT path for arbitrary sizes (offline; pocketfft allocates scratch).
     bool forward(std::span<const double> input, std::span<std::complex<double>> output);
+    // Inverse of forward (offline, pocketfft): size/2 + 1 bins → size real
+    // samples, scaled by 1/size so inverse(forward(x)) == x.
+    bool inverse(std::span<const std::complex<double>> input, std::span<double> output);
     // Allocation-free radix-2 path for audio-thread use after prepare.
     bool forwardRt(std::span<const double> input, std::span<std::complex<double>> output) SUPPLE_RT;
 

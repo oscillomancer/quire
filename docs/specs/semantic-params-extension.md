@@ -167,3 +167,21 @@ round trip; `describe` is non-empty and ≤ 600 chars.
   processes blocks continuously and checks for process errors and that the
   last patch is in effect; RT cleanliness is checked when the plugin and tool
   run under the rtsan preset.
+
+## Amendments (2026-09-26, orchestrator — structured patches)
+
+- **Flat `params` in merge patches.** A plugin whose patch is structured
+  (slots, routes — e.g. Orrery) also accepts a top-level `"params"` member in
+  `CLAP_SUPPLE_SET_MERGE` / `VALIDATE_ONLY` documents: `{"params": {"<key>":
+  value}}` with keys as in the schema's `params`. The plugin translates each
+  key to its place in the nested document. Keys of slots the patch does not
+  have are errors (`/params/<key>`). Hosts can therefore set values by key on
+  any semantic plugin (the sandbox's `param.set`, the optimizer).
+- **`"active": false`** on a schema `params` entry marks a parameter the
+  current structure does not use (its slot is absent, or its slot's type has
+  no such field). Plugins whose schema changes this way call
+  `changed(PATCH | SCHEMA)` after a structural `set_patch`.
+- Structured plugins implement the extension through
+  `plugins/common`'s `SemanticModel` / `SemanticAdapter` (same wire formats as
+  `FlatSemantic`); `semantic-conformance` exercises them with whole-document
+  replaces during processing.

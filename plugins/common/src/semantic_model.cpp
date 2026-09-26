@@ -44,7 +44,11 @@ bool SemanticAdapter::getSchema(const clap_ostream_t* out) const {
     doc["plugin"]["name"] = id_.name;
     doc["plugin"]["version"] = id_.version;
     doc["patch_type"] = model_.patchTypeId();
-    doc["params"] = *params::describeTable(model_.table()).find("params");
+    json::Value ps = *params::describeTable(model_.table()).find("params");
+    const auto t = model_.table();
+    for (std::size_t i = 0; i < t.size(); ++i)
+        if (!model_.paramActive(i)) ps[t[i].key]["active"] = false;
+    doc["params"] = std::move(ps);
     doc["patch"] = model_.patchSchema();
     doc["docs"] = id_.docs;
     return writeAll(out, json::writeCompact(doc));

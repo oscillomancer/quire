@@ -154,7 +154,9 @@ class PatchType {
     // RFC 7396 merge onto the patch's minimal form, then full validation. A
     // merge that changes a slot's type drops the old type's fields (and values
     // the new type cannot take); one that removes an FX from fx.chain drops its
-    // block.
+    // block. A flat "params" member ({"filter1.cutoff": 800}) sets values by
+    // parameter key (the semantic-params flat convention); its keys must
+    // belong to existing slots.
     Result<Patch> merge(const Patch& current, const json::Value& mergePatch) const;
     json::Value diff(const Patch& a, const Patch& b) const;
     json::Value jsonSchema() const;
@@ -167,6 +169,12 @@ class PatchType {
 
 // The value a field takes when a slot omits it (per-type for oscillator waves).
 double defaultValue(const Structure& st, std::size_t index);
+// Whether the parameter belongs to a slot that exists and has this field for
+// its type (inactive parameters are ignored by the DSP and not written).
+bool paramActive(const Structure& st, std::size_t index);
+// The parameter's location in the nested patch document
+// ({"oscillators", "osc1", "level"}).
+std::vector<std::string> patchPath(std::size_t index);
 // ≤ 600 characters (synth.md §7). `changedOnly` skips default-valued details.
 std::string describe(const Patch& p, bool changedOnly = true);
 

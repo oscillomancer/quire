@@ -41,7 +41,8 @@ class SandboxHost : public cmd::Host {
     // Tests: a fixed clock for deterministic logs.
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
-    cmd::Context makeContext(const cmd::Origin&) override;
+    cmd::Context makeContext(const cmd::Origin&) override;  // adopts background renders
+    void stopJobs() override;
     Result<std::uint64_t> beginTransaction(const cmd::Origin&, std::string_view label) override;
     Status commitTransaction(std::uint64_t) override;
     void rollbackTransaction(std::uint64_t) override;

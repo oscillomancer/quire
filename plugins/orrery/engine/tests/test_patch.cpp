@@ -320,3 +320,29 @@ TEST_CASE("the default patch round-trips in both forms") {
         CHECK(q->body == d.body);
     }
 }
+
+TEST_CASE("flat params in merges set values by key") {
+    auto p = type().parse(kPad);
+    REQUIRE(p);
+    auto m =
+        json::parse(R"({"params": {"filter1.cutoff": "2 kHz", "amp.attack": 20, "macro1": 60}})");
+    auto q = type().merge(*p, *m);
+    REQUIRE_MESSAGE(q, (q ? "" : all(q.error())));
+    CHECK(value(*q, kFilter1, FilterF::cutoff) == 2000.0);
+    CHECK(value(*q, kEnvAmp, EnvF::attack) == 20.0);
+    CHECK(value(*q, kMacro1, MacroF::value) == 60.0);
+    auto unknown = type().merge(*p, *json::parse(R"({"params": {"filter1.cutof": 1}})"));
+    REQUIRE_FALSE(unknown);
+    CHECK(unknown.error().code == "orrery.unknown_param");
+    CHECK(unknown.error().hint.find("filter1.cutoff") != std::string::npos);
+    auto inactive = type().merge(*p, *json::parse(R"({"params": {"osc4.level": -3}})"));
+    REQUIRE_FALSE(inactive);
+    CHECK(inactive.error().code == "orrery.param_inactive");
+    CHECK(inactive.error().path == "/params/osc4.level");
+    CHECK(paramActive(p->body.structure, index(kFilter1, FilterF::cutoff)));
+    CHECK_FALSE(paramActive(p->body.structure, index(kFilter1, FilterF::vowel)));  // ladder
+    CHECK(patchPath(index(kReverb, ReverbF::mix)) ==
+          std::vector<std::string>{"fx", "reverb", "mix"});
+    CHECK(patchPath(index(kEnv2, EnvF::decay)) ==
+          std::vector<std::string>{"envelopes", "env2", "decay"});
+}

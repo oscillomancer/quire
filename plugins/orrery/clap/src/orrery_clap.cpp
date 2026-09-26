@@ -62,6 +62,9 @@ class Model final : public clapx::SemanticModel {
     std::string describe(bool changedOnly) const override {
         return orrery::describe(current(), changedOnly);
     }
+    bool paramActive(std::size_t index) const override {
+        return orrery::paramActive(structure, index);
+    }
 
     Patch current() const;
     void install(const Patch& p);  // store + engine
@@ -180,9 +183,13 @@ struct Plugin {
         }
     }
 
-    void valuesChanged() {
+    void valuesChanged(bool structural) {
         if (hostParams) hostParams->rescan(host, CLAP_PARAM_RESCAN_VALUES);
-        if (hostSemantic) hostSemantic->changed(host, CLAP_SUPPLE_CHANGED_PATCH);
+        if (hostSemantic) {
+            uint32_t flags = CLAP_SUPPLE_CHANGED_PATCH;
+            if (structural) flags |= CLAP_SUPPLE_CHANGED_SCHEMA;
+            hostSemantic->changed(host, flags);
+        }
     }
 };
 
@@ -209,8 +216,9 @@ Status Model::apply(std::uint32_t mode, const json::Value& document) {
                                                   : type_.merge(current(), document);
     if (!result) return std::move(result).error();
     if (mode == CLAP_SUPPLE_SET_VALIDATE_ONLY) return okStatus();
+    const bool structural = !(result->body.structure == structure);
     install(*result);
-    p_.valuesChanged();
+    p_.valuesChanged(structural);  // "active" flags in the schema follow the structure
     return okStatus();
 }
 

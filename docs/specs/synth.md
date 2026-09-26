@@ -455,6 +455,10 @@ real-time engine). The code is the reference; these notes explain the choices.
 - **Oversampling:** voices are summed at the oversampled rate and decimated
   once by polyphase IIR half-band filters (−96 dB stopband from 28 kHz at 2×;
   4× cascades a 3-section first stage). No reported latency.
+- **Resonance curves:** ladder feedback k = 4·r (self-oscillation at 100 %);
+  SVF damping k = 2·(1 − r)², so the knob is perceptually even (40 % ≈ Q 1.4,
+  70 % ≈ Q 5.6, 100 % rings). A linear damping mapping made resonance
+  inaudible below ~60 % — the optimizer could not identify it.
 - **Voices:** at most 64 sounding voices (notes × unison) plus 16 spares that
   fade stolen notes out over 64 samples; stealing prefers the oldest released
   note.

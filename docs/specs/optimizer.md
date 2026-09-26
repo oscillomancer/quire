@@ -1,6 +1,6 @@
 # Spec: the parameter optimizer and long-running jobs (P3.3)
 
-**Status:** Draft for review (2026-09-26). Frozen before P3.3 starts.
+**Status:** Implemented (2026-09-26); amendments at the end.
 **Code:** `libs/optimize` (`supple::opt`: CMA-ES, bounded, deterministic;
 no audio knowledge), `host/sandbox` (the `optimize.*` commands, loss
 functions over core-analysis, the render worker pool), `libs/command-bus`
@@ -153,3 +153,32 @@ result within 10 % of each hidden value (normalized domain) within 300
 evaluations — deterministic under a fixed seed, and identical on 1 and 8
 threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
 `envelope.attack_ms` 5 ± 2).
+
+## Amendments (2026-09-26, implementation)
+
+- `libs/optimize`: `Cmaes` (ask/tell) and `minimize()` as specified; options
+  add `sigmaTolerance` (default 1e-4, the σ-collapse threshold — lower it for
+  unbounded benchmarks). Tests: sphere/ellipsoid/Rosenbrock n = 10 reach
+  1e-10 within the published budgets (+50 %), bounds, determinism, stopping.
+- `optimize.start` arguments are flat: `instance`, `params`, `target`
+  `{reference?, profile?}`, `phrase`, `seconds`, `tail_s` (default 1 s),
+  `evaluations` (default 300), `max_seconds` (default 60), `seed`. `apply` is
+  not implemented yet: the result's `patch` is `{"params": {...}}` (the
+  semantic-params flat convention) for `patch.merge`. The command refuses to
+  run inside a batch (a job cannot be rolled back); call it on its own.
+- `"auto"` selects continuous, modulatable parameters marked active in the
+  schema, excluding performance/placement parameters: `voice.*`, `*.pan`,
+  `*_curve`, `*.delay`, `*.hold`, `*.velocity`, `*.fade`, `output.level`.
+- Evaluation is single-threaded on one worker thread that owns a clone of the
+  instance (cloned through its state). The best candidate's render is written
+  by the worker under a render id reserved at start and joins the session's
+  renders at the next command (`SandboxHost::makeContext`). Worker threads are
+  joined through `cmd::Host::stopJobs()`, which `~Dispatcher` calls while its
+  JobManager is alive.
+- Candidate analysis uses `pitchFrames = 40` and skips mono-loss.
+- An extra reference term, **`trajectory`**: RMS of log2(centroid/centroid_ref)
+  over the aligned centroid tracks (≤ 100 points), weight 1.0, scale 0.1 oct.
+  Without it a filter envelope's decay was not identifiable.
+- End-to-end test with Orrery: a hidden cutoff/resonance/env2-decay patch is
+  recovered within 10 % (normalized) from a 1 s phrase in ≤ 300 evaluations;
+  a centroid profile is hit within 5 %; cancellation stops a job.

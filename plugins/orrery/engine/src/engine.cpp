@@ -562,7 +562,11 @@ struct Engine::Impl {
             const auto u = static_cast<std::size_t>(fi);
             out.g[u] = tptG(cutoff, fs);
             const double res = get(FilterF::resonance) / 100.0;
-            out.k[u] = *type == FilterType::Ladder ? 4.0 * res : 2.0 - 1.99 * res;
+            // Ladder: feedback 0..4 (self-oscillation at 4). SVF: damping
+            // k = 2(1-r)² — perceptual (40 % ≈ Q 1.4, 70 % ≈ Q 5.6, 100 % rings).
+            out.k[u] = *type == FilterType::Ladder
+                           ? 4.0 * res
+                           : std::max(0.005, 2.0 * (1.0 - res) * (1.0 - res));
             out.drive[u] = dsp::dbToGain(get(FilterF::drive));
             out.level[u] = dsp::levelGain(get(FilterF::level));
             out.delay[u] = fs / cutoff;

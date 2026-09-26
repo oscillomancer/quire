@@ -72,6 +72,9 @@ TEST_CASE("Orrery loads as a CLAP instrument with the semantic extension") {
     REQUIRE(schema);
     CHECK(schema->find("patch_type")->asString() == "supple.orrery-patch/1.0");
     CHECK(schema->find("params")->find("filter1.cutoff") != nullptr);
+    // Defaults: one va oscillator — osc2's parameters are inactive.
+    CHECK(schema->find("params")->find("osc2.level")->find("active")->asBool() == false);
+    CHECK(schema->find("params")->find("osc1.level")->find("active") == nullptr);
     CHECK(in->params().size() > 200);
 
     REQUIRE(in->setPatch(kPad, CLAP_SUPPLE_SET_REPLACE));

@@ -45,12 +45,14 @@
     { "name": "asan", "inherits": "base", "configurePreset": "asan",
       "environment": { "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=1" } },
     { "name": "ubsan", "inherits": "base", "configurePreset": "ubsan",
-      "environment": { "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1" } },
+      "environment": { "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1" },
+      "filter": { "exclude": { "label": "slow" } } },
     { "name": "tsan", "inherits": "base", "configurePreset": "tsan",
       "environment": { "TSAN_OPTIONS": "halt_on_error=1" },
-      "filter": { "exclude": { "label": "tsan-skip" } } },
+      "filter": { "exclude": { "label": "tsan-skip|slow" } } },
     { "name": "rtsan", "inherits": "base", "configurePreset": "rtsan",
-      "environment": { "RTSAN_OPTIONS": "halt_on_error=1" } }
+      "environment": { "RTSAN_OPTIONS": "halt_on_error=1" },
+      "filter": { "exclude": { "label": "slow" } } }
   ],
   "workflowPresets": [
     { "name": "dev", "steps": [

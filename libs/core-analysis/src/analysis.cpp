@@ -280,8 +280,8 @@ std::string noteName(double hz) {
     return s;
 }
 
-HarmonicReport harmonicOf(const std::vector<double>& x, double fs,
-                          std::pair<double, double> range) {
+HarmonicReport harmonicOf(const std::vector<double>& x, double fs, std::pair<double, double> range,
+                          int maxFrames) {
     HarmonicReport r;
     const auto w = static_cast<std::size_t>(std::lround(4096.0 * fs / 48000.0));
     const auto hop = static_cast<std::size_t>(std::lround(0.01 * fs));
@@ -295,12 +295,22 @@ HarmonicReport harmonicOf(const std::vector<double>& x, double fs,
     dsp::Fft fft;
     fft.prepare(nfft);
     std::vector<double> a(nfft), b(nfft);
-    std::vector<std::complex<double>> A(nfft / 2 + 1), Bs(nfft / 2 + 1);
+    std::vector<std::complex<double>> A(nfft / 2 + 1), Bs(nfft / 2 + 1), prod(nfft / 2 + 1);
+    std::vector<double> full(nfft);
     std::vector<double> d(tauMax + 2), dn(tauMax + 2);
     std::vector<double> voicedF0, hnr, periods;
     std::vector<std::size_t> voicedStarts;
     std::size_t nonSilent = 0;
-    for (std::size_t start = 0; start + w <= x.size() || (start == 0 && !x.empty()); start += hop) {
+    // With a frame budget, step over whole hops so frame positions stay on the
+    // 10 ms grid (the track keeps its hop; skipped frames read as unvoiced).
+    std::size_t stride = hop;
+    if (maxFrames > 0 && x.size() > w) {
+        const std::size_t frames = (x.size() - w) / hop + 1;
+        stride = hop * std::max<std::size_t>(1, (frames + static_cast<std::size_t>(maxFrames) - 1) /
+                                                    static_cast<std::size_t>(maxFrames));
+    }
+    for (std::size_t start = 0; start + w <= x.size() || (start == 0 && !x.empty());
+         start += stride) {
         if (start + w > x.size()) break;
         const double* f = x.data() + start;
         r.f0Track.push_back(0.0);
@@ -312,31 +322,11 @@ HarmonicReport harmonicOf(const std::vector<double>& x, double fs,
         for (std::size_t i = 0; i < w; ++i) b[i] = f[i];
         fft.forward(a, A);
         fft.forward(b, Bs);
-        // r(τ) = Σ a[j]·b[j+τ]  →  IFFT(conj(A)·B); compute by direct inverse via symmetry.
-        std::vector<std::complex<double>> prod(nfft / 2 + 1);
+        // r(τ) = Σ a[j]·b[j+τ] = IFFT(conj(A)·B).
         for (std::size_t k = 0; k <= nfft / 2; ++k) prod[k] = std::conj(A[k]) * Bs[k];
-        // Inverse real FFT through a forward FFT of the conjugate (real output).
-        std::vector<double> corr(tauMax + 1, 0.0);
-        {
-            // Build the full Hermitian spectrum and use the forward transform on
-            // its real and imaginary parts (N small enough; offline).
-            std::vector<double> re(nfft), im(nfft);
-            std::vector<std::complex<double>> fre(nfft / 2 + 1), fim(nfft / 2 + 1);
-            for (std::size_t k = 0; k < nfft; ++k) {
-                const std::complex<double> c = k <= nfft / 2 ? prod[k] : std::conj(prod[nfft - k]);
-                re[k] = c.real();
-                im[k] = c.imag();
-            }
-            fft.forward(re, fre);
-            fft.forward(im, fim);
-            // x[n] = (1/N) Σ X[k] e^{+i2πkn/N} = (1/N)(conj(F(re))[n] + i·conj(F(im))[n]); real
-            // part:
-            for (std::size_t t = 0; t <= tauMax; ++t) {
-                const std::complex<double> vr = t <= nfft / 2 ? std::conj(fre[t]) : fre[nfft - t];
-                const std::complex<double> vi = t <= nfft / 2 ? std::conj(fim[t]) : fim[nfft - t];
-                corr[t] = (vr.real() - vi.imag()) / static_cast<double>(nfft);
-            }
-        }
+        fft.inverse(prod, full);
+        std::vector<double> corr(full.begin(),
+                                 full.begin() + static_cast<std::ptrdiff_t>(tauMax + 1));
         // Energies of the sliding window [τ, τ + integ).
         std::vector<double> e(tauMax + 1);
         double e0 = 0.0;
@@ -593,7 +583,7 @@ double pearson(const float* l, const float* r, std::size_t n) {
     return sxx > 0.0 && syy > 0.0 ? sxy / std::sqrt(sxx * syy) : (sxx == syy ? 1.0 : 0.0);
 }
 
-StereoReport stereoOf(const Signal& s) {
+StereoReport stereoOf(const Signal& s, bool monoLoss) {
     StereoReport r;
     const float* l = s.channels[0];
     const float* rr = s.channels[1];
@@ -643,6 +633,7 @@ StereoReport stereoOf(const Signal& s) {
         r.bandWidth[static_cast<std::size_t>(b)] = a + c > 0.0 ? c / (a + c) : 0.0;
     }
     // Mono loss: loudness of the stereo signal minus the mono downmix in both channels.
+    if (!monoLoss) return r;
     const LoudnessReport stereo = loudnessOf(s);
     std::vector<float> m32(n);
     for (std::size_t i = 0; i < n; ++i) m32[i] = static_cast<float>(mid[i]);
@@ -734,9 +725,11 @@ Result<Report> analyze(const Signal& s, const Options& o) {
     if (o.spectral)
         r.spectral = spectralOf(Stft(mono, s.sampleRate, pow2Nearest(0.0427 * s.sampleRate)));
     if (o.harmonic)
-        r.harmonic = harmonicOf(mono, s.sampleRate, o.f0RangeHz.value_or(std::pair{30.0, 4000.0}));
+        r.harmonic = harmonicOf(mono, s.sampleRate, o.f0RangeHz.value_or(std::pair{30.0, 4000.0}),
+                                o.pitchFrames);
     if (o.envelope) r.envelope = envelopeOf(mono, s.sampleRate, o.noteOffSeconds);
-    if (o.stereo && s.layout == Layout::Stereo && s.channels.size() >= 2) r.stereo = stereoOf(s);
+    if (o.stereo && s.layout == Layout::Stereo && s.channels.size() >= 2)
+        r.stereo = stereoOf(s, o.monoLoss);
     return r;
 }
 

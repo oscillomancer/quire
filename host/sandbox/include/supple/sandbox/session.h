@@ -9,11 +9,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "supple/base/result.h"
@@ -136,6 +140,21 @@ class Session {
 
     // --- rendering -------------------------------------------------------------
     Result<const RenderRecord*> render(const RenderInput& input);
+    // Validates `input` and renders it through `chain` with `settings`,
+    // recording nothing (usable from a worker thread that owns the chain).
+    static Result<RenderResult> renderThrough(std::span<host::Instance* const> chain,
+                                              const RenderInput& input,
+                                              const SessionSettings& settings);
+    // A private copy of an instance (same plugin, same state) for background
+    // work; the caller owns it and may use it from one worker thread.
+    Result<std::unique_ptr<host::Instance>> cloneInstance(std::string_view id);
+    // Background renders: reserve an id and path on the model thread, write
+    // the WAV and submit the record from a worker; the record joins the
+    // session when the model thread next calls adoptBackgroundRenders().
+    RenderRecord reserveRender(std::string name);
+    void submitRender(RenderRecord record);  // any thread
+    void adoptBackgroundRenders();           // model thread
+    std::string ridPrefixForTests() const { return "rd_"; }
     Result<const RenderRecord*> findRender(std::string_view id) const;
     RenderRecord* mutableRender(std::string_view id);  // e.g. to attach analysis
     const std::map<std::string, RenderRecord>& renders() const { return renders_; }
@@ -145,6 +164,11 @@ class Session {
     Status setSettings(const SessionSettings& s);  // deactivates instances if rate/block changed
     json::Value summary() const;                   // settings, chain, instances, renders
     void reset();                                  // unload everything, delete renders
+
+    // --- background jobs ----------------------------------------------------------
+    // Runs `work` on its own thread; stopJobs() requests stop and joins all.
+    void startJob(std::function<void(std::stop_token)> work);
+    void stopJobs();
 
     // --- transactions ----------------------------------------------------------
     // One level (the bus wraps each edit or batch in one). Rollback restores
@@ -173,6 +197,9 @@ class Session {
     std::map<std::string, RenderRecord> renders_;
     std::uint64_t nextInstance_ = 1, nextRender_ = 1;
     std::unique_ptr<Txn> txn_;
+    std::mutex backgroundMutex_;
+    std::vector<RenderRecord> backgroundRenders_;
+    std::vector<std::jthread> jobs_;
 };
 
 // Tick → sample at a constant tempo: round(tick · 60 · rate / (tempo · ppq)).

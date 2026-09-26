@@ -235,11 +235,17 @@ class Host {
                          Kind /*kind*/) {}
     virtual std::uint64_t clockMs() const;
     virtual void setupFixture(Dispatcher&, std::string_view) {}
+    // Called by ~Dispatcher while its JobManager is still alive: stop and join
+    // any worker threads that report into it.
+    virtual void stopJobs() {}
 };
 
 class Dispatcher {
   public:
     Dispatcher(const Registry& registry, Host& host) : registry_(registry), host_(host) {}
+    ~Dispatcher();
+    Dispatcher(const Dispatcher&) = delete;
+    Dispatcher& operator=(const Dispatcher&) = delete;
     Result<json::Value> execute(const Invocation& invocation);
     JobManager& jobs() { return jobs_; }
     void flushJobEvents();

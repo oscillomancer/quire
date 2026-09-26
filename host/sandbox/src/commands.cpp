@@ -7,6 +7,7 @@
 #include <fstream>
 
 #include "analysis_commands.h"
+#include "optimize_commands.h"
 #include "supple/base/files.h"
 #include "supple/notation/notation.h"
 
@@ -945,6 +946,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
     }
 
     registerAnalysisCommands(registry);
+    registerOptimizeCommands(registry);
 }
 
 // --- host ------------------------------------------------------------------------------
@@ -960,10 +962,13 @@ std::vector<std::pair<std::string, json::Value>> SandboxHost::takeEvents() {
 }
 
 cmd::Context SandboxHost::makeContext(const cmd::Origin& origin) {
+    session_->adoptBackgroundRenders();  // e.g. an optimizer's best candidate
     cmd::Context ctx(origin);
     ctx.provide<Session>(*session_);
     return ctx;
 }
+
+void SandboxHost::stopJobs() { session_->stopJobs(); }
 
 Result<std::uint64_t> SandboxHost::beginTransaction(const cmd::Origin&, std::string_view) {
     SUPPLE_TRY(session_->begin());

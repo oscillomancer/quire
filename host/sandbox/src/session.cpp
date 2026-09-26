@@ -1,5 +1,7 @@
 #include "supple/sandbox/session.h"
 
+#include "schema_params.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -206,6 +208,7 @@ std::vector<TimedEvent> sequenceEvents(const midi::Sequence& seq, double tempo, 
 Session::Session(SessionOptions options) : options_(std::move(options)) {}
 
 Session::~Session() {
+    stopJobs();
     // Instances deactivate and unload in their destructors; renders stay on disk.
     txn_.reset();
     instances_.clear();
@@ -438,9 +441,15 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
                              closestHint(key, names, "plugin.describe"));
             }
             json::Value item = json::Value::object();
-            item["value"] = values && values->find(key) ? *values->find(key) : json::Value();
             const auto pid = static_cast<std::uint32_t>(entry->find("id")->asInt());
             auto clap = in.paramValue(pid);
+            if (values && values->find(key)) {
+                item["value"] = *values->find(key);  // flat patch: the patch value
+            } else if (clap) {
+                // Structured patch: the physical value from the CLAP value.
+                const SchemaParam sp = schemaParam(*entry);
+                item["value"] = params::toJson(sp.spec, physicalFromClap(sp, *clap));
+            }
             if (clap) {
                 auto t = in.paramText(pid, *clap);
                 if (t) item["text"] = *t;
@@ -697,59 +706,57 @@ Result<std::vector<PresetInfo>> Session::presetList(std::string_view plugin) {
 
 // --- rendering -----------------------------------------------------------------------
 
-Result<const RenderRecord*> Session::render(const RenderInput& input) {
-    if (chain_.empty())
+Result<RenderResult> Session::renderThrough(std::span<host::Instance* const> chain,
+                                            const RenderInput& input,
+                                            const SessionSettings& settings) {
+    if (chain.empty())
         return Error("render.empty_chain", "nothing to render through", {},
                      "load a plugin first (plugin.load)");
     if (input.notes && input.audio)
         return Error("render.input", "give either notes or audio, not both");
-    const double tempo = input.tempo.value_or(settings_.tempo);
+    const double tempo = input.tempo.value_or(settings.tempo);
     if (!(tempo >= 1 && tempo <= 999))
         return Error("render.tempo", "tempo out of range", "/tempo", "1 .. 999 BPM");
     if (input.tailSeconds && !(*input.tailSeconds >= 0 && *input.tailSeconds <= 60))
         return Error("render.tail", "tail out of range", "/tail_s", "0 .. 60 seconds");
     if (input.seconds && !(*input.seconds > 0 && *input.seconds <= 600))
         return Error("render.length", "length out of range", "/seconds", "(0, 600] seconds");
-
-    std::vector<host::Instance*> chain;
-    for (const auto& id : chain_) chain.push_back(instances_.at(id)->instance.get());
-    const Loaded& first = *instances_.at(chain_.front());
+    host::Instance& first = *chain.front();
 
     RenderRequest req;
     std::int64_t length = 0;
     if (input.notes) {
-        if (!first.instance->acceptsNotes())
-            return Error("render.not_instrument",
-                         label(first.id, first.info) + " does not accept notes", {},
+        if (!first.acceptsNotes())
+            return Error("render.not_instrument", first.info().name + " does not accept notes", {},
                          "load an instrument first in the chain, or render audio_file input");
         const midi::Sequence& seq = *input.notes;
         if (seq.ppq < 1) return Error("render.input", "ppq must be positive");
-        req.events = sequenceEvents(seq, tempo, settings_.sampleRate);
+        req.events = sequenceEvents(seq, tempo, settings.sampleRate);
         std::int64_t endTicks = seq.length;
         for (const auto& n : seq.notes) endTicks = std::max(endTicks, n.start + n.length);
         for (const auto& c : seq.controls) endTicks = std::max(endTicks, c.tick);
-        length = ticksToSamples(endTicks, seq.ppq, tempo, settings_.sampleRate);
+        length = ticksToSamples(endTicks, seq.ppq, tempo, settings.sampleRate);
     }
     if (input.audio) {
-        if (first.instance->audioInputChannels() == 0)
+        if (first.audioInputChannels() == 0)
             return Error("render.no_input",
-                         label(first.id, first.info) + " is an instrument and takes no audio", {},
+                         first.info().name + " is an instrument and takes no audio", {},
                          "render notes through it, or remove it to process audio with effects");
         req.input = &*input.audio;
         length = static_cast<std::int64_t>(input.audio->frames());
     }
-    if (input.seconds) length = std::llround(*input.seconds * settings_.sampleRate);
+    if (input.seconds) length = std::llround(*input.seconds * settings.sampleRate);
     if (length <= 0 && !input.notes && !input.audio)
         return Error("render.length", "nothing to render", {},
                      "give notes, audio, or a length in seconds");
     req.lengthSamples = length;
 
     RenderSettings rs;
-    rs.sampleRate = settings_.sampleRate;
-    rs.blockSize = settings_.blockSize;
+    rs.sampleRate = settings.sampleRate;
+    rs.blockSize = settings.blockSize;
     rs.tempo = tempo;
-    rs.numerator = settings_.numerator;
-    rs.denominator = settings_.denominator;
+    rs.numerator = settings.numerator;
+    rs.denominator = settings.denominator;
     if (input.meter) {
         const auto& m = *input.meter;
         if (m.numerator < 1 || m.numerator > 64 || m.denominator < 1 || m.denominator > 64 ||
@@ -758,9 +765,17 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
         rs.numerator = static_cast<std::uint16_t>(m.numerator);
         rs.denominator = static_cast<std::uint16_t>(m.denominator);
     }
-    rs.tailLimitSeconds = input.tailSeconds.value_or(settings_.tailLimitSeconds);
+    rs.tailLimitSeconds = input.tailSeconds.value_or(settings.tailLimitSeconds);
+    return sandbox::render(chain, rs, req);
+}
 
-    auto result = sandbox::render(chain, rs, req);
+Result<const RenderRecord*> Session::render(const RenderInput& input) {
+    if (chain_.empty())
+        return Error("render.empty_chain", "nothing to render through", {},
+                     "load a plugin first (plugin.load)");
+    std::vector<host::Instance*> chain;
+    for (const auto& id : chain_) chain.push_back(instances_.at(id)->instance.get());
+    auto result = renderThrough(chain, input, settings_);
     if (!result) return std::move(result).error();
 
     RenderRecord rec;
@@ -899,6 +914,55 @@ void Session::rollback() {
     if (reconfigure)
         for (auto& [id, l] : instances_)
             if (l->instance->active()) l->instance->deactivate();
+}
+
+Result<std::unique_ptr<host::Instance>> Session::cloneInstance(std::string_view id) {
+    auto lr = loaded(id);
+    if (!lr) return std::move(lr).error();
+    Loaded& l = **lr;
+    auto state = l.instance->saveState();
+    if (!state) return std::move(state).error();
+    auto made = host::Instance::create(l.info, options_.identity);
+    if (!made) return std::move(made).error();
+    SUPPLE_TRY((*made)->loadState(*state));
+    return std::move(*made);
+}
+
+RenderRecord Session::reserveRender(std::string name) {
+    RenderRecord rec;
+    rec.id = "rd_" + std::to_string(nextRender_++);
+    rec.name = std::move(name);
+    rec.path = options_.workdir / "renders" / (rec.id + ".wav");
+    return rec;
+}
+
+void Session::submitRender(RenderRecord record) {
+    std::lock_guard lock(backgroundMutex_);
+    backgroundRenders_.push_back(std::move(record));
+}
+
+void Session::adoptBackgroundRenders() {
+    std::vector<RenderRecord> ready;
+    {
+        std::lock_guard lock(backgroundMutex_);
+        ready.swap(backgroundRenders_);
+    }
+    for (auto& r : ready) {
+        const std::string id = r.id;
+        renders_[id] = std::move(r);
+    }
+}
+
+void Session::startJob(std::function<void(std::stop_token)> work) {
+    // Finished threads are reaped here (their jthreads join immediately).
+    jobs_.emplace_back([w = std::move(work)](std::stop_token st) { w(st); });
+}
+
+void Session::stopJobs() {
+    for (auto& t : jobs_) t.request_stop();
+    for (auto& t : jobs_)
+        if (t.joinable()) t.join();
+    jobs_.clear();
 }
 
 }  // namespace supple::sandbox
