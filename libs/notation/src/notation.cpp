@@ -310,8 +310,8 @@ class Compiler {
         for (const auto& line : lines_) {
             const auto& t = line.tokens;
             const auto& head = t[0].text;
-            const bool barLike = !head.empty() && head.front() >= '0' && head.front() <= '9' &&
-                                 head.back() == ':';
+            const bool barLike =
+                !head.empty() && head.front() >= '0' && head.front() <= '9' && head.back() == ':';
             if (head == "notation") {
                 if (t.size() != 2 || t[1].text != "1")
                     add("syntax", "Unsupported notation version.", t[0], "Write 'notation 1'.");
@@ -635,6 +635,12 @@ class Compiler {
                             currentVoice->bars[bar].line = t[0].line;
                             row.clear();
                             ++bar;
+                        } else if (i > 1 && t[i - 1].text == "|" && t[i].text.ends_with(':') &&
+                                   internal::integer(std::string_view(t[i].text).substr(
+                                       0, t[i].text.size() - 1))) {
+                            add("bar_after_pipe", "Bar number follows a pipe.", t[i],
+                                "After `|` the next bar continues without a number: `... | D3:h "
+                                "A2:h`, or start a new line `2: ...`.");
                         } else
                             row.push_back(t[i]);
                     }
