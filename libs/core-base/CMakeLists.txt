@@ -1,5 +1,5 @@
 supple_add_library(core-base
-  SOURCES src/result.cpp src/units.cpp src/closest.cpp
+  SOURCES src/result.cpp src/units.cpp src/closest.cpp src/files.cpp
   DEPS supple::product-info)
 
-supple_add_tests(core-base SOURCES tests/test_result.cpp tests/test_rt_primitives.cpp LABELS rt)
+supple_add_tests(core-base SOURCES tests/test_result.cpp tests/test_rt_primitives.cpp tests/test_files.cpp LABELS rt)
