@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(SUPPLE_BUILD_FUZZERS "Build parser fuzz targets" OFF)
 option(SUPPLE_BUILD_TESTS "Build unit tests" ON)
 option(SUPPLE_BUILD_PLUGINS "Build the stock plugins (template-derived)" ON)
 option(SUPPLE_BUILD_GUI "Build GUI components" ON)
@@ -33,6 +34,9 @@ add_subdirectory(libs)
 add_subdirectory(tests)
 if(SUPPLE_BUILD_SPIKES)
   add_subdirectory(tools/spikes/gui-shell)
+endif()
+if(SUPPLE_BUILD_FUZZERS)
+  add_subdirectory(tests/fuzz)
 endif()
 
 # License gate: fails the build when a dependency is not declared.

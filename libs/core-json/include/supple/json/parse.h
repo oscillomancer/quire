@@ -1,0 +1,10 @@
+#pragma once
+#include <supple/base/result.h>
+#include <supple/json/value.h>
+namespace supple::json {
+struct ParseOptions {
+    std::size_t maxDepth = 256;
+    std::size_t maxBytes = 256u << 20;
+};
+Result<Value> parse(std::string_view text, const ParseOptions& options = {});
+}  // namespace supple::json
