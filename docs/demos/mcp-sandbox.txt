@@ -50,6 +50,61 @@ response
   "result": {
     "tools": [
       {
+        "name": "analyze",
+        "title": "Analyze a render or audio file: loudness, spectrum, pitch, envelope, stereo.",
+        "description": "Analyze a render or audio file: loudness, spectrum, pitch, envelope, stereo. source: rd_<n> or a file path. Report supple.analysis-report/1.0: loudness (LUFS, LRA, true peak), spectral (centroid, rolloff, flatness, tilt, named band levels relative to the total), harmonic (f0, note, harmonics in dB relative to the fundamental), envelope (attack, decay to -20 dB, release after note-off, onsets), stereo (width, correlation). note_off_s defaults to the end of a render's input. Envelope values (attack, decay, release) describe single notes: render one note to measure them. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "analyze_args",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "standard",
+                "full"
+              ],
+              "description": "summary: key scalars (≤ 400 tokens); standard: + percentiles, band shares, 1/3-octave spectrum; full: + time series.",
+              "default": "summary"
+            },
+            "note_off_s": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 3600.0
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "analysis",
+          "properties": {
+            "report": {},
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "report",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
         "name": "batch",
         "title": "Run commands atomically.",
         "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",
@@ -92,6 +147,98 @@ response
         },
         "annotations": {
           "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "compare",
+        "title": "Compare two renders or files: notable descriptor changes and timbre distance.",
+        "description": "Compare two renders or files: notable descriptor changes and timbre distance. Notable changes use fixed thresholds (loudness 1 LU, centroid 10 %, band levels 1.5 dB, harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the 1/3-octave spectra after removing the level offset: a pure gain change reads 0. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "compare_args",
+          "properties": {
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "test": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            }
+          },
+          "required": [
+            "reference",
+            "test"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "comparison",
+          "properties": {
+            "notable": {},
+            "ltas_rms_db": {
+              "type": "number"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "notable",
+            "ltas_rms_db",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "masking",
+        "title": "Estimate where one sound masks another (critical bands).",
+        "description": "Estimate where one sound masks another (critical bands). masker (e.g. the kick) and maskee (e.g. the bass): renders or files at the same sample rate. Per Bark band: % of the maskee's active frames masked and by how much; the three worst bands. An estimate for corrective mixing, not a psychoacoustic model of record. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "masking_args",
+          "properties": {
+            "masker": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "maskee": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            }
+          },
+          "required": [
+            "masker",
+            "maskee"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "masking",
+          "properties": {
+            "result": {}
+          },
+          "required": [
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
           "destructiveHint": false,
           "idempotentHint": false
         }
@@ -693,6 +840,44 @@ response
         }
       },
       {
+        "name": "profile_evaluate",
+        "title": "Score a render against a target descriptor profile.",
+        "description": "Score a render against a target descriptor profile. profile: {\"schema\": \"supple.analysis-profile/1.0\", \"targets\": {\"<report key>\": {\"target\": x, \"tolerance\": t, \"weight\"?: w} | {\"min\"?: a, \"max\"?: b}}, \"ltas\"?: [31 relative dB]}. Keys are dotted report paths such as spectral.centroid_hz.median or harmonic.harmonics_db.3. Returns per-target pass and normalized distance, and a weighted loss (0 = on target). See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "profile_args",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "profile": {}
+          },
+          "required": [
+            "source",
+            "profile"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "profile_result",
+          "properties": {
+            "result": {}
+          },
+          "required": [
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
         "name": "render",
         "title": "Render notes, a MIDI file or an audio file through the chain to a WAV.",
         "description": "Render notes, a MIDI file or an audio file through the chain to a WAV. notation: a phrase in the notation (see the notation guide), e.g. \"voice lead; 1: C4:q E4:q G4:h | C5:w\". midi_file / audio_file: paths (audio at the session rate). bars/seconds override the length; the tail after it is rendered until silence (tail_s caps it). Returns the render id for analyze/compare and the WAV path. See describe for errors and examples.",
@@ -748,9 +933,12 @@ response
             "analyze": {
               "type": "string",
               "enum": [
-                "none"
+                "none",
+                "summary",
+                "standard",
+                "full"
               ],
-              "description": "Analysis detail (more levels arrive with core-analysis).",
+              "description": "Also analyze the render (see the analyze command); summary is compact (≤ 400 tokens).",
               "default": "none"
             }
           },
@@ -792,7 +980,8 @@ response
               "items": {
                 "type": "string"
               }
-            }
+            },
+            "analysis": {}
           },
           "required": [
             "render",
