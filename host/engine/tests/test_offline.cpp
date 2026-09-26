@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <unistd.h>
 
 #include <cmath>
 
@@ -84,7 +85,8 @@ std::size_t firstNonZero(const std::vector<float>& v) {
 }
 
 OfflineResult render(const model::Session& s, InstancePool& pool, double seconds, double tail = 0) {
-    auto r = renderOffline(s, pool, {0.0, seconds, tail, 512});
+    auto r =
+        renderOffline(s, pool, {.startSeconds = 0.0, .endSeconds = seconds, .tailSeconds = tail});
     REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
     return std::move(*r);
 }
@@ -213,7 +215,8 @@ TEST_CASE("a missing plugin passes audio through with a warning") {
     REQUIRE(r.warnings.size() == 1);
     CHECK(r.warnings[0].find("org.example.not-installed") != std::string::npos);
     CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kCentre).epsilon(1e-4));
-    CHECK(renderOffline(s, pool, {1.0, 1.0, 0, 512}).error().code == "engine.range");
+    CHECK(renderOffline(s, pool, {.startSeconds = 1.0, .endSeconds = 1.0}).error().code ==
+          "engine.range");
 }
 
 namespace {
@@ -298,4 +301,76 @@ TEST_CASE("solo: soloed tracks and their signal path stay audible") {
     t2.modify<model::Track>(b, [](model::Track& x) { x.solo = model::Solo::Defeat; });
     auto r2 = render(commit(t2), pool, 0.5);
     CHECK(peak(r2.audio.channels[0]) > 0.25 * kCentre * kCentre * 1.2);  // B is back
+}
+
+TEST_CASE("audio items: position, take offset, fade, channel mode, offline media") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-media-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData ramp;
+    ramp.sampleRate = 48000;
+    ramp.channels.assign(2, std::vector<float>(48000));
+    for (int i = 0; i < 48000; ++i) {
+        ramp.channels[0][static_cast<std::size_t>(i)] = static_cast<float>(i) / 48000.0f;
+        ramp.channels[1][static_cast<std::size_t>(i)] = -static_cast<float>(i) / 48000.0f;
+    }
+    REQUIRE(audio::writeWav(dir / "media" / "ramp.wav", ramp).ok());
+    ramp.sampleRate = 44100;
+    REQUIRE(audio::writeWav(dir / "media" / "slow.wav", ramp).ok());
+
+    model::EditTxn t(model::Session::create(), 1);
+    const Id tr = addTrack(t, "Audio");
+    const Id md = t.create(model::MediaSource{"ramp.wav", "", "wav", 48000, 2, 48000});
+    model::Take take;
+    take.source = md;
+    take.startOffset = 0.1;  // 4800 frames in
+    const Id tk = t.create(take);
+    model::Item item;
+    item.track = tr;
+    item.position = 1.0;  // beat 1 = 0.5 s
+    item.length = 0.5;    // beats = 0.25 s
+    item.takes = {tk};
+    item.activeTake = tk;
+    item.fadeIn = {0.01, model::FadeShape::Linear, 0};  // 480 samples
+    const Id it = t.create(item);
+    auto s = commit(t);
+
+    auto pool = makePool();
+    MediaCache media;
+    auto r = renderOffline(
+        s, pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir, .media = &media});
+    REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+    CHECK(r->warnings.empty());
+    const auto& L = r->audio.channels[0];
+    const auto& R = r->audio.channels[1];
+    CHECK(peak(L, 0, 24000) == 0.0);
+    CHECK(peak(L, 36000) == 0.0);  // the item ends at 0.75 s
+    // After the fade: source frame 4800 + k, centred (0.707).
+    for (int k : {480, 1000, 11999}) {
+        const auto i = static_cast<std::size_t>(24000 + k);
+        const double src = (4800.0 + k) / 48000.0;
+        CHECK(double(L[i]) == doctest::Approx(src * kCentre).epsilon(1e-5));
+        CHECK(double(R[i]) == doctest::Approx(-src * kCentre).epsilon(1e-5));
+    }
+    CHECK(double(L[24000 + 240]) ==
+          doctest::Approx(0.5 * (4800.0 + 240) / 48000.0 * kCentre).epsilon(1e-5));
+    CHECK(media.size() == 1);
+
+    model::EditTxn t2(s, 2);
+    t2.modify<model::Take>(tk, [](model::Take& x) { x.channelMode = model::ChannelMode::Left; });
+    auto r2 =
+        renderOffline(commit(t2), pool,
+                      {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir, .media = &media});
+    REQUIRE(r2);
+    CHECK(r2->audio.channels[1][30000] == r2->audio.channels[0][30000]);
+
+    model::EditTxn t3(s, 2);
+    t3.modify<model::MediaSource>(md, [](model::MediaSource& m) { m.path = "slow.wav"; });
+    (void)it;
+    auto r3 =
+        renderOffline(commit(t3), pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir});
+    REQUIRE(r3);
+    REQUIRE(r3->warnings.size() == 1);
+    CHECK(r3->warnings[0].find("44100") != std::string::npos);
+    std::filesystem::remove_all(dir);
 }

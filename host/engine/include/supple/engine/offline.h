@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -55,11 +56,26 @@ class InstancePool {
     std::map<model::Id, Entry> instances_;
 };
 
+// Decoded audio media, keyed by resolved path (main thread). Reused across
+// renders; the engine's disk-backed, resampling media cache replaces it.
+class MediaCache {
+  public:
+    Result<std::shared_ptr<const audio::AudioData>> get(const std::filesystem::path& path);
+    std::size_t size() const { return entries_.size(); }
+
+  private:
+    std::map<std::string, std::shared_ptr<const audio::AudioData>> entries_;
+};
+
 struct OfflineSettings {
     double startSeconds = 0.0;
     double endSeconds = 0.0;   // exclusive; the tail follows
     double tailSeconds = 0.0;  // rendered after endSeconds
     std::uint32_t blockSize = 512;
+    // Relative media paths resolve against <projectDir>/<project.media_dir>
+    // (or <projectDir> itself when the file is found there).
+    std::filesystem::path projectDir;
+    MediaCache* media = nullptr;  // null: a cache for this render only
 };
 
 struct OfflineResult {

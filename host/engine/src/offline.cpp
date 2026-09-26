@@ -68,6 +68,19 @@ void InstancePool::prune(const Session& session) {
         it = session.fx.contains(it->first) ? std::next(it) : instances_.erase(it);
 }
 
+// --- media -----------------------------------------------------------------------------
+
+Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::filesystem::path& path) {
+    const std::string key = path.lexically_normal().string();
+    auto it = entries_.find(key);
+    if (it != entries_.end()) return it->second;
+    auto data = audio::readAudio(path);
+    if (!data) return std::move(data).error();
+    auto shared = std::make_shared<const audio::AudioData>(std::move(*data));
+    entries_.emplace(key, shared);
+    return shared;
+}
+
 // --- mixing helpers ---------------------------------------------------------------------
 
 std::pair<double, double> panGains(double pan, double panLawDb) {
@@ -196,6 +209,19 @@ struct Stage {
     host::OutputEvents outEvents;
 };
 
+// An audio item ready to play: which source frames land on which samples.
+struct Clip {
+    std::shared_ptr<const audio::AudioData> data;
+    std::int64_t start = 0, length = 0;  // samples on the track's timeline (PDC-shifted)
+    std::int64_t offset = 0;             // source frame at the item start
+    bool loop = false;
+    model::ChannelMode mode = model::ChannelMode::Normal;
+    double gainL = 1.0, gainR = 1.0;
+    std::int64_t fadeIn = 0, fadeOut = 0;
+    model::FadeShape fadeInShape = model::FadeShape::Linear,
+                     fadeOutShape = model::FadeShape::Linear;
+};
+
 struct TimedEvent {
     std::int64_t sample;
     host::Event event;
@@ -209,6 +235,7 @@ struct Node {
     Stereo sum, preFx, preFader, post;
     std::vector<TimedEvent> events;
     std::size_t nextEvent = 0;
+    std::vector<Clip> clips;
     int noteTarget = -1;  // chain index receiving note events
     double volume = 1.0, width = 1.0, panL = 1.0, panR = 1.0;
     double volumeDb = 0.0, pan = 0.0, panLawDb = -3.0;
@@ -230,10 +257,61 @@ struct Plan {
     std::uint32_t block = 512;
     const time::TimeMap* timeMap = nullptr;
     std::vector<std::string> warnings;
+    std::filesystem::path projectDir;
+    MediaCache* media = nullptr;
 };
 
 std::int64_t latTap(const Node& n, model::Tap tap) {
     return tap == model::Tap::PreFx ? n.latIn : n.latIn + n.latChain;
+}
+
+// Where an item sits, after resolving its timebase (item, then track, then
+// project): its start in beats and seconds and its end in seconds.
+struct ItemSpan {
+    double startBeat, startSec, endSec;
+};
+ItemSpan itemSpan(const Session& s, const model::Item& it, const model::Track* tr) {
+    const time::TimeMap& tm = *s.timeMap;
+    model::Timebase tb = s.project->timebase;
+    if (it.timebase == model::ItemTimebase::Time)
+        tb = model::Timebase::Time;
+    else if (it.timebase == model::ItemTimebase::Beats)
+        tb = model::Timebase::Beats;
+    else if (it.timebase == model::ItemTimebase::BeatsPosition)
+        tb = model::Timebase::BeatsPosition;
+    else if (tr && tr->timebase == model::TrackTimebase::Time)
+        tb = model::Timebase::Time;
+    else if (tr && tr->timebase == model::TrackTimebase::Beats)
+        tb = model::Timebase::Beats;
+    else if (tr && tr->timebase == model::TrackTimebase::BeatsPosition)
+        tb = model::Timebase::BeatsPosition;
+    if (tb == model::Timebase::Time)
+        return {tm.beatAt(it.position), it.position, it.position + it.length};
+    const double startSec = tm.secondsAt(it.position);
+    if (tb == model::Timebase::Beats)
+        return {it.position, startSec, tm.secondsAt(it.position + it.length)};
+    return {it.position, startSec, startSec + it.length};  // beats position, seconds length
+}
+
+double fadeCurve(model::FadeShape shape, double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    switch (shape) {
+        case model::FadeShape::Linear:
+            return t;
+        case model::FadeShape::Slow:
+            return t * t;
+        case model::FadeShape::Fast:
+            return 1.0 - (1.0 - t) * (1.0 - t);
+        case model::FadeShape::SlowFast:
+            return t * t * (3.0 - 2.0 * t);
+        case model::FadeShape::FastSlow:
+            return 0.5 - std::sin(std::asin(1.0 - 2.0 * t) / 3.0);
+        case model::FadeShape::Cos:
+            return std::sin(t * std::numbers::pi / 2.0);  // equal power
+        case model::FadeShape::Exp:
+            return t * t * t;
+    }
+    return t;
 }
 
 // Note and control events of the MIDI items on `track`, in samples from the
@@ -252,31 +330,8 @@ std::vector<TimedEvent> trackEvents(const Session& s, Id track, double startSeco
         const model::MidiSource* src = s.midi.find(*take->source);
         if (!src) continue;
         const midi::Sequence& seq = src->sequence;
-        // Resolve the item's timebase to find its start beat and end time.
-        model::Timebase tb = s.project->timebase;
-        if (it.timebase == model::ItemTimebase::Time)
-            tb = model::Timebase::Time;
-        else if (it.timebase == model::ItemTimebase::Beats)
-            tb = model::Timebase::Beats;
-        else if (it.timebase == model::ItemTimebase::BeatsPosition)
-            tb = model::Timebase::BeatsPosition;
-        else if (tr && tr->timebase == model::TrackTimebase::Time)
-            tb = model::Timebase::Time;
-        else if (tr && tr->timebase == model::TrackTimebase::Beats)
-            tb = model::Timebase::Beats;
-        else if (tr && tr->timebase == model::TrackTimebase::BeatsPosition)
-            tb = model::Timebase::BeatsPosition;
-        double startBeat = 0, endSec = 0;
-        if (tb == model::Timebase::Time) {
-            startBeat = tm.beatAt(it.position);
-            endSec = it.position + it.length;
-        } else if (tb == model::Timebase::Beats) {
-            startBeat = it.position;
-            endSec = tm.secondsAt(it.position + it.length);
-        } else {
-            startBeat = it.position;
-            endSec = tm.secondsAt(it.position) + it.length;
-        }
+        const ItemSpan span = itemSpan(s, it, tr);
+        const double startBeat = span.startBeat, endSec = span.endSec;
         const double rateScale = take->playrate > 0 ? take->playrate : 1.0;
         const double loopBeats = seq.ppq > 0 ? static_cast<double>(seq.length) / seq.ppq : 0.0;
         auto toSample = [&](double contentBeat, double loopOffset) -> std::optional<std::int64_t> {
@@ -626,6 +681,60 @@ Status prepare(Plan& p, const Session& s) {
                  {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
                 a->shift(n.latIn);
     }
+    // Audio items, like events shifted by the track's input latency.
+    for (Node& n : p.nodes) {
+        const model::Track* tr = s.tracks.find(n.id);
+        for (const auto& e : s.items) {
+            const model::Item& it = *e.value;
+            if (it.track != n.id || it.mute || !it.activeTake) continue;
+            const model::Take* take = s.takes.find(*it.activeTake);
+            if (!take || !take->source || take->source->kind != Kind::Media) continue;
+            const model::MediaSource* src = s.media.find(*take->source);
+            if (!src) continue;
+            std::filesystem::path path = src->path;
+            if (path.is_relative()) {
+                const auto inMedia = p.projectDir / s.project->mediaDir / path;
+                path = std::filesystem::exists(inMedia) ? inMedia : p.projectDir / path;
+            }
+            auto data = p.media->get(path);
+            if (!data) {
+                p.warnings.push_back(e.id.str() + ": " + data.error().message + " (media " +
+                                     take->source->str() + " is offline)");
+                continue;
+            }
+            if ((*data)->sampleRate != p.rate) {
+                p.warnings.push_back(e.id.str() + ": " + take->source->str() + " is at " +
+                                     std::to_string(static_cast<int>((*data)->sampleRate)) +
+                                     " Hz; resampling is not available yet, the item is silent");
+                continue;
+            }
+            if (take->playrate != 1.0)
+                p.warnings.push_back(e.id.str() + ": playrate " + std::to_string(take->playrate) +
+                                     " is rendered at 1.0 (time stretching is not available yet)");
+            const ItemSpan span = itemSpan(s, it, tr);
+            const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
+            Clip c;
+            c.data = *data;
+            c.start = time::samplesAt(span.startSec, p.rate) - origin + n.latIn;
+            c.length =
+                time::samplesAt(span.endSec, p.rate) - time::samplesAt(span.startSec, p.rate);
+            c.offset = time::samplesAt(take->startOffset, p.rate);
+            c.loop = it.loop;
+            c.mode = take->channelMode;
+            const double g =
+                dbToGain(it.gainDb) * dbToGain(take->gainDb) * (take->phaseInvert ? -1.0 : 1.0);
+            const auto [pl, pr] = take->pan == 0.0
+                                      ? std::pair{1.0, 1.0}
+                                      : panGains(take->pan / 100.0, s.project->panLawDb);
+            c.gainL = g * pl;
+            c.gainR = g * pr;
+            c.fadeIn = time::samplesAt(it.fadeIn.length, p.rate);
+            c.fadeOut = time::samplesAt(it.fadeOut.length, p.rate);
+            c.fadeInShape = it.fadeIn.shape;
+            c.fadeOutShape = it.fadeOut.shape;
+            n.clips.push_back(std::move(c));
+        }
+    }
     // Events, shifted by each track's input latency so its own notes stay
     // aligned with what arrives from upstream.
     for (Node& n : p.nodes) {
@@ -700,6 +809,49 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
             }
         }
         node.preFx.copyFrom(node.sum, n);
+        // Audio items play after the pre-FX tap, before the chain.
+        for (const Clip& c : node.clips) {
+            const std::int64_t from = std::max<std::int64_t>(pos, c.start);
+            const std::int64_t to = std::min<std::int64_t>(pos + n, c.start + c.length);
+            const auto& ch = c.data->channels;
+            const auto frames = static_cast<std::int64_t>(c.data->frames());
+            if (ch.empty() || frames == 0) continue;
+            const std::size_t right = ch.size() > 1 ? 1 : 0;
+            for (std::int64_t t = from; t < to; ++t) {
+                const std::int64_t k = t - c.start;  // sample within the item
+                std::int64_t f = c.offset + k;
+                if (c.loop) f = ((f % frames) + frames) % frames;
+                if (f < 0 || f >= frames) continue;
+                const auto fi = static_cast<std::size_t>(f);
+                float l = ch[0][fi], r = ch[right][fi];
+                switch (c.mode) {
+                    case model::ChannelMode::Normal:
+                        break;
+                    case model::ChannelMode::ReverseStereo:
+                        std::swap(l, r);
+                        break;
+                    case model::ChannelMode::MonoMix:
+                        l = r = 0.5f * (l + r);
+                        break;
+                    case model::ChannelMode::Left:
+                        r = l;
+                        break;
+                    case model::ChannelMode::Right:
+                        l = r;
+                        break;
+                }
+                double fade = 1.0;
+                if (c.fadeIn > 0 && k < c.fadeIn)
+                    fade *= fadeCurve(c.fadeInShape,
+                                      static_cast<double>(k) / static_cast<double>(c.fadeIn));
+                if (c.fadeOut > 0 && k >= c.length - c.fadeOut)
+                    fade *= fadeCurve(c.fadeOutShape, static_cast<double>(c.length - k) /
+                                                          static_cast<double>(c.fadeOut));
+                const auto i = static_cast<std::size_t>(t - pos);
+                node.sum.l[i] += static_cast<float>(static_cast<double>(l) * c.gainL * fade);
+                node.sum.r[i] += static_cast<float>(static_cast<double>(r) * c.gainR * fade);
+            }
+        }
         // 2. Route this block's events to the note target.
         for (Stage& st : node.chain) st.blockEvents.clear();
         while (node.nextEvent < node.events.size() &&
@@ -797,6 +949,9 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     auto compiled = compile(s, pool, opt);
     if (!compiled) return std::move(compiled).error();
     Plan& p = *compiled;
+    MediaCache localMedia;
+    p.projectDir = opt.projectDir;
+    p.media = opt.media ? opt.media : &localMedia;
     SUPPLE_TRY(prepare(p, s));
     const std::int64_t length = time::samplesAt(opt.endSeconds, p.rate) -
                                 time::samplesAt(opt.startSeconds, p.rate) +
