@@ -285,6 +285,8 @@ bool FlatSemantic::loadState(const clap_istream_t* in) {
             const auto before = current();
             const auto next = scratch.snapshot();
             if (onBeforeApply) onBeforeApply(next);
+            envelope_ = {};
+            if (type_.codec().hasSeed()) envelope_.seed = 0;
             store_.assign(next);
             if (onApplied) onApplied(before.body, next);
             return true;

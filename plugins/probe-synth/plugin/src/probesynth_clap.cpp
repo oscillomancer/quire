@@ -81,6 +81,9 @@ bool legacyLoad(std::span<const uint8_t> bytes, supple::clapx::ParamStore& out) 
         if (!std::isfinite(value)) return false;
         if (const auto* spec = findParam(id); spec && !(spec->flags & pa::kReadonly)) {
             if (id == kAmpSustain || id == kFilterSustain) value *= 100.0;
+            // Binary v1 drove these raw doubles through static_cast<int> in
+            // the DSP. Preserve that truncation before ParamStore rounds enums.
+            if (id == kWaveform || id == kFilterSlope) value = std::trunc(value);
             out.set(id, value);
         }
     }

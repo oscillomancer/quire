@@ -44,7 +44,9 @@
   changes, then updates the DSP from one consistent set of physical values.
   `FlatSemantic` provides canonical JSON patches, transactional CLAP state and
   the semantic extension. The binary v1 loader converts old sustain ratios to
-  percent, and rejects truncated or non-finite state before applying anything.
+  percent, truncates fractional waveform/slope values as the v1 DSP did,
+  resets the patch envelope seed to its default, and rejects truncated or
+  non-finite state before applying anything.
 - A patch envelope carries a seed; the processor combines it with the stable
   `osc.seed` parameter. `RtHandoff` carries an immutable validated patch snapshot (all physical
   values plus the envelope seed) to the audio thread. A new `onBeforeApply`

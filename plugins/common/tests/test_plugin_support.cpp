@@ -4,6 +4,7 @@
 
 #include <supple/json/json.h>
 #include <atomic>
+#include <cstring>
 #include <thread>
 
 using namespace supple;
@@ -107,6 +108,41 @@ TEST_CASE("FlatSemantic brackets a validated patch assignment") {
     CHECK(calls.empty());
     CHECK(semantic.setPatch(CLAP_SUPPLE_SET_REPLACE, doc.data(), doc.size(), nullptr));
     CHECK(calls == "BA");
+}
+
+TEST_CASE("FlatSemantic legacy load resets the envelope before publishing") {
+    patch::FlatPatchType type("legacy-test", 1, 0, kT, true);
+    clapx::ParamStore store(kT);
+    clapx::FlatSemantic semantic(type, store, "com.suppleaudio.test.legacy", "", "", 0x4c454731);
+    const std::string doc = R"({"schema":"supple.legacy-test-patch/1.0","seed":123,"params":{}})";
+    REQUIRE(semantic.setPatch(CLAP_SUPPLE_SET_REPLACE, doc.data(), doc.size(), nullptr));
+    REQUIRE(semantic.envelope().seed == 123);
+    semantic.legacyLoad = [](std::span<const std::uint8_t> bytes, clapx::ParamStore& scratch) {
+        if (bytes.size() != 1 || bytes[0] != 0x42) return false;
+        scratch.set(0, 1200);
+        return true;
+    };
+    std::uint8_t marker = 0x42;
+    struct Input {
+        std::uint8_t* data;
+        std::size_t offset = 0;
+    } input{&marker};
+    clap_istream_t stream{&input, [](const clap_istream_t* s, void* out, std::uint64_t count) {
+                              auto& source = *static_cast<Input*>(s->ctx);
+                              if (source.offset || count == 0) return std::int64_t{0};
+                              std::memcpy(out, source.data, 1);
+                              ++source.offset;
+                              return std::int64_t{1};
+                          }};
+    bool published = false;
+    semantic.onApplied = [&](const patch::FlatBody&, const patch::FlatBody& after) {
+        CHECK(semantic.envelope().seed == 0);
+        CHECK(after.values[0] == 1200);
+        published = true;
+    };
+    REQUIRE(semantic.loadState(&stream));
+    CHECK(published);
+    CHECK(semantic.current().meta.seed == 0);
 }
 
 TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::description("rt")) {

@@ -84,16 +84,31 @@ int main(int argc, char** argv) {
         static_cast<const clap_plugin_state_t*>(plugin->get_extension(plugin, CLAP_EXT_STATE));
     if (!sem || !state) return 1;
 
-    // Template binary v1: cutoff 1200 Hz, amp sustain 0.5 ratio. Both migrate
-    // transactionally into the physical-domain JSON patch (50 percent).
+    // A binary v1 load must replace the previous JSON patch's envelope seed.
+    const std::string seeded =
+        R"({"schema":"supple.probe-synth-patch/1.0","seed":123,"params":{}})";
+    std::string seedError;
+    clap_ostream_t seedErrors{&seedError, writeText};
+    if (!sem->set_patch(plugin, CLAP_SUPPLE_SET_REPLACE, seeded.c_str(),
+                        static_cast<uint32_t>(seeded.size()), &seedErrors)) {
+        std::fprintf(stderr, "seeded patch: %s\n", seedError.c_str());
+        return 1;
+    }
+
+    // Template binary v1: cutoff 1200 Hz, amp sustain 0.5 ratio. Fractional
+    // waveform and slope values used to truncate in the old DSP.
     Input legacy;
     put32(legacy.bytes, 0x51505231);
     put32(legacy.bytes, 1);
-    put32(legacy.bytes, 2);
+    put32(legacy.bytes, 4);
     put32(legacy.bytes, 1);
     putDouble(legacy.bytes, 1200);
     put32(legacy.bytes, 7);
     putDouble(legacy.bytes, 0.5);
+    put32(legacy.bytes, 0);
+    putDouble(legacy.bytes, 0.6);
+    put32(legacy.bytes, 4);
+    putDouble(legacy.bytes, 0.6);
     if (!state->load(plugin, &legacy.stream)) {
         std::fprintf(stderr, "legacy load failed\n");
         return 1;
@@ -106,9 +121,13 @@ int main(int argc, char** argv) {
     }
     auto parsed = supple::json::parse(patchText);
     const auto* body = parsed ? parsed->find("params") : nullptr;
-    if (!body || !body->find("amp.sustain") || !body->find("filter.cutoff") ||
-        body->find("amp.sustain")->asDouble() != 50.0 ||
-        body->find("filter.cutoff")->asDouble() != 1200.0) {
+    const auto* seed = parsed ? parsed->find("seed") : nullptr;
+    if (!body || !seed || seed->asDouble() != 0.0 || !body->find("amp.sustain") ||
+        !body->find("filter.cutoff") || !body->find("osc.waveform") ||
+        !body->find("filter.slope") || body->find("amp.sustain")->asDouble() != 50.0 ||
+        body->find("filter.cutoff")->asDouble() != 1200.0 ||
+        body->find("osc.waveform")->asString() != "saw" ||
+        body->find("filter.slope")->asString() != "db12") {
         std::fprintf(stderr, "legacy patch: %s\n", patchText.c_str());
         return 1;
     }
