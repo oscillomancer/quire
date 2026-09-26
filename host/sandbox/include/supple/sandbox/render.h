@@ -36,8 +36,10 @@ struct TimedEvent {
 struct RenderRequest {
     std::vector<TimedEvent> events;  // any order; sorted internally (stable)
     const audio::AudioData* input =
-        nullptr;                     // for effect chains; resampled beforehand to the session rate
-    std::int64_t lengthSamples = 0;  // the musical length (the tail follows); 0 = input length
+        nullptr;  // for effect chains; resampled beforehand to the session rate
+    // The musical length (the tail follows). 0 = the input length or the last
+    // event + 1, whichever is later.
+    std::int64_t lengthSamples = 0;
 };
 
 struct RenderResult {

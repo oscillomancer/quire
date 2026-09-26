@@ -173,7 +173,10 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     j.length = request.lengthSamples > 0
                    ? request.lengthSamples
                    : (request.input ? static_cast<std::int64_t>(request.input->frames()) : 0);
-    if (!j.events.empty()) j.length = std::max(j.length, j.events.back().sample + 1);
+    // An explicit length is authoritative (events past it land in the tail);
+    // otherwise the render covers the input and every event.
+    if (!j.events.empty() && request.lengthSamples <= 0)
+        j.length = std::max(j.length, j.events.back().sample + 1);
     const auto tailMax =
         static_cast<std::int64_t>(std::llround(settings.tailLimitSeconds * settings.sampleRate));
     j.maxTotal = j.length + j.latency + std::max<std::int64_t>(0, tailMax);
