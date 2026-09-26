@@ -1,0 +1,280 @@
+# Spec: the headless engine (Phase 4)
+
+**Status:** Draft for review (2026-09-26). Frozen before P4 implementation.
+**Decision records:** ADR-0004 (backends), ADR-0008 (model/plan
+separation), ARCHITECTURE §3 (threads, channels, RT rules, main-thread
+budget), §6 (bridging, latency changes).
+**Code:** `host/engine` (`supple::engine`), `host/isolation` (bridge
+process), reusing `host/clap-host` from Phase 2 unchanged.
+
+The engine turns immutable session versions into sound: in real time through
+an audio backend, or offline as fast as possible. Its non-negotiables are
+real-time safety, determinism, and REAPER-class efficiency (anticipative
+processing, flexible isolation).
+
+---
+
+## 1. Compilation: Session version → RenderPlan
+
+The model thread (or a worker it delegates to) compiles a version into an
+immutable `RenderPlan`. Plans are never edited; a new version means a new
+plan (built incrementally from the previous one where possible, §1.6).
+
+### 1.1 Nodes
+
+- **TrackNode** per track, processing stages in order:
+  `inputs sum → [tap: pre_fx] → items/takes playback mixed in → FX chain →
+  [tap: pre_fader] → trim/volume/pan/width/mute/phase → [tap: post_fader]`.
+  Items play *before* the chain (as in REAPER); input monitoring and record
+  inputs enter at `inputs sum`.
+- **ItemPlayer** (inside a TrackNode): per active item on the track's lanes,
+  per take: source reader (audio: disk-streamed decoded+resampled blocks
+  from the media cache; MIDI: event generator from the source with playrate
+  and loop), take FX chain, take envelopes, item gain/fades/crossfades.
+- **FxInstance** wrappers around `host::Instance` (in-process) or a bridge
+  proxy (§5), with wet/dry, bypass, pins, oversampling, parallel groups and
+  containers compiled into a small per-chain program.
+- **RouteEdge**: copy from a source tap with gain/pan/channel map (and MIDI
+  filter), plus its PDC delay line.
+- **HwInput / HwOutput** nodes bound to backend ports.
+
+### 1.2 Buffers
+
+All buffers are allocated at compile time: per node, `channels × maxBlock`
+float per tap in use, one input-sum buffer, per-edge delay lines sized for
+the edge's compensation, per-plugin scratch for pins/oversampling. MIDI/event
+buffers are fixed-capacity arenas (overflow drops and counts).
+Summation of a node's inputs happens **in a fixed order** (edges sorted by
+source node order, then edge ID) after all inputs for the block exist —
+never by concurrent accumulation — so results are thread-count independent.
+
+### 1.3 Plugin delay compensation
+
+- Each FX instance reports latency (CLAP `latency`); bypassed instances keep
+  their latency (compensated bypass); offline instances report 0.
+- A chain's latency: sum over serial stages, max over a parallel group
+  (shorter branches delayed to match inside the chain program).
+- For every node, `arrival(e) = latency(source up to tap(e)) + edge delay`
+  must be equal for all inputs; the compiler solves this by giving each edge
+  `delay(e) = max_in − latency_at_tap(e)`, recursively from sources to the
+  master, then shifts the transport so the master output is aligned (the
+  plan's `output_latency`). Items on a track are read `latency` samples
+  early so they line up at the output. Pre-FX taps from a track with
+  latency get delayed like any other.
+- `fx.pdc = ignore` excludes an instance from compensation (for low-latency
+  monitoring chains).
+- Input monitoring paths are not delayed to align with playback (they are
+  live); recorded material is offset by the backend's reported input latency
+  plus the monitored chain's latency so it lands where it was played.
+- Runtime latency changes follow ARCHITECTURE §6: `request_restart` → new
+  plan built in the background → swap at a block boundary with a 10 ms
+  crossfade on affected paths.
+
+### 1.4 Automation
+
+Envelope points are pre-converted to plan time (samples at the engine rate,
+per the time map; beat-timebase points are converted through the tempo map
+at compile time). Per block, each automated target evaluates its segments:
+- mixer targets (volume, pan, width, send gain) interpolate per sample
+  (gain ramps) — cheap and exact;
+- plugin parameters receive CLAP param-value events at segment points and
+  every `automation_resolution` samples inside curved/linear segments
+  (default 32; always at exact point positions), in the parameter's CLAP
+  domain (normalized for stock plugins, ADR-0010);
+- write/touch/latch modes record from GUI/control input into the model on
+  the main thread (reliable coalescing channel, ARCHITECTURE §3), creating
+  one version per gesture.
+
+### 1.5 Transport and time
+
+The plan holds a sample-domain time map (tempo segments → samples) so the RT
+thread computes CLAP transport (beats, bars, tempo, time signature, loop,
+playing/recording flags) per block without floating-point drift (positions
+are integer samples; beat positions derived per block from the segment
+table). Looping wraps at exact samples; a block that crosses the loop point is
+split.
+
+### 1.6 Incremental rebuild and plan swap
+
+The compiler diffs the new version against the one the current plan was built
+from (session-model §4). Unchanged nodes keep their plugin instances and
+state (their DSP objects are moved into the new plan); new plugins are
+instantiated and activated on the main thread before the swap; parameter
+changes on existing instances become param events rather than rebuilds.
+The swap: `std::atomic<const RenderPlan*>` exchanged by the model thread;
+the RT thread picks up the new pointer at the next cycle start and
+acknowledges via an epoch counter; the model thread destroys the old plan
+(and deactivates removed plugins) only after the acknowledgement. Nothing on
+the RT thread frees memory.
+
+## 2. Real-time execution
+
+### 2.1 Live and anticipative regions
+
+A node is **live** when its output this cycle depends on something only
+known now: hardware inputs (armed or input-monitored tracks), the MIDI input
+for a monitored instrument, or a live-flagged track (plugin GUI open —
+configurable, default on; open MIDI editor with preview — configurable). Live
+propagates downstream: any node fed by a live node is live (the master is
+live whenever anything is live). All other nodes are **anticipative**.
+
+- **Anticipative nodes** render ahead of the playhead on worker threads into
+  per-node SPSC ring buffers, `render_ahead` long (default **200 ms**,
+  REAPER's default), in larger blocks (default 1024 samples). The RT thread
+  consumes their output at device block size. Edits that reach an
+  anticipative node (parameter changes from the UI) take effect at the
+  render-ahead horizon — like REAPER — unless the node is live-flagged.
+  Seeking or a structural edit flushes the rings and restarts render-ahead
+  from the new position (brief pre-roll; the RT thread outputs silence for
+  a node whose ring is not yet filled, counted as an anticipation miss).
+- **Live nodes** run inside the audio callback at device block size, in
+  topological order, parallelized over the worker pool when
+  `live_multiprocessing` is enabled (default: on when the live region has
+  ≥ 2 independent nodes of meaningful cost).
+
+Eligibility knobs mirror REAPER's (research doc, Addendum 2): anticipate
+tracks without FX (default off: nothing to gain), tracks with open MIDI
+editors (default off), tracks in touch/latch/write automation (default on).
+The current classification of every node is queryable
+(`engine.graph {detail}`) and emitted in engine stats.
+
+### 2.2 Worker pool
+
+`N = max(1, cores − 2)` workers by default (10 cores here → 8), each with a
+lock-free work-stealing deque; tasks are `(node, block range)` with atomic
+dependency counters. Workers sleep on a futex when idle; wakes use
+`rt::wake()` (the one sanctioned RT syscall). Anticipative work runs at
+normal-but-elevated priority; live work at RT priority (SCHED_FIFO via rtkit
+if available, reported otherwise — never by changing system config).
+
+The RT thread never blocks on a worker: for live parallelism it enqueues
+tasks, then **helps** (pops and runs tasks itself); it spins only on tasks
+already in progress elsewhere, up to a deadline (default 50 % of the block
+period); if a live task misses the deadline the RT thread finishes that
+cycle without it (the node outputs silence for that block, counted as a
+live-scheduling miss — this should never happen in normal operation and is
+a benchmark failure).
+
+### 2.3 The RT cycle
+
+1. Pick up a new plan if published (acknowledge epoch).
+2. Drain the model→RT command queue (transport, param events, meters on/off).
+3. Read hardware inputs into HwInput buffers; feed record rings.
+4. Run live nodes (with worker help); pull anticipative outputs from rings.
+5. Sum into the master, run the master chain (live if anything is live, else
+   the master is anticipative too and the RT thread only copies its ring
+   output).
+6. Write hardware outputs; publish meters (lossy rings) and state deltas
+   (coalescing slots).
+
+Everything in this cycle is `SUPPLE_RT` and runs under rtsan in the `rtsan`
+preset's engine tests (with the dummy backend).
+
+## 3. Offline rendering
+
+- Runs a **separate plan instance** with its **own plugin instances**
+  (created from the version's state/patches), so rendering never disturbs
+  playback and A/B renders of two branches can run side by side.
+- Fixed block size (default 512; setting), no anticipative split, all nodes
+  in topological order, optionally parallel across independent nodes —
+  results must be **bit-identical for any worker count** (fixed summation
+  order, §1.2) and across repeated runs (acceptance test).
+- Real-time/offline match: for sessions of stock plugins (block-size
+  invariant by their own acceptance tests), a real-time capture through the
+  dummy backend at any device block size nulls against the offline render to
+  −120 dBFS (acceptance test). Third-party plugins that are not block-size
+  invariant are documented exceptions.
+- Render jobs (`render.*`): mix, stems (per track post-fader through the
+  master-less path, or through master with others muted — option), regions,
+  the render matrix, selected items; tail handling (`tail_ms` or until
+  silence); normalization (loudness via core-analysis, then gain, then
+  optional true-peak limiter — deterministic, two-pass); dither (seeded
+  TPDF); formats WAV (PCM/float, RF64 beyond 4 GiB) and FLAC (libFLAC,
+  BSD-3, vendored when needed); file naming per session-model §7.3; a job
+  queue; results reported as files + analysis summaries.
+
+## 4. Media, recording, device handling
+
+- **Media cache**: decoded and resampled audio (Signalsmith-quality
+  resampler or the audio-file polyphase resampler), keyed by `(content hash,
+  engine rate)`, disk-backed under `$XDG_CACHE_HOME/<slug>/media/`. Disk
+  streaming readers prefetch on I/O threads into per-item rings (default
+  1200 ms like REAPER's media buffer).
+- **Peaks**: min/max pyramids built on I/O threads, cached by content hash,
+  never in project diffs.
+- **Recording**: RT thread writes input frames into large preallocated SPSC
+  rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
+  rewriting the header every 5 s so a crash leaves a valid file up to the last
+  flush; punch in/out and loop recording (one take per pass); MIDI recording
+  into MIDI takes; overflow is an error event, never a silent drop.
+- **Backends** (ADR-0004): JACK (dlopen), dummy, offline in P4; buffer-size,
+  sample-rate and device changes stop the engine cleanly, rebuild the plan,
+  and restart; xruns are counted (backend callbacks + our own deadline
+  misses) and emitted as `engine.xrun` events with context (block size,
+  load, which node was slowest).
+
+## 5. Plugin isolation (`host/isolation`)
+
+Modes per instance (session-model §1.7): `in_process`, `shared_bridge` (one
+bridge process for all instances in that mode), `dedicated` (one process per
+instance).
+
+- The bridge executable (`<slug>-bridge`) hosts plugins with the same
+  `clap-host` library. Control plane: a Unix socket speaking a small binary
+  protocol for main-thread calls (activate, params, state, semantic
+  extension, GUI create/set_parent with the host's X11 XID, timers).
+  Data plane: a `memfd` shared-memory region per instance with input/output
+  audio buffers, event arenas and a cycle header; wake via eventfd/futex
+  through `rt::wake()`.
+- **Pipelined** (default): at cycle n the engine publishes input n and
+  consumes output n−1; the instance's reported latency is increased by one
+  engine block (compensated by PDC). **Synchronous** (opt-in, for
+  low-latency monitoring): the engine publishes input n and spins until
+  output n or a deadline (≤ 30 % of the block period), else silence + a
+  bridge-miss count.
+- Crash handling: a control thread watches the process (pidfd); on crash the
+  instance becomes a **failed node** (silence; `fx.failed` event with the
+  signal and last known state kept in the model), the rest of the session
+  keeps playing, and `fx.restart` re-creates it from the last known state.
+- Acceptance: a deliberately crashing test plugin (a CLAP that segfaults on
+  a given parameter value) in `dedicated` mode does not stop the engine; a
+  real-time capture around the crash shows only that node going silent.
+
+## 6. Control surface
+
+The engine registers the session-model §7 command catalogue on the command
+bus and exposes it through the control protocol (Unix socket), Lua (Phase
+4/5 bindings) and MCP (proxy or in-process). Engine-specific commands:
+`engine.start {backend, device, rate, block}`, `engine.stop`,
+`engine.status` (q: backend, rate, block, load, xruns, anticipation
+misses), `engine.graph` (q: nodes, live/anticipative classification,
+latencies, CPU per node), `engine.settings.set {render_ahead_ms,
+worker_threads, live_multiprocessing, automation_resolution, …}`.
+Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
+`meters` (rate-limited, subscribe per track), `fx.failed`,
+`record.progress`.
+
+## 7. Benchmarks (acceptance, `docs/benchmarks/`)
+
+- **B1 capacity:** generated session: N tracks, each an Orrery instance
+  (standard patch from `docs/specs/synth.md` §9) + stock EQ + stock
+  compressor playing a 4-bar notation loop, one armed audio track with the
+  same chain monitoring input; at 48 kHz / 64 frames on this machine: find
+  the largest N with zero xruns over 5 minutes, with and without
+  anticipative processing. Target: anticipative on ≥ 3× the tracks of
+  anticipative off.
+- **B2 REAPER comparison:** the same structure in REAPER 7 (the stock synth
+  loaded as CLAP in REAPER, ReaEQ/ReaComp substituted where needed and
+  noted), same device settings, anticipative FX at its default; report N for
+  both.
+- **B3 latency/PDC:** impulse through chains with known latencies across a
+  folder/send topology; outputs must align to the sample.
+- **B4 determinism:** repeated offline renders (1, 2, 8 worker threads)
+  byte-identical; real-time capture vs offline null.
+- **B5 edit responsiveness:** 1000 random edits via the bus while playing:
+  main-thread time per edit (p95 < 2 ms), no xruns, plan swap latency.
+- **B6 isolation:** crash test (§5) + CPU overhead of pipelined bridge vs
+  in-process for 16 instances.
+
+Results are recorded with kernel, PipeWire version, quantum actually
+granted, and CPU governor (read-only facts).
