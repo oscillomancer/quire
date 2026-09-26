@@ -69,6 +69,16 @@ class EngineApp : public cmd::Host {
     Status open(const std::filesystem::path& path);  // replaces the history
     void newProject(model::Project project);
 
+    // --- branches ------------------------------------------------------------------
+    // Re-executes recorded invocations on `base` as `version` (the replayer
+    // for merges): commands run against a temporary transaction on that base.
+    Result<model::Replayed> replay(const cmd::Registry& registry, const model::Session& base,
+                                   const std::vector<model::Invocation>& invocations,
+                                   std::uint64_t version);
+    Status switchBranch(std::string_view name);  // reloads the engine
+    model::MergeOutcome mergeBranch(const cmd::Registry& registry, std::string_view from,
+                                    std::string_view into);
+
     // --- rendering ---------------------------------------------------------------
     Result<OfflineResult> renderMix(const OfflineSettings& settings);
     std::filesystem::path rendersDir() const { return options_.workdir / "renders"; }

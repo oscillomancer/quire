@@ -183,6 +183,63 @@ Status EngineApp::open(const fs::path& where) {
     return okStatus();
 }
 
+// --- branches ----------------------------------------------------------------------------
+
+Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const model::Session& base,
+                                          const std::vector<model::Invocation>& invocations,
+                                          std::uint64_t version) {
+    std::unique_ptr<model::EditTxn> saved = std::move(txn_);
+    model::TxnRecord savedRecord = std::move(record_);
+    txn_ = std::make_unique<model::EditTxn>(base, version);
+    auto restore = [&] {
+        txn_ = std::move(saved);
+        record_ = std::move(savedRecord);
+    };
+    for (std::size_t i = 0; i < invocations.size(); ++i) {
+        const model::Invocation& inv = invocations[i];
+        const cmd::CommandInfo* info = registry.find(inv.command);
+        if (!info) {
+            restore();
+            return Error("history.replay", "unknown command " + inv.command + " in history");
+        }
+        cmd::Context ctx = makeContext({cmd::Origin::Type::Internal, "replay", ""});
+        ctx.provide<const cmd::Registry>(registry);
+        auto r = info->invoke(inv.args, ctx);
+        if (!r) {
+            Error e = std::move(r).error();
+            restore();
+            e.message = inv.command + ": " + e.message;
+            return e;
+        }
+    }
+    model::Replayed out;
+    out.changes = txn_->changes();
+    out.created = txn_->created();
+    auto s = txn_->commit();
+    restore();
+    if (!s) return std::move(s).error();
+    out.session = std::move(*s);
+    return out;
+}
+
+Status EngineApp::switchBranch(std::string_view name) {
+    SUPPLE_TRY(versions_->switchBranch(name));
+    headChanged();
+    return okStatus();
+}
+
+model::MergeOutcome EngineApp::mergeBranch(const cmd::Registry& registry, std::string_view from,
+                                           std::string_view into) {
+    auto outcome = versions_->merge(
+        from, into,
+        [&](const model::Session& base, const std::vector<model::Invocation>& inv,
+            std::uint64_t version) { return replay(registry, base, inv, version); },
+        clockMs());
+    if (outcome.conflicts.empty() && !outcome.upToDate && versions_->branch() == into)
+        headChanged();
+    return outcome;
+}
+
 // --- rendering ----------------------------------------------------------------------------
 
 Result<OfflineResult> EngineApp::renderMix(const OfflineSettings& settings) {
@@ -308,6 +365,12 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
+    if (fixture == "branch_ahead") {  // an agent branch one edit ahead of main, main current
+        run("branch.create", R"({"name": "agent/claude/darker"})");
+        run("track.set", R"({"track": "tr_1", "volume_db": -3})");
+        run("branch.switch", R"({"name": "main"})");
+        return;
+    }
     if (fixture == "song_undone") {
         run("track.set", R"({"track": "tr_1", "volume_db": -3})");
         (void)versions_->undo();

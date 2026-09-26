@@ -123,3 +123,51 @@ TEST_CASE("an LLM builds a song over the bus: batch, render, undo, save and reop
     CHECK(errs.error().path == "/args/track");
     CHECK(errs.error().hint.find("tr_1") != std::string::npos);
 }
+
+TEST_CASE("agent branches: parallel edits merge by replay; conflicts are reported") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        return r;
+    };
+    REQUIRE(call("track.add", R"({"name": "Drums"})"));
+    REQUIRE(call("branch.create", R"({"name": "agent/claude/bass"})"));
+    // On the branch: a bass track (tr_2 here) and a level change on it.
+    REQUIRE(call("track.add", R"({"name": "Bass"})"));
+    REQUIRE(call("track.set", R"({"track": "tr_2", "volume_db": -4})"));
+    // Meanwhile on main: a keys track (also tr_2 there) and a drums tweak.
+    REQUIRE(call("branch.switch", R"({"name": "main"})"));
+    REQUIRE(call("track.add", R"({"name": "Keys"})"));
+    REQUIRE(call("track.set", R"({"track": "tr_1", "mute": true})"));
+    auto diff = call("branch.diff", R"({"a": "main", "b": "agent/claude/bass"})");
+    REQUIRE(diff);
+    CHECK((*diff)["changes"].size() >= 2);
+
+    auto merged = call("branch.merge", R"({"from": "agent/claude/bass"})");
+    REQUIRE_MESSAGE(merged, (merged ? std::string() : merged.error().toString()));
+    CHECK_FALSE((*merged)["fast_forward"].asBool());
+    CHECK((*merged)["remapped"]["tr_2"].asString() == "tr_3");
+    const auto& s = app->head();
+    CHECK(s.tracks.find(*model::Id::parse("tr_2"))->name == "Keys");
+    CHECK(s.tracks.find(*model::Id::parse("tr_3"))->name == "Bass");
+    CHECK(s.tracks.find(*model::Id::parse("tr_3"))->volumeDb == -4.0);  // followed the remap
+    CHECK(s.tracks.find(*model::Id::parse("tr_1"))->mute);
+
+    // A conflict: both sides set the drums level.
+    REQUIRE(call("branch.create", R"({"name": "agent/claude/drums"})"));
+    REQUIRE(call("track.set", R"({"track": "tr_1", "volume_db": -2})"));
+    REQUIRE(call("branch.switch", R"({"name": "main"})"));
+    REQUIRE(call("track.set", R"({"track": "tr_1", "volume_db": -6})"));
+    const auto before = app->versions().headVersion("main");
+    auto conflict = call("branch.merge", R"({"from": "agent/claude/drums"})");
+    REQUIRE(!conflict);
+    CHECK(conflict.error().code == "branch.conflict");
+    REQUIRE(conflict.error().details.size() == 1);
+    CHECK(conflict.error().details[0].code == "merge.concurrent_edit");
+    CHECK(conflict.error().details[0].message.find("volume_db") != std::string::npos);
+    CHECK(app->versions().headVersion("main") == before);
+}
