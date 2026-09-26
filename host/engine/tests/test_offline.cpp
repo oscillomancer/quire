@@ -215,3 +215,87 @@ TEST_CASE("a missing plugin passes audio through with a warning") {
     CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kCentre).epsilon(1e-4));
     CHECK(renderOffline(s, pool, {1.0, 1.0, 0, 512}).error().code == "engine.range");
 }
+
+namespace {
+Id addEnvelope(model::EditTxn& t, Id object, std::string param,
+               std::vector<model::EnvPoint> points) {
+    model::Envelope env;
+    env.target = {object, std::move(param)};
+    env.points = std::move(points);
+    return t.create(env);
+}
+double windowPeak(const std::vector<float>& v, std::size_t centre) {
+    return peak(v, centre - 120, centre + 120);
+}
+}  // namespace
+
+TEST_CASE("mixer automation: volume in dB, square mute on the exact sample, route mute") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id tr = addTrack(t, "Synth");
+    addFx(t, tr, kSine);
+    addNote(t, tr, 0.0, 8.0);
+    addEnvelope(t, tr, "volume", {{0.0, 0.0}, {2.0, -12.0}});
+    addEnvelope(t, tr, "mute", {{0.0, 0.0, model::PointShape::Square}, {3.0, 1.0}});
+    auto s = commit(t);
+    auto r = render(s, pool, 2.0);
+    REQUIRE(r.warnings.empty());
+    const auto& L = r.audio.channels[0];
+    const double base = 0.25 * kCentre;
+    CHECK(windowPeak(L, 24000) / base ==
+          doctest::Approx(std::pow(10.0, -6.0 / 20.0)).epsilon(0.01));
+    CHECK(windowPeak(L, 60000) / base ==
+          doctest::Approx(std::pow(10.0, -12.0 / 20.0)).epsilon(0.01));
+    CHECK(peak(L, 72000) == 0.0);  // muted from beat 3 = 1.5 s
+    CHECK(peak(L, 71800, 72000) > 0.0);
+
+    // Through a latent chain the mute still lands on beat 3 of the output.
+    model::EditTxn t2(s, 2);
+    addFx(t2, tr, kGain,
+          json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+              .value());
+    auto r2 = render(commit(t2), pool, 2.0);
+    CHECK(r2.outputLatency == 64);
+    CHECK(peak(r2.audio.channels[0], 72000) == 0.0);
+    CHECK(peak(r2.audio.channels[0], 71800, 72000) > 0.0);
+}
+
+TEST_CASE("route automation") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id src = addTrack(t, "Src");
+    addFx(t, src, kSine);
+    addNote(t, src, 0.0, 4.0);
+    t.modify<model::Track>(src, [](model::Track& x) { x.mute = true; });
+    const Id bus = addTrack(t, "Bus");
+    model::Route send;
+    send.from.track = src;
+    send.to.track = bus;
+    send.tap = model::Tap::PreFader;
+    const Id sd = t.create(send);
+    addEnvelope(t, sd, "mute", {{0.0, 0.0, model::PointShape::Square}, {1.0, 1.0}});
+    auto r = render(commit(t), pool, 1.0);
+    CHECK(peak(r.audio.channels[0], 0, 24000) > 0.1);
+    CHECK(peak(r.audio.channels[0], 24000) == 0.0);
+}
+
+TEST_CASE("solo: soloed tracks and their signal path stay audible") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id folder = addTrack(t, "Folder");
+    const Id a = addTrack(t, "A", folder);
+    const Id b = addTrack(t, "B");
+    addFx(t, a, kSine);
+    addFx(t, b, kSine);
+    addNote(t, a, 0.0, 1.0, 69);
+    addNote(t, b, 0.0, 1.0, 81);
+    t.modify<model::Track>(a, [](model::Track& x) { x.solo = model::Solo::On; });
+    auto s = commit(t);
+    auto r = render(s, pool, 0.5);
+    // Only A (through its folder) is heard: one sine at the -3 dB law, twice.
+    CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kCentre * kCentre).epsilon(1e-4));
+    model::EditTxn t2(s, 2);
+    t2.modify<model::Track>(b, [](model::Track& x) { x.solo = model::Solo::Defeat; });
+    auto r2 = render(commit(t2), pool, 0.5);
+    CHECK(peak(r2.audio.channels[0]) > 0.25 * kCentre * kCentre * 1.2);  // B is back
+}

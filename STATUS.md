@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-09-26 06:25 by the orchestrator. Compact and current: what's done,
+Updated 2026-09-26 07:05 by the orchestrator. Compact and current: what's done,
 in progress, blocked, next. Task IDs are stable (P<phase>.<n>).
 
 ## Phase 0 — Reconnaissance and foundations
@@ -46,7 +46,7 @@ reports committed in docs.
 |---|---|---|
 | P2.1 | `specs/semantic-params-extension.md` (CLAP ext `com.suppleaudio.semantic-params/1`) | spec frozen; ABI header in `plugins/common/include/supple/clap/semantic_params.h` |
 | P2.2 | host/clap-host: load, instantiate, activate, process with note/param events, state, semantic ext | **done** (orchestrator); reviewed (scout round 2); fixes 15b7324: enforced lifecycle, pending restart/flush requests, event-arena overflow, tail notifications; new `test.edge` fixture |
-| P2.3 | probe synth from the template (instrument, CLAP-only offline build, C++20) | stage 1 **done** (probe; commit 9494f9a on p2-probe, not merged: 8-voice instrument, CLI render, editor, X11 embed check passed). Review pending. Stage 2 (semantic params via plugin_support — now with `ParamStore::readAll()`) on hold until the reset |
+| P2.3 | probe synth from the template (instrument, CLAP-only offline build, C++20) | stage 1 **done and merged** (11e3892; `build/<preset>/plugins/clap/ProbeSynth.clap`, its 6 ctests run as `plugin.probe-synth.ctest`; `supple_add_plugin(<dir> <PREFIX>)` made generic). Review pending. Stage 2 (semantic params via plugin_support — now with `ParamStore::readAll()`) at the reset |
 | P2.4 | host/sandbox: render notation/MIDI/audio through a plugin offline, analyze, write WAV + report; CLI | **done except analysis** (orchestrator): renderer (147336b + review fixes), `Session` (107f7f4: instances/chain/params/patches/presets/renders/transactions), 16 commands on the bus + `SandboxHost` with NDJSON command log, `quire-sandbox exec`/`registry` CLI, generated `skill/generated/sandbox-*.{md,json}` with a drift test. Examples use the test fixtures until the probe synth is semantic. Missing: `analyze`/`compare`/`masking`/`profile.evaluate` + render `analyze` levels (need core-analysis), audio-file resampling, `--mcp` (needs P2.6) |
 | P2.5 | control-protocol: JSON-RPC 2.0 NDJSON over Unix socket | next for json (brief json-2 Task B) |
 | P2.6 | mcp adapter (stdio) generated from the registry; sandbox tools | next for json (Task B), then `--mcp` in the sandbox CLI (orchestrator) |
@@ -72,8 +72,12 @@ reports committed in docs.
 
 | ID | Task | State |
 |---|---|---|
-| P4.0 | `specs/session-model.md` (objects, time map, versions/branches, project file, command catalogue) and `specs/engine.md` (plans, PDC, anticipative processing, isolation, benchmarks) | drafts; to be reviewed before P4 |
-| P4.1 | core-json `compactRows` writer option for bulk arrays in project files | planned |
+| P4.0 | `specs/session-model.md` (objects, time map, versions/branches, project file, command catalogue) and `specs/engine.md` (plans, PDC, anticipative processing, isolation, benchmarks) | drafts, used as the basis for the P4 core below (amendment: `fx` is a top-level project collection); design review by reaper/scout still wanted before the command catalogue |
+| P4.1 | core-json `compactRows` writer option for bulk arrays in project files | not needed so far: the canonical writer already prints MIDI rows one per line |
+| P4.2 | `libs/timeline`: tempo/meter maps, closed-form ramps, bar/beat, pickups | **done** (orchestrator, ba816c6) |
+| P4.3 | `host/engine/model`: ids, IdMap, object types + schemas, EditTxn, invariants, diff, project file, VersionStore (undo/redo/coalescing/branches/replay merge with field-level conflicts) | **done** (orchestrator, 4a327ac); review queued (scout-5) |
+| P4.4 | `host/engine` offline renderer: plan compile (topological, fixed summation order), MIDI items, FX chains via clap-host, mixer (width/volume/pan law/mute, master balance), routes with taps, PDC, mixer automation (track volume/trim/pan/width/mute, route volume/pan/mute; shapes), solo, engine.graph lines | **done** (orchestrator, 275682b + automation/solo). Next: audio items (native rate; resampling when core-dsp lands), plugin-parameter automation, stems, then the real-time engine (JACK dlopen, plan swap, anticipative processing) |
+| P4.5 | engine command catalogue on the bus (session-model §7) | planned — well specified; a Sol task once the model review is in |
 
 ## Team (Codex workers via Herdr)
 

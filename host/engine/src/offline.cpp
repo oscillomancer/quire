@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <numbers>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -125,11 +126,60 @@ struct Stereo {
     }
 };
 
+double shapeCurve(model::PointShape shape, double tension, double t) {
+    switch (shape) {
+        case model::PointShape::Linear:
+            return t;
+        case model::PointShape::Square:
+            return 0.0;  // holds until the next point
+        case model::PointShape::Slow:
+            return t * t * (3.0 - 2.0 * t);
+        case model::PointShape::FastStart:
+            return 1.0 - (1.0 - t) * (1.0 - t);
+        case model::PointShape::FastEnd:
+            return t * t;
+        case model::PointShape::Bezier:
+            return t + std::clamp(tension, -1.0, 1.0) * t * (1.0 - t);
+    }
+    return t;
+}
+
+// A compiled envelope: points at samples from the render start (already
+// shifted by the latency at the point of application), values in the
+// target's unit. Playback is monotonic, so a cursor makes lookups O(1).
+struct Automation {
+    struct Pt {
+        std::int64_t sample;
+        double value;
+        model::PointShape shape;
+        double tension;
+    };
+    std::vector<Pt> points;
+    std::size_t cursor = 0;
+    bool active() const { return !points.empty(); }
+    void shift(std::int64_t by) {
+        for (auto& pt : points) pt.sample += by;
+    }
+    double at(std::int64_t s) SUPPLE_RT {
+        if (s <= points.front().sample) return points.front().value;
+        while (cursor + 1 < points.size() && points[cursor + 1].sample <= s) ++cursor;
+        if (cursor + 1 >= points.size()) return points.back().value;
+        const Pt& a = points[cursor];
+        const Pt& b = points[cursor + 1];
+        const double t =
+            static_cast<double>(s - a.sample) / static_cast<double>(b.sample - a.sample);
+        return a.value + (b.value - a.value) * shapeCurve(a.shape, a.tension, t);
+    }
+};
+
 struct Edge {
-    std::size_t from = 0;  // node index
+    std::size_t from = 0;     // node index
+    std::optional<Id> route;  // empty for parent sends
     model::Tap tap = model::Tap::PostFader;
     double gainL = 1.0, gainR = 1.0;
+    double volumeDb = 0.0, pan = 0.0;
     bool mono = false, invert = false;
+    Automation autoVolume, autoPan, autoMute;  // route envelopes (dB, %, 0/1)
     Delay delay;
     Stereo tmp;
 };
@@ -161,7 +211,14 @@ struct Node {
     std::size_t nextEvent = 0;
     int noteTarget = -1;  // chain index receiving note events
     double volume = 1.0, width = 1.0, panL = 1.0, panR = 1.0;
-    bool mute = false;
+    double volumeDb = 0.0, pan = 0.0, panLawDb = -3.0;
+    bool mute = false, master = false;
+    bool soloSilenced = false;  // another track is soloed and this one is not on its path
+    Automation autoVolume, autoTrim, autoPan, autoWidth, autoMute;  // dB, dB, %, %, 0/1
+    bool automated() const {
+        return autoVolume.active() || autoTrim.active() || autoPan.active() || autoWidth.active() ||
+               autoMute.active();
+    }
 };
 
 struct Plan {
@@ -356,6 +413,10 @@ Result<Plan> compile(const Session& s, InstancePool& pool, const OfflineSettings
         n.id = (*order)[i];
         const model::Track& t = *s.tracks.find(n.id);
         n.volume = dbToGain(t.volumeDb);
+        n.volumeDb = t.volumeDb;
+        n.pan = t.pan;
+        n.panLawDb = s.project->panLawDb;
+        n.master = n.id == model::kMaster;
         n.width = t.width / 100.0;
         if (n.id == model::kMaster) {
             // The master pans as a balance control: no attenuation at the centre.
@@ -404,7 +465,10 @@ Result<Plan> compile(const Session& s, InstancePool& pool, const OfflineSettings
         if (!r.from.track || !r.to.track || r.mute) continue;
         Edge ed;
         ed.from = index.at(*r.from.track);
+        ed.route = e.id;
         ed.tap = r.tap;
+        ed.volumeDb = r.volumeDb;
+        ed.pan = r.pan;
         const double g = dbToGain(r.volumeDb);
         auto [pl, pr] = panGains(r.pan / 100.0, s.project->panLawDb);
         ed.gainL = g * pl;
@@ -420,7 +484,87 @@ Result<Plan> compile(const Session& s, InstancePool& pool, const OfflineSettings
         p.nodes[pe.to].in.push_back(p.edges.size());
         p.edges.push_back(std::move(pe.e));
     }
-    p.warnings.shrink_to_fit();
+    // Solo: with any track soloed, a track stays audible only if it is soloed,
+    // solo-defeated, the master, or on a soloed track's signal path: what
+    // feeds it (soloing a bus or folder keeps its sources and children) and
+    // where it goes (soloing a source keeps its folders, buses and the master).
+    // Siblings that merely share a folder with a soloed track are silenced.
+    {
+        std::set<Id> soloed;
+        for (const auto& e : s.tracks)
+            if (e.value->solo == model::Solo::On || e.value->solo == model::Solo::InPlace)
+                soloed.insert(e.id);
+        if (!soloed.empty()) {
+            std::map<Id, std::vector<Id>> down, up;  // signal flow
+            for (const auto& e : s.tracks)
+                if (e.value->parent && e.value->parentSend.enabled) {
+                    down[e.id].push_back(*e.value->parent);
+                    up[*e.value->parent].push_back(e.id);
+                }
+            for (const auto& e : s.routes)
+                if (e.value->from.track && e.value->to.track) {
+                    down[*e.value->from.track].push_back(*e.value->to.track);
+                    up[*e.value->to.track].push_back(*e.value->from.track);
+                }
+            std::set<Id> audible = soloed;
+            auto flood = [&](std::map<Id, std::vector<Id>>& g) {
+                std::vector<Id> stack(soloed.begin(), soloed.end());
+                std::set<Id> seen;
+                while (!stack.empty()) {
+                    const Id id = stack.back();
+                    stack.pop_back();
+                    for (Id nxt : g[id])
+                        if (seen.insert(nxt).second) {
+                            audible.insert(nxt);
+                            stack.push_back(nxt);
+                        }
+                }
+            };
+            flood(down);
+            flood(up);
+            for (Node& n : p.nodes) {
+                const model::Track& t = *s.tracks.find(n.id);
+                n.soloSilenced = !audible.count(n.id) && t.solo != model::Solo::Defeat && !n.master;
+            }
+        }
+    }
+    // Envelopes on mixer targets (plugin parameters come later).
+    const std::int64_t origin = time::samplesAt(opt.startSeconds, p.rate);
+    for (const auto& e : s.envelopes) {
+        const model::Envelope& env = *e.value;
+        if (!env.active || env.points.empty()) continue;
+        Automation a;
+        for (const model::EnvPoint& pt : env.points) {
+            const double sec =
+                env.timebase == model::Timebase::Time ? pt.pos : s.timeMap->secondsAt(pt.pos);
+            a.points.push_back(
+                {time::samplesAt(sec, p.rate) - origin, pt.value, pt.shape, pt.tension});
+        }
+        const Id o = env.target.object;
+        const std::string& param = env.target.param;
+        Automation* slot = nullptr;
+        if (o.kind == Kind::Track && index.count(o)) {
+            Node& n = p.nodes[index.at(o)];
+            slot = param == "volume"  ? &n.autoVolume
+                   : param == "trim"  ? &n.autoTrim
+                   : param == "pan"   ? &n.autoPan
+                   : param == "width" ? &n.autoWidth
+                   : param == "mute"  ? &n.autoMute
+                                      : nullptr;
+        } else if (o.kind == Kind::Route) {
+            for (Edge& ed : p.edges)
+                if (ed.route == o)
+                    slot = param == "volume" ? &ed.autoVolume
+                           : param == "pan"  ? &ed.autoPan
+                           : param == "mute" ? &ed.autoMute
+                                             : nullptr;
+        }
+        if (slot)
+            *slot = std::move(a);
+        else
+            p.warnings.push_back(e.id.str() + ": automation of " + o.str() + " " + param +
+                                 " is not rendered yet");
+    }
     return p;
 }
 
@@ -471,6 +615,17 @@ Status prepare(Plan& p, const Session& s) {
     }
     const Node& master = p.nodes.back();
     p.outputLatency = master.latIn + master.latChain;
+    // Automation lines up with the signal where it is applied: the fader sees
+    // the track's input and chain latency, a route's gain its target's input.
+    for (Node& n : p.nodes) {
+        const std::int64_t at = n.latIn + n.latChain;
+        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
+            a->shift(at);
+        for (std::size_t ei : n.in)
+            for (Automation* a :
+                 {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
+                a->shift(n.latIn);
+    }
     // Events, shifted by each track's input latency so its own notes stay
     // aligned with what arrives from upstream.
     for (Node& n : p.nodes) {
@@ -522,9 +677,22 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
                                                                 : src.post;
             e.tmp.copyFrom(tap, n);
             e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
-            const float gl = static_cast<float>(e.invert ? -e.gainL : e.gainL);
-            const float gr = static_cast<float>(e.invert ? -e.gainR : e.gainR);
+            const bool automated =
+                e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
+            const double sign = e.invert ? -1.0 : 1.0;
+            float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
             for (std::uint32_t i = 0; i < n; ++i) {
+                if (automated) {
+                    const std::int64_t at = pos + i;
+                    const double g =
+                        (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
+                            ? 0.0
+                            : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
+                    const auto [pl, pr] = panGains(
+                        (e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, node.panLawDb);
+                    gl = static_cast<float>(sign * g * pl);
+                    gr = static_cast<float>(sign * g * pr);
+                }
                 float l = e.tmp.l[i], r = e.tmp.r[i];
                 if (e.mono) l = r = 0.5f * (l + r);
                 node.sum.l[i] += l * gl;
@@ -576,14 +744,41 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
         }
         node.preFader.copyFrom(node.sum, n);
         // 4. Width, volume, pan, mute.
-        const float w = static_cast<float>(node.width);
-        const float gl = node.mute ? 0.0f : static_cast<float>(node.volume * node.panL);
-        const float gr = node.mute ? 0.0f : static_cast<float>(node.volume * node.panR);
+        float w = static_cast<float>(node.width);
+        float gl = node.mute ? 0.0f : static_cast<float>(node.volume * node.panL);
+        float gr = node.mute ? 0.0f : static_cast<float>(node.volume * node.panR);
+        const bool automated = node.automated();
         for (std::uint32_t i = 0; i < n; ++i) {
+            if (automated) {
+                const std::int64_t at = pos + i;
+                const bool muted = node.autoMute.active() ? node.autoMute.at(at) >= 0.5 : node.mute;
+                const double db =
+                    (node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb) +
+                    (node.autoTrim.active() ? node.autoTrim.at(at) : 0.0);
+                double pl = node.panL, pr = node.panR;
+                if (node.autoPan.active()) {
+                    const double pan = std::clamp(node.autoPan.at(at) / 100.0, -1.0, 1.0);
+                    if (node.master) {
+                        pl = pan <= 0 ? 1.0 : 1.0 - pan;
+                        pr = pan >= 0 ? 1.0 : 1.0 + pan;
+                    } else {
+                        std::tie(pl, pr) = panGains(pan, node.panLawDb);
+                    }
+                }
+                const double g = muted ? 0.0 : dbToGain(db);
+                gl = static_cast<float>(g * pl);
+                gr = static_cast<float>(g * pr);
+                if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
+            }
             const float mid = 0.5f * (node.sum.l[i] + node.sum.r[i]);
             const float side = 0.5f * (node.sum.l[i] - node.sum.r[i]) * w;
             node.post.l[i] = (mid + side) * gl;
             node.post.r[i] = (mid - side) * gr;
+        }
+        if (node.soloSilenced) {  // processed (plugin state continues) but not heard
+            node.preFx.clear(n);
+            node.preFader.clear(n);
+            node.post.clear(n);
         }
     }
     return true;
