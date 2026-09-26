@@ -57,6 +57,15 @@ and modulation amounts in oct/st/dB/%.
 *Meanwhile:* Phase 1–2 work continues; P3.2 waits for this spec to be frozen,
 with or without your comments.
 
+### 8. Which models and budget for automated LLM evaluations — decision
+The evaluation harness (`docs/specs/eval-harness.md`) runs agents against the
+sandbox over MCP to measure how well they program the synth and write
+notation. Runners exist for the Claude CLI, the Codex CLI, and any Anthropic /
+OpenAI-compatible API (including a local llama-server). Which should it use,
+and how many runs per week are acceptable cost-wise? A local model on the Arc
+B580 is free but weaker; a frontier model is the real target user.
+*Meanwhile:* the harness is built and dry-run tested without calling models.
+
 ## Resolved
 
 (none yet)
