@@ -1,9 +1,3 @@
-# The semantic-params extension header is shared with the plugins.
-add_library(semantic-params-abi INTERFACE)
-target_include_directories(semantic-params-abi INTERFACE ${CMAKE_SOURCE_DIR}/plugins/common/include)
-target_link_libraries(semantic-params-abi INTERFACE supple::clap)
-add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
-
 supple_add_library(clap-host
   SOURCES src/clap_host.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi
