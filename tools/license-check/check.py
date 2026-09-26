@@ -79,7 +79,12 @@ def main() -> int:
         lf = d.get("license_file")
         if lf and not (tp / lf).is_file():
             errors.append(f"{tag}: license file third_party/{lf} is missing")
-        if not lf and d.get("linkage") != "system":
+        if d.get("fetched"):
+            # Fetched at configure time on some platforms only (never in the
+            # default offline build): must still declare license and pin.
+            if not d.get("commit") or not d.get("source"):
+                errors.append(f"{tag}: fetched dependency needs 'source' and a pinned 'commit'")
+        elif not lf and d.get("linkage") != "system":
             errors.append(f"{tag}: no license_file declared")
         if tag.lower() not in third_party_md.lower():
             errors.append(f"{tag}: not described in THIRD_PARTY.md")

@@ -90,6 +90,16 @@
       "commit": "b7637149ebe53124e5be90559e02a0185bbcbd73",
       "purpose": "Plugin editor windowing (template GUI stack); not used by the DAW shell",
       "linkage": "static (plugins only)"
+    },
+    {
+      "name": "nanovg_metal",
+      "fetched": true,
+      "license": "MIT",
+      "version": "template pin",
+      "source": "https://github.com/wjakob/nanovg_metal",
+      "commit": "1e4243990741f5b0da73bc0f25c85ae0e31b8766",
+      "purpose": "Metal renderer for plugin editors on macOS only (fetched by the template CMake on Apple); never built on Linux",
+      "linkage": "static (macOS plugins only)"
     }
   ],
   "system_libraries": [
