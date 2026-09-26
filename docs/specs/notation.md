@@ -128,7 +128,10 @@ section    := voice | lane | events
   host's).
 - `tempo 120` — only used when there is no host tempo map (the sandbox);
   otherwise it must agree with the host at the item start or it is a warning.
-- `length 8` — item length in bars (default: the last bar written).
+- `length 8` — item length in whole bars; `length 8+480t` adds ticks (fewer
+  than one bar). Default: the end of the last written bar. The length must
+  be ≥ the end of the last event; it may be shorter than the last written
+  bar (trailing rests beyond it are simply cut).  *(Amended 2026-09-26.)*
 
 ### B.4 Voices
 
@@ -311,7 +314,10 @@ lane poly PITCH [ch 1..16]
 POSITION VALUE [SHAPE]
 ```
 
-Lane points are listed one per line (or `;`-separated), in time order:
+Lane points are listed one per line (or `;`-separated), in non-decreasing
+time order. Several points may share a position; they compile to events at
+the same tick in the order written (the last one wins, as in MIDI).
+*(Amended 2026-09-26.)*
 
 - **Positions** are `BAR.BEAT` with an optional tick offset: `1.1`, `3.2`,
   `4.3+120t`. Beats count the meter's denominator unit (in 6/8, `2.4` is the
@@ -401,7 +407,7 @@ rest would fix it), `bar_order`, `bar_overlap` (bar written twice),
 `copy_source` (copy from unwritten bars), `dangling_tie`, `tie_mismatch`,
 `fill_not_last`, `grid_steps` (states the step count needed), `grid_char`,
 `unknown_drum` (closest names), `unknown_chord` (closest quality),
-`velocity_range`, `channel_range`, `lane_order` (positions must increase),
+`velocity_range`, `channel_range`, `lane_order` (positions must not decrease),
 `lane_value`, `position` (beat beyond the meter), `meter_mismatch`,
 `meter_conflict`, `duplicate_voice`, `duplicate_pitch`.
 
@@ -413,8 +419,8 @@ and meter map. It also must be deterministic (same input → same bytes).
 Canonical output, in order:
 
 1. `notation 1`, `ppq N` (always), `meter N/D` (standalone only: the first
-   bar's meter; changes written per B.10), `length N` only when the item
-   length is not the end of the last written bar.
+   bar's meter; changes written per B.10), `length N` or `length N+Mt` only
+   when the item length is not the end of the last written bar.
 2. Channel 10 as a grid voice named `drums` when `drumGrids` and every
    note on channel 10 fits one grid (try `s`, `e3`, `t`, `s3`, `x` in that
    order): all starts on steps, one common length (`len`), velocities that
@@ -437,7 +443,7 @@ Canonical output, in order:
    copy line (`5 = 1`, or merged ranges `5-8 = 1-4`), checked by recompile.
 4. Lanes: one per (kind, channel, number), in order CC (by number), bend,
    pressure, poly (by pitch); every event is a `step` point written
-   `BAR.BEAT[+Nt] VALUE`, except runs that `lin` reproduces exactly
+   `BAR.BEAT[+Nt] VALUE` (events sharing a tick keep their order), except runs that `lin` reproduces exactly
    (verified by recompiling the run), which collapse to their endpoints.
    Bend is written raw.
 5. `events` blocks per channel with programs and sysex.
