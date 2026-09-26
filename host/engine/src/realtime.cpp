@@ -75,6 +75,7 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     if (backend_) return Error("engine.running", "the engine is already running");
     config_ = config;
     shutDown_ = false;
+    shutdownRequested_ = false;
     SUPPLE_TRY(backend.start(config, [this](const float* const* in, float* const* out,
                                             std::uint32_t n) { cycle(in, out, n); }));
     backend_ = &backend;
@@ -83,19 +84,18 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
 
 void Engine::stop() {
     if (!backend_) return;
-    // Ask the audio thread to stop processing every instance, then stop the
-    // backend. A manual backend has no thread: its next run() would do it,
-    // so stop processing here (no cycle is running).
-    commands_.push({Command::Op::Shutdown, 0});
+    // Ask the audio thread to stop processing every instance (a flag: never
+    // dropped), then stop the backend. A manual backend has no thread: its
+    // caller is the audio thread and no cycle is running, so stop here.
+    shutdownRequested_.store(true, std::memory_order_release);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (backend_->ownsThread() && !shutDown_.load() &&
            std::chrono::steady_clock::now() < deadline)
         std::this_thread::yield();
     backend_->stop();
     if (!shutDown_.load()) {
-        Command c{};
-        while (commands_.pop(c)) {
-        }
+        // No cycle acknowledged (manual backend, or a stalled device thread
+        // that the backend has now joined): nothing else touches the plugins.
         for (host::Instance* in : processing_) in->stopProcessing();
     }
     processing_.clear();
@@ -124,15 +124,17 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     warnings_ = plan->warnings;
     latest_ = std::make_shared<const model::Session>(session);
     prunePending_ = true;
+    plan->generation = ++publishedGen_;
     handoff_.publish(std::move(plan));
     return okStatus();
 }
 
-void Engine::play() { commands_.push({Command::Op::Play, 0}); }
-void Engine::pause() { commands_.push({Command::Op::Pause, 0}); }
+void Engine::play() { wantPlaying_.store(true, std::memory_order_release); }
+void Engine::pause() { wantPlaying_.store(false, std::memory_order_release); }
 void Engine::seek(double seconds) {
-    commands_.push(
-        {Command::Op::Seek, time::samplesAt(std::max(0.0, seconds), config_.sampleRate)});
+    seekSample_.store(time::samplesAt(std::max(0.0, seconds), config_.sampleRate),
+                      std::memory_order_relaxed);
+    seekSeq_.fetch_add(1, std::memory_order_release);
 }
 
 TransportState Engine::transport() const {
@@ -145,9 +147,8 @@ TransportState Engine::transport() const {
 
 void Engine::service() {
     handoff_.collect();
-    if (prunePending_ && latest_ &&
-        handoff_.adoptedGeneration() == handoff_.publishedGeneration()) {
-        plugins_.prune(*latest_);  // the audio thread stopped processing removed instances
+    if (prunePending_ && latest_ && stoppedGen_.load(std::memory_order_acquire) >= publishedGen_) {
+        plugins_.prune(*latest_);  // the audio thread finished stopping removed instances
         prunePending_ = false;
     }
 }
@@ -163,7 +164,12 @@ void Engine::adopt(detail::Plan* next) SUPPLE_RT {
     processing_.clear();
     if (!next) return;
     for (host::Instance* in : next->instances) {
-        if (!in->processing()) (void)in->startProcessing();
+        // A plugin that refuses to start is left out (its stage passes audio
+        // through, see detail::processBlock) and retried on the next plan.
+        if (!in->processing() && !in->startProcessing()) {
+            processErrors_.fetch_add(1);
+            continue;
+        }
         processing_.push_back(in);  // within the reserved capacity
     }
 }
@@ -178,32 +184,28 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
     if (plan != plan_) {
         adopt(plan);
         plan_ = plan;
-        if (plan) detail::locate(*plan, pos_);
-    }
-    Command c{};
-    while (commands_.pop(c)) {
-        switch (c.op) {
-            case Command::Op::Play:
-                playing_ = true;
-                break;
-            case Command::Op::Pause:
-                playing_ = false;
-                resetInstances(plan);
-                break;
-            case Command::Op::Seek:
-                pos_ = c.sample;
-                if (plan) {
-                    detail::locate(*plan, pos_);
-                    resetInstances(plan);
-                }
-                break;
-            case Command::Op::Shutdown:
-                for (host::Instance* in : processing_) in->stopProcessing();
-                processing_.clear();
-                playing_ = false;
-                shutDown_.store(true);
-                break;
+        if (plan) {
+            detail::locate(*plan, pos_);
+            stoppedGen_.store(plan->generation, std::memory_order_release);
         }
+    }
+    if (shutdownRequested_.load(std::memory_order_acquire) && !shutDown_.load()) {
+        for (host::Instance* in : processing_) in->stopProcessing();
+        processing_.clear();
+        playing_ = false;
+        shutDown_.store(true);
+    }
+    if (const std::uint64_t seq = seekSeq_.load(std::memory_order_acquire); seq != seekSeen_) {
+        seekSeen_ = seq;
+        pos_ = seekSample_.load(std::memory_order_relaxed);
+        if (plan) {
+            detail::locate(*plan, pos_);
+            resetInstances(plan);
+        }
+    }
+    if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
+        playing_ = want;
+        if (!want) resetInstances(plan);  // no hanging notes
     }
     const bool run = plan && playing_ && !shutDown_.load() && frames <= plan->block;
     if (run && detail::processBlock(*plan, pos_, frames)) {

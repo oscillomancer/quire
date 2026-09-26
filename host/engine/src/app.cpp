@@ -234,6 +234,10 @@ model::MergeOutcome EngineApp::mergeBranch(const cmd::Registry& registry, std::s
         from, into,
         [&](const model::Session& base, const std::vector<model::Invocation>& inv,
             std::uint64_t version) { return replay(registry, base, inv, version); },
+        [&](std::string_view command) -> const json::Value* {
+            const cmd::CommandInfo* info = registry.find(command);
+            return info ? &info->argsSchema : nullptr;
+        },
         clockMs());
     if (outcome.conflicts.empty() && !outcome.upToDate && versions_->branch() == into)
         headChanged();

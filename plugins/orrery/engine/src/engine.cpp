@@ -32,7 +32,7 @@ constexpr int kVoicePool = Engine::kMaxVoices + 16;  // spares fade out stolen n
 constexpr int kMaxMods = 96;                         // modulated destinations per scope
 constexpr std::uint32_t kFadeSamples = 64;           // base-rate samples
 constexpr std::size_t kSourceCount = static_cast<std::size_t>(Source::Count);
-constexpr int kMaxHeld = 16;
+constexpr int kMaxHeld = 128;       // every MIDI key
 constexpr double kVoiceGain = 0.5;  // -6 dB internal headroom per voice
 
 // --- program: a compiled patch -------------------------------------------------------
@@ -59,7 +59,7 @@ struct Program {
     std::array<std::int16_t, kOscCount> pitchSlot{-1, -1, -1, -1};
     // Audio-rate routes [carrier][modulator].
     std::array<std::array<double, kOscCount>, kOscCount> fm{}, am{};
-    std::array<std::array<Source, kOscCount>, kOscCount> fmVia{};
+    std::array<std::array<Source, kOscCount>, kOscCount> fmVia{}, amVia{};
     std::array<int, kOscCount> order{0, 1, 2, 3};
     std::array<std::array<bool, kOscCount>, kOscCount> delayed{};
     std::array<std::array<float, kMaxSteps>, kStepCount> steps{};
@@ -76,6 +76,7 @@ std::unique_ptr<Program> compileProgram(const Patch& patch) {
     p->voiceSlot.assign(paramCount(), -1);
     p->globalSlot.assign(paramCount(), -1);
     for (auto& row : p->fmVia) row.fill(Source::Count);
+    for (auto& row : p->amVia) row.fill(Source::Count);
 
     // Group routes by destination (the patch orders them by source first).
     auto key = [](const Dest& d) { return static_cast<int>(d.kind) * 100000 + d.index; };
@@ -91,6 +92,7 @@ std::unique_ptr<Program> compileProgram(const Patch& patch) {
                     p->fmVia[d.index][static_cast<std::size_t>(m)] = r->via.value_or(Source::Count);
                 } else {
                     p->am[d.index][static_cast<std::size_t>(m)] = r->amount / 100.0;
+                    p->amVia[d.index][static_cast<std::size_t>(m)] = r->via.value_or(Source::Count);
                 }
             }
             continue;
@@ -225,7 +227,7 @@ struct Voice {
 
     std::array<double, kMaxMods> mod{};
     std::array<double, kOscCount> prevOut{};
-    std::array<std::array<double, kOscCount>, kOscCount> fmIndex{};
+    std::array<std::array<double, kOscCount>, kOscCount> fmIndex{}, amDepth{};
     // Per-sample ramps across a control tick.
     std::array<dsp::Lerp, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{};
     std::array<dsp::Lerp, kFilterCount> g{}, k{}, drive{}, level{}, delay{}, feedback{}, damping{};
@@ -495,6 +497,11 @@ struct Engine::Impl {
                 v.fmIndex[static_cast<std::size_t>(c)][static_cast<std::size_t>(m)] =
                     a * (via == Source::Count ? 1.0 : src[static_cast<std::size_t>(via)]) /
                     dsp::kTwoPi;
+                const Source amVia =
+                    P.amVia[static_cast<std::size_t>(c)][static_cast<std::size_t>(m)];
+                v.amDepth[static_cast<std::size_t>(c)][static_cast<std::size_t>(m)] =
+                    P.am[static_cast<std::size_t>(c)][static_cast<std::size_t>(m)] *
+                    (amVia == Source::Count ? 1.0 : src[static_cast<std::size_t>(amVia)]);
             }
         // Glide and drift.
         if (v.glideOffset != 0.0) {
@@ -751,7 +758,7 @@ struct Engine::Impl {
                 }
                 for (std::size_t m = 0; m < kOscCount; ++m)
                     if (P.am[uo][m] != 0.0) {
-                        const double a = P.am[uo][m];
+                        const double a = v.amDepth[uo][m];
                         x *= 1.0 - a + a * (P.delayed[uo][m] ? v.prevOut[m] : out[m]);
                     }
                 out[uo] = x;
@@ -949,6 +956,14 @@ struct Engine::Impl {
                 std::int64_t t) SUPPLE_RT {
         const auto mode = static_cast<VoiceMode>(base(index(kVoice, VoiceF::mode), t));
         const bool othersHeld = heldCount > 0;
+        // The held-key stack keeps each key once, newest last.
+        for (int i = 0; i < heldCount; ++i)
+            if (held[static_cast<std::size_t>(i)] == key) {
+                for (int j = i; j + 1 < heldCount; ++j)
+                    held[static_cast<std::size_t>(j)] = held[static_cast<std::size_t>(j + 1)];
+                --heldCount;
+                break;
+            }
         if (heldCount < kMaxHeld) held[static_cast<std::size_t>(heldCount++)] = key;
         if (!othersHeld) {
             for (int l = 0; l < kLfoCount; ++l)
@@ -987,6 +1002,17 @@ struct Engine::Impl {
             if (started == unison) break;
             if (v.state != Voice::State::Free) continue;
             startVoice(v, key, channel, noteId, velocity, started, unison, noteSerial,
+                       glide ? lastPitch : -1.0, t);
+            ++started;
+        }
+        // Spares exhausted by a burst of steals: take over the fading voices
+        // closest to silence (a new note never goes missing).
+        while (started < unison) {
+            Voice* best = nullptr;
+            for (Voice& v : voices)
+                if (v.state == Voice::State::Fading && (!best || v.fade < best->fade)) best = &v;
+            if (!best) break;
+            startVoice(*best, key, channel, noteId, velocity, started, unison, noteSerial,
                        glide ? lastPitch : -1.0, t);
             ++started;
         }
@@ -1123,8 +1149,14 @@ struct Engine::Impl {
                                     for (auto& en : vv.env) en.release();
                                 }
                         break;
-                    case 120:
-                    case 123:
+                    case 120:  // All Sound Off: everything stops now, pedal or not
+                        for (Voice& vv : voices)
+                            if (vv.state == Voice::State::Active) fadeOut(vv);
+                        sustainPedal = false;
+                        heldCount = 0;
+                        monoSerial = 0;
+                        break;
+                    case 123:  // All Notes Off: releases (sustained notes wait for the pedal)
                         for (Voice& vv : voices)
                             if (vv.state == Voice::State::Active) releaseVoice(vv, 0.0);
                         heldCount = 0;
@@ -1154,7 +1186,8 @@ struct Engine::Impl {
                 break;
             case Event::Type::PolyPressure:
                 for (Voice& v : voices)
-                    if (v.state == Voice::State::Active && v.key == e.key)
+                    if (v.state == Voice::State::Active && v.key == e.key &&
+                        (e.noteId >= 0 ? v.noteId == e.noteId : v.channel == e.channel))
                         v.pressure = std::clamp(e.value, 0.0, 1.0);
                 break;
             case Event::Type::AllNotesOff:
@@ -1180,8 +1213,22 @@ struct Engine::Impl {
             }
         }
         if (first || next->os != decFactor) {
-            // Quality changed: restart every voice and the decimators.
-            for (Voice& v : voices) v.state = Voice::State::Free;
+            // Quality changed: sounding voices restart their DSP at the new
+            // rate (envelopes, gate and pitch continue), decimators reset.
+            for (Voice& v : voices) {
+                if (v.state == Voice::State::Free) continue;
+                if (!first && v.state == Voice::State::Fading)  // keep the fade's duration
+                    v.fadeStep *= static_cast<double>(decFactor) / static_cast<double>(next->os);
+                for (std::size_t fi = 0; fi < static_cast<std::size_t>(kFilterCount); ++fi)
+                    for (std::size_t c = 0; c < 2; ++c) {
+                        v.svf[fi][c].reset();
+                        v.ladder[fi][c].reset();
+                        v.comb[fi][c].reset();
+                        v.formant[fi][c].reset();
+                    }
+                v.prevOut.fill(0.0);
+                v.fresh = true;
+            }
             decL[decIndex(next->os)].reset();
             decR[decIndex(next->os)].reset();
             decFactor = next->os;
@@ -1318,7 +1365,7 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
 #endif
         return;
     }
-    m.tempo = std::clamp(transport.tempo, 20.0, 999.0);
+    m.tempo = std::isfinite(transport.tempo) ? std::clamp(transport.tempo, 20.0, 999.0) : 120.0;
     const Program& P = *m.prog;
     const auto os = static_cast<std::uint32_t>(P.os);
     const std::int64_t B = m.now;

@@ -31,6 +31,7 @@ Result<Replayed> apply(const Session& base, const std::vector<Invocation>& inv,
                 t.remove<Track>(*id);
             } else {
                 t.modify<Track>(*id, [&](Track& tr) {
+                    if (const auto* n = i.args.find("name")) tr.name = n->asString();
                     if (const auto* v = i.args.find("volume_db")) tr.volumeDb = v->asDouble();
                     if (const auto* m = i.args.find("mute")) tr.mute = m->asBool();
                 });
@@ -43,6 +44,19 @@ Result<Replayed> apply(const Session& base, const std::vector<Invocation>& inv,
     auto s = t.commit();
     if (!s) return std::move(s).error();
     return Replayed{std::move(*s), std::move(changes), std::move(created)};
+}
+
+// The toy commands' argument schemas: "track" is an ID, "name" is text.
+const json::Value* schemas(std::string_view command) {
+    static const json::Value add =
+        json::parse(R"({"type": "object", "properties": {"name": {"type": "string"}}})").value();
+    static const json::Value set = json::parse(R"({"type": "object", "properties": {
+        "track": {"type": "string", "pattern": "^tr_[0-9]+$"}, "name": {"type": "string"},
+        "volume_db": {"type": "number"}, "mute": {"type": "boolean"}}})")
+                                       .value();
+    if (command == "track.add") return &add;
+    if (command == "track.set" || command == "track.remove") return &set;
+    return nullptr;
 }
 
 Invocation inv(std::string command, std::string_view args) {
@@ -114,11 +128,11 @@ TEST_CASE("branches: isolated heads, fast-forward merge") {
     REQUIRE(vs.undo().ok());
     CHECK_FALSE(vs.canUndo());  // undo stops where the branch began
     REQUIRE(vs.redo().ok());
-    auto m = vs.merge("agent/claude/darker", "main", apply);
+    auto m = vs.merge("agent/claude/darker", "main", apply, schemas);
     CHECK(m.conflicts.empty());
     CHECK(m.fastForward);
     CHECK(track(vs, "main", "tr_1")->volumeDb == -9.0);
-    CHECK(vs.merge("agent/claude/darker", "main", apply).upToDate);
+    CHECK(vs.merge("agent/claude/darker", "main", apply, schemas).upToDate);
     CHECK(vs.deleteBranch("main").error().code == "branch.protected");
     CHECK(vs.deleteBranch("agent/claude/darker").error().code == "branch.current");
     REQUIRE(vs.switchBranch("main").ok());
@@ -133,7 +147,7 @@ TEST_CASE("merge by replay remaps IDs created on both sides") {
     REQUIRE(vs.switchBranch("topic").ok());
     run(vs, {inv("track.add", R"({"name": "Branch track"})")});  // tr_1 on the branch too
     run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")});
-    auto m = vs.merge("topic", "main", apply);
+    auto m = vs.merge("topic", "main", apply, schemas);
     REQUIRE_MESSAGE(m.conflicts.empty(), (m.conflicts.empty() ? "" : m.conflicts[0].message));
     CHECK_FALSE(m.fastForward);
     CHECK(m.remap.at(*Id::parse("tr_1")) == *Id::parse("tr_2"));
@@ -142,7 +156,7 @@ TEST_CASE("merge by replay remaps IDs created on both sides") {
     CHECK(track(vs, "main", "tr_2")->name == "Branch track");
     CHECK(track(vs, "main", "tr_2")->volumeDb == -3.0);  // the edit followed the remap
     CHECK(vs.head("main")->tracks.find(kMaster)->children.size() == 2);  // no false conflict
-    CHECK(vs.merge("topic", "main", apply).upToDate);
+    CHECK(vs.merge("topic", "main", apply, schemas).upToDate);
     REQUIRE(vs.switchBranch("main").ok());
     REQUIRE(vs.undo().ok());  // undo steps back through the replayed transactions
     CHECK(track(vs, "main", "tr_2")->volumeDb == 0.0);
@@ -161,7 +175,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
         const auto headBefore = vs.headVersion("main");
         REQUIRE(vs.switchBranch("topic").ok());
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
-        auto m = vs.merge("topic", "main", apply);
+        auto m = vs.merge("topic", "main", apply, schemas);
         REQUIRE(m.conflicts.size() == 1);
         CHECK(m.conflicts[0].kind == Conflict::Kind::ConcurrentEdit);
         CHECK(m.conflicts[0].object == Id::parse("tr_1"));
@@ -173,7 +187,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
         run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
         REQUIRE(vs.switchBranch("topic").ok());
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
-        auto m = vs.merge("topic", "main", apply);
+        auto m = vs.merge("topic", "main", apply, schemas);
         CHECK(m.conflicts.empty());
         CHECK(track(vs, "main", "tr_1")->mute);
         CHECK(track(vs, "main", "tr_1")->volumeDb == -2.0);
@@ -183,7 +197,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
         run(vs, {inv("track.remove", R"({"track": "tr_1"})")});
         REQUIRE(vs.switchBranch("topic").ok());
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
-        auto m = vs.merge("topic", "main", apply);
+        auto m = vs.merge("topic", "main", apply, schemas);
         REQUIRE(m.conflicts.size() == 1);
         CHECK(m.conflicts[0].message.find("removed") != std::string::npos);
     }
@@ -196,17 +210,82 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
                           std::uint64_t) -> Result<Replayed> {
             return Error("render.failed", "replay refused");
         };
-        auto m = vs.merge("topic", "main", failing);
+        auto m = vs.merge("topic", "main", failing, schemas);
         REQUIRE(m.conflicts.size() == 1);
         CHECK(m.conflicts[0].kind == Conflict::Kind::Invalid);
         CHECK(track(vs, "main", "tr_2")->name == "B");
     }
 }
 
-TEST_CASE("remapIds rewrites exact ID strings anywhere") {
+TEST_CASE("remapIds rewrites exact IDs in ID-typed fields") {
     const std::map<Id, Id> remap{{*Id::parse("tr_1"), *Id::parse("tr_7")}};
+    const json::Value schema = json::parse(R"({"type": "object", "properties": {
+        "track": {"type": "string", "pattern": "^tr_[0-9]+$"},
+        "list": {"type": "array", "items": {"type": "string", "pattern": "^[a-z]{2}_[0-9]+$"}},
+        "n": {"type": "integer"}}})")
+                                   .value();
     auto v =
         json::parse(R"({"track": "tr_1", "list": ["tr_1", "tr_10", "x tr_1"], "n": 1})").value();
-    CHECK(json::writeCompact(remapIds(v, remap)) ==
+    CHECK(json::writeCompact(remapIds(v, schema, remap)) ==
           R"({"track":"tr_7","list":["tr_7","tr_10","x tr_1"],"n":1})");
+}
+
+TEST_CASE("coalescing never erases a version another branch references (review round 3)") {
+    VersionStore vs(Session::create());
+    run(vs, {inv("track.add", R"({"name": "A"})")});
+    const auto v1 =
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -1})")}, "fader:tr_1");
+    REQUIRE(vs.createBranch("topic", "main").ok());
+    const auto v2 =
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")}, "fader:tr_1");
+    CHECK(v2 != v1);  // not coalesced: topic's head is v1
+    REQUIRE(vs.version(vs.headVersion("topic")) != nullptr);
+    CHECK(track(vs, "topic", "tr_1")->volumeDb == -1.0);
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -2.0);
+    // Later gestures on main coalesce again (nothing else points at v2).
+    const auto v3 =
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")}, "fader:tr_1");
+    CHECK(vs.version(v2) == nullptr);
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -3.0);
+    REQUIRE(vs.undo().ok());
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -1.0);
+    (void)v3;
+}
+
+TEST_CASE("merge remaps only schema-declared IDs (review round 3)") {
+    VersionStore vs(Session::create());
+    REQUIRE(vs.createBranch("topic", "main").ok());
+    run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
+    REQUIRE(vs.switchBranch("topic").ok());
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});           // tr_1 on the branch
+    run(vs, {inv("track.set", R"({"track": "tr_1", "name": "tr_1"})")});  // literal text
+    auto m = vs.merge("topic", "main", apply, schemas);
+    REQUIRE(m.conflicts.empty());
+    CHECK(track(vs, "main", "tr_2")->name == "tr_1");  // the name is text, not a reference
+    CHECK(track(vs, "main", "tr_1")->name == "Main track");
+
+    const json::Value schema =
+        json::parse(
+            R"({"type": "object", "$defs": {"id": {"type": "string", "pattern": "^tr_[0-9]+$"}},
+        "properties": {"targets": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+                       "note": {"type": "string"},
+                       "gains": {"type": "object", "propertyNames": {"pattern": "^tr_[0-9]+$"},
+                                 "additionalProperties": {"type": "number"}},
+                       "item": {"oneOf": [
+                           {"type": "object", "properties": {"kind": {"const": "text"}, "value": {"type": "string"}}},
+                           {"type": "object", "properties": {"kind": {"const": "ref"}, "value": {"type": "string", "pattern": "^[a-z]{2}_[0-9]+$"}}}]}}})")
+            .value();
+    const json::Value args =
+        json::parse(R"({"targets": ["tr_1", "tr_3"], "note": "tr_1", "gains": {"tr_1": -3},
+        "item": {"kind": "ref", "value": "tr_1"}})")
+            .value();
+    const json::Value text = json::parse(R"({"item": {"kind": "text", "value": "tr_1"}})").value();
+    const std::map<Id, Id> remap{{*Id::parse("tr_1"), *Id::parse("tr_2")}};
+    json::Value out = remapIds(args, schema, remap);
+    CHECK(out["targets"].asArray()[0].asString() == "tr_2");
+    CHECK(out["targets"].asArray()[1].asString() == "tr_3");
+    CHECK(out["note"].asString() == "tr_1");
+    CHECK(out.find("gains")->find("tr_2") != nullptr);
+    CHECK(out["item"]["value"].asString() == "tr_2");
+    CHECK(remapIds(text, schema, remap)["item"]["value"].asString() == "tr_1");
 }

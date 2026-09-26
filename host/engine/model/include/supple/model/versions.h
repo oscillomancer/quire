@@ -74,6 +74,9 @@ struct Replayed {
 };
 using Replayer = std::function<Result<Replayed>(
     const Session& base, const std::vector<Invocation>& invocations, std::uint64_t version)>;
+// A command's argument JSON Schema (the command layer provides it; null for an
+// unknown command). Merges rewrite only what these schemas declare as IDs.
+using ArgSchemas = std::function<const json::Value*(std::string_view command)>;
 
 class VersionStore {
   public:
@@ -105,7 +108,7 @@ class VersionStore {
     std::vector<std::string> branches() const;
 
     MergeOutcome merge(std::string_view from, std::string_view into, const Replayer& replay,
-                       std::uint64_t timeMs = 0);
+                       const ArgSchemas& schemas, std::uint64_t timeMs = 0);
 
   private:
     struct Branch {
@@ -124,6 +127,11 @@ class VersionStore {
 
 // Rewrites every JSON string equal to a remapped ID (used for replayed
 // arguments): IDs have a unique textual form, so exact string matches are IDs.
-json::Value remapIds(const json::Value& v, const std::map<Id, Id>& remap);
+// Rewrites the IDs in `args` through `remap`, guided by the arguments' JSON
+// Schema: only strings (and object keys) whose schema pattern is an ID pattern
+// ("^tr_[0-9]+$", "^[a-z]{2}_[0-9]+$") change; names, notes and other text that
+// happen to look like IDs stay as written.
+json::Value remapIds(const json::Value& args, const json::Value& schema,
+                     const std::map<Id, Id>& remap);
 
 }  // namespace supple::model

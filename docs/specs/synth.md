@@ -428,7 +428,8 @@ real-time engine). The code is the reference; these notes explain the choices.
   level (`env2>osc2.level`). The amount of `oscN.fm` is the peak phase
   deviation in radians per unit signal (`x`, ±20). Processing order is
   topological (modulators first); edges inside a cycle use the modulator's
-  previous sample.
+  previous sample. `via` scales FM and AM depth per control tick; `curve` is
+  an error on audio-rate routes (it shapes control sources only).
 - **Route amounts** for `ct` destinations (e.g. `osc1.fine`) are in semitones
   like other pitch destinations; `st`, `ct` and `oct` strings convert into
   each other (`"8 ct"` → 0.08). Limits: ±10 oct, ±96 st, ±96 dB, ±20 x,
@@ -461,7 +462,18 @@ real-time engine). The code is the reference; these notes explain the choices.
   inaudible below ~60 % — the optimizer could not identify it.
 - **Voices:** at most 64 sounding voices (notes × unison) plus 16 spares that
   fade stolen notes out over 64 samples; stealing prefers the oldest released
-  note.
+  note. When a burst of steals has used every spare, the new note takes over
+  the fading voices closest to silence: a note-on never goes missing.
+- **MIDI mode messages:** CC 120 (All Sound Off) fades every voice out at once
+  and clears the pedal and held keys; CC 123 (All Notes Off) releases, and
+  sustained notes wait for the pedal. Poly pressure matches note id when the
+  host gives one, else channel and key. Mono/legato remember all 128 keys
+  (each once, newest last). A non-finite transport tempo counts as 120 BPM.
+- **Quality changes** keep sounding notes: their filters and feedback state
+  restart at the new rate, envelopes, gate and pitch continue, and fades keep
+  their duration.
+- **Validation:** `drive: {"type": "off"}` takes no other field, and an
+  explicit empty step `values` array is an error.
 
 **Performance (first measurement, 2026-09-26):** the §9 reference patch
 (8 notes × 3 unison, 2 va + sub, ladder, tape drive, 2 envs, 1 LFO, chorus +

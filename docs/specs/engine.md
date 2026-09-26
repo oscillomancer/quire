@@ -291,11 +291,21 @@ granted, and CPU governor (read-only facts).
 - **Plan hand-off:** `RtHandoff<Plan>`. `acquire()` returns the previous plan
   to the main thread immediately, so the audio thread keeps its own
   preallocated list of the instances it is processing; on adoption it stops
-  instances the new plan dropped and starts new ones. The main thread prunes
-  the instance pool only after the newest plan is adopted (`service()`).
+  instances the new plan dropped and starts new ones, then stores the plan's
+  generation; the main thread prunes the instance pool only once that
+  generation reaches the newest published one (`service()`), so no instance
+  is destroyed before the audio thread has stopped it. A plugin whose
+  `start_processing()` fails is left out of processing (its stage passes
+  audio through, delay-compensated, and `processErrors` counts it); the next
+  plan retries it. Per-stage event storage is reserved for the most events
+  any block-long window holds, so a seek off the block grid never allocates.
   Plans share ownership of the session's TimeMap (a session version may be
   freed while its plan plays).
-- **Transport:** play/pause/seek/shutdown on an SPSC command queue; pause and
+- **Transport:** play/pause/seek/shutdown are coalescing atomics (the latest
+  request wins, none is dropped however many arrive between callbacks); the
+  audio thread stops every plugin on shutdown, and the main thread does so
+  only when no cycle ran (manual backend, or a stalled device thread already
+  joined). Pause and
   seek `reset()` the plugins (no hanging notes); seek re-locates event and
   automation cursors and clears delay lines. The live output lags the
   render position by the plan's output latency.

@@ -346,3 +346,16 @@ TEST_CASE("flat params in merges set values by key") {
     CHECK(patchPath(index(kEnv2, EnvF::decay)) ==
           std::vector<std::string>{"envelopes", "env2", "decay"});
 }
+
+TEST_CASE(
+    "review round 3: drive off takes no fields; steps need values; no curves on audio routes") {
+    const Error e1 = parseError(R"("drive": {"type": "off", "amount": 99, "bogus": 1})");
+    CHECK_MESSAGE(mentions(e1, "orrery.field_not_for_type", "/drive/amount"), all(e1));
+    CHECK_MESSAGE(mentions(e1, "orrery.field_not_for_type", "/drive/bogus"), all(e1));
+    const Error e2 = parseError(R"("steps": {"step1": {"values": []}})");
+    CHECK_MESSAGE(mentions(e2, "orrery.steps.empty", "/steps/step1/values"), all(e2));
+    const Error e3 =
+        parseError(R"("oscillators": {"osc1": {"type": "va"}, "osc2": {"type": "va", "to": "none"}},
+                            "routes": {"osc2>osc1.am": {"amount": 100, "curve": 50}})");
+    CHECK_MESSAGE(mentions(e3, "orrery.route.curve"), all(e3));
+}

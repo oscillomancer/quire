@@ -125,10 +125,6 @@ class Engine {
     std::uint64_t processErrors() const { return processErrors_.load(); }
 
   private:
-    struct Command {
-        enum class Op : std::uint8_t { Play, Pause, Seek, Shutdown } op;
-        std::int64_t sample = 0;
-    };
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
     void adopt(detail::Plan* next) SUPPLE_RT;
     void resetInstances(detail::Plan* plan) SUPPLE_RT;
@@ -138,7 +134,17 @@ class Engine {
     Backend* backend_ = nullptr;
     BackendConfig config_;
     RtHandoff<detail::Plan> handoff_;
-    SpscRing<Command, 64> commands_;
+    // Transport requests: coalescing atomics (the latest request wins and none
+    // is ever dropped), read by the audio thread at the start of each cycle.
+    std::atomic<bool> wantPlaying_{false};
+    std::atomic<std::int64_t> seekSample_{0};
+    std::atomic<std::uint64_t> seekSeq_{0};
+    std::atomic<bool> shutdownRequested_{false};
+    std::uint64_t seekSeen_ = 0;  // audio thread
+    // Plans carry a generation; the audio thread stores it here after adopt()
+    // has stopped the instances the plan dropped. service() prunes only then.
+    std::uint64_t publishedGen_ = 0;
+    std::atomic<std::uint64_t> stoppedGen_{0};
     std::shared_ptr<const model::Session> latest_;
     bool prunePending_ = false;
     std::uint32_t outputLatency_ = 0;

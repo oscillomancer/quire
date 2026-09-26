@@ -523,9 +523,21 @@ class Decoder {
                        "valid: " + list(kDriveTypes) + R"(; e.g. {"type": "tape", "amount": 6})"));
             return;
         }
-        if (auto t = name(*type, kDriveTypes, "/drive/type", "drive type"))
-            st_.drive = static_cast<DriveType>(*t);
-        if (st_.drive != DriveType::Off) fields(v, kDrive, "/drive", {"type"});
+        const auto t = name(*type, kDriveTypes, "/drive/type", "drive type");
+        if (!t) return;
+        st_.drive = static_cast<DriveType>(*t);
+        if (st_.drive != DriveType::Off) {
+            fields(v, kDrive, "/drive", {"type"});
+            return;
+        }
+        for (const auto& m : v.asObject())
+            if (m.key != "type")
+                fail(Error("orrery.field_not_for_type",
+                           ""
+                           " + m.key + "
+                           " does nothing while drive is off",
+                           pointer({"drive", m.key}),
+                           "choose a drive type (soft, tape, fold, hard) or remove the field"));
     }
 
     void simple(const Value& v, Slot s, std::string_view block) {
@@ -600,6 +612,9 @@ class Decoder {
                 if (!values->isArray()) {
                     fail(Error("orrery.type", "values must be an array of percentages",
                                path + "/values", "e.g. [100, 0, -50, 25]"));
+                } else if (values->size() == 0) {
+                    fail(Error("orrery.steps.empty", "a step sequence needs 1..16 values",
+                               path + "/values", "e.g. [100, 0, -50, 25], or remove \"values\""));
                 } else if (values->size() > static_cast<std::size_t>(kMaxSteps)) {
                     fail(Error("orrery.steps.too_many",
                                "a step sequence has at most 16 values, got " +
@@ -803,6 +818,11 @@ class Decoder {
                                path + pointer({f.key}), didYouMean(f.key, names)));
                     ok = false;
                 }
+            }
+            if (isAudioSource(r.source) && r.curve != 0.0) {
+                fail(Error("orrery.route.curve", "curve does not apply to audio-rate routes",
+                           path + "/curve", "curves shape control sources; remove it"));
+                ok = false;
             }
             if (!m.value.find("amount")) {
                 fail(Error("orrery.route.amount", "the route needs an amount", path + "/amount",

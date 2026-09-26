@@ -180,7 +180,8 @@ struct Node {
 };
 
 struct Plan {
-    std::vector<Node> nodes;  // topological order; the master is last
+    std::uint64_t generation = 0;  // set by the real-time engine when it publishes the plan
+    std::vector<Node> nodes;       // topological order; the master is last
     std::vector<Edge> edges;
     double rate = 48000.0;
     double startSeconds = 0.0;

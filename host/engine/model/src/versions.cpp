@@ -131,26 +131,100 @@ std::set<std::string> changedFields(const Session& before, const Session& after,
 
 }  // namespace
 
-json::Value remapIds(const json::Value& v, const std::map<Id, Id>& remap) {
-    if (remap.empty()) return v;
-    if (v.isString()) {
-        if (auto id = Id::parse(v.asString())) {
-            auto it = remap.find(*id);
-            if (it != remap.end()) return json::Value(it->second.str());
-        }
+namespace {
+
+// "^tr_[0-9]+$" (one kind) or "^[a-z]{2}_[0-9]+$" (any kind).
+bool idPattern(const json::Value* schema, const char* key) {
+    const json::Value* p = schema && schema->isObject() ? schema->find(key) : nullptr;
+    if (!p || !p->isString()) return false;
+    const std::string& s = p->asString();
+    constexpr std::string_view kTail = "_[0-9]+$";
+    return s.size() > kTail.size() + 1 && s.front() == '^' &&
+           std::string_view(s).substr(s.size() - kTail.size()) == kTail;
+}
+
+std::string remapped(const std::string& text, const std::map<Id, Id>& remap) {
+    if (auto id = Id::parse(text))
+        if (auto it = remap.find(*id); it != remap.end()) return it->second.str();
+    return text;
+}
+
+bool typeMatches(const json::Value& v, const json::Value& schema) {
+    const json::Value* t = schema.find("type");
+    if (!t || !t->isString()) return true;
+    const std::string& s = t->asString();
+    return (s == "string" && v.isString()) || (s == "object" && v.isObject()) ||
+           (s == "array" && v.isArray()) || (s == "number" && v.isNumber()) ||
+           (s == "integer" && v.isNumber()) || (s == "boolean" && v.isBool()) ||
+           (s == "null" && v.isNull());
+}
+
+// A oneOf/anyOf alternative applies when its tag constants match (tagged
+// variants) and its type matches.
+bool alternativeMatches(const json::Value& v, const json::Value& alt) {
+    if (!alt.isObject() || !typeMatches(v, alt)) return false;
+    if (const json::Value* props = alt.find("properties");
+        props && props->isObject() && v.isObject())
+        for (const auto& p : props->asObject())
+            if (const json::Value* c = p.value.isObject() ? p.value.find("const") : nullptr) {
+                const json::Value* x = v.find(p.key);
+                if (!x || !(*x == *c)) return false;
+            }
+    return true;
+}
+
+using Defs = std::map<std::string, const json::Value*>;
+
+json::Value remapWalk(const json::Value& v, const json::Value* schema, Defs defs,
+                      const std::map<Id, Id>& remap, int depth) {
+    if (!schema || !schema->isObject() || depth > 64) return v;
+    if (const json::Value* d = schema->find("$defs"); d && d->isObject())
+        for (const auto& m : d->asObject()) defs[m.key] = &m.value;
+    if (const json::Value* ref = schema->find("$ref"); ref && ref->isString()) {
+        constexpr std::string_view kPrefix = "#/$defs/";
+        const std::string& r = ref->asString();
+        if (r.rfind(kPrefix, 0) == 0)
+            if (auto it = defs.find(r.substr(kPrefix.size())); it != defs.end())
+                return remapWalk(v, it->second, defs, remap, depth + 1);
         return v;
     }
+    for (const char* k : {"oneOf", "anyOf"})
+        if (const json::Value* alts = schema->find(k); alts && alts->isArray()) {
+            for (const auto& alt : alts->asArray())
+                if (alternativeMatches(v, alt)) return remapWalk(v, &alt, defs, remap, depth + 1);
+            return v;
+        }
+    if (v.isString())
+        return idPattern(schema, "pattern") ? json::Value(remapped(v.asString(), remap)) : v;
     if (v.isArray()) {
+        const json::Value* items = schema->find("items");
         json::Value out = json::Value::array();
-        for (const auto& x : v.asArray()) out.push_back(remapIds(x, remap));
+        for (const auto& x : v.asArray())
+            out.push_back(remapWalk(x, items, defs, remap, depth + 1));
         return out;
     }
     if (v.isObject()) {
+        const json::Value* props = schema->find("properties");
+        const json::Value* extra = schema->find("additionalProperties");
+        const bool idKeys = idPattern(schema->find("propertyNames"), "pattern");
         json::Value out = json::Value::object();
-        for (const auto& m : v.asObject()) out[m.key] = remapIds(m.value, remap);
+        for (const auto& m : v.asObject()) {
+            const json::Value* sub = props && props->isObject() ? props->find(m.key) : nullptr;
+            if (!sub) sub = extra;
+            out[idKeys ? remapped(m.key, remap) : m.key] =
+                remapWalk(m.value, sub, defs, remap, depth + 1);
+        }
         return out;
     }
     return v;
+}
+
+}  // namespace
+
+json::Value remapIds(const json::Value& args, const json::Value& schema,
+                     const std::map<Id, Id>& remap) {
+    if (remap.empty()) return args;
+    return remapWalk(args, &schema, {}, remap, 0);
 }
 
 VersionStore::VersionStore(Session initial) {
@@ -209,8 +283,23 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
     v.txn = std::move(txn);
     v.timeMs = timeMs;
     v.session = std::make_shared<const Session>(std::move(session));
+    // The head may only be replaced when nothing else points at it: another
+    // branch's head, base or redo stack, or a version built on it.
+    auto referencedElsewhere = [&](std::uint64_t id) {
+        for (const auto& [name, other] : branches_) {
+            if (name == current_) continue;
+            if (other.head == id || other.base == id ||
+                std::find(other.redo.begin(), other.redo.end(), id) != other.redo.end())
+                return true;
+        }
+        for (const auto& [vid, ver] : versions_)
+            if (std::find(ver.parents.begin(), ver.parents.end(), id) != ver.parents.end())
+                return true;
+        return false;
+    };
     const bool coalesceWithHead = !v.txn.coalesceKey.empty() && b.head != b.base &&
-                                  b.redo.empty() && head.txn.coalesceKey == v.txn.coalesceKey;
+                                  b.redo.empty() && head.txn.coalesceKey == v.txn.coalesceKey &&
+                                  !referencedElsewhere(b.head);
     if (coalesceWithHead) {
         // Replace the head: same parent, combined changes and invocations.
         v.parents = head.parents;
@@ -335,7 +424,8 @@ std::uint64_t VersionStore::forkPoint(std::uint64_t a, std::uint64_t b) const {
 }
 
 MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
-                                 const Replayer& replay, std::uint64_t timeMs) {
+                                 const Replayer& replay, const ArgSchemas& schemas,
+                                 std::uint64_t timeMs) {
     MergeOutcome out;
     const Branch* src = lookup(from);
     const Branch* dstc = lookup(into);
@@ -412,8 +502,10 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
             return out;
         }
         std::vector<Invocation> inv;
-        for (const auto& i : v.txn.invocations)
-            inv.push_back({i.command, remapIds(i.args, out.remap)});
+        for (const auto& i : v.txn.invocations) {
+            const json::Value* schema = schemas ? schemas(i.command) : nullptr;
+            inv.push_back({i.command, schema ? remapIds(i.args, *schema, out.remap) : i.args});
+        }
         auto result = replay(*state, inv, nextId);
         if (!result) {
             out.conflicts.push_back(

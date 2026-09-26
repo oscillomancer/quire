@@ -327,7 +327,10 @@ source branch's transactions (in order) onto `into`'s head:
 
 1. For each logged invocation, rewrite IDs through the remap table (IDs the
    branch created that collide with IDs created on `into` since the fork get
-   fresh IDs; schemas identify ID-typed fields).
+   fresh IDs; schemas identify ID-typed fields: only strings, and object
+   keys, whose argument-schema pattern is an ID pattern such as `^tr_[0-9]+$`
+   are rewritten — a track *named* "tr_1" keeps its name). Coalesced edits
+   never erase a version that another branch's head or base still refers to.
 2. Re-validate and apply. A failure is a **conflict** of kind `invalid`.
 3. Before applying, compare the `rev` of every object the invocation touches
    against the fork point: if `into` changed that object since the fork,

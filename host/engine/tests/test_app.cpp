@@ -170,4 +170,17 @@ TEST_CASE("agent branches: parallel edits merge by replay; conflicts are reporte
     CHECK(conflict.error().details[0].code == "merge.concurrent_edit");
     CHECK(conflict.error().details[0].message.find("volume_db") != std::string::npos);
     CHECK(app->versions().headVersion("main") == before);
+
+    // Only ID-typed arguments follow a remap: a track *named* "tr_4" keeps its name.
+    REQUIRE(call("branch.create", R"({"name": "agent/claude/names"})"));
+    REQUIRE(call("track.add", R"({"name": "Pad"})"));  // tr_4 on the branch
+    REQUIRE(call("track.set", R"({"track": "tr_4", "name": "tr_4", "notes": "copy of tr_1"})"));
+    REQUIRE(call("branch.switch", R"({"name": "main"})"));
+    REQUIRE(call("track.add", R"({"name": "Lead"})"));  // tr_4 on main
+    auto names = call("branch.merge", R"({"from": "agent/claude/names"})");
+    REQUIRE_MESSAGE(names, (names ? std::string() : names.error().toString()));
+    CHECK((*names)["remapped"]["tr_4"].asString() == "tr_5");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_4"))->name == "Lead");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_5"))->name == "tr_4");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_5"))->notes == "copy of tr_1");
 }

@@ -324,3 +324,92 @@ TEST_CASE("band-limited triangle is closer to the ideal than the naive one") {
     }
     CHECK(errBlamp < errNaive);
 }
+
+TEST_CASE("review round 3: steal bursts, all-sound-off, quality changes, AM via, held keys") {
+    SUBCASE("a burst of steals never drops the newest note") {
+        const Patch p = parse(R"("voice": {"polyphony": 32, "unison": 2},
+                                 "oscillators": {"osc1": {"type": "va", "wave": "sine"}},
+                                 "envelopes": {"amp": {"release": "5 ms"}})");
+        std::vector<Timed> ev;
+        for (int k = 0; k < 41; ++k) ev.push_back(note(0, 30 + k, 1.0));
+        for (int k = 0; k < 40; ++k) ev.push_back(noteOff(10, 30 + k));
+        const Audio a = render(p, ev, 24000, 256);
+        CHECK(a.rms(12000, 24000) > 0.01);  // key 70 still sounds
+    }
+    SUBCASE("CC120 silences notes held by the sustain pedal; CC123 does not") {
+        const Patch p = parse(R"("oscillators": {"osc1": {"type": "va"}})");
+        const Audio off =
+            render(p, {note(0, 60, 1.0), cc(10, 64, 1.0), cc(4800, 120, 1.0)}, 24000, 256);
+        CHECK(off.rms(12000, 24000) < 1e-6);
+        const Audio held =
+            render(p, {note(0, 60, 1.0), cc(10, 64, 1.0), cc(4800, 123, 1.0)}, 24000, 256);
+        CHECK(held.rms(12000, 24000) > 0.01);
+    }
+    SUBCASE("a quality change keeps held notes sounding") {
+        Engine engine;
+        engine.prepare(48000.0, 256);
+        engine.setPatch(parse(R"("oscillators": {"osc1": {"type": "va"}})"));
+        engine.reset();
+        std::vector<float> l(256), r(256);
+        Event on;
+        on.type = Event::Type::NoteOn;
+        on.key = 60;
+        on.value = 1.0;
+        engine.process(std::span<const Event>(&on, 1), Transport{}, l.data(), r.data(), 256);
+        engine.setPatch(
+            parse(R"("voice": {"quality": "high"}, "oscillators": {"osc1": {"type": "va"}})"));
+        double e = 0.0;
+        for (int i = 0; i < 40; ++i) {
+            engine.process({}, Transport{}, l.data(), r.data(), 256);
+            for (float x : l) e += static_cast<double>(x) * static_cast<double>(x);
+        }
+        CHECK(engine.activeVoices() == 1);
+        CHECK(e > 1.0);
+    }
+    SUBCASE("AM follows its via source") {
+        const Patch p = parse(R"("oscillators": {"osc1": {"type": "va", "wave": "sine"},
+                                                 "osc2": {"type": "va", "wave": "sine", "coarse": 7, "to": "none"}},
+                                 "routes": {"osc2>osc1.am": {"amount": 100, "via": "modwheel"}})");
+        const Audio dry = render(p, {note(0, 57, 1.0)}, 9600, 256);
+        const Audio wet = render(p, {cc(0, 1, 1.0), note(0, 57, 1.0)}, 9600, 256);
+        double diff = 0.0;
+        for (std::size_t i = 2000; i < 9600; ++i)
+            diff += std::fabs(static_cast<double>(dry.l[i] - wet.l[i]));
+        CHECK(diff > 50.0);
+    }
+    SUBCASE("poly pressure reaches only the voice on its channel") {
+        const Patch p = parse(R"("oscillators": {"osc1": {"type": "va"}},
+                                 "filters": {"filter1": {"type": "svf", "cutoff": 200}},
+                                 "routes": {"pressure>filter1.cutoff": {"amount": "+5 oct"}})");
+        auto on = [](int ch) {
+            Timed t = note(0, 60, 1.0);
+            t.event.channel = static_cast<std::int16_t>(ch);
+            return t;
+        };
+        auto pp = [](int ch) {
+            Timed t{100, Event{}};
+            t.event.type = Event::Type::PolyPressure;
+            t.event.key = 60;
+            t.event.channel = static_cast<std::int16_t>(ch);
+            t.event.value = 1.0;
+            return t;
+        };
+        const Audio one = render(p, {on(0), on(1), pp(0)}, 9600, 256);
+        const Audio both = render(p, {on(0), on(1), pp(0), pp(1)}, 9600, 256);
+        CHECK(one.rms(4800, 9600) < 0.9 * both.rms(4800, 9600));
+    }
+    SUBCASE("legato tracks 18 held keys; releasing the newest returns to the one before") {
+        const Patch p = parse(
+            R"("voice": {"mode": "legato"}, "oscillators": {"osc1": {"type": "va", "wave": "sine"}})");
+        std::vector<Timed> ev;
+        for (int k = 0; k < 18; ++k) ev.push_back(note(k * 10, 40 + k, 1.0));
+        ev.push_back(noteOff(400, 57));
+        // Key 56 (the 17th) sounds after releasing 57: its period is ~3.3 ms at 48 kHz.
+        const Audio a = render(p, ev, 24000, 256);
+        std::size_t crossings = 0;
+        for (std::size_t i = 12001; i < 24000; ++i)
+            crossings += (a.l[i - 1] < 0.0f) != (a.l[i] < 0.0f);
+        const double hz = static_cast<double>(crossings) / 2.0 / 0.25;
+        CHECK(hz == doctest::Approx(440.0 * std::pow(2.0, (56 - 69) / 12.0)).epsilon(0.03));
+    }
+}

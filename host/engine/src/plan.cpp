@@ -497,17 +497,18 @@ Status prepare(Plan& p, const Session& s) {
     for (Node& n : p.nodes) {
         n.events = trackEvents(s, n.id, p.startSeconds, p.rate);
         for (auto& ev : n.events) ev.sample += n.latIn;
-        std::size_t perBlockMax = 0;
-        // Reserve the largest per-block count (events are sorted).
-        for (std::size_t a = 0, b = 0; a < n.events.size(); a = b) {
-            const std::int64_t blk = n.events[a].sample / static_cast<std::int64_t>(block);
-            b = a;
+        // Reserve the most events any block-long window holds (events are
+        // sorted; after a seek, blocks start anywhere), so processBlock never
+        // allocates.
+        std::size_t windowMax = 0;
+        for (std::size_t a = 0, b = 0; a < n.events.size(); ++a) {
+            if (b < a) b = a;
             while (b < n.events.size() &&
-                   n.events[b].sample / static_cast<std::int64_t>(block) == blk)
+                   n.events[b].sample < n.events[a].sample + static_cast<std::int64_t>(block))
                 ++b;
-            perBlockMax = std::max(perBlockMax, b - a);
+            windowMax = std::max(windowMax, b - a);
         }
-        for (Stage& st : n.chain) st.blockEvents.reserve(perBlockMax + 1);
+        for (Stage& st : n.chain) st.blockEvents.reserve(windowMax + 1);
     }
     return okStatus();
 }
@@ -617,11 +618,14 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
             if (node.noteTarget < 0) continue;
             host::Event e = te.event;
             e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
-            node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents.push_back(e);
+            auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
+            if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
         }
         // 3. The FX chain, in place on `sum`.
         for (Stage& st : node.chain) {
-            if (st.bypass || !st.instance) {
+            // A stage whose plugin is not processing (start_processing failed)
+            // passes audio through, delay-compensated, like a bypass.
+            if (st.bypass || !st.instance || !st.instance->processing()) {
                 st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
                 continue;
             }
