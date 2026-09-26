@@ -244,6 +244,7 @@ bool FlatSemantic::setPatch(std::uint32_t mode, const char* text, std::uint32_t 
         mode == CLAP_SUPPLE_SET_REPLACE ? type_.fromJson(*doc) : type_.merge(before, *doc);
     if (!result) return fail(result.error());
     if (mode == CLAP_SUPPLE_SET_VALIDATE_ONLY) return true;
+    if (onBeforeApply) onBeforeApply(result->body);
     envelope_ = result->meta;
     store_.assign(result->body);
     if (onApplied) onApplied(before.body, result->body);
@@ -282,8 +283,10 @@ bool FlatSemantic::loadState(const clap_istream_t* in) {
             ParamStore scratch(store_.table());
             if (!legacyLoad(bytes, scratch)) return false;
             const auto before = current();
-            store_.assign(scratch.snapshot());
-            if (onApplied) onApplied(before.body, store_.snapshot());
+            const auto next = scratch.snapshot();
+            if (onBeforeApply) onBeforeApply(next);
+            store_.assign(next);
+            if (onApplied) onApplied(before.body, next);
             return true;
         }
         return false;
@@ -291,6 +294,7 @@ bool FlatSemantic::loadState(const clap_istream_t* in) {
     auto p = type_.parse(*text);
     if (!p) return false;
     const auto before = current();
+    if (onBeforeApply) onBeforeApply(p->body);
     envelope_ = p->meta;
     store_.assign(p->body);
     if (onApplied) onApplied(before.body, p->body);

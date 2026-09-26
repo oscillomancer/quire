@@ -116,6 +116,10 @@ class FlatSemantic {
 
     // Called after a successful set_patch or state load (e.g. to request a
     // restart when a latency-changing parameter moved, or rescan values).
+    // onBeforeApply runs after validation and before ParamStore::assign. A
+    // plugin can defer RT adoption until its onApplied callback publishes an
+    // immutable companion snapshot (for example, the patch envelope seed).
+    std::function<void(const patch::FlatBody& next)> onBeforeApply;
     std::function<void(const patch::FlatBody& before, const patch::FlatBody& after)> onApplied;
 
     // Builds a clap_plugin_supple_semantic_params_t whose thunks find the

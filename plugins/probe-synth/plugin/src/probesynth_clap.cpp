@@ -8,12 +8,16 @@
 // so all three formats are the same DSP with the same parameter IDs and the
 // same saved state.
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
+#include "supple/base/handoff.h"
+#include "supple/clap/plugin_support.h"
 
 #include <clap/clap.h>
 
@@ -38,7 +42,7 @@ const char* kFeatures[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_S
 
 const clap_plugin_descriptor_t kDesc = {CLAP_VERSION_INIT,
                                         "com.suppleaudio.probe-synth",
-                                        "ProbeSynth",
+                                        "Probe Synth",
                                         "Supple Audio",
                                         "",
                                         "",
@@ -46,6 +50,47 @@ const clap_plugin_descriptor_t kDesc = {CLAP_VERSION_INIT,
                                         "0.1.0",
                                         "An internal eight-voice test instrument.",
                                         kFeatures};
+
+// The patch type and legacy binary reader are product-owned; shared format and
+// validation live in plugin_support and core-patch.
+constexpr uint32_t kStateMagic = 0x51505231;  // QPR1, retained across v1/v2
+const supple::patch::FlatPatchType& patchType() {
+    static const supple::patch::FlatPatchType type("probe-synth", 1, 0, kParams, true);
+    return type;
+}
+
+bool legacyLoad(std::span<const uint8_t> bytes, supple::clapx::ParamStore& out) {
+    size_t off = 0;
+    auto get32 = [&](uint32_t& v) {
+        if (off + 4 > bytes.size()) return false;
+        v = 0;
+        for (int i = 0; i < 4; ++i) v |= uint32_t(bytes[off++]) << (8 * i);
+        return true;
+    };
+    uint32_t magic = 0, version = 0, count = 0;
+    if (!get32(magic) || magic != kStateMagic || !get32(version) || version != 1 || !get32(count) ||
+        count > kParamCount || bytes.size() != 12 + size_t(count) * 12)
+        return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t id = 0;
+        if (!get32(id)) return false;
+        uint64_t bits = 0;
+        for (int j = 0; j < 8; ++j) bits |= uint64_t(bytes[off++]) << (8 * j);
+        double value = 0;
+        std::memcpy(&value, &bits, 8);
+        if (!std::isfinite(value)) return false;
+        if (const auto* spec = findParam(id); spec && !(spec->flags & pa::kReadonly)) {
+            if (id == kAmpSustain || id == kFilterSustain) value *= 100.0;
+            out.set(id, value);
+        }
+    }
+    return true;
+}
+
+struct PatchSnapshot {
+    std::array<double, kNumParams> values{};
+    uint32_t seed = 0;
+};
 
 // ---------------------------------------------------------------------------
 
@@ -59,55 +104,90 @@ struct Plug
     const clap_host_params_t* hostParams = nullptr;
 
     probesynth::Processor processor;
-    // Written by the audio thread (automation) and by the editor; read by
-    // both. Plain doubles here would be a genuine race now that a GUI exists.
-    std::atomic<double> values[kNumParams];
+    supple::clapx::ParamStore store{kParams};
+    supple::clapx::FlatSemantic semantic{patchType(),
+                                         store,
+                                         "com.suppleaudio.probe-synth",
+                                         "Probe Synth: eight-voice test instrument.",
+                                         "Probe Synth: ",
+                                         kStateMagic};
+    supple::RtHandoff<PatchSnapshot> patchHandoff;
+    double audioValues[kNumParams]{};
+    uint64_t seenGeneration = 0;
+    uint32_t patchSeed = 0;
+    uint64_t adoptedPatchGeneration = 0;
+    std::atomic<uint64_t> readyPatchGeneration{0};
+    std::atomic<bool> patchApplying{false};
     std::atomic<double> srAtomic{48000.0};
     int channels = 2;
     int preparedChannels = 0;
     bool active = false;
     std::atomic<int> latencyAtomic{0};
-    // Scratch for process(), sized once from the selected mono/stereo port
-    // configuration during activation and never resized on the audio thread.
     std::vector<float*> ptrs32;
     std::vector<double*> ptrs64;
 
+    Plug() {
+        semantic.legacyLoad = legacyLoad;
+        semantic.onBeforeApply = [this](const supple::patch::FlatBody&) {
+            patchApplying.store(true, std::memory_order_release);
+        };
+        semantic.onApplied = [this](const supple::patch::FlatBody&,
+                                    const supple::patch::FlatBody& after) {
+            auto snapshot = std::make_unique<PatchSnapshot>();
+            for (size_t i = 0; i < snapshot->values.size(); ++i)
+                snapshot->values[i] = after.values[i];
+            snapshot->seed = semantic.envelope().seed.value_or(0);
+            const uint64_t published = patchHandoff.publish(std::move(snapshot));
+            readyPatchGeneration.store(published, std::memory_order_release);
+            patchApplying.store(false, std::memory_order_release);
+            if (hostParams && hostParams->rescan)
+                hostParams->rescan(host, CLAP_PARAM_RESCAN_VALUES);
+        };
+    }
     void sizeScratch(int nch) {
-        ptrs32.resize((size_t)nch);
-        ptrs64.resize((size_t)nch);
+        ptrs32.resize(static_cast<size_t>(nch));
+        ptrs64.resize(static_cast<size_t>(nch));
     }
+    double pv(uint32_t id) const { return store.get(id); }
+    void sv(uint32_t id, double physical) { store.set(id, physical); }
 
-    double pv(uint32_t id) const { return values[id].load(std::memory_order_relaxed); }
-    void sv(uint32_t id, double v) { values[id].store(v, std::memory_order_relaxed); }
-
-    void loadDefaults() {
-        for (int i = 0; i < kParamCount; ++i) sv(kParams[i].id, kParams[i].def);
-    }
-
-    probesynth::Processor::Params toParams() const {
+    // Adopting a patch snapshot and applying individual CLAP automation use
+    // the same physical-to-DSP conversion, always on the audio thread.
+    void applyAudioValues() {
         probesynth::Processor::Params p;
-        p.waveform = static_cast<int>(pv(kWaveform));
-        p.cutoff = pv(kCutoff);
-        p.resonance = pv(kResonance);
-        p.filterAmount = pv(kFilterAmount);
-        p.filterSlope = static_cast<int>(pv(kFilterSlope));
-        p.ampAttack = pv(kAmpAttack);
-        p.ampDecay = pv(kAmpDecay);
-        p.ampSustain = pv(kAmpSustain);
-        p.ampRelease = pv(kAmpRelease);
-        p.filterAttack = pv(kFilterAttack);
-        p.filterDecay = pv(kFilterDecay);
-        p.filterSustain = pv(kFilterSustain);
-        p.filterRelease = pv(kFilterRelease);
-        p.seed = static_cast<uint32_t>(pv(kSeed));
-        p.outputGainDb = pv(kOutputGain);
-
-        return p;
-    }
-
-    void pushParams() {
-        processor.setParams(toParams());
+        p.waveform = static_cast<int>(audioValues[kWaveform]);
+        p.cutoff = audioValues[kCutoff];
+        p.resonance = audioValues[kResonance];
+        p.filterAmount = audioValues[kFilterAmount];
+        p.filterSlope = static_cast<int>(audioValues[kFilterSlope]);
+        p.ampAttack = audioValues[kAmpAttack];
+        p.ampDecay = audioValues[kAmpDecay];
+        p.ampSustain = audioValues[kAmpSustain] / 100.0;
+        p.ampRelease = audioValues[kAmpRelease];
+        p.filterAttack = audioValues[kFilterAttack];
+        p.filterDecay = audioValues[kFilterDecay];
+        p.filterSustain = audioValues[kFilterSustain] / 100.0;
+        p.filterRelease = audioValues[kFilterRelease];
+        p.seed = static_cast<uint32_t>(audioValues[kSeed]) ^ patchSeed;
+        p.outputGainDb = audioValues[kOutputGain];
+        processor.setParams(p);
         latencyAtomic.store(processor.latencySamples(), std::memory_order_relaxed);
+    }
+    // A pre-apply hook fences the period after ParamStore::assign but before
+    // the companion patch snapshot has reached RtHandoff. If adoption cannot
+    // proceed this block, keep the complete previous DSP state.
+    void refreshParams(bool force = false) {
+        if (patchApplying.load(std::memory_order_acquire) ||
+            readyPatchGeneration.load(std::memory_order_acquire) > adoptedPatchGeneration)
+            return;
+        const uint64_t generation = store.generation();
+        if (!force && generation == seenGeneration) return;
+        if (!store.readAll(audioValues)) return;
+        if (patchApplying.load(std::memory_order_acquire) ||
+            readyPatchGeneration.load(std::memory_order_acquire) > adoptedPatchGeneration)
+            return;
+        seenGeneration = generation;
+        applyAudioValues();
     }
 
 #if PROBESYNTH_WITH_GUI
@@ -187,8 +267,8 @@ struct Plug
 
     void setParam(uint32_t id, double v) override {
         const ParamDef* d = findParam(id);
-        if (!d || d->readonly) return;
-        const double c = std::max(d->min, std::min(d->max, v));
+        if (!d || (d->flags & pa::kReadonly)) return;
+        const double c = pa::clampPhysical(*d, v);
         // Apply locally at once so the knob tracks the mouse even with the
         // transport stopped; the ring is what tells the host.
         sv(id, c);
@@ -309,54 +389,26 @@ const clap_plugin_latency_t kLatency = {latGet};
 // Extension: params
 // ---------------------------------------------------------------------------
 
-uint32_t CLAP_ABI paramCount(const clap_plugin_t*) { return (uint32_t)kParamCount; }
-
+uint32_t CLAP_ABI paramCount(const clap_plugin_t*) {
+    return supple::clapx::ClapParams::count(kParams);
+}
 bool CLAP_ABI paramInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
-    if (index >= (uint32_t)kParamCount) return false;
-    const ParamDef& d = kParams[index];
-    std::memset(info, 0, sizeof(*info));
-    info->id = d.id;
-    std::snprintf(info->name, sizeof(info->name), "%s", d.name);
-    std::snprintf(info->module, sizeof(info->module), "%s", d.module);
-    info->min_value = d.min;
-    info->max_value = d.max;
-    info->default_value = d.def;
-    info->flags = 0;
-    if (d.readonly) {
-        info->flags |= CLAP_PARAM_IS_READONLY;
-    } else {
-        info->flags |= CLAP_PARAM_IS_AUTOMATABLE;
-    }
-    if (d.stepped) info->flags |= CLAP_PARAM_IS_STEPPED;
-    if (d.isBypass) info->flags |= CLAP_PARAM_IS_BYPASS;
-    return true;
+    return supple::clapx::ClapParams::info(kParams, index, info);
 }
-
 bool CLAP_ABI paramGetValue(const clap_plugin_t* p, clap_id id, double* out) {
-    auto* self = (Plug*)p->plugin_data;
-    if (!findParam(id)) return false;
-    *out = self->pv(id);
-    return true;
+    return ((Plug*)p->plugin_data)->store.getClap(id, *out);
 }
-
 bool CLAP_ABI paramValueToText(const clap_plugin_t*, clap_id id, double v, char* out,
                                uint32_t size) {
-    if (!findParam(id)) return false;
-    probesynth::formatValue(id, v, out, size);
-    return true;
+    return supple::clapx::ClapParams::valueToText(kParams, id, v, out, size);
 }
-
 bool CLAP_ABI paramTextToValue(const clap_plugin_t*, clap_id id, const char* text, double* out) {
-    return probesynth::parseValue(id, text, *out);
+    return supple::clapx::ClapParams::textToValue(kParams, id, text, out);
 }
-
 void applyEvent(Plug* self, const clap_event_header_t* h) {
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
-    if (h->type != CLAP_EVENT_PARAM_VALUE) return;
-    const auto* ev = (const clap_event_param_value_t*)h;
-    const ParamDef* d = findParam(ev->param_id);
-    if (!d || d->readonly) return;
-    self->sv(ev->param_id, std::max(d->min, std::min(d->max, ev->value)));
+    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE) return;
+    const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(h);
+    self->store.setClap(ev->param_id, ev->value);
 }
 
 void applyNote(Plug* self, const clap_event_header_t* h) {
@@ -404,7 +456,7 @@ bool emitEdit(const clap_output_events_t* out, const probesynth::gui::ParamEdit&
         ev.port_index = -1;
         ev.channel = -1;
         ev.key = -1;
-        ev.value = e.value;
+        ev.value = pa::toClap(kParams[e.id], e.value);
         return out->try_push(out, &ev.header);
     }
     clap_event_param_gesture_t ev{};
@@ -476,7 +528,7 @@ void CLAP_ABI paramFlush(const clap_plugin_t* p, const clap_input_events_t* in,
     const uint32_t n = in->size(in);
     for (uint32_t i = 0; i < n; ++i) applyEvent(self, in->get(in, i));
     drainEdits(self, out, 0);
-    if (!self->active) self->pushParams();
+    if (!self->active) self->refreshParams();
 }
 
 const clap_plugin_params_t kParamsExt = {paramCount,       paramInfo,        paramGetValue,
@@ -489,90 +541,12 @@ const clap_plugin_params_t kParamsExt = {paramCount,       paramInfo,        par
 // Versioned id/value pairs rather than a raw struct dump, so that reordering or
 // adding parameters later cannot silently misread an old session.
 
-constexpr uint32_t kStateMagic = 0x51505231;  // "QPR1"
-constexpr uint32_t kStateVersion = 1;
-
-bool CLAP_ABI stateSave(const clap_plugin_t* p, const clap_ostream_t* os) {
-    auto* self = (Plug*)p->plugin_data;
-    std::vector<uint8_t> buf;
-    auto put32 = [&](uint32_t v) {
-        for (int i = 0; i < 4; ++i) buf.push_back((uint8_t)(v >> (8 * i)));
-    };
-    auto putd = [&](double v) {
-        uint64_t u;
-        std::memcpy(&u, &v, 8);
-        for (int i = 0; i < 8; ++i) buf.push_back((uint8_t)(u >> (8 * i)));
-    };
-    put32(kStateMagic);
-    put32(kStateVersion);
-    uint32_t saved = 0;
-    for (int i = 0; i < kParamCount; ++i)
-        if (!kParams[i].readonly) ++saved;
-    put32(saved);
-    for (int i = 0; i < kParamCount; ++i) {
-        if (kParams[i].readonly) continue;
-        put32((uint32_t)kParams[i].id);
-        putd(self->pv(kParams[i].id));
-    }
-
-    size_t off = 0;
-    while (off < buf.size()) {
-        const int64_t n = os->write(os, buf.data() + off, buf.size() - off);
-        if (n <= 0) return false;
-        off += (size_t)n;
-    }
-    return true;
+bool CLAP_ABI stateSave(const clap_plugin_t* p, const clap_ostream_t* out) {
+    return ((Plug*)p->plugin_data)->semantic.saveState(out);
 }
-
-bool CLAP_ABI stateLoad(const clap_plugin_t* p, const clap_istream_t* is) {
-    auto* self = (Plug*)p->plugin_data;
-    std::vector<uint8_t> buf;
-    uint8_t tmp[1024];
-    for (;;) {
-        const int64_t n = is->read(is, tmp, sizeof(tmp));
-        if (n < 0) return false;
-        if (n == 0) break;
-        buf.insert(buf.end(), tmp, tmp + n);
-    }
-    size_t off = 0;
-    auto get32 = [&](uint32_t& v) {
-        if (off + 4 > buf.size()) return false;
-        v = 0;
-        for (int i = 0; i < 4; ++i) v |= (uint32_t)buf[off + (size_t)i] << (8 * i);
-        off += 4;
-        return true;
-    };
-    auto getd = [&](double& v) {
-        if (off + 8 > buf.size()) return false;
-        uint64_t u = 0;
-        for (int i = 0; i < 8; ++i) u |= (uint64_t)buf[off + (size_t)i] << (8 * i);
-        std::memcpy(&v, &u, 8);
-        off += 8;
-        return true;
-    };
-
-    uint32_t magic = 0, version = 0, count = 0;
-    if (!get32(magic) || magic != kStateMagic) return false;
-    if (!get32(version) || version > kStateVersion) return false;
-    if (!get32(count)) return false;
-
-    self->loadDefaults();  // anything absent from an older state keeps its default
-    for (uint32_t i = 0; i < count; ++i) {
-        uint32_t id = 0;
-        double v = 0.0;
-        if (!get32(id) || !getd(v)) return false;
-        const ParamDef* d = findParam((clap_id)id);
-        if (d && !d->readonly) self->sv(id, std::max(d->min, std::min(d->max, v)));
-    }
-    if (!self->active) self->pushParams();
-    if (self->host) {
-        auto* hp =
-            (const clap_host_params_t*)self->host->get_extension(self->host, CLAP_EXT_PARAMS);
-        if (hp && hp->rescan) hp->rescan(self->host, CLAP_PARAM_RESCAN_VALUES);
-    }
-    return true;
+bool CLAP_ABI stateLoad(const clap_plugin_t* p, const clap_istream_t* in) {
+    return ((Plug*)p->plugin_data)->semantic.loadState(in);
 }
-
 const clap_plugin_state_t kState = {stateSave, stateLoad};
 
 // ---------------------------------------------------------------------------
@@ -585,7 +559,6 @@ void stopGuiTimer(Plug* self);  // defined with the rest of the GUI extension
 
 bool CLAP_ABI plugInit(const clap_plugin_t* p) {
     auto* self = (Plug*)p->plugin_data;
-    self->loadDefaults();
     if (self->host)
         self->hostParams =
             (const clap_host_params_t*)self->host->get_extension(self->host, CLAP_EXT_PARAMS);
@@ -614,7 +587,7 @@ bool CLAP_ABI plugActivate(const clap_plugin_t* p, double sr, uint32_t, uint32_t
     self->processor.prepare(sr, self->channels);
     self->preparedChannels = self->channels;
     self->sizeScratch(self->channels);
-    self->pushParams();
+    self->refreshParams(true);
     self->active = true;
     return true;
 }
@@ -626,11 +599,21 @@ void CLAP_ABI plugStopProcessing(const clap_plugin_t*) {}
 
 void CLAP_ABI plugReset(const clap_plugin_t* p) { ((Plug*)p->plugin_data)->processor.reset(); }
 
-clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_process_t* proc) {
+clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p,
+                                         const clap_process_t* proc) SUPPLE_RT {
     auto* self = (Plug*)p->plugin_data;
     // Main-thread flush/state load only touch atomics while active; copy them
     // into the SDK-free DSP on the audio thread before rendering.
-    self->pushParams();
+    if (auto* snapshot = self->patchHandoff.acquire()) {
+        const uint64_t adopted = self->patchHandoff.adoptedGeneration();
+        if (adopted != self->adoptedPatchGeneration) {
+            std::copy(snapshot->values.begin(), snapshot->values.end(), self->audioValues);
+            self->patchSeed = snapshot->seed;
+            self->adoptedPatchGeneration = adopted;
+            self->applyAudioValues();
+        }
+    }
+    self->refreshParams();
     const uint32_t nframes = proc->frames_count;
     const clap_input_events_t* in = proc->in_events;
     const uint32_t nev = in ? in->size(in) : 0;
@@ -647,7 +630,7 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_proc
 
     // Editor edits are drained before any audio is rendered, so a knob move
     // takes effect in the block you hear it in rather than the next one.
-    if (drainEdits(self, proc->out_events, 0)) self->pushParams();
+    if (drainEdits(self, proc->out_events, 0)) self->refreshParams();
 
     uint32_t ev = 0, frame = 0;
     bool dirty = false;
@@ -664,7 +647,7 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_proc
             ++ev;
         }
         if (dirty) {
-            self->pushParams();
+            self->refreshParams();
             dirty = false;
         }
 
@@ -866,12 +849,18 @@ const clap_plugin_timer_support_t kTimerSupport = {plugOnGuiTimer};
 
 #endif  // PROBESYNTH_WITH_GUI
 
+supple::clapx::FlatSemantic* resolveSemantic(const clap_plugin_t* p) {
+    return &((Plug*)p->plugin_data)->semantic;
+}
+
 const void* CLAP_ABI plugGetExtension(const clap_plugin_t*, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &kAudioPortsConfig;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kNotePorts;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kParamsExt;
     if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
+    if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS))
+        return supple::clapx::FlatSemantic::extension<resolveSemantic>();
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kLatency;
 #if PROBESYNTH_WITH_GUI
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kGui;

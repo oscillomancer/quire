@@ -19,7 +19,9 @@ files+=(
   plugins/probe-synth/plugin/gui/Editor.h
   plugins/probe-synth/test/test_core.cpp
   plugins/probe-synth/test/editor_input.cpp
+  plugins/probe-synth/test/semantic_rt.cpp
   plugins/probe-synth/tools/probesynth_cli.cpp
+  plugins/probe-synth/tools/gui_preview.cpp
 )
 [ ${#files[@]} -eq 0 ] && exit 0
 clang-format "${mode[@]}" "${files[@]}"

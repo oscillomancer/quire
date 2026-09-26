@@ -14,8 +14,13 @@ if(SUPPLE_BUILD_PLUGINS)
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${dir}")
     if(SUPPLE_SANITIZE STREQUAL "realtime")
       set(plugin_rtsan ON)
+      set(plugin_core_sanitize realtime)
+    elseif(SUPPLE_SANITIZE STREQUAL "thread")
+      set(plugin_rtsan OFF)
+      set(plugin_core_sanitize thread)
     else()
       set(plugin_rtsan OFF)
+      set(plugin_core_sanitize "")
     endif()
     ExternalProject_Add(plugin-${dir}
       SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${dir}"
@@ -30,9 +35,11 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DSUPPLE_ROOT=${CMAKE_SOURCE_DIR}
+        -DSUPPLE_SEMANTIC_CONFORMANCE=${CMAKE_BINARY_DIR}/plugins/common/semantic-conformance
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
         -D${prefix}_VST3=${SUPPLE_PLUGIN_VST3}
         -D${prefix}_RTSAN=${plugin_rtsan}
+        -DSUPPLE_SANITIZE=${plugin_core_sanitize}
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON
       BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1)
     if(SUPPLE_BUILD_TESTS)

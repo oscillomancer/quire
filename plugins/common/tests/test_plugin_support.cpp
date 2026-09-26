@@ -86,6 +86,29 @@ TEST_CASE("errorsToJson flattens schema.invalid into its details") {
     CHECK(one->size() == 1);
 }
 
+TEST_CASE("FlatSemantic brackets a validated patch assignment") {
+    patch::FlatPatchType type("hook-test", 1, 0, kT, false);
+    clapx::ParamStore store(kT);
+    clapx::FlatSemantic semantic(type, store, "com.suppleaudio.test.hook", "", "", 0x484f4f4b);
+    std::string calls;
+    semantic.onBeforeApply = [&](const patch::FlatBody& next) {
+        CHECK(store.get(0) == 1000);
+        CHECK(next.values[0] == 1200);
+        calls += 'B';
+    };
+    semantic.onApplied = [&](const patch::FlatBody& before, const patch::FlatBody& after) {
+        CHECK(before.values[0] == 1000);
+        CHECK(store.get(0) == 1200);
+        CHECK(after.values[0] == 1200);
+        calls += 'A';
+    };
+    const std::string doc = R"({"schema":"supple.hook-test-patch/1.0","params":{"freq":1200}})";
+    CHECK(semantic.setPatch(CLAP_SUPPLE_SET_VALIDATE_ONLY, doc.data(), doc.size(), nullptr));
+    CHECK(calls.empty());
+    CHECK(semantic.setPatch(CLAP_SUPPLE_SET_REPLACE, doc.data(), doc.size(), nullptr));
+    CHECK(calls == "BA");
+}
+
 TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::description("rt")) {
     static constexpr params::ParamSpec kMany[] = {
         {.id = 0, .key = "a", .name = "A", .max = 1e6},

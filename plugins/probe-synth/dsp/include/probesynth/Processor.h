@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include "supple/base/rng.h"
 
 #if __has_cpp_attribute(clang::nonblocking)
 #define PROBESYNTH_RT [[clang::nonblocking]]
@@ -36,14 +37,14 @@ class Processor {
         reset();
     }
     void setParams(const Params& p) {
-        if (p.seed != params_.seed) noise_ = p.seed ? p.seed : 1;
+        if (p.seed != params_.seed) noise_.reseed(p.seed);
         params_ = p;
     }
     void reset() {
         voices_ = {};
         age_ = 0;
         peak_ = 0;
-        noise_ = params_.seed ? params_.seed : 1;
+        noise_.reseed(params_.seed);
     }
     int latencySamples() const { return 0; }
     void noteOn(int noteId, int channel, int key, double velocity) PROBESYNTH_RT {
@@ -101,10 +102,7 @@ class Processor {
                         osc = std::sin(6.283185307179586 * v.phase);
                         break;
                     case 3:
-                        noise_ ^= noise_ << 13;
-                        noise_ ^= noise_ >> 17;
-                        noise_ ^= noise_ << 5;
-                        osc = (static_cast<double>(noise_) / 2147483648.0) - 1.0;
+                        osc = noise_.bipolar();
                         break;
                     default:
                         osc = 2.0 * v.phase - 1.0 - polyBlep(v.phase, dt);
@@ -209,6 +207,6 @@ class Processor {
     double sampleRate_ = 48000, peak_ = 0;
     int channels_ = 2;
     uint64_t age_ = 0;
-    uint32_t noise_ = 1;
+    supple::Rng noise_{1};
 };
 }  // namespace probesynth

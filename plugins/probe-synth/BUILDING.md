@@ -25,6 +25,8 @@ build/dev/plugins/probe-synth/probesynth-linux-host-probe \
   build/dev/plugins/clap/ProbeSynth.clap /tmp/probe-host.ppm
 ```
 
+The `semantic-conformance` and `semantic-rt` tests exercise the extension,
+legacy state migration, and patch replacement during processing.
 The template's `host_contract.h` checks the instrument's no-input layout,
 float/double audio, non-silent note rendering and parameter text round trips.
 The `rtsan` preset instruments the SDK-free DSP test.
