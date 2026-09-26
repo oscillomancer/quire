@@ -99,11 +99,14 @@ class Writer {
                     WriteOptions compactOptions{false, false, opt_.indent, opt_.maxLineWidth};
                     Writer compact(compactOptions);
                     auto trial = compact.run(v);
-                    if (!trial ||
-                        out_.size() -
-                                (out_.rfind('\n') == std::string::npos ? 0 : out_.rfind('\n') + 1) +
-                                trial->size() - 1 >
-                            static_cast<std::size_t>(opt_.maxLineWidth))
+                    // The one-line pretty form is the compact form plus one space
+                    // after each of the (size - 1) separating commas. The opening
+                    // bracket is already in out_ and also counted in the trial.
+                    const std::size_t lineStart =
+                        out_.rfind('\n') == std::string::npos ? 0 : out_.rfind('\n') + 1;
+                    const std::size_t column = out_.size() - lineStart - 1;
+                    if (!trial || column + trial->size() + (a.size() - 1) >
+                                      static_cast<std::size_t>(opt_.maxLineWidth))
                         inlineArray = false;
                 }
                 for (std::size_t i = 0; i < a.size(); ++i) {

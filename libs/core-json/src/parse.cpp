@@ -4,7 +4,9 @@
 #include <limits>
 namespace supple::json {
 namespace {
-bool validUtf8(std::string_view s) {
+// Returns the offset of the first byte that starts an invalid UTF-8 sequence,
+// or npos when the whole input is valid.
+std::size_t firstInvalidUtf8(std::string_view s) {
     for (std::size_t i = 0; i < s.size();) {
         auto c = static_cast<unsigned char>(s[i]);
         if (c < 0x80) {
@@ -15,21 +17,21 @@ bool validUtf8(std::string_view s) {
                          : c >= 0xe0 && c <= 0xef ? 3
                          : c >= 0xc2 && c <= 0xdf ? 2
                                                   : 0;
-        if (!count || i + count > s.size()) return false;
+        if (!count || i + count > s.size()) return i;
         unsigned cp = c & (count == 2 ? 0x1f : count == 3 ? 0x0f : 0x07);
         for (unsigned j = 1; j < count; ++j) {
             auto d = static_cast<unsigned char>(s[i + j]);
-            if ((d & 0xc0) != 0x80) return false;
+            if ((d & 0xc0) != 0x80) return i;
             cp = (cp << 6) | (d & 0x3f);
         }
         if (cp < (count == 2   ? 0x80u
                   : count == 3 ? 0x800u
                                : 0x10000u) ||
             cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
-            return false;
+            return i;
         i += count;
     }
-    return true;
+    return std::string_view::npos;
 }
 void appendUtf8(std::string& s, unsigned cp) {
     if (cp < 0x80)
@@ -56,14 +58,9 @@ class Parser {
             return fail("too_large", "JSON input exceeds byte limit", "reduce the document size");
         if (text_.substr(0, 3) == "\xef\xbb\xbf")
             return fail("bom", "UTF-8 BOM is not allowed", "remove the BOM");
-        if (!validUtf8(text_)) {
-            // Report the first invalid byte rather than allowing it to be consumed by a string.
-            for (std::size_t n = 1; n <= text_.size(); ++n)
-                if (!validUtf8(text_.substr(0, n)) &&
-                    (static_cast<unsigned char>(text_[n - 1]) < 0x80 || n == text_.size())) {
-                    pos_ = n - 1;
-                    break;
-                }
+        if (auto bad = firstInvalidUtf8(text_); bad != std::string_view::npos) {
+            // Report the first invalid byte rather than letting a string consume it.
+            pos_ = bad;
             return fail("invalid_utf8", "invalid UTF-8 input",
                         "encode the document as valid UTF-8");
         }

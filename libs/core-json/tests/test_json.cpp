@@ -194,3 +194,23 @@ TEST_CASE("release writer replaces non-finite numbers with null") {
     CHECK(writeCanonical(nested) == "{\n  \"bad\": null\n}\n");
 #endif
 }
+TEST_CASE("scalar arrays stay on one line up to exactly the width limit") {
+    // Key prefix `  "k": ` is 7 columns; the array is 93 columns: 100 in total.
+    std::string items;
+    for (int i = 0; i < 31; ++i) items += (i ? ", " : "") + std::string("1");
+    // 31 items: 31 digits + 30 * 2 separators + 2 brackets = 93
+    auto fits = parse("{\"k\":[" + items + "]}");
+    REQUIRE(fits);
+    CHECK(writeCanonical(*fits) == "{\n  \"k\": [" + items + "]\n}\n");
+    auto over = parse("{\"kk\":[" + items + "]}");
+    REQUIRE(over);
+    CHECK(writeCanonical(*over).find("[\n") != std::string::npos);
+}
+TEST_CASE("invalid UTF-8 is located at its first byte") {
+    std::string text = "{\"a\": \"ok\", \"b\": \"x\xc3\x28\"}";
+    auto r = parse(text);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code == "json.parse.invalid_utf8");
+    REQUIRE(r.error().loc.has_value());
+    CHECK(r.error().loc->column == 20);
+}
