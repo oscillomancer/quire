@@ -400,7 +400,11 @@ json::Value FlatPatchType::jsonSchema() const {
 
 // --- state framing -------------------------------------------------------------
 
-std::vector<std::uint8_t> encodeState(std::string_view canonicalJson, std::uint32_t magic) {
+Result<std::vector<std::uint8_t>> encodeState(std::string_view canonicalJson, std::uint32_t magic) {
+    if (canonicalJson.size() > kMaxStateBytes)
+        return Error("patch.state.too_large",
+                     "state document is " + std::to_string(canonicalJson.size()) + " bytes", "",
+                     "states are limited to 16 MiB");
     std::vector<std::uint8_t> out;
     out.reserve(12 + canonicalJson.size());
     put32(out, magic);
@@ -408,6 +412,10 @@ std::vector<std::uint8_t> encodeState(std::string_view canonicalJson, std::uint3
     put32(out, static_cast<std::uint32_t>(canonicalJson.size()));
     out.insert(out.end(), canonicalJson.begin(), canonicalJson.end());
     return out;
+}
+
+bool isFramedState(std::span<const std::uint8_t> bytes, std::uint32_t magic) {
+    return bytes.size() >= 8 && get32(bytes, 0) == magic && get32(bytes, 4) == kStateFormatVersion;
 }
 
 Result<std::string> decodeState(std::span<const std::uint8_t> bytes, std::uint32_t magic) {

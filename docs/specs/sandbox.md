@@ -222,3 +222,34 @@ paths, locations and hints.
   restartable latency and JSON state, and a sine instrument. The host was also
   checked by hand against the template's `Starter.clap` (scan, text I/O,
   flush, processing, state).
+
+## Implementation notes — review round 2 (2026-09-26, orchestrator)
+
+- **Lifecycle is enforced:** `startProcessing()` returns false when the plugin
+  refuses (then `process()` returns false); `deactivate()` while processing is
+  ignored and logged; destroying a processing instance stops it first (caller
+  bug, recovered). `request_restart` raised while processing stays pending
+  until processing stops; `request_flush` while active is served by the next
+  `process()`/`flushParams()` on the audio thread (`needsAudioFlush()`).
+- **Event arena:** queued `setParam()` changes only take the slots left after
+  the block's own events; the rest stay queued for the next block. Block
+  events beyond the arena are dropped and counted
+  (`Notifications::droppedEvents`). MIDI-only note ports get a choke as a
+  note-off.
+- **Tail policy:** when every chain stage implements `clap.tail` with a finite
+  value, the render stops exactly at musical end + latency + the sum of the
+  reported tails (or earlier on the silence hold); an unreported or infinite
+  tail leaves it to silence detection and the cap. `Notifications::tailChanged`
+  reports `clap.tail.changed`.
+- **Render limits:** at most 2^25 frames per render (~11.6 min at 48 kHz),
+  checked before allocating; negative or out-of-range event times, non-finite
+  or out-of-range tail/silence settings are errors (`render.too_long`,
+  `render.event_time`, `render.tail`, `render.silence`). An explicit
+  `lengthSamples` is authoritative; events past it land in the tail.
+- **Session** (`session.h`): the model behind the §4 commands, independent of
+  the bus. Third-party plugins' params are addressed by CLAP id or name with
+  CLAP values or `{"text": …}`; semantic plugins' params go through
+  `set_patch` merges so the plugin validates units and ranges (error paths are
+  rebased from `/params/…` to `/values/…`). Presets live in
+  `<presetDir>/<plugin id>/<name>.json`. IDs are never reused, even after a
+  rollback.

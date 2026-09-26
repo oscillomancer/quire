@@ -3,8 +3,10 @@
 // Checks a plugin's com.suppleaudio.semantic-params/1 implementation against
 // docs/specs/semantic-params-extension.md §7 through the real CLAP host.
 // Every stock plugin registers it as a CTest test. Exit 0 = conforming.
+#include <atomic>
 #include <cstdio>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "supple/clap/semantic_params.h"
@@ -151,6 +153,60 @@ int main(int argc, char** argv) {
         check(in.setPatch(json::writeCompact(merge), CLAP_SUPPLE_SET_VALIDATE_ONLY).ok(),
               "validate-only accepts");
         check(get(in, false) == snapshot, "validate-only changes nothing");
+    }
+
+    // 7. set_patch during processing: another thread processes blocks while the
+    // main thread merges patches. Under the rtsan preset the plugin's process()
+    // is checked for RT violations; here we require no process errors and the
+    // last patch to be the one in effect.
+    if (!firstFloat.empty()) {
+        check(in.activate(48000.0, 1, 256).ok(), "activates for the processing test");
+        std::atomic<bool> stop{false}, failed{false}, started{false};
+        std::atomic<long> blocks{0};
+        std::thread audio([&] {
+            std::vector<float> l(256, 0.0f), r(256, 0.0f), ol(256), orr(256);
+            float* inPtr[2] = {l.data(), r.data()};
+            float* outPtr[2] = {ol.data(), orr.data()};
+            if (!in.startProcessing()) {
+                failed = true;
+                return;
+            }
+            started = true;
+            host::ProcessBlock b;
+            b.inputs = in.audioInputChannels() ? inPtr : nullptr;
+            b.inputChannels = in.audioInputChannels() ? 2 : 0;
+            b.outputs = outPtr;
+            b.outputChannels = 2;
+            b.frames = 256;
+            while (!stop.load()) {
+                if (!in.process(b)) failed = true;
+                blocks.fetch_add(1);
+            }
+            in.stopProcessing();
+        });
+        while (!started.load() && !failed.load()) std::this_thread::yield();
+        bool allOk = true;
+        std::string last;
+        for (int i = 0; i < 200 && !failed.load(); ++i) {
+            json::Value merge = json::Value::object();
+            merge["params"][firstFloat] =
+                floatMin + (floatMax - floatMin) * ((i % 2) ? 0.25 : 0.75);
+            last = json::writeCompact(merge);
+            allOk = in.setPatch(last, CLAP_SUPPLE_SET_MERGE).ok() && allOk;
+            if (i % 20 == 0) std::this_thread::yield();
+        }
+        stop = true;
+        audio.join();
+        check(!failed.load() && allOk, "set_patch during processing: no errors (" +
+                                           std::to_string(blocks.load()) + " blocks)");
+        const auto now = json::parse(get(in, false));
+        const auto want = json::parse(last);
+        check(now && want &&
+                  now->find("params")->find(firstFloat)->asDouble() ==
+                      want->find("params")->find(firstFloat)->asDouble(),
+              "the last patch applied during processing is in effect");
+        in.deactivate();
+        check(in.setPatch(snapshot, CLAP_SUPPLE_SET_REPLACE).ok(), "restore");
     }
 
     // 8. State save/load equals the patch round trip.

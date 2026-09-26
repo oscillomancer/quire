@@ -8,10 +8,16 @@
 //   com.suppleaudio.test.sine  — instrument; 0 inputs, stereo output, CLAP and
 //     MIDI note dialects; one sine voice per key at velocity * 0.25, stops at
 //     note off and reports NOTE_END.
+//   com.suppleaudio.test.edge  — stereo pass-through for host edge cases. Its
+//     4-byte state is a configuration: byte 0 = refuse start_processing,
+//     bytes 1..3 = reported tail in samples (little endian). Loading state
+//     calls request_flush; param 7 ("Flushes") reads back how many times
+//     params.flush has been called.
 #include <clap/clap.h>
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -164,7 +170,8 @@ const clap_plugin_latency_t kGainLatency = {gainLatency};
 bool CLAP_ABI gainStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
     const std::string doc = gainPatchType().serialize(G(pl)->current());
     auto bytes = patch::encodeState(doc, 0x54474e31);  // "TGN1"
-    return os->write(os, bytes.data(), bytes.size()) == static_cast<int64_t>(bytes.size());
+    if (!bytes) return false;
+    return os->write(os, bytes->data(), bytes->size()) == static_cast<int64_t>(bytes->size());
 }
 bool CLAP_ABI gainStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     std::vector<std::uint8_t> buf;
@@ -436,6 +443,85 @@ clap_process_status CLAP_ABI sineProcess(const clap_plugin_t* pl, const clap_pro
     return CLAP_PROCESS_CONTINUE;
 }
 
+// --- edge -------------------------------------------------------------------------
+
+const clap_plugin_descriptor_t* edgeDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
+    static const clap_plugin_descriptor_t d = {
+        CLAP_VERSION_INIT, "com.suppleaudio.test.edge", "Test Edge", "Supple Audio", "", "", "",
+        "0.1.0",           "Host edge-case fixture",    features};
+    return &d;
+}
+
+struct Edge {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+    std::uint8_t config[4] = {0, 0, 0, 0};
+    std::atomic<int> flushes{0};
+};
+Edge* E(const clap_plugin_t* p) { return static_cast<Edge*>(p->plugin_data); }
+
+uint32_t CLAP_ABI edgeParamCount(const clap_plugin_t*) { return 1; }
+bool CLAP_ABI edgeParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
+    if (index != 0) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->id = 7;
+    info->flags = CLAP_PARAM_IS_READONLY;
+    std::snprintf(info->name, sizeof(info->name), "Flushes");
+    info->max_value = 1e9;
+    return true;
+}
+bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+    if (id != 7) return false;
+    *out = E(pl)->flushes.load();
+    return true;
+}
+bool CLAP_ABI edgeValueToText(const clap_plugin_t*, clap_id, double v, char* out, uint32_t size) {
+    std::snprintf(out, size, "%d", static_cast<int>(v));
+    return true;
+}
+bool CLAP_ABI edgeTextToValue(const clap_plugin_t*, clap_id, const char*, double*) { return false; }
+void CLAP_ABI edgeFlush(const clap_plugin_t* pl, const clap_input_events_t*,
+                        const clap_output_events_t*) {
+    ++E(pl)->flushes;
+}
+const clap_plugin_params_t kEdgeParams = {edgeParamCount,  edgeParamInfo,   edgeParamValue,
+                                          edgeValueToText, edgeTextToValue, edgeFlush};
+uint32_t CLAP_ABI edgeTail(const clap_plugin_t* pl) {
+    const auto* c = E(pl)->config;
+    return static_cast<uint32_t>(c[1]) | (static_cast<uint32_t>(c[2]) << 8) |
+           (static_cast<uint32_t>(c[3]) << 16);
+}
+const clap_plugin_tail_t kEdgeTail = {edgeTail};
+bool CLAP_ABI edgeStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
+    return os->write(os, E(pl)->config, 4) == 4;
+}
+bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
+    std::uint8_t buf[4];
+    if (is->read(is, buf, 4) != 4) return false;
+    std::memcpy(E(pl)->config, buf, 4);
+    const auto* hp = static_cast<const clap_host_params_t*>(
+        E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
+    if (hp) hp->request_flush(E(pl)->host);
+    return true;
+}
+const clap_plugin_state_t kEdgeState = {edgeStateSave, edgeStateLoad};
+const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
+    if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kEdgeTail;
+    if (!std::strcmp(id, CLAP_EXT_STATE)) return &kEdgeState;
+    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kGainPorts;
+    return nullptr;
+}
+bool CLAP_ABI edgeActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
+bool CLAP_ABI edgeStart(const clap_plugin_t* pl) { return E(pl)->config[0] == 0; }
+clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_process_t* p) {
+    for (uint32_t c = 0; c < 2; ++c)
+        for (uint32_t i = 0; i < p->frames_count; ++i)
+            p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i];
+    return CLAP_PROCESS_CONTINUE;
+}
+
 // --- shared lifecycle ------------------------------------------------------------------
 
 bool CLAP_ABI initOk(const clap_plugin_t*) { return true; }
@@ -464,9 +550,12 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 2; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 3; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
-    return i == 0 ? gainDescriptor() : i == 1 ? sineDescriptor() : nullptr;
+    return i == 0   ? gainDescriptor()
+           : i == 1 ? sineDescriptor()
+           : i == 2 ? edgeDescriptor()
+                    : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
                                             const char* id) {
@@ -474,6 +563,12 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
         return make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt);
     if (!std::strcmp(id, sineDescriptor()->id))
         return make<Sine>(host, sineDescriptor(), sineActivate, sineProcess, sineExt);
+    if (!std::strcmp(id, edgeDescriptor()->id)) {
+        const clap_plugin_t* p =
+            make<Edge>(host, edgeDescriptor(), edgeActivate, edgeProcess, edgeExt);
+        const_cast<clap_plugin_t*>(p)->start_processing = edgeStart;
+        return p;
+    }
     return nullptr;
 }
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};

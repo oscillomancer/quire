@@ -24,6 +24,9 @@ host::Transport transportAt(const RenderSettings& s, std::int64_t sample) {
 
 namespace {
 
+// ~11.6 minutes at 48 kHz; 256 MiB of stereo float output.
+constexpr std::int64_t kMaxRenderFrames = std::int64_t(1) << 25;
+
 struct Stage {
     host::Instance* instance = nullptr;
     std::vector<float> left, right;  // output buffers (blockSize)
@@ -42,9 +45,10 @@ struct Job {
     const float* inPtr[2] = {nullptr, nullptr};
     std::vector<float> outL, outR;  // sized to the maximum render length
     std::int64_t length = 0, latency = 0, maxTotal = 0, rendered = 0;
+    std::int64_t tailEnd = -1;  // musical end + the chain's reported tail, or -1 (unknown)
     std::int64_t silenceHold = 0;
     double silenceLinear = 0;
-    bool capped = false, error = false;
+    bool capped = false, error = false, startFailed = false;
 };
 
 // The block loop: runs on the render (audio) thread and must not allocate,
@@ -56,9 +60,9 @@ void renderLoop(Job& j) SUPPLE_RT {
     const std::int64_t musicalEnd = j.length + j.latency;
     std::size_t next = 0;
     std::int64_t pos = 0, silentRun = 0;
-    while (pos < j.maxTotal) {
-        const auto n =
-            static_cast<std::uint32_t>(std::min<std::int64_t>(s.blockSize, j.maxTotal - pos));
+    const std::int64_t end = j.tailEnd >= 0 ? std::min(j.maxTotal, j.tailEnd) : j.maxTotal;
+    while (pos < end) {
+        const auto n = static_cast<std::uint32_t>(std::min<std::int64_t>(s.blockSize, end - pos));
         // Chain input for this block.
         const bool haveInput = input && pos < inputFrames;
         if (haveInput) {
@@ -125,7 +129,8 @@ void renderLoop(Job& j) SUPPLE_RT {
             if (silentRun >= j.silenceHold) break;
         }
     }
-    j.capped = pos >= j.maxTotal && j.maxTotal > j.length + j.latency;
+    j.capped = pos >= j.maxTotal && j.maxTotal > j.length + j.latency &&
+               !(j.tailEnd >= 0 && j.tailEnd <= j.maxTotal);
     j.rendered = pos;
 }
 
@@ -149,6 +154,25 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
                          in.info().name + " cannot follow another plugin (no stereo input)", {},
                          "instruments go first in the chain");
     }
+    if (!(settings.tailLimitSeconds >= 0 && settings.tailLimitSeconds <= 600))
+        return Error("render.tail", "tail limit out of range", {}, "0 .. 600 seconds");
+    if (!(settings.silenceHoldSeconds > 0 && settings.silenceHoldSeconds <= 60) ||
+        !(settings.silenceDb <= 0 && settings.silenceDb >= -400))
+        return Error("render.silence", "silence detection settings out of range", {},
+                     "hold (0, 60] s, threshold -400 .. 0 dB");
+    if (request.lengthSamples < 0 || request.lengthSamples > kMaxRenderFrames)
+        return Error("render.too_long", "render length out of range", {},
+                     "at most " + std::to_string(kMaxRenderFrames) + " frames");
+    for (std::size_t i = 0; i < request.events.size(); ++i) {
+        const auto at = request.events[i].sample;
+        if (at < 0 || at > kMaxRenderFrames)
+            return Error("render.event_time",
+                         "event " + std::to_string(i) + " is at sample " + std::to_string(at), {},
+                         "events must lie in 0 .. " + std::to_string(kMaxRenderFrames));
+    }
+    if (request.input && request.input->frames() > static_cast<std::size_t>(kMaxRenderFrames))
+        return Error("render.too_long", "input audio is too long", {},
+                     "at most " + std::to_string(kMaxRenderFrames) + " frames");
     if (request.input && request.input->sampleRate != settings.sampleRate)
         return Error("render.input_rate",
                      "input audio is at " + std::to_string(request.input->sampleRate) + " Hz", {},
@@ -180,6 +204,26 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     const auto tailMax =
         static_cast<std::int64_t>(std::llround(settings.tailLimitSeconds * settings.sampleRate));
     j.maxTotal = j.length + j.latency + std::max<std::int64_t>(0, tailMax);
+    if (j.maxTotal > kMaxRenderFrames)
+        return Error("render.too_long",
+                     "the render would need " + std::to_string(j.maxTotal) + " frames", {},
+                     "shorten the input or the tail limit (at most " +
+                         std::to_string(kMaxRenderFrames) + " frames)");
+    // When every stage reports its tail (clap.tail), the render may end when
+    // the chain's total tail has elapsed; an infinite or unreported tail
+    // leaves it to silence detection and the cap.
+    {
+        std::int64_t tail = 0;
+        bool known = true;
+        for (host::Instance* in : chain) {
+            if (!in->reportsTail() || in->tail() == UINT32_MAX) {
+                known = false;
+                break;
+            }
+            tail += in->tail();
+        }
+        if (known) j.tailEnd = j.length + j.latency + tail;
+    }
     j.silenceHold =
         std::max<std::int64_t>(1, std::llround(settings.silenceHoldSeconds * settings.sampleRate));
     j.silenceLinear = std::pow(10.0, settings.silenceDb / 20.0);
@@ -207,12 +251,16 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     }
 
     std::thread audio([&] {
+        bool started = true;
         for (host::Instance* in : chain) {
             if (settings.resetBeforeRender) in->reset();
             in->flushParams();
-            in->startProcessing();
+            started = in->startProcessing() && started;
         }
-        renderLoop(j);
+        if (started)
+            renderLoop(j);
+        else
+            j.startFailed = true;
         for (host::Instance* in : chain) in->stopProcessing();
     });
     audio.join();
@@ -222,6 +270,9 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         in->serviceMainThread();
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
+    if (j.startFailed)
+        return Error("render.start_failed", "a plugin refused to start processing", {},
+                     "check the plugin log (render result log)");
     if (j.error)
         return Error("render.process_error",
                      "a plugin reported a processing error at sample " + std::to_string(j.rendered),

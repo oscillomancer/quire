@@ -52,10 +52,10 @@ double gainClap(double db) {
 
 }  // namespace
 
-TEST_CASE("scan finds both fixtures with their capabilities") {
+TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 2);
+    REQUIRE(list->size() == 3);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -216,4 +216,97 @@ TEST_CASE("the process path is real-time safe" * doctest::description("rt")) {
     for (int i = 0; i < 50; ++i) ok = ok && rtBlock(**inst, buf.block(256, events, false), out);
     CHECK(ok);
     (*inst)->stopProcessing();
+}
+
+TEST_CASE("lifecycle: a restart requested while processing waits until processing stops") {
+    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
+    REQUIRE(inst);
+    auto& g = **inst;
+    REQUIRE(g.activate(48000, 1, 256).ok());
+    CHECK(g.latency() == 0);
+    REQUIRE(g.startProcessing());
+    Buffers buf(64);
+    Event e;
+    e.kind = Event::Kind::Param;
+    e.paramId = 1;  // latency: "short" -> the fixture calls request_restart on the audio thread
+    e.value = 1.0;
+    REQUIRE(g.process(buf.block(64, std::span<const Event>(&e, 1))));
+    g.serviceMainThread();  // still processing: must not restart, must keep the request
+    CHECK(g.active());
+    CHECK(g.latency() == 0);
+    g.deactivate();  // refused while processing
+    CHECK(g.active());
+    bool logged = false;
+    for (const auto& line : g.takeLog())
+        logged = logged || line.find("deactivate") != std::string::npos;
+    CHECK(logged);
+    g.stopProcessing();
+    CHECK(g.serviceMainThread());
+    CHECK(g.active());
+    CHECK(g.latency() == 64);
+}
+
+TEST_CASE("lifecycle: request_flush while active is served on the audio thread") {
+    auto inst = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(inst);
+    auto& p = **inst;
+    auto flushes = [&] { return p.paramValue(7).value(); };
+    const std::uint8_t plain[4] = {0, 0, 0, 0};
+    // Inactive: the host flushes on the main thread.
+    REQUIRE(p.loadState(plain).ok());
+    CHECK_FALSE(p.needsAudioFlush());
+    p.serviceMainThread();
+    CHECK(flushes() == 1.0);
+    // Active: the main thread must not flush; flushParams() on the audio thread does.
+    REQUIRE(p.activate(48000, 1, 256).ok());
+    REQUIRE(p.loadState(plain).ok());
+    CHECK(p.needsAudioFlush());
+    p.serviceMainThread();
+    CHECK(flushes() == 1.0);
+    p.flushParams();
+    CHECK(flushes() == 2.0);
+    CHECK_FALSE(p.needsAudioFlush());
+    // A process call also satisfies the request.
+    REQUIRE(p.loadState(plain).ok());
+    REQUIRE(p.startProcessing());
+    Buffers buf(32);
+    REQUIRE(p.process(buf.block(32)));
+    CHECK_FALSE(p.needsAudioFlush());
+    p.stopProcessing();
+}
+
+TEST_CASE("lifecycle: refused start_processing blocks process(); tail is reported") {
+    auto inst = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(inst);
+    auto& p = **inst;
+    const std::uint8_t refuse[4] = {1, 0xe8, 0x03, 0};  // tail 1000 samples
+    REQUIRE(p.loadState(refuse).ok());
+    CHECK(p.reportsTail());
+    CHECK(p.tail() == 1000);
+    REQUIRE(p.activate(48000, 1, 256).ok());
+    CHECK_FALSE(p.startProcessing());
+    Buffers buf(32);
+    CHECK_FALSE(p.process(buf.block(32)));
+    CHECK_FALSE(Instance::create(find("com.suppleaudio.test.gain"), {}).value()->reportsTail());
+}
+
+TEST_CASE("events: queued params wait when the arena is full; overflow is counted") {
+    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
+    REQUIRE(inst);
+    auto& g = **inst;
+    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.startProcessing());
+    REQUIRE(g.setParam(0, gainClap(-6)).ok());  // queued (active)
+    std::vector<Event> midi(9000);
+    for (auto& e : midi) {
+        e.kind = Event::Kind::Midi;  // ignored by the gain fixture
+        e.midi[0] = 0xb0;
+    }
+    Buffers buf(256);
+    REQUIRE(g.process(buf.block(256, midi)));
+    CHECK(g.takeNotifications().droppedEvents == 9000 - 8192);
+    CHECK(g.paramValue(0).value() == doctest::Approx(gainClap(0)));  // not delivered yet
+    REQUIRE(g.process(buf.block(256)));
+    CHECK(g.paramValue(0).value() == doctest::Approx(gainClap(-6)));
+    g.stopProcessing();
 }

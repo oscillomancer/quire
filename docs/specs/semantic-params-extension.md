@@ -152,3 +152,18 @@ documents fail with errors whose paths point at the problem and leave
 during processing (another thread calling process with rtsan active) is
 RT-clean and takes effect within one block; state save/load equals patch
 round trip; `describe` is non-empty and ≤ 600 chars.
+
+## Implementation notes (2026-09-26, orchestrator)
+
+- `plugins/common` `ParamStore` delivers whole patches to the audio thread
+  with a seqlock: `assign()` (set_patch, state load, reset) is one write;
+  the audio thread calls `readAll(values)` when `generation()` moved and keeps
+  its previous values if a write is in progress (wait-free; retried next
+  block). Single CLAP param events still update one value at a time.
+- Legacy state: `FlatSemantic::legacyLoad` is only offered streams that do not
+  claim the framed form (`patch::isFramedState`); a malformed v2 frame is
+  rejected, never reinterpreted.
+- The conformance tool's step 7 runs 200 merges against a thread that
+  processes blocks continuously and checks for process errors and that the
+  last patch is in effect; RT cleanliness is checked when the plugin and tool
+  run under the rtsan preset.

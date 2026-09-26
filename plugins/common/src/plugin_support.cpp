@@ -1,5 +1,6 @@
 #include "supple/clap/plugin_support.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -98,9 +99,28 @@ bool ParamStore::setClap(clap_id id, double clapValue) SUPPLE_RT {
 }
 
 void ParamStore::resetToDefaults() {
+    patch::FlatBody b;
+    b.values.resize(table_.size());
+    for (std::size_t i = 0; i < table_.size(); ++i) b.values[i] = table_[i].def;
+    const auto s = seq_.load(std::memory_order_relaxed);
+    seq_.store(s + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
     for (std::size_t i = 0; i < table_.size(); ++i)
-        values_[i].store(table_[i].def, std::memory_order_relaxed);
+        values_[i].store(b.values[i], std::memory_order_relaxed);  // readonly too: defaults
+    seq_.store(s + 2, std::memory_order_release);
     generation_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+bool ParamStore::readAll(std::span<double> out) const SUPPLE_RT {
+    // Seqlock reader (Boehm, "Can seqlocks get along with programming
+    // language memory models?", 2012): relaxed data loads bracketed by an
+    // acquire load and an acquire fence.
+    const auto s1 = seq_.load(std::memory_order_acquire);
+    if (s1 & 1) return false;
+    const std::size_t n = std::min(out.size(), table_.size());
+    for (std::size_t i = 0; i < n; ++i) out[i] = values_[i].load(std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return seq_.load(std::memory_order_relaxed) == s1;
 }
 
 patch::FlatBody ParamStore::snapshot() const {
@@ -111,11 +131,16 @@ patch::FlatBody ParamStore::snapshot() const {
 }
 
 void ParamStore::assign(const patch::FlatBody& body) {
+    // Seqlock writer (single writer: the main thread).
+    const auto s = seq_.load(std::memory_order_relaxed);
+    seq_.store(s + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
     for (std::size_t i = 0; i < table_.size() && i < body.values.size(); ++i) {
         if (table_[i].flags & params::kReadonly) continue;
         values_[i].store(params::clampPhysical(table_[i], body.values[i]),
                          std::memory_order_relaxed);
     }
+    seq_.store(s + 2, std::memory_order_release);
     generation_.fetch_add(1, std::memory_order_acq_rel);
 }
 
@@ -234,7 +259,9 @@ bool FlatSemantic::describe(std::uint32_t detail, const clap_ostream_t* out) con
 }
 
 bool FlatSemantic::saveState(const clap_ostream_t* out) const {
-    const auto bytes = patch::encodeState(type_.serialize(current()), stateMagic_);
+    const auto framed = patch::encodeState(type_.serialize(current()), stateMagic_);
+    if (!framed) return false;
+    const auto& bytes = *framed;
     std::size_t off = 0;
     while (off < bytes.size()) {
         const int64_t n = out->write(out, bytes.data() + off, bytes.size() - off);
@@ -249,7 +276,9 @@ bool FlatSemantic::loadState(const clap_istream_t* in) {
     if (!readAll(in, bytes)) return false;
     auto text = patch::decodeState(bytes, stateMagic_);
     if (!text) {
-        if (legacyLoad && text.error().code != "patch.state.utf8") {
+        // Only a stream that does not claim the framed form may be legacy;
+        // a malformed frame is corrupt and rejected.
+        if (legacyLoad && !patch::isFramedState(bytes, stateMagic_)) {
             ParamStore scratch(store_.table());
             if (!legacyLoad(bytes, scratch)) return false;
             const auto before = current();

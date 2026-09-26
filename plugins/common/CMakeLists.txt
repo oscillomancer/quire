@@ -10,7 +10,7 @@ supple_add_library(plugin-support
   DEPS supple::core-params supple::core-patch supple::semantic-params-abi)
 
 if(SUPPLE_BUILD_TESTS)
-  supple_add_tests(plugin-support SOURCES tests/test_plugin_support.cpp)
+  supple_add_tests(plugin-support SOURCES tests/test_plugin_support.cpp LABELS rt)
 
   # Checks any plugin's semantic extension through the real host (spec §7).
   add_executable(semantic-conformance tools/semantic_conformance.cpp)

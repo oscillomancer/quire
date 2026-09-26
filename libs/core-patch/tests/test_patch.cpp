@@ -310,7 +310,9 @@ TEST_CASE("flat patch merge and diff") {
 
 TEST_CASE("state framing") {
     const std::string doc = "{\"schema\":\"supple.eq-patch/1.0\"}";
-    auto bytes = encodeState(doc, 0x51455131);
+    auto bytes = encodeState(doc, 0x51455131).value();
+    CHECK(isFramedState(bytes, 0x51455131));
+    CHECK_FALSE(isFramedState(bytes, 0x51455132));
     auto decoded = decodeState(bytes, 0x51455131);
     REQUIRE(decoded);
     CHECK(*decoded == doc);
@@ -324,13 +326,17 @@ TEST_CASE("state framing") {
     auto v1 = bytes;
     v1[4] = 1;
     CHECK(decodeState(v1, 0x51455131).error().code == "patch.state.version");
+    CHECK_FALSE(isFramedState(v1, 0x51455131));
+    CHECK(isFramedState(truncated, 0x51455131));  // claims the frame: corrupt, not legacy
     auto huge = bytes;
     huge[11] = 0x7f;
     CHECK(decodeState(huge, 0x51455131).error().code == "patch.state.too_large");
     std::vector<std::uint8_t> short4 = {1, 2, 3, 4};
     CHECK(decodeState(short4, 0x51455131).error().code == "patch.state.truncated");
-    auto badUtf8 = encodeState("{\"a\":\"\xff\"}", 7);
+    auto badUtf8 = encodeState("{\"a\":\"\xff\"}", 7).value();
     CHECK(decodeState(badUtf8, 7).error().code == "patch.state.utf8");
+    CHECK(encodeState(std::string(kMaxStateBytes + 1, ' '), 7).error().code ==
+          "patch.state.too_large");
 }
 
 TEST_CASE("describeFlat") {

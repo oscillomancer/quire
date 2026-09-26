@@ -125,13 +125,16 @@ class Instance {
     const PluginInfo& info() const { return info_; }
 
     // --- lifecycle (main thread) ---
+    // Deactivation (and destruction) require processing to have stopped on the
+    // audio thread first; deactivate() while processing is ignored and logged.
     Status activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames);
     void deactivate();
     bool active() const { return active_; }
     double sampleRate() const { return sampleRate_; }  // of the current/last activation
     std::uint32_t maxFrames() const { return maxFrames_; }
     std::uint32_t latency() const;
-    std::uint32_t tail() const;  // UINT32_MAX = infinite
+    std::uint32_t tail() const;  // UINT32_MAX = infinite; 0 when not reported
+    bool reportsTail() const { return extTail_ != nullptr; }
 
     // --- ports (valid after create; a stereo configuration is selected when offered) ---
     std::uint32_t audioInputChannels() const { return inChannels_; }
@@ -158,16 +161,23 @@ class Instance {
     Status loadState(std::span<const std::uint8_t> bytes);
 
     // --- processing (audio thread) ---
-    void startProcessing() SUPPLE_RT;
+    // start_processing; false if inactive or the plugin refused (then
+    // process() must not be called).
+    bool startProcessing() SUPPLE_RT;
     void stopProcessing() SUPPLE_RT;
     bool processing() const { return processing_; }
-    // Returns false on CLAP_PROCESS_ERROR. Output events are appended to `out`
-    // (may be null). Queued setParam() changes are delivered first, at time 0.
+    // Returns false on CLAP_PROCESS_ERROR, or when not processing. Output
+    // events are appended to `out` (may be null). Queued setParam() changes
+    // are delivered first, at time 0, as far as the event arena has room
+    // after the block's own events (the rest wait for the next block); block
+    // events beyond the arena are dropped and counted (Notifications).
     bool process(const ProcessBlock& block, OutputEvents* out = nullptr) SUPPLE_RT;
     // Delivers queued setParam() changes through params.flush while active but
     // not processing (CLAP requires the audio thread for that case).
+    // Also serves a plugin's request_flush while active (see needsAudioFlush()).
     void flushParams() SUPPLE_RT;
-    void reset() SUPPLE_RT;  // clap_plugin.reset: [audio-thread & active]
+    bool needsAudioFlush() const;  // active, a flush was requested, nothing processed since
+    void reset() SUPPLE_RT;        // clap_plugin.reset: [audio-thread & active]
 
     // --- main-thread servicing (call regularly: after renders, from the app loop) ---
     // Handles request_callback, request_restart (while active), pending flushes
@@ -176,8 +186,9 @@ class Instance {
     // Flags the plugin raised since the last call (cleared on read).
     struct Notifications {
         bool stateDirty = false, paramsRescan = false, latencyChanged = false,
-             semanticChanged = false;
+             semanticChanged = false, tailChanged = false;
         std::uint32_t paramsRescanFlags = 0;
+        std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
     Notifications takeNotifications();
 
@@ -205,7 +216,7 @@ class Instance {
     std::uint32_t inChannels_ = 0, outChannels_ = 0;
     bool acceptsNotes_ = false;
     bool active_ = false;
-    bool processing_ = false;
+    std::atomic<bool> processing_{false};  // written on the audio thread
     std::uint32_t maxFrames_ = 0;
     double sampleRate_ = 0.0;
 };

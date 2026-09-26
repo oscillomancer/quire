@@ -1,7 +1,10 @@
 #include <doctest/doctest.h>
 
 #include <supple/clap/plugin_support.h>
+
 #include <supple/json/json.h>
+#include <atomic>
+#include <thread>
 
 using namespace supple;
 
@@ -81,4 +84,39 @@ TEST_CASE("errorsToJson flattens schema.invalid into its details") {
     auto one = json::parse(clapx::errorsToJson(Error("c", "only", "/z", "hint")));
     REQUIRE(one);
     CHECK(one->size() == 1);
+}
+
+TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::description("rt")) {
+    static constexpr params::ParamSpec kMany[] = {
+        {.id = 0, .key = "a", .name = "A", .max = 1e6},
+        {.id = 1, .key = "b", .name = "B", .max = 1e6},
+        {.id = 2, .key = "c", .name = "C", .max = 1e6},
+        {.id = 3, .key = "d", .name = "D", .max = 1e6},
+        {.id = 4, .key = "e", .name = "E", .max = 1e6},
+        {.id = 5, .key = "f", .name = "F", .max = 1e6},
+    };
+    clapx::ParamStore s(kMany);
+    std::atomic<bool> stop{false};
+    std::thread writer([&] {
+        patch::FlatBody b;
+        b.values.resize(6);
+        for (int k = 1; k <= 20000; ++k) {
+            for (auto& v : b.values) v = k;
+            s.assign(b);
+        }
+        stop = true;
+    });
+    double v[6];
+    std::uint64_t reads = 0, torn = 0;
+    while (!stop.load()) {
+        if (!s.readAll(v)) continue;
+        ++reads;
+        for (double x : v)
+            if (x != v[0]) ++torn;
+    }
+    writer.join();
+    CHECK(torn == 0);
+    REQUIRE(s.readAll(v));
+    CHECK(v[5] == 20000.0);
+    MESSAGE("consistent reads during writes: ", reads);
 }

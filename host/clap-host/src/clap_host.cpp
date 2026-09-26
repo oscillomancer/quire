@@ -122,6 +122,8 @@ struct Instance::HostState {
     std::atomic<bool> callbackRequested{false}, restartRequested{false}, processRequested{false};
     std::atomic<bool> flushRequested{false};
     std::atomic<bool> stateDirty{false}, latencyChanged{false}, semanticChanged{false};
+    std::atomic<bool> tailChanged{false};
+    std::atomic<std::uint32_t> droppedEvents{0};  // input events that did not fit the arena
     std::atomic<std::uint32_t> rescanFlags{0};
     std::atomic<bool> rescanned{false};
 
@@ -203,7 +205,7 @@ struct HostCallbacks {
 
     // clap.latency, clap.tail
     static void CLAP_ABI latencyChanged(const clap_host_t* h) { S(h)->latencyChanged = true; }
-    static void CLAP_ABI tailChanged(const clap_host_t*) {}
+    static void CLAP_ABI tailChanged(const clap_host_t* h) { S(h)->tailChanged = true; }
 
     // clap.audio-ports, clap.note-ports
     static bool CLAP_ABI audioPortsRescanSupported(const clap_host_t*, uint32_t) { return false; }
@@ -551,6 +553,9 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
 
 Instance::~Instance() {
     if (!plugin_) return;
+    // Destroying a processing instance is a caller bug (the audio thread must
+    // stop processing first); recover by stopping on this thread.
+    if (processing_) stopProcessing();
     if (active_) deactivate();
     plugin_->destroy(plugin_);
     plugin_ = nullptr;
@@ -572,6 +577,13 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
 
 void Instance::deactivate() {
     if (!active_) return;
+    if (processing_) {
+        // CLAP forbids deactivating while processing: the audio thread must
+        // call stopProcessing() (and be joined) first.
+        std::lock_guard lock(hostState_->logMutex);
+        hostState_->log.emplace_back("host: deactivate() ignored while processing");
+        return;
+    }
     plugin_->deactivate(plugin_);
     active_ = false;
 }
@@ -646,9 +658,9 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
 }
 
 namespace {
-void appendParam(Instance::HostState& h, std::uint32_t time, std::uint32_t id,
+bool appendParam(Instance::HostState& h, std::uint32_t time, std::uint32_t id,
                  double value) SUPPLE_RT {
-    if (h.eventCount >= h.events.size()) return;
+    if (h.eventCount >= h.events.size()) return false;
     auto& e = h.events[h.eventCount++].param;
     e = {};
     e.header = {sizeof(clap_event_param_value_t), time, CLAP_CORE_EVENT_SPACE_ID,
@@ -659,6 +671,18 @@ void appendParam(Instance::HostState& h, std::uint32_t time, std::uint32_t id,
     e.port_index = -1;
     e.channel = -1;
     e.key = -1;
+    return true;
+}
+
+// Moves queued setParam() changes into the arena, leaving `reserve` slots
+// free; what does not fit stays queued for the next block/flush.
+void drainParamQueue(Instance::HostState& h, std::size_t reserve) SUPPLE_RT {
+    const std::size_t limit = h.events.size() > reserve ? h.events.size() - reserve : 0;
+    ParamChange pc{};
+    while (h.eventCount < limit && h.paramQueue.peek(pc)) {
+        appendParam(h, 0, pc.id, pc.value);
+        h.paramQueue.consume();
+    }
 }
 }  // namespace
 
@@ -666,19 +690,21 @@ void Instance::flushParams() SUPPLE_RT {
     AudioThreadScope scope;
     HostState& h = *hostState_;
     h.eventCount = 0;
-    ParamChange pc{};
-    while (h.paramQueue.pop(pc)) appendParam(h, 0, pc.id, pc.value);
-    if (h.eventCount && extParams_) {
+    drainParamQueue(h, 0);
+    const bool requested = h.flushRequested.exchange(false);
+    if ((h.eventCount || requested) && extParams_) {
         h.outSink = nullptr;
         extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
     }
     h.eventCount = 0;
 }
 
-void Instance::startProcessing() SUPPLE_RT {
-    if (processing_ || !active_) return;
+bool Instance::startProcessing() SUPPLE_RT {
+    if (processing_) return true;
+    if (!active_) return false;
     AudioThreadScope scope;
     processing_ = plugin_->start_processing(plugin_);
+    return processing_;
 }
 
 void Instance::stopProcessing() SUPPLE_RT {
@@ -694,14 +720,17 @@ void Instance::reset() SUPPLE_RT {
 }
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
-    if (!active_) return false;
+    if (!active_ || !processing_) return false;
     AudioThreadScope scope;
     HostState& h = *hostState_;
     h.eventCount = 0;
-    ParamChange pc{};
-    while (h.paramQueue.pop(pc)) appendParam(h, 0, pc.id, pc.value);
+    h.flushRequested.store(false);  // a process call is a flush
+    drainParamQueue(h, b.events.size());
     for (const Event& e : b.events) {
-        if (h.eventCount >= h.events.size()) break;
+        if (h.eventCount >= h.events.size()) {
+            h.droppedEvents.fetch_add(1);
+            continue;
+        }
         const std::uint32_t t = std::min(e.time, b.frames ? b.frames - 1 : 0u);
         switch (e.kind) {
             case Event::Kind::Param:
@@ -711,17 +740,20 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
             case Event::Kind::NoteOff:
             case Event::Kind::NoteChoke: {
                 ClapEvent& ce = h.events[h.eventCount++];
-                if (h.preferMidiNotes && e.kind != Event::Kind::NoteChoke) {
+                if (h.preferMidiNotes) {  // MIDI-only port: a choke becomes a note-off
                     ce.midi = {};
                     ce.midi.header = {sizeof(clap_event_midi_t), t, CLAP_CORE_EVENT_SPACE_ID,
                                       CLAP_EVENT_MIDI, 0};
                     ce.midi.port_index = static_cast<uint16_t>(e.port);
-                    const auto status = static_cast<std::uint8_t>(
-                        (e.kind == Event::Kind::NoteOn ? 0x90 : 0x80) | (e.channel & 0x0f));
+                    const bool on = e.kind == Event::Kind::NoteOn;
+                    const auto status =
+                        static_cast<std::uint8_t>((on ? 0x90 : 0x80) | (e.channel & 0x0f));
                     ce.midi.data[0] = status;
                     ce.midi.data[1] = static_cast<std::uint8_t>(e.key & 0x7f);
-                    ce.midi.data[2] =
-                        static_cast<std::uint8_t>(std::clamp(e.velocity * 127.0 + 0.5, 0.0, 127.0));
+                    ce.midi.data[2] = e.kind == Event::Kind::NoteChoke
+                                          ? 0
+                                          : static_cast<std::uint8_t>(
+                                                std::clamp(e.velocity * 127.0 + 0.5, 0.0, 127.0));
                 } else {
                     ce.note = {};
                     const uint16_t type = e.kind == Event::Kind::NoteOn    ? CLAP_EVENT_NOTE_ON
@@ -850,6 +882,8 @@ Status Instance::loadState(std::span<const std::uint8_t> bytes) {
     return okStatus();
 }
 
+bool Instance::needsAudioFlush() const { return active_ && hostState_->flushRequested.load(); }
+
 bool Instance::serviceMainThread() {
     HostState& h = *hostState_;
     bool did = false;
@@ -857,14 +891,19 @@ bool Instance::serviceMainThread() {
         plugin_->on_main_thread(plugin_);
         did = true;
     }
-    if (h.restartRequested.exchange(false) && active_ && !processing_) {
+    // A restart raised while processing stays pending until processing stops.
+    if (!active_) {
+        h.restartRequested = false;  // the next activation picks up the change
+    } else if (!processing_ && h.restartRequested.exchange(false)) {
         const double sr = sampleRate_;
         const std::uint32_t maxFrames = maxFrames_;
         deactivate();
         (void)activate(sr, 1, maxFrames);
         did = true;
     }
-    if (h.flushRequested.exchange(false) && !active_ && extParams_) {
+    // While active, a requested flush is served by the next process() or
+    // flushParams() on the audio thread (needsAudioFlush()).
+    if (!active_ && extParams_ && h.flushRequested.exchange(false)) {
         h.eventCount = 0;
         h.outSink = nullptr;
         extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
@@ -889,6 +928,8 @@ Instance::Notifications Instance::takeNotifications() {
     n.stateDirty = h.stateDirty.exchange(false);
     n.latencyChanged = h.latencyChanged.exchange(false);
     n.semanticChanged = h.semanticChanged.exchange(false);
+    n.tailChanged = h.tailChanged.exchange(false);
+    n.droppedEvents = h.droppedEvents.exchange(0);
     n.paramsRescan = h.rescanned.exchange(false);
     n.paramsRescanFlags = h.rescanFlags.exchange(0);
     return n;

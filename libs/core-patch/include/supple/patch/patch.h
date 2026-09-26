@@ -182,8 +182,13 @@ class FlatPatchType {
 inline constexpr std::uint32_t kStateFormatVersion = 2;  // 1 = the template's binary id/value form
 inline constexpr std::size_t kMaxStateBytes = 16u << 20;
 
-// magic (LE u32) | version 2 (LE u32) | byte length (LE u32) | UTF-8 JSON
-std::vector<std::uint8_t> encodeState(std::string_view canonicalJson, std::uint32_t magic);
+// magic (LE u32) | version 2 (LE u32) | byte length (LE u32) | UTF-8 JSON.
+// A document over kMaxStateBytes is an error (patch.state.too_large).
+Result<std::vector<std::uint8_t>> encodeState(std::string_view canonicalJson, std::uint32_t magic);
+// True when `bytes` start with this plugin's magic and format version 2, i.e.
+// the stream claims to be the framed form. Plugins with a legacy loader use
+// it to decide: a claimed-but-malformed frame is corrupt, never legacy.
+bool isFramedState(std::span<const std::uint8_t> bytes, std::uint32_t magic);
 // Returns the JSON text. Truncated, oversized, wrong magic/version or
 // non-UTF-8 input is an error (patch.state.*). Nothing is applied here.
 Result<std::string> decodeState(std::span<const std::uint8_t> bytes, std::uint32_t magic);

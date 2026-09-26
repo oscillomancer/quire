@@ -163,3 +163,58 @@ TEST_CASE("transport positions") {
     CHECK(u.bar == 2);
     CHECK(u.barStartBeat == doctest::Approx(6.0));
 }
+
+TEST_CASE("render ends when the chain's reported tail elapses") {
+    auto edge = make("com.suppleaudio.test.edge");
+    const std::uint8_t tail1000[4] = {0, 0xe8, 0x03, 0};
+    REQUIRE(edge->loadState(tail1000).ok());
+    host::Instance* chain[] = {edge.get()};
+    audio::AudioData in;
+    in.sampleRate = 48000;
+    in.channels.assign(
+        2, std::vector<float>(4800, 0.0f));  // silent: silence detection would wait 0.2 s
+    RenderRequest req;
+    req.input = &in;
+    RenderSettings s;
+    auto r = render(chain, s, req);
+    REQUIRE(r);
+    CHECK(r->audio.frames() == 4800 + 1000);  // 5800 is not a block multiple: exact stop
+    CHECK(r->tailSamples == 1000);
+    CHECK_FALSE(r->tailCapped);
+}
+
+TEST_CASE("render reports a refused start_processing") {
+    auto edge = make("com.suppleaudio.test.edge");
+    const std::uint8_t refuse[4] = {1, 0, 0, 0};
+    REQUIRE(edge->loadState(refuse).ok());
+    host::Instance* chain[] = {edge.get()};
+    RenderRequest req;
+    req.lengthSamples = 100;
+    auto r = render(chain, RenderSettings{}, req);
+    REQUIRE(!r);
+    CHECK(r.error().code == "render.start_failed");
+}
+
+TEST_CASE("render validates sizes before allocating") {
+    auto sine = make("com.suppleaudio.test.sine");
+    host::Instance* chain[] = {sine.get()};
+    RenderRequest req;
+    req.lengthSamples = INT64_MAX;
+    CHECK(render(chain, RenderSettings{}, req).error().code == "render.too_long");
+    req.lengthSamples = -1;
+    CHECK(render(chain, RenderSettings{}, req).error().code == "render.too_long");
+    req.lengthSamples = 100;
+    req.events = {note(-5, true)};
+    CHECK(render(chain, RenderSettings{}, req).error().code == "render.event_time");
+    req.events = {note(INT64_MAX - 1, true)};
+    CHECK(render(chain, RenderSettings{}, req).error().code == "render.event_time");
+    req.events.clear();
+    RenderSettings nan;
+    nan.tailLimitSeconds = std::nan("");
+    CHECK(render(chain, nan, req).error().code == "render.tail");
+    RenderSettings hold;
+    hold.silenceHoldSeconds = 0;
+    CHECK(render(chain, hold, req).error().code == "render.silence");
+    req.lengthSamples = (std::int64_t(1) << 25) - 10;  // fits, but not with a 5 s tail
+    CHECK(render(chain, RenderSettings{}, req).error().code == "render.too_long");
+}

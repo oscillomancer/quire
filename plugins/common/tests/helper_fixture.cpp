@@ -73,6 +73,9 @@ struct Tilt {
     clapx::ParamStore store{kTable};
     clapx::FlatSemantic semantic{patchType(),          store,    "com.suppleaudio.test.tilt",
                                  "A tilt EQ fixture.", "Tilt: ", 0x54494c54};
+    // Audio thread: the values the DSP uses, refreshed as one consistent set.
+    double values[5] = {};
+    std::uint64_t seen = 0;
 };
 Tilt* T(const clap_plugin_t* p) { return static_cast<Tilt*>(p->plugin_data); }
 clapx::FlatSemantic* resolve(const clap_plugin_t* p) { return &T(p)->semantic; }
@@ -125,8 +128,13 @@ const clap_plugin_t* create(const clap_host_t*) {
                     [](const clap_plugin_t*) {},
                     [](const clap_plugin_t*) {},
                     [](const clap_plugin_t* p, const clap_process_t* pr) -> clap_process_status {
-                        clapx::ClapParams::applyEvents(T(p)->store, pr->in_events);
-                        const float mix = static_cast<float>(T(p)->store.get(3) / 100.0);
+                        Tilt* t = T(p);
+                        clapx::ClapParams::applyEvents(t->store, pr->in_events);
+                        // The intended pattern: adopt a whole new value set when
+                        // the generation moved and no assign() is mid-write.
+                        const auto gen = t->store.generation();
+                        if (gen != t->seen && t->store.readAll(t->values)) t->seen = gen;
+                        const float mix = static_cast<float>(t->values[3] / 100.0);
                         for (uint32_t c = 0; c < 2; ++c)
                             for (uint32_t i = 0; i < pr->frames_count; ++i)
                                 pr->audio_outputs[0].data32[c][i] =

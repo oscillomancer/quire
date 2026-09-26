@@ -50,7 +50,7 @@ TEST_CASE("plugins: catalogue, lookup by id, case-insensitive id and path") {
     auto s = openSession(dir);
     auto list = s->plugins();
     REQUIRE(list);
-    CHECK(list->size() == 2);
+    CHECK(list->size() == 3);
     CHECK(s->findPlugin(kGain).value().name == "Test Gain");
     CHECK(s->findPlugin("COM.SUPPLEAUDIO.TEST.SINE").value().id == kSine);
     auto bad = s->findPlugin("com.suppleaudio.test.gian");

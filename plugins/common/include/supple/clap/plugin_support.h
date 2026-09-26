@@ -9,15 +9,17 @@
 //   ClapParams     clap_plugin_params_t helpers (info, text) over a table.
 //   FlatSemantic   the extension + JSON state for a FlatPatchType plugin.
 //
-// Threading: ParamStore reads/writes and changed() are RT-safe; everything
+// Threading: ParamStore reads/writes and generation() are RT-safe; everything
 // else is main-thread (CLAP's rules for params info/text, state and the
-// extension).
+// extension). Whole patches (set_patch, state load) reach the audio thread
+// atomically through readAll(): see ParamStore.
 #pragma once
 
 #include <clap/clap.h>
 
 #include <atomic>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -44,20 +46,32 @@ class ParamStore {
     bool getClap(clap_id id, double& clapValue) const SUPPLE_RT;
     bool setClap(clap_id id, double clapValue) SUPPLE_RT;
 
-    // Monotonic counter bumped by every set(); the audio thread compares it with
-    // the value it last consumed to know when to push values into its DSP.
+    // Monotonic counter bumped by every set()/assign(); the audio thread
+    // compares it with the value it last consumed to know when to push values
+    // into its DSP.
     std::uint64_t generation() const SUPPLE_RT {
         return generation_.load(std::memory_order_acquire);
     }
 
-    void resetToDefaults();
+    // Audio thread: copies every value (out.size() == size()) as one
+    // consistent set with respect to assign(). Returns false while an assign()
+    // is in progress; the caller keeps its previous values and tries again next
+    // block (wait-free, never spins). Single-value set() calls are not grouped.
+    //
+    //   if (store.generation() != seen && store.readAll(values)) {
+    //       seen = generation-read-before-readAll; push values into the DSP;
+    //   }
+    bool readAll(std::span<double> out) const SUPPLE_RT;
+
+    void resetToDefaults();                    // main thread; atomic like assign()
     patch::FlatBody snapshot() const;          // main thread
-    void assign(const patch::FlatBody& body);  // main thread; one generation bump
+    void assign(const patch::FlatBody& body);  // main thread; one seqlock write + one bump
 
   private:
     params::Table table_;
     std::unique_ptr<std::atomic<double>[]> values_;
     std::atomic<std::uint64_t> generation_{1};
+    std::atomic<std::uint64_t> seq_{0};  // odd while assign() writes (seqlock)
 };
 
 // --- CLAP params helpers -----------------------------------------------------------
