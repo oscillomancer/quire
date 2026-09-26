@@ -3,3 +3,4 @@
 add_subdirectory(core-base)
 add_subdirectory(core-json)
 add_subdirectory(core-schema)
+add_subdirectory(core-params)

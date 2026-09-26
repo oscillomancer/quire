@@ -40,6 +40,12 @@ function(supple_target_defaults target)
                                            -Wnon-virtual-dtor -Wold-style-cast
                                            -Wcast-align -Woverloaded-virtual
                                            -Wnull-dereference -Wdouble-promotion)
+  # Parameter tables use designated initializers with default member values
+  # on purpose (docs/specs/core-params.md); Clang's -Wextra would flag every
+  # omitted field.
+  target_compile_options(${target} PRIVATE
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-missing-designated-field-initializers>
+    $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>)
   if(SUPPLE_WERROR)
     target_compile_options(${target} PRIVATE -Werror)
   endif()
