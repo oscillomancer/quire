@@ -157,6 +157,16 @@ section    := voice | lane | events
 
 ### B.4 Voices
 
+**Implicit voice** *(Amended 2026-09-26, second round)*: bar lines that
+appear before any `voice`/`lane`/`events` section belong to an implicit
+`voice main` with default attributes, so a one-voice phrase needs no
+declaration: `1: C4:q E4:q G4:h`. It is exactly equivalent to writing
+`voice main` first (an explicit later `voice main` is then a duplicate-voice
+error). The decompiler still writes every voice explicitly. A bar line that
+cannot start the implicit voice (e.g. after a `lane` section) keeps its
+error, whose hint must say to add a `voice NAME` line — never suggest a
+header keyword for a line that starts with a bar number.
+
 ```
 voice NAME [ch 1..16] [vel 1..127] [octave -1..8] [grid DUR [len DUR]] [accent 1..127] [ghost 1..127]
 BAR ":" events [ "|" events ]...
