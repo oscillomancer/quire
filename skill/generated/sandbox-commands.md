@@ -1,0 +1,1436 @@
+# Command reference
+
+Generated from the command registry.
+
+## `batch@1`
+
+Run commands atomically.
+
+Run commands atomically.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `label` | string |  |  |  |  |
+| `steps` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Empty batch** (`empty`)
+
+```json
+{
+  "steps": []
+}
+
+```
+
+Result:
+
+```json
+{
+  "label": "",
+  "results": []
+}
+
+```
+
+## `job.cancel@1`
+
+Cancel a job.
+
+Cancel a job.
+
+Kind: `action`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Cancel job** (`job_running`)
+
+```json
+{
+  "job": "jb_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "jb_1",
+  "status": "cancelled",
+  "progress": {
+    "fraction": 0.0,
+    "message": ""
+  }
+}
+
+```
+
+## `job.list@1`
+
+List session jobs.
+
+List session jobs.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**List jobs** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "jobs": []
+}
+
+```
+
+## `job.status@1`
+
+Get a job's status.
+
+Get a job's status.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Get job** (`job_running`)
+
+```json
+{
+  "job": "jb_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "jb_1",
+  "status": "running",
+  "progress": {
+    "fraction": 0.0,
+    "message": ""
+  }
+}
+
+```
+
+## `job.wait@1`
+
+Wait for a job.
+
+Wait for a job.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | string |  |  |  |  |
+| `timeout_s` | number |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Wait for job** (`job_running`)
+
+```json
+{
+  "job": "jb_1",
+  "timeout_s": 0
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "jb_1",
+  "status": "running",
+  "progress": {
+    "fraction": 0.0,
+    "message": ""
+  }
+}
+
+```
+
+## `param.get@1`
+
+Read parameter values (physical value and display text).
+
+keys: semantic keys (e.g. "filter.cutoff"); omit for all. Third-party plugins: CLAP ids or names; values are CLAP values.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `keys` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "param_values",
+  "properties": {
+    "values": {}
+  },
+  "required": ["values"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_param`: no parameter with that key Hint: closest key in the hint; see plugin.describe
+
+### Examples
+
+**Read one value** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2",
+  "keys": ["gain"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "values": {
+    "gain": {
+      "value": 0.0,
+      "text": "<any>"
+    }
+  }
+}
+
+```
+
+## `param.set@1`
+
+Set parameters in physical units; returns the values as applied.
+
+values: {key: number | "unit string" | enum key | bool}, e.g. {"filter.cutoff": "1.2 kHz", "filter.mode": "lowpass"}. All values are validated first; nothing changes if any is invalid. Third-party plugins: CLAP id or name keys with CLAP values or {"text": "..."}. Use patch.merge to change several sections at once.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `values` | value |  |  |  | Key -> value. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "param_values",
+  "properties": {
+    "values": {}
+  },
+  "required": ["values"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_param`: no parameter with that key Hint: closest key in the hint
+- `params.out_of_range`: a value is outside its range Hint: the hint gives the valid range
+- `params.parse`: a unit string could not be read Hint: the hint shows the expected form
+
+### Examples
+
+**Set a level with a unit string** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2",
+  "values": {
+    "gain": "-6 dB"
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "values": {
+    "gain": {
+      "value": -6.0,
+      "text": "<any>"
+    }
+  }
+}
+
+```
+
+## `patch.get@1`
+
+Get an instance's patch document (changed values or all).
+
+detail changed (default): only values that differ from the defaults, still a complete patch. detail full: every value. Semantic plugins only.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `detail` | string |  |  | "changed" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "patch",
+  "properties": {
+    "patch": {}
+  },
+  "required": ["patch"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.not_semantic`: the plugin has no semantic patch Hint: use param.get / presets
+
+### Examples
+
+**Get the changed values** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "patch": "<any>"
+}
+
+```
+
+## `patch.merge@1`
+
+Merge a partial patch (RFC 7396) into an instance.
+
+patch: only the values to change, e.g. {"params": {"filter.cutoff": "800 Hz"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `patch` | value |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "patch_merge",
+  "properties": {
+    "changed": {},
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["changed", "description"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.not_semantic`: the plugin has no semantic patch Hint: use param.set
+- `params.out_of_range`: a value is outside its range Hint: the hint gives the valid range
+
+### Examples
+
+**Turn it down** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2",
+  "patch": {
+    "params": {
+      "gain": "-12 dB"
+    }
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "changed": {
+    "params": {
+      "gain": -12.0
+    }
+  },
+  "description": "<any>"
+}
+
+```
+
+## `patch.set@1`
+
+Replace an instance's whole patch; returns a description of the result.
+
+patch: a complete patch document (see plugin.describe detail full for its schema); missing values take their defaults. Validated fully before anything changes. For partial edits use patch.merge.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `patch` | value |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "description",
+  "properties": {
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["description"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.not_semantic`: the plugin has no semantic patch Hint: use presets
+- `schema.invalid`: the patch has problems Hint: details list each with its path
+
+### Examples
+
+**Reset to defaults** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2",
+  "patch": {
+    "schema": "supple.test-gain-patch/1.0"
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "description": "<any>"
+}
+
+```
+
+## `plugin.describe@1`
+
+Describe a plugin instance: parameters, current values, patch format.
+
+detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. Semantic plugins are programmed with param.set (physical units) or patch.merge.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `detail` | string |  |  | "summary" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "plugin_description",
+  "properties": {
+    "plugin": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "params": {},
+    "patch_type": {
+      "type": "string"
+    },
+    "patch_schema": {},
+    "description": {
+      "type": "string"
+    },
+    "docs": {
+      "type": "string"
+    }
+  },
+  "required": ["plugin", "name", "params", "description"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Summarize the effect** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "name": "<any>",
+  "params": "<any>",
+  "patch_type": "<any>",
+  "description": "<any>"
+}
+
+```
+
+## `plugin.list@1`
+
+List the CLAP plugins the sandbox can load.
+
+Scans the plugin path once (rescan: true to scan again). filter matches the id or name, case-insensitively. Load one with plugin.load.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `filter` | string |  |  |  | Text to match in the id or name. |
+| `rescan` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "plugin_list",
+  "properties": {
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "plugin",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "instrument": {
+            "type": "boolean"
+          },
+          "semantic": {
+            "type": "boolean"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "name", "vendor", "instrument", "semantic", "features"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["plugins"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List everything** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "plugins": "<any>"
+}
+
+```
+
+## `plugin.load@1`
+
+Load a plugin into the chain and return its instance id.
+
+plugin is an id from plugin.list or a .clap path. An instrument goes first in the chain, anything else last, unless position says otherwise (instruments must stay first). Then describe it with plugin.describe.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `plugin` | string |  |  |  | Plugin id or .clap path. |
+| `position` | integer |  | 0.0.. |  | Chain index (0 = first). |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "plugin_load",
+  "properties": {
+    "instance": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "semantic": {
+      "type": "boolean"
+    },
+    "chain": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["instance", "name", "semantic", "chain"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_plugin`: no plugin with that id or path Hint: closest ids in the hint; see plugin.list
+- `sandbox.chain_order`: an instrument would not be first, or a second instrument Hint: remove the existing instrument or load an effect
+- `sandbox.position`: position past the end of the chain Hint: 0 .. chain length
+
+### Examples
+
+**Load an instrument** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.sine"
+}
+
+```
+
+Result:
+
+```json
+{
+  "instance": "in_1",
+  "name": "<any>",
+  "semantic": "<any>",
+  "chain": ["in_1"]
+}
+
+```
+
+**Add an effect after the instrument** (`synth_loaded`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "instance": "in_3",
+  "name": "<any>",
+  "semantic": "<any>",
+  "chain": ["in_1", "in_2", "in_3"]
+}
+
+```
+
+## `plugin.remove@1`
+
+Remove a plugin instance from the chain.
+
+Unloads the instance; its id is not reused.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "chain",
+  "properties": {
+    "chain": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["chain"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_instance`: no such instance Hint: the hint lists loaded instances
+
+### Examples
+
+**Remove the effect** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "chain": ["in_1"]
+}
+
+```
+
+## `preset.list@1`
+
+List saved presets, optionally for one plugin id.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `plugin` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "preset_list",
+  "properties": {
+    "presets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "preset",
+        "properties": {
+          "plugin": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["plugin", "name", "tags"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["presets"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List the effect's presets** (`synth_with_preset`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "presets": [
+    {
+      "plugin": "com.suppleaudio.test.gain",
+      "name": "Quiet",
+      "tags": ["soft"]
+    }
+  ]
+}
+
+```
+
+## `preset.load@1`
+
+Load a named preset into an instance.
+
+The preset must belong to the instance's plugin (see preset.list).
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "description",
+  "properties": {
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["description"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.unknown_preset`: no preset with that name for this plugin Hint: closest names in the hint
+
+### Examples
+
+**Load** (`synth_with_preset`)
+
+```json
+{
+  "instance": "in_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "description": "<any>"
+}
+
+```
+
+## `preset.save@1`
+
+Save an instance's current settings as a named preset.
+
+Stores the patch (semantic plugins) or the plugin state. Overwrites a preset of the same name for the same plugin. Names: 1-64 of A-Z a-z 0-9 space _ . + -.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
+| `name` | string |  |  |  |  |
+| `tags` | array |  |  |  |  |
+| `notes` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "path",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `sandbox.preset_name`: the name has characters outside the allowed set Hint: letters, digits, space _ . + -
+
+### Examples
+
+**Save** (`synth_loaded`)
+
+```json
+{
+  "instance": "in_2",
+  "name": "Quiet",
+  "tags": ["soft"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
+## `registry.describe@1`
+
+Describe a command.
+
+Describe a command.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `command` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Describe registry.list** (`empty`)
+
+```json
+{
+  "command": "registry.list"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "registry.list",
+  "version": 1,
+  "kind": "query",
+  "exposure": "mcp-exec",
+  "summary": "List available commands.",
+  "description": "List available commands.",
+  "tags": [],
+  "args": {
+    "type": "object",
+    "properties": {
+      "tag": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  },
+  "result": {
+    "type": "object"
+  },
+  "errors": [],
+  "examples": [
+    {
+      "title": "List commands",
+      "args": {
+        "text": "registry.list"
+      },
+      "result": {
+        "commands": [
+          {
+            "name": "registry.list",
+            "version": 1,
+            "kind": "query",
+            "summary": "List available commands."
+          }
+        ]
+      },
+      "fixture": "empty"
+    }
+  ]
+}
+
+```
+
+## `registry.list@1`
+
+List available commands.
+
+List available commands.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `tag` | string |  |  |  |  |
+| `kind` | string |  |  |  |  |
+| `text` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**List commands** (`empty`)
+
+```json
+{
+  "text": "registry.list"
+}
+
+```
+
+Result:
+
+```json
+{
+  "commands": [
+    {
+      "name": "registry.list",
+      "version": 1,
+      "kind": "query",
+      "summary": "List available commands."
+    }
+  ]
+}
+
+```
+
+## `render@1`
+
+Render notes, a MIDI file or an audio file through the chain to a WAV.
+
+notation: a phrase in the notation (see the notation guide), e.g. "voice lead; 1: C4:q E4:q G4:h | C5:w". midi_file / audio_file: paths (audio at the session rate). bars/seconds override the length; the tail after it is rendered until silence (tail_s caps it). Returns the render id for analyze/compare and the WAV path.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `notation` | string |  |  |  | Notation text. |
+| `midi_file` | string |  |  |  |  |
+| `audio_file` | string |  |  |  |  |
+| `bars` | number |  | ..1000.0 |  |  |
+| `seconds` | number |  | ..600.0 |  |  |
+| `tempo` | value | bpm | 1.0..999.0 |  | Quantity strings are range-checked by the server. |
+| `tail_s` | number |  | 0.0..60.0 |  |  |
+| `name` | string |  |  |  |  |
+| `analyze` | string |  |  | "none" | Analysis detail (more levels arrive with core-analysis). |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "render_result",
+  "properties": {
+    "render": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "peak_dbfs": {
+      "type": "number"
+    },
+    "tail_s": {
+      "type": "number"
+    },
+    "tail_capped": {
+      "type": "boolean"
+    },
+    "latency_samples": {
+      "type": "integer"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["render", "path", "seconds", "peak_dbfs", "tail_s", "tail_capped", "latency_samples"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `notation.*`: the notation does not compile Hint: the error has line:col and a hint
+- `render.empty_chain`: nothing is loaded Hint: plugin.load first
+- `render.not_instrument`: notes given but the first plugin is an effect Hint: load an instrument first
+- `render.input_rate`: audio_file at another sample rate Hint: session.set sample_rate
+
+### Examples
+
+**Render a phrase** (`synth_loaded`)
+
+```json
+{
+  "notation": "voice lead; 1: A4:q E5:q r:h"
+}
+
+```
+
+Result:
+
+```json
+{
+  "render": "rd_1",
+  "path": "<any>",
+  "seconds": "<any>",
+  "peak_dbfs": "<any>",
+  "tail_s": "<any>",
+  "tail_capped": false,
+  "latency_samples": 0
+}
+
+```
+
+## `session.get@1`
+
+Show the session: settings, chain, instances and renders.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "session",
+  "properties": {
+    "settings": {},
+    "chain": {},
+    "instances": {},
+    "renders": {}
+  },
+  "required": ["settings", "chain", "instances", "renders"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**An empty session** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "settings": {
+    "sample_rate": 48000.0,
+    "block_size": 256,
+    "tempo": 120.0,
+    "meter": "4/4",
+    "tail_limit_s": 5.0
+  },
+  "chain": [],
+  "instances": {},
+  "renders": {}
+}
+
+```
+
+## `session.reset@1`
+
+Unload every plugin, delete renders and restore default settings.
+
+Not undoable. Saved presets are kept.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Start over** (`synth_loaded`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `session.set@1`
+
+Change session settings (rate, block size, tempo, meter, tail limit).
+
+Only the given fields change. A rate or block size change reactivates plugins at the next render.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `sample_rate` | value | Hz | 8000.0..384000.0 |  | Quantity strings are range-checked by the server. |
+| `block_size` | integer |  | 1.0..8192.0 |  |  |
+| `tempo` | value | bpm | 1.0..999.0 |  | Quantity strings are range-checked by the server. |
+| `meter` | string |  |  |  |  |
+| `tail_limit_s` | number |  | 0.0..60.0 |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "settings",
+  "properties": {
+    "settings": {}
+  },
+  "required": ["settings"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Slow down, 3/4** (`empty`)
+
+```json
+{
+  "tempo": "90 bpm",
+  "meter": "3/4"
+}
+
+```
+
+Result:
+
+```json
+{
+  "settings": {
+    "sample_rate": 48000.0,
+    "block_size": 256,
+    "tempo": 90.0,
+    "meter": "3/4",
+    "tail_limit_s": 5.0
+  }
+}
+
+```

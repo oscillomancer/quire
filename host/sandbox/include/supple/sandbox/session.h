@@ -19,6 +19,7 @@
 #include "supple/base/result.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
+#include "supple/midi/midi.h"
 #include "supple/sandbox/render.h"
 
 namespace supple::sandbox {
@@ -41,25 +42,17 @@ struct SessionOptions {
     host::HostIdentity identity;
 };
 
-// One note in seconds-free musical time: ticks at `ppq`, converted to samples
-// at the session (or render) tempo. The notation/MIDI front ends produce these.
-struct PhraseNote {
-    std::int64_t start = 0, length = 0;  // ticks
-    std::uint8_t channel = 0, pitch = 60, velocity = 96;
-};
-struct Phrase {
-    int ppq = 960;
-    std::int64_t lengthTicks = 0;  // musical length; 0 = end of the last note
-    std::vector<PhraseNote> notes;
-};
-
-// What a render plays. Exactly one of `phrase` / `audio` (or neither: a
-// silent render of `seconds`, useful for tails and noise floors).
+// What a render plays. At most one of `notes` / `audio` (neither: a silent
+// render of `seconds`, useful for tails and noise floors).
 struct RenderInput {
-    std::optional<Phrase> phrase;           // to the first instance (must accept notes)
-    std::optional<audio::AudioData> audio;  // to the first instance (an effect)
+    // A MIDI item (ticks at its ppq, converted at the render tempo) for the
+    // first instance, which must accept notes. Its length is the musical
+    // length (at least the end of the last event).
+    std::optional<midi::Sequence> notes;
+    std::optional<audio::AudioData> audio;  // for the first instance (an effect)
     std::optional<double> seconds;          // overrides the musical length
     std::optional<double> tempo;            // this render only
+    std::optional<midi::Meter> meter;       // transport meter, this render only
     std::optional<double> tailSeconds;      // this render only (<= 60)
     std::string name;                       // free label kept with the render
 };
@@ -185,8 +178,11 @@ class Session {
 // Tick → sample at a constant tempo: round(tick · 60 · rate / (tempo · ppq)).
 std::int64_t ticksToSamples(std::int64_t ticks, int ppq, double tempo, double sampleRate);
 
-// Note events for the chain's first stage (note-offs before note-ons at the
-// same sample; CLAP note ids 0, 1, 2, … in note order).
-std::vector<TimedEvent> phraseEvents(const Phrase& phrase, double tempo, double sampleRate);
+// Events for the chain's first stage: notes as note on/off (offs before ons
+// at the same sample; CLAP note ids 0, 1, 2, … in note order; a zero-length
+// note lasts one sample) and controls (CC, program, pressure, pitch bend) as
+// MIDI 1.0 events between them. Sysex is not sent.
+std::vector<TimedEvent> sequenceEvents(const midi::Sequence& sequence, double tempo,
+                                       double sampleRate);
 
 }  // namespace supple::sandbox

@@ -124,21 +124,23 @@ std::int64_t ticksToSamples(std::int64_t ticks, int ppq, double tempo, double sa
                         (tempo * static_cast<double>(ppq)));
 }
 
-std::vector<TimedEvent> phraseEvents(const Phrase& phrase, double tempo, double sampleRate) {
+std::vector<TimedEvent> sequenceEvents(const midi::Sequence& seq, double tempo, double sampleRate) {
+    // Order at one sample: note-offs, then controls, then note-ons (so a
+    // controller set "at" a note start applies to it).
     struct Item {
         std::int64_t sample;
-        bool on;
+        int rank;  // 0 off, 1 control, 2 on
         TimedEvent ev;
     };
     std::vector<Item> items;
-    items.reserve(phrase.notes.size() * 2);
+    items.reserve(seq.notes.size() * 2 + seq.controls.size());
     std::int32_t noteId = 0;
-    for (const PhraseNote& n : phrase.notes) {
-        const std::int64_t on = ticksToSamples(n.start, phrase.ppq, tempo, sampleRate);
+    for (const midi::Note& n : seq.notes) {
+        const std::int64_t on = ticksToSamples(n.start, seq.ppq, tempo, sampleRate);
         // A zero-length note still sounds for one sample, so its off never
         // precedes its own on.
         const std::int64_t off =
-            std::max(on + 1, ticksToSamples(n.start + n.length, phrase.ppq, tempo, sampleRate));
+            std::max(on + 1, ticksToSamples(n.start + n.length, seq.ppq, tempo, sampleRate));
         TimedEvent e;
         e.target = 0;
         e.event.channel = n.channel;
@@ -147,15 +149,51 @@ std::vector<TimedEvent> phraseEvents(const Phrase& phrase, double tempo, double 
         e.event.velocity = n.velocity / 127.0;
         e.sample = on;
         e.event.kind = host::Event::Kind::NoteOn;
-        items.push_back({on, true, e});
+        items.push_back({on, 2, e});
         e.sample = off;
         e.event.kind = host::Event::Kind::NoteOff;
-        e.event.velocity = 0.0;
-        items.push_back({off, false, e});
+        e.event.velocity = n.offVelocity / 127.0;
+        items.push_back({off, 0, e});
+    }
+    auto b7 = [](std::int32_t v) { return static_cast<std::uint8_t>(std::clamp(v, 0, 127)); };
+    for (const midi::Control& c : seq.controls) {
+        TimedEvent e;
+        e.target = 0;
+        e.sample = ticksToSamples(c.tick, seq.ppq, tempo, sampleRate);
+        e.event.kind = host::Event::Kind::Midi;
+        const auto ch = static_cast<std::uint8_t>(c.channel & 0x0f);
+        switch (c.kind) {
+            case midi::ControlKind::CC:
+                e.event.midi[0] = static_cast<std::uint8_t>(0xb0 | ch);
+                e.event.midi[1] = b7(c.number);
+                e.event.midi[2] = b7(c.value);
+                break;
+            case midi::ControlKind::ProgramChange:
+                e.event.midi[0] = static_cast<std::uint8_t>(0xc0 | ch);
+                e.event.midi[1] = b7(c.value);
+                break;
+            case midi::ControlKind::ChannelPressure:
+                e.event.midi[0] = static_cast<std::uint8_t>(0xd0 | ch);
+                e.event.midi[1] = b7(c.value);
+                break;
+            case midi::ControlKind::PolyPressure:
+                e.event.midi[0] = static_cast<std::uint8_t>(0xa0 | ch);
+                e.event.midi[1] = b7(c.number);
+                e.event.midi[2] = b7(c.value);
+                break;
+            case midi::ControlKind::PitchBend: {
+                const std::int32_t v = std::clamp(c.value, -8192, 8191) + 8192;
+                e.event.midi[0] = static_cast<std::uint8_t>(0xe0 | ch);
+                e.event.midi[1] = static_cast<std::uint8_t>(v & 0x7f);
+                e.event.midi[2] = static_cast<std::uint8_t>((v >> 7) & 0x7f);
+                break;
+            }
+        }
+        items.push_back({e.sample, 1, e});
     }
     std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
         if (a.sample != b.sample) return a.sample < b.sample;
-        return !a.on && b.on;  // offs first
+        return a.rank < b.rank;
     });
     std::vector<TimedEvent> out;
     out.reserve(items.size());
@@ -181,6 +219,7 @@ Result<std::unique_ptr<Session>> Session::open(SessionOptions options) {
     if (ec)
         return Error("sandbox.workdir", "cannot create " + options.workdir.string(), {},
                      "choose a writable directory");
+    options.workdir = fs::absolute(options.workdir, ec);
     if (options.presetDir.empty()) options.presetDir = options.workdir / "presets";
     return std::unique_ptr<Session>(new Session(std::move(options)));
 }
@@ -662,7 +701,7 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
     if (chain_.empty())
         return Error("render.empty_chain", "nothing to render through", {},
                      "load a plugin first (plugin.load)");
-    if (input.phrase && input.audio)
+    if (input.notes && input.audio)
         return Error("render.input", "give either notes or audio, not both");
     const double tempo = input.tempo.value_or(settings_.tempo);
     if (!(tempo >= 1 && tempo <= 999))
@@ -678,16 +717,18 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
 
     RenderRequest req;
     std::int64_t length = 0;
-    if (input.phrase) {
+    if (input.notes) {
         if (!first.instance->acceptsNotes())
             return Error("render.not_instrument",
                          label(first.id, first.info) + " does not accept notes", {},
                          "load an instrument first in the chain, or render audio_file input");
-        if (input.phrase->ppq < 1) return Error("render.input", "ppq must be positive");
-        req.events = phraseEvents(*input.phrase, tempo, settings_.sampleRate);
-        std::int64_t endTicks = input.phrase->lengthTicks;
-        for (const auto& n : input.phrase->notes) endTicks = std::max(endTicks, n.start + n.length);
-        length = ticksToSamples(endTicks, input.phrase->ppq, tempo, settings_.sampleRate);
+        const midi::Sequence& seq = *input.notes;
+        if (seq.ppq < 1) return Error("render.input", "ppq must be positive");
+        req.events = sequenceEvents(seq, tempo, settings_.sampleRate);
+        std::int64_t endTicks = seq.length;
+        for (const auto& n : seq.notes) endTicks = std::max(endTicks, n.start + n.length);
+        for (const auto& c : seq.controls) endTicks = std::max(endTicks, c.tick);
+        length = ticksToSamples(endTicks, seq.ppq, tempo, settings_.sampleRate);
     }
     if (input.audio) {
         if (first.instance->audioInputChannels() == 0)
@@ -698,7 +739,7 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
         length = static_cast<std::int64_t>(input.audio->frames());
     }
     if (input.seconds) length = std::llround(*input.seconds * settings_.sampleRate);
-    if (length <= 0 && !input.phrase && !input.audio)
+    if (length <= 0 && !input.notes && !input.audio)
         return Error("render.length", "nothing to render", {},
                      "give notes, audio, or a length in seconds");
     req.lengthSamples = length;
@@ -709,6 +750,14 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
     rs.tempo = tempo;
     rs.numerator = settings_.numerator;
     rs.denominator = settings_.denominator;
+    if (input.meter) {
+        const auto& m = *input.meter;
+        if (m.numerator < 1 || m.numerator > 64 || m.denominator < 1 || m.denominator > 64 ||
+            !isPowerOfTwo(static_cast<unsigned>(m.denominator)))
+            return Error("render.meter", "invalid meter", "/meter", "N/D, N 1..64, D a power of 2");
+        rs.numerator = static_cast<std::uint16_t>(m.numerator);
+        rs.denominator = static_cast<std::uint16_t>(m.denominator);
+    }
     rs.tailLimitSeconds = input.tailSeconds.value_or(settings_.tailLimitSeconds);
 
     auto result = sandbox::render(chain, rs, req);

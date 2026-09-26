@@ -36,8 +36,8 @@ std::unique_ptr<Session> openSession(const TempDir& dir) {
     return std::move(*s);
 }
 
-Phrase twoNotes() {
-    Phrase p;
+midi::Sequence twoNotes() {
+    midi::Sequence p;
     p.ppq = 960;
     p.notes = {{0, 960, 0, 69, 127}, {960, 960, 0, 76, 64}};  // two quarter notes
     return p;
@@ -198,7 +198,7 @@ TEST_CASE("render: notes through instrument + effect, WAV written, deterministic
     const std::string g = s->load(kGain).value();
     REQUIRE(s->patchMerge(g, *json::parse(R"({"params": {"gain": -6}})")));
     RenderInput in;
-    in.phrase = twoNotes();
+    in.notes = twoNotes();
     in.name = "two notes";
     auto r = s->render(in);
     REQUIRE(r);
@@ -250,7 +250,7 @@ TEST_CASE("render: effect-only chain processes audio input") {
     CHECK((*r)->frames == 4800);
     CHECK((*r)->peakDbfs == doctest::Approx(20 * std::log10(0.5) - 20).epsilon(0.001));
     RenderInput notes;
-    notes.phrase = twoNotes();
+    notes.notes = twoNotes();
     CHECK(s->render(notes).error().code == "render.not_instrument");
     a.sampleRate = 44100;
     in.audio = a;
@@ -264,7 +264,7 @@ TEST_CASE("transactions: rollback restores chain, state and renders; IDs stay un
     const std::string g = s->load(kGain).value();
     REQUIRE(s->patchMerge(g, *json::parse(R"({"params": {"gain": -3}})")));
     RenderInput in;
-    in.phrase = twoNotes();
+    in.notes = twoNotes();
     REQUIRE(s->render(in));
 
     REQUIRE(s->begin().ok());
@@ -315,7 +315,7 @@ TEST_CASE("settings: validation paths, summary, reset") {
     CHECK(e.error().details[1].path == "/meter");
     REQUIRE(s->load(kSine));
     RenderInput in;
-    in.phrase = twoNotes();
+    in.notes = twoNotes();
     REQUIRE(s->render(in));
     SessionSettings hi;
     hi.sampleRate = 96000;
@@ -335,24 +335,33 @@ TEST_CASE("settings: validation paths, summary, reset") {
     CHECK(s->settings().sampleRate == 48000);
 }
 
-TEST_CASE("phrase events: tick timing, offs before ons, zero-length notes") {
-    Phrase p;
+TEST_CASE("sequence events: tick timing, offs before controls before ons, zero-length notes") {
+    midi::Sequence p;
     p.ppq = 480;
     p.notes = {{0, 480, 0, 60, 100}, {480, 480, 0, 60, 100}, {960, 0, 9, 36, 127}};
-    const auto ev = phraseEvents(p, 120.0, 48000.0);
-    REQUIRE(ev.size() == 6);
+    p.controls = {{480, midi::ControlKind::CC, 0, 74, 90},
+                  {960, midi::ControlKind::PitchBend, 0, 0, -8192}};
+    const auto ev = sequenceEvents(p, 120.0, 48000.0);
+    REQUIRE(ev.size() == 8);
     CHECK(ev[0].sample == 0);
     CHECK(ev[1].sample == 24000);
-    CHECK(ev[1].event.kind == host::Event::Kind::NoteOff);  // first note ends…
-    CHECK(ev[2].event.kind == host::Event::Kind::NoteOn);   // …before the next starts
-    CHECK(ev[2].event.noteId == 1);
-    CHECK(ev[3].sample == 48000);
-    CHECK(ev[3].event.kind == host::Event::Kind::NoteOff);
+    CHECK(ev[1].event.kind == host::Event::Kind::NoteOff);  // first note ends,
+    CHECK(ev[2].event.kind == host::Event::Kind::Midi);     // the controller moves,
+    CHECK(ev[2].event.midi[0] == 0xb0);
+    CHECK(ev[2].event.midi[1] == 74);
+    CHECK(ev[2].event.midi[2] == 90);
+    CHECK(ev[3].event.kind == host::Event::Kind::NoteOn);  // then the next note starts
+    CHECK(ev[3].event.noteId == 1);
     CHECK(ev[4].sample == 48000);
-    CHECK(ev[4].event.kind == host::Event::Kind::NoteOn);
-    CHECK(ev[5].sample == 48001);  // zero-length note lasts one sample
-    CHECK(ev[5].event.kind == host::Event::Kind::NoteOff);
-    CHECK(ev[5].event.channel == 9);
+    CHECK(ev[4].event.kind == host::Event::Kind::NoteOff);
+    CHECK(ev[5].event.midi[0] == 0xe0);  // pitch bend -8192 -> 0x00 0x00
+    CHECK(ev[5].event.midi[1] == 0);
+    CHECK(ev[5].event.midi[2] == 0);
+    CHECK(ev[6].sample == 48000);
+    CHECK(ev[6].event.kind == host::Event::Kind::NoteOn);
+    CHECK(ev[7].sample == 48001);  // zero-length note lasts one sample
+    CHECK(ev[7].event.kind == host::Event::Kind::NoteOff);
+    CHECK(ev[7].event.channel == 9);
     CHECK(ticksToSamples(1, 960, 120.0, 48000.0) == 25);  // 25.0 exactly
     CHECK(ticksToSamples(7, 960, 97.0, 44100.0) == 199);  // 198.9…
 }
