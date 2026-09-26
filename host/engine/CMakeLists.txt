@@ -13,7 +13,7 @@ endif()
 
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).
 add_executable(${PRODUCT_SLUG}-engine tools/engine_main.cpp)
-target_link_libraries(${PRODUCT_SLUG}-engine PRIVATE supple::engine supple::product-info)
+target_link_libraries(${PRODUCT_SLUG}-engine PRIVATE supple::engine supple::mcp supple::product-info)
 supple_target_defaults(${PRODUCT_SLUG}-engine)
 
 if(SUPPLE_BUILD_TESTS)
@@ -21,4 +21,11 @@ if(SUPPLE_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:${PRODUCT_SLUG}-engine>
             -DGENERATED=${PROJECT_SOURCE_DIR}/skill/generated -DPREFIX=engine
             -P ${PROJECT_SOURCE_DIR}/host/sandbox/tools/check_generated.cmake)
+endif()
+
+if(SUPPLE_BUILD_TESTS)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME engine.mcp-stdio
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-engine> session_describe)
 endif()

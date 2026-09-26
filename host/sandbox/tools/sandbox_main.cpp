@@ -7,12 +7,15 @@
 //   <slug>-sandbox registry [--markdown | --mcp-tools]
 //       The command registry document, the Markdown reference, or the MCP
 //       tool list (generator output; drift-tested against skill/generated/).
-//   <slug>-sandbox --mcp ...   (arrives with the MCP adapter, P2.6)
+//   <slug>-sandbox --mcp [--workdir DIR] [--plugin-path P]...
+//       Serve MCP over stdio against a live in-process sandbox session.
 #include <unistd.h>
 
+#include <supple/mcp/server.h>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -28,7 +31,9 @@ namespace {
 int usage() {
     std::fprintf(stderr,
                  "usage: %.*s-sandbox exec '<json>' [--workdir DIR] [--plugin-path P]...\n"
-                 "       %.*s-sandbox registry [--markdown | --mcp-tools]\n",
+                 "       %.*s-sandbox registry [--markdown | --mcp-tools]\n"
+                 "       %.*s-sandbox --mcp [--workdir DIR] [--plugin-path P]...\n",
+                 static_cast<int>(product::kSlug.size()), product::kSlug.data(),
                  static_cast<int>(product::kSlug.size()), product::kSlug.data(),
                  static_cast<int>(product::kSlug.size()), product::kSlug.data());
     return 2;
@@ -76,6 +81,38 @@ int main(int argc, char** argv) {
     if (args.empty()) return usage();
     cmd::Registry registry;
     sandbox::registerCommands(registry);
+
+    if (args[0] == "--mcp") {
+        sandbox::SessionOptions options;
+        options.identity.name = std::string(product::kName) + " sandbox";
+        options.identity.vendor = std::string(product::kVendor);
+        options.identity.version = std::string(product::kVersion);
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--workdir" && i + 1 < args.size())
+                options.workdir = args[++i];
+            else if (args[i] == "--plugin-path" && i + 1 < args.size())
+                options.pluginPath.emplace_back(args[++i]);
+            else
+                return usage();
+        }
+        if (options.workdir.empty()) options.workdir = defaultWorkdir();
+        if (!options.pluginPath.empty())
+            for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
+        auto session = sandbox::Session::open(options);
+        if (!session) {
+            std::fprintf(stderr, "%s\n", session.error().toString().c_str());
+            return 1;
+        }
+        sandbox::SandboxHost host(std::move(*session), options.workdir / "commands.ndjson");
+        cmd::Dispatcher dispatcher(registry, host);
+        mcp::Server server(registry, dispatcher);
+        auto status = server.serve(std::cin, std::cout);
+        if (!status) {
+            std::fprintf(stderr, "%s\n", status.error().toString().c_str());
+            return 1;
+        }
+        return 0;
+    }
 
     if (args[0] == "registry") {
         if (args.size() == 1) {

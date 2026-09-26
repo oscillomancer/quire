@@ -346,3 +346,25 @@ Phase 2 demo committed to `docs/demos/`.
   every run.
 - A libFuzzer target exercises JSON invocations, including batches and step
   references. Its smoke corpus runs in CTest when `SUPPLE_BUILD_FUZZERS=ON`.
+
+## Implementation notes (2026-09-26, Task B)
+
+- `rpc::Server` owns Unix socket I/O and frames NDJSON up to 16 MiB. A caller
+  supplies `rpc::Post` to schedule requests onto its model thread; only that
+  thread executes `Dispatcher` commands and calls `Server::publish` from its
+  host event sink. The server uses bounded per-connection output queues,
+  reports dropped events, and assigns per-topic event sequence numbers. The
+  path helper uses `$XDG_RUNTIME_DIR/<slug>/<instance>.sock`; created product
+  directories and sockets have modes 0700 and 0600.
+- `rpc::Client` is synchronous and belongs on a thread other than the server's
+  model thread. `mcp::Server` uses the same MCP stdio handler over either a
+  local `Dispatcher` or this client, with the proxy discovering tool schemas
+  from `registry.list` and `registry.describe` over RPC.
+- The MCP handshake implementation supports `2025-06-18` and `2025-11-25`.
+  Requests for incompatible newer revisions fall back to `2025-11-25`.
+  `initialize` supplies client identity to `Origin`; the proxy updates its RPC
+  handshake with that identity before forwarding calls.
+- Both headless CLIs expose `--mcp`. `tests/integration/mcp_client.py` checks
+  initialize, tools/list, a successful tools/call and a structured command
+  error against each binary. `docs/demos/mcp-sandbox.txt` records that
+  exchange against the sandbox.
