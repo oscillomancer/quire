@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "title": "config",
+  "description": "Filter configuration",
+  "properties": {
+    "cutoff": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 20.0,
+          "maximum": 20000.0
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+        }
+      ],
+      "x-unit": "Hz",
+      "x-unit-strings": true,
+      "description": "Quantity strings are range-checked by the server.",
+      "default": 1000.0
+    },
+    "mode": {
+      "type": "string"
+    }
+  },
+  "required": ["mode"],
+  "additionalProperties": false
+}
