@@ -37,12 +37,30 @@ struct Error {
     Error(std::string c, std::string m, std::string p = {}, std::string h = {})
         : code(std::move(c)), message(std::move(m)), path(std::move(p)), hint(std::move(h)) {}
 
-    Error& at(std::string p) & { path = std::move(p); return *this; }
-    Error&& at(std::string p) && { path = std::move(p); return std::move(*this); }
-    Error& withHint(std::string h) & { hint = std::move(h); return *this; }
-    Error&& withHint(std::string h) && { hint = std::move(h); return std::move(*this); }
-    Error& withLoc(SourceLoc l) & { loc = l; return *this; }
-    Error&& withLoc(SourceLoc l) && { loc = l; return std::move(*this); }
+    Error& at(std::string p) & {
+        path = std::move(p);
+        return *this;
+    }
+    Error&& at(std::string p) && {
+        path = std::move(p);
+        return std::move(*this);
+    }
+    Error& withHint(std::string h) & {
+        hint = std::move(h);
+        return *this;
+    }
+    Error&& withHint(std::string h) && {
+        hint = std::move(h);
+        return std::move(*this);
+    }
+    Error& withLoc(SourceLoc l) & {
+        loc = l;
+        return *this;
+    }
+    Error&& withLoc(SourceLoc l) && {
+        loc = l;
+        return std::move(*this);
+    }
 
     // "code at path (line:col): message. Hint: hint" -- for logs and CLIs.
     std::string toString() const;
@@ -58,16 +76,31 @@ class [[nodiscard]] Result {
     bool ok() const { return v_.index() == 0; }
     explicit operator bool() const { return ok(); }
 
-    T& value() & { assert(ok()); return std::get<0>(v_); }
-    const T& value() const& { assert(ok()); return std::get<0>(v_); }
-    T&& value() && { assert(ok()); return std::get<0>(std::move(v_)); }
+    T& value() & {
+        assert(ok());
+        return std::get<0>(v_);
+    }
+    const T& value() const& {
+        assert(ok());
+        return std::get<0>(v_);
+    }
+    T&& value() && {
+        assert(ok());
+        return std::get<0>(std::move(v_));
+    }
     T* operator->() { return &value(); }
     const T* operator->() const { return &value(); }
     T& operator*() & { return value(); }
     const T& operator*() const& { return value(); }
 
-    const Error& error() const& { assert(!ok()); return std::get<1>(v_); }
-    Error&& error() && { assert(!ok()); return std::get<1>(std::move(v_)); }
+    const Error& error() const& {
+        assert(!ok());
+        return std::get<1>(v_);
+    }
+    Error&& error() && {
+        assert(!ok());
+        return std::get<1>(std::move(v_));
+    }
 
     T valueOr(T fallback) const& { return ok() ? value() : std::move(fallback); }
 
@@ -83,8 +116,14 @@ class [[nodiscard]] Result<void> {
     Result(Error error) : e_(std::move(error)) {}
     bool ok() const { return !e_.has_value(); }
     explicit operator bool() const { return ok(); }
-    const Error& error() const& { assert(!ok()); return *e_; }
-    Error&& error() && { assert(!ok()); return std::move(*e_); }
+    const Error& error() const& {
+        assert(!ok());
+        return *e_;
+    }
+    Error&& error() && {
+        assert(!ok());
+        return std::move(*e_);
+    }
 
   private:
     std::optional<Error> e_;
@@ -95,9 +134,9 @@ using Status = Result<void>;
 inline Status okStatus() { return {}; }
 
 // Propagate an error from an expression yielding Result<...>.
-#define SUPPLE_TRY(expr)                                   \
-    do {                                                   \
-        auto&& supple_try_r_ = (expr);                     \
+#define SUPPLE_TRY(expr)                                                  \
+    do {                                                                  \
+        auto&& supple_try_r_ = (expr);                                    \
         if (!supple_try_r_.ok()) return std::move(supple_try_r_).error(); \
     } while (0)
 
