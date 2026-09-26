@@ -144,3 +144,16 @@ TEST_CASE("PCM encoding maps NaN to zero and clamps infinities") {
         CHECK(c[3] == 0.5f);
     }
 }
+
+TEST_CASE("resampling preserves channel layout and duration") {
+    auto input = tone(4800, 48000, 2);
+    auto output = resample(input, 44100);
+    REQUIRE(output);
+    CHECK(output->sampleRate == 44100);
+    CHECK(output->channelCount() == 2);
+    CHECK(output->frames() == 4410);
+    input.truncated = true;
+    CHECK(resample(input, 44100)->truncated);
+    CHECK(std::abs(output->seconds() - input.seconds()) < 1e-12);
+    CHECK_FALSE(resample(input, -1));
+}

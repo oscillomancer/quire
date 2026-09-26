@@ -38,6 +38,8 @@ struct AudioData {
 enum class Container { Wav, Flac, Mp3, Unknown };
 Container detect(std::span<const std::uint8_t> head);  // from the first bytes
 
+Result<AudioData> resample(const AudioData& data, double targetRate);
+
 Result<AudioData> readAudio(const std::filesystem::path& path);
 Result<AudioData> readAudio(std::span<const std::uint8_t> bytes);
 
