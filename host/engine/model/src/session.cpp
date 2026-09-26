@@ -103,6 +103,43 @@ void apply(Session& s, TxnBuilders& b) {
 }
 }  // namespace
 
+Session EditTxn::preview() const {
+    Session s = base_;
+    apply<TempoPointObj>(s, builders_);
+    apply<MeterObj>(s, builders_);
+    apply<Track>(s, builders_);
+    apply<Item>(s, builders_);
+    apply<Take>(s, builders_);
+    apply<MediaSource>(s, builders_);
+    apply<MidiSource>(s, builders_);
+    apply<FxInstance>(s, builders_);
+    apply<Route>(s, builders_);
+    apply<Envelope>(s, builders_);
+    apply<Marker>(s, builders_);
+    apply<Region>(s, builders_);
+    s.project = project_;
+    s.blobs = blobs_;
+    s.next = next_;
+    s.version = version_;
+    if ((builders_.tempo && builders_.tempo->touched()) ||
+        (builders_.meters && builders_.meters->touched())) {
+        std::vector<time::TempoPoint> tempo;
+        for (const auto& e : s.tempo)
+            tempo.push_back({e.value->beat, e.value->bpm,
+                             e.value->ramp ? time::TempoShape::Ramp : time::TempoShape::Step});
+        std::sort(tempo.begin(), tempo.end(),
+                  [](const auto& a, const auto& b) { return a.beat < b.beat; });
+        std::vector<time::MeterChange> meter;
+        for (const auto& e : s.meters)
+            meter.push_back({e.value->bar, e.value->numerator, e.value->denominator});
+        std::sort(meter.begin(), meter.end(),
+                  [](const auto& a, const auto& b) { return a.bar < b.bar; });
+        if (auto map = time::TimeMap::create(std::move(tempo), std::move(meter)))
+            s.timeMap = std::make_shared<const time::TimeMap>(std::move(*map));
+    }
+    return s;
+}
+
 Result<Session> EditTxn::commit() {
     if (committed_) return Error("model.txn", "transaction already committed");
     committed_ = true;

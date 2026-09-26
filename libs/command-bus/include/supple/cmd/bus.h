@@ -227,6 +227,12 @@ class Host {
     virtual void log(const LogRecord&) = 0;
     virtual void emit(std::string_view topic, json::Value payload) = 0;
     virtual bool actionTransactional(std::string_view) const { return false; }
+    // Called after a command ran successfully inside the current transaction
+    // (before it commits), with the resolved arguments — hosts that replay
+    // history (branch merges) record edits here. Not called for queries or
+    // for the batch command itself (its steps are reported one by one).
+    virtual void invoked(std::string_view /*command*/, int /*version*/, const json::Value& /*args*/,
+                         Kind /*kind*/) {}
     virtual std::uint64_t clockMs() const;
     virtual void setupFixture(Dispatcher&, std::string_view) {}
 };

@@ -117,6 +117,7 @@ class EditTxn {
         const Id id{Traits<T>::kind, next_[Traits<T>::kind]++};
         builder<T>().put(id, version_, std::make_shared<const T>(std::move(value)));
         record(Change::Op::Add, id);
+        created_.push_back(id);
         return id;
     }
     // Adds an object under an explicit ID (the master, loaders, merge replay);
@@ -128,6 +129,7 @@ class EditTxn {
         b.put(id, version_, std::make_shared<const T>(std::move(value)));
         if (next_[id.kind] <= id.n) next_[id.kind] = id.n + 1;
         record(Change::Op::Add, id);
+        created_.push_back(id);
         return true;
     }
     // Replaces an existing object (false if it does not exist).
@@ -162,6 +164,12 @@ class EditTxn {
 
     // Changes so far, coalesced per object (add+update = add, add+remove = none).
     std::vector<Change> changes() const;
+    // IDs created so far, in creation order (removed ones included: replay
+    // merges match creations by order).
+    const std::vector<Id>& created() const { return created_; }
+    // The session as it would be committed now, without validation (queries
+    // inside a batch read their earlier steps' effects through this).
+    Session preview() const;
 
     // Validates and returns the new session. The transaction is spent.
     Result<Session> commit();
@@ -182,6 +190,7 @@ class EditTxn {
     std::map<std::string, std::shared_ptr<const Blob>> blobs_;
     mutable TxnBuilders builders_;
     std::map<Id, Change::Op> changes_;
+    std::vector<Id> created_;
     bool committed_ = false;
     bool projectChanged_ = false;
 };

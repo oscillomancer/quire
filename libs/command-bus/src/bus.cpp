@@ -569,6 +569,8 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
             error.details.push_back(checked.error());
             return error;
         }
+        if (info->kind != Kind::Query)
+            host_.invoked(name, info->version, resolvedArgs.value_or(invocation.args), info->kind);
         return result;
     };
     Result<json::Value> result = Error("command.internal", "unreachable");
