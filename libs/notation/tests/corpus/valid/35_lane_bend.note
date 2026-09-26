@@ -1,0 +1,6 @@
+notation 1
+ppq 960
+meter 4/4
+lane bend ch 2 range 2
+1.1 -0.5st
+2.1 +1st

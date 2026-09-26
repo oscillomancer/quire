@@ -1,0 +1,7 @@
+notation 1
+ppq 960
+meter 4/4
+voice a ch 1
+1: C4:w
+voice b ch 1
+1: E4:w

@@ -515,3 +515,24 @@ Canonical output, in order:
 - SMF: read/write round trip; fixtures of format 0 and 1 files written by the
   test itself; running status; note-on velocity 0; unterminated notes.
 - A libFuzzer target for `compile` (built with `SUPPLE_BUILD_FUZZERS`).
+
+---
+
+## Implementation notes (Phase 1)
+
+- A `#` starts a comment at a token boundary. Inside a token it remains part of
+  a pitch or chord spelling, as in `F#4` and `{C7#9}`.
+- With a `pickup`, `length B[+Nt]` counts the pickup and then B complete bars
+  from bar 1. The item starts at tick 0, so bar 1 starts at `pickupTicks`.
+- A lane's `+Nt` offset may span denominator beats but stays within its bar.
+  This lets `1.1+1t` name tick 1 in a 6/8 bar at PPQ 1: the bar is three
+  whole ticks even though individual eighth-note beat onsets can be fractional.
+- A tie retains the first segment's note-on velocity and takes the final
+  segment's note-off velocity. Intermediate segments emit no separate MIDI
+  note. An exact duplicate controller write may be removed only when adjacent
+  to the previous write at the same tick and address; removing it across an
+  intervening value would change the final value.
+- `SmfReadOptions::track` uses a zero-based track index. Its returned clip
+  length is that track's end-of-track tick; `SmfInfo` still reports metadata
+  found on all tracks. A standalone SMF F7 escape event is counted as skipped;
+  F7 continuation chunks complete a preceding F0 sysex message.
