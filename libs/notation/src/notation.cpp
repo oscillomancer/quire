@@ -802,12 +802,18 @@ class Compiler {
                         if (i + 1 < row.size())
                             add("fill_not_last", "Fill rest must end the bar.", token,
                                 "Move r:* to the end.");
-                        cursor = limit;
+                        cursor = std::max(cursor, limit);
                         continue;
                     }
                     if (s.starts_with("r:")) {
                         Token dur{s.substr(2), token.line, token.column + 2};
-                        if (auto n = duration(dur)) cursor += *n;
+                        if (auto n = duration(dur)) {
+                            if (*n > std::numeric_limits<std::int64_t>::max() - cursor)
+                                add("bad_duration", "Rest duration overflows tick time.", dur,
+                                    "Use a shorter rest.");
+                            else
+                                cursor += *n;
+                        }
                         continue;
                     }
                     const auto colon = s.find(':');
@@ -873,9 +879,22 @@ class Compiler {
                     }
                     if (accent) vel = std::min(127, vel + 20);
                     auto noteLength = staccato ? std::max<std::int64_t>(1, *ticks / 2) : *ticks;
-                    const auto start = barStart(bar) + cursor;
+                    const auto base = barStart(bar);
+                    if (cursor > std::numeric_limits<std::int64_t>::max() - base ||
+                        noteLength > std::numeric_limits<std::int64_t>::max() - base - cursor) {
+                        add("bad_duration", "Note duration overflows tick time.", dur,
+                            "Use a shorter duration.");
+                        continue;
+                    }
+                    const auto start = base + cursor;
                     if (tie && tie->end == start && tie->pitches == pitches) {
                         for (auto index : tie->indices) {
+                            if (noteLength > std::numeric_limits<std::int64_t>::max() -
+                                                 result_.sequence.notes[index].length) {
+                                add("bad_duration", "Tied note duration overflows tick time.", dur,
+                                    "Use a shorter tied duration.");
+                                continue;
+                            }
                             result_.sequence.notes[index].length += noteLength;
                             result_.sequence.notes[index].offVelocity =
                                 static_cast<std::uint8_t>(off);
@@ -901,7 +920,13 @@ class Compiler {
                         }
                         if (tied && !pitches.empty()) tie = std::move(next);
                     }
-                    if (!layered) cursor += *ticks;
+                    if (!layered) {
+                        if (*ticks > std::numeric_limits<std::int64_t>::max() - cursor)
+                            add("bad_duration", "Bar cursor overflows tick time.", dur,
+                                "Use a shorter duration.");
+                        else
+                            cursor += *ticks;
+                    }
                 }
             }
             if (cursor != limit) {

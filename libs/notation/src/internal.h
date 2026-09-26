@@ -139,7 +139,7 @@ inline std::optional<std::int64_t> duration(std::string_view token, int ppq, boo
                 denominator *= 4;
             } else if (!suffix.empty()) {
                 auto n = integer(suffix);
-                if (!n || *n < 3 || *n > 64) return std::nullopt;
+                if (!n || *n < 3 || *n > 1000000) return std::nullopt;
                 int power = 1;
                 while (power * 2 < *n) power *= 2;
                 numerator *= power;
