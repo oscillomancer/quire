@@ -125,6 +125,8 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     for (Node& n : p.nodes)
         for (Stage& st : n.chain)
             if (st.instance) instances.push_back(st.instance);
+    detail::Workers workers(opt.threads == 0 ? detail::Workers::defaultHelpers()
+                                             : std::min(opt.threads, 64u) - 1);
     std::thread audio([&] {
         for (host::Instance* in : instances) {
             in->reset();
@@ -135,7 +137,8 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
             for (std::int64_t pos = 0; pos < total; pos += p.block) {
                 const auto n =
                     static_cast<std::uint32_t>(std::min<std::int64_t>(p.block, total - pos));
-                if (!processBlock(p, pos, n)) {
+                if (!(workers.helpers() ? processBlockOn(workers, p, pos, n)
+                                        : processBlock(p, pos, n))) {
                     failed = true;
                     break;
                 }

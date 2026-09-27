@@ -43,6 +43,8 @@ struct EngineStatus {
     std::int64_t planLatency = 0, deviceLatency = 0;  // frames
     std::int64_t xruns = 0, cycles = 0, processErrors = 0;
     bool restartNeeded = false;
+    bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
+    std::int64_t anticipationMisses = 0;
 };
 
 struct TransportInfo {
@@ -103,9 +105,10 @@ class EngineApp : public cmd::Host {
 
     // --- real-time engine (optional) ------------------------------------------------
     Status startEngine(Backend& backend, const BackendConfig& config);
+    Status startEngine(Backend& backend, const BackendConfig& config, const EngineOptions& options);
     // On a backend the app owns: "jack" (the audio device, at the graph's
     // rate) or "dummy" (no device, paced like one, at the project's rate).
-    Status startEngine(std::string_view backend, std::uint32_t block);
+    Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
     void stopEngine();
     Engine* engine() { return engine_.get(); }
     EngineStatus engineStatus() const;

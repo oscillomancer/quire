@@ -397,7 +397,7 @@ Result:
 
 Start real-time playback on the audio device (jack) or without one (dummy).
 
-backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the engine's block in frames (default 256); the device's period may differ and is reported. The project must run at the device's rate.
+backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The project must run at the device's rate.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -407,6 +407,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `backend` | string |  |  |  |  |
 | `block` | integer |  | 16.0..4096.0 |  |  |
+| `anticipative` | boolean |  |  |  |  |
 
 ### Result
 
@@ -447,6 +448,12 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "restart_needed": {
       "type": "boolean"
+    },
+    "anticipative": {
+      "type": "boolean"
+    },
+    "anticipation_misses": {
+      "type": "integer"
     }
   },
   "required": [
@@ -460,7 +467,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "xruns",
     "cycles",
     "process_errors",
-    "restart_needed"
+    "restart_needed",
+    "anticipative",
+    "anticipation_misses"
   ],
   "additionalProperties": false
 }
@@ -500,7 +509,9 @@ Result:
   "xruns": 0,
   "cycles": "<any>",
   "process_errors": 0,
-  "restart_needed": false
+  "restart_needed": false,
+  "anticipative": true,
+  "anticipation_misses": 0
 }
 
 ```
@@ -557,6 +568,12 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "restart_needed": {
       "type": "boolean"
+    },
+    "anticipative": {
+      "type": "boolean"
+    },
+    "anticipation_misses": {
+      "type": "integer"
     }
   },
   "required": [
@@ -570,7 +587,9 @@ Kind: `query`. Exposure: `mcp-tool`.
     "xruns",
     "cycles",
     "process_errors",
-    "restart_needed"
+    "restart_needed",
+    "anticipative",
+    "anticipation_misses"
   ],
   "additionalProperties": false
 }
@@ -600,7 +619,9 @@ Result:
   "xruns": 0,
   "cycles": 0,
   "process_errors": 0,
-  "restart_needed": false
+  "restart_needed": false,
+  "anticipative": false,
+  "anticipation_misses": 0
 }
 
 ```

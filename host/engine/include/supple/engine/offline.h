@@ -76,6 +76,9 @@ struct OfflineSettings {
     // (or <projectDir> itself when the file is found there).
     std::filesystem::path projectDir;
     MediaCache* media = nullptr;  // null: a cache for this render only
+    // Threads rendering the graph; 0: every core but two. The output is
+    // identical for any count.
+    unsigned threads = 0;
 };
 
 struct OfflineResult {

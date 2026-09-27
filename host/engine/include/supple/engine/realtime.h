@@ -30,7 +30,9 @@ namespace supple::engine {
 
 namespace detail {
 struct Plan;
-}
+struct ChunkRing;
+class Workers;
+}  // namespace detail
 
 struct BackendConfig {
     double sampleRate = 48000.0;
@@ -109,9 +111,18 @@ struct TransportState {
     double seconds = 0.0;
 };
 
+struct EngineOptions {
+    // Render ahead of the playhead on the anticipation thread and the worker
+    // pool (ADR-0012). Off: every node runs in the audio callback.
+    bool anticipative = true;
+    std::uint32_t renderBlock = 1024;  // frames per anticipative block (64 .. 8192)
+    double renderAheadMs = 200.0;      // how far ahead of the playhead
+    int workers = -1;                  // helper threads; -1: every core but three
+};
+
 class Engine {
   public:
-    Engine(InstancePool& plugins, MediaCache& media);
+    Engine(InstancePool& plugins, MediaCache& media, EngineOptions options = {});
     ~Engine();
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
@@ -128,6 +139,20 @@ class Engine {
     void pause();  // stops the transport; plugin state is reset (no hanging notes)
     void seek(double seconds);
     TransportState transport() const;
+    // Main thread: waits (bounded) until the renderer has acted on every
+    // transport request, so transport() reports the new state. With the
+    // renderer in the callback: two audio cycles (none for a manual backend).
+    void awaitTransport(double timeoutSeconds = 1.0);
+    // Anticipative, main thread: waits until `frames` of the current
+    // transport epoch are rendered ahead of the playhead (at most the
+    // render-ahead amount), or the transport is paused. False on timeout.
+    bool awaitRendered(std::int64_t frames, double timeoutSeconds = 10.0);
+    // Audio cycles that found no rendered audio while playing (after the
+    // pre-roll of a start or seek).
+    std::uint64_t anticipationMisses() const { return misses_.load(); }
+    // Tests: while held, the renderer renders nothing.
+    void holdRenderer(bool hold) { hold_.store(hold); }
+    const EngineOptions& options() const { return options_; }
 
     // Main thread, regularly: frees retired plans; once the newest plan is
     // live, destroys instances whose fx left the session.
@@ -145,11 +170,16 @@ class Engine {
 
   private:
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
+    void pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
+    void rendererLoop(std::uint64_t firstEpoch);
+    void relocate(std::uint64_t previous, std::uint64_t epoch);
+    std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
     void adopt(detail::Plan* next) SUPPLE_RT;
     void resetInstances(detail::Plan* plan) SUPPLE_RT;
 
     InstancePool& plugins_;
     MediaCache& media_;
+    EngineOptions options_;
     Backend* backend_ = nullptr;
     BackendConfig config_;
     RtHandoff<detail::Plan> handoff_;
@@ -184,6 +214,27 @@ class Engine {
     std::atomic<bool> stoppedOnAudioThread_{false};
     std::atomic<std::uint64_t> processErrors_{0};
     std::atomic<std::uint64_t> cycles_{0};
+
+    // Anticipation (ADR-0012). The renderer thread owns plan_, processing_,
+    // playing_ and pos_ (the render position) instead of the audio thread.
+    // Seek and pause bump epoch_; the callback drops chunks of older epochs.
+    std::unique_ptr<detail::ChunkRing> ring_;
+    std::unique_ptr<detail::Workers> workers_;
+    std::thread renderer_;
+    std::atomic<bool> rendererQuit_{false}, hold_{false};
+    std::int64_t aheadFrames_ = 0;             // render-ahead target
+    std::atomic<std::uint64_t> epoch_{0};      // main thread: bumped by seek and pause
+    std::atomic<std::uint64_t> epochDone_{0};  // renderer: the epoch it has relocated for
+    std::atomic<std::int64_t> epochStart_{0};  // ... and where that epoch starts
+    std::atomic<std::int64_t> renderedTo_{0};  // renderer: after its last chunk
+    std::int64_t epochStartLocal_ = 0;         // renderer
+    std::uint64_t rtEpoch_ = 0;                // audio thread
+    std::uint32_t rtOffset_ = 0;               // audio thread: into the front chunk
+    bool rtPrimed_ = false;                    // audio thread: played a chunk of rtEpoch_
+    std::atomic<std::uint64_t> rtEpochSeen_{0};
+    std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
+    std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
+    std::atomic<std::uint64_t> misses_{0};
 };
 
 }  // namespace supple::engine

@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <cmath>
 #include <thread>
 
@@ -105,40 +106,63 @@ double maxDiff(const std::vector<float>& a, std::size_t aFrom, const std::vector
     return worst;
 }
 
+const EngineOptions kInCallback{.anticipative = false};
+
+// Anticipative: drive a manual backend `cycles` times, letting the renderer
+// keep ahead (a device's callbacks would be paced by its clock).
+void runAhead(Engine& engine, DummyBackend& backend, std::int64_t cycles, std::uint32_t block) {
+    while (cycles > 0) {
+        REQUIRE(engine.awaitRendered(4096));
+        const std::int64_t n =
+            std::min<std::int64_t>(cycles, std::max<std::int64_t>(1, 4096 / block));
+        backend.run(n);
+        cycles -= n;
+    }
+}
+
 }  // namespace
 
 TEST_CASE("real-time output equals the offline render (any block size)" *
           doctest::description("rt")) {
-    for (const char* extra : {static_cast<const char*>(nullptr), "com.suppleaudio.test.gain"}) {
-        const model::Session s = synthSession(-3.0, extra);
-        auto pool = makePool();
-        auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+    for (const EngineOptions& options :
+         {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}})
+        for (const char* extra : {static_cast<const char*>(nullptr), "com.suppleaudio.test.gain"}) {
+            INFO("anticipative " << options.anticipative << ", workers " << options.workers);
+            const model::Session s = synthSession(-3.0, extra);
+            auto pool = makePool();
+            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
 
-        auto rtPool = makePool();
-        MediaCache media;
-        DummyBackend backend(
-            {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
-        Engine engine(rtPool, media);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
-        engine.play();
-        backend.run((48000 * 2 + 4096) / 128);
-        engine.stop();
-        const std::uint32_t L = engine.outputLatency();
-        CHECK(L == (extra ? 64u : 0u));
-        CHECK(engine.processErrors() == 0);
-        const auto& cap = backend.capture();
-        // The live output lags by the plan's latency; after that it is the offline render.
-        CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
-        CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
-    }
+            auto rtPool = makePool();
+            MediaCache media;
+            DummyBackend backend(
+                {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+            Engine engine(rtPool, media, options);
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+            REQUIRE(engine.load(s).ok());
+            engine.play();
+            if (options.anticipative)
+                runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+            else
+                backend.run((48000 * 2 + 4096) / 128);
+            CHECK(engine.anticipationMisses() == 0);
+            engine.stop();
+            const std::uint32_t L = engine.outputLatency();
+            CHECK(L == (extra ? 64u : 0u));
+            CHECK(engine.processErrors() == 0);
+            const auto& cap = backend.capture();
+            // The live output lags by the plan's latency; after that it is the offline render.
+            CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+            CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
+        }
 }
 
-TEST_CASE("plan swaps while playing, seek, pause; retired plans and instances are freed") {
+TEST_CASE(
+    "in the callback: plan swaps while playing, seek, pause; retired plans and instances are "
+    "freed") {
     auto pool = makePool();
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
-    Engine engine(pool, media);
+    Engine engine(pool, media, kInCallback);
     REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
     REQUIRE(engine.load(synthSession(0.0)).ok());
     engine.play();
@@ -190,11 +214,12 @@ TEST_CASE("threaded backend: plan swaps from the main thread race-free" *
     CHECK(backend.cycles() >= 400);
 }
 
-TEST_CASE("transport requests between callbacks are never dropped (review round 3)") {
+TEST_CASE(
+    "in the callback: transport requests between callbacks are never dropped (review round 3)") {
     auto pool = makePool();
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
-    Engine engine(pool, media);
+    Engine engine(pool, media, kInCallback);
     REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
     REQUIRE(engine.load(synthSession(0.0)).ok());
     for (int i = 0; i < 40; ++i) {  // 120 requests, more than any queue held
@@ -217,50 +242,56 @@ TEST_CASE("transport requests between callbacks are never dropped (review round 
 
 TEST_CASE("a seek off the block grid never grows event storage on the audio thread" *
           doctest::description("rt")) {
-    auto pool = makePool();
-    MediaCache media;
-    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
-    Engine engine(pool, media);
-    // Two notes at sample 75, two at 100: aligned 100-frame blocks hold two
-    // each, but the block [1, 101) after a one-sample seek holds all four.
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 100}).ok());
-    REQUIRE(engine.load(clusterSession({3, 3, 4, 4})).ok());
-    engine.seek(1.0 / 48000.0);
-    engine.play();
-    backend.run(4);  // under rtsan an allocation here aborts
-    CHECK(engine.processErrors() == 0);
-    double energy = 0;
-    for (std::size_t i = 100; i < 400; ++i)
-        energy +=
-            double(backend.capture().channels[0][i]) * double(backend.capture().channels[0][i]);
-    CHECK(energy > 1.0);  // all four notes sound
-    engine.stop();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.renderBlock = 100}}) {
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
+        Engine engine(pool, media, options);
+        // Two notes at sample 75, two at 100: aligned 100-frame blocks hold two
+        // each, but the block [1, 101) after a one-sample seek holds all four.
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 100}).ok());
+        REQUIRE(engine.load(clusterSession({3, 3, 4, 4})).ok());
+        engine.seek(1.0 / 48000.0);
+        engine.play();
+        if (options.anticipative) REQUIRE(engine.awaitRendered(400));
+        backend.run(4);  // under rtsan an allocation here aborts
+        CHECK(engine.processErrors() == 0);
+        double energy = 0;
+        for (std::size_t i = 100; i < 400; ++i)
+            energy +=
+                double(backend.capture().channels[0][i]) * double(backend.capture().channels[0][i]);
+        CHECK(energy > 1.0);  // all four notes sound
+        engine.stop();
+    }
 }
 
 TEST_CASE("a plugin that refuses to start is passed through, not processed") {
-    auto pool = makePool();
-    MediaCache media;
-    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
-    Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    model::Session s = synthSession(0.0, "com.suppleaudio.test.edge");
-    model::EditTxn t(s, 2);
-    for (const auto& e : s.fx)
-        if (e.value->plugin.id == "com.suppleaudio.test.edge")
-            t.modify<model::FxInstance>(
-                e.id, [](model::FxInstance& f) { f.state = "sha256:edge-refuses-start"; });
-    t.putBlob("sha256:edge-refuses-start",
-              std::make_shared<const model::Blob>(model::Blob{{1, 0, 0, 0}}));
-    REQUIRE(engine.load(t.commit().value()).ok());
-    engine.play();
-    backend.run(10);
-    CHECK(engine.processErrors() >= 1);
-    CHECK(engine.transport().sample == 2560);
-    double peak = 0;
-    for (std::size_t i = 0; i < 2560; ++i)
-        peak = std::max(peak, std::fabs(double(backend.capture().channels[0][i])));
-    CHECK(peak > 0.1);  // the sine passes through the stage that did not start
-    engine.stop();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{}}) {
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+        model::Session s = synthSession(0.0, "com.suppleaudio.test.edge");
+        model::EditTxn t(s, 2);
+        for (const auto& e : s.fx)
+            if (e.value->plugin.id == "com.suppleaudio.test.edge")
+                t.modify<model::FxInstance>(
+                    e.id, [](model::FxInstance& f) { f.state = "sha256:edge-refuses-start"; });
+        t.putBlob("sha256:edge-refuses-start",
+                  std::make_shared<const model::Blob>(model::Blob{{1, 0, 0, 0}}));
+        REQUIRE(engine.load(t.commit().value()).ok());
+        engine.play();
+        if (options.anticipative) REQUIRE(engine.awaitRendered(2560));
+        backend.run(10);
+        CHECK(engine.processErrors() >= 1);
+        CHECK(engine.transport().sample == 2560);
+        double peak = 0;
+        for (std::size_t i = 0; i < 2560; ++i)
+            peak = std::max(peak, std::fabs(double(backend.capture().channels[0][i])));
+        CHECK(peak > 0.1);  // the sine passes through the stage that did not start
+        engine.stop();
+    }
 }
 
 TEST_CASE("stop() stops plugins on the audio thread even with second-long gaps between callbacks" *
@@ -309,10 +340,10 @@ TEST_CASE("the engine plays through the JACK backend (a stand-in libjack)" *
     REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
     REQUIRE(engine.load(synthSession(0.0)).ok());
     engine.play();
-    const auto until = fake.cycles() + 20;
-    while (fake.cycles() < until) std::this_thread::yield();
-    CHECK(engine.transport().sample >= 256);
+    for (int i = 0; i < 5000 && fake.outputPeak("supple:out_1") <= 0.01f; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     CHECK(fake.outputPeak("supple:out_1") > 0.01f);
+    CHECK(engine.transport().sample >= 256);
     engine.stop();
     CHECK(engine.lastStopOnAudioThread());
     CHECK(engine.processErrors() == 0);
@@ -327,7 +358,7 @@ TEST_CASE("the engine survives the JACK server going away") {
     JackBackend::Options o;
     o.library = FakeJack::kPath;
     JackBackend backend(o);
-    Engine engine(pool, media);
+    Engine engine(pool, media, kInCallback);
     REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
     REQUIRE(engine.load(synthSession(0.0)).ok());
     engine.play();
@@ -355,5 +386,153 @@ TEST_CASE("the engine refuses a session at a rate the graph does not run") {
     auto st = engine.load(synthSession(0.0));  // the session runs at 48 kHz
     CHECK_FALSE(st.ok());
     engine.stop();
+    fake.reset();
+}
+
+TEST_CASE(
+    "anticipative: pause silences at once, seek plays no stale audio, the position is the "
+    "listener's" *
+    doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    engine.awaitTransport();
+    CHECK(engine.transport().playing);
+    CHECK(engine.transport().sample == 0);
+    runAhead(engine, backend, 10, 256);
+    CHECK(engine.transport().sample == 2560);
+    const auto& cap = backend.capture();
+    auto peakOf = [&](std::size_t from, std::size_t to) {
+        double m = 0;
+        for (std::size_t i = from; i < to; ++i)
+            m = std::max(m, std::fabs(double(cap.channels[0][i])));
+        return m;
+    };
+    CHECK(peakOf(2304, 2560) > 0.1);  // the first note sounds
+    engine.pause();
+    backend.run(1);  // the rendered audio is dropped: silent at once
+    CHECK(peakOf(2560, 2816) == 0.0);
+    engine.awaitTransport();
+    CHECK_FALSE(engine.transport().playing);
+    CHECK(engine.transport().sample == 2560);  // the listener's position, not the renderer's
+    engine.play();                             // resumes there
+    engine.awaitTransport();
+    runAhead(engine, backend, 4, 256);
+    CHECK(engine.transport().sample == 2560 + 1024);
+    engine.seek(1.0);  // while playing
+    engine.awaitTransport();
+    CHECK(engine.transport().sample == 48000);
+    runAhead(engine, backend, 1, 256);
+    CHECK(engine.transport().sample == 48000 + 256);
+    CHECK(engine.anticipationMisses() == 0);
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());  // the renderer stopped the plugins
+}
+
+TEST_CASE("anticipative: an edit takes effect after the audio already rendered, without a gap" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    runAhead(engine, backend, 10, 256);
+    REQUIRE(engine.awaitRendered(1 << 20));  // 200 ms (9600 frames) ahead of 2560
+    REQUIRE(engine.load(synthSession(-6.0206)).ok());
+    runAhead(engine, backend, 150, 256);
+    engine.service();
+    const auto& cap = backend.capture();
+    auto peakOf = [&](std::size_t from, std::size_t to) {
+        double m = 0;
+        for (std::size_t i = from; i < to; ++i)
+            m = std::max(m, std::fabs(double(cap.channels[0][i])));
+        return m;
+    };
+    // Note 1 (0 .. 12000) was rendered before the edit; note 2 (24000 ..) after.
+    CHECK(peakOf(24000, 36000) / peakOf(2560, 12000) == doctest::Approx(0.5).epsilon(0.01));
+    CHECK(engine.anticipationMisses() == 0);
+    CHECK(pool.size() == 1);  // the instance was kept
+    engine.stop();
+}
+
+TEST_CASE("anticipative: a renderer that falls behind counts misses and plays silence") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    runAhead(engine, backend, 4, 256);
+    engine.holdRenderer(true);
+    backend.run(100);  // 25600 frames: more than was rendered ahead
+    CHECK(engine.anticipationMisses() > 0);
+    double tail = 0;
+    for (std::size_t i = 25000; i < 26624; ++i)
+        tail = std::max(tail, std::fabs(double(backend.capture().channels[0][i])));
+    CHECK(tail == 0.0);
+    engine.holdRenderer(false);
+    runAhead(engine, backend, 10, 256);  // and it catches up
+    engine.stop();
+}
+
+TEST_CASE("anticipative on a paced device: edits and transport from the main thread race-free" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
+    Engine engine(pool, media, {.renderBlock = 512, .renderAheadMs = 50, .workers = 3});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(synthSession(0.0, "com.suppleaudio.test.gain")).ok());
+    engine.play();
+    for (int i = 0; i < 40; ++i) {
+        const auto until = backend.cycles() + 4;
+        while (backend.cycles() < until) std::this_thread::yield();
+        switch (i % 5) {
+            case 0:
+                REQUIRE(engine.load(synthSession(-0.5 * i, "com.suppleaudio.test.gain")).ok());
+                break;
+            case 1:
+                engine.seek(0.1 * i);
+                break;
+            case 2:
+                engine.pause();
+                break;
+            case 3:
+                engine.play();
+                break;
+            default:
+                engine.service();
+        }
+    }
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    CHECK(engine.lastStopOnAudioThread());
+}
+
+TEST_CASE("anticipative: the renderer stops the plugins when the JACK server goes away") {
+    FakeJack& fake = fakeJack();
+    fake.reset(256);
+    auto pool = makePool();
+    MediaCache media;
+    JackBackend::Options o;
+    o.library = FakeJack::kPath;
+    JackBackend backend(o);
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    const auto until = fake.cycles() + 5;
+    while (fake.cycles() < until) std::this_thread::yield();
+    fake.shutdown();
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());
+    CHECK_FALSE(engine.running());
     fake.reset();
 }

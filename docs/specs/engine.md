@@ -345,7 +345,31 @@ granted, and CPU governor (read-only facts).
   wait (≤ 1 s) for two audio cycles so their answer is the new state;
   `transport.stop` returns to where play started. `<slug>-engine play FILE`
   plays a project through the device from the CLI.
-- **Not yet:** anticipative processing and the worker pool (every node runs
-  in the callback), automatic restart after device changes, MIDI ports,
-  plugin-parameter automation, stems and render jobs, resampling/stretching
-  of audio items, the 10 ms crossfade on structural swaps.
+- **Anticipative processing** (ADR-0012, `EngineOptions`, default on): a
+  renderer thread owns the plan, the plugin lifecycle and the render
+  position, renders the whole graph (nothing is live yet) in 1024-frame
+  blocks into an SPSC ring of epoch-tagged chunks kept 200 ms ahead, and the
+  callback only copies chunk frames. Seek and pause bump the epoch on the
+  main thread; the callback drops older chunks at its next cycle (pause is
+  silent at once, a seek never plays stale audio); the renderer relocates —
+  after a pause to the position the callback reports once it has seen the
+  new epoch. New plans are adopted at the render position (edits are heard
+  after the audio already rendered, no gap). The renderer paces itself by
+  the frames rendered ahead of the played position and naps otherwise; the
+  callback makes no system call. Misses (no chunk while playing, after the
+  pre-roll) are counted (`engine.status.anticipation_misses`). `stop()`
+  joins the renderer first; it stops every plugin as it ends. With
+  `anticipative = false` the old in-callback renderer runs (the reference,
+  and the base for live nodes).
+- **Worker pool** (`workers.{h,cpp}`): helper threads (every core but three,
+  plus the submitting thread) run one render block as a DAG over the plan's
+  nodes: per-node atomic counts of unfinished sources, a bounded Vyukov MPMC
+  ready queue, the submitter helps; idle helpers park on an atomic wait.
+  `processNode` is the unit (a node sums its inputs in the fixed order and
+  processes its own edges, items and chain), so results are bit-identical
+  for any thread count — the offline renderer uses the pool too (B4 test:
+  1, 2, 8 threads byte-identical) and defaults to all cores.
+- **Not yet:** live nodes (monitoring/recording) and live multiprocessing,
+  automatic restart after device changes, MIDI ports, plugin-parameter
+  automation, stems and render jobs, resampling/stretching of audio items,
+  the 10 ms crossfade on structural swaps, the B1 capacity benchmark.

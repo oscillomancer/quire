@@ -263,8 +263,13 @@ Result<OfflineResult> EngineApp::renderMix(const OfflineSettings& settings) {
 // --- real-time engine -----------------------------------------------------------------------
 
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
+    return startEngine(backend, config, EngineOptions{});
+}
+
+Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
+                              const EngineOptions& options) {
     if (engine_) return Error("engine.running", "the engine is already running");
-    engine_ = std::make_unique<Engine>(*pool_, media_);
+    engine_ = std::make_unique<Engine>(*pool_, media_, options);
     auto st = engine_->start(backend, config);
     if (!st) {
         engine_.reset();
@@ -275,7 +280,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
     return engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
 }
 
-Status EngineApp::startEngine(std::string_view backend, std::uint32_t block) {
+Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative) {
     if (engine_)
         return Error("engine.running", "the engine is already running", {},
                      "engine.stop first to change the backend or block size");
@@ -294,7 +299,7 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block) {
         return Error("engine.backend", "unknown backend " + std::string(backend), {},
                      "jack or dummy");
     }
-    auto st = startEngine(*ownedBackend_, config);
+    auto st = startEngine(*ownedBackend_, config, EngineOptions{.anticipative = anticipative});
     if (!st) stopEngine();  // e.g. the project's rate is not the device's
     return st;
 }
@@ -324,6 +329,8 @@ EngineStatus EngineApp::engineStatus() const {
     st.cycles = static_cast<std::int64_t>(engine_->cycles());
     st.processErrors = static_cast<std::int64_t>(engine_->processErrors());
     st.restartNeeded = b.restartNeeded;
+    st.anticipative = engine_->options().anticipative;
+    st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());
     return st;
 }
 
@@ -331,7 +338,6 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     if (!engine_)
         return Error("engine.stopped", "the real-time engine is not running", {},
                      "engine.start first");
-    const std::uint64_t before = engine_->cycles();
     if (action == "play") {
         playStart_ = engine_->transport().seconds;
         engine_->play();
@@ -344,12 +350,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         engine_->seek(seconds.value_or(0.0));
         if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
     }
-    if (action != "get" && backend_->ownsThread()) {
-        // Two cycles: the first may have begun before the request.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-        while (engine_->cycles() < before + 2 && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    if (action != "get") engine_->awaitTransport();
     engine_->service();
     const TransportState t = engine_->transport();
     return TransportInfo{t.playing, t.seconds, view().timeMap->beatAt(t.seconds), t.sample};

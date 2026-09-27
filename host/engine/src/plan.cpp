@@ -1,5 +1,6 @@
 #include "plan.h"
 
+#include <atomic>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -510,6 +511,13 @@ Status prepare(Plan& p, const Session& s) {
         }
         for (Stage& st : n.chain) st.blockEvents.reserve(windowMax + 1);
     }
+    // The node graph for the worker pool: a node waits for its edges' sources.
+    std::vector<std::vector<std::uint32_t>> deps(p.nodes.size());
+    for (std::size_t i = 0; i < p.nodes.size(); ++i)
+        for (std::size_t e : p.nodes[i].in)
+            deps[i].push_back(static_cast<std::uint32_t>(p.edges[e].from));
+    p.graph = std::make_unique<TaskGraph>();
+    p.graph->build(deps);
     return okStatus();
 }
 
@@ -531,170 +539,192 @@ host::Transport transportAt(const Plan& p, std::int64_t sample) {
 }
 
 // One block of every node, in order. Returns false on a plugin error.
-bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
-    const host::Transport transport = transportAt(p, pos);
-    for (Node& node : p.nodes) {
-        // 1. Sum the inputs (fixed order), each through its compensation delay.
-        node.sum.clear(n);
-        for (std::size_t ei : node.in) {
-            Edge& e = p.edges[ei];
-            const Node& src = p.nodes[e.from];
-            const Stereo& tap = e.tap == model::Tap::PreFx      ? src.preFx
-                                : e.tap == model::Tap::PreFader ? src.preFader
-                                                                : src.post;
-            e.tmp.copyFrom(tap, n);
-            e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
-            const bool automated =
-                e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
-            const double sign = e.invert ? -1.0 : 1.0;
-            float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
-            for (std::uint32_t i = 0; i < n; ++i) {
-                if (automated) {
-                    const std::int64_t at = pos + i;
-                    const double g =
-                        (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
-                            ? 0.0
-                            : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
-                    const auto [pl, pr] = panGains(
-                        (e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, node.panLawDb);
-                    gl = static_cast<float>(sign * g * pl);
-                    gr = static_cast<float>(sign * g * pr);
-                }
-                float l = e.tmp.l[i], r = e.tmp.r[i];
-                if (e.mono) l = r = 0.5f * (l + r);
-                node.sum.l[i] += l * gl;
-                node.sum.r[i] += r * gr;
-            }
-        }
-        node.preFx.copyFrom(node.sum, n);
-        // Audio items play after the pre-FX tap, before the chain.
-        for (const Clip& c : node.clips) {
-            const std::int64_t from = std::max<std::int64_t>(pos, c.start);
-            const std::int64_t to = std::min<std::int64_t>(pos + n, c.start + c.length);
-            const auto& ch = c.data->channels;
-            const auto frames = static_cast<std::int64_t>(c.data->frames());
-            if (ch.empty() || frames == 0) continue;
-            const std::size_t right = ch.size() > 1 ? 1 : 0;
-            for (std::int64_t t = from; t < to; ++t) {
-                const std::int64_t k = t - c.start;  // sample within the item
-                std::int64_t f = c.offset + k;
-                if (c.loop) f = ((f % frames) + frames) % frames;
-                if (f < 0 || f >= frames) continue;
-                const auto fi = static_cast<std::size_t>(f);
-                float l = ch[0][fi], r = ch[right][fi];
-                switch (c.mode) {
-                    case model::ChannelMode::Normal:
-                        break;
-                    case model::ChannelMode::ReverseStereo:
-                        std::swap(l, r);
-                        break;
-                    case model::ChannelMode::MonoMix:
-                        l = r = 0.5f * (l + r);
-                        break;
-                    case model::ChannelMode::Left:
-                        r = l;
-                        break;
-                    case model::ChannelMode::Right:
-                        l = r;
-                        break;
-                }
-                double fade = 1.0;
-                if (c.fadeIn > 0 && k < c.fadeIn)
-                    fade *= fadeCurve(c.fadeInShape,
-                                      static_cast<double>(k) / static_cast<double>(c.fadeIn));
-                if (c.fadeOut > 0 && k >= c.length - c.fadeOut)
-                    fade *= fadeCurve(c.fadeOutShape, static_cast<double>(c.length - k) /
-                                                          static_cast<double>(c.fadeOut));
-                const auto i = static_cast<std::size_t>(t - pos);
-                node.sum.l[i] += static_cast<float>(static_cast<double>(l) * c.gainL * fade);
-                node.sum.r[i] += static_cast<float>(static_cast<double>(r) * c.gainR * fade);
-            }
-        }
-        // 2. Route this block's events to the note target.
-        for (Stage& st : node.chain) st.blockEvents.clear();
-        while (node.nextEvent < node.events.size() &&
-               node.events[node.nextEvent].sample < pos + n) {
-            const TimedEvent& te = node.events[node.nextEvent++];
-            if (node.noteTarget < 0) continue;
-            host::Event e = te.event;
-            e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
-            auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
-            if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
-        }
-        // 3. The FX chain, in place on `sum`.
-        for (Stage& st : node.chain) {
-            // A stage whose plugin is not processing (start_processing failed)
-            // passes audio through, delay-compensated, like a bypass.
-            if (st.bypass || !st.instance || !st.instance->processing()) {
-                st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
-                continue;
-            }
-            const float* in[2] = {node.sum.l.data(), node.sum.r.data()};
-            float* out[2] = {st.out.l.data(), st.out.r.data()};
-            host::ProcessBlock b;
-            b.inputs = st.instrument ? nullptr : in;
-            b.inputChannels = st.instrument ? 0 : 2;
-            b.outputs = out;
-            b.outputChannels = 2;
-            b.frames = n;
-            b.events = st.blockEvents;
-            b.transport = &transport;
-            b.steadyTime = pos;
-            st.outEvents.clear();
-            if (!st.instance->process(b, &st.outEvents)) return false;
-            // Dry signal delayed by the stage's latency: an instrument adds its
-            // output to what came in; an effect mixes wet and dry.
-            st.dryBuf.copyFrom(node.sum, n);
-            st.dry.process(st.dryBuf.l.data(), st.dryBuf.r.data(), n);
-            const float wet = static_cast<float>(st.wet),
-                        dryGain = st.instrument ? 1.0f : 1.0f - wet;
-            for (std::uint32_t i = 0; i < n; ++i) {
-                node.sum.l[i] =
-                    st.out.l[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.l[i] * dryGain;
-                node.sum.r[i] =
-                    st.out.r[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.r[i] * dryGain;
-            }
-        }
-        node.preFader.copyFrom(node.sum, n);
-        // 4. Width, volume, pan, mute.
-        float w = static_cast<float>(node.width);
-        float gl = node.mute ? 0.0f : static_cast<float>(node.volume * node.panL);
-        float gr = node.mute ? 0.0f : static_cast<float>(node.volume * node.panR);
-        const bool automated = node.automated();
+bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
+                 const host::Transport& transport) SUPPLE_RT {
+    Node& node = p.nodes[index];
+    // 1. Sum the inputs (fixed order), each through its compensation delay.
+    node.sum.clear(n);
+    for (std::size_t ei : node.in) {
+        Edge& e = p.edges[ei];
+        const Node& src = p.nodes[e.from];
+        const Stereo& tap = e.tap == model::Tap::PreFx      ? src.preFx
+                            : e.tap == model::Tap::PreFader ? src.preFader
+                                                            : src.post;
+        e.tmp.copyFrom(tap, n);
+        e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
+        const bool automated = e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
+        const double sign = e.invert ? -1.0 : 1.0;
+        float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
         for (std::uint32_t i = 0; i < n; ++i) {
             if (automated) {
                 const std::int64_t at = pos + i;
-                const bool muted = node.autoMute.active() ? node.autoMute.at(at) >= 0.5 : node.mute;
-                const double db =
-                    (node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb) +
-                    (node.autoTrim.active() ? node.autoTrim.at(at) : 0.0);
-                double pl = node.panL, pr = node.panR;
-                if (node.autoPan.active()) {
-                    const double pan = std::clamp(node.autoPan.at(at) / 100.0, -1.0, 1.0);
-                    if (node.master) {
-                        pl = pan <= 0 ? 1.0 : 1.0 - pan;
-                        pr = pan >= 0 ? 1.0 : 1.0 + pan;
-                    } else {
-                        std::tie(pl, pr) = panGains(pan, node.panLawDb);
-                    }
-                }
-                const double g = muted ? 0.0 : dbToGain(db);
-                gl = static_cast<float>(g * pl);
-                gr = static_cast<float>(g * pr);
-                if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
+                const double g =
+                    (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
+                        ? 0.0
+                        : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
+                const auto [pl, pr] = panGains(
+                    (e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, node.panLawDb);
+                gl = static_cast<float>(sign * g * pl);
+                gr = static_cast<float>(sign * g * pr);
             }
-            const float mid = 0.5f * (node.sum.l[i] + node.sum.r[i]);
-            const float side = 0.5f * (node.sum.l[i] - node.sum.r[i]) * w;
-            node.post.l[i] = (mid + side) * gl;
-            node.post.r[i] = (mid - side) * gr;
-        }
-        if (node.soloSilenced) {  // processed (plugin state continues) but not heard
-            node.preFx.clear(n);
-            node.preFader.clear(n);
-            node.post.clear(n);
+            float l = e.tmp.l[i], r = e.tmp.r[i];
+            if (e.mono) l = r = 0.5f * (l + r);
+            node.sum.l[i] += l * gl;
+            node.sum.r[i] += r * gr;
         }
     }
+    node.preFx.copyFrom(node.sum, n);
+    // Audio items play after the pre-FX tap, before the chain.
+    for (const Clip& c : node.clips) {
+        const std::int64_t from = std::max<std::int64_t>(pos, c.start);
+        const std::int64_t to = std::min<std::int64_t>(pos + n, c.start + c.length);
+        const auto& ch = c.data->channels;
+        const auto frames = static_cast<std::int64_t>(c.data->frames());
+        if (ch.empty() || frames == 0) continue;
+        const std::size_t right = ch.size() > 1 ? 1 : 0;
+        for (std::int64_t t = from; t < to; ++t) {
+            const std::int64_t k = t - c.start;  // sample within the item
+            std::int64_t f = c.offset + k;
+            if (c.loop) f = ((f % frames) + frames) % frames;
+            if (f < 0 || f >= frames) continue;
+            const auto fi = static_cast<std::size_t>(f);
+            float l = ch[0][fi], r = ch[right][fi];
+            switch (c.mode) {
+                case model::ChannelMode::Normal:
+                    break;
+                case model::ChannelMode::ReverseStereo:
+                    std::swap(l, r);
+                    break;
+                case model::ChannelMode::MonoMix:
+                    l = r = 0.5f * (l + r);
+                    break;
+                case model::ChannelMode::Left:
+                    r = l;
+                    break;
+                case model::ChannelMode::Right:
+                    l = r;
+                    break;
+            }
+            double fade = 1.0;
+            if (c.fadeIn > 0 && k < c.fadeIn)
+                fade *= fadeCurve(c.fadeInShape,
+                                  static_cast<double>(k) / static_cast<double>(c.fadeIn));
+            if (c.fadeOut > 0 && k >= c.length - c.fadeOut)
+                fade *= fadeCurve(c.fadeOutShape, static_cast<double>(c.length - k) /
+                                                      static_cast<double>(c.fadeOut));
+            const auto i = static_cast<std::size_t>(t - pos);
+            node.sum.l[i] += static_cast<float>(static_cast<double>(l) * c.gainL * fade);
+            node.sum.r[i] += static_cast<float>(static_cast<double>(r) * c.gainR * fade);
+        }
+    }
+    // 2. Route this block's events to the note target.
+    for (Stage& st : node.chain) st.blockEvents.clear();
+    while (node.nextEvent < node.events.size() && node.events[node.nextEvent].sample < pos + n) {
+        const TimedEvent& te = node.events[node.nextEvent++];
+        if (node.noteTarget < 0) continue;
+        host::Event e = te.event;
+        e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
+        auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
+        if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
+    }
+    // 3. The FX chain, in place on `sum`.
+    for (Stage& st : node.chain) {
+        // A stage whose plugin is not processing (start_processing failed)
+        // passes audio through, delay-compensated, like a bypass.
+        if (st.bypass || !st.instance || !st.instance->processing()) {
+            st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
+            continue;
+        }
+        const float* in[2] = {node.sum.l.data(), node.sum.r.data()};
+        float* out[2] = {st.out.l.data(), st.out.r.data()};
+        host::ProcessBlock b;
+        b.inputs = st.instrument ? nullptr : in;
+        b.inputChannels = st.instrument ? 0 : 2;
+        b.outputs = out;
+        b.outputChannels = 2;
+        b.frames = n;
+        b.events = st.blockEvents;
+        b.transport = &transport;
+        b.steadyTime = pos;
+        st.outEvents.clear();
+        if (!st.instance->process(b, &st.outEvents)) return false;
+        // Dry signal delayed by the stage's latency: an instrument adds its
+        // output to what came in; an effect mixes wet and dry.
+        st.dryBuf.copyFrom(node.sum, n);
+        st.dry.process(st.dryBuf.l.data(), st.dryBuf.r.data(), n);
+        const float wet = static_cast<float>(st.wet), dryGain = st.instrument ? 1.0f : 1.0f - wet;
+        for (std::uint32_t i = 0; i < n; ++i) {
+            node.sum.l[i] = st.out.l[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.l[i] * dryGain;
+            node.sum.r[i] = st.out.r[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.r[i] * dryGain;
+        }
+    }
+    node.preFader.copyFrom(node.sum, n);
+    // 4. Width, volume, pan, mute.
+    float w = static_cast<float>(node.width);
+    float gl = node.mute ? 0.0f : static_cast<float>(node.volume * node.panL);
+    float gr = node.mute ? 0.0f : static_cast<float>(node.volume * node.panR);
+    const bool automated = node.automated();
+    for (std::uint32_t i = 0; i < n; ++i) {
+        if (automated) {
+            const std::int64_t at = pos + i;
+            const bool muted = node.autoMute.active() ? node.autoMute.at(at) >= 0.5 : node.mute;
+            const double db = (node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb) +
+                              (node.autoTrim.active() ? node.autoTrim.at(at) : 0.0);
+            double pl = node.panL, pr = node.panR;
+            if (node.autoPan.active()) {
+                const double pan = std::clamp(node.autoPan.at(at) / 100.0, -1.0, 1.0);
+                if (node.master) {
+                    pl = pan <= 0 ? 1.0 : 1.0 - pan;
+                    pr = pan >= 0 ? 1.0 : 1.0 + pan;
+                } else {
+                    std::tie(pl, pr) = panGains(pan, node.panLawDb);
+                }
+            }
+            const double g = muted ? 0.0 : dbToGain(db);
+            gl = static_cast<float>(g * pl);
+            gr = static_cast<float>(g * pr);
+            if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
+        }
+        const float mid = 0.5f * (node.sum.l[i] + node.sum.r[i]);
+        const float side = 0.5f * (node.sum.l[i] - node.sum.r[i]) * w;
+        node.post.l[i] = (mid + side) * gl;
+        node.post.r[i] = (mid - side) * gr;
+    }
+    if (node.soloSilenced) {  // processed (plugin state continues) but not heard
+        node.preFx.clear(n);
+        node.preFader.clear(n);
+        node.post.clear(n);
+    }
     return true;
+}
+
+bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
+    const host::Transport transport = transportAt(p, pos);
+    for (std::size_t i = 0; i < p.nodes.size(); ++i)
+        if (!processNode(p, i, pos, n, transport)) return false;
+    return true;
+}
+
+namespace {
+struct BlockRun {
+    Plan* plan;
+    std::int64_t pos;
+    std::uint32_t frames;
+    const host::Transport* transport;
+    std::atomic<bool> ok{true};
+};
+void runNode(void* ctx, std::uint32_t index) SUPPLE_RT {
+    auto* b = static_cast<BlockRun*>(ctx);
+    if (!processNode(*b->plan, index, b->pos, b->frames, *b->transport))
+        b->ok.store(false, std::memory_order_relaxed);
+}
+}  // namespace
+
+bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t n) {
+    const host::Transport transport = transportAt(p, pos);
+    BlockRun run{&p, pos, n, &transport};
+    workers.run(*p.graph, &runNode, &run);
+    return run.ok.load(std::memory_order_relaxed);
 }
 
 void locate(Plan& p, std::int64_t pos) SUPPLE_RT {

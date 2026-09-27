@@ -14,6 +14,7 @@
 
 #include "supple/engine/offline.h"
 #include "supple/time/timeline.h"
+#include "workers.h"
 
 namespace supple::engine::detail {
 
@@ -194,6 +195,7 @@ struct Plan {
     std::filesystem::path projectDir;
     MediaCache* media = nullptr;
     std::vector<host::Instance*> instances;  // every instance the plan processes, sorted
+    std::unique_ptr<TaskGraph> graph;        // node dependencies, for processBlockOn
 };
 
 // Builds the plan's structure (nodes in topological order, edges, plugin
@@ -204,8 +206,15 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
 // Main thread: activates new instances, measures latencies, sizes buffers
 // and delays, compiles events and clips.
 Status prepare(Plan& p, const Session& s);
-// Audio thread: one block of every node at plan sample `pos`.
+// Audio thread: one block of node `index` at plan sample `pos` (its sources
+// must have been processed for this block).
+bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t frames,
+                 const host::Transport& transport) SUPPLE_RT;
+// Audio thread: one block of every node at plan sample `pos`, in order.
 bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames) SUPPLE_RT;
+// The same on the worker pool (the caller helps): bit-identical results.
+// Not SUPPLE_RT itself (it wakes the helpers); every node task is.
+bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t frames);
 // Audio thread: repositions every playback cursor at `pos` (events,
 // automation) and clears delay lines. Plugins are not touched.
 void locate(Plan& p, std::int64_t pos) SUPPLE_RT;

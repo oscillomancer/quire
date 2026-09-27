@@ -86,6 +86,7 @@ enum class BackendArg { Jack, Dummy };
 struct EngineStartArgs {
     std::optional<BackendArg> backend;
     std::optional<std::int64_t> block;
+    std::optional<bool> anticipative;
 };
 struct SeekArgs {
     std::optional<double> seconds, beat;
@@ -105,6 +106,8 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("cycles", &EngineStatus::cycles, schema::integer())
         .field("process_errors", &EngineStatus::processErrors, schema::integer())
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
+        .field("anticipative", &EngineStatus::anticipative, schema::boolean())
+        .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
         .build();
 }
 
@@ -1599,14 +1602,17 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Start real-time playback on the audio device (jack) or without one (dummy).";
         c.description =
             "backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, "
-            "paced like one). block: the engine's block in frames (default 256); the device's "
-            "period may differ and is reported. The project must run at the device's rate.";
+            "paced like one). block: the device block in frames (default 256); the device's "
+            "period may differ and is reported. anticipative (default true): render ahead of "
+            "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
+            "everything in the audio callback. The project must run at the device's rate.";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
                             schema::enumeration<BackendArg>(
                                 {{BackendArg::Jack, "jack"}, {BackendArg::Dummy, "dummy"}}))
                      .field("block", &EngineStartArgs::block, schema::integer().range(16, 4096))
+                     .field("anticipative", &EngineStartArgs::anticipative, schema::boolean())
                      .build();
         c.result = engineStatusSchema();
         c.errors = {{"engine.running", "the engine is already running", "engine.stop first"},
@@ -1617,13 +1623,15 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
-                     "cycles": "<any>", "process_errors": 0, "restart_needed": false})"),
+                     "cycles": "<any>", "process_errors": 0, "restart_needed": false,
+                     "anticipative": true, "anticipation_misses": 0})"),
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
             const bool dummy = a.backend.value_or(BackendArg::Jack) == BackendArg::Dummy;
             SUPPLE_TRY(app.startEngine(dummy ? "dummy" : "jack",
-                                       static_cast<std::uint32_t>(a.block.value_or(256))));
+                                       static_cast<std::uint32_t>(a.block.value_or(256)),
+                                       a.anticipative.value_or(true)));
             return app.engineStatus();
         };
         registry.add(std::move(c));
@@ -1660,7 +1668,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.examples = {{"Not running", obj("{}"),
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
-                     "cycles": 0, "process_errors": 0, "restart_needed": false})"),
+                     "cycles": 0, "process_errors": 0, "restart_needed": false,
+                     "anticipative": false, "anticipation_misses": 0})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();

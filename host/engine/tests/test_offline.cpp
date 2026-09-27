@@ -374,3 +374,47 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
     CHECK(r3->warnings[0].find("44100") != std::string::npos);
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("offline renders are bit-identical for any thread count (B4)") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id folder = addTrack(t, "Folder");
+    const Id busA = addTrack(t, "Bus A");
+    const Id busB = addTrack(t, "Bus B");
+    addFx(t, busB, kGain,
+          json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+              .value());
+    for (int i = 0; i < 10; ++i) {
+        const Id tr = addTrack(t, "T" + std::to_string(i), i % 3 == 0 ? folder : kMaster);
+        addFx(t, tr, kSine);
+        if (i % 4 == 1)
+            addFx(t, tr, kGain,
+                  json::parse(
+                      R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+                      .value());
+        addNote(t, tr, 0.25 * i, 2.0, 48 + 3 * i, 60 + 5 * i);
+        t.modify<model::Track>(tr, [&](model::Track& x) {
+            x.volumeDb = -1.0 * i;
+            x.pan = -90.0 + 20.0 * i;
+        });
+        model::Route send;
+        send.from.track = tr;
+        send.to.track = i % 2 ? busA : busB;
+        send.tap = i % 3 ? model::Tap::PostFader : model::Tap::PreFader;
+        send.volumeDb = -3.0 - i;
+        t.create(send);
+    }
+    const auto s = commit(t);
+    std::vector<OfflineResult> runs;
+    for (unsigned threads : {1u, 2u, 8u}) {
+        auto r =
+            renderOffline(s, pool, {.startSeconds = 0.0, .endSeconds = 2.0, .threads = threads});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        runs.push_back(std::move(*r));
+    }
+    CHECK(peak(runs[0].audio.channels[0]) > 0.01);
+    for (const OfflineResult& r : runs) {
+        CHECK(r.audio.channels[0] == runs[0].audio.channels[0]);
+        CHECK(r.audio.channels[1] == runs[0].audio.channels[1]);
+    }
+}

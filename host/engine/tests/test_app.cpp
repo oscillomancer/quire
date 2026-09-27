@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <thread>
@@ -218,8 +219,8 @@ TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)"
     CHECK(status["period"].asInt() == 1024);
     CHECK(status["device_latency"].asInt() == 512);
     CHECK(call("transport.play", "{}")["playing"].asBool());
-    const auto until = fake.cycles() + 10;
-    while (fake.cycles() < until) std::this_thread::yield();
+    for (int i = 0; i < 5000 && fake.outputPeak("") <= 0.01f; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     CHECK(fake.outputPeak("") > 0.01f);
     CHECK(call("transport.get", "{}")["sample"].asInt() > 0);
 

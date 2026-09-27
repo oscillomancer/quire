@@ -281,7 +281,7 @@
   {
     "name": "engine_start",
     "title": "Start real-time playback on the audio device (jack) or without one (dummy).",
-    "description": "Start real-time playback on the audio device (jack) or without one (dummy). backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the engine's block in frames (default 256); the device's period may differ and is reported. The project must run at the device's rate. See describe for errors and examples.",
+    "description": "Start real-time playback on the audio device (jack) or without one (dummy). backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The project must run at the device's rate. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "engine_start_args",
@@ -294,6 +294,9 @@
           "type": "integer",
           "minimum": 16.0,
           "maximum": 4096.0
+        },
+        "anticipative": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -334,6 +337,12 @@
         },
         "restart_needed": {
           "type": "boolean"
+        },
+        "anticipative": {
+          "type": "boolean"
+        },
+        "anticipation_misses": {
+          "type": "integer"
         }
       },
       "required": [
@@ -347,7 +356,9 @@
         "xruns",
         "cycles",
         "process_errors",
-        "restart_needed"
+        "restart_needed",
+        "anticipative",
+        "anticipation_misses"
       ],
       "additionalProperties": false
     },
@@ -403,6 +414,12 @@
         },
         "restart_needed": {
           "type": "boolean"
+        },
+        "anticipative": {
+          "type": "boolean"
+        },
+        "anticipation_misses": {
+          "type": "integer"
         }
       },
       "required": [
@@ -416,7 +433,9 @@
         "xruns",
         "cycles",
         "process_errors",
-        "restart_needed"
+        "restart_needed",
+        "anticipative",
+        "anticipation_misses"
       ],
       "additionalProperties": false
     },
