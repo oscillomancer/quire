@@ -249,10 +249,10 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
     return Error("engine.automation", in.info().name + " has no parameter \"" + param + "\"");
 }
 
-Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
-                     std::uint32_t block) {
+Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
+                     double rate) {
     Plan p;
-    p.rate = s.project->sampleRate;
+    p.rate = rate > 0 ? rate : s.project->sampleRate;
     p.block = block;
     p.startSeconds = startSeconds;
     p.timeMap = s.timeMap;
@@ -546,16 +546,10 @@ Status prepare(Plan& p, const Session& s) {
                 const auto inMedia = p.projectDir / s.project->mediaDir / path;
                 path = std::filesystem::exists(inMedia) ? inMedia : p.projectDir / path;
             }
-            auto data = p.media->get(path);
+            auto data = p.media->get(path, p.rate);  // resampled to the plan's rate
             if (!data) {
                 p.warnings.push_back(e.id.str() + ": " + data.error().message + " (media " +
                                      take->source->str() + " is offline)");
-                continue;
-            }
-            if ((*data)->sampleRate != p.rate) {
-                p.warnings.push_back(e.id.str() + ": " + take->source->str() + " is at " +
-                                     std::to_string(static_cast<int>((*data)->sampleRate)) +
-                                     " Hz; resampling is not available yet, the item is silent");
                 continue;
             }
             if (take->playrate != 1.0)

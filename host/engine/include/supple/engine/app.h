@@ -192,6 +192,7 @@ class EngineApp : public cmd::Host {
   private:
     explicit EngineApp(AppOptions options);
     Result<host::Instance*> scratch(const model::FxInstance& fx);
+    bool inRecordDir(const std::filesystem::path& file) const;
     void headChanged();  // reload the real-time engine
 
     AppOptions options_;

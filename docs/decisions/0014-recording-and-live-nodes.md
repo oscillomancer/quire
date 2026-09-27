@@ -181,3 +181,25 @@ when the machine is busiest, during a recording session).
   and recovered at its original position and length (one undo step); a
   crashed file whose header covers half the audio plays in full after
   recovery onto another track; header repair unit test.
+
+## Review round 8 fixes (2026-09-27)
+
+- `stopRecording` no longer frees the recorder on a timeout: the callback
+  marks itself in a cycle (`cycleSeq_` odd, seq_cst with the recorder
+  pointer), and the main thread waits for the cycle in progress to end; if
+  it has not ended after 2 s the recorder is kept and `record.busy` is
+  returned (a later stop, or `engine.stop`, finishes it).
+- Two armed tracks whose names sanitize alike get distinct files (paths
+  chosen in this recording are reserved), and the writer creates files
+  exclusively (`fopen "wbx"`), so no take can truncate another's.
+- Recovery considers only regular files directly in a real `rec/`
+  directory (no symlinks, for the directory or the file; checked when
+  listing and again before repair), and inspect/repair open with
+  `O_NOFOLLOW`. A file listed twice is `recover.duplicate_file`.
+- Anticipative capture records only the input that went with played audio:
+  a pull reports how many frames came from rendered chunks; input during a
+  renderer dropout (partly or wholly unplayed cycles, while playing) counts
+  as `lost_frames`. The take stays on the timeline: its frames are exactly
+  what was heard.
+- Media resampling (same commit): see engine.md §Media resampling; the
+  real-time engine now runs at the device's rate.

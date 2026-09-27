@@ -211,8 +211,14 @@ class Engine {
                            std::uint32_t frames) SUPPLE_RT;
     void liveRender(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;
-    // Returns the timeline sample of the first frame played, or kNothingPlayed.
-    std::int64_t pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
+    // What a pull played: the timeline sample of its first frame (or
+    // kNothingPlayed) and how many frames, from the start of the buffer, came
+    // from rendered chunks (the rest is silence: the renderer fell behind).
+    struct Pulled {
+        std::int64_t first;
+        std::uint32_t frames;
+    };
+    Pulled pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
     static constexpr std::int64_t kNothingPlayed = INT64_MIN;
     void rendererLoop(std::uint64_t firstEpoch);
     void relocate(std::uint64_t previous, std::uint64_t epoch);
@@ -298,9 +304,12 @@ class Engine {
     std::int64_t livePos_ = 0;
     bool liveReady_ = false;  // livePos_ is valid for rtEpoch_
 
-    // Recording: the callback captures while recorder_ is set.
+    // Recording: the callback captures while recorder_ is set. cycleSeq_ is
+    // odd while a callback runs (seq_cst with recorder_, so stopRecording
+    // knows when no callback can still hold the recorder).
     std::unique_ptr<detail::Recorder> recorderOwned_;
     std::atomic<detail::Recorder*> recorder_{nullptr};
+    std::atomic<std::uint64_t> cycleSeq_{0};
 };
 
 }  // namespace supple::engine

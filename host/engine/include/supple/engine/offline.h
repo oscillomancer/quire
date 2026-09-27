@@ -75,7 +75,11 @@ class InstancePool {
 // renders; the engine's disk-backed, resampling media cache replaces it.
 class MediaCache {
   public:
-    Result<std::shared_ptr<const audio::AudioData>> get(const std::filesystem::path& path);
+    // Decoded audio at `rate` (resampled once, then kept; 0: the file's own
+    // rate). The resampler is deterministic, so every cache gives the same
+    // samples (offline ≡ real time).
+    Result<std::shared_ptr<const audio::AudioData>> get(const std::filesystem::path& path,
+                                                        double rate = 0);
     std::size_t size() const { return entries_.size(); }
 
   private:

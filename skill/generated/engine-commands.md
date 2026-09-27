@@ -397,7 +397,7 @@ Result:
 
 Start real-time playback on the audio device (jack) or without one (dummy).
 
-backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The project must run at the device's rate.
+backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -488,7 +488,6 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `engine.running`: the engine is already running Hint: engine.stop first
 - `backend.unavailable`: JACK is not installed Hint: install pipewire-jack
 - `backend.open`: no JACK server answered Hint: is PipeWire running?
-- `engine.sample_rate`: the project's rate is not the device's Hint: match them
 
 ### Examples
 
@@ -2278,6 +2277,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `recover.nothing`: there is nothing to recover Hint: project.recoverable
 - `recover.unknown_file`: a file is not a recording to recover Hint: project.recoverable lists them
+- `recover.duplicate_file`: a file is listed twice Hint: list each once
 - `recover.no_track`: the track it was recorded on is gone Hint: give track
 
 ### Examples
@@ -3303,6 +3303,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
 - `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
+- `record.busy`: the audio callback did not return for 2 s (still recording) Hint: stop again, or engine.stop (the files stay recoverable)
 
 ### Examples
 
@@ -3401,6 +3402,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
 - `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
+- `record.busy`: the audio callback did not return for 2 s (still recording) Hint: stop again, or engine.stop (the files stay recoverable)
 
 ### Examples
 
@@ -3499,6 +3501,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
 - `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
+- `record.busy`: the audio callback did not return for 2 s (still recording) Hint: stop again, or engine.stop (the files stay recoverable)
 
 ### Examples
 
@@ -3700,6 +3703,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
 - `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
+- `record.busy`: the audio callback did not return for 2 s (still recording) Hint: stop again, or engine.stop (the files stay recoverable)
 
 ### Examples
 

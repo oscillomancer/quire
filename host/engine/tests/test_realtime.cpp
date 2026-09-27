@@ -376,21 +376,39 @@ TEST_CASE("the engine survives the JACK server going away") {
     fake.reset();
 }
 
-TEST_CASE("the engine refuses a session at a rate the graph does not run") {
-    FakeJack& fake = fakeJack();
-    fake.reset();
-    fake.setRate(44100);
-    auto pool = makePool();
-    MediaCache media;
-    JackBackend::Options o;
-    o.library = FakeJack::kPath;
-    JackBackend backend(o);
-    Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    auto st = engine.load(synthSession(0.0));  // the session runs at 48 kHz
-    CHECK_FALSE(st.ok());
-    engine.stop();
-    fake.reset();
+TEST_CASE("the engine runs a session at the device's rate, not the project's") {
+    // A 48 kHz project on a 44.1 kHz device: notes land at the same seconds
+    // (0.25 s long, one per beat at 120 BPM) and the plugin runs at 44.1 kHz.
+    for (bool anticipative : {false, true}) {
+        CAPTURE(anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 44100});
+        EngineOptions options;
+        options.anticipative = anticipative;
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 44100, .blockSize = 147}).ok());
+        const model::Session s = synthSession(0.0);
+        REQUIRE(s.project->sampleRate == 48000.0);
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (anticipative)
+            runAhead(engine, backend, 44100 / 147, 147);
+        else
+            backend.run(44100 / 147);
+        engine.stop();
+        const auto& L = backend.capture().channels[0];
+        REQUIRE(L.size() >= 44100);
+        auto energy = [&](std::size_t from, std::size_t to) {
+            double e = 0;
+            for (std::size_t i = from; i < to; ++i) e += double(L[i]) * double(L[i]);
+            return e;
+        };
+        CHECK(energy(0, 11000) > 1.0);       // note 1: 0 to 0.25 s
+        CHECK(energy(11030, 22045) == 0.0);  // silence to beat 1
+        CHECK(energy(22055, 33000) > 1.0);   // note 2 from 0.5 s = 22050
+        CHECK(engine.transport().seconds == doctest::Approx(1.0));
+    }
 }
 
 TEST_CASE(
@@ -705,6 +723,49 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
         engine.stop();
         std::filesystem::remove_all(dir);
     }
+}
+
+TEST_CASE("recording through a playback dropout keeps the take on the timeline" *
+          doctest::description("rt")) {
+    // The renderer stalls mid-take (a 384-frame block against 1024-frame
+    // chunks, so one cycle is half played). Input that went with played
+    // audio is recorded; input during the dropout had no timeline position
+    // and is counted as lost, never recorded as if it had been heard.
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Manual,
+         .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
+             for (std::uint32_t c = 0; c < channels; ++c)
+                 for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.5f;
+         }});
+    Engine engine(pool, media, EngineOptions{});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 384, .inputs = 2}).ok());
+    const model::Session s = synthSession(0.0);
+    REQUIRE(engine.load(s).ok());
+    Id track;
+    for (const auto& e : s.tracks)
+        if (e.id != kMaster) track = e.id;
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-rec-gap-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav"}}).ok());
+    engine.play();
+    runAhead(engine, backend, 20, 384);
+    engine.holdRenderer(true);
+    backend.run(80);  // 30720 frames: more than was rendered ahead
+    engine.holdRenderer(false);
+    runAhead(engine, backend, 20, 384);
+    CHECK(engine.anticipationMisses() > 0);
+    auto takes = engine.stopRecording();
+    REQUIRE(takes);
+    const RecordedTake& t = (*takes)[0];
+    CHECK(t.startSample == 0);
+    CHECK(t.overflowFrames > 0);
+    CHECK(t.frames + static_cast<std::int64_t>(t.overflowFrames) == 120 * 384);
+    CHECK(t.frames == engine.transport().sample);  // exactly what was heard
+    engine.stop();
+    std::filesystem::remove_all(dir);
 }
 
 namespace {

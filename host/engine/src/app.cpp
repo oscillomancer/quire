@@ -384,10 +384,15 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             std::string base;
             for (char c : tr.name.empty() ? e.id.str() : tr.name)
                 base += std::isalnum(static_cast<unsigned char>(c)) ? c : '-';
-            for (int n = 1;; ++n) {
+            for (int n = 1;; ++n) {  // (the writer also creates it exclusively)
                 t.file = dir / (base + "-" + std::to_string(n) + ".wav");
                 std::error_code ec;
-                if (!fs::exists(t.file, ec) && !fs::exists(detail::sidecarPath(t.file), ec)) break;
+                const bool taken =
+                    std::any_of(targets.begin(), targets.end(),
+                                [&](const RecordTarget& o) { return o.file == t.file; });
+                if (!taken && !fs::exists(t.file, ec) &&
+                    !fs::exists(detail::sidecarPath(t.file), ec))
+                    break;
             }
             targets.push_back(std::move(t));
         }
@@ -405,8 +410,8 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         if (action == "stop") engine_->seek(playStart_);
         if (engine_->recording()) {
             auto takes = engine_->stopRecording();
+            if (!takes) return std::move(takes).error();  // record.busy: still recording
             recordingFiles_.clear();
-            if (!takes) return std::move(takes).error();
             auto committed = commitTakes(*takes);
             if (!committed) return std::move(committed).error();
             recorded = std::move(*committed);
@@ -494,11 +499,21 @@ fs::path comparable(const fs::path& p) {
 
 }  // namespace
 
+// Only regular files directly in a real rec/ directory: recovery rewrites
+// headers, so nothing reached through a link is touched.
+bool EngineApp::inRecordDir(const fs::path& file) const {
+    std::error_code ec;
+    const fs::path dir = recordDir();
+    return fs::is_directory(fs::symlink_status(dir, ec)) &&
+           fs::is_regular_file(fs::symlink_status(file, ec)) &&
+           fs::equivalent(file.parent_path(), dir, ec) && !ec;
+}
+
 std::vector<RecoverableInfo> EngineApp::recoverable() const {
     std::vector<RecoverableInfo> out;
     const fs::path dir = recordDir();
     std::error_code ec;
-    if (!fs::is_directory(dir, ec)) return out;
+    if (!fs::is_directory(fs::symlink_status(dir, ec))) return out;
     // Every file a version uses, resolved the way plans resolve media.
     std::set<fs::path> used;
     const fs::path projectDir = projectPath_.empty() ? fs::path() : projectPath_.parent_path();
@@ -521,7 +536,7 @@ std::vector<RecoverableInfo> EngineApp::recoverable() const {
     std::sort(files.begin(), files.end());
     const fs::path media = mediaDir();
     for (const fs::path& f : files) {
-        if (used.count(comparable(f))) continue;
+        if (!inRecordDir(f) || used.count(comparable(f))) continue;
         auto side = detail::readSidecar(f);  // none: not a recording, or capture never began
         if (!side || !(side->sampleRate > 0)) continue;
         auto info = audio::inspectWavStream(f);
@@ -552,6 +567,9 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
         if (it == all.end())
             return Error("recover.unknown_file", files[i] + " is not a recording to recover",
                          "/files/" + std::to_string(i), "project.recoverable lists them");
+        if (std::find(chosen.begin(), chosen.end(), &*it) != chosen.end())
+            return Error("recover.duplicate_file", files[i] + " is listed twice",
+                         "/files/" + std::to_string(i));
         chosen.push_back(&*it);
     }
     const model::Session& s = head();
@@ -571,6 +589,9 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
         takes.push_back(std::move(t));
     }
     for (RecordedTake& t : takes) {
+        if (!inRecordDir(t.file))  // replaced since it was listed
+            return Error("recover.unknown_file",
+                         t.file.string() + " is not a recording to recover");
         auto frames = audio::repairWavStream(t.file);
         if (!frames) return std::move(frames).error();
         t.frames = static_cast<std::int64_t>(*frames);

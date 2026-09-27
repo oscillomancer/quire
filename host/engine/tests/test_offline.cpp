@@ -367,11 +367,25 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
     model::EditTxn t3(s, 2);
     t3.modify<model::MediaSource>(md, [](model::MediaSource& m) { m.path = "slow.wav"; });
     (void)it;
-    auto r3 =
-        renderOffline(commit(t3), pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir});
+    // A file at another rate is resampled: the same ramp, 44.1 kHz frames
+    // spaced at 48 kHz, the take offset still 0.1 s (4410 source frames).
+    const model::Session slow = commit(t3);
+    auto r3 = renderOffline(
+        slow, pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir, .media = &media});
     REQUIRE(r3);
-    REQUIRE(r3->warnings.size() == 1);
-    CHECK(r3->warnings[0].find("44100") != std::string::npos);
+    CHECK(r3->warnings.empty());
+    CHECK(peak(r3->audio.channels[0], 36000) == 0.0);
+    for (int k : {480, 1000, 11999}) {
+        const auto i = static_cast<std::size_t>(24000 + k);
+        const double src = (4410.0 + k * 44100.0 / 48000.0) / 48000.0;
+        CHECK(double(r3->audio.channels[0][i]) == doctest::Approx(src * kCentre).epsilon(1e-3));
+        CHECK(double(r3->audio.channels[1][i]) == doctest::Approx(-src * kCentre).epsilon(1e-3));
+    }
+    CHECK(media.size() == 2);
+    auto again =
+        renderOffline(slow, pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir});
+    REQUIRE(again);  // a fresh cache resamples to the same samples
+    CHECK(again->audio.channels == r3->audio.channels);
     std::filesystem::remove_all(dir);
 }
 

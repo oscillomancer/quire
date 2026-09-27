@@ -329,8 +329,9 @@ granted, and CPU governor (read-only facts).
   `PIPEWIRE_QUANTUM` is not used because pipewire-jack maps it to
   `node.force-quantum` + `node.force-rate` (the whole graph).
   `forceBufferSize` (`jack_set_buffer_size`) is the opt-in for benchmarks.
-  The granted rate is the engine's rate (a project at another rate is refused
-  with `engine.sample_rate`; resampling comes with media resampling). Stop:
+  The granted rate is the engine's rate; a project at another rate plays at
+  the device's (positions are in seconds, media is resampled to the plan's
+  rate, plugins are activated at it; renders stay at the project's rate). Stop:
   the next process cycle makes the final zero-frame callback; if the server
   is gone or no cycle comes within 2 s, the client is deactivated and closed
   and the engine stops its plugins on the main thread. Xruns (server
@@ -390,9 +391,18 @@ granted, and CPU governor (read-only facts).
   `env.remove`, `env.list` (values in the parameter's unit; text like
   "800 Hz" for plugins). Write/touch/latch recording is not implemented.
 - **Recording and input monitoring** (ADR-0014): see the ADR's
-  implementation notes (recording; the live region with two executors).
+  implementation notes (recording; the live region with two executors;
+  crash recovery).
+- **Media resampling:** `MediaCache::get(path, rate)` decodes and resamples
+  once per (file, rate) with the audio-file polyphase resampler (Kaiser
+  windowed sinc; deterministic, so offline ≡ real time); plans ask for their
+  own rate. The real-time engine compiles at the device's rate, so a project
+  at another rate plays (previously refused). The cache is in memory and the
+  resampling is synchronous at plan compile — the disk-backed, content-hashed
+  cache and background decode above are still to come.
 - **Not yet:** live multiprocessing,
   one shared process for `shared_bridge`,
   automatic restart after device changes, MIDI ports, automation recording
-  (write/touch/latch), stems and render jobs, resampling/stretching of audio items,
-  the 10 ms crossfade on structural swaps, the B1 capacity benchmark.
+  (write/touch/latch), stems and render jobs, stretching/playrate of audio items,
+  the 10 ms crossfade on structural swaps, B1 proper (preliminary:
+  docs/benchmarks/b1-preliminary.md).

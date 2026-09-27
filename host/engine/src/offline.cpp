@@ -104,12 +104,18 @@ host::Instance* InstancePool::find(Id id) const {
 
 // --- media -----------------------------------------------------------------------------
 
-Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::filesystem::path& path) {
-    const std::string key = path.lexically_normal().string();
+Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::filesystem::path& path,
+                                                                double rate) {
+    const std::string key = path.lexically_normal().string() + "@" + json::formatDouble(rate);
     auto it = entries_.find(key);
     if (it != entries_.end()) return it->second;
     auto data = audio::readAudio(path);
     if (!data) return std::move(data).error();
+    if (rate > 0 && data->sampleRate != rate) {
+        auto resampled = audio::resample(*data, rate);
+        if (!resampled) return std::move(resampled).error();
+        data = std::move(*resampled);
+    }
     auto shared = std::make_shared<const audio::AudioData>(std::move(*data));
     entries_.emplace(key, shared);
     return shared;

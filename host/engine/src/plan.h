@@ -320,9 +320,11 @@ struct Plan {
 
 // Builds the plan's structure (nodes in topological order, edges, plugin
 // instances from the pool, automation). `startSeconds` is the timeline
-// origin of sample 0 (0 for the real-time engine).
-Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
-                     std::uint32_t block);
+// origin of sample 0 (0 for the real-time engine). `rate`: the rate the plan
+// runs at (0: the project's; the real-time engine runs at the device's —
+// positions are in seconds and media is resampled, so any rate works).
+Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
+                     double rate = 0);
 // Main thread: activates new instances, measures latencies, sizes buffers
 // and delays, compiles events and clips.
 Status prepare(Plan& p, const Session& s);

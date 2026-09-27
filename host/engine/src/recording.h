@@ -57,6 +57,8 @@ class Recorder {
     // Audio thread: `pos` is the timeline sample of this callback's output.
     void capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
                  std::int64_t pos) SUPPLE_RT;
+    // Audio thread: input that could not be placed (a playback dropout).
+    void lose(std::uint32_t frames) SUPPLE_RT;
     // Main thread, once capture() can no longer run: drains, closes, reports.
     std::vector<RecordedTake> finish();
 

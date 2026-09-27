@@ -694,6 +694,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.errors = {{"recover.nothing", "there is nothing to recover", "project.recoverable"},
                     {"recover.unknown_file", "a file is not a recording to recover",
                      "project.recoverable lists them"},
+                    {"recover.duplicate_file", "a file is listed twice", "list each once"},
                     {"recover.no_track", "the track it was recorded on is gone", "give track"}};
         c.examples = {{"Recover everything", obj("{}"),
                        obj(R"({"recovered": [{"track": "tr_1", "item": "it_1", "take": "tk_1",
@@ -1139,10 +1140,6 @@ void registerEngineCommands(cmd::Registry& registry) {
                     const double secs = data->seconds();
                     length = s.timeMap->beatAt(s.timeMap->secondsAt(pos) + secs) - pos;
                 }
-                if (data->sampleRate != s.project->sampleRate)
-                    r.warnings = std::vector<std::string>{
-                        "the file is at " + std::to_string(static_cast<int>(data->sampleRate)) +
-                        " Hz; it plays silent until resampling lands"};
                 const Id md_ = t.create(std::move(md));
                 take.source = md_;
                 r.source = md_.str();
@@ -2167,7 +2164,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             "paced like one). block: the device block in frames (default 256); the device's "
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
-            "everything in the audio callback. The project must run at the device's rate.";
+            "everything in the audio callback. The engine runs at the device's rate (media "
+            "is resampled; renders stay at the project's rate).";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
@@ -2179,8 +2177,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result = engineStatusSchema();
         c.errors = {{"engine.running", "the engine is already running", "engine.stop first"},
                     {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
-                    {"backend.open", "no JACK server answered", "is PipeWire running?"},
-                    {"engine.sample_rate", "the project's rate is not the device's", "match them"}};
+                    {"backend.open", "no JACK server answered", "is PipeWire running?"}};
         c.examples = {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
@@ -2254,10 +2251,11 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.tags = {"transport"};
         c.args = schema::object<NoArgs>("no_args").build();
         c.result = transportSchema();
-        c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
         c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"},
                     {"record.nothing_armed", "no armed track has an input",
-                     "track.set {armed: true, record_input: [1, 2]}"}};
+                     "track.set {armed: true, record_input: [1, 2]}"},
+                    {"record.busy", "the audio callback did not return for 2 s (still recording)",
+                     "stop again, or engine.stop (the files stay recoverable)"}};
         const bool rec = std::string(action) == "record";
         c.examples = {{"While the engine runs", obj("{}"),
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +

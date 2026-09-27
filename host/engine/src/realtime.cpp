@@ -182,15 +182,11 @@ void Engine::stop() {
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
     if (!backend_) return Error("engine.stopped", "start the engine first");
-    if (session.project->sampleRate != config_.sampleRate)
-        return Error("engine.sample_rate",
-                     "the project is at " + std::to_string(session.project->sampleRate) +
-                         " Hz, the device at " + std::to_string(config_.sampleRate),
-                     {}, "run the project and the device at the same rate");
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
     auto compiled = detail::compile(
-        session, plugins_, 0.0, options_.anticipative ? options_.renderBlock : config_.blockSize);
+        session, plugins_, 0.0, options_.anticipative ? options_.renderBlock : config_.blockSize,
+        config_.sampleRate);  // the device's rate, whatever the project's
     if (!compiled) return std::move(compiled).error();
     auto plan = std::make_unique<detail::Plan>(std::move(*compiled));
     plan->projectDir = projectDir;
@@ -366,6 +362,11 @@ void Engine::resetOwned(const std::vector<host::Instance*>& owned) SUPPLE_RT {
 }
 
 void Engine::cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT {
+    struct InCycle {  // cycleSeq_ is odd from here until return
+        std::atomic<std::uint64_t>& seq;
+        explicit InCycle(std::atomic<std::uint64_t>& s) : seq(s) { seq.fetch_add(1); }
+        ~InCycle() { seq.fetch_add(1, std::memory_order_release); }
+    } inCycle(cycleSeq_);
     if (frames == 0) {  // the backend's final callback: stop every plugin here
         // Anticipative: the renderer stopped its share as it ended; the live
         // share is this thread's.
@@ -449,8 +450,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         const detail::Node& master = plan->nodes.back();
         std::copy_n(master.post.l.begin(), frames, out[0]);
         std::copy_n(master.post.r.begin(), frames, out[1]);
-        if (detail::Recorder* r = recorder_.load(std::memory_order_acquire))
-            r->capture(in, deviceInputs_, frames, pos_);
+        if (detail::Recorder* r = recorder_.load()) r->capture(in, deviceInputs_, frames, pos_);
         pos_ += frames;
     } else {
         if (run) processErrors_.fetch_add(1);
@@ -464,7 +464,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
 
 // --- anticipation (ADR-0012) -----------------------------------------------------------------
 
-std::int64_t Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
+Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
     std::int64_t first = kNothingPlayed;
     const std::uint64_t e = epoch_.load(std::memory_order_acquire);
     if (e != rtEpoch_) {
@@ -502,7 +502,7 @@ std::int64_t Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_R
             misses_.fetch_add(1, std::memory_order_relaxed);
     }
     if (done > 0) rtPrimed_ = true;
-    return first;
+    return {first, done};
 }
 
 // --- recording (ADR-0014) --------------------------------------------------------------------
@@ -525,14 +525,18 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
 
 Result<std::vector<RecordedTake>> Engine::stopRecording() {
     if (!recorderOwned_) return Error("record.stopped", "not recording");
-    recorder_.store(nullptr, std::memory_order_release);
-    if (backend_ && backend_->ownsThread()) {
-        // A cycle that began before the store may still be capturing; the
-        // one after it cannot.
-        const std::uint64_t before = cycles_.load();
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-        while (cycles_.load() < before + 2 && std::chrono::steady_clock::now() < deadline)
+    recorder_.store(nullptr);
+    // A callback that entered before the store may still hold the recorder;
+    // one that enters after it sees null. (seq_cst on both sides.)
+    if (const std::uint64_t seq = cycleSeq_.load(); seq & 1) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (cycleSeq_.load(std::memory_order_acquire) == seq &&
+               std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::microseconds(200));
+        if (cycleSeq_.load(std::memory_order_acquire) == seq)  // never free what it may use
+            return Error("record.busy",
+                         "the audio callback has not returned for 2 s; the recording is kept", {},
+                         "stop again, or stop the engine (the files stay recoverable)");
     }
     auto takes = recorderOwned_->finish();
     recorderOwned_.reset();
@@ -693,10 +697,17 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         if (livePlan_ && livePlan_->split) {
             liveRender(ins, outAt, k);
         } else {
-            const std::int64_t played = pullAhead(outAt, k);
-            if (detail::Recorder* r = recorder_.load(std::memory_order_acquire);
-                r && played != kNothingPlayed)
-                r->capture(ins, inputs, k, played);
+            const Pulled played = pullAhead(outAt, k);
+            // Only input that went with played audio is recorded; what came
+            // during a dropout had no timeline position and counts as lost.
+            if (detail::Recorder* r = recorder_.load()) {
+                if (played.first != kNothingPlayed) {
+                    r->capture(ins, inputs, played.frames, played.first);
+                    r->lose(k - played.frames);
+                } else if (playing) {
+                    r->lose(k);
+                }
+            }
         }
         done += k;
     }
@@ -749,8 +760,7 @@ void Engine::liveRender(const float* const* in, float* const* out, std::uint32_t
     std::copy_n(master.post.l.begin(), k, out[0]);
     std::copy_n(master.post.r.begin(), k, out[1]);
     if (playing) {
-        if (detail::Recorder* r = recorder_.load(std::memory_order_acquire))
-            r->capture(in, deviceInputs_, k, livePos_);
+        if (detail::Recorder* r = recorder_.load()) r->capture(in, deviceInputs_, k, livePos_);
         livePos_ += k;
         rtPos_.store(livePos_, std::memory_order_relaxed);
         rtPosEpoch_.store(rtEpoch_, std::memory_order_release);

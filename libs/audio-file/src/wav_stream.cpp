@@ -1,5 +1,8 @@
 #include "supple/audio/wav_stream.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -24,6 +27,15 @@ std::uint32_t get32(const std::uint8_t* p) {
     return v;
 }
 
+// Recovery touches only the file itself, never what a link points to.
+std::FILE* openNoFollow(const std::filesystem::path& path, int flags, const char* mode) {
+    const int fd = ::open(path.c_str(), flags | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return nullptr;
+    std::FILE* f = ::fdopen(fd, mode);
+    if (!f) ::close(fd);
+    return f;
+}
+
 constexpr long kHeaderBytes = 44;
 // The RIFF container caps sizes at 32 bits; longer recordings need RF64.
 constexpr std::uint64_t kMaxData = 0xFFFFFFFFull - (kHeaderBytes - 8);
@@ -37,8 +49,8 @@ Status WavStreamWriter::open(const std::filesystem::path& path, double sampleRat
     if (file_) return Error("audio.stream", "the writer is already open");
     if (channels == 0 || channels > 64 || !(sampleRate > 0))
         return Error("audio.stream", "bad channel count or rate");
-    file_ = std::fopen(path.c_str(), "wb");
-    if (!file_) return Error("file.write", "cannot create " + path.string());
+    file_ = std::fopen(path.c_str(), "wbx");  // never an existing file (another take's)
+    if (!file_) return Error("file.write", "cannot create " + path.string() + " (does it exist?)");
     channels_ = channels;
     frames_ = 0;
     std::uint8_t h[kHeaderBytes] = {};
@@ -105,14 +117,15 @@ Status WavStreamWriter::close() {
 }
 
 Result<WavStreamInfo> inspectWavStream(const std::filesystem::path& path) {
-    std::error_code ec;
-    const std::uintmax_t size = std::filesystem::file_size(path, ec);
-    if (ec) return Error("file.open", "cannot read " + path.string());
-    std::FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return Error("file.open", "cannot read " + path.string());
+    std::FILE* f = openNoFollow(path, O_RDONLY, "rb");
+    if (!f) return Error("file.open", "cannot read " + path.string() + " (or it is a link)");
     std::uint8_t h[kHeaderBytes];
-    const bool read = std::fread(h, 1, sizeof h, f) == sizeof h;
+    bool read = std::fread(h, 1, sizeof h, f) == sizeof h;
+    long end = -1;
+    if (read && std::fseek(f, 0, SEEK_END) == 0) end = std::ftell(f);
     std::fclose(f);
+    read = read && end >= kHeaderBytes;
+    const auto size = static_cast<std::uint64_t>(end);
     if (!read || std::memcmp(h, "RIFF", 4) != 0 || std::memcmp(h + 8, "WAVEfmt ", 8) != 0 ||
         get32(h + 16) != 16 || get16(h + 20) != 3 || get16(h + 34) != 32 ||
         std::memcmp(h + 36, "data", 4) != 0)
@@ -132,8 +145,8 @@ Result<std::uint64_t> repairWavStream(const std::filesystem::path& path) {
     auto info = inspectWavStream(path);
     if (!info) return std::move(info).error();
     if (info->fileFrames == info->headerFrames) return info->headerFrames;
-    std::FILE* f = std::fopen(path.c_str(), "r+b");
-    if (!f) return Error("file.write", "cannot open " + path.string());
+    std::FILE* f = openNoFollow(path, O_RDWR, "r+b");
+    if (!f) return Error("file.write", "cannot open " + path.string() + " (or it is a link)");
     const auto data = static_cast<std::uint32_t>(info->fileFrames * info->channels * 4);
     std::uint8_t b[4];
     bool ok = true;

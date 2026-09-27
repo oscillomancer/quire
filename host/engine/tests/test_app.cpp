@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 
 #include <supple/audio/audio_file.h>
@@ -240,13 +241,12 @@ TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)"
     CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
     CHECK(fake.open() == 0);
 
-    // A device at another rate than the project: a clean error, nothing left open.
+    // A device at another rate than the project: the engine runs at the device's.
     fake.setRate(44100);
-    auto refused = d.execute({"engine.start", j("{}"), kTest});
-    REQUIRE_FALSE(refused);
-    CHECK(refused.error().code == "engine.sample_rate");
+    auto other = call("engine.start", "{}");
+    CHECK(other["sample_rate"].asDouble() == 44100.0);
+    call("engine.stop", "{}");
     CHECK(fake.open() == 0);
-    CHECK_FALSE(app->engine());
     fake.reset();
 }
 
@@ -512,4 +512,82 @@ TEST_CASE("recovering a crashed recording repairs its header and plays all of it
     CHECK(double(left[49000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
     CHECK(double(left[95000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
     CHECK(double(left[97000]) == 0.0);
+}
+
+TEST_CASE("two armed tracks with one name record to two files (review round 8)") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Vocal"}, "as": "a"},
+        {"command": "track.add", "args": {"name": "Vocal"}, "as": "b"},
+        {"command": "track.set", "args": {"track": "${a.track}", "armed": true, "record_input": [1]}},
+        {"command": "track.set", "args": {"track": "${b.track}", "armed": true, "record_input": [2]}}]})");
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
+             for (std::uint32_t c = 0; c < channels; ++c)
+                 for (std::uint32_t i = 0; i < n; ++i) in[c][i] = c ? -0.5f : 0.25f;
+         }});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    call("transport.record", "{}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    auto stopped = call("transport.stop", "{}");
+    app->stopEngine();
+    REQUIRE(stopped["recorded"].size() == 2);
+    const std::string f0 = stopped["recorded"].at(0).find("file")->asString();
+    const std::string f1 = stopped["recorded"].at(1).find("file")->asString();
+    CHECK(f0 != f1);
+    for (const auto& [file, value] : {std::pair{f0, 0.25f}, std::pair{f1, -0.5f}}) {
+        auto audio = audio::readAudio(file);
+        REQUIRE(audio);
+        REQUIRE(audio->frames() > 1000);
+        CHECK(audio->channels[0][500] == value);  // each file holds its own input
+        CHECK(fs::exists(fs::path(file).replace_extension(".rec.json")));
+    }
+}
+
+TEST_CASE("recovery touches only files in rec/, once each (review round 8)") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");  // rec/Vocal-1.wav, recoverable
+    const fs::path rec = app->recordDir();
+    // An eligible WAV outside the project, linked into rec/ with a sidecar.
+    const fs::path outside = root.path / "elsewhere.wav";
+    fs::copy_file(rec / "Vocal-1.wav", outside);
+    fs::copy_file(rec / "Vocal-1.rec.json", rec / "Link-1.rec.json");
+    fs::create_symlink(outside, rec / "Link-1.wav");
+    auto bytes = [](const fs::path& p) {
+        std::ifstream f(p, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(f), {});
+    };
+    const std::string before = bytes(outside);
+
+    auto list = d.execute({"project.recoverable", j("{}"), kTest});
+    REQUIRE(list);
+    REQUIRE((*list)["recordings"].size() == 1);
+    CHECK((*list)["recordings"].at(0).find("file")->asString() == "rec/Vocal-1.wav");
+    auto link = d.execute({"project.recover", j(R"({"files": ["rec/Link-1.wav"]})"), kTest});
+    REQUIRE_FALSE(link);
+    CHECK(link.error().code == "recover.unknown_file");
+    auto twice = d.execute(
+        {"project.recover", j(R"({"files": ["rec/Vocal-1.wav", "rec/Vocal-1.wav"]})"), kTest});
+    REQUIRE_FALSE(twice);
+    CHECK(twice.error().code == "recover.duplicate_file");
+    CHECK(app->head().items.size() == 0);
+    auto all = d.execute({"project.recover", j("{}"), kTest});
+    REQUIRE(all);
+    CHECK((*all)["recovered"].size() == 1);
+    CHECK(bytes(outside) == before);  // never rewritten through the link
 }

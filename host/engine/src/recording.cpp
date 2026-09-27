@@ -103,6 +103,7 @@ Status Recorder::open() {
 
 void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
                        std::int64_t pos) SUPPLE_RT {
+    if (frames == 0) return;
     if (!started_.load(std::memory_order_relaxed)) {
         // What the performer heard at `pos` reaches us a round trip later.
         start_.store(pos - latency_, std::memory_order_relaxed);
@@ -112,6 +113,11 @@ void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::ui
         const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames);
         if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
     }
+}
+
+void Recorder::lose(std::uint32_t frames) SUPPLE_RT {
+    if (frames == 0 || !started_.load(std::memory_order_relaxed)) return;
+    for (auto& t : tracks_) t->overflow.fetch_add(frames, std::memory_order_relaxed);
 }
 
 void Recorder::drain(Track& t, std::vector<float>& scratch) {
