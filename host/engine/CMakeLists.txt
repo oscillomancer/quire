@@ -27,6 +27,11 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+# Capacity benchmark (engine.md §7 B1, preliminary): engine-bench <orrery-headless.clap>.
+add_executable(engine-bench bench/engine_bench.cpp)
+target_link_libraries(engine-bench PRIVATE supple::engine)
+supple_target_defaults(engine-bench)
+
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).
 add_executable(${PRODUCT_SLUG}-engine tools/engine_main.cpp)
 target_link_libraries(${PRODUCT_SLUG}-engine PRIVATE supple::engine supple::mcp supple::product-info)
