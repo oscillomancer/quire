@@ -253,6 +253,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                      double rate) {
     Plan p;
     p.rate = rate > 0 ? rate : s.project->sampleRate;
+    p.smoothFrames = static_cast<std::uint32_t>(std::max(1.0, std::round(0.010 * p.rate)));
     p.block = block;
     p.startSeconds = startSeconds;
     p.timeMap = s.timeMap;
@@ -897,9 +898,22 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     for (Stage& st : node.chain) {
         // A stage whose plugin is not processing (start_processing failed)
         // passes audio through, delay-compensated, like a bypass.
-        if (st.bypass || !st.instance || !st.instance->processing() ||
-            (self && st.instance->owner() != self)) {
+        if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self)) {
             st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
+            st.appliedWet = -1.0f;
+            continue;
+        }
+        // The wet level to reach (0 bypassed); a change ramps from the level
+        // last applied, the plugin running until the ramp is done.
+        const auto target = static_cast<float>(st.bypass ? 0.0 : st.instrument ? 1.0 : st.wet);
+        if (st.appliedWet < 0.0f) st.appliedWet = target;  // new here: no ramp
+        if (target != st.appliedWet && st.wetRampLeft == 0) {
+            st.rampFromWet = st.appliedWet;
+            st.wetRampLeft = p.smoothFrames;
+        }
+        if (st.bypass && st.wetRampLeft == 0) {  // bypassed and faded out
+            st.dry.process(node.sum.l.data(), node.sum.r.data(), n);
+            st.appliedWet = 0.0f;
             continue;
         }
         const float* in[2] = {node.sum.l.data(), node.sum.r.data()};
@@ -919,20 +933,65 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         // output to what came in; an effect mixes wet and dry.
         st.dryBuf.copyFrom(node.sum, n);
         st.dry.process(st.dryBuf.l.data(), st.dryBuf.r.data(), n);
-        const float wet = static_cast<float>(st.wet), dryGain = st.instrument ? 1.0f : 1.0f - wet;
-        for (std::uint32_t i = 0; i < n; ++i) {
-            node.sum.l[i] = st.out.l[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.l[i] * dryGain;
-            node.sum.r[i] = st.out.r[i] * (st.instrument ? 1.0f : wet) + st.dryBuf.r[i] * dryGain;
+        if (st.wetRampLeft == 0) {
+            const float wet = target, dryGain = st.instrument ? 1.0f : 1.0f - wet;
+            for (std::uint32_t i = 0; i < n; ++i) {
+                node.sum.l[i] = st.out.l[i] * wet + st.dryBuf.l[i] * dryGain;
+                node.sum.r[i] = st.out.r[i] * wet + st.dryBuf.r[i] * dryGain;
+            }
+            st.appliedWet = target;
+        } else {
+            // Crossfading (an instrument's "dry" is what came in: it stays).
+            const float span = static_cast<float>(p.smoothFrames);
+            for (std::uint32_t i = 0; i < n; ++i) {
+                float wet = target;
+                if (st.wetRampLeft > 0) {
+                    const float t = 1.0f - static_cast<float>(st.wetRampLeft) / span;
+                    wet = st.rampFromWet + (target - st.rampFromWet) * t;
+                    --st.wetRampLeft;
+                }
+                const float dryGain = st.instrument ? 1.0f : 1.0f - wet;
+                node.sum.l[i] = st.out.l[i] * wet + st.dryBuf.l[i] * dryGain;
+                node.sum.r[i] = st.out.r[i] * wet + st.dryBuf.r[i] * dryGain;
+                st.appliedWet = wet;
+            }
         }
     }
     node.preFader.copyFrom(node.sum, n);
-    // 4. Width, volume, pan, mute.
+    // 4. Width, volume, pan, mute (and solo). A changed static value ramps
+    // from the one last applied (carried across plan swaps).
     float w = static_cast<float>(node.width);
-    float gl = node.mute ? 0.0f : static_cast<float>(node.volume * node.panL);
-    float gr = node.mute ? 0.0f : static_cast<float>(node.volume * node.panR);
+    const bool silent = node.mute || node.soloSilenced;
+    float gl = silent ? 0.0f : static_cast<float>(node.volume * node.panL);
+    float gr = silent ? 0.0f : static_cast<float>(node.volume * node.panR);
     const bool automated = node.automated();
+    if (!automated) {
+        const Node::Mix target{gl, gr, w};
+        if (!node.mixValid) {
+            node.applied = target;
+            node.mixValid = true;
+        }
+        if (!(target == node.applied) && !(node.rampLeft > 0 && target == node.rampTo)) {
+            node.rampFrom = node.applied;
+            node.rampTo = target;
+            node.rampLeft = p.smoothFrames;
+        }
+    } else {
+        node.rampLeft = 0;  // the envelope decides
+    }
+    const float span = static_cast<float>(p.smoothFrames);
     for (std::uint32_t i = 0; i < n; ++i) {
-        if (automated) {
+        if (!automated && node.rampLeft > 0) {
+            const float t = 1.0f - static_cast<float>(node.rampLeft) / span;
+            gl = node.rampFrom.gl + (node.rampTo.gl - node.rampFrom.gl) * t;
+            gr = node.rampFrom.gr + (node.rampTo.gr - node.rampFrom.gr) * t;
+            w = node.rampFrom.w + (node.rampTo.w - node.rampFrom.w) * t;
+            if (--node.rampLeft == 0) {
+                gl = node.rampTo.gl;
+                gr = node.rampTo.gr;
+                w = node.rampTo.w;
+            }
+        } else if (automated) {
             const std::int64_t at = pos + i;
             const bool muted = node.autoMute.active() ? node.autoMute.at(at) >= 0.5 : node.mute;
             const double db = (node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb) +
@@ -947,7 +1006,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                     std::tie(pl, pr) = panGains(pan, node.panLawDb);
                 }
             }
-            const double g = muted ? 0.0 : dbToGain(db);
+            const double g = muted || node.soloSilenced ? 0.0 : dbToGain(db);
             gl = static_cast<float>(g * pl);
             gr = static_cast<float>(g * pr);
             if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
@@ -957,10 +1016,11 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         node.post.l[i] = (mid + side) * gl;
         node.post.r[i] = (mid - side) * gr;
     }
+    node.applied = {gl, gr, w};
+    node.mixValid = true;
     if (node.soloSilenced) {  // processed (plugin state continues) but not heard
-        node.preFx.clear(n);
+        node.preFx.clear(n);  // (the pre-fader taps switch at once; the post ramps)
         node.preFader.clear(n);
-        node.post.clear(n);
     }
     return true;
 }
@@ -1101,6 +1161,31 @@ void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT {
                         static_cast<std::uint8_t>(std::min(255, n.held[k] + old.liveHeld[k]));
                 n.releaseHeld = true;  // ended at the start of the next block
             }
+            break;
+        }
+    }
+}
+
+void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
+    for (Node& n : to.nodes) {
+        if (liveClass >= 0 && n.live != (liveClass == 1)) continue;
+        for (const Node& old : from.nodes) {  // (plans are small; a swap is rare)
+            if (old.id != n.id) continue;
+            // Only what this executor processed (the other one writes the rest).
+            if (liveClass >= 0 && old.live != (liveClass == 1)) break;
+            n.applied = old.applied;
+            n.mixValid = old.mixValid;
+            n.rampFrom = old.rampFrom;
+            n.rampTo = old.rampTo;
+            n.rampLeft = old.rampLeft;
+            for (Stage& st : n.chain)
+                for (const Stage& os : old.chain)
+                    if (st.instance && os.instance == st.instance) {
+                        st.appliedWet = os.appliedWet;
+                        st.rampFromWet = os.rampFromWet;
+                        st.wetRampLeft = os.wetRampLeft;
+                        break;
+                    }
             break;
         }
     }

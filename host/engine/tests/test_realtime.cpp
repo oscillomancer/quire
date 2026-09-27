@@ -185,8 +185,12 @@ TEST_CASE(
             m = std::max(m, std::fabs(double(cap.channels[0][i])));
         return m;
     };
-    const double before = peakOf(0, 2560), after = peakOf(2560, 5120);
+    // The change ramps over 10 ms (480 samples) instead of stepping: over the
+    // first period after the swap (184 samples at 261 Hz) the gain is still
+    // above 0.8; after the ramp it is half.
+    const double before = peakOf(0, 2560), after = peakOf(2560 + 480, 5120);
     CHECK(after / before == doctest::Approx(0.5).epsilon(0.01));
+    CHECK(peakOf(2560, 2560 + 184) / before > 0.8);
     // Seek to beat 2 (1.0 s): the output there matches an offline render at that point.
     engine.seek(1.0);
     backend.run(1);
@@ -1298,4 +1302,36 @@ TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
         CHECK(before > 0.1);
         CHECK(after == 0.0);
     }
+}
+
+TEST_CASE("a mute while playing fades over 10 ms instead of clicking" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
+    Engine engine(pool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    model::Session s = synthSession(0.0);
+    REQUIRE(engine.load(s).ok());
+    engine.play();
+    backend.run(10);  // 2560 frames
+    model::EditTxn t(s, 2);
+    for (const auto& e : s.tracks)
+        if (e.id != kMaster) t.modify<model::Track>(e.id, [](model::Track& x) { x.mute = true; });
+    REQUIRE(engine.load(t.commit().value()).ok());
+    backend.run(10);
+    engine.stop();
+    const auto& L = backend.capture().channels[0];
+    auto peakOf = [&](std::size_t from, std::size_t to) {
+        double m = 0;
+        for (std::size_t i = from; i < to; ++i) m = std::max(m, std::fabs(double(L[i])));
+        return m;
+    };
+    const double before = peakOf(0, 2560);
+    CHECK(peakOf(2560, 2560 + 184) > 0.5 * before);  // still fading
+    CHECK(peakOf(2560 + 480, 5120) == 0.0);          // silent after 10 ms
+    double jump = 0;  // no sample-to-sample step bigger than the sine's own slope
+    for (std::size_t i = 2400; i < 3200; ++i)
+        jump = std::max(jump, std::fabs(double(L[i]) - double(L[i - 1])));
+    CHECK(jump < 0.02);
 }

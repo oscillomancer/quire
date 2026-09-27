@@ -395,6 +395,13 @@ granted, and CPU governor (read-only facts).
   crash recovery).
 - **Loop and punch** (ADR-0015): see the ADR's implementation notes.
 - **MIDI input** (ADR-0016): see the ADR's implementation notes.
+- **Smooth swaps:** a plan swap carries each node's applied post-fader gains
+  and width and each stage's applied wet level into the new plan
+  (`carryMix`, by track and by instance, per executor); a changed volume,
+  pan, width, mute, solo, FX wet or bypass then ramps over 10 ms instead of
+  stepping (a bypassed plugin keeps running until faded out). Automated
+  values follow their envelope. Structural changes (a plugin inserted or
+  removed, a route added) still switch at the swap.
 - **Media resampling:** `MediaCache::get(path, rate)` decodes and resamples
   once per (file, rate) with the audio-file polyphase resampler (Kaiser
   windowed sinc; deterministic, so offline ≡ real time); plans ask for their
@@ -406,5 +413,5 @@ granted, and CPU governor (read-only facts).
   one shared process for `shared_bridge`,
   automatic restart after device changes, MIDI output ports, automation recording
   (write/touch/latch), stems and render jobs, stretching/playrate of audio items,
-  the 10 ms crossfade on structural swaps, B1 proper (preliminary:
+  crossfades for structural changes (inserting/removing plugins), B1 proper (preliminary:
   docs/benchmarks/b1-preliminary.md).

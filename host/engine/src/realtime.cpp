@@ -464,7 +464,10 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
     }
     detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
     if (plan != plan_) {
-        if (plan_ && plan) detail::carryLiveNotes(*plan_, *plan, false);  // old plan still ours
+        if (plan_ && plan) {  // the old plan is still ours here
+            detail::carryLiveNotes(*plan_, *plan, false);
+            detail::carryMix(*plan_, *plan, -1);
+        }
         adoptShare(processing_, plan ? &plan->instances : nullptr, &processing_);
         plan_ = plan;
         if (plan) {
@@ -675,6 +678,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
     while (!rendererQuit_.load(std::memory_order_acquire)) {
         detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
         if (plan != plan_) {  // edits take effect here: after what is already rendered
+            if (plan_ && plan) detail::carryMix(*plan_, *plan, 0);
             adoptShare(processing_, plan ? &plan->rendererInstances : nullptr, self);
             plan_ = plan;
             if (plan) {
@@ -759,7 +763,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
 // --- the live region (ADR-0014) -----------------------------------------------------------
 
 void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
-    if (livePlan_ && next && next->split) detail::carryLiveNotes(*livePlan_, *next, true);
+    if (livePlan_ && next && next->split) {
+        detail::carryLiveNotes(*livePlan_, *next, true);
+        detail::carryMix(*livePlan_, *next, 1);
+    }
     adoptShare(liveProcessing_, next ? &next->liveInstances : nullptr, &liveProcessing_);
     const bool wasLive = livePlan_ && livePlan_->split;
     livePlan_ = next;

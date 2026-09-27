@@ -233,6 +233,11 @@ struct Stage {
     std::vector<ParamLane> lanes;
     bool bypass = false, instrument = false;
     double wet = 1.0;
+    // The wet level applied at the end of the last block (-1: none yet) and
+    // a ramp toward the target (0 when bypassed): a bypass or wet change
+    // crossfades over Plan::smoothFrames, the plugin running meanwhile.
+    float appliedWet = -1.0f, rampFromWet = 0.0f;
+    std::uint32_t wetRampLeft = 0;
     std::int64_t latency = 0;
     Delay dry;  // bypassed or partly-dry signal, delayed to match the stage
     Stereo out, dryBuf;
@@ -292,6 +297,17 @@ struct Node {
     std::array<std::uint8_t, 16 * 128> liveHeld{};  // device notes sounding (per channel/key)
     bool live = false;
     Automation autoVolume, autoTrim, autoPan, autoWidth, autoMute;  // dB, dB, %, %, 0/1
+    // The post-fader gains and width applied at the end of the last block
+    // and the ramp toward new static targets (a volume, pan, mute, solo or
+    // width change ramps over Plan::smoothFrames instead of stepping; the
+    // values carry across plan swaps, carryMix).
+    struct Mix {
+        float gl = 1.0f, gr = 1.0f, w = 1.0f;
+        friend bool operator==(const Mix&, const Mix&) = default;
+    };
+    Mix applied, rampFrom, rampTo;
+    bool mixValid = false;  // `applied` holds a value (no ramp from nothing)
+    std::uint32_t rampLeft = 0;
     bool automated() const {
         return autoVolume.active() || autoTrim.active() || autoPan.active() || autoWidth.active() ||
                autoMute.active();
@@ -303,6 +319,7 @@ struct Plan {
     std::vector<Node> nodes;       // topological order; the master is last
     std::vector<Edge> edges;
     double rate = 48000.0;
+    std::uint32_t smoothFrames = 480;  // 10 ms: ramps at plan swaps (carryMix)
     double startSeconds = 0.0;
     std::int64_t outputLatency = 0;
     std::uint32_t block = 512;
@@ -385,6 +402,11 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
 // into live nodes (the anticipative callback; a node that left it belongs to
 // the renderer, and its instance was reset on the way).
 void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
+// A plan swap (the 10 ms crossfade on structural swaps, engine.md §2): the
+// mix gains and stage wet levels applied by the old plan carry into the new
+// one's matching nodes (by track) and stages (by instance), so a changed
+// value ramps from where the old plan left it. `liveClass` as for wrapTo.
+void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT;
 
 // `loop`: the executor's transport loop, for plugins that follow it.
 host::Transport transportAt(const Plan& p, std::int64_t sample,
