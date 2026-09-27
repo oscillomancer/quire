@@ -475,6 +475,21 @@ real-time engine). The code is the reference; these notes explain the choices.
 - **Validation:** `drive: {"type": "off"}` takes no other field, and an
   explicit empty step `values` array is an error.
 
+- **Wavetables:** seven original tables generated at first use (FFT, main
+  thread, ~8 MB shared by all instances) from harmonic recipes — `harmonic_ramp`
+  (1/k^(1+8p²): saw → sine), `pwm` (pulse 50 % → 5 %), `formant` (a 1/√k source
+  through three formants sweeping a → e → i → o → u for a nominal 110 Hz),
+  `bell` (hum, prime, tierce, quint, nominal … with ratios quantized to 1/8 of
+  the played pitch: the table's fundamental is pitch/8), `organ` (nine drawbars
+  at pitch/2, eight registrations, 3 dB per step), `digital` (a ramp through
+  sample-and-hold 4096 → 16 steps and 16 → 3 bits, then band-limited),
+  `spectral_comb` (a raised-cosine comb over 1/k^0.6, period 16 → 3 harmonics).
+  32 frames per table (`position` crossfades adjacent frames); 10 mip levels
+  of 512 >> L harmonics at ≥ 8 samples per top harmonic, one gain per frame.
+  The oscillator reads the level whose top harmonic stays below
+  min(20 kHz, internal Nyquist): harmonics never reach the decimator's
+  transition band. Measured: worst non-harmonic component −80 dB for a saw
+  frame at 2.1 kHz in `normal`.
 - **Plugin and editor:** `plugins/orrery` is the template-derived plugin
   (`Orrery.clap`; VST3 on request): the shared CLAP core (`plugins/orrery/clap`)
   plus an editor that shows the patch as a signal-flow diagram (oscillators →

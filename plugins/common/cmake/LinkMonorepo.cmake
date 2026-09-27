@@ -20,7 +20,7 @@ function(supple_plugin_add_monorepo_libraries)
     # A plugin owns its tests; the core libraries' suites are run by the parent.
     set(SUPPLE_BUILD_TESTS OFF)
     add_subdirectory("${SUPPLE_ROOT}/third_party" "${CMAKE_BINARY_DIR}/supple/third_party")
-    foreach(lib core-base core-json core-schema core-params core-patch)
+    foreach(lib core-base core-json core-schema core-params core-patch core-dsp)
         add_subdirectory("${SUPPLE_ROOT}/libs/${lib}" "${CMAKE_BINARY_DIR}/supple/${lib}")
     endforeach()
     add_subdirectory("${SUPPLE_ROOT}/plugins/common" "${CMAKE_BINARY_DIR}/supple/plugin-support")

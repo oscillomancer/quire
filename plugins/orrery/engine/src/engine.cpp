@@ -19,6 +19,7 @@
 #include "oscillators.h"
 #include "oversampling.h"
 #include "supple/base/handoff.h"
+#include "wavetables.h"
 
 namespace supple::orrery {
 
@@ -63,6 +64,7 @@ struct Program {
     std::array<int, kOscCount> order{0, 1, 2, 3};
     std::array<std::array<bool, kOscCount>, kOscCount> delayed{};
     std::array<std::array<float, kMaxSteps>, kStepCount> steps{};
+    const WavetableBank* tables = nullptr;  // generated when a wavetable oscillator exists
 };
 
 std::unique_ptr<Program> compileProgram(const Patch& patch) {
@@ -71,6 +73,8 @@ std::unique_ptr<Program> compileProgram(const Patch& patch) {
     p->values = patch.body.values;
     p->seed = patch.meta.seed.value_or(0);
     p->os = oversampling(p->st.quality);
+    for (const auto& t : p->st.osc)
+        if (t == OscType::Wavetable) p->tables = &WavetableBank::get();  // main thread
     for (int s = 0; s < kSlotCount; ++s)
         p->has[static_cast<std::size_t>(s)] = p->st.has(static_cast<Slot>(s));
     p->voiceSlot.assign(paramCount(), -1);
@@ -189,7 +193,7 @@ struct Ramp {
 // --- voices --------------------------------------------------------------------------------
 
 struct Targets {
-    std::array<double, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{};
+    std::array<double, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{}, position{};
     std::array<double, kFilterCount> g{}, k{}, drive{}, level{}, delay{}, feedback{}, damping{};
     std::array<Formant::Coefs, kFilterCount> formant{};
     double bal1 = 1.0, bal2 = 1.0;
@@ -219,6 +223,7 @@ struct Voice {
     Lfo driftPitch, driftCutoff;
     std::array<VaOsc, kOscCount> va{};
     std::array<FmOsc, kOscCount> fmo{};
+    std::array<WtOsc, kOscCount> wt{};
     std::array<NoiseOsc, kOscCount> noise{};
     std::array<std::array<Svf, 2>, kFilterCount> svf{};
     std::array<std::array<Ladder, 2>, kFilterCount> ladder{};
@@ -229,7 +234,7 @@ struct Voice {
     std::array<double, kOscCount> prevOut{};
     std::array<std::array<double, kOscCount>, kOscCount> fmIndex{}, amDepth{};
     // Per-sample ramps across a control tick.
-    std::array<dsp::Lerp, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{};
+    std::array<dsp::Lerp, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{}, position{};
     std::array<dsp::Lerp, kFilterCount> g{}, k{}, drive{}, level{}, delay{}, feedback{}, damping{};
     std::array<Formant::Coefs, kFilterCount> formantCoefs{};
     dsp::Lerp bal1, bal2, driveGain, driveBias, driveMix, driveComp, ampL, ampR;
@@ -555,6 +560,7 @@ struct Engine::Impl {
             out.width[static_cast<std::size_t>(o)] = get(OscF::width) / 100.0;
             out.shape[static_cast<std::size_t>(o)] = get(OscF::shape) / 100.0;
             out.fb[static_cast<std::size_t>(o)] = get(OscF::feedback) / 100.0;
+            out.position[static_cast<std::size_t>(o)] = get(OscF::position) / 100.0;
         }
         // Filters.
         const double keyOct = (pitch - 60.0) / 12.0;
@@ -624,6 +630,7 @@ struct Engine::Impl {
             go(v.width[o], t.width[o]);
             go(v.shape[o], t.shape[o]);
             go(v.fb[o], t.fb[o]);
+            go(v.position[o], t.position[o]);
         }
         for (std::size_t fi = 0; fi < kFilterCount; ++fi) {
             go(v.g[fi], t.g[fi]);
@@ -696,8 +703,13 @@ struct Engine::Impl {
         const auto driveCurve = static_cast<DriveCurve>(static_cast<int>(P.st.drive) - 1);
         std::array<Wave, kOscCount> waves{};
         std::array<NoiseColor, kOscCount> colors{};
+        std::array<const Wavetable*, kOscCount> tables{};
+        const double wtLimit = wavetableLimit(sr * P.os);
         for (int o = 0; o < kOscCount; ++o) {
             if (!P.st.osc[static_cast<std::size_t>(o)]) continue;
+            if (P.tables)
+                tables[static_cast<std::size_t>(o)] =
+                    &P.tables->table(static_cast<Table>(ramps[index(osc(o), OscF::table)].to));
             waves[static_cast<std::size_t>(o)] =
                 static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
             colors[static_cast<std::size_t>(o)] =
@@ -742,9 +754,8 @@ struct Engine::Impl {
                             v.va[0].wrapped() > 0.0)
                             v.va[uo].syncTo(v.va[0].wrapped(), inc);
                         break;
-                    case OscType::Wavetable:  // TODO(P3.2 wavetable): generated tables; sine for
-                                              // now
-                        x = v.va[uo].next(inc, Wave::Sine, 0.5, 0.0, pm);
+                    case OscType::Wavetable:
+                        x = v.wt[uo].next(inc, *tables[uo], v.position[uo].next(), pm, wtLimit);
                         break;
                     case OscType::Fm:
                         x = v.fmo[uo].next(inc, waves[uo], v.fb[uo].next(), pm);
@@ -919,6 +930,7 @@ struct Engine::Impl {
                 reset ? base(index(osc(o), OscF::phase), t) / 360.0 : v.rng.uniform();
             v.va[uo].reset(phase);
             v.fmo[uo].reset(phase);
+            v.wt[uo].reset(phase);
             v.noise[uo].seed(v.rng.next());
             v.prevOut[uo] = 0.0;
         }
@@ -1240,6 +1252,7 @@ struct Engine::Impl {
                     if (!sameOsc(*previous, *next, o)) {
                         v.va[static_cast<std::size_t>(o)].reset(v.rng.uniform());
                         v.fmo[static_cast<std::size_t>(o)].reset(v.rng.uniform());
+                        v.wt[static_cast<std::size_t>(o)].reset(v.rng.uniform());
                     }
                 for (int fi = 0; fi < kFilterCount; ++fi)
                     if (!sameFilter(*previous, *next, fi))

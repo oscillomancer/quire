@@ -4,8 +4,10 @@
 # links the same sources.
 supple_add_library(orrery-engine
   SOURCES src/params.cpp src/patch.cpp src/engine.cpp src/fx.cpp src/oversampling.cpp
-  DEPS supple::core-base supple::core-json supple::core-params supple::core-patch)
+          src/wavetables.cpp
+  DEPS supple::core-base supple::core-json supple::core-params supple::core-patch
+       supple::core-dsp)
 
 supple_add_tests(orrery-engine
-  SOURCES tests/test_params.cpp tests/test_patch.cpp tests/test_engine.cpp
+  SOURCES tests/test_params.cpp tests/test_patch.cpp tests/test_engine.cpp tests/test_wavetables.cpp
   LABELS rt)
