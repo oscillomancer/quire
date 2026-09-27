@@ -20,6 +20,7 @@ if(SUPPLE_BUILD_TESTS)
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_jack.cpp tests/test_workers.cpp LABELS rt)
   target_include_directories(engine.tests PRIVATE src)
+  target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   add_dependencies(engine.tests clap-host-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"

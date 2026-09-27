@@ -1,0 +1,35 @@
+# Project and history fuzzing
+
+Configure the fuzz targets with Clang and run them against their seed corpora:
+
+```sh
+cmake -S . -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug \
+  -DSUPPLE_BUILD_FUZZERS=ON -DSUPPLE_SANITIZE=address \
+  -DSUPPLE_BUILD_GUI=OFF -DSUPPLE_BUILD_PLUGINS=OFF
+cmake --build build/fuzz --target project.fuzz history.fuzz -j6
+ASAN_OPTIONS=detect_leaks=0 build/fuzz/tests/fuzz/project.fuzz \
+  -max_total_time=120 build/fuzz/tests/fuzz/project-corpus
+ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0 \
+  build/fuzz/tests/fuzz/history.fuzz -max_total_time=120 \
+  build/fuzz/tests/fuzz/history-corpus
+```
+
+`project.fuzz` feeds bytes to the parser used by `project.open`. Accepted
+projects must satisfy the model invariants and survive a canonical text
+round trip. The corpus contains files saved by the engine (empty, MIDI song,
+FX, automation), plus a saved project with a route and a missing audio media
+item. Missing media is valid project state.
+
+`history.fuzz` maps bytes to real bus commands on a fresh `EngineApp`,
+including batches, failed calls, undo/redo and branch operations. After each
+call it checks every branch head's invariants, and checks that failed calls
+did not move the head. At the end it undoes to the branch base, redoes to the
+final canonical text, then saves and reopens. The seeded property test in
+`engine.tests` uses the same sequence runner. Route edits are absent from the
+current engine command catalogue, so the project corpus covers routes.
+
+Clang ASan reports an allocation/deallocation mismatch in libstdc++'s
+`std::stable_sort` temporary buffer (`get_temporary_buffer` uses `operator
+new`/`free` in this toolchain). The history fuzz command disables only that
+check; the remaining ASan checks stay active.

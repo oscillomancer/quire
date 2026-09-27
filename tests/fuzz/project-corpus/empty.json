@@ -1,0 +1,59 @@
+{
+  "schema": "supple.project/1.0",
+  "project": {
+    "next_ids": {
+      "tr": 1,
+      "it": 1,
+      "tk": 1,
+      "md": 1,
+      "mi": 1,
+      "fx": 1,
+      "sd": 1,
+      "en": 1,
+      "ai": 1,
+      "mk": 1,
+      "rg": 1,
+      "tp": 2,
+      "ts": 2,
+      "gr": 1,
+      "ln": 1,
+      "rj": 1
+    }
+  },
+  "tempo": {
+    "points": {
+      "tp_1": {
+        "beat": 0.0,
+        "bpm": 120.0
+      }
+    },
+    "meters": {
+      "ts_1": {
+        "bar": 1,
+        "numerator": 4,
+        "denominator": 4
+      }
+    }
+  },
+  "rulers": {
+    "markers": {},
+    "regions": {}
+  },
+  "tracks": {
+    "tr_0": {
+      "name": "Master"
+    }
+  },
+  "items": {},
+  "takes": {},
+  "fx": {},
+  "sources": {
+    "media": {},
+    "midi": {}
+  },
+  "routes": {},
+  "envelopes": {},
+  "groups": {},
+  "blobs": {}
+}
+
