@@ -98,10 +98,18 @@ and delay tails at every pass).
 ## Implementation notes (2026-09-27)
 
 - `LoopRange` (realtime.h): `until(pos, n)` (frames before the loop end),
-  `next(from, to)` (where playback continues). `Engine::setLoop` writes it
-  under a sequence lock and bumps the epoch; the renderer reads it at each
-  relocation, the callback when it sees the epoch (anticipative) or when
-  the sequence changes (in-callback).
+  `next(from, to)` (where playback continues). Every epoch bump (seek,
+  pause, `setLoop`) happens inside one sequence lock together with the
+  seek target and the loop (`writeTransport`, main thread only), so a
+  reader gets an epoch with exactly its seek and loop (review round 13: a
+  loop published before its epoch bump could pair with the previous
+  epoch). The renderer reads the snapshot at each relocation and takes its
+  epoch from it; the callback reads it when it sees a new epoch
+  (anticipative) or a new sequence (in-callback) with at most four tries —
+  a write in progress keeps the old epoch and loop for another cycle
+  instead of spinning on the main thread (a priority inversion). The
+  callback also takes the loop at `start` (it used to miss a loop set
+  before the engine started).
 - Stream positions: `Chunk::stream`, the renderer's `streamLocal_`, the
   callback's `rtStream_`/`liveStream_`; `handAt`, render-ahead and
   `ChunkRing::pullAt` use them. `pullAhead` stops at a timeline

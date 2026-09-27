@@ -309,6 +309,7 @@ class Engine {
     bool lastStopOnAudioThread() const { return stoppedOnAudioThread_.load(); }
 
   private:
+    friend struct EngineTestAccess;  // defined by the tests alone
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
     // Anticipative: the callback's work — the master ring, or the live nodes.
     void anticipativeCycle(const float* const* in, float* const* out,
@@ -329,11 +330,25 @@ class Engine {
     Pulled pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
     static constexpr std::int64_t kNothingPlayed = INT64_MIN;
     void rendererLoop(std::uint64_t firstEpoch);
-    void relocate(std::uint64_t previous, std::uint64_t epoch);
+    std::uint64_t relocate(std::uint64_t previous);  // returns the epoch it relocated for
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
     // Frames the callback has played in `epoch` (0 before its first).
     std::int64_t playedStream(std::uint64_t epoch) const;
-    LoopRange readLoop(std::uint64_t* seq = nullptr) const SUPPLE_RT;
+    // The epoch with its seek target and loop, read under xportSeq_: the
+    // audio thread gives up after `tries` (a write in progress) and keeps
+    // what it has for another cycle; transportSnapshot() waits the writer out.
+    struct TransportSnapshot {
+        std::uint64_t epoch = 0;
+        std::uint64_t seekSeq = 0;
+        std::int64_t seekSample = 0;
+        LoopRange loop;
+    };
+    bool readTransport(TransportSnapshot& out, int tries,
+                       std::uint64_t* seq = nullptr) const SUPPLE_RT;
+    TransportSnapshot transportSnapshot() const;
+    LoopRange readLoop() const { return transportSnapshot().loop; }
+    template <class F>
+    void writeTransport(F&& change);
     // One executor's share of a plan: stops what it owns that `next` lacks,
     // then starts what `next` has once the other executor has let go.
     void adoptShare(std::vector<host::Instance*>& owned, const std::vector<host::Instance*>* next,
@@ -356,6 +371,8 @@ class Engine {
     std::atomic<std::uint64_t> callbackGen_{0};     // the callback's plan generation
     // Transport requests: coalescing atomics (the latest request wins and none
     // is ever dropped), read by the audio thread at the start of each cycle.
+    // The seek target and the loop change only with the epoch, under the
+    // sequence lock below.
     std::atomic<bool> wantPlaying_{false};
     std::atomic<std::int64_t> seekSample_{0};
     std::atomic<std::uint64_t> seekSeq_{0};
@@ -394,7 +411,7 @@ class Engine {
     std::thread renderer_;
     std::atomic<bool> rendererQuit_{false}, hold_{false};
     std::int64_t aheadFrames_ = 0;                 // render-ahead target
-    std::atomic<std::uint64_t> epoch_{0};          // main thread: bumped by seek and pause
+    std::atomic<std::uint64_t> epoch_{0};          // main thread: seek, pause, setLoop
     std::atomic<std::uint64_t> epochDone_{0};      // renderer: the epoch it has relocated for
     std::atomic<std::int64_t> epochStart_{0};      // ... and where that epoch starts
     std::atomic<std::int64_t> renderedStream_{0};  // renderer: frames rendered in the epoch
@@ -409,7 +426,7 @@ class Engine {
     std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     LoopRange loopC_;                           // audio thread: the loop it plays
-    std::uint64_t loopSeqSeen_ = ~0ull;         // audio thread (in-callback mode)
+    std::uint64_t xportSeen_ = ~0ull;           // audio thread (in-callback mode)
     std::atomic<std::uint64_t> misses_{0};
 
     // The callback's share when anticipative: its plan and the live instances
@@ -422,9 +439,11 @@ class Engine {
     std::int64_t liveStream_ = 0;  // frames the live nodes played in rtEpoch_
     bool liveReady_ = false;       // livePos_ is valid for rtEpoch_
 
-    // The loop, written by the main thread under a sequence lock (odd while
-    // writing), read by the executors when they start an epoch.
-    std::atomic<std::uint64_t> loopSeq_{0};
+    // Epoch bumps (seek, pause, setLoop) with the seek target and the loop,
+    // written by the main thread alone under one sequence lock (odd while
+    // writing), so an executor starting an epoch gets exactly its seek and
+    // loop (ADR-0015).
+    std::atomic<std::uint64_t> xportSeq_{0};
     std::atomic<std::int64_t> loopStart_{0}, loopEnd_{0};
     std::atomic<bool> loopOn_{false};
 

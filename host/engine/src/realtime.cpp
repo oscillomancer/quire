@@ -130,7 +130,9 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         const auto chunks = static_cast<std::size_t>(
             std::ceil(options_.renderAheadMs / 1000.0 * 192000.0 / options_.renderBlock));
         ring_ = std::make_unique<detail::ChunkRing>(chunks + 2, options_.renderBlock);
-        rtEpoch_ = epoch_.load();
+        const TransportSnapshot t = transportSnapshot();  // the main thread writes it
+        rtEpoch_ = t.epoch;
+        loopC_ = t.loop;
         rtOffset_ = 0;
         rtPrimed_ = false;
         livePlan_ = nullptr;
@@ -159,12 +161,13 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
                                  : static_cast<unsigned>(std::min(options_.workers, 64)));
         // The renderer's starting epoch is taken here, not on its thread: a
         // seek or pause issued before the thread runs must still be seen.
-        const std::uint64_t first = epoch_.load(std::memory_order_acquire);
+        const TransportSnapshot t = transportSnapshot();
+        const std::uint64_t first = t.epoch;
         epochStartLocal_ = pos_;
         epochStart_.store(pos_);
         streamLocal_ = 0;
         renderedStream_.store(0);
-        loopR_ = readLoop();
+        loopR_ = t.loop;
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
         renderer_ = std::thread([this, first] { rendererLoop(first); });
@@ -279,44 +282,62 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     return okStatus();
 }
 
+template <class F>
+void Engine::writeTransport(F&& change) {
+    const std::uint64_t seq = xportSeq_.load(std::memory_order_relaxed);
+    xportSeq_.store(seq + 1, std::memory_order_relaxed);  // odd: being written
+    std::atomic_thread_fence(std::memory_order_release);
+    change();
+    epoch_.fetch_add(1, std::memory_order_release);  // anticipative: drop what is rendered
+    xportSeq_.store(seq + 2, std::memory_order_release);
+}
+
 void Engine::play() { wantPlaying_.store(true, std::memory_order_release); }
 void Engine::pause() {
     wantPlaying_.store(false, std::memory_order_release);
-    epoch_.fetch_add(1, std::memory_order_release);  // anticipative: drop what is rendered
+    writeTransport([] {});
 }
 void Engine::seek(double seconds) {
-    seekSample_.store(time::samplesAt(std::max(0.0, seconds), config_.sampleRate),
-                      std::memory_order_relaxed);
-    seekSeq_.fetch_add(1, std::memory_order_release);
-    epoch_.fetch_add(1, std::memory_order_release);
+    writeTransport([&] {
+        seekSample_.store(time::samplesAt(std::max(0.0, seconds), config_.sampleRate),
+                          std::memory_order_relaxed);
+        seekSeq_.fetch_add(1, std::memory_order_relaxed);
+    });
 }
 
 void Engine::setLoop(double startSeconds, double endSeconds, bool on) {
-    const std::uint64_t seq = loopSeq_.load(std::memory_order_relaxed);
-    loopSeq_.store(seq + 1, std::memory_order_relaxed);  // odd: being written
-    std::atomic_thread_fence(std::memory_order_release);
-    loopStart_.store(time::samplesAt(std::max(0.0, startSeconds), config_.sampleRate),
-                     std::memory_order_relaxed);
-    loopEnd_.store(time::samplesAt(std::max(0.0, endSeconds), config_.sampleRate),
-                   std::memory_order_relaxed);
-    loopOn_.store(on, std::memory_order_relaxed);
-    loopSeq_.store(seq + 2, std::memory_order_release);
-    epoch_.fetch_add(1, std::memory_order_release);  // anticipative: re-render ahead
+    writeTransport([&] {
+        loopStart_.store(time::samplesAt(std::max(0.0, startSeconds), config_.sampleRate),
+                         std::memory_order_relaxed);
+        loopEnd_.store(time::samplesAt(std::max(0.0, endSeconds), config_.sampleRate),
+                       std::memory_order_relaxed);
+        loopOn_.store(on, std::memory_order_relaxed);
+    });
 }
 
-LoopRange Engine::readLoop(std::uint64_t* seqOut) const SUPPLE_RT {
-    for (;;) {
-        const std::uint64_t seq = loopSeq_.load(std::memory_order_acquire);
-        LoopRange l;
-        l.start = loopStart_.load(std::memory_order_relaxed);
-        l.end = loopEnd_.load(std::memory_order_relaxed);
-        l.on = loopOn_.load(std::memory_order_relaxed);
+bool Engine::readTransport(TransportSnapshot& t, int tries, std::uint64_t* seqOut) const SUPPLE_RT {
+    for (int i = 0; i < tries; ++i) {
+        const std::uint64_t seq = xportSeq_.load(std::memory_order_acquire);
+        if (seq & 1) continue;
+        t.epoch = epoch_.load(std::memory_order_relaxed);
+        t.seekSeq = seekSeq_.load(std::memory_order_relaxed);
+        t.seekSample = seekSample_.load(std::memory_order_relaxed);
+        t.loop.start = loopStart_.load(std::memory_order_relaxed);
+        t.loop.end = loopEnd_.load(std::memory_order_relaxed);
+        t.loop.on = loopOn_.load(std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_acquire);
-        if ((seq & 1) == 0 && loopSeq_.load(std::memory_order_relaxed) == seq) {
+        if (xportSeq_.load(std::memory_order_relaxed) == seq) {
             if (seqOut) *seqOut = seq;
-            return l;
+            return true;
         }
     }
+    return false;
+}
+
+Engine::TransportSnapshot Engine::transportSnapshot() const {
+    TransportSnapshot t;
+    while (!readTransport(t, 64)) std::this_thread::yield();
+    return t;
 }
 
 std::int64_t Engine::playedPosition(std::uint64_t epoch, std::int64_t epochStart) const {
@@ -514,9 +535,13 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         stoppedOnAudioThread_ = true;
         shutDown_.store(true);
     }
-    if (const std::uint64_t seq = seekSeq_.load(std::memory_order_acquire); seq != seekSeen_) {
-        seekSeen_ = seq;
-        pos_ = seekSample_.load(std::memory_order_relaxed);
+    TransportSnapshot xport;
+    std::uint64_t xportSeq = 0;
+    const bool xportNew = xportSeq_.load(std::memory_order_acquire) != xportSeen_ &&
+                          readTransport(xport, 4, &xportSeq);  // else: next cycle
+    if (xportNew && xport.seekSeq != seekSeen_) {
+        seekSeen_ = xport.seekSeq;
+        pos_ = xport.seekSample;
         if (plan) {
             detail::locate(*plan, pos_);
             resetOwned(processing_);
@@ -526,8 +551,10 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         playing_ = want;
         if (!want) resetOwned(processing_);  // no hanging notes
     }
-    if (const std::uint64_t seq = loopSeq_.load(std::memory_order_acquire); seq != loopSeqSeen_)
-        loopC_ = readLoop(&loopSeqSeen_);
+    if (xportNew) {
+        xportSeen_ = xportSeq;
+        loopC_ = xport.loop;
+    }
     if (plan) {
         startFree(processing_, &plan->instances, &processing_);  // any refused, retried
         // For monitored inputs (audio and MIDI).
@@ -592,12 +619,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
 
 Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
     std::int64_t first = kNothingPlayed;
-    const std::uint64_t e = epoch_.load(std::memory_order_acquire);
-    if (e != rtEpoch_) {
-        rtEpoch_ = e;
-        rtPrimed_ = false;
-        rtEpochSeen_.store(e, std::memory_order_release);
-    }
+    const std::uint64_t e = rtEpoch_;  // anticipativeCycle took it with its loop
     detail::ChunkRing& ring = *ring_;
     while (const detail::Chunk* c = ring.front()) {  // flushed by a seek or pause
         if (c->epoch >= e) break;
@@ -672,10 +694,14 @@ Result<std::vector<RecordedTake>> Engine::stopRecording() {
     return takes;
 }
 
-void Engine::relocate(std::uint64_t previous, std::uint64_t epoch) {
-    if (const std::uint64_t seq = seekSeq_.load(std::memory_order_acquire); seq != seekSeen_) {
-        seekSeen_ = seq;
-        pos_ = seekSample_.load(std::memory_order_relaxed);
+std::uint64_t Engine::relocate(std::uint64_t previous) {
+    // The newest epoch with its own seek and loop (never a loop or seek of a
+    // later epoch paired with this one).
+    const TransportSnapshot t = transportSnapshot();
+    const std::uint64_t epoch = t.epoch;
+    if (t.seekSeq != seekSeen_) {
+        seekSeen_ = t.seekSeq;
+        pos_ = t.seekSample;
     } else {
         // Paused: resume where the listener is. Once the callback has seen
         // the new epoch it plays nothing older, so its position is final. (A
@@ -696,8 +722,9 @@ void Engine::relocate(std::uint64_t previous, std::uint64_t epoch) {
     epochStart_.store(pos_);
     streamLocal_ = 0;
     renderedStream_.store(0, std::memory_order_release);
-    loopR_ = readLoop();  // a loop change bumps the epoch: this is the new one
+    loopR_ = t.loop;
     epochDone_.store(epoch, std::memory_order_release);
+    return epoch;
 }
 
 void Engine::rendererLoop(std::uint64_t seen) {
@@ -738,10 +765,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
         } else if (plan) {
             startFree(processing_, &plan->rendererInstances, self);  // let go by the callback
         }
-        if (const std::uint64_t e = epoch_.load(std::memory_order_acquire); e != seen) {
-            relocate(seen, e);
-            seen = e;
-        }
+        if (epoch_.load(std::memory_order_acquire) != seen) seen = relocate(seen);
         if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
             playing_ = want;
             if (!want) resetOwned(processing_);  // no hanging notes
@@ -829,14 +853,16 @@ void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
 
 void Engine::anticipativeCycle(const float* const* in, float* const* out,
                                std::uint32_t frames) SUPPLE_RT {
-    const std::uint64_t e = epoch_.load(std::memory_order_acquire);
-    if (e != rtEpoch_) {
-        rtEpoch_ = e;
+    TransportSnapshot xport;
+    if (epoch_.load(std::memory_order_acquire) != rtEpoch_ &&
+        readTransport(xport, 4)) {  // else: the main thread is writing, try next cycle
+        rtEpoch_ = xport.epoch;
         rtPrimed_ = false;
         liveReady_ = false;
-        loopC_ = readLoop();  // the renderer takes the loop with the epoch too
-        rtEpochSeen_.store(e, std::memory_order_release);
+        loopC_ = xport.loop;  // the renderer takes the loop with the epoch too
+        rtEpochSeen_.store(rtEpoch_, std::memory_order_release);
     }
+    const std::uint64_t e = rtEpoch_;
     const bool playing = wantPlaying_.load(std::memory_order_acquire);
     std::array<const float*, 64> inAt{};
     const std::uint32_t inputs = deviceInputs_;

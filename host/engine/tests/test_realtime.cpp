@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <future>
 #include <thread>
 
 #include <unistd.h>
@@ -15,6 +16,30 @@
 
 using namespace supple;
 using namespace supple::engine;
+
+namespace supple::engine {
+// A main-thread transport write stalled halfway (preempted after the odd
+// sequence store), and the executors' view of the epoch.
+struct EngineTestAccess {
+    static std::uint64_t beginWrite(Engine& e) {
+        const std::uint64_t seq = e.xportSeq_.load();
+        e.xportSeq_.store(seq + 1);
+        return seq;
+    }
+    static void loopAndEpoch(Engine& e, std::int64_t start, std::int64_t end) {
+        e.loopStart_.store(start);
+        e.loopEnd_.store(end);
+        e.loopOn_.store(true);
+        e.epoch_.fetch_add(1);
+    }
+    static void endWrite(Engine& e, std::uint64_t seq) { e.xportSeq_.store(seq + 2); }
+    static std::uint64_t epoch(const Engine& e) { return e.epoch_.load(); }
+    static std::uint64_t rtEpoch(const Engine& e) { return e.rtEpoch_; }
+    static LoopRange rtLoop(const Engine& e) { return e.loopC_; }
+    static std::uint64_t rendererEpoch(const Engine& e) { return e.epochDone_.load(); }
+    static LoopRange rendererLoop(const Engine& e) { return e.loopR_; }  // after rendererEpoch
+};
+}  // namespace supple::engine
 using model::Id;
 using model::kMaster;
 
@@ -1422,4 +1447,55 @@ TEST_CASE("monitoring off while playing: the renderer takes over without a gap" 
         longest = std::max(longest, run);
     }
     CHECK(longest < 3000);  // the gaps between notes (~525) and one cut note, never ~9600
+}
+
+TEST_CASE("a transport write in progress never stalls the audio callback" *
+          doctest::description("rt")) {
+    // The main thread preempted inside a seek/loop write: the callback must
+    // not wait for it (it keeps its epoch and loop for another cycle), and
+    // both executors then take the new epoch with its own loop.
+    for (const bool anticipative : {true, false}) {
+        CAPTURE(anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media, EngineOptions{.anticipative = anticipative, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+        REQUIRE(engine.load(synthSession(0.0)).ok());
+        if (anticipative) REQUIRE(engine.awaitPlan());
+        engine.setLoop(0.0, 1.0, true);
+        engine.play();
+        engine.awaitTransport();
+        backend.run(8);
+        const std::uint64_t before = EngineTestAccess::epoch(engine);
+        const LoopRange old = EngineTestAccess::rtLoop(engine);
+        CHECK(old.end == 48000);
+
+        const std::uint64_t seq = EngineTestAccess::beginWrite(engine);
+        EngineTestAccess::loopAndEpoch(engine, 4800, 24000);  // not published yet
+        auto cycles = std::async(std::launch::async, [&] { backend.run(16); });
+        const bool returned = cycles.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        if (!returned) EngineTestAccess::endWrite(engine, seq);  // let it finish, then fail
+        cycles.wait();
+        REQUIRE(returned);
+        if (anticipative) CHECK(EngineTestAccess::rtEpoch(engine) == before);
+        CHECK(EngineTestAccess::rtLoop(engine).end == old.end);
+
+        EngineTestAccess::endWrite(engine, seq);
+        backend.run(1);
+        const LoopRange now = EngineTestAccess::rtLoop(engine);
+        CHECK(now.start == 4800);
+        CHECK(now.end == 24000);
+        if (anticipative) {
+            CHECK(EngineTestAccess::rtEpoch(engine) == before + 1);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (EngineTestAccess::rendererEpoch(engine) != before + 1 &&
+                   std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            REQUIRE(EngineTestAccess::rendererEpoch(engine) == before + 1);
+            CHECK(EngineTestAccess::rendererLoop(engine).start == 4800);
+            CHECK(EngineTestAccess::rendererLoop(engine).end == 24000);
+        }
+        engine.stop();
+    }
 }
