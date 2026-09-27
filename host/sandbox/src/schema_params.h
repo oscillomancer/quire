@@ -3,6 +3,8 @@
 // through its schema: CLAP value ↔ physical value, normalized mapping.
 #pragma once
 
+#include <charconv>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -17,22 +19,34 @@ struct SchemaParam {
     std::string unitName;
 };
 
-inline params::Curve curveFromName(std::string_view name) {
+inline Result<params::Curve> curveFromName(std::string_view name) {
     params::Curve c;
+    if (name == "linear" || name.empty()) return c;
     if (name == "log") {
         c.kind = params::CurveKind::Log;
     } else if (name.rfind("pow:", 0) == 0) {
         c.kind = params::CurveKind::Pow;
-        c.k = std::stod(std::string(name.substr(4)));
+        name.remove_prefix(4);
     } else if (name.rfind("bipolar:", 0) == 0) {
         c.kind = params::CurveKind::Bipolar;
-        c.k = std::stod(std::string(name.substr(8)));
+        name.remove_prefix(8);
+    } else {
+        return Error("sandbox.param_curve", "unknown parameter curve", "/curve",
+                     "use linear, log, pow:<positive exponent>, or bipolar:<positive exponent>");
+    }
+    if (c.kind == params::CurveKind::Pow || c.kind == params::CurveKind::Bipolar) {
+        const char* begin = name.data();
+        const char* end = begin + name.size();
+        const auto [next, err] = std::from_chars(begin, end, c.k);
+        if (err != std::errc{} || next != end || !std::isfinite(c.k) || c.k <= 0.0)
+            return Error("sandbox.param_curve", "curve exponent must be finite and positive",
+                         "/curve", "use e.g. pow:3 or bipolar:2");
     }
     return c;
 }
 
 // `entry` must outlive the result (choice keys are borrowed).
-inline SchemaParam schemaParam(const json::Value& entry) {
+inline Result<SchemaParam> schemaParam(const json::Value& entry) {
     SchemaParam p;
     auto str = [&](const char* k) -> std::string_view {
         const json::Value* v = entry.find(k);
@@ -57,7 +71,11 @@ inline SchemaParam schemaParam(const json::Value& entry) {
     for (int u = 0; u <= static_cast<int>(units::Unit::none); ++u)
         if (!p.unitName.empty() && units::unitName(static_cast<units::Unit>(u)) == p.unitName)
             p.spec.unit = static_cast<units::Unit>(u);
-    if (!str("curve").empty()) p.spec.curve = curveFromName(str("curve"));
+    if (!str("curve").empty()) {
+        auto curve = curveFromName(str("curve"));
+        if (!curve) return std::move(curve).error();
+        p.spec.curve = *curve;
+    }
     return p;
 }
 

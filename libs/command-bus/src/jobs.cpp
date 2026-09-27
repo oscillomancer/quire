@@ -1,6 +1,7 @@
 #include <supple/cmd/bus.h>
 #include <algorithm>
 #include <cmath>
+#include <exception>
 
 namespace supple::cmd {
 namespace {
@@ -66,12 +67,26 @@ Status JobManager::progress(std::string_view id, double fraction, std::string me
     return {};
 }
 Status JobManager::complete(std::string_view id, json::Value result) {
+    return completeWith(id, std::move(result), {});
+}
+Status JobManager::completeWith(std::string_view id, json::Value result,
+                                const std::function<void()>& publish) {
     std::lock_guard lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     if (it->second.status != "running")
         return Error("job.finished", "job is no longer running", "/job");
-    it->second.status = it->second.cancelRequested ? "cancelled" : "done";
+    if (it->second.cancelRequested) return Error("job.finished", "job was cancelled", "/job");
+    if (publish) {
+        try {
+            publish();
+        } catch (const std::exception& e) {
+            return Error("job.publish", e.what(), "/job");
+        } catch (...) {
+            return Error("job.publish", "could not publish job result", "/job");
+        }
+    }
+    it->second.status = "done";
     it->second.result = std::move(result);
     events_.emplace_back("job.done", snapshot(it->second));
     cv_.notify_all();

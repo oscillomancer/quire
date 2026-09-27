@@ -50,7 +50,7 @@ TEST_CASE("plugins: catalogue, lookup by id, case-insensitive id and path") {
     auto s = openSession(dir);
     auto list = s->plugins();
     REQUIRE(list);
-    CHECK(list->size() == 4);
+    CHECK(list->size() == 8);
     CHECK(s->findPlugin(kGain).value().name == "Test Gain");
     CHECK(s->findPlugin("COM.SUPPLEAUDIO.TEST.SINE").value().id == kSine);
     auto bad = s->findPlugin("com.suppleaudio.test.gian");
@@ -58,7 +58,7 @@ TEST_CASE("plugins: catalogue, lookup by id, case-insensitive id and path") {
     CHECK(bad.error().code == "sandbox.unknown_plugin");
     CHECK(bad.error().hint.find(kGain) != std::string::npos);
     auto byPath = s->findPlugin(kFixture.string());
-    REQUIRE(!byPath);  // the fixture binary holds two plugins
+    REQUIRE(!byPath);  // the fixture binary holds multiple plugins
     CHECK(byPath.error().code == "sandbox.ambiguous_plugin");
 }
 

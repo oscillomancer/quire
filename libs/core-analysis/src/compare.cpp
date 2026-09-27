@@ -317,6 +317,7 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
             }
             TargetResult tr;
             tr.key = m.key;
+            tr.weight = weight;
             auto it = values.find(m.key);
             if (it == values.end()) {
                 // Not applicable to this report (e.g. f0 of unpitched audio): fails hard.

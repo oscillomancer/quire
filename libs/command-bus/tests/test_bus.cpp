@@ -325,12 +325,19 @@ TEST_CASE("job lifecycle, cancellation, timeout and event throttling") {
     CHECK(dispatcher.jobs().cancelled(second));
     CHECK(dispatcher.jobs().status(second)->find("status")->asString() == "cancelled");
     CHECK_FALSE(dispatcher.jobs().complete(second, json::Value::object()));
+    bool published = false;
+    CHECK_FALSE(
+        dispatcher.jobs().completeWith(second, json::Value::object(), [&] { published = true; }));
+    CHECK_FALSE(published);
     CHECK(call(dispatcher, "job.status", obj("{\"job\":\"missing\"}")).error().code ==
           "job.unknown");
     CHECK(call(dispatcher, "job.list"));
     auto third = dispatcher.jobs().create();
     CHECK(dispatcher.jobs().fail(third, Error("toy.failed", "oops")));
     CHECK(dispatcher.jobs().status(third)->find("error")->find("code")->asString() == "toy.failed");
+    auto fourth = dispatcher.jobs().create();
+    CHECK(dispatcher.jobs().completeWith(fourth, json::Value::object(), [&] { published = true; }));
+    CHECK(published);
 }
 
 TEST_CASE("generated registry, tools and reference match golden files") {

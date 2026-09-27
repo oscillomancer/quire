@@ -13,8 +13,10 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(sandbox-optimize.tests)
   add_test(NAME sandbox-optimize.tests COMMAND sandbox-optimize.tests)
   set_tests_properties(sandbox-optimize.tests PROPERTIES LABELS "sandbox;slow;tsan-skip")
-  add_dependencies(sandbox-optimize.tests orrery-headless)
-  target_compile_definitions(sandbox-optimize.tests PRIVATE ORRERY_CLAP_PATH="$<TARGET_FILE:orrery-headless>")
+  add_dependencies(sandbox-optimize.tests orrery-headless clap-host-fixtures)
+  target_compile_definitions(sandbox-optimize.tests PRIVATE
+    ORRERY_CLAP_PATH="$<TARGET_FILE:orrery-headless>"
+    FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
 endif()
 
 # The sandbox CLI: <slug>-sandbox (named from cmake/Product.cmake).
