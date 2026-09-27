@@ -46,12 +46,12 @@ double score(std::string_view key, double a, double b) {
     if (startsWith(key, "loudness.true_peak") || startsWith(key, "loudness.sample_peak"))
         return d / 0.5;
     if (startsWith(key, "loudness.")) return d / 1.0;
-    if (startsWith(key, "spectral.centroid_hz") || startsWith(key, "spectral.rolloff_hz"))
-        return endsWith(key, ".median") ? rel(0.10) : 0.0;
+    if (startsWith(key, "spectral.centroid_hz.") || startsWith(key, "spectral.rolloff_hz."))
+        return rel(0.10);
     if (startsWith(key, "spectral.bands.") && endsWith(key, ".level_db")) return d / 1.5;
     if (key == "spectral.tilt_db_per_oct") return d / 1.0;
-    if (key == "spectral.flatness.median") return d / 0.05;
-    if (key == "stereo.correlation") return d / 0.1;
+    if (startsWith(key, "spectral.flatness.")) return d / 0.05;
+    if (startsWith(key, "stereo.correlation")) return d / 0.1;
     if (key == "stereo.width" || (startsWith(key, "stereo.bands.") && endsWith(key, ".width")))
         return d / 0.05;
     if (key == "envelope.attack_ms" || key == "envelope.decay20_ms" || key == "envelope.release_ms")
@@ -150,12 +150,25 @@ constexpr double kBark[25] = {20,   100,  200,  300,  400,  510,   630,  770,  9
 std::vector<std::vector<double>> barkFrames(const Signal& s, std::int64_t frames, std::size_t n) {
     // Mono downmix, zero-padded to `frames`.
     std::vector<double> x(static_cast<std::size_t>(frames), 0.0);
+    constexpr double w50[5] = {1, 1, 1, 1.41, 1.41};
+    constexpr double w51[6] = {1, 1, 1, 0, 1.41, 1.41};
     for (std::int64_t i = 0; i < s.frames; ++i) {
         double v = 0.0;
-        for (std::size_t c = 0; c < s.channels.size() && c < 2; ++c)
-            v += static_cast<double>(s.channels[c][i]);
-        x[static_cast<std::size_t>(i)] =
-            v / static_cast<double>(std::min<std::size_t>(2, s.channels.size()));
+        if (s.layout == Layout::Mono) {
+            v = static_cast<double>(s.channels[0][i]);
+        } else if (s.layout == Layout::Stereo) {
+            v = 0.5 *
+                (static_cast<double>(s.channels[0][i]) + static_cast<double>(s.channels[1][i]));
+        } else {
+            const double* weights = s.layout == Layout::Surround50 ? w50 : w51;
+            double sum = 0.0;
+            for (std::size_t c = 0; c < s.channels.size(); ++c) {
+                v += weights[c] * static_cast<double>(s.channels[c][i]);
+                sum += weights[c];
+            }
+            v /= sum;
+        }
+        x[static_cast<std::size_t>(i)] = v;
     }
     std::vector<double> w(n);
     double w2 = 0.0;
@@ -276,9 +289,32 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
             }
             const json::Value& t = m.value;
             if (!t.isObject()) return Error("analysis.profile", "a target is an object", path);
-            const double weight = t.find("weight") && t.find("weight")->isNumber()
-                                      ? t.find("weight")->asDouble()
-                                      : 1.0;
+            const auto* weightValue = t.find("weight");
+            if (weightValue &&
+                (!weightValue->isNumber() || !std::isfinite(weightValue->asDouble()) ||
+                 weightValue->asDouble() <= 0.0))
+                return Error("analysis.profile.weight", "weight must be a positive number",
+                             path + "/weight");
+            const double weight = weightValue ? weightValue->asDouble() : 1.0;
+            const auto* target = t.find("target");
+            const auto* tol = t.find("tolerance");
+            const auto* minValue = t.find("min");
+            const auto* maxValue = t.find("max");
+            if (target) {
+                if (!target->isNumber() || !std::isfinite(target->asDouble()) || !tol ||
+                    !tol->isNumber() || !std::isfinite(tol->asDouble()) || tol->asDouble() <= 0.0)
+                    return Error("analysis.profile",
+                                 "target needs a number and a positive tolerance", path,
+                                 R"(e.g. {"target": 1200, "tolerance": 150})");
+            } else if (minValue || maxValue) {
+                if ((minValue && (!minValue->isNumber() || !std::isfinite(minValue->asDouble()))) ||
+                    (maxValue && (!maxValue->isNumber() || !std::isfinite(maxValue->asDouble()))) ||
+                    (minValue && maxValue && minValue->asDouble() > maxValue->asDouble()))
+                    return Error("analysis.profile.range", "min and max must be ordered numbers",
+                                 path);
+            } else {
+                return Error("analysis.profile", "a target has target+tolerance or min/max", path);
+            }
             TargetResult tr;
             tr.key = m.key;
             auto it = values.find(m.key);
@@ -288,30 +324,17 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
                 tr.distance = 10.0;
             } else {
                 tr.value = it->second;
-                if (t.find("target")) {
-                    const auto* target = t.find("target");
-                    const auto* tol = t.find("tolerance");
-                    if (!target->isNumber() || !tol || !tol->isNumber() || tol->asDouble() <= 0.0)
-                        return Error("analysis.profile",
-                                     "target needs a number and a positive tolerance", path,
-                                     R"(e.g. {"target": 1200, "tolerance": 150})");
+                if (target) {
                     tr.distance = std::fabs(tr.value - target->asDouble()) / tol->asDouble();
                     tr.pass = tr.distance <= 1.0;
-                } else if (t.find("min") || t.find("max")) {
-                    const double lo = t.find("min") && t.find("min")->isNumber()
-                                          ? t.find("min")->asDouble()
-                                          : -1e300;
-                    const double hi = t.find("max") && t.find("max")->isNumber()
-                                          ? t.find("max")->asDouble()
-                                          : 1e300;
+                } else if (minValue || maxValue) {
+                    const double lo = minValue ? minValue->asDouble() : -1e300;
+                    const double hi = maxValue ? maxValue->asDouble() : 1e300;
                     const double span = hi - lo < 1e299 && hi > lo ? hi - lo : 1.0;
                     tr.distance = tr.value < lo   ? (lo - tr.value) / span
                                   : tr.value > hi ? (tr.value - hi) / span
                                                   : 0.0;
                     tr.pass = tr.distance == 0.0;
-                } else {
-                    return Error("analysis.profile", "a target has target+tolerance or min/max",
-                                 path);
                 }
             }
             pass = pass && tr.pass;
@@ -328,7 +351,10 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
         std::array<double, kThirdOctaves> want{};
         for (int i = 0; i < kThirdOctaves; ++i) {
             const json::Value& v = ltas->at(static_cast<std::size_t>(i));
-            want[static_cast<std::size_t>(i)] = v.isNumber() ? v.asDouble() : -120.0;
+            if (!v.isNumber() || !std::isfinite(v.asDouble()))
+                return Error("analysis.profile.ltas", "LTAS levels must be numbers",
+                             "/ltas/" + std::to_string(i));
+            want[static_cast<std::size_t>(i)] = v.asDouble();
         }
         TargetResult tr;
         tr.key = "ltas";
@@ -369,6 +395,18 @@ Result<MaskingReport> masking(const Signal& masker, const Signal& maskee) {
     if (masker.sampleRate != maskee.sampleRate)
         return Error("analysis.sample_rate", "masker and maskee must share a sample rate", {},
                      "resample one of them");
+    auto validLayout = [](const Signal& s) {
+        const std::size_t expected = s.layout == Layout::Mono         ? 1
+                                     : s.layout == Layout::Stereo     ? 2
+                                     : s.layout == Layout::Surround50 ? 5
+                                     : s.layout == Layout::Surround51 ? 6
+                                                                      : 0;
+        return expected != 0 && s.channels.size() == expected;
+    };
+    if (!validLayout(masker) || !validLayout(maskee))
+        return Error("analysis.layout", "channel count does not match layout", "/channels");
+    if (!(masker.sampleRate >= 22050.0 && masker.sampleRate <= 192000.0))
+        return Error("analysis.sample_rate", "sample rate must be 22.05..192 kHz", {});
     const std::int64_t frames = std::max(masker.frames, maskee.frames);
     const double fs = masker.sampleRate;
     const auto n = static_cast<std::size_t>(1)

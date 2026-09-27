@@ -57,7 +57,9 @@ std::vector<double> downmix(const Signal& s) {
                 (static_cast<double>(s.channels[0][i]) + static_cast<double>(s.channels[1][i]));
         } else {
             // BS.1770 weights: L R C (1.0), surrounds 1.41, LFE excluded; normalized.
-            constexpr double w[6] = {1, 1, 1, 0, 1.41, 1.41};
+            constexpr double w50[5] = {1, 1, 1, 1.41, 1.41};
+            constexpr double w51[6] = {1, 1, 1, 0, 1.41, 1.41};
+            const double* w = s.layout == Layout::Surround50 ? w50 : w51;
             double sum = 0.0;
             for (std::size_t c = 0; c < std::min<std::size_t>(n, 6); ++c) {
                 v += w[c] * static_cast<double>(s.channels[c][i]);
@@ -583,7 +585,7 @@ double pearson(const float* l, const float* r, std::size_t n) {
     return sxx > 0.0 && syy > 0.0 ? sxy / std::sqrt(sxx * syy) : (sxx == syy ? 1.0 : 0.0);
 }
 
-StereoReport stereoOf(const Signal& s, bool monoLoss) {
+StereoReport stereoOf(const Signal& s, bool monoLoss, const LoudnessReport* loudness) {
     StereoReport r;
     const float* l = s.channels[0];
     const float* rr = s.channels[1];
@@ -616,7 +618,7 @@ StereoReport stereoOf(const Signal& s, bool monoLoss) {
         eR += b * b;
     }
     r.width = em + es > 0.0 ? es / (em + es) : 0.0;
-    r.balanceDb = eL > 0.0 && eR > 0.0 ? 10.0 * std::log10(eR / eL) : 0.0;
+    r.balanceDb = eL + eR > 0.0 ? 10.0 * std::log10(eR / eL) : 0.0;
     const std::size_t nfft = pow2Nearest(0.0427 * s.sampleRate);
     Stft sm(mid, s.sampleRate, nfft), ss(side, s.sampleRate, nfft);
     std::vector<double> pm(nfft / 2 + 1, 0.0), ps(nfft / 2 + 1, 0.0);
@@ -634,14 +636,14 @@ StereoReport stereoOf(const Signal& s, bool monoLoss) {
     }
     // Mono loss: loudness of the stereo signal minus the mono downmix in both channels.
     if (!monoLoss) return r;
-    const LoudnessReport stereo = loudnessOf(s);
+    const double stereoIntegrated = loudness ? loudness->integrated : loudnessOf(s).integrated;
     std::vector<float> m32(n);
     for (std::size_t i = 0; i < n; ++i) m32[i] = static_cast<float>(mid[i]);
     const float* both[2] = {m32.data(), m32.data()};
     Signal mono{std::span<const float* const>(both, 2), s.frames, s.sampleRate, Layout::Stereo};
     const LoudnessReport monoL = loudnessOf(mono);
-    r.monoLossLu = std::isfinite(stereo.integrated) && std::isfinite(monoL.integrated)
-                       ? stereo.integrated - monoL.integrated
+    r.monoLossLu = std::isfinite(stereoIntegrated) && std::isfinite(monoL.integrated)
+                       ? stereoIntegrated - monoL.integrated
                        : 0.0;
     return r;
 }
@@ -715,6 +717,22 @@ Result<Report> analyze(const Signal& s, const Options& o) {
     if (!(s.sampleRate >= 22050.0 && s.sampleRate <= 192000.0))
         return Error("analysis.sample_rate", "sample rate must be 22.05..192 kHz", {},
                      "resample first (audio::resample)");
+    const std::size_t expected = s.layout == Layout::Mono         ? 1
+                                 : s.layout == Layout::Stereo     ? 2
+                                 : s.layout == Layout::Surround50 ? 5
+                                 : s.layout == Layout::Surround51 ? 6
+                                                                  : 0;
+    if (s.channels.size() != expected)
+        return Error("analysis.layout", "channel count does not match layout", "/channels",
+                     "supply channels in the declared layout order");
+    if (o.f0RangeHz) {
+        const auto [lo, hi] = *o.f0RangeHz;
+        const double minHz = s.sampleRate / (std::lround(4096.0 * s.sampleRate / 48000.0) / 2.0);
+        if (!std::isfinite(lo) || !std::isfinite(hi) || lo < minHz || hi <= lo ||
+            hi > s.sampleRate / 2.0)
+            return Error("analysis.f0_range", "invalid pitch frequency range", "/f0RangeHz",
+                         "use finite ascending frequencies within the YIN window and Nyquist");
+    }
     Report r;
     r.seconds = static_cast<double>(s.frames) / s.sampleRate;
     r.sampleRate = s.sampleRate;
@@ -728,8 +746,8 @@ Result<Report> analyze(const Signal& s, const Options& o) {
         r.harmonic = harmonicOf(mono, s.sampleRate, o.f0RangeHz.value_or(std::pair{30.0, 4000.0}),
                                 o.pitchFrames);
     if (o.envelope) r.envelope = envelopeOf(mono, s.sampleRate, o.noteOffSeconds);
-    if (o.stereo && s.layout == Layout::Stereo && s.channels.size() >= 2)
-        r.stereo = stereoOf(s, o.monoLoss);
+    if (o.stereo && s.layout == Layout::Stereo)
+        r.stereo = stereoOf(s, o.monoLoss, r.loudness ? &*r.loudness : nullptr);
     return r;
 }
 
