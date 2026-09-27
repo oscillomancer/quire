@@ -766,6 +766,7 @@ ParamLocation locate(std::size_t index) { return built().where[index]; }
 std::uint16_t fieldCount(Block b) { return static_cast<std::uint16_t>(fields(b).size()); }
 
 std::string_view fieldName(Block b, std::uint16_t field) { return fields(b)[field].name; }
+std::string_view fieldLabel(Block b, std::uint16_t field) { return fields(b)[field].label; }
 
 std::optional<std::uint16_t> findField(Block b, std::string_view name) {
     const auto& defs = fields(b);

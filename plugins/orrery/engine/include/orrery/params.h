@@ -264,6 +264,9 @@ ParamLocation locate(std::size_t index);
 std::uint16_t fieldCount(Block b);
 // The field's patch name ("cutoff") — the key without the slot prefix.
 std::string_view fieldName(Block b, std::uint16_t field);
+// The field's display label without the slot prefix ("Level"; the CLAP name
+// is "Osc 1 Level").
+std::string_view fieldLabel(Block b, std::uint16_t field);
 std::optional<std::uint16_t> findField(Block b, std::string_view name);
 // True for fields written with their choice label in patches ("24 dB", "1/8.").
 bool writesLabel(std::size_t index);

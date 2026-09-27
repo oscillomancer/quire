@@ -475,6 +475,17 @@ real-time engine). The code is the reference; these notes explain the choices.
 - **Validation:** `drive: {"type": "off"}` takes no other field, and an
   explicit empty step `values` array is an error.
 
+- **Plugin and editor:** `plugins/orrery` is the template-derived plugin
+  (`Orrery.clap`; VST3 on request): the shared CLAP core (`plugins/orrery/clap`)
+  plus an editor that shows the patch as a signal-flow diagram (oscillators →
+  filters → drive → amp → fx → output), the modulators (envelopes, LFOs, steps,
+  macros, voice), an inspector with the selected module's active parameters and
+  the route list. Structural edits (add/remove/retype modules, targets, routing,
+  quality, fx chain, routes and their `via`) are semantic merge patches built by
+  `orrery/edits.h`, so the editor cannot produce a patch the codec rejects;
+  parameter edits are host gestures. Outputs: stereo, or mono ((L+R)/2);
+  32- and 64-bit hosts.
+
 **Performance (first measurement, 2026-09-26):** the §9 reference patch
 (8 notes × 3 unison, 2 va + sub, ladder, tape drive, 2 envs, 1 LFO, chorus +
 reverb, `normal`) costs ≈ 10.7 % of one core at 48 kHz / 256 frames (-O2),

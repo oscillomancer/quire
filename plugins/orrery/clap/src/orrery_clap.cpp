@@ -100,7 +100,9 @@ struct Plugin final : EditorBridge {
     clapx::SemanticAdapter adapter{
         model,
         {kDescriptor.id, kDescriptor.name, kDescriptor.version, std::string(kDocs), kStateMagic}};
-    std::vector<Event> events;  // audio thread; reserved at activation
+    std::vector<Event> events;              // audio thread; reserved at activation
+    std::vector<float> scratchL, scratchR;  // 64-bit or mono hosts: render here, then convert
+    bool mono = false;                      // the selected audio-ports config (inactive only)
     std::array<std::int16_t, 2600> indexOfId{};
     bool active = false;
     std::atomic<bool> processing{false};
@@ -401,15 +403,37 @@ const clap_plugin_state_t kState = {
 
 const clap_plugin_audio_ports_t kAudioPorts = {
     [](const clap_plugin_t*, bool input) -> uint32_t { return input ? 0 : 1; },
-    [](const clap_plugin_t*, uint32_t index, bool input, clap_audio_port_info_t* info) {
+    [](const clap_plugin_t* p, uint32_t index, bool input, clap_audio_port_info_t* info) {
         if (input || index != 0) return false;
+        const bool mono = self(p)->mono;
         std::memset(info, 0, sizeof(*info));
         info->id = 0;
         std::strcpy(info->name, "Out");
-        info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-        info->channel_count = 2;
-        info->port_type = CLAP_PORT_STEREO;
+        info->flags = CLAP_AUDIO_PORT_IS_MAIN | CLAP_AUDIO_PORT_SUPPORTS_64BITS;
+        info->channel_count = mono ? 1 : 2;
+        info->port_type = mono ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
         info->in_place_pair = CLAP_INVALID_ID;
+        return true;
+    }};
+
+// Stereo (default) or mono output; mono is the stereo render's (L+R)/2.
+const clap_plugin_audio_ports_config_t kAudioPortsConfig = {
+    [](const clap_plugin_t*) -> uint32_t { return 2; },
+    [](const clap_plugin_t*, uint32_t index, clap_audio_ports_config_t* c) {
+        if (index > 1) return false;
+        std::memset(c, 0, sizeof(*c));
+        c->id = index;
+        std::strcpy(c->name, index == 0 ? "Stereo" : "Mono");
+        c->output_port_count = 1;
+        c->has_main_output = true;
+        c->main_output_channel_count = index == 0 ? 2 : 1;
+        c->main_output_port_type = index == 0 ? CLAP_PORT_STEREO : CLAP_PORT_MONO;
+        return true;
+    },
+    [](const clap_plugin_t* p, clap_id id) {
+        Plugin* s = self(p);
+        if (s->active || id > 1) return false;
+        s->mono = id == 1;
         return true;
     }};
 
@@ -444,6 +468,8 @@ bool activate(const clap_plugin_t* p, double sampleRate, uint32_t, uint32_t maxF
     Plugin* s = self(p);
     s->engine.prepare(sampleRate, maxFrames);
     s->events.reserve(kMaxEvents);
+    s->scratchL.assign(maxFrames, 0.0f);
+    s->scratchR.assign(maxFrames, 0.0f);
     s->active = true;
     s->engine.setPatch(s->model.current());
     return true;
@@ -459,10 +485,32 @@ clap_process_status process(const clap_plugin_t* p, const clap_process_t* pr) {
         t.tempo = pr->transport->tempo;
     if (pr->audio_outputs_count < 1 || pr->audio_outputs[0].channel_count < 1)
         return CLAP_PROCESS_ERROR;
-    float* left = pr->audio_outputs[0].data32[0];
-    float* right = pr->audio_outputs[0].channel_count > 1 ? pr->audio_outputs[0].data32[1] : left;
-    // CLAP guarantees frames_count <= the activation's max_frames_count.
-    s->engine.process(s->events, t, left, right, pr->frames_count);
+    const clap_audio_buffer_t& ob = pr->audio_outputs[0];
+    if (!ob.data32 && !ob.data64) return CLAP_PROCESS_ERROR;
+    const std::uint32_t n = pr->frames_count;  // <= the activation's max_frames_count
+    const bool wide = !ob.data32;
+    const bool mono = ob.channel_count < 2;
+    // Render straight into a stereo float output; otherwise into scratch, then
+    // widen to 64-bit and/or fold to mono.
+    const bool direct = !wide && !mono;
+    float* left = direct ? ob.data32[0] : s->scratchL.data();
+    float* right = direct ? ob.data32[1] : s->scratchR.data();
+    s->engine.process(s->events, t, left, right, n);
+    if (!direct) {
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const float l = left[i], r = right[i];
+            if (mono) {
+                const float m = 0.5f * (l + r);
+                if (wide)
+                    ob.data64[0][i] = static_cast<double>(m);
+                else
+                    ob.data32[0][i] = m;
+            } else {
+                ob.data64[0][i] = static_cast<double>(l);
+                ob.data64[1][i] = static_cast<double>(r);
+            }
+        }
+    }
     if (!s->telemetryOn.load(std::memory_order_relaxed))
         return s->events.empty() && s->engine.silent() ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
     float pl = 0.0f, pr2 = 0.0f;
@@ -510,6 +558,7 @@ const clap_plugin_t* createClapPlugin(const clap_host_t* host, const ClapExtensi
                      if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kParams;
                      if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
                      if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
+                     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &kAudioPortsConfig;
                      if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kNotePorts;
                      if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kLatency;
                      if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS))
