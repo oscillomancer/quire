@@ -28,4 +28,7 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME engine.mcp-stdio
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
             $<TARGET_FILE:${PRODUCT_SLUG}-engine> session_describe)
+  add_test(NAME engine.mcp-proxy
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-engine> $<TARGET_FILE:${PRODUCT_SLUG}-mcp> --engine)
 endif()

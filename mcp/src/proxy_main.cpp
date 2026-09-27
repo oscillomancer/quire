@@ -6,15 +6,19 @@
 int main(int argc, char** argv) {
     using namespace supple;
     std::filesystem::path path;
-    if (argc == 3 && std::string_view(argv[1]) == "--socket")
-        path = argv[2];
-    else if (argc == 1)
-        path = rpc::socketPath("main");
-    else {
-        std::fprintf(stderr, "usage: %.*s-mcp [--socket PATH]\n",
-                     static_cast<int>(product::kSlug.size()), product::kSlug.data());
-        return 2;
+    std::string instance = "default";
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--socket" && i + 1 < argc)
+            path = argv[++i];
+        else if (std::string_view(argv[i]) == "--instance" && i + 1 < argc)
+            instance = argv[++i];
+        else {
+            std::fprintf(stderr, "usage: %.*s-mcp [--instance NAME] [--socket PATH]\n",
+                         static_cast<int>(product::kSlug.size()), product::kSlug.data());
+            return 2;
+        }
     }
+    if (path.empty()) path = rpc::socketPath(instance);
     rpc::Client client;
     auto connected = client.connect(path, "mcp-proxy", {}, true);
     if (!connected) {

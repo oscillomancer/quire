@@ -35,4 +35,9 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME sandbox.mcp-stdio
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> session_get)
+  add_test(NAME sandbox.mcp-proxy
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
+            $<TARGET_FILE:orrery-headless>)
+  add_dependencies(${PRODUCT_SLUG}-sandbox orrery-headless)
 endif()

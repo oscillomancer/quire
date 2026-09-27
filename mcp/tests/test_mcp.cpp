@@ -185,3 +185,17 @@ TEST_CASE("proxy MCP forwards calls over the Unix control socket") {
     rpcServer.stop();
     CHECK_FALSE(std::filesystem::exists(path));
 }
+
+TEST_CASE("MCP stdio caps an unterminated oversized frame") {
+    auto commands = registry();
+    Host host;
+    cmd::Dispatcher dispatcher(commands, host);
+    mcp::Server server(commands, dispatcher);
+    std::istringstream input(std::string(rpc::kMaxMessageBytes + 1, 'x'));
+    std::ostringstream output;
+    REQUIRE(server.serve(input, output));
+    auto reply = json::parse(output.str());
+    REQUIRE(reply);
+    CHECK(reply->find("error")->find("code")->asInt() == -32600);
+    CHECK(reply->find("id")->isNull());
+}

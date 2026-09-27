@@ -9,9 +9,12 @@
 //       tool list (generator output; drift-tested against skill/generated/).
 //   <slug>-sandbox --mcp [--workdir DIR] [--plugin-path P]...
 //       Serve MCP over stdio against a live in-process sandbox session.
+//   <slug>-sandbox serve [--workdir DIR] [--plugin-path P]... [--instance NAME] [--socket PATH]
+//       Serve the command bus on a Unix socket from the model thread.
 #include <unistd.h>
 
 #include <supple/mcp/server.h>
+#include <supple/rpc/model_loop.h>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -32,7 +35,10 @@ int usage() {
     std::fprintf(stderr,
                  "usage: %.*s-sandbox exec '<json>' [--workdir DIR] [--plugin-path P]...\n"
                  "       %.*s-sandbox registry [--markdown | --mcp-tools]\n"
-                 "       %.*s-sandbox --mcp [--workdir DIR] [--plugin-path P]...\n",
+                 "       %.*s-sandbox --mcp [--workdir DIR] [--plugin-path P]...\n"
+                 "       %.*s-sandbox serve [--workdir DIR] [--plugin-path P]... "
+                 "[--instance NAME] [--socket PATH]\n",
+                 static_cast<int>(product::kSlug.size()), product::kSlug.data(),
                  static_cast<int>(product::kSlug.size()), product::kSlug.data(),
                  static_cast<int>(product::kSlug.size()), product::kSlug.data(),
                  static_cast<int>(product::kSlug.size()), product::kSlug.data());
@@ -82,16 +88,23 @@ int main(int argc, char** argv) {
     cmd::Registry registry;
     sandbox::registerCommands(registry);
 
-    if (args[0] == "--mcp") {
+    if (args[0] == "--mcp" || args[0] == "serve") {
+        const bool rpcMode = args[0] == "serve";
         sandbox::SessionOptions options;
         options.identity.name = std::string(product::kName) + " sandbox";
         options.identity.vendor = std::string(product::kVendor);
         options.identity.version = std::string(product::kVersion);
+        std::string instance = "default";
+        fs::path socket;
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--workdir" && i + 1 < args.size())
                 options.workdir = args[++i];
             else if (args[i] == "--plugin-path" && i + 1 < args.size())
                 options.pluginPath.emplace_back(args[++i]);
+            else if (rpcMode && args[i] == "--instance" && i + 1 < args.size())
+                instance = args[++i];
+            else if (rpcMode && args[i] == "--socket" && i + 1 < args.size())
+                socket = args[++i];
             else
                 return usage();
         }
@@ -105,6 +118,26 @@ int main(int argc, char** argv) {
         }
         sandbox::SandboxHost host(std::move(*session), options.workdir / "commands.ndjson");
         cmd::Dispatcher dispatcher(registry, host);
+        if (rpcMode) {
+            rpc::ModelLoop loop;
+            rpc::Server* activeServer = nullptr;
+            rpc::Server server(registry, dispatcher, [&](auto task) {
+                loop.post([&, task = std::move(task)] {
+                    task();
+                    for (auto& [topic, payload] : host.takeEvents())
+                        activeServer->publish(topic, payload);
+                });
+            });
+            activeServer = &server;
+            auto started = server.start(socket.empty() ? rpc::socketPath(instance) : socket);
+            if (!started) {
+                std::fprintf(stderr, "%s\n", started.error().toString().c_str());
+                return 1;
+            }
+            loop.run();
+            server.stop();
+            return 0;
+        }
         mcp::Server server(registry, dispatcher);
         auto status = server.serve(std::cin, std::cout);
         if (!status) {

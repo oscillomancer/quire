@@ -257,20 +257,44 @@ std::optional<json::Value> Server::handle(const json::Value& request) {
 }
 Status Server::serve(std::istream& input, std::ostream& output) {
     std::string frame;
-    while (std::getline(input, frame)) {
-        if (frame.size() > rpc::kMaxMessageBytes) {
-            output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
-            output.flush();
+    bool overflow = false;
+    auto* source = input.rdbuf();
+    while (true) {
+        auto next = source->sbumpc();
+        if (next == std::char_traits<char>::eof()) break;
+        if (next == '\n') {
+            if (overflow) {
+                output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
+                output.flush();
+                if (!output) return Error("mcp.write", "failed to write stdio response");
+                frame.clear();
+                overflow = false;
+                continue;
+            }
+            auto parsed = json::parse(frame);
+            auto reply = parsed ? handle(*parsed)
+                                : std::optional<json::Value>(error(nullptr, -32700, "Parse error"));
+            if (reply) {
+                output << json::writeCompact(*reply) << '\n';
+                output.flush();
+                if (!output) return Error("mcp.write", "failed to write stdio response");
+            }
+            frame.clear();
             continue;
         }
-        auto parsed = json::parse(frame);
-        auto reply = parsed ? handle(*parsed)
-                            : std::optional<json::Value>(error(nullptr, -32700, "Parse error"));
-        if (reply) {
-            output << json::writeCompact(*reply) << '\n';
-            output.flush();
-            if (!output) return Error("mcp.write", "failed to write stdio response");
+        if (!overflow) {
+            if (frame.size() < rpc::kMaxMessageBytes)
+                frame.push_back(static_cast<char>(next));
+            else {
+                frame.clear();
+                overflow = true;
+            }
         }
+    }
+    if (overflow) {
+        output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
+        output.flush();
+        if (!output) return Error("mcp.write", "failed to write stdio response");
     }
     return {};
 }

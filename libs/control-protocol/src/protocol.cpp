@@ -2,6 +2,7 @@
 #include <poll.h>
 #include <supple/product.h>
 #include <supple/rpc/protocol.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -92,6 +93,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         std::mutex outputMutex;
         std::deque<std::string> output;
         std::size_t outputBytes = 0;
+        std::size_t pendingRequests = 0;
+        std::size_t pendingBytes = 0;
         std::string input, sending;
         std::size_t sent = 0;
         bool closeAfterWrite = false;
@@ -106,6 +109,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
     Post post;
     std::filesystem::path socket;
     int listener = -1;
+    dev_t socketDevice = 0;
+    ino_t socketInode = 0;
     std::thread acceptThread;
     std::mutex peersMutex;
     std::vector<std::shared_ptr<Peer>> peers;
@@ -118,14 +123,22 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
     void enqueue(const std::shared_ptr<Peer>& peer, json::Value value, bool event = false) {
         std::string message = line(value);
         std::lock_guard lock(peer->outputMutex);
+        if (!event && message.size() > kMaxMessageBytes) {
+            const auto* id = value.find("id");
+            message = line(rpcError(id ? *id : json::Value(nullptr), -32000, "Response too large",
+                                    Error("rpc.response_too_large", "response exceeds 16 MiB", "",
+                                          "narrow the query")));
+        }
         if (event &&
             (peer->output.size() >= 256 || peer->outputBytes + message.size() > 1024 * 1024)) {
             ++peer->dropped;
             return;
         }
-        if (!event && peer->outputBytes + message.size() > 4 * 1024 * 1024) {
-            peer->closeAfterWrite = true;
-            return;
+        if (!event && peer->outputBytes + message.size() > 32 * 1024 * 1024 - 64 * 1024) {
+            const auto* id = value.find("id");
+            message = line(rpcError(
+                id ? *id : json::Value(nullptr), -32000, "Response too large",
+                Error("rpc.response_too_large", "outbound queue is full", "", "narrow the query")));
         }
         peer->outputBytes += message.size();
         peer->output.push_back(std::move(message));
@@ -156,7 +169,12 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                                          "use the atomic batch command")));
             return;
         }
-        auto* id = request.isObject() ? request.find("id") : nullptr;
+        if (!request.isObject()) {
+            enqueue(peer, rpcError(nullptr, -32600, "Invalid Request",
+                                   Error("rpc.invalid_request", "expected a request object")));
+            return;
+        }
+        auto* id = request.find("id");
         json::Value idValue = id ? *id : json::Value(nullptr);
         // Notifications are ignored and recorded without a response.
         if (!id) {
@@ -167,10 +185,16 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         auto* method = request.isObject() ? request.find("method") : nullptr;
         auto* params = request.isObject() ? request.find("params") : nullptr;
         if (!validId(*id) || !version || !version->isString() || version->asString() != "2.0" ||
-            !method || !method->isString() || (params && !params->isObject())) {
+            !method || !method->isString()) {
             enqueue(peer, rpcError(idValue, -32600, "Invalid Request",
                                    Error("rpc.invalid_request", "expected JSON-RPC 2.0 request", "",
                                          "use an object with id, method and object params")));
+            return;
+        }
+        if (params && !params->isObject()) {
+            enqueue(peer, rpcError(idValue, -32602, "Invalid params",
+                                   Error("rpc.invalid_params", "params must be an object",
+                                         "/params", "send an object of named arguments")));
             return;
         }
         const auto& name = method->asString();
@@ -268,9 +292,45 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
     }
     void io(const std::shared_ptr<Peer>& peer) {
         while (running) {
-            short events = POLLIN;
+            // Consume already framed input when a response frees a request slot.
+            while (true) {
+                std::size_t newline = peer->input.find('\n');
+                if (newline == std::string::npos) break;
+                {
+                    std::lock_guard lock(peer->outputMutex);
+                    if (peer->closeAfterWrite || peer->pendingRequests >= 16 ||
+                        peer->pendingBytes + newline > 32 * 1024 * 1024 ||
+                        peer->outputBytes >= 32 * 1024 * 1024 - 64 * 1024)
+                        break;
+                    ++peer->pendingRequests;
+                    peer->pendingBytes += newline;
+                }
+                auto frame = peer->input.substr(0, newline);
+                peer->input.erase(0, newline + 1);
+                if (frame.size() > kMaxMessageBytes) {
+                    enqueue(peer, rpcError(nullptr, -32600, "Message too large",
+                                           Error("rpc.message_size", "message exceeds 16 MiB")));
+                    std::lock_guard lock(peer->outputMutex);
+                    --peer->pendingRequests;
+                    peer->pendingBytes -= newline;
+                    peer->closeAfterWrite = true;
+                    break;
+                }
+                auto weak = weak_from_this();
+                post([weak, peer, size = frame.size(), frame = std::move(frame)] {
+                    if (auto self = weak.lock(); self && self->running) self->process(peer, frame);
+                    std::lock_guard lock(peer->outputMutex);
+                    --peer->pendingRequests;
+                    peer->pendingBytes -= size;
+                });
+            }
+            short events = 0;
             {
                 std::lock_guard lock(peer->outputMutex);
+                if (!peer->closeAfterWrite && peer->pendingRequests < 16 &&
+                    peer->pendingBytes < 32 * 1024 * 1024 &&
+                    peer->outputBytes < 32 * 1024 * 1024 - 64 * 1024)
+                    events |= POLLIN;
                 if (!peer->sending.empty() || !peer->output.empty()) events |= POLLOUT;
                 if (peer->closeAfterWrite && peer->sending.empty() && peer->output.empty()) break;
             }
@@ -286,26 +346,9 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                     break;
                 }
                 peer->input.append(bytes, static_cast<std::size_t>(count));
-                while (true) {
-                    auto newline = peer->input.find('\n');
-                    if (newline == std::string::npos) break;
-                    auto frame = peer->input.substr(0, newline);
-                    peer->input.erase(0, newline + 1);
-                    if (frame.size() > kMaxMessageBytes) {
-                        enqueue(peer,
-                                rpcError(nullptr, -32600, "Message too large",
-                                         Error("rpc.message_size", "message exceeds 16 MiB")));
-                        std::lock_guard lock(peer->outputMutex);
-                        peer->closeAfterWrite = true;
-                        break;
-                    }
-                    auto weak = weak_from_this();
-                    post([weak, peer, frame = std::move(frame)] {
-                        if (auto self = weak.lock(); self && self->running)
-                            self->process(peer, frame);
-                    });
-                }
-                if (peer->input.size() > kMaxMessageBytes) {
+                auto newline = peer->input.find('\n');
+                if ((newline == std::string::npos && peer->input.size() > kMaxMessageBytes) ||
+                    (newline != std::string::npos && newline > kMaxMessageBytes)) {
                     enqueue(peer, rpcError(nullptr, -32600, "Message too large",
                                            Error("rpc.message_size", "message exceeds 16 MiB")));
                     std::lock_guard lock(peer->outputMutex);
@@ -317,23 +360,25 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                     std::lock_guard lock(peer->outputMutex);
                     if (peer->sending.empty() && !peer->output.empty()) {
                         peer->sending = std::move(peer->output.front());
-                        peer->outputBytes -= peer->sending.size();
                         peer->output.pop_front();
                         peer->sent = 0;
                     }
                 }
-                if (!peer->sending.empty()) {
+                {
+                    std::lock_guard lock(peer->outputMutex);
+                    if (peer->sending.empty()) continue;
                     auto n = ::send(peer->fd, peer->sending.data() + peer->sent,
                                     peer->sending.size() - peer->sent, MSG_NOSIGNAL);
                     if (n > 0) {
                         peer->sent += static_cast<std::size_t>(n);
+                        peer->outputBytes -= static_cast<std::size_t>(n);
                         if (peer->sent == peer->sending.size()) {
                             peer->sending.clear();
-                            dropNotice(peer);
                         }
                     } else if (n < 0 && errno != EAGAIN && errno != EINTR)
                         break;
                 }
+                if (peer->sending.empty()) dropNotice(peer);
             }
         }
         int closingFd = peer->fd.exchange(-1);
@@ -379,39 +424,113 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
             peer->thread = std::thread([self = shared_from_this(), peer] { self->io(peer); });
         }
     }
-    Status start(const std::filesystem::path& path) {
+    Status start(const std::filesystem::path& requested) {
         if (running) return Error("rpc.running", "server is already running");
         std::error_code ec;
+        auto path = std::filesystem::absolute(requested, ec);
+        if (ec) return Error("rpc.path", ec.message(), requested.string());
         std::filesystem::create_directories(path.parent_path(), ec);
         if (ec) return Error("rpc.path", ec.message(), path.string());
-        if (path.parent_path().filename() == product::kSlug)
-            ::chmod(path.parent_path().c_str(), 0700);
-        if (std::filesystem::exists(path))
-            return Error("rpc.path", "socket path already exists", path.string(),
-                         "remove the stale socket after checking no server uses it");
+        if (path.parent_path().filename() == product::kSlug &&
+            ::chmod(path.parent_path().c_str(), 0700) != 0)
+            return Error("rpc.path", std::strerror(errno), path.parent_path().string());
+        // Serialize stale-path inspection and bind across competing processes.
+        auto lockPath = path.string() + ".lock";
+        int lockFd = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+        if (lockFd < 0) return Error("rpc.path", std::strerror(errno), lockPath);
+        if (::flock(lockFd, LOCK_EX) != 0) {
+            auto message = std::strerror(errno);
+            ::close(lockFd);
+            return Error("rpc.path", message, lockPath);
+        }
+        auto unlock = [&] {
+            ::flock(lockFd, LOCK_UN);
+            ::close(lockFd);
+        };
+        struct stat existing{};
+        if (::lstat(path.c_str(), &existing) == 0) {
+            int probe = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+            sockaddr_un addr{};
+            addr.sun_family = AF_UNIX;
+            auto name = path.string();
+            if (name.size() >= sizeof(addr.sun_path)) {
+                if (probe >= 0) ::close(probe);
+                unlock();
+                return Error("rpc.path", "socket path is too long", name);
+            }
+            std::memcpy(addr.sun_path, name.c_str(), name.size() + 1);
+            int connected = probe >= 0
+                                ? ::connect(probe, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))
+                                : -1;
+            int connectError = errno;
+            if (probe >= 0) ::close(probe);
+            if (connected == 0 || !S_ISSOCK(existing.st_mode) ||
+                (connectError != ECONNREFUSED && connectError != ENOENT)) {
+                unlock();
+                return Error("rpc.address_in_use", "socket address is in use", name,
+                             "choose another instance or socket path");
+            }
+            if (::unlink(path.c_str()) != 0 && errno != ENOENT) {
+                auto message = std::strerror(errno);
+                unlock();
+                return Error("rpc.path", message, name);
+            }
+        }
         listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        if (listener < 0) return Error("rpc.socket", std::strerror(errno));
+        if (listener < 0) {
+            unlock();
+            return Error("rpc.socket", std::strerror(errno));
+        }
         sockaddr_un address{};
         address.sun_family = AF_UNIX;
         auto pathString = path.string();
         if (pathString.size() >= sizeof(address.sun_path)) {
             ::close(listener);
             listener = -1;
+            unlock();
             return Error("rpc.path", "socket path is too long", pathString);
         }
         std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
-        if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
-            ::listen(listener, 16) != 0) {
+        if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+            int bindError = errno;
             auto message = std::strerror(errno);
             ::close(listener);
             listener = -1;
-            std::filesystem::remove(path, ec);
+            unlock();
+            return Error(bindError == EADDRINUSE ? "rpc.address_in_use" : "rpc.socket", message,
+                         pathString);
+        }
+        struct stat owned{};
+        if (::lstat(path.c_str(), &owned) == 0) {
+            socketDevice = owned.st_dev;
+            socketInode = owned.st_ino;
+        }
+        if (::listen(listener, 16) != 0) {
+            auto message = std::strerror(errno);
+            ::close(listener);
+            listener = -1;
+            struct stat current{};
+            if (::lstat(path.c_str(), &current) == 0 && current.st_dev == socketDevice &&
+                current.st_ino == socketInode)
+                ::unlink(path.c_str());
+            unlock();
             return Error("rpc.socket", message, pathString);
         }
-        ::chmod(path.c_str(), 0600);
+        if (::chmod(path.c_str(), 0600) != 0) {
+            auto message = std::strerror(errno);
+            ::close(listener);
+            listener = -1;
+            struct stat current{};
+            if (::lstat(path.c_str(), &current) == 0 && current.st_dev == socketDevice &&
+                current.st_ino == socketInode)
+                ::unlink(path.c_str());
+            unlock();
+            return Error("rpc.path", message, pathString);
+        }
         socket = path;
         running = true;
         acceptThread = std::thread([self = shared_from_this()] { self->acceptLoop(); });
+        unlock();
         return {};
     }
     void stop() {
@@ -429,8 +548,10 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         }
         for (auto& peer : copy)
             if (peer->thread.joinable()) peer->thread.join();
-        std::error_code ec;
-        std::filesystem::remove(socket, ec);
+        struct stat current{};
+        if (::lstat(socket.c_str(), &current) == 0 && current.st_dev == socketDevice &&
+            current.st_ino == socketInode)
+            ::unlink(socket.c_str());
     }
     void publish(std::string_view topic, const json::Value& payload) {
         auto sequence = ++topicSequence[std::string(topic)];
