@@ -1886,8 +1886,8 @@
   },
   {
     "name": "track_set",
-    "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes.",
-    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes. Only the given fields change. solo: off | on | in_place | defeat. See describe for errors and examples.",
+    "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.",
+    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (input monitoring is not heard yet). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_set_args",
@@ -1963,6 +1963,21 @@
         "solo": {
           "type": "string",
           "pattern": "^(off|on|in_place|defeat)$"
+        },
+        "armed": {
+          "type": "boolean"
+        },
+        "record_input": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1.0,
+            "maximum": 64.0
+          }
+        },
+        "monitor": {
+          "type": "string",
+          "enum": ["off", "on", "auto"]
         }
       },
       "required": ["track"],
@@ -1997,6 +2012,9 @@
         "playing": {
           "type": "boolean"
         },
+        "recording": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -2005,9 +2023,38 @@
         },
         "sample": {
           "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["playing", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2018,8 +2065,8 @@
   },
   {
     "name": "transport_pause",
-    "title": "Pause playback where it is.",
-    "description": "Pause playback where it is.  See describe for errors and examples.",
+    "title": "Pause playback where it is (ends a recording).",
+    "description": "Pause playback where it is (ends a recording).  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -2033,6 +2080,9 @@
         "playing": {
           "type": "boolean"
         },
+        "recording": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -2041,9 +2091,38 @@
         },
         "sample": {
           "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["playing", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2069,6 +2148,9 @@
         "playing": {
           "type": "boolean"
         },
+        "recording": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -2077,9 +2159,106 @@
         },
         "sample": {
           "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["playing", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_record",
+    "title": "Play and record every armed track's input.",
+    "description": "Play and record every armed track's input.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2118,6 +2297,9 @@
         "playing": {
           "type": "boolean"
         },
+        "recording": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -2126,9 +2308,38 @@
         },
         "sample": {
           "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["playing", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2139,8 +2350,8 @@
   },
   {
     "name": "transport_stop",
-    "title": "Stop playback and return to where it started.",
-    "description": "Stop playback and return to where it started.  See describe for errors and examples.",
+    "title": "Stop playback and return to where it started (ends a recording).",
+    "description": "Stop playback and return to where it started (ends a recording).  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -2154,6 +2365,9 @@
         "playing": {
           "type": "boolean"
         },
+        "recording": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -2162,9 +2376,38 @@
         },
         "sample": {
           "type": "integer"
+        },
+        "recorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["playing", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample"],
       "additionalProperties": false
     },
     "annotations": {

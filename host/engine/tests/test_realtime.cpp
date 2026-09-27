@@ -4,6 +4,9 @@
 #include <cmath>
 #include <thread>
 
+#include <unistd.h>
+
+#include <supple/audio/audio_file.h>
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
 #include <supple/host/clap_host.h>
@@ -646,5 +649,60 @@ TEST_CASE("plugin automation: real-time output equals the offline render" *
         const std::uint32_t L = engine.outputLatency();
         const auto& cap = backend.capture();
         CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+    }
+}
+
+TEST_CASE("recording: every input frame lands in the take, placed where it was heard" *
+          doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                              .input = [](float* const* in, std::uint32_t channels, std::uint32_t n,
+                                          std::int64_t frame) {
+                                  for (std::uint32_t c = 0; c < channels; ++c)
+                                      for (std::uint32_t i = 0; i < n; ++i)
+                                          in[c][i] = static_cast<float>((frame + i) % 1000) /
+                                                     1000.0f * (c ? -1.0f : 1.0f);
+                              }});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        const model::Session s = synthSession(0.0);
+        REQUIRE(engine.load(s).ok());
+        Id track;
+        for (const auto& e : s.tracks)
+            if (e.id != kMaster) track = e.id;
+        const auto dir =
+            std::filesystem::temp_directory_path() / ("supple-rec-" + std::to_string(::getpid()));
+        std::filesystem::remove_all(dir);
+        REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav"}}).ok());
+        CHECK(engine.recording());
+        engine.seek(1.0);
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 100, 256);
+        else
+            backend.run(100);
+        auto takes = engine.stopRecording();
+        REQUIRE(takes);
+        REQUIRE(takes->size() == 1);
+        const RecordedTake& t = (*takes)[0];
+        CHECK(t.startSample == 48000);  // no device or plan latency here
+        CHECK(t.frames == 100 * 256);
+        CHECK(t.overflowFrames == 0);
+        auto audio = audio::readAudio(t.file);
+        REQUIRE(audio);
+        REQUIRE(audio->frames() == static_cast<std::size_t>(t.frames));
+        int breaks = 0;
+        for (std::size_t i = 1; i < audio->frames(); ++i) {
+            const double d = double(audio->channels[0][i]) - double(audio->channels[0][i - 1]);
+            if (std::fabs(d - 0.001) > 1e-5 && std::fabs(d + 0.999) > 1e-5)
+                ++breaks;  // wraps at 1000
+            if (audio->channels[1][i] != -audio->channels[0][i]) ++breaks;
+        }
+        CHECK(breaks == 0);  // contiguous: nothing lost, nothing doubled
+        engine.stop();
+        std::filesystem::remove_all(dir);
     }
 }

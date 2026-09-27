@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "plan.h"
+#include "recording.h"
 #include "workers.h"
 
 namespace supple::engine {
@@ -22,6 +23,10 @@ Status DummyBackend::start(const BackendConfig& config, Callback callback) {
     callback_ = std::move(callback);
     outL_.assign(config.blockSize, 0.0f);
     outR_.assign(config.blockSize, 0.0f);
+    inputs_.assign(config.inputs, std::vector<float>(config.blockSize, 0.0f));
+    inPtrs_.clear();
+    for (auto& c : inputs_) inPtrs_.push_back(c.data());
+    inputFrame_ = 0;
     capture_.sampleRate = config.sampleRate;
     capture_.channels.assign(
         2, std::vector<float>(static_cast<std::size_t>(options_.captureFrames), 0.0f));
@@ -63,7 +68,10 @@ void DummyBackend::run(std::int64_t n) {
 
 void DummyBackend::cycle() {
     float* out[2] = {outL_.data(), outR_.data()};
-    callback_(nullptr, out, config_.blockSize);
+    if (options_.input && !inPtrs_.empty())
+        options_.input(inPtrs_.data(), config_.inputs, config_.blockSize, inputFrame_);
+    inputFrame_ += config_.blockSize;
+    callback_(inPtrs_.empty() ? nullptr : inPtrs_.data(), out, config_.blockSize);
     const auto room = std::min<std::int64_t>(config_.blockSize, options_.captureFrames - captured_);
     if (room > 0) {
         std::copy_n(outL_.begin(), room, capture_.channels[0].begin() + captured_);
@@ -188,7 +196,10 @@ void Engine::stop() {
         rendererQuit_.store(true, std::memory_order_release);
         renderer_.join();
     }
+    recorder_.store(nullptr, std::memory_order_release);
     backend_->stop();
+    if (recorderOwned_) (void)recorderOwned_->finish();  // no callback runs now: keep the files
+    recorderOwned_.reset();
     if (!shutDown_.load()) {
         // A backend that broke its stop() contract has already joined its
         // thread, so nothing else touches the plugins: recover here.
@@ -328,10 +339,10 @@ void Engine::resetInstances(detail::Plan* plan) SUPPLE_RT {
         for (host::Instance* in : plan->instances) in->reset();
 }
 
-void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames) SUPPLE_RT {
+void Engine::cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT {
     if (frames == 0) {  // the backend's final callback: stop every plugin here
         if (!shutDown_.load()) {
-            for (host::Instance* in : processing_) in->stopProcessing();
+            for (host::Instance* inst : processing_) inst->stopProcessing();
             processing_.clear();
             playing_ = false;
             stoppedOnAudioThread_ = true;
@@ -340,7 +351,10 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
         return;
     }
     if (ring_) {  // anticipative: the renderer has done the work
-        pullAhead(out, frames);
+        const std::int64_t played = pullAhead(out, frames);
+        if (detail::Recorder* r = recorder_.load(std::memory_order_acquire);
+            r && played != kNothingPlayed)
+            r->capture(in, config_.inputs, frames, played);
         cycles_.fetch_add(1, std::memory_order_release);
         return;
     }
@@ -354,7 +368,7 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
         }
     }
     if (shutdownRequested_.load(std::memory_order_acquire) && !shutDown_.load()) {
-        for (host::Instance* in : processing_) in->stopProcessing();
+        for (host::Instance* inst : processing_) inst->stopProcessing();
         processing_.clear();
         playing_ = false;
         stoppedOnAudioThread_ = true;
@@ -377,6 +391,8 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
         const detail::Node& master = plan->nodes.back();
         std::copy_n(master.post.l.begin(), frames, out[0]);
         std::copy_n(master.post.r.begin(), frames, out[1]);
+        if (detail::Recorder* r = recorder_.load(std::memory_order_acquire))
+            r->capture(in, config_.inputs, frames, pos_);
         pos_ += frames;
     } else {
         if (run) processErrors_.fetch_add(1);
@@ -390,7 +406,8 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
 
 // --- anticipation (ADR-0012) -----------------------------------------------------------------
 
-void Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
+std::int64_t Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
+    std::int64_t first = kNothingPlayed;
     const std::uint64_t e = epoch_.load(std::memory_order_acquire);
     if (e != rtEpoch_) {
         rtEpoch_ = e;
@@ -408,6 +425,7 @@ void Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
         const detail::Chunk* c = ring.front();
         if (!c || c->epoch != e) break;
         const std::uint32_t take = std::min(frames - done, c->frames - rtOffset_);
+        if (first == kNothingPlayed) first = c->start + rtOffset_;
         std::copy_n(c->l.begin() + rtOffset_, take, out[0] + done);
         std::copy_n(c->r.begin() + rtOffset_, take, out[1] + done);
         done += take;
@@ -426,6 +444,41 @@ void Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
             misses_.fetch_add(1, std::memory_order_relaxed);
     }
     if (done > 0) rtPrimed_ = true;
+    return first;
+}
+
+// --- recording (ADR-0014) --------------------------------------------------------------------
+
+Status Engine::startRecording(std::vector<RecordTarget> targets) {
+    if (!backend_) return Error("engine.stopped", "start the engine first");
+    if (recorderOwned_) return Error("record.running", "already recording");
+    if (targets.empty())
+        return Error("record.nothing_armed", "no track is armed with an input", {},
+                     "track.set {armed: true, record_input: [1, 2]}");
+    const BackendStatus b = backend_->status();
+    const std::int64_t latency =
+        static_cast<std::int64_t>(outputLatency_) + b.outputLatency + b.inputLatency;
+    auto rec = std::make_unique<detail::Recorder>(std::move(targets), config_.sampleRate, latency);
+    SUPPLE_TRY(rec->open());
+    recorderOwned_ = std::move(rec);
+    recorder_.store(recorderOwned_.get(), std::memory_order_release);
+    return okStatus();
+}
+
+Result<std::vector<RecordedTake>> Engine::stopRecording() {
+    if (!recorderOwned_) return Error("record.stopped", "not recording");
+    recorder_.store(nullptr, std::memory_order_release);
+    if (backend_ && backend_->ownsThread()) {
+        // A cycle that began before the store may still be capturing; the
+        // one after it cannot.
+        const std::uint64_t before = cycles_.load();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (cycles_.load() < before + 2 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    auto takes = recorderOwned_->finish();
+    recorderOwned_.reset();
+    return takes;
 }
 
 void Engine::relocate(std::uint64_t previous, std::uint64_t epoch) {

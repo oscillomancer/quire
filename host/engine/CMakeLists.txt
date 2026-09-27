@@ -1,7 +1,8 @@
 add_subdirectory(model)
 
 supple_add_library(engine
-  SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/jack_backend.cpp
+  SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/recording.cpp
+          src/jack_backend.cpp
           src/app.cpp src/commands.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::notation supple::core-params

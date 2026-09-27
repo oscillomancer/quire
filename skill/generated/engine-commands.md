@@ -2863,9 +2863,9 @@ Result:
 
 ## `track.set@1`
 
-Set track fields: name, volume_db, pan, width, mute, solo, color, notes.
+Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
 
-Only the given fields change. solo: off | on | in_place | defeat.
+Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (input monitoring is not heard yet).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2883,6 +2883,9 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `mute` | boolean |  |  |  |  |
 | `phase_invert` | boolean |  |  |  |  |
 | `solo` | string |  |  |  |  |
+| `armed` | boolean |  |  |  |  |
+| `record_input` | array |  |  |  |  |
+| `monitor` | string |  |  |  |  |
 
 ### Result
 
@@ -2905,6 +2908,24 @@ Kind: `edit`. Exposure: `mcp-tool`.
   "track": "tr_1",
   "volume_db": "-4 dB",
   "pan": -15
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Arm for recording from inputs 1 and 2** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "armed": true,
+  "record_input": [1, 2]
 }
 
 ```
@@ -2939,6 +2960,9 @@ Kind: `query`. Exposure: `mcp-tool`.
     "playing": {
       "type": "boolean"
     },
+    "recording": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -2947,9 +2971,38 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "sample": {
       "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["playing", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
   "additionalProperties": false
 }
 
@@ -2973,6 +3026,7 @@ Result:
 ```json
 {
   "playing": false,
+  "recording": false,
   "seconds": 0.0,
   "beat": 0.0,
   "sample": 0
@@ -2982,7 +3036,7 @@ Result:
 
 ## `transport.pause@1`
 
-Pause playback where it is.
+Pause playback where it is (ends a recording).
 
 
 
@@ -3003,6 +3057,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "playing": {
       "type": "boolean"
     },
+    "recording": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -3011,9 +3068,38 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "sample": {
       "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["playing", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
   "additionalProperties": false
 }
 
@@ -3022,6 +3108,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
+- `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
 
 ### Examples
 
@@ -3037,6 +3124,7 @@ Result:
 ```json
 {
   "playing": false,
+  "recording": false,
   "seconds": "<any>",
   "beat": "<any>",
   "sample": "<any>"
@@ -3067,6 +3155,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "playing": {
       "type": "boolean"
     },
+    "recording": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -3075,9 +3166,38 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "sample": {
       "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["playing", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
   "additionalProperties": false
 }
 
@@ -3086,6 +3206,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
+- `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
 
 ### Examples
 
@@ -3101,6 +3222,105 @@ Result:
 ```json
 {
   "playing": true,
+  "recording": false,
+  "seconds": "<any>",
+  "beat": "<any>",
+  "sample": "<any>"
+}
+
+```
+
+## `transport.record@1`
+
+Play and record every armed track's input.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "recording": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+- `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
+
+### Examples
+
+**While the engine runs** (`engine_armed`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "playing": true,
+  "recording": true,
   "seconds": "<any>",
   "beat": "<any>",
   "sample": "<any>"
@@ -3134,6 +3354,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "playing": {
       "type": "boolean"
     },
+    "recording": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -3142,9 +3365,38 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "sample": {
       "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["playing", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
   "additionalProperties": false
 }
 
@@ -3171,6 +3423,7 @@ Result:
 ```json
 {
   "playing": false,
+  "recording": false,
   "seconds": 2.0,
   "beat": 4.0,
   "sample": 96000
@@ -3180,7 +3433,7 @@ Result:
 
 ## `transport.stop@1`
 
-Stop playback and return to where it started.
+Stop playback and return to where it started (ends a recording).
 
 
 
@@ -3201,6 +3454,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "playing": {
       "type": "boolean"
     },
+    "recording": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -3209,9 +3465,38 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "sample": {
       "type": "integer"
+    },
+    "recorded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["playing", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample"],
   "additionalProperties": false
 }
 
@@ -3220,6 +3505,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `engine.stopped`: the engine is not running Hint: engine.start first
+- `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
 
 ### Examples
 
@@ -3235,6 +3521,7 @@ Result:
 ```json
 {
   "playing": false,
+  "recording": false,
   "seconds": "<any>",
   "beat": "<any>",
   "sample": "<any>"

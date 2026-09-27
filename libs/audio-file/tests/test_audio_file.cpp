@@ -5,6 +5,8 @@
 #include <limits>
 
 #include <supple/audio/audio_file.h>
+#include <supple/audio/wav_stream.h>
+#include <unistd.h>
 
 using namespace supple::audio;
 namespace fs = std::filesystem;
@@ -156,4 +158,31 @@ TEST_CASE("resampling preserves channel layout and duration") {
     CHECK(resample(input, 44100)->truncated);
     CHECK(std::abs(output->seconds() - input.seconds()) < 1e-12);
     CHECK_FALSE(resample(input, -1));
+}
+
+TEST_CASE("a streamed WAV is readable after every header update and after close") {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("supple-wav-stream-" + std::to_string(::getpid()) + ".wav");
+    supple::audio::WavStreamWriter w;
+    REQUIRE(w.open(path, 48000, 2).ok());
+    std::vector<float> block(2 * 1000);
+    for (std::size_t i = 0; i < 1000; ++i) {
+        block[2 * i] = static_cast<float>(i) / 1000.0f;
+        block[2 * i + 1] = -static_cast<float>(i) / 1000.0f;
+    }
+    REQUIRE(w.append(block.data(), 1000).ok());
+    REQUIRE(w.updateHeader().ok());
+    auto partial = supple::audio::readAudio(path);  // as a crash would leave it
+    REQUIRE(partial);
+    CHECK(partial->frames() == 1000);
+    REQUIRE(w.append(block.data(), 500).ok());
+    REQUIRE(w.close().ok());
+    auto whole = supple::audio::readAudio(path);
+    REQUIRE(whole);
+    CHECK(whole->frames() == 1500);
+    CHECK(whole->channelCount() == 2);
+    CHECK(whole->sampleRate == 48000.0);
+    CHECK(double(whole->channels[0][999]) == doctest::Approx(0.999));
+    CHECK(double(whole->channels[1][1499]) == doctest::Approx(-0.499));
+    std::filesystem::remove(path);
 }

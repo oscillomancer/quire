@@ -49,10 +49,17 @@ struct EngineStatus {
     std::vector<std::string> failedFx;  // isolated instances whose bridge crashed or hung
 };
 
+struct RecordedInfo {
+    std::string track, item, take, file;
+    double seconds = 0;
+    std::int64_t lostFrames = 0;  // input the disk could not keep up with
+};
+
 struct TransportInfo {
-    bool playing = false;
+    bool playing = false, recording = false;
     double seconds = 0, beat = 0;
     std::int64_t sample = 0;
+    std::optional<std::vector<RecordedInfo>> recorded;  // takes a stop/pause just committed
 };
 
 class EngineApp : public cmd::Host {
@@ -121,6 +128,8 @@ class EngineApp : public cmd::Host {
     void restartFx(model::Id fx);
     // Emits fx.failed once for each isolated instance that has failed.
     void checkFailures();
+    // Commits recorded takes as items on their tracks (one version).
+    Result<std::vector<RecordedInfo>> commitTakes(const std::vector<RecordedTake>& takes);
     // The real-time engine's instance of `fx` (tests and tools), or null.
     host::Instance* instanceOf(model::Id fx) const { return pool_ ? pool_->find(fx) : nullptr; }
     // Transport requests. With a device, each waits (at most a second) until

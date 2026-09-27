@@ -114,11 +114,21 @@ schema::Schema<EngineStatus> engineStatusSchema() {
 }
 
 schema::Schema<TransportInfo> transportSchema() {
+    auto recorded = schema::object<RecordedInfo>("recorded_take")
+                        .field("track", &RecordedInfo::track, schema::string())
+                        .field("item", &RecordedInfo::item, schema::string())
+                        .field("take", &RecordedInfo::take, schema::string())
+                        .field("file", &RecordedInfo::file, schema::string())
+                        .field("seconds", &RecordedInfo::seconds, schema::number())
+                        .field("lost_frames", &RecordedInfo::lostFrames, schema::integer())
+                        .build();
     return schema::object<TransportInfo>("transport")
         .field("playing", &TransportInfo::playing, schema::boolean())
+        .field("recording", &TransportInfo::recording, schema::boolean())
         .field("seconds", &TransportInfo::seconds, schema::number())
         .field("beat", &TransportInfo::beat, schema::number())
         .field("sample", &TransportInfo::sample, schema::integer())
+        .field("recorded", &TransportInfo::recorded, schema::arrayOf(recorded))
         .build();
 }
 
@@ -331,6 +341,9 @@ struct TrackSetArgs {
     std::optional<double> volumeDb, pan, width;
     std::optional<bool> mute, phaseInvert;
     std::optional<std::string> solo;
+    std::optional<bool> armed;
+    std::optional<std::vector<std::int64_t>> recordInput;
+    std::optional<model::Monitor> monitor;
 };
 struct TrackMoveArgs {
     std::string track;
@@ -822,8 +835,12 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "track.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set track fields: name, volume_db, pan, width, mute, solo, color, notes.";
-        c.description = "Only the given fields change. solo: off | on | in_place | defeat.";
+        c.summary =
+            "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.";
+        c.description =
+            "Only the given fields change. solo: off | on | in_place | defeat. armed + "
+            "record_input (device input channels, 1-based) prepare a track for "
+            "transport.record; monitor: off | on | auto (input monitoring is not heard yet).";
         c.tags = {"track", "mixer"};
         c.args = schema::object<TrackSetArgs>("track_set_args")
                      .field("track", &TrackSetArgs::track, idArg("tr", "Track"))
@@ -841,16 +858,49 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("solo", &TrackSetArgs::solo,
                             schema::string().pattern("^(off|on|in_place|defeat)$",
                                                      "off, on, in_place or defeat"))
+                     .field("armed", &TrackSetArgs::armed, schema::boolean())
+                     .field("record_input", &TrackSetArgs::recordInput,
+                            schema::arrayOf(schema::integer().range(1, 64)))
+                     .field("monitor", &TrackSetArgs::monitor,
+                            schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
+                                                                 {model::Monitor::On, "on"},
+                                                                 {model::Monitor::Auto, "auto"}}))
                      .build();
         c.result = emptySchema();
-        c.examples = {{"Turn the bass down 4 dB and a little left",
-                       obj(R"({"track": "tr_1", "volume_db": "-4 dB", "pan": -15})"), obj("{}"),
-                       "song"}};
+        c.examples = {
+            {"Turn the bass down 4 dB and a little left",
+             obj(R"({"track": "tr_1", "volume_db": "-4 dB", "pan": -15})"), obj("{}"), "song"},
+            {"Arm for recording from inputs 1 and 2",
+             obj(R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})"), obj("{}"),
+             "song"}};
         c.run = [](const TrackSetArgs& a, Context& ctx) -> Result<Empty> {
             EngineApp& app = A(ctx);
-            auto id = existing<model::Track>(app.view(), a.track, "/track");
+            const model::Session s = app.view();
+            auto id = existing<model::Track>(s, a.track, "/track");
             if (!id) return std::move(id).error();
+            if ((a.armed || a.recordInput || a.monitor) && *id == model::kMaster)
+                return Error("track.master", "the master does not record", "/track");
+            // The record input is a route from the device inputs (hw_input).
+            std::optional<Id> input = s.tracks.find(*id)->record.input;
+            if (a.recordInput) {
+                if (a.recordInput->empty())
+                    return Error("track.record_input", "give one or more input channels",
+                                 "/record_input", "e.g. [1, 2] for a stereo pair");
+                std::vector<int> channels(a.recordInput->begin(), a.recordInput->end());
+                if (input && s.routes.find(*input)) {
+                    app.txn().modify<model::Route>(
+                        *input, [&](model::Route& r) { r.from.hwChannels = channels; });
+                } else {
+                    model::Route r;
+                    r.from.hwChannels = channels;
+                    r.to.track = *id;
+                    input = app.txn().create(r);
+                }
+            }
             app.txn().modify<model::Track>(*id, [&](model::Track& t) {
+                if (a.armed) t.record.armed = *a.armed;
+                if (a.recordInput) t.record.input = input;
+                if (a.monitor) t.record.monitor = *a.monitor;
                 if (a.name) t.name = *a.name;
                 if (a.color) t.color = *a.color;
                 if (a.notes) t.notes = *a.notes;
@@ -2100,8 +2150,10 @@ void registerEngineCommands(cmd::Registry& registry) {
     // ---------------------------------------------------------------- transport.*
     for (const auto& [action, summary, playing] :
          {std::tuple{"play", "Start playback from the current position.", true},
-          std::tuple{"pause", "Pause playback where it is.", false},
-          std::tuple{"stop", "Stop playback and return to where it started.", false}}) {
+          std::tuple{"pause", "Pause playback where it is (ends a recording).", false},
+          std::tuple{"stop", "Stop playback and return to where it started (ends a recording).",
+                     false},
+          std::tuple{"record", "Play and record every armed track's input.", true}}) {
         Command<NoArgs, TransportInfo> c;
         c.name = std::string("transport.") + action;
         c.kind = Kind::Action;
@@ -2111,10 +2163,15 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<NoArgs>("no_args").build();
         c.result = transportSchema();
         c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
+        c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"},
+                    {"record.nothing_armed", "no armed track has an input",
+                     "track.set {armed: true, record_input: [1, 2]}"}};
+        const bool rec = std::string(action) == "record";
         c.examples = {{"While the engine runs", obj("{}"),
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +
+                           R"(, "recording": )" + (rec ? "true" : "false") +
                            R"(, "seconds": "<any>", "beat": "<any>", "sample": "<any>"})"),
-                       "engine_running"}};
+                       rec ? "engine_armed" : "engine_running"}};
         c.run = [act = std::string(action)](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport(act);
         };
@@ -2136,9 +2193,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.errors = {
             {"engine.stopped", "the engine is not running", "engine.start first"},
             {"transport.position", "not exactly one position", "give seconds, beat or bar"}};
-        c.examples = {{"To bar 2 (120 BPM, 4/4)", obj(R"({"bar": 2})"),
-                       obj(R"({"playing": false, "seconds": 2.0, "beat": 4.0, "sample": 96000})"),
-                       "engine_running"}};
+        c.examples = {
+            {"To bar 2 (120 BPM, 4/4)", obj(R"({"bar": 2})"),
+             obj(R"({"playing": false, "recording": false, "seconds": 2.0, "beat": 4.0, "sample": 96000})"),
+             "engine_running"}};
         c.run = [](const SeekArgs& a, Context& ctx) -> Result<TransportInfo> {
             EngineApp& app = A(ctx);
             if (a.seconds.has_value() + a.beat.has_value() + a.bar.has_value() != 1)
@@ -2165,9 +2223,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<NoArgs>("no_args").build();
         c.result = transportSchema();
         c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
-        c.examples = {{"Stopped at the start", obj("{}"),
-                       obj(R"({"playing": false, "seconds": 0.0, "beat": 0.0, "sample": 0})"),
-                       "engine_running"}};
+        c.examples = {
+            {"Stopped at the start", obj("{}"),
+             obj(R"({"playing": false, "recording": false, "seconds": 0.0, "beat": 0.0, "sample": 0})"),
+             "engine_running"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport("get");
         };

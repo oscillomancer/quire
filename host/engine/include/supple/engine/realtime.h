@@ -12,6 +12,7 @@
 #pragma once
 
 #include <atomic>
+#include <climits>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -32,7 +33,23 @@ namespace detail {
 struct Plan;
 struct ChunkRing;
 class Workers;
+class Recorder;
 }  // namespace detail
+
+// Recording (ADR-0014): one armed track's input.
+struct RecordTarget {
+    model::Id track;
+    std::vector<int> inputs;  // device input channels, 0-based (one per file channel)
+    std::filesystem::path file;
+};
+
+struct RecordedTake {
+    model::Id track;
+    std::filesystem::path file;
+    std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
+    std::int64_t frames = 0;
+    std::uint64_t overflowFrames = 0;  // input lost because the disk fell behind
+};
 
 struct BackendConfig {
     double sampleRate = 48000.0;
@@ -45,6 +62,7 @@ struct BackendStatus {
     std::uint32_t period = 0;         // the device's period, in frames
     std::uint64_t xruns = 0;          // reported by the device
     std::uint32_t outputLatency = 0;  // frames from the backend's outputs to the device
+    std::uint32_t inputLatency = 0;   // frames from the device to the backend's inputs
     bool restartNeeded = false;       // the device's rate changed or it went away
 };
 
@@ -65,7 +83,7 @@ class Backend {
     // True when callbacks run on a thread of the backend's own (a device);
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
-    virtual BackendStatus status() const { return {config().blockSize, 0, 0, false}; }
+    virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false}; }
 };
 
 // No device. `Manual` runs cycles on the caller's thread (deterministic
@@ -78,6 +96,11 @@ class DummyBackend : public Backend {
         Mode mode = Mode::Manual;
         bool paced = false;              // Thread mode: sleep one block period per cycle
         std::int64_t captureFrames = 0;  // frames of output to keep
+        // Tests: fills the input channels before each cycle (on the audio
+        // thread; `frame` counts input frames since start). Null: silence.
+        std::function<void(float* const* in, std::uint32_t channels, std::uint32_t frames,
+                           std::int64_t frame)>
+            input;
     };
     explicit DummyBackend(Options options);
     ~DummyBackend() override;
@@ -101,6 +124,9 @@ class DummyBackend : public Backend {
     std::atomic<bool> running_{false};
     std::atomic<std::int64_t> cycles_{0};
     std::vector<float> outL_, outR_;
+    std::vector<std::vector<float>> inputs_;
+    std::vector<float*> inPtrs_;
+    std::int64_t inputFrame_ = 0;
     audio::AudioData capture_;
     std::int64_t captured_ = 0;
 };
@@ -150,6 +176,11 @@ class Engine {
     // Audio cycles that found no rendered audio while playing (after the
     // pre-roll of a start or seek).
     std::uint64_t anticipationMisses() const { return misses_.load(); }
+    // Recording (main thread): capture starts with the first played cycle,
+    // placed where the performer heard it (device and plan latency).
+    Status startRecording(std::vector<RecordTarget> targets);
+    Result<std::vector<RecordedTake>> stopRecording();
+    bool recording() const { return recorderOwned_ != nullptr; }
     // Tests: while held, the renderer renders nothing.
     void holdRenderer(bool hold) { hold_.store(hold); }
     const EngineOptions& options() const { return options_; }
@@ -170,7 +201,9 @@ class Engine {
 
   private:
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
-    void pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
+    // Returns the timeline sample of the first frame played, or kNothingPlayed.
+    std::int64_t pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
+    static constexpr std::int64_t kNothingPlayed = INT64_MIN;
     void rendererLoop(std::uint64_t firstEpoch);
     void relocate(std::uint64_t previous, std::uint64_t epoch);
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
@@ -235,6 +268,10 @@ class Engine {
     std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     std::atomic<std::uint64_t> misses_{0};
+
+    // Recording: the callback captures while recorder_ is set.
+    std::unique_ptr<detail::Recorder> recorderOwned_;
+    std::atomic<detail::Recorder*> recorder_{nullptr};
 };
 
 }  // namespace supple::engine

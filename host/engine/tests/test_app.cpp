@@ -344,3 +344,58 @@ TEST_CASE("an LLM automates a plugin parameter over the bus and hears it in the 
     REQUIRE(call("history.undo", "{}"));
     CHECK(app->head().envelopes.size() == 0);
 }
+
+TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Vocal"}, "as": "v"},
+        {"command": "track.set", "args": {"track": "${v.track}", "armed": true, "record_input": [1, 2]}}]})");
+    // A device whose inputs carry a 0.5 sine at 441 Hz.
+    DummyBackend backend({.mode = DummyBackend::Mode::Thread,
+                          .paced = true,
+                          .input = [](float* const* in, std::uint32_t channels, std::uint32_t n,
+                                      std::int64_t frame) {
+                              for (std::uint32_t c = 0; c < channels; ++c)
+                                  for (std::uint32_t i = 0; i < n; ++i)
+                                      in[c][i] =
+                                          0.5f * static_cast<float>(std::sin(
+                                                     2.0 * 3.14159265358979 * 441.0 *
+                                                     static_cast<double>(frame + i) / 48000.0));
+                          }});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    auto started = call("transport.record", "{}");
+    CHECK(started["recording"].asBool());
+    CHECK(started["playing"].asBool());
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    auto stopped = call("transport.stop", "{}");
+    CHECK_FALSE(stopped["recording"].asBool());
+    REQUIRE(stopped["recorded"].size() == 1);
+    const json::Value& take = stopped["recorded"].at(0);
+    CHECK(take.find("track")->asString() == "tr_1");
+    CHECK(take.find("seconds")->asDouble() > 0.2);
+    CHECK(take.find("lost_frames")->asInt() == 0);
+    CHECK(fs::exists(take.find("file")->asString()));
+    CHECK(app->head().items.size() == 1);
+    app->stopEngine();
+
+    // The take plays back in a render: the sine, centred (-3 dB).
+    auto mix = call("render.mix", R"({"name": "take", "end_beat": 0.5})");
+    auto audio = audio::readAudio(mix["path"].asString());
+    REQUIRE(audio);
+    double peak = 0;
+    for (float x : audio->channels[0]) peak = std::max(peak, std::fabs(double(x)));
+    CHECK(peak == doctest::Approx(0.5 * 0.70710678).epsilon(0.01));
+
+    // One version: undo removes the take.
+    call("history.undo", "{}");
+    CHECK(app->head().items.size() == 0);
+}

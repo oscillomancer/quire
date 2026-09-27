@@ -1,0 +1,71 @@
+// Internal: recording (ADR-0014 §1–2). The audio callback copies each armed
+// track's input channels into an SPSC frame ring; a writer thread drains the
+// rings into WAV files, rewriting their headers every few seconds so a crash
+// leaves readable takes. The callback never blocks; overflow is counted.
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <span>
+#include <thread>
+#include <vector>
+
+#include "supple/audio/wav_stream.h"
+#include "supple/base/rt.h"
+#include "supple/engine/realtime.h"
+
+namespace supple::engine::detail {
+
+// Interleaved float frames, one producer (the audio callback), one consumer.
+class FrameRing {
+  public:
+    void init(std::uint32_t channels, std::size_t frames);
+    // Copies `frames` of the selected input channels (missing ones: silence);
+    // returns how many fitted.
+    std::size_t write(const float* const* in, std::uint32_t inChannels, std::span<const int> select,
+                      std::uint32_t frames) SUPPLE_RT;
+    std::size_t read(float* out, std::size_t maxFrames);  // interleaved
+    std::uint32_t channels() const { return channels_; }
+
+  private:
+    std::vector<float> buf_;
+    std::size_t capacity_ = 0;  // frames
+    std::uint32_t channels_ = 0;
+    alignas(64) std::atomic<std::size_t> write_{0};
+    alignas(64) std::atomic<std::size_t> read_{0};
+};
+
+class Recorder {
+  public:
+    Recorder(std::vector<RecordTarget> targets, double rate, std::int64_t latency);
+    ~Recorder();
+    Status open();  // creates the files and starts the writer thread
+    // Audio thread: `pos` is the timeline sample of this callback's output.
+    void capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
+                 std::int64_t pos) SUPPLE_RT;
+    // Main thread, once capture() can no longer run: drains, closes, reports.
+    std::vector<RecordedTake> finish();
+
+  private:
+    struct Track {
+        RecordTarget target;
+        FrameRing ring;
+        audio::WavStreamWriter writer;
+        std::atomic<std::uint64_t> overflow{0};
+    };
+    void writerLoop();
+    void drain(Track& t, std::vector<float>& scratch);
+
+    std::vector<std::unique_ptr<Track>> tracks_;
+    double rate_;
+    std::int64_t latency_;
+    std::atomic<bool> started_{false};
+    std::atomic<std::int64_t> start_{0};
+    std::atomic<bool> stop_{false};
+    std::thread writer_;
+    Status writeError_ = okStatus();  // writer thread; read after join
+};
+
+}  // namespace supple::engine::detail

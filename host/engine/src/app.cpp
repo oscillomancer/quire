@@ -5,6 +5,7 @@
 #include <chrono>
 #include <thread>
 
+#include "supple/audio/audio_file.h"
 #include "supple/base/closest.h"
 #include "supple/base/files.h"
 #include "supple/clap/semantic_params.h"
@@ -293,6 +294,7 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     BackendConfig config;
     config.sampleRate = view().project->sampleRate;
     config.blockSize = block;
+    config.inputs = 2;  // the device's first stereo pair, for recording
     if (backend == "jack") {
         JackOptions o;
         o.clientName = std::string(product::kSlug);
@@ -363,14 +365,48 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     if (!engine_)
         return Error("engine.stopped", "the real-time engine is not running", {},
                      "engine.start first");
-    if (action == "play") {
+    std::optional<std::vector<RecordedInfo>> recorded;
+    if (action == "record") {
+        const model::Session s = view();
+        const fs::path dir =
+            (projectPath_.empty() ? options_.workdir / "media"
+                                  : projectPath_.parent_path() / s.project->mediaDir) /
+            "rec";
+        std::vector<RecordTarget> targets;
+        for (const auto& e : s.tracks) {
+            const model::Track& tr = *e.value;
+            if (!tr.record.armed || !tr.record.input) continue;
+            const model::Route* in = s.routes.find(*tr.record.input);
+            if (!in || !in->from.hwChannels) continue;
+            RecordTarget t;
+            t.track = e.id;
+            for (int ch : *in->from.hwChannels) t.inputs.push_back(ch - 1);
+            std::string base;
+            for (char c : tr.name.empty() ? e.id.str() : tr.name)
+                base += std::isalnum(static_cast<unsigned char>(c)) ? c : '-';
+            for (int n = 1;; ++n) {
+                t.file = dir / (base + "-" + std::to_string(n) + ".wav");
+                std::error_code ec;
+                if (!fs::exists(t.file, ec)) break;
+            }
+            targets.push_back(std::move(t));
+        }
+        SUPPLE_TRY(engine_->startRecording(std::move(targets)));
         playStart_ = engine_->transport().seconds;
         engine_->play();
-    } else if (action == "pause") {
+    } else if (action == "play") {
+        playStart_ = engine_->transport().seconds;
+        engine_->play();
+    } else if (action == "pause" || action == "stop") {
         engine_->pause();
-    } else if (action == "stop") {
-        engine_->pause();
-        engine_->seek(playStart_);
+        if (action == "stop") engine_->seek(playStart_);
+        if (engine_->recording()) {
+            auto takes = engine_->stopRecording();
+            if (!takes) return std::move(takes).error();
+            auto committed = commitTakes(*takes);
+            if (!committed) return std::move(committed).error();
+            recorded = std::move(*committed);
+        }
     } else if (action == "seek") {
         engine_->seek(seconds.value_or(0.0));
         if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
@@ -379,7 +415,54 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     engine_->service();
     checkFailures();
     const TransportState t = engine_->transport();
-    return TransportInfo{t.playing, t.seconds, view().timeMap->beatAt(t.seconds), t.sample};
+    return TransportInfo{t.playing, engine_->recording(),
+                         t.seconds, view().timeMap->beatAt(t.seconds),
+                         t.sample,  std::move(recorded)};
+}
+
+Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes) {
+    std::vector<RecordedInfo> out;
+    auto txnId = beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, "record");
+    if (!txnId) return std::move(txnId).error();
+    const model::Session s = view();
+    const double rate = s.project->sampleRate;
+    const fs::path media =
+        projectPath_.empty() ? fs::path() : projectPath_.parent_path() / s.project->mediaDir;
+    for (const RecordedTake& r : takes) {
+        // Material before the timeline's start is kept in the file, skipped by the take.
+        const double offset = r.startSample < 0 ? static_cast<double>(-r.startSample) / rate : 0.0;
+        const double start = static_cast<double>(std::max<std::int64_t>(r.startSample, 0)) / rate;
+        const double seconds = static_cast<double>(r.frames) / rate - offset;
+        if (seconds <= 0 || !s.tracks.find(r.track)) continue;
+        model::MediaSource md;
+        std::error_code ec;
+        const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
+        md.path = !ec && !rel.empty() && *rel.begin() != ".." ? rel.string() : r.file.string();
+        md.format = "wav";
+        md.sampleRate = rate;
+        md.channels = 0;
+        if (auto head = audio::readAudio(r.file))
+            md.channels = static_cast<int>(head->channelCount());
+        md.frames = r.frames;
+        model::EditTxn& t = txn();
+        const Id source = t.create(std::move(md));
+        model::Take take;
+        take.source = source;
+        take.startOffset = offset;
+        take.name = r.file.stem().string();
+        const Id tk = t.create(std::move(take));
+        model::Item item;
+        item.track = r.track;
+        item.position = s.timeMap->beatAt(start);
+        item.length = s.timeMap->beatAt(start + seconds) - item.position;
+        item.takes = {tk};
+        item.activeTake = tk;
+        const Id it = t.create(std::move(item));
+        out.push_back({r.track.str(), it.str(), tk.str(), r.file.string(), seconds,
+                       static_cast<std::int64_t>(r.overflowFrames)});
+    }
+    SUPPLE_TRY(commitTransaction(*txnId));
+    return out;
 }
 
 void EngineApp::headChanged() {
@@ -473,6 +556,14 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         assert(r && "fixture command failed");
         (void)r;
     };
+    if (fixture == "engine_armed") {  // + tr_1 armed on inputs 1-2
+        run("track.add", R"({"name": "Vocal"})");
+        run("track.set", R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})");
+        auto st = startEngine("dummy", 256);
+        assert(st && "fixture engine failed");
+        (void)st;
+        return;
+    }
     if (fixture == "saved") {
         run("project.set", R"({"name": "Saved"})");
         (void)save("example-project.json");

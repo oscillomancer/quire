@@ -266,6 +266,13 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
                 api->connect(impl->client, api->portName(impl->outPorts[c]), ports[c]);
             api->free(static_cast<void*>(ports));
         }
+        // The physical capture ports into our inputs, in order.
+        if (const char** ports =
+                api->getPorts(impl->client, nullptr, kAudioType, kPortIsPhysical | kPortIsOutput)) {
+            for (std::uint32_t c = 0; c < config.inputs && ports[c]; ++c)
+                api->connect(impl->client, ports[c], api->portName(impl->inPorts[c]));
+            api->free(static_cast<void*>(ports));
+        }
     }
     config_ = config;
     config_.sampleRate = static_cast<double>(impl->rate);
@@ -309,7 +316,13 @@ JackBackend::Stats JackBackend::stats() const {
 
 BackendStatus JackBackend::status() const {
     const Stats s = stats();
-    return {s.period, s.xruns, s.outputLatency, s.rateChanged || s.serverGone};
+    std::uint32_t inputLatency = 0;
+    if (impl_ && impl_->api->portGetLatencyRange && impl_->inputs > 0 && !s.serverGone) {
+        LatencyRange range{0, 0};
+        impl_->api->portGetLatencyRange(impl_->inPorts[0], 0 /* capture */, &range);
+        inputLatency = range.max;
+    }
+    return {s.period, s.xruns, s.outputLatency, inputLatency, s.rateChanged || s.serverGone};
 }
 
 }  // namespace supple::engine
