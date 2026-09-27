@@ -11,6 +11,7 @@
 
 #include "orrery/clap_plugin.h"
 #include "orrery/params.h"
+#include "supple/json/json.h"
 
 using namespace supple;
 using namespace supple::orrery;
@@ -212,6 +213,9 @@ TEST_CASE("an editor gesture while processing reaches the host and the engine") 
 TEST_CASE("edits while the host is not processing go out through params.flush") {
     Instance in;
     REQUIRE(in.p->activate(in.p, 48000.0, 16, 256));  // active, not processing
+    auto filter = json::parse(R"({"filters":{"filter1":{"type":"ladder"}}})");
+    REQUIRE(filter);
+    REQUIRE(in.bridge().merge(*filter));
     const std::size_t cutoff = indexOf("filter1.cutoff");
     in.bridge().edit(cutoff, 2000.0);  // outside a gesture: sent as a whole gesture
     InEvents none;

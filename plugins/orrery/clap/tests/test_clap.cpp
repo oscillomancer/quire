@@ -6,12 +6,15 @@
 
 #include <cmath>
 #include <filesystem>
+#include <random>
 #include <string>
 #include <vector>
 
+#include "orrery/patch.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
+#include "supple/patch/patch.h"
 
 using namespace supple;
 
@@ -121,6 +124,74 @@ TEST_CASE("notes render; automation moves the parameter; state round-trips") {
     const double hz = patch->find("filters")->find("filter1")->find("cutoff")->asDouble();
     CHECK(hz == doctest::Approx(20.0 * std::pow(1000.0, 0.25)).epsilon(1e-6));
 
+    auto state = in->saveState();
+    REQUIRE(state);
+    auto other = load();
+    REQUIRE(other->loadState(*state));
+    CHECK(*other->getPatch(false) == *in->getPatch(false));
+}
+
+TEST_CASE("randomized host parameters save and load through the patch codec") {
+    constexpr std::string_view topologies[] = {R"({"schema":"supple.orrery-patch/1.0"})",
+                                               R"({"schema":"supple.orrery-patch/1.0",
+            "oscillators":{"osc1":{"type":"va"},"osc2":{"type":"fm"},
+                           "osc3":{"type":"sub"},"osc4":{"type":"wavetable"}},
+            "filters":{"filter1":{"type":"ladder"},"filter2":{"type":"svf"}},
+            "drive":{"type":"tape"},
+            "envelopes":{"env2":{},"env3":{},"env4":{}},
+            "lfos":{"lfo1":{},"lfo2":{},"lfo3":{},"lfo4":{}},
+            "steps":{"step1":{},"step2":{}},
+            "fx":{"chain":["chorus","phaser","delay","reverb","eq"]}})",
+                                               R"({"schema":"supple.orrery-patch/1.0",
+            "oscillators":{"osc1":{"type":"noise"},"osc2":{"type":"va"},
+                           "osc3":{"type":"fm"},"osc4":{"type":"sub"}},
+            "filters":{"filter1":{"type":"comb"},"filter2":{"type":"formant"}},
+            "fx":{"chain":["phaser"]}})"};
+    for (std::string_view topology : topologies) {
+        auto in = load();
+        REQUIRE(in->setPatch(topology, CLAP_SUPPLE_SET_REPLACE));
+        std::mt19937 rng(0x0e11e7);
+        std::uniform_real_distribution<double> fraction(0.0, 1.0);
+        for (const auto& p : in->params()) {
+            const double value = p.min + (p.max - p.min) * fraction(rng);
+            REQUIRE(in->setParam(p.id, value));
+        }
+        auto state = in->saveState();
+        REQUIRE(state);
+        auto text = patch::decodeState(*state, 0x3152'4F51);
+        REQUIRE(text);
+        orrery::PatchType codec;
+        auto parsed = codec.parse(*text);
+        INFO((parsed ? "" : parsed.error().message + " at " + parsed.error().path));
+        REQUIRE(parsed);
+        auto other = load();
+        REQUIRE(other->loadState(*state));
+        CHECK(*other->getPatch(false) == *in->getPatch(false));
+        for (const auto& p : in->params()) {
+            auto before = in->paramValue(p.id);
+            auto after = other->paramValue(p.id);
+            REQUIRE(before);
+            REQUIRE(after);
+            INFO(p.name);
+            CHECK(*after == doctest::Approx(*before));
+        }
+    }
+}
+
+TEST_CASE("host values outside the active patch domain are canonicalized") {
+    auto in = load();
+    REQUIRE(in->setPatch(R"({"schema":"supple.orrery-patch/1.0",
+                             "oscillators":{"osc1":{"type":"va"}},
+                             "fx":{"chain":["phaser"]}})",
+                         CLAP_SUPPLE_SET_REPLACE));
+    const auto* wave = params::findByKey(orrery::table(), "osc1.wave");
+    const auto* stages = params::findByKey(orrery::table(), "fx.phaser.stages");
+    REQUIRE(wave);
+    REQUIRE(stages);
+    REQUIRE(in->setParam(wave->id, 5));    // half_sine is FM-only
+    REQUIRE(in->setParam(stages->id, 5));  // phaser stages must be even
+    CHECK(*in->paramValue(wave->id) == 0);
+    CHECK(*in->paramValue(stages->id) == 6);
     auto state = in->saveState();
     REQUIRE(state);
     auto other = load();
