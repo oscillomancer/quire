@@ -64,7 +64,9 @@ notation. Runners exist for the Claude CLI, the Codex CLI, and any Anthropic /
 OpenAI-compatible API (including a local llama-server). Which should it use,
 and how many runs per week are acceptable cost-wise? A local model on the Arc
 B580 is free but weaker; a frontier model is the real target user.
-*Meanwhile:* the harness is built and dry-run tested without calling models.
+*Meanwhile:* the harness is specified (`docs/specs/eval-harness.md`) but not
+built yet (corrected 2026-09-26: an earlier note here said it was); it will be
+built and dry-run tested without calling models before any runs.
 
 ### 9. Names for the stock effects — decision (low effort)
 Working names (craft nouns, in the family of your products): EQ **Facet**,
