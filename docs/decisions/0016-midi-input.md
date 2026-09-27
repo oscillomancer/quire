@@ -111,5 +111,8 @@ select a device).
   in both modes; MIDI events are placed per loop pass; monitoring off with
   a key held releases the note; over the bus, a MIDI performance commits as
   notes one beat apart and reads back as notation.
-- Not yet: `midi_overdub` (merging into the item under the start), crash
-  recovery of MIDI, MIDI output ports.
+- `midi_overdub` (`track.set {record_mode}`): the recording merges into
+  the MIDI item under its first heard position as a new take (a copy of
+  the active take's notes plus every pass's recorded notes, in the take's
+  PPQ and start offset); with no item there, new items as usual.
+- Not yet: crash recovery of MIDI, MIDI output ports.

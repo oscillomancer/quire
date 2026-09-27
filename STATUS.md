@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-09-26 18:50 by the orchestrator. Compact and current: what's done,
+Updated 2026-09-27 10:10 by the orchestrator. Compact and current: what's done,
 in progress, blocked, next. Task IDs are stable (P<phase>.<n>).
 
 ## Phase 0 — Reconnaissance and foundations
@@ -71,6 +71,17 @@ reports committed in docs.
 
 ## Phase 4 — Headless engine (specs drafted early)
 
+Acceptance (build prompt Phase 4), as of 2026-09-27:
+
+| Criterion | State |
+|---|---|
+| Multi-track session with CLAP plugins in real time at 64-sample buffers without xruns under a defined load | **open**: preliminary B1 (docs/benchmarks/b1-preliminary.md: anticipative ≈96 Orrery tracks vs ≈4 in the callback, paced stand-in device); B1 proper needs the stock EQ/compressor (eq-1) and a run on the device at a forced 64-frame period (HUMAN_REVIEW: forcing the graph quantum affects every PipeWire client) |
+| Offline render bit-identical across repeated renders; nulls against real-time capture | **passes** (engine.tests: RT ≡ offline in both modes, B4 determinism for any thread count, with loops, monitoring, automation) |
+| Undo/redo fuzz-tested | **passes** (p4-fuzz: history property fuzzer + seeded engine test; project-file fuzzer) |
+| A crashing plugin in isolation does not take down the engine | **passes** (P4.8; shared bridge in review) |
+| An LLM over MCP builds a small arrangement headlessly and renders it | **passes** (P4.14, engine.mcp-arrangement) |
+| Benchmarks vs REAPER recorded in docs/benchmarks/ | **open** (needs B1 proper) |
+
 | ID | Task | State |
 |---|---|---|
 | P4.0 | `specs/session-model.md` (objects, time map, versions/branches, project file, command catalogue) and `specs/engine.md` (plans, PDC, anticipative processing, isolation, benchmarks) | drafts, used as the basis for the P4 core below (amendment: `fx` is a top-level project collection); design review by reaper/scout still wanted before the command catalogue |
@@ -82,7 +93,7 @@ reports committed in docs.
 | P4.10 | recording (ADR-0014 phase 1) | **done** (orchestrator, this session): armed tracks' inputs captured on the audio thread into SPSC rings, written by a writer thread to float WAV with periodic header rewrites (crash-readable), placed by play position minus plan + device latency; `track.set {armed, record_input, monitor}`, `transport.record`, takes committed as one version on stop; crash recovery — a sidecar per recording, header repair, `project.recoverable`/`project.recover`, `recoverable` count on `project.get/open`. Open: punch/loop takes, RF64 |
 | P4.11 | input monitoring — the live region (ADR-0014 phase 2) | **done** (orchestrator, this session): live classification (monitoring + downstream + master), monitored input in the node's input sum (also while stopped), two executors over one plan — the renderer renders ahead and fills per-frontier-edge rings, the callback runs live nodes at the device block and switches plans at the render horizon; plans reclaimed by generation; per-instance owner tokens. Anticipative output with a monitored track is bit-identical to the in-callback reference; tsan/rtsan clean. Open: live multiprocessing, class-change crossfade |
 | P4.12 | transport loop, punch, loop recording into takes (ADR-0015) | **done** (orchestrator, this session): loop playback in both modes and with monitoring (wraps mid-block without a gap; stream positions for cross-executor comparisons; held notes released at the wrap; tails ring on), punch applied at commit, one item per loop with a take per pass (newest whole pass active), `transport.loop/punch`, CLAP transport loop flags. Open: MIDI recording |
-| P4.13 | MIDI input: live monitoring and recording (ADR-0016) | **done** (orchestrator, this session): JACK MIDI input ports per device (optional symbols), Dummy MIDI for tests; MIDI-monitored tracks play live in the callback (device/channel routes); MIDI takes committed as notes/controls per run or loop pass, punch-trimmed; `track.set {record_midi, midi_channel}`. Open: `midi_overdub`, MIDI crash recovery, MIDI outputs |
+| P4.13 | MIDI input: live monitoring and recording (ADR-0016) | **done** (orchestrator, this session): JACK MIDI input ports per device (optional symbols), Dummy MIDI for tests; MIDI-monitored tracks play live in the callback (device/channel routes); MIDI takes committed as notes/controls per run or loop pass, punch-trimmed; `track.set {record_midi, midi_channel, record_mode}` (midi_overdub merges as a new take). Open: MIDI crash recovery, MIDI outputs |
 | P4.14 | Phase 4 acceptance: an arrangement over MCP | **passes** (orchestrator, this session): `tests/integration/mcp_arrangement.py` (CTest `engine.mcp-arrangement`, dev/gcc) — an MCP client builds tempo + three Orrery tracks with patches and notation MIDI + a basic mix in one batch, renders, analyzes, saves, reopens and renders bit-identically; transcript in docs/demos/mcp-arrangement.md |
 | P4.9 | plugin-parameter automation | **done** (orchestrator, this session): envelopes on plugin params (semantic keys in physical units, interpolated on the parameter's curve; CLAP ids/names in CLAP values), sample-accurate events every 32 samples and at points, latency-aligned, RT ≡ offline; `env.add/points.set/set/remove/list`. Open: write/touch/latch recording, automation items |
 | P4.8 | plugin process isolation (ADR-0013) | **done, dedicated mode** (orchestrator, this session): `<slug>-bridge` + bridged `host::Instance` (control socketpair, memfd data plane, futex, 2 s deadline (lifecycle commands 7 s), pidfd); crash/hang fail only the instance; `fx.set {isolation}`, `fx.restart`, `failed_fx`, `fx.failed`. **Phase 4 acceptance "a crashing test plugin in isolation mode doesn't take down the engine" passes** (engine.tests). Open: shared-bridge process, GUI across processes, B6 benchmark |

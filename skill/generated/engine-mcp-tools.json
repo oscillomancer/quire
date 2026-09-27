@@ -2187,7 +2187,7 @@
   {
     "name": "track_set",
     "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.",
-    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. See describe for errors and examples.",
+    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_set_args",
@@ -2282,6 +2282,10 @@
           "type": "integer",
           "minimum": 0.0,
           "maximum": 16.0
+        },
+        "record_mode": {
+          "type": "string",
+          "enum": ["input", "midi_overdub", "midi_replace"]
         },
         "monitor": {
           "type": "string",

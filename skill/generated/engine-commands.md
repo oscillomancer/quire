@@ -3257,7 +3257,7 @@ Result:
 
 Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
 
-Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped.
+Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3279,6 +3279,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `record_input` | array |  |  |  |  |
 | `record_midi` | string |  |  |  |  |
 | `midi_channel` | integer |  | 0.0..16.0 |  |  |
+| `record_mode` | string |  |  |  |  |
 | `monitor` | string |  |  |  |  |
 
 ### Result

@@ -403,6 +403,7 @@ struct TrackSetArgs {
     std::optional<std::vector<std::int64_t>> recordInput;
     std::optional<std::string> recordMidi;
     std::optional<std::int64_t> midiChannel;
+    std::optional<model::RecordMode> recordMode;
     std::optional<model::Monitor> monitor;
 };
 struct TrackMoveArgs {
@@ -959,7 +960,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "transport.record; record_midi records MIDI instead: a device name (substring of "
             "the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: "
             "off | on | auto (auto: while armed) — a monitored track hears its input live (an "
-            "instrument plays the keyboard), also while stopped.";
+            "instrument plays the keyboard), also while stopped. record_mode: input (new "
+            "items), midi_overdub (merge into the MIDI item under the start, as a new take), "
+            "midi_replace.";
         c.tags = {"track", "mixer"};
         c.args =
             schema::object<TrackSetArgs>("track_set_args")
@@ -983,6 +986,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                        schema::arrayOf(schema::integer().range(1, 64)))
                 .field("record_midi", &TrackSetArgs::recordMidi, schema::string())
                 .field("midi_channel", &TrackSetArgs::midiChannel, schema::integer().range(0, 16))
+                .field("record_mode", &TrackSetArgs::recordMode,
+                       schema::enumeration<model::RecordMode>(
+                           {{model::RecordMode::Input, "input"},
+                            {model::RecordMode::MidiOverdub, "midi_overdub"},
+                            {model::RecordMode::MidiReplace, "midi_replace"}}))
                 .field("monitor", &TrackSetArgs::monitor,
                        schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
                                                             {model::Monitor::On, "on"},
@@ -1002,7 +1010,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto id = existing<model::Track>(s, a.track, "/track");
             if (!id) return std::move(id).error();
-            if ((a.armed || a.recordInput || a.recordMidi || a.midiChannel || a.monitor) &&
+            if ((a.armed || a.recordInput || a.recordMidi || a.midiChannel || a.recordMode ||
+                 a.monitor) &&
                 *id == model::kMaster)
                 return Error("track.master", "the master does not record", "/track");
             if (a.recordInput && a.recordMidi)
@@ -1051,6 +1060,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             app.txn().modify<model::Track>(*id, [&](model::Track& t) {
                 if (a.armed) t.record.armed = *a.armed;
+                if (a.recordMode) t.record.mode = *a.recordMode;
                 if (a.recordInput || a.recordMidi || a.midiChannel) t.record.input = input;
                 if (a.monitor) t.record.monitor = *a.monitor;
                 if (a.name) t.name = *a.name;

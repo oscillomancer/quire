@@ -489,13 +489,131 @@ struct ItemPlan {
     std::vector<TakePlan> takes;
 };
 
-// MIDI (ADR-0016): a source per take, notes paired from note-on/off (still
-// held at the end of the run: ended there), other channel messages as
-// controls, in the project's PPQ from the item's start.
+// Adds run `run`'s recorded MIDI heard in [from, to) to `seq`: notes paired
+// from note-on/off (a retrigger ends the previous one; still held at the
+// run's end: ended there, or at `to`), other channel messages as controls.
+template <class TickOf>
+void appendRecorded(midi::Sequence& seq, const RecordedTake& r, std::size_t run, std::int64_t from,
+                    std::int64_t to, std::int64_t runEnd, TickOf tick) {
+    std::map<std::pair<int, int>, std::pair<std::int64_t, int>> open;
+    auto close = [&](std::pair<int, int> key, std::int64_t at, int offVelocity) {
+        auto it = open.find(key);
+        if (it == open.end()) return;
+        const auto [on, velocity] = it->second;
+        open.erase(it);
+        if (on < from || on >= to) return;  // outside the item
+        midi::Note n;
+        n.start = tick(on);
+        n.length = std::max<std::int64_t>(1, tick(std::min(at, to)) - n.start);
+        n.channel = static_cast<std::uint8_t>(key.first);
+        n.pitch = static_cast<std::uint8_t>(key.second);
+        n.velocity = static_cast<std::uint8_t>(velocity);
+        n.offVelocity = static_cast<std::uint8_t>(offVelocity);
+        seq.notes.push_back(n);
+    };
+    for (const RecordedMidiEvent& ev : r.midi) {
+        if (ev.run != run) continue;
+        const int status = ev.bytes[0] & 0xf0, ch = ev.bytes[0] & 0x0f;
+        const int b1 = ev.bytes[1], b2 = ev.bytes[2];
+        if (status == 0x90 && b2 > 0) {
+            close({ch, b1}, ev.timeline, 0);
+            open[{ch, b1}] = {ev.timeline, b2};
+        } else if (status == 0x80 || status == 0x90) {
+            close({ch, b1}, ev.timeline, status == 0x80 ? b2 : 0);
+        } else if (ev.timeline >= from && ev.timeline < to) {
+            midi::Control c;
+            c.tick = tick(ev.timeline);
+            c.channel = static_cast<std::uint8_t>(ch);
+            switch (status) {
+                case 0xb0:
+                    c.kind = midi::ControlKind::CC;
+                    c.number = static_cast<std::uint8_t>(b1);
+                    c.value = b2;
+                    break;
+                case 0xc0:
+                    c.kind = midi::ControlKind::ProgramChange;
+                    c.value = b1;
+                    break;
+                case 0xd0:
+                    c.kind = midi::ControlKind::ChannelPressure;
+                    c.value = b1;
+                    break;
+                case 0xa0:
+                    c.kind = midi::ControlKind::PolyPressure;
+                    c.number = static_cast<std::uint8_t>(b1);
+                    c.value = b2;
+                    break;
+                default:  // 0xe0
+                    c.kind = midi::ControlKind::PitchBend;
+                    c.value = ((b2 << 7) | b1) - 8192;
+                    break;
+            }
+            seq.controls.push_back(c);
+        }
+    }
+    while (!open.empty()) close(open.begin()->first, runEnd, 0);  // still held
+}
+
+// midi_overdub (ADR-0016): the recording merges into the MIDI item under its
+// first heard position, as a new take (the old one stays for undo and take
+// switching). False when there is no such item (a new item is made then).
+bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
+                 const std::vector<Run>& runs, double rate, std::vector<RecordedInfo>& out) {
+    if (runs.empty()) return false;
+    const double atBeat = s.timeMap->beatAt(static_cast<double>(runs.front().t0) / rate);
+    for (const auto& e : s.items) {
+        const model::Item& it = *e.value;
+        if (it.track != r.track || !it.activeTake) continue;
+        const model::Take* old = s.takes.find(*it.activeTake);
+        if (!old || !old->source || old->source->kind != model::Kind::Midi) continue;
+        if (atBeat < it.position || atBeat >= it.position + it.length) continue;
+        midi::Sequence seq = s.midi.find(*old->source)->sequence;
+        const double ppq = seq.ppq;
+        auto tick = [&](std::int64_t sample) {
+            return static_cast<std::int64_t>(
+                std::llround((s.timeMap->beatAt(static_cast<double>(sample) / rate) - it.position +
+                              old->startOffset) *
+                             ppq));
+        };
+        const auto from =
+            static_cast<std::int64_t>(std::llround(s.timeMap->secondsAt(it.position) * rate));
+        const auto to = static_cast<std::int64_t>(
+            std::llround(s.timeMap->secondsAt(it.position + it.length) * rate));
+        for (const Run& run : runs)  // every pass layers onto the same take
+            appendRecorded(seq, r, run.index, from, to, run.t0 + (run.to - run.from), tick);
+        seq.canonicalize();
+        model::MidiSource src;
+        src.sequence = std::move(seq);
+        const Id mi = t.create(std::move(src));
+        model::Take take = *old;
+        take.source = mi;
+        take.name = (old->name.empty() ? std::string("MIDI") : old->name) + " overdub";
+        const Id tk = t.create(std::move(take));
+        t.modify<model::Item>(e.id, [&](model::Item& x) {
+            x.takes.push_back(tk);
+            x.activeTake = tk;
+        });
+        RecordedInfo info;
+        info.track = r.track.str();
+        info.item = e.id.str();
+        info.take = tk.str();
+        info.takes = {tk.str()};
+        info.seconds = static_cast<double>(r.frames) / rate;
+        info.lostFrames = static_cast<std::int64_t>(r.overflowFrames);
+        out.push_back(std::move(info));
+        return true;
+    }
+    return false;
+}
+
+// MIDI (ADR-0016): a source per take in the project's PPQ from the item start.
 void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
                     const std::vector<Run>& runs, const std::vector<ItemPlan>& items, double rate,
                     std::vector<RecordedInfo>& out) {
     const model::Track* tr = s.tracks.find(r.track);
+    if (tr && tr->record.mode == model::RecordMode::MidiOverdub &&
+        overdubMidi(t, s, r, runs, rate, out))
+        return;
     const int ppq = s.project->ppq;
     for (const ItemPlan& ip : items) {
         model::Item item;
@@ -512,67 +630,10 @@ void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTa
         std::optional<Id> active;
         for (std::size_t k = 0; k < ip.takes.size(); ++k) {
             const Run& run = runs[ip.takes[k].run];
-            const std::int64_t runEnd = run.t0 + (run.to - run.from);
             midi::Sequence seq;
             seq.ppq = ppq;
             seq.length = tick(ip.end);
-            std::map<std::pair<int, int>, std::pair<std::int64_t, int>> open;
-            auto close = [&](std::pair<int, int> key, std::int64_t at, int offVelocity) {
-                auto it = open.find(key);
-                if (it == open.end()) return;
-                const auto [on, velocity] = it->second;
-                open.erase(it);
-                if (on < ip.start || on >= ip.end) return;  // outside the item
-                midi::Note n;
-                n.start = tick(on);
-                n.length = std::max<std::int64_t>(1, tick(std::min(at, ip.end)) - n.start);
-                n.channel = static_cast<std::uint8_t>(key.first);
-                n.pitch = static_cast<std::uint8_t>(key.second);
-                n.velocity = static_cast<std::uint8_t>(velocity);
-                n.offVelocity = static_cast<std::uint8_t>(offVelocity);
-                seq.notes.push_back(n);
-            };
-            for (const RecordedMidiEvent& ev : r.midi) {
-                if (ev.run != run.index) continue;
-                const int status = ev.bytes[0] & 0xf0, ch = ev.bytes[0] & 0x0f;
-                const int b1 = ev.bytes[1], b2 = ev.bytes[2];
-                if (status == 0x90 && b2 > 0) {
-                    close({ch, b1}, ev.timeline, 0);  // a retrigger ends the last one
-                    open[{ch, b1}] = {ev.timeline, b2};
-                } else if (status == 0x80 || status == 0x90) {
-                    close({ch, b1}, ev.timeline, status == 0x80 ? b2 : 0);
-                } else if (ev.timeline >= ip.start && ev.timeline < ip.end) {
-                    midi::Control c;
-                    c.tick = tick(ev.timeline);
-                    c.channel = static_cast<std::uint8_t>(ch);
-                    switch (status) {
-                        case 0xb0:
-                            c.kind = midi::ControlKind::CC;
-                            c.number = static_cast<std::uint8_t>(b1);
-                            c.value = b2;
-                            break;
-                        case 0xc0:
-                            c.kind = midi::ControlKind::ProgramChange;
-                            c.value = b1;
-                            break;
-                        case 0xd0:
-                            c.kind = midi::ControlKind::ChannelPressure;
-                            c.value = b1;
-                            break;
-                        case 0xa0:
-                            c.kind = midi::ControlKind::PolyPressure;
-                            c.number = static_cast<std::uint8_t>(b1);
-                            c.value = b2;
-                            break;
-                        default:  // 0xe0
-                            c.kind = midi::ControlKind::PitchBend;
-                            c.value = ((b2 << 7) | b1) - 8192;
-                            break;
-                    }
-                    seq.controls.push_back(c);
-                }
-            }
-            while (!open.empty()) close(open.begin()->first, runEnd, 0);  // still held
+            appendRecorded(seq, r, run.index, ip.start, ip.end, run.t0 + (run.to - run.from), tick);
             seq.canonicalize();
             model::MidiSource src;
             src.sequence = std::move(seq);

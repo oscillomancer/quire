@@ -837,3 +837,67 @@ TEST_CASE("a batch keeps text positions of nested errors (not pointer-prefixed)"
     CHECK(step.details[0].path.front() != '/');  // "1:16": a position in the notation text
     CHECK(step.details[0].path.find("/steps") == std::string::npos);
 }
+
+TEST_CASE("midi_overdub merges a performance into the item under it, as a new take") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    // Four bars of a bass line on beat 1 of each bar (at 120 BPM a bar is 2 s).
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Keys"}, "as": "k"},
+        {"command": "fx.add", "args": {"track": "${k.track}", "plugin": "com.suppleaudio.test.sine"}},
+        {"command": "item.add", "args": {"track": "${k.track}", "bar": 1, "notation": "voice v; 1: C3:w | C3:w | C3:w | C3:w"}},
+        {"command": "track.set", "args": {"track": "${k.track}", "armed": true, "record_midi": "*", "record_mode": "midi_overdub"}}]})");
+    const model::Session before = app->head();
+    REQUIRE(before.items.size() == 1);
+    const model::Id item = before.items.begin()->id;
+    const model::Id oldTake = *before.items.begin()->value->activeTake;
+    const std::size_t oldNotes =
+        before.midi.find(*before.takes.find(oldTake)->source)->sequence.notes.size();
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .midiPorts = {"Keyboard"},
+         .midi = [](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
+             for (std::int64_t f = frame; f < frame + n; ++f) {
+                 if (f % 12000 != 0) continue;
+                 MidiInputEvent m;
+                 m.frame = static_cast<std::uint32_t>(f - frame);
+                 m.size = 3;
+                 const bool on = f % 24000 == 0;
+                 m.bytes[0] = on ? 0x90 : 0x80;
+                 m.bytes[1] = 72;
+                 m.bytes[2] = on ? 90 : 0;
+                 out.push_back(m);
+             }
+         }});
+    REQUIRE(
+        app->startEngine(backend,
+                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true})
+            .ok());
+    call("transport.record", "{}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    auto stopped = call("transport.stop", "{}");
+    app->stopEngine();
+    REQUIRE(stopped["recorded"].size() == 1);
+    CHECK(stopped["recorded"].at(0).find("item")->asString() == item.str());  // no new item
+    const model::Session s = app->head();
+    CHECK(s.items.size() == 1);
+    const model::Item& it = *s.items.find(item);
+    REQUIRE(it.takes.size() == 2);
+    CHECK(it.takes[0] == oldTake);  // the old take stays
+    const midi::Sequence& merged = s.midi.find(*s.takes.find(*it.activeTake)->source)->sequence;
+    std::size_t c5 = 0, c3 = 0;
+    for (const midi::Note& n : merged.notes) (n.pitch == 72 ? c5 : c3) += 1;
+    CHECK(c3 == oldNotes);
+    CHECK(c5 >= 2);
+    call("history.undo", "{}");
+    CHECK(app->head().items.find(item)->takes.size() == 1);
+}
