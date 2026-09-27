@@ -9,19 +9,20 @@ masking.
 ## The loop
 
 1. `session.describe` — tracks, their chains, levels and routing in one read.
-2. `render.mix` (optionally `start_beat`/`end_beat`) writes the mix to a WAV;
-   analyze it with the sandbox's `analyze {source: <wav path>}` (the DAW gets
-   its own `analyze` soon). Read loudness first (`integrated_lufs`,
+2. `render.mix {analyze: "summary"}` (optionally `start_beat`/`end_beat`) writes
+   the mix to a WAV and returns its analysis inline. Use
+   `analyze.render {render: <render id>}` to inspect it later. Read loudness
+   first (`integrated_lufs`,
    `true_peak_dbtp`), then the band levels and stereo width.
-3. Solo a pair of parts that fight (kick and bass, bass and keys), render
-   each, and run the sandbox's `masking {masker, maskee}` on the two renders:
-   it reports per Bark band how much of the maskee is masked and the three
+3. Run `analyze.masking {masker_track, maskee_track}` on parts that fight
+   (kick and bass, bass and keys). It renders each track's post-fader output
+   and reports per Bark band how much of the maskee is masked and the three
    worst bands.
 4. Fix with the smallest move: level (`track.set {track, volume_db}`), pan
    (`track.set {track, pan}`), a different octave or voicing (edit the MIDI),
    or — when the EQ ships — a cut in the masked band on the less important
    part.
-5. Render again and `compare` with the previous mix render.
+5. Render again and `analyze.compare {reference, test}` with the two render ids.
 
 Group a change and its render in one `batch`: one undo step, atomic.
 

@@ -131,6 +131,8 @@ class EngineApp : public cmd::Host {
     // --- rendering ---------------------------------------------------------------
     Result<OfflineResult> renderMix(const OfflineSettings& settings);
     std::filesystem::path rendersDir() const { return options_.workdir / "renders"; }
+    std::string rememberRender(const std::filesystem::path& path);
+    Result<std::filesystem::path> renderPath(std::string_view reference) const;
 
     // --- real-time engine (optional) ------------------------------------------------
     Status startEngine(Backend& backend, const BackendConfig& config);
@@ -218,6 +220,7 @@ class EngineApp : public cmd::Host {
     std::optional<std::vector<host::PluginInfo>> catalogue_;
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
+    std::map<std::string, std::filesystem::path> renders_;
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;

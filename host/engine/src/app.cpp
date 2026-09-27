@@ -270,6 +270,23 @@ Result<OfflineResult> EngineApp::renderMix(const OfflineSettings& settings) {
     return renderOffline(view(), offlinePool, s);  // inside a batch: with the earlier steps
 }
 
+std::string EngineApp::rememberRender(const fs::path& path) {
+    const std::string id = "rd_" + std::to_string(renders_.size() + 1);
+    renders_[id] = path;
+    return id;
+}
+
+Result<fs::path> EngineApp::renderPath(std::string_view reference) const {
+    if (reference.starts_with("rd_")) {
+        auto it = renders_.find(std::string(reference));
+        if (it == renders_.end())
+            return Error("engine.unknown_render", "no such render " + std::string(reference), {},
+                         "render.mix returns a render id; use it or a WAV path");
+        return it->second;
+    }
+    return resolve(fs::path(reference));
+}
+
 // --- real-time engine -----------------------------------------------------------------------
 
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
@@ -830,6 +847,7 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     if (fixture == "song_with_env")  // + en_1: fx_2 gain, two points
         run("env.add",
             R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})");
+    if (fixture == "song_with_render") run("render.mix", R"({"name":"example"})");
 }
 
 }  // namespace supple::engine

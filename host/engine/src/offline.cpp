@@ -19,6 +19,64 @@ using model::Id;
 using model::Kind;
 using model::Session;
 
+namespace {
+// Keep the target and precisely the tracks whose enabled sends feed it.
+Session upstreamSession(const Session& source, Id target) {
+    if (target == model::kMaster) return source;
+    Session s = source;
+    std::set<Id> keep{target};
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& entry : source.tracks) {
+            const auto& track = *entry.value;
+            if (track.parentSend.enabled && track.parent && keep.count(*track.parent))
+                changed |= keep.insert(entry.id).second;
+        }
+        for (const auto& entry : source.routes) {
+            const auto& route = *entry.value;
+            if (!route.mute && route.from.track && route.to.track && keep.count(*route.to.track))
+                changed |= keep.insert(*route.from.track).second;
+        }
+    }
+    const bool masterFeedsTarget = keep.count(model::kMaster) != 0;
+    keep.insert(model::kMaster);
+    // A target's sends toward the master are irrelevant to its tap. Retain a
+    // harmless root connection so the compiler still orders the master last.
+    model::IdMap<model::Track>::Builder tracks(source.tracks);
+    for (const auto& entry : source.tracks) {
+        if (!keep.count(entry.id)) {
+            tracks.erase(entry.id);
+            continue;
+        }
+        if (entry.id == model::kMaster && !masterFeedsTarget) {
+            auto master = std::make_shared<model::Track>(*entry.value);
+            master->chain.clear();
+            master->mute = false;
+            tracks.put(entry.id, entry.rev, std::move(master));
+        } else if (!entry.value->parent || !keep.count(*entry.value->parent)) {
+            auto track = std::make_shared<model::Track>(*entry.value);
+            track->parent = model::kMaster;
+            track->parentSend.enabled = true;
+            tracks.put(entry.id, entry.rev, std::move(track));
+        }
+    }
+    s.tracks = tracks.build();
+    model::IdMap<model::Item>::Builder items(source.items);
+    for (const auto& entry : source.items)
+        if (!keep.count(entry.value->track) || entry.value->track == model::kMaster)
+            items.erase(entry.id);
+    s.items = items.build();
+    model::IdMap<model::Route>::Builder routes(source.routes);
+    for (const auto& entry : source.routes)
+        if (!entry.value->from.track || !entry.value->to.track ||
+            !keep.count(*entry.value->from.track) || !keep.count(*entry.value->to.track))
+            routes.erase(entry.id);
+    s.routes = routes.build();
+    return s;
+}
+}  // namespace
+
 // --- instance pool ------------------------------------------------------------------
 
 InstancePool::InstancePool(Resolver resolve, host::HostIdentity identity)
@@ -144,17 +202,31 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         return Error("engine.block_size", "block size out of range", {}, "1 .. 8192");
     if (!(opt.tailSeconds >= 0 && opt.tailSeconds <= 600))
         return Error("engine.tail", "tail out of range", {}, "0 .. 600 s");
-    auto compiled = detail::compile(s, pool, opt.startSeconds, opt.blockSize);
+    const Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
+    auto compiled = detail::compile(selectedSession, pool, opt.startSeconds, opt.blockSize);
     if (!compiled) return std::move(compiled).error();
     Plan& p = *compiled;
     MediaCache localMedia;
     p.projectDir = opt.projectDir;
     p.media = opt.media ? opt.media : &localMedia;
-    SUPPLE_TRY(prepare(p, s));
+    SUPPLE_TRY(prepare(p, selectedSession));
+    const Node* selected = &p.nodes.back();
+    if (opt.track) {
+        auto it = std::find_if(p.nodes.begin(), p.nodes.end(),
+                               [&](const Node& node) { return node.id == *opt.track; });
+        if (it == p.nodes.end())
+            return Error("track.unknown", "track is absent from the render plan", "/track");
+        selected = &*it;
+        // An analysis tap is isolated from the session's current solo state.
+        for (Node& node : p.nodes) node.soloSilenced = false;
+    }
+    const auto outputLatency =
+        opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
+                  : p.outputLatency;
     const std::int64_t length = time::samplesAt(opt.endSeconds, p.rate) -
                                 time::samplesAt(opt.startSeconds, p.rate) +
                                 time::samplesAt(opt.tailSeconds, p.rate);
-    const std::int64_t total = length + p.outputLatency;
+    const std::int64_t total = length + outputLatency;
     if (total > (std::int64_t(1) << 28)) return Error("engine.too_long", "render too long");
     std::vector<float> outL(static_cast<std::size_t>(total)), outR(static_cast<std::size_t>(total));
     bool failed = false, startFailed = false;
@@ -180,9 +252,11 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                     failed = true;
                     break;
                 }
-                const Node& master = p.nodes.back();
-                std::copy_n(master.post.l.begin(), n, outL.begin() + pos);
-                std::copy_n(master.post.r.begin(), n, outR.begin() + pos);
+                const Stereo& tap = opt.tap == model::Tap::PreFx      ? selected->preFx
+                                    : opt.tap == model::Tap::PreFader ? selected->preFader
+                                                                      : selected->post;
+                std::copy_n(tap.l.begin(), n, outL.begin() + pos);
+                std::copy_n(tap.r.begin(), n, outR.begin() + pos);
             }
         }
         for (host::Instance* in : instances) in->stopProcessing();
@@ -210,10 +284,10 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         line += "] lat_in=" + std::to_string(n.latIn) + " lat_chain=" + std::to_string(n.latChain);
         r.graph.push_back(std::move(line));
     }
-    r.outputLatency = static_cast<std::uint32_t>(p.outputLatency);
+    r.outputLatency = static_cast<std::uint32_t>(outputLatency);
     r.warnings = std::move(p.warnings);
     r.audio.sampleRate = p.rate;
-    const auto skip = static_cast<std::ptrdiff_t>(p.outputLatency);
+    const auto skip = static_cast<std::ptrdiff_t>(outputLatency);
     r.audio.channels = {std::vector<float>(outL.begin() + skip, outL.end()),
                         std::vector<float>(outR.begin() + skip, outR.end())};
     return r;

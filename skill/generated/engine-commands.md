@@ -2,6 +2,191 @@
 
 Generated from the command registry.
 
+## `analyze.compare@1`
+
+Compare two renders or track outputs by perceptual descriptors.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `reference` | string |  |  |  |  |
+| `test` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "comparison",
+  "properties": {
+    "notable": {},
+    "ltas_rms_db": {
+      "type": "number"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["notable", "ltas_rms_db", "summary"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Compare a track with itself** (`song_with_item`)
+
+```json
+{
+  "reference": "tr_1",
+  "test": "tr_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "notable": [],
+  "ltas_rms_db": 0.0,
+  "summary": "<any>"
+}
+
+```
+
+## `analyze.masking@1`
+
+Estimate masking between two tracks over the same range.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `masker_track` | string |  |  |  |  |
+| `maskee_track` | string |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**One track against itself** (`song_with_fx`)
+
+```json
+{
+  "masker_track": "tr_1",
+  "maskee_track": "tr_1"
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+## `analyze.render@1`
+
+Analyze a render id or audio path: loudness, spectrum, envelope and stereo.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `render` | string |  |  |  |  |
+| `detail` | string |  |  | "summary" | summary: key scalars; standard: + percentiles and spectrum; full: + time series. |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Analyze a mix** (`song_with_render`)
+
+```json
+{
+  "render": "rd_1"
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+## `analyze.track@1`
+
+Render one track's output offline and analyze it.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+| `tap` | string |  |  | "post_fader" |  |
+| `detail` | string |  |  | "summary" | summary: key scalars; standard: + percentiles and spectrum; full: + time series. |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Analyze a track** (`song_with_item`)
+
+```json
+{
+  "track": "tr_1"
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
 ## `batch@1`
 
 Run commands atomically.
@@ -2652,7 +2837,7 @@ Result:
 
 Render the mix offline to a float WAV (default: start to the last item's end).
 
-start_beat/end_beat in beats; tail_s seconds after the end (reverb tails).
+start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -2664,6 +2849,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..60.0 |  |  |
 | `name` | string |  |  |  |  |
+| `analyze` | string |  |  |  |  |
 
 ### Result
 
@@ -2672,6 +2858,9 @@ Kind: `action`. Exposure: `mcp-tool`.
   "type": "object",
   "title": "render_mix",
   "properties": {
+    "render": {
+      "type": "string"
+    },
     "path": {
       "type": "string"
     },
@@ -2689,9 +2878,10 @@ Kind: `action`. Exposure: `mcp-tool`.
       "items": {
         "type": "string"
       }
-    }
+    },
+    "analysis": {}
   },
-  "required": ["path", "seconds", "peak_dbfs", "output_latency"],
+  "required": ["render", "path", "seconds", "peak_dbfs", "output_latency"],
   "additionalProperties": false
 }
 
@@ -2712,6 +2902,7 @@ Result:
 
 ```json
 {
+  "render": "rd_1",
   "path": "<any>",
   "seconds": "<any>",
   "peak_dbfs": "<any>",

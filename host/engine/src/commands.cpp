@@ -6,6 +6,7 @@
 #include <cmath>
 #include <set>
 
+#include "analysis_commands.h"
 #include "supple/audio/audio_file.h"
 #include "supple/engine/app.h"
 #include "supple/model/schemas.h"
@@ -497,15 +498,19 @@ struct FxDescription {
 
 // --- render / history ------------------------------------------------------------------------
 
+enum class RenderAnalyze { Summary, Full };
 struct RenderMixArgs {
     std::optional<double> startBeat, endBeat, tailS;
     std::optional<std::string> name;
+    std::optional<RenderAnalyze> analyze;
 };
 struct RenderMixResult {
+    std::string render;
     std::string path;
     double seconds = 0, peakDbfs = 0;
     std::int64_t outputLatency = 0;
     std::optional<std::vector<std::string>> warnings;
+    std::optional<json::Value> analysis;
 };
 struct HistoryResult {
     std::int64_t version = 0;
@@ -1622,7 +1627,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary =
             "Render the mix offline to a float WAV (default: start to the last item's end).";
         c.description =
-            "start_beat/end_beat in beats; tail_s seconds after the end (reverb tails).";
+            "start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). "
+            "analyze: summary or full returns a supple.analysis-report/1.0 inline. "
+            "The render id can be passed to analyze.render or analyze.compare.";
         c.tags = {"render"};
         c.args = schema::object<RenderMixArgs>("render_mix_args")
                      .field("start_beat", &RenderMixArgs::startBeat, schema::number().min(0))
@@ -1631,18 +1638,23 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("name", &RenderMixArgs::name,
                             schema::string().pattern("^[A-Za-z0-9 _.+-]{1,64}$",
                                                      "a file-name-safe name"))
+                     .field("analyze", &RenderMixArgs::analyze,
+                            schema::enumeration<RenderAnalyze>({{RenderAnalyze::Summary, "summary"},
+                                                                {RenderAnalyze::Full, "full"}}))
                      .build();
         c.result =
             schema::object<RenderMixResult>("render_mix")
+                .field("render", &RenderMixResult::render, schema::string())
                 .field("path", &RenderMixResult::path, schema::string())
                 .field("seconds", &RenderMixResult::seconds, schema::number())
                 .field("peak_dbfs", &RenderMixResult::peakDbfs, schema::number())
                 .field("output_latency", &RenderMixResult::outputLatency, schema::integer())
                 .field("warnings", &RenderMixResult::warnings, schema::arrayOf(schema::string()))
+                .field("analysis", &RenderMixResult::analysis, schema::any())
                 .build();
         c.examples = {
             {"Render", obj(R"({"name": "mix-v1"})"),
-             obj(R"({"path": "<any>", "seconds": "<any>", "peak_dbfs": "<any>", "output_latency": 0})"),
+             obj(R"({"render": "rd_1", "path": "<any>", "seconds": "<any>", "peak_dbfs": "<any>", "output_latency": 0})"),
              "song_with_fx"}};
         c.run = [](const RenderMixArgs& a, Context& ctx) -> Result<RenderMixResult> {
             EngineApp& app = A(ctx);
@@ -1666,6 +1678,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (const auto& ch : r->audio.channels)
                 for (float v : ch) peak = std::max(peak, std::fabs(v));
             RenderMixResult out;
+            out.render = app.rememberRender(path);
             out.path = path.string();
             out.seconds = std::round(r->audio.seconds() * 1e4) / 1e4;
             out.peakDbfs =
@@ -1673,10 +1686,18 @@ void registerEngineCommands(cmd::Registry& registry) {
                          : -1000.0;
             out.outputLatency = r->outputLatency;
             if (!r->warnings.empty()) out.warnings = r->warnings;
+            if (a.analyze) {
+                auto report = analyzeAudio(r->audio, *a.analyze == RenderAnalyze::Full
+                                                         ? analysis::Detail::Full
+                                                         : analysis::Detail::Summary);
+                if (!report) return std::move(report).error();
+                out.analysis = std::move(*report);
+            }
             return out;
         };
         registry.add(std::move(c));
     }
+    registerEngineAnalysisCommands(registry);
     // ---------------------------------------------------------------- history
     auto historyResult = [] {
         return schema::object<HistoryResult>("history_result")
