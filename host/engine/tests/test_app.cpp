@@ -818,3 +818,22 @@ TEST_CASE("an LLM records a MIDI performance over the bus and reads it back as n
     auto text = call("midi.get", std::string(R"({"item": ")") + itemId + R"("})");
     CHECK(text["text"].asString().find("C4") != std::string::npos);
 }
+
+TEST_CASE("a batch keeps text positions of nested errors (not pointer-prefixed)") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto r = d.execute({"batch", j(R"({"steps": [
+        {"command": "track.add", "args": {"name": "Bass"}, "as": "b"},
+        {"command": "item.add", "args": {"track": "${b.track}", "bar": 1, "notation": "voice v; 1: C4:q | 2: D4:q | 3: E4:q"}}]})"),
+                        kTest});
+    REQUIRE_FALSE(r);
+    REQUIRE(r.error().details.size() == 1);
+    const Error& step = r.error().details[0];
+    CHECK(step.path == "/steps/1/args/notation");
+    REQUIRE_FALSE(step.details.empty());
+    CHECK(step.details[0].path.front() != '/');  // "1:16": a position in the notation text
+    CHECK(step.details[0].path.find("/steps") == std::string::npos);
+}

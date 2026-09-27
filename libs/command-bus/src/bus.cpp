@@ -127,6 +127,8 @@ Status validateFields(const json::Value& args, std::initializer_list<std::string
     return error;
 }
 std::string pointerPrefix(std::string_view prefix, std::string_view path) {
+    // Only JSON pointers nest; a text position ("1:43", notation) stays as it is.
+    if (!path.empty() && path.front() != '/') return std::string(path);
     return std::string(prefix) + std::string(path);
 }
 void prefixError(Error& error, std::string_view prefix) {
