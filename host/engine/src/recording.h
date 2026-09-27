@@ -37,6 +37,18 @@ class FrameRing {
     alignas(64) std::atomic<std::size_t> read_{0};
 };
 
+// A recording's sidecar (ADR-0014 §3), next to its WAV file: where the take
+// belongs. Written as soon as capture starts, so a crash before the stop
+// commits the take still leaves enough to place it (project.recover).
+struct RecordingInfo {
+    model::Id track;
+    std::int64_t startSample = 0;  // timeline sample of the file's first frame
+    double sampleRate = 0;
+};
+std::filesystem::path sidecarPath(const std::filesystem::path& wav);
+Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info);
+Result<RecordingInfo> readSidecar(const std::filesystem::path& wav);
+
 class Recorder {
   public:
     Recorder(std::vector<RecordTarget> targets, double rate, std::int64_t latency);
@@ -57,6 +69,7 @@ class Recorder {
     };
     void writerLoop();
     void drain(Track& t, std::vector<float>& scratch);
+    void writeSidecars();
 
     std::vector<std::unique_ptr<Track>> tracks_;
     double rate_;
@@ -65,7 +78,9 @@ class Recorder {
     std::atomic<std::int64_t> start_{0};
     std::atomic<bool> stop_{false};
     std::thread writer_;
+    bool sidecars_ = false;           // writer thread
     Status writeError_ = okStatus();  // writer thread; read after join
+    Status sidecarError_ = okStatus();
 };
 
 }  // namespace supple::engine::detail

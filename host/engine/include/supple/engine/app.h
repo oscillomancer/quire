@@ -55,6 +55,16 @@ struct RecordedInfo {
     std::int64_t lostFrames = 0;  // input the disk could not keep up with
 };
 
+// A recording no version of the session uses (after a crash: a take that
+// was never committed, or committed but never saved), and where its sidecar
+// says it belongs.
+struct RecoverableInfo {
+    std::string file;  // relative to the project's media directory ("rec/Vocal-1.wav")
+    std::string track;
+    double startSeconds = 0, seconds = 0;
+    std::int64_t channels = 0;
+};
+
 struct TransportInfo {
     bool playing = false, recording = false;
     double seconds = 0, beat = 0;
@@ -129,7 +139,23 @@ class EngineApp : public cmd::Host {
     // Emits fx.failed once for each isolated instance that has failed.
     void checkFailures();
     // Commits recorded takes as items on their tracks (one version).
-    Result<std::vector<RecordedInfo>> commitTakes(const std::vector<RecordedTake>& takes);
+    Result<std::vector<RecordedInfo>> commitTakes(const std::vector<RecordedTake>& takes,
+                                                  std::string_view label = "record");
+
+    // --- recordings (crash recovery, ADR-0014 §3) -----------------------------------
+    // Where media lives: next to the project file, or the work directory's
+    // media/ before the project has one. Recordings go to its rec/.
+    std::filesystem::path mediaDir() const;
+    std::filesystem::path recordDir() const { return mediaDir() / "rec"; }
+    // Recordings in recordDir() with a sidecar that no version uses and that
+    // are not being recorded now, oldest name first.
+    std::vector<RecoverableInfo> recoverable() const;
+    // Repairs their headers (the frames written after the last rewrite count)
+    // and commits them as one version ("recover"), each on its sidecar's track
+    // (or `track`) at its recorded position. `files` as recoverable() lists
+    // them; empty: all.
+    Result<std::vector<RecordedInfo>> recover(const std::vector<std::string>& files,
+                                              std::optional<model::Id> track);
     // The real-time engine's instance of `fx` (tests and tools), or null.
     host::Instance* instanceOf(model::Id fx) const { return pool_ ? pool_->find(fx) : nullptr; }
     // Transport requests. With a device, each waits (at most a second) until
@@ -151,8 +177,9 @@ class EngineApp : public cmd::Host {
     // Example fixtures: empty, saved, song (tr_1 "Bass"), song_with_item
     // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_with_env (+ en_1
     // on fx_2 gain), song_undone,
-    // engine_running (the dummy backend), and the bus's job_running. Built by
-    // running commands.
+    // engine_running (the dummy backend), engine_armed (+ tr_1 armed),
+    // recording_interrupted (tr_1 + rec/Vocal-1.wav left by a crash), and the
+    // bus's job_running. Built by running commands.
     void setupFixture(cmd::Dispatcher& dispatcher, std::string_view fixture) override;
     // Relative project paths resolve against the work directory.
     std::filesystem::path resolve(const std::filesystem::path& path) const;
@@ -179,7 +206,8 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
-    double playStart_ = 0.0;  // transport.stop returns here
+    double playStart_ = 0.0;                             // transport.stop returns here
+    std::vector<std::filesystem::path> recordingFiles_;  // while recording
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;
     std::vector<cmd::LogRecord> records_;

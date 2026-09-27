@@ -1,6 +1,6 @@
 # ADR-0014: Recording, input monitoring and the live region
 
-**Status:** Accepted, 2026-09-27 (recording and input monitoring implemented; recovery next). Spec: `docs/specs/engine.md` §2.1, §4
+**Status:** Accepted, 2026-09-27 (recording, input monitoring and crash recovery implemented). Spec: `docs/specs/engine.md` §2.1, §4
 (recording), `docs/specs/session-model.md` (`track.record`, routes from
 `hw_input`). Builds on ADR-0012 (anticipation) and ADR-0004 (JACK inputs).
 
@@ -115,7 +115,7 @@ when the machine is busiest, during a recording session).
   returns `recorded: [{track, item, take, file, seconds, lost_frames}]`.
 - Tests: contiguous capture with exact placement in both renderers; a take
   recorded over the bus plays back in a render and undoes as one step.
-- Not yet: `project.recover`, punch/loop takes, RF64, monitoring (§4–5),
+- Not yet: punch/loop takes, RF64, monitoring (§4–5; since done),
   and replaying a recording in a branch merge (the version has no
   invocation to replay).
 
@@ -148,5 +148,36 @@ when the machine is busiest, during a recording session).
   plugin between executors with no errors; tsan and rtsan clean.
 - Not yet: live multiprocessing (live nodes run on the callback alone),
   the crossfade at class changes (a pass-through gap until the new owner
-  starts), `project.recover`, punch/loop.
+  starts), punch/loop.
 
+## Implementation notes: crash recovery (2026-09-27)
+
+- Each recording gets a sidecar, `<name>.rec.json` next to its WAV
+  (`{schema, track, start_sample, sample_rate}`), written atomically by the
+  writer thread as soon as capture has started. It stays after the take is
+  committed: it records where the file belongs.
+- The writer flushes to the OS after every drain (20 ms), so a crash of the
+  process loses at most the ring's undrained frames; the header may lag by
+  up to 5 s. `audio::inspectWavStream` reads a file's header frames and the
+  whole frames actually present; `repairWavStream` rewrites the sizes to
+  cover them.
+- A recording is *recoverable* when it has a sidecar, is not being recorded
+  now, and no version in the store (any branch) uses its file. So a take
+  undone in this session is not offered (redo still has it); one committed
+  but never saved, or never committed because the program died, is.
+  (History is not saved with the project, so after a reopen only the saved
+  head counts.)
+- `project.recoverable` lists them (file relative to the media folder,
+  track, start_seconds, seconds including the unaccounted tail, channels);
+  `project.recover {files?, track?}` repairs and commits them as one version
+  ("recover") at their recorded positions, on the sidecar's track or
+  `track` (`recover.no_track` when the original is gone). `project.get` and
+  `project.open` report the count as `recoverable`.
+- Also fixed on the way: a failed disk write stopped the take silently; the
+  frames after it now count as `lost_frames` and the engine emits
+  `record.error {track, file, error}`. Takes carry the engine's sample
+  rate, so a device at another rate than the project places them correctly.
+- Tests: a take recorded for real, lost by undo + save + reopen, is offered
+  and recovered at its original position and length (one undo step); a
+  crashed file whose header covers half the audio plays in full after
+  recovery onto another track; header repair unit test.

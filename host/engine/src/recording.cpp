@@ -3,7 +3,40 @@
 #include <algorithm>
 #include <chrono>
 
+#include "supple/base/files.h"
+#include "supple/json/json.h"
+
 namespace supple::engine::detail {
+
+std::filesystem::path sidecarPath(const std::filesystem::path& wav) {
+    std::filesystem::path p = wav;
+    p.replace_extension(".rec.json");
+    return p;
+}
+
+Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info) {
+    json::Value v = json::Value::object();
+    v["schema"] = "supple.recording/1.0";
+    v["track"] = info.track.str();
+    v["start_sample"] = static_cast<long long>(info.startSample);
+    v["sample_rate"] = info.sampleRate;
+    return writeFileAtomic(sidecarPath(wav), json::writeCanonical(v) + "\n");
+}
+
+Result<RecordingInfo> readSidecar(const std::filesystem::path& wav) {
+    auto text = readTextFile(sidecarPath(wav), 1 << 16);
+    if (!text) return std::move(text).error();
+    auto v = json::parse(*text);
+    if (!v) return std::move(v).error();
+    const json::Value* track = v->find("track");
+    const json::Value* start = v->find("start_sample");
+    const json::Value* rate = v->find("sample_rate");
+    std::optional<model::Id> id =
+        track && track->isString() ? model::Id::parse(track->asString()) : std::nullopt;
+    if (!id || !start || !start->isInt() || !rate || !rate->isNumber())
+        return Error("record.sidecar", sidecarPath(wav).string() + " is not a recording sidecar");
+    return RecordingInfo{*id, start->asInt(), rate->asDouble()};
+}
 
 void FrameRing::init(std::uint32_t channels, std::size_t frames) {
     channels_ = channels;
@@ -85,11 +118,27 @@ void Recorder::drain(Track& t, std::vector<float>& scratch) {
     const std::size_t chunk = scratch.size() / t.ring.channels();
     for (;;) {
         const std::size_t n = t.ring.read(scratch.data(), chunk);
-        if (n == 0) return;
+        if (n == 0) break;
         if (writeError_) {
             auto st = t.writer.append(scratch.data(), n);
             if (!st) writeError_ = std::move(st);
         }
+        if (!writeError_) t.overflow.fetch_add(n, std::memory_order_relaxed);  // lost too
+    }
+    if (writeError_) {
+        auto st = t.writer.flush();  // a crash of the process keeps what the OS has
+        if (!st) writeError_ = std::move(st);
+    }
+}
+
+void Recorder::writeSidecars() {
+    if (sidecars_ || !started_.load(std::memory_order_acquire)) return;
+    sidecars_ = true;
+    const std::int64_t start = start_.load(std::memory_order_relaxed);
+    for (auto& t : tracks_) {
+        // Without one the take is fine but a crash would leave it unplaced.
+        auto st = writeSidecar(t->target.file, {t->target.track, start, rate_});
+        if (!st && sidecarError_) sidecarError_ = std::move(st);
     }
 }
 
@@ -97,6 +146,7 @@ void Recorder::writerLoop() {
     std::vector<float> scratch(8192 * 16);
     auto lastHeader = std::chrono::steady_clock::now();
     while (!stop_.load(std::memory_order_acquire)) {
+        writeSidecars();
         for (auto& t : tracks_) drain(*t, scratch);
         if (std::chrono::steady_clock::now() - lastHeader > std::chrono::seconds(5)) {
             for (auto& t : tracks_) (void)t->writer.updateHeader();  // a crash keeps this much
@@ -104,6 +154,7 @@ void Recorder::writerLoop() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    writeSidecars();
     for (auto& t : tracks_) drain(*t, scratch);  // what arrived before the stop
 }
 
@@ -118,9 +169,14 @@ std::vector<RecordedTake> Recorder::finish() {
         r.track = t->target.track;
         r.file = t->target.file;
         r.startSample = start;
+        r.sampleRate = rate_;
         r.frames = static_cast<std::int64_t>(t->writer.frames());
         r.overflowFrames = t->overflow.load();
-        (void)t->writer.close();
+        if (auto st = t->writer.close(); !st && writeError_) writeError_ = std::move(st);
+        if (!writeError_)
+            r.error = writeError_.error().toString();
+        else if (!sidecarError_)
+            r.error = sidecarError_.error().toString();
         out.push_back(std::move(r));
     }
     return out;

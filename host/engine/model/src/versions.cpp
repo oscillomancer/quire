@@ -269,6 +269,10 @@ const Version* VersionStore::version(std::uint64_t id) const {
     return it == versions_.end() ? nullptr : &it->second;
 }
 
+void VersionStore::forEachVersion(const std::function<void(const Version&)>& visit) const {
+    for (const auto& [id, v] : versions_) visit(v);
+}
+
 Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                            std::vector<Change> changes, std::vector<Id> created,
                                            std::uint64_t timeMs) {

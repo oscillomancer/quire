@@ -1,5 +1,6 @@
 #include "supple/audio/wav_stream.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -13,6 +14,14 @@ void put16(std::uint8_t* p, std::uint16_t v) {
 }
 void put32(std::uint8_t* p, std::uint32_t v) {
     for (int i = 0; i < 4; ++i) p[i] = static_cast<std::uint8_t>(v >> (8 * i));
+}
+std::uint16_t get16(const std::uint8_t* p) {
+    return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
+}
+std::uint32_t get32(const std::uint8_t* p) {
+    std::uint32_t v = 0;
+    for (int i = 3; i >= 0; --i) v = (v << 8) | p[i];
+    return v;
 }
 
 constexpr long kHeaderBytes = 44;
@@ -76,12 +85,65 @@ Status WavStreamWriter::updateHeader() {
     return okStatus();
 }
 
+Status WavStreamWriter::flush() {
+    if (file_ && std::fflush(file_) != 0) return Error("file.write", "flush");
+    return okStatus();
+}
+
+void WavStreamWriter::abandon() {
+    if (!file_) return;
+    std::fclose(file_);
+    file_ = nullptr;
+}
+
 Status WavStreamWriter::close() {
     if (!file_) return okStatus();
     auto st = updateHeader();
     std::fclose(file_);
     file_ = nullptr;
     return st;
+}
+
+Result<WavStreamInfo> inspectWavStream(const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (ec) return Error("file.open", "cannot read " + path.string());
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return Error("file.open", "cannot read " + path.string());
+    std::uint8_t h[kHeaderBytes];
+    const bool read = std::fread(h, 1, sizeof h, f) == sizeof h;
+    std::fclose(f);
+    if (!read || std::memcmp(h, "RIFF", 4) != 0 || std::memcmp(h + 8, "WAVEfmt ", 8) != 0 ||
+        get32(h + 16) != 16 || get16(h + 20) != 3 || get16(h + 34) != 32 ||
+        std::memcmp(h + 36, "data", 4) != 0)
+        return Error("audio.not_stream", path.string() + " is not a recording's WAV file");
+    WavStreamInfo info;
+    info.channels = get16(h + 22);
+    info.sampleRate = get32(h + 24);
+    if (info.channels == 0) return Error("audio.not_stream", path.string() + " has no channels");
+    const std::uint64_t frameBytes = std::uint64_t(info.channels) * 4;
+    info.headerFrames = get32(h + 40) / frameBytes;
+    const std::uint64_t data = std::min<std::uint64_t>(size - kHeaderBytes, kMaxData);
+    info.fileFrames = data / frameBytes;
+    return info;
+}
+
+Result<std::uint64_t> repairWavStream(const std::filesystem::path& path) {
+    auto info = inspectWavStream(path);
+    if (!info) return std::move(info).error();
+    if (info->fileFrames == info->headerFrames) return info->headerFrames;
+    std::FILE* f = std::fopen(path.c_str(), "r+b");
+    if (!f) return Error("file.write", "cannot open " + path.string());
+    const auto data = static_cast<std::uint32_t>(info->fileFrames * info->channels * 4);
+    std::uint8_t b[4];
+    bool ok = true;
+    put32(b, data + kHeaderBytes - 8);
+    ok = ok && std::fseek(f, 4, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
+    put32(b, data);
+    ok = ok && std::fseek(f, 40, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
+    ok = std::fclose(f) == 0 && ok;
+    if (!ok) return Error("file.write", "cannot rewrite the header of " + path.string());
+    return info->fileFrames;
 }
 
 }  // namespace supple::audio

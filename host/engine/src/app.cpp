@@ -6,12 +6,15 @@
 #include <thread>
 
 #include "supple/audio/audio_file.h"
+#include "supple/audio/wav_stream.h"
 #include "supple/base/closest.h"
 #include "supple/base/files.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/engine/jack.h"
 #include "supple/model/schemas.h"
 #include "supple/product.h"
+
+#include "recording.h"
 
 namespace supple::engine {
 
@@ -368,10 +371,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     std::optional<std::vector<RecordedInfo>> recorded;
     if (action == "record") {
         const model::Session s = view();
-        const fs::path dir =
-            (projectPath_.empty() ? options_.workdir / "media"
-                                  : projectPath_.parent_path() / s.project->mediaDir) /
-            "rec";
+        const fs::path dir = recordDir();
         std::vector<RecordTarget> targets;
         for (const auto& e : s.tracks) {
             const model::Track& tr = *e.value;
@@ -387,11 +387,14 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             for (int n = 1;; ++n) {
                 t.file = dir / (base + "-" + std::to_string(n) + ".wav");
                 std::error_code ec;
-                if (!fs::exists(t.file, ec)) break;
+                if (!fs::exists(t.file, ec) && !fs::exists(detail::sidecarPath(t.file), ec)) break;
             }
             targets.push_back(std::move(t));
         }
+        std::vector<fs::path> files;
+        for (const RecordTarget& t : targets) files.push_back(t.file);
         SUPPLE_TRY(engine_->startRecording(std::move(targets)));
+        recordingFiles_ = std::move(files);
         playStart_ = engine_->transport().seconds;
         engine_->play();
     } else if (action == "play") {
@@ -402,6 +405,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         if (action == "stop") engine_->seek(playStart_);
         if (engine_->recording()) {
             auto takes = engine_->stopRecording();
+            recordingFiles_.clear();
             if (!takes) return std::move(takes).error();
             auto committed = commitTakes(*takes);
             if (!committed) return std::move(committed).error();
@@ -420,15 +424,23 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
                          t.sample,  std::move(recorded)};
 }
 
-Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes) {
+Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes,
+                                                         std::string_view label) {
     std::vector<RecordedInfo> out;
-    auto txnId = beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, "record");
+    auto txnId = beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, label);
     if (!txnId) return std::move(txnId).error();
     const model::Session s = view();
-    const double rate = s.project->sampleRate;
     const fs::path media =
         projectPath_.empty() ? fs::path() : projectPath_.parent_path() / s.project->mediaDir;
     for (const RecordedTake& r : takes) {
+        if (!r.error.empty()) {
+            json::Value ev = json::Value::object();
+            ev["track"] = r.track.str();
+            ev["file"] = r.file.string();
+            ev["error"] = r.error;
+            emit("record.error", std::move(ev));
+        }
+        const double rate = r.sampleRate > 0 ? r.sampleRate : s.project->sampleRate;
         // Material before the timeline's start is kept in the file, skipped by the take.
         const double offset = r.startSample < 0 ? static_cast<double>(-r.startSample) / rate : 0.0;
         const double start = static_cast<double>(std::max<std::int64_t>(r.startSample, 0)) / rate;
@@ -439,7 +451,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
         md.path = !ec && !rel.empty() && *rel.begin() != ".." ? rel.string() : r.file.string();
         md.format = "wav";
-        md.sampleRate = rate;
+        md.sampleRate = rate;  // the device's (playback warns if it is not the project's)
         md.channels = 0;
         if (auto head = audio::readAudio(r.file))
             md.channels = static_cast<int>(head->channelCount());
@@ -463,6 +475,107 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
     }
     SUPPLE_TRY(commitTransaction(*txnId));
     return out;
+}
+
+// --- recordings (crash recovery) ------------------------------------------------------------
+
+fs::path EngineApp::mediaDir() const {
+    return projectPath_.empty() ? options_.workdir / "media"
+                                : projectPath_.parent_path() / head().project->mediaDir;
+}
+
+namespace {
+
+fs::path comparable(const fs::path& p) {
+    std::error_code ec;
+    fs::path c = fs::weakly_canonical(p, ec);
+    return ec ? p.lexically_normal() : c;
+}
+
+}  // namespace
+
+std::vector<RecoverableInfo> EngineApp::recoverable() const {
+    std::vector<RecoverableInfo> out;
+    const fs::path dir = recordDir();
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return out;
+    // Every file a version uses, resolved the way plans resolve media.
+    std::set<fs::path> used;
+    const fs::path projectDir = projectPath_.empty() ? fs::path() : projectPath_.parent_path();
+    versions_->forEachVersion([&](const model::Version& v) {
+        for (const auto& e : v.session->media) {
+            const fs::path p = e.value->path;
+            if (p.is_absolute()) {
+                used.insert(comparable(p));
+            } else {
+                used.insert(comparable(projectDir / v.session->project->mediaDir / p));
+                used.insert(comparable(projectDir / p));
+            }
+        }
+    });
+    for (const fs::path& f : recordingFiles_) used.insert(comparable(f));
+    std::vector<fs::path> files;
+    for (auto it = fs::directory_iterator(dir, ec); !ec && it != fs::directory_iterator();
+         it.increment(ec))
+        if (it->path().extension() == ".wav") files.push_back(it->path());
+    std::sort(files.begin(), files.end());
+    const fs::path media = mediaDir();
+    for (const fs::path& f : files) {
+        if (used.count(comparable(f))) continue;
+        auto side = detail::readSidecar(f);  // none: not a recording, or capture never began
+        if (!side || !(side->sampleRate > 0)) continue;
+        auto info = audio::inspectWavStream(f);
+        if (!info || info->fileFrames == 0) continue;
+        RecoverableInfo r;
+        r.file = f.lexically_relative(media).string();
+        r.track = side->track.str();
+        r.startSeconds = static_cast<double>(side->startSample) / side->sampleRate;
+        r.seconds = static_cast<double>(info->fileFrames) / info->sampleRate;
+        r.channels = info->channels;
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::string>& files,
+                                                     std::optional<Id> track) {
+    const std::vector<RecoverableInfo> all = recoverable();
+    std::vector<const RecoverableInfo*> chosen;
+    if (files.empty()) {
+        for (const RecoverableInfo& r : all) chosen.push_back(&r);
+        if (chosen.empty()) return Error("recover.nothing", "there are no recordings to recover");
+    }
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        const fs::path want = fs::path(files[i]).lexically_normal();
+        auto it = std::find_if(all.begin(), all.end(),
+                               [&](const RecoverableInfo& r) { return fs::path(r.file) == want; });
+        if (it == all.end())
+            return Error("recover.unknown_file", files[i] + " is not a recording to recover",
+                         "/files/" + std::to_string(i), "project.recoverable lists them");
+        chosen.push_back(&*it);
+    }
+    const model::Session& s = head();
+    std::vector<RecordedTake> takes;
+    for (const RecoverableInfo* r : chosen) {
+        RecordedTake t;
+        t.file = mediaDir() / r->file;
+        auto side = detail::readSidecar(t.file);
+        if (!side) return std::move(side).error();
+        t.track = track.value_or(side->track);
+        if (!s.tracks.find(t.track))
+            return Error("recover.no_track",
+                         r->file + " was recorded on " + t.track.str() + ", which is gone",
+                         "/track", "give a track to put it on");
+        t.startSample = side->startSample;
+        t.sampleRate = side->sampleRate;
+        takes.push_back(std::move(t));
+    }
+    for (RecordedTake& t : takes) {
+        auto frames = audio::repairWavStream(t.file);
+        if (!frames) return std::move(frames).error();
+        t.frames = static_cast<std::int64_t>(*frames);
+    }
+    return commitTakes(takes, "recover");
 }
 
 void EngineApp::headChanged() {
@@ -561,6 +674,30 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         run("track.set", R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})");
         auto st = startEngine("dummy", 256);
         assert(st && "fixture engine failed");
+        (void)st;
+        return;
+    }
+    if (fixture == "recording_interrupted") {  // tr_1 "Vocal" + rec/Vocal-1.wav, never committed
+        run("track.add", R"({"name": "Vocal"})");
+        // One second of stereo from 1 s on; the recording stopped (crashed)
+        // half a second after its last header rewrite.
+        const fs::path file = recordDir() / "Vocal-1.wav";
+        std::error_code ec;
+        fs::create_directories(file.parent_path(), ec);
+        const double rate = head().project->sampleRate;
+        const auto half = static_cast<std::size_t>(rate / 2);
+        std::vector<float> frames(2 * half, 0.25f);
+        audio::WavStreamWriter w;
+        auto st = w.open(file, rate, 2);
+        st = st ? w.append(frames.data(), half) : st;
+        st = st ? w.updateHeader() : st;
+        st = st ? w.append(frames.data(), half) : st;
+        st = st ? w.flush() : st;
+        w.abandon();
+        st = st ? detail::writeSidecar(
+                      file, {Id{model::Kind::Track, 1}, static_cast<std::int64_t>(rate), rate})
+                : st;
+        assert(st && "fixture recording failed");
         (void)st;
         return;
     }

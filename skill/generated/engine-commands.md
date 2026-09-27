@@ -2060,7 +2060,7 @@ Result:
 
 Show the project: name, rate, tempo, meter, file, version and branch.
 
-
+recoverable: recordings a crash left out of the project (project.recoverable).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2096,9 +2096,12 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "version": {
       "type": "integer"
+    },
+    "recoverable": {
+      "type": "integer"
     }
   },
-  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version", "recoverable"],
   "additionalProperties": false
 }
 
@@ -2123,7 +2126,8 @@ Result:
   "sample_rate": 48000.0,
   "tempo": 120.0,
   "meter": "4/4",
-  "version": 0
+  "version": 0,
+  "recoverable": 0
 }
 
 ```
@@ -2132,7 +2136,7 @@ Result:
 
 Open a project file (replaces the current project and its history).
 
-
+recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -2169,9 +2173,12 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "version": {
       "type": "integer"
+    },
+    "recoverable": {
+      "type": "integer"
     }
   },
-  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version", "recoverable"],
   "additionalProperties": false
 }
 
@@ -2203,7 +2210,194 @@ Result:
   "sample_rate": "<any>",
   "tempo": "<any>",
   "meter": "<any>",
-  "version": "<any>"
+  "version": "<any>",
+  "recoverable": 0
+}
+
+```
+
+## `project.recover@1`
+
+Put recordings a crash left out back into the project (one undo step).
+
+files: as project.recoverable lists them (omit for all). Each becomes an item on the track it was recorded on (or track) at the position it was recorded.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `files` | array |  |  |  |  |
+| `track` | string |  |  |  | Track id, e.g. "tr_1". |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "recover_result",
+  "properties": {
+    "recovered": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recorded_take",
+        "properties": {
+          "track": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string"
+          },
+          "take": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "lost_frames": {
+            "type": "integer"
+          }
+        },
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["recovered"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `recover.nothing`: there is nothing to recover Hint: project.recoverable
+- `recover.unknown_file`: a file is not a recording to recover Hint: project.recoverable lists them
+- `recover.no_track`: the track it was recorded on is gone Hint: give track
+
+### Examples
+
+**Recover everything** (`recording_interrupted`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "recovered": [
+    {
+      "track": "tr_1",
+      "item": "it_1",
+      "take": "tk_1",
+      "file": "<any>",
+      "seconds": 1.0,
+      "lost_frames": 0
+    }
+  ]
+}
+
+```
+
+## `project.recoverable@1`
+
+List recordings a crash left out of the project.
+
+Takes recorded but never committed (the program stopped mid-recording) or never saved, found in the media folder's rec/. start_seconds is where each was recorded; seconds includes audio written after the file's last header update.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "recoverable_list",
+  "properties": {
+    "recordings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recoverable_recording",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          },
+          "start_seconds": {
+            "type": "number"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "channels": {
+            "type": "integer"
+          }
+        },
+        "required": ["file", "track", "start_seconds", "seconds", "channels"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["recordings"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**After a crash while recording** (`recording_interrupted`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "recordings": [
+    {
+      "file": "rec/Vocal-1.wav",
+      "track": "tr_1",
+      "start_seconds": 1.0,
+      "seconds": 1.0,
+      "channels": 2
+    }
+  ]
+}
+
+```
+
+**Nothing to recover** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "recordings": []
 }
 
 ```

@@ -66,6 +66,43 @@ struct ProjectInfo {
     double sampleRate = 0, tempo = 0;
     std::string meter;
     std::int64_t version = 0;
+    std::int64_t recoverable = 0;  // recordings project.recover can bring back
+};
+
+schema::Schema<ProjectInfo> projectInfoSchema() {
+    return schema::object<ProjectInfo>("project_info")
+        .field("name", &ProjectInfo::name, schema::string())
+        .field("path", &ProjectInfo::path, schema::string())
+        .field("branch", &ProjectInfo::branch, schema::string())
+        .field("sample_rate", &ProjectInfo::sampleRate, schema::number())
+        .field("tempo", &ProjectInfo::tempo, schema::number())
+        .field("meter", &ProjectInfo::meter, schema::string())
+        .field("version", &ProjectInfo::version, schema::integer())
+        .field("recoverable", &ProjectInfo::recoverable, schema::integer())
+        .build();
+}
+
+ProjectInfo projectInfo(EngineApp& app, const model::Session& s) {
+    const auto m = s.timeMap->meterAt(1);
+    return ProjectInfo{s.project->name,
+                       app.projectPath().string(),
+                       app.versions().branch(),
+                       s.project->sampleRate,
+                       s.timeMap->bpmAt(0),
+                       std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
+                       static_cast<std::int64_t>(s.version),
+                       static_cast<std::int64_t>(app.recoverable().size())};
+}
+
+struct RecoverableList {
+    std::vector<RecoverableInfo> recordings;
+};
+struct RecoverArgs {
+    std::optional<std::vector<std::string>> files;
+    std::optional<std::string> track;
+};
+struct RecoverResult {
+    std::vector<RecordedInfo> recovered;
 };
 struct ProjectSetArgs {
     std::optional<std::string> name, title, author, notes;
@@ -113,15 +150,19 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .build();
 }
 
+schema::Schema<RecordedInfo> recordedSchema() {
+    return schema::object<RecordedInfo>("recorded_take")
+        .field("track", &RecordedInfo::track, schema::string())
+        .field("item", &RecordedInfo::item, schema::string())
+        .field("take", &RecordedInfo::take, schema::string())
+        .field("file", &RecordedInfo::file, schema::string())
+        .field("seconds", &RecordedInfo::seconds, schema::number())
+        .field("lost_frames", &RecordedInfo::lostFrames, schema::integer())
+        .build();
+}
+
 schema::Schema<TransportInfo> transportSchema() {
-    auto recorded = schema::object<RecordedInfo>("recorded_take")
-                        .field("track", &RecordedInfo::track, schema::string())
-                        .field("item", &RecordedInfo::item, schema::string())
-                        .field("take", &RecordedInfo::take, schema::string())
-                        .field("file", &RecordedInfo::file, schema::string())
-                        .field("seconds", &RecordedInfo::seconds, schema::number())
-                        .field("lost_frames", &RecordedInfo::lostFrames, schema::integer())
-                        .build();
+    auto recorded = recordedSchema();
     return schema::object<TransportInfo>("transport")
         .field("playing", &TransportInfo::playing, schema::boolean())
         .field("recording", &TransportInfo::recording, schema::boolean())
@@ -494,30 +535,16 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Show the project: name, rate, tempo, meter, file, version and branch.";
         c.tags = {"project"};
         c.args = schema::object<NoArgs>("no_args").build();
-        c.result = schema::object<ProjectInfo>("project_info")
-                       .field("name", &ProjectInfo::name, schema::string())
-                       .field("path", &ProjectInfo::path, schema::string())
-                       .field("branch", &ProjectInfo::branch, schema::string())
-                       .field("sample_rate", &ProjectInfo::sampleRate, schema::number())
-                       .field("tempo", &ProjectInfo::tempo, schema::number())
-                       .field("meter", &ProjectInfo::meter, schema::string())
-                       .field("version", &ProjectInfo::version, schema::integer())
-                       .build();
+        c.description =
+            "recoverable: recordings a crash left out of the project (project.recoverable).";
+        c.result = projectInfoSchema();
         c.examples = {
             {"A new project", obj("{}"),
-             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0})"),
+             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0, "recoverable": 0})"),
              "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
-            const model::Session s = app.view();
-            const auto m = s.timeMap->meterAt(1);
-            return ProjectInfo{s.project->name,
-                               app.projectPath().string(),
-                               app.versions().branch(),
-                               s.project->sampleRate,
-                               s.timeMap->bpmAt(0),
-                               std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
-                               static_cast<std::int64_t>(s.version)};
+            return projectInfo(app, app.view());
         };
         registry.add(std::move(c));
     }
@@ -591,34 +618,98 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<PathArgs>("path_args")
                      .field("path", &PathArgs::path, schema::string())
                      .build();
-        c.result = schema::object<ProjectInfo>("project_info")
-                       .field("name", &ProjectInfo::name, schema::string())
-                       .field("path", &ProjectInfo::path, schema::string())
-                       .field("branch", &ProjectInfo::branch, schema::string())
-                       .field("sample_rate", &ProjectInfo::sampleRate, schema::number())
-                       .field("tempo", &ProjectInfo::tempo, schema::number())
-                       .field("meter", &ProjectInfo::meter, schema::string())
-                       .field("version", &ProjectInfo::version, schema::integer())
-                       .build();
+        c.description =
+            "recoverable > 0: recordings a crash left out of the project; project.recoverable "
+            "lists them and project.recover puts them back.";
+        c.result = projectInfoSchema();
         c.errors = {{"file.open", "the file cannot be read", "check the path"},
                     {"schema.invalid", "the file has problems", "details list each with its path"}};
         c.examples = {
             {"Open", obj(R"({"path": "example-project.json"})"),
-             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>"})"),
+             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>", "recoverable": 0})"),
              "saved"}};
         c.run = [](const PathArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
             if (!a.path) return Error("project.no_path", "give the project file to open", "/path");
             SUPPLE_TRY(app.open(*a.path));
-            const model::Session& s = app.head();
-            const auto m = s.timeMap->meterAt(1);
-            return ProjectInfo{s.project->name,
-                               app.projectPath().string(),
-                               app.versions().branch(),
-                               s.project->sampleRate,
-                               s.timeMap->bpmAt(0),
-                               std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
-                               static_cast<std::int64_t>(s.version)};
+            return projectInfo(app, app.head());
+        };
+        registry.add(std::move(c));
+    }
+    // ---------------------------------------------------------------- project.recoverable /
+    // project.recover
+    {
+        Command<NoArgs, RecoverableList> c;
+        c.name = "project.recoverable";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List recordings a crash left out of the project.";
+        c.description =
+            "Takes recorded but never committed (the program stopped mid-recording) or never "
+            "saved, found in the media folder's rec/. start_seconds is where each was "
+            "recorded; seconds includes audio written after the file's last header update.";
+        c.tags = {"project", "recording"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result =
+            schema::object<RecoverableList>("recoverable_list")
+                .field("recordings", &RecoverableList::recordings,
+                       schema::arrayOf(
+                           schema::object<RecoverableInfo>("recoverable_recording")
+                               .field("file", &RecoverableInfo::file, schema::string())
+                               .field("track", &RecoverableInfo::track, schema::string())
+                               .field("start_seconds", &RecoverableInfo::startSeconds,
+                                      schema::number())
+                               .field("seconds", &RecoverableInfo::seconds, schema::number())
+                               .field("channels", &RecoverableInfo::channels, schema::integer())
+                               .build()))
+                .build();
+        c.examples = {{"After a crash while recording", obj("{}"),
+                       obj(R"({"recordings": [{"file": "rec/Vocal-1.wav", "track": "tr_1",
+                              "start_seconds": 1.0, "seconds": 1.0, "channels": 2}]})"),
+                       "recording_interrupted"},
+                      {"Nothing to recover", obj("{}"), obj(R"({"recordings": []})"), "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<RecoverableList> {
+            return RecoverableList{A(ctx).recoverable()};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<RecoverArgs, RecoverResult> c;
+        c.name = "project.recover";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Put recordings a crash left out back into the project (one undo step).";
+        c.description =
+            "files: as project.recoverable lists them (omit for all). Each becomes an item on "
+            "the track it was recorded on (or track) at the position it was recorded.";
+        c.tags = {"project", "recording"};
+        c.args = schema::object<RecoverArgs>("recover_args")
+                     .field("files", &RecoverArgs::files, schema::arrayOf(schema::string()))
+                     .field("track", &RecoverArgs::track, idArg("tr", "Track"))
+                     .build();
+        c.result =
+            schema::object<RecoverResult>("recover_result")
+                .field("recovered", &RecoverResult::recovered, schema::arrayOf(recordedSchema()))
+                .build();
+        c.errors = {{"recover.nothing", "there is nothing to recover", "project.recoverable"},
+                    {"recover.unknown_file", "a file is not a recording to recover",
+                     "project.recoverable lists them"},
+                    {"recover.no_track", "the track it was recorded on is gone", "give track"}};
+        c.examples = {{"Recover everything", obj("{}"),
+                       obj(R"({"recovered": [{"track": "tr_1", "item": "it_1", "take": "tk_1",
+                              "file": "<any>", "seconds": 1.0, "lost_frames": 0}]})"),
+                       "recording_interrupted"}};
+        c.run = [](const RecoverArgs& a, Context& ctx) -> Result<RecoverResult> {
+            EngineApp& app = A(ctx);
+            std::optional<Id> track;
+            if (a.track) {
+                auto id = existing<model::Track>(app.view(), *a.track, "/track");
+                if (!id) return std::move(id).error();
+                track = *id;
+            }
+            auto r = app.recover(a.files.value_or(std::vector<std::string>{}), track);
+            if (!r) return std::move(r).error();
+            return RecoverResult{std::move(*r)};
         };
         registry.add(std::move(c));
     }

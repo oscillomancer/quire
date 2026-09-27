@@ -101,6 +101,8 @@ class VersionStore {
     // The current branch's versions, newest first (up to `limit`).
     std::vector<const Version*> history(std::size_t limit = 50) const;
     const Version* version(std::uint64_t id) const;
+    // Every version on every branch, oldest first.
+    void forEachVersion(const std::function<void(const Version&)>& visit) const;
 
     Status createBranch(const std::string& name, std::string_view from);  // at from's head
     Status switchBranch(std::string_view name);

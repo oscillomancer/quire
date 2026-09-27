@@ -49,6 +49,8 @@ struct RecordedTake {
     std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
     std::int64_t frames = 0;
     std::uint64_t overflowFrames = 0;  // input lost because the disk fell behind
+    std::string error;                 // a failed disk write (what came after it is lost), if any
+    double sampleRate = 0;             // of the file and of startSample (the engine's rate)
 };
 
 struct BackendConfig {

@@ -399,3 +399,117 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     call("history.undo", "{}");
     CHECK(app->head().items.size() == 0);
 }
+
+TEST_CASE("recordings a crash left out are listed and recovered in place, whole") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    // Record a take for real (the Recorder writes the sidecar), then lose it
+    // the way a crash before saving would: undo, save, reopen.
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Vocal"}, "as": "v"},
+        {"command": "track.set", "args": {"track": "${v.track}", "armed": true, "record_input": [1]}}]})");
+    call("project.save", R"({"path": "song.json"})");
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
+             for (std::uint32_t c = 0; c < channels; ++c)
+                 for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.5f;
+         }});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    call("transport.seek", R"({"seconds": 0.5})");
+    call("transport.record", "{}");
+    // While it records, its file is not offered.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(call("project.recoverable", "{}")["recordings"].size() == 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    auto stopped = call("transport.stop", "{}");
+    app->stopEngine();
+    REQUIRE(stopped["recorded"].size() == 1);
+    const json::Value take = stopped["recorded"].at(0);
+    const model::Session recorded = app->head();
+    REQUIRE(recorded.items.size() == 1);
+    const model::Item original = *recorded.items.begin()->value;
+    CHECK(call("project.get", "{}")["recoverable"].asInt() == 0);
+    call("history.undo", "{}");
+    CHECK(call("project.get", "{}")["recoverable"].asInt() == 0);  // redo still has it
+    call("project.save", "{}");
+    auto opened = call("project.open", R"({"path": "song.json"})");
+    CHECK(opened["recoverable"].asInt() == 1);
+
+    auto list = call("project.recoverable", "{}");
+    REQUIRE(list["recordings"].size() == 1);
+    const json::Value& rec = list["recordings"].at(0);
+    CHECK(rec.find("file")->asString() == "rec/Vocal-1.wav");
+    CHECK(rec.find("track")->asString() == "tr_1");
+    CHECK(rec.find("channels")->asInt() == 1);
+    CHECK(rec.find("seconds")->asDouble() == doctest::Approx(take.find("seconds")->asDouble()));
+
+    auto bad = d.execute({"project.recover", j(R"({"files": ["rec/Other-1.wav"]})"), kTest});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "recover.unknown_file");
+    CHECK(bad.error().path == "/args/files/0");
+
+    auto recovered = call("project.recover", R"({"files": ["rec/Vocal-1.wav"]})");
+    REQUIRE(recovered["recovered"].size() == 1);
+    const model::Session s = app->head();
+    REQUIRE(s.items.size() == 1);
+    const model::Item& back = *s.items.begin()->value;
+    CHECK(back.track == original.track);
+    CHECK(back.position == doctest::Approx(original.position));
+    CHECK(back.length == doctest::Approx(original.length));
+    CHECK(call("project.recoverable", "{}")["recordings"].size() == 0);
+    auto nothing = d.execute({"project.recover", j("{}"), kTest});
+    REQUIRE_FALSE(nothing);
+    CHECK(nothing.error().code == "recover.nothing");
+    // One undo step.
+    call("history.undo", "{}");
+    CHECK(app->head().items.size() == 0);
+}
+
+TEST_CASE("recovering a crashed recording repairs its header and plays all of it") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");  // tr_1 + rec/Vocal-1.wav: 1 s at 1 s
+    const fs::path file = app->recordDir() / "Vocal-1.wav";
+    // As the crash left it, a reader sees only up to the last header rewrite.
+    auto before = audio::readAudio(file);
+    REQUIRE(before);
+    CHECK(before->frames() == 24000);
+
+    // The track it was recorded on is gone: it must be told where to go.
+    REQUIRE(d.execute({"track.remove", j(R"({"track": "tr_1"})"), kTest}));
+    REQUIRE(d.execute({"track.add", j(R"({"name": "Vocal 2"})"), kTest}));
+    auto gone = d.execute({"project.recover", j("{}"), kTest});
+    REQUIRE_FALSE(gone);
+    CHECK(gone.error().code == "recover.no_track");
+    auto r = d.execute({"project.recover", j(R"({"track": "tr_2"})"), kTest});
+    REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+    CHECK((*r)["recovered"].at(0).find("seconds")->asDouble() == doctest::Approx(1.0));
+    auto after = audio::readAudio(file);
+    REQUIRE(after);
+    CHECK(after->frames() == 48000);
+
+    // It plays from 1 s to 2 s (120 BPM: beats 2 to 4), at 0.25 panned centre.
+    auto mix = d.execute({"render.mix", j(R"({"name": "recovered", "end_beat": 5})"), kTest});
+    REQUIRE(mix);
+    auto audio = audio::readAudio((*mix)["path"].asString());
+    REQUIRE(audio);
+    const auto& left = audio->channels[0];
+    REQUIRE(left.size() >= 110000);
+    CHECK(double(left[47000]) == 0.0);
+    CHECK(double(left[49000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
+    CHECK(double(left[95000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
+    CHECK(double(left[97000]) == 0.0);
+}

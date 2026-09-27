@@ -6,6 +6,7 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/audio/wav_stream.h>
+#include <supple/base/files.h>
 #include <unistd.h>
 
 using namespace supple::audio;
@@ -185,4 +186,51 @@ TEST_CASE("a streamed WAV is readable after every header update and after close"
     CHECK(double(whole->channels[0][999]) == doctest::Approx(0.999));
     CHECK(double(whole->channels[1][1499]) == doctest::Approx(-0.499));
     std::filesystem::remove(path);
+}
+
+TEST_CASE("repairing a streamed WAV recovers the frames written after the last header update") {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("supple-wav-repair-" + std::to_string(::getpid()) + ".wav");
+    {
+        supple::audio::WavStreamWriter w;
+        REQUIRE(w.open(path, 44100, 1).ok());
+        std::vector<float> ramp(1500);
+        for (std::size_t i = 0; i < ramp.size(); ++i) ramp[i] = static_cast<float>(i) / 2000.0f;
+        REQUIRE(w.append(ramp.data(), 1000).ok());
+        REQUIRE(w.updateHeader().ok());
+        REQUIRE(w.append(ramp.data() + 1000, 500).ok());
+        REQUIRE(w.flush().ok());
+        // A crash now: the header says 1000 frames, the file holds 1500 (and
+        // half a frame the OS got before the end).
+        const float half = 0.25f;
+        std::FILE* f = std::fopen(path.c_str(), "ab");
+        REQUIRE(f);
+        std::fwrite(&half, 1, 2, f);
+        std::fclose(f);
+        auto info = supple::audio::inspectWavStream(path);
+        REQUIRE(info);
+        CHECK(info->headerFrames == 1000);
+        CHECK(info->fileFrames == 1500);
+        CHECK(info->channels == 1);
+        CHECK(info->sampleRate == 44100.0);
+        auto repaired = supple::audio::repairWavStream(path);
+        REQUIRE(repaired);
+        CHECK(*repaired == 1500);
+        auto audio = supple::audio::readAudio(path);
+        REQUIRE(audio);
+        CHECK(audio->frames() == 1500);
+        CHECK(double(audio->channels[0][1499]) == doctest::Approx(1499.0 / 2000.0));
+        CHECK(*supple::audio::repairWavStream(path) == 1500);  // idempotent
+        // (The writer's destructor would rewrite the header; a crash would not.)
+        (void)w.close();
+    }
+    const auto other = path.string() + ".txt";
+    REQUIRE(supple::writeFileAtomic(other,
+                                    std::string_view("RIFF but not really a wave file at all...."))
+                .ok());
+    auto bad = supple::audio::inspectWavStream(other);
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "audio.not_stream");
+    std::filesystem::remove(path);
+    std::filesystem::remove(other);
 }

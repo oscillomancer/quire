@@ -1376,7 +1376,7 @@
   {
     "name": "project_get",
     "title": "Show the project: name, rate, tempo, meter, file, version and branch.",
-    "description": "Show the project: name, rate, tempo, meter, file, version and branch.  See describe for errors and examples.",
+    "description": "Show the project: name, rate, tempo, meter, file, version and branch. recoverable: recordings a crash left out of the project (project.recoverable). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -1407,9 +1407,21 @@
         },
         "version": {
           "type": "integer"
+        },
+        "recoverable": {
+          "type": "integer"
         }
       },
-      "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+      "required": [
+        "name",
+        "path",
+        "branch",
+        "sample_rate",
+        "tempo",
+        "meter",
+        "version",
+        "recoverable"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -1421,7 +1433,7 @@
   {
     "name": "project_open",
     "title": "Open a project file (replaces the current project and its history).",
-    "description": "Open a project file (replaces the current project and its history).  See describe for errors and examples.",
+    "description": "Open a project file (replaces the current project and its history). recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "path_args",
@@ -1456,14 +1468,141 @@
         },
         "version": {
           "type": "integer"
+        },
+        "recoverable": {
+          "type": "integer"
         }
       },
-      "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version"],
+      "required": [
+        "name",
+        "path",
+        "branch",
+        "sample_rate",
+        "tempo",
+        "meter",
+        "version",
+        "recoverable"
+      ],
       "additionalProperties": false
     },
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_recover",
+    "title": "Put recordings a crash left out back into the project (one undo step).",
+    "description": "Put recordings a crash left out back into the project (one undo step). files: as project.recoverable lists them (omit for all). Each becomes an item on the track it was recorded on (or track) at the position it was recorded. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "recover_args",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "recover_result",
+      "properties": {
+        "recovered": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recorded_take",
+            "properties": {
+              "track": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string"
+              },
+              "take": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "lost_frames": {
+                "type": "integer"
+              }
+            },
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["recovered"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "project_recoverable",
+    "title": "List recordings a crash left out of the project.",
+    "description": "List recordings a crash left out of the project. Takes recorded but never committed (the program stopped mid-recording) or never saved, found in the media folder's rec/. start_seconds is where each was recorded; seconds includes audio written after the file's last header update. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "recoverable_list",
+      "properties": {
+        "recordings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recoverable_recording",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "track": {
+                "type": "string"
+              },
+              "start_seconds": {
+                "type": "number"
+              },
+              "seconds": {
+                "type": "number"
+              },
+              "channels": {
+                "type": "integer"
+              }
+            },
+            "required": ["file", "track", "start_seconds", "seconds", "channels"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["recordings"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
       "idempotentHint": false
     }
   },

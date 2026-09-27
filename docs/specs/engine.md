@@ -205,7 +205,9 @@ preset's engine tests (with the dummy backend).
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last
-  flush; punch in/out and loop recording (one take per pass); MIDI recording
+  flush; a sidecar per file records its track and start, and
+  `project.recover` repairs the header to cover everything on disk and places
+  takes a crash left out (ADR-0014); punch in/out and loop recording (one take per pass); MIDI recording
   into MIDI takes; overflow is an error event, never a silent drop.
 - **Backends** (ADR-0004): JACK (dlopen), dummy, offline in P4; buffer-size,
   sample-rate and device changes stop the engine cleanly, rebuild the plan,
