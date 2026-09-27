@@ -60,10 +60,18 @@ function(probesynth_target_defaults target)
             -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
     endif()
+    if (SUPPLE_SANITIZE STREQUAL "thread")
+        target_compile_options(${target} PRIVATE -fsanitize=thread)
+        target_link_options(${target} PRIVATE -fsanitize=thread)
+    endif()
 endfunction()
+
+include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
+supple_plugin_add_monorepo_libraries()
 
 add_library(probesynth-dsp INTERFACE)
 target_include_directories(probesynth-dsp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/dsp/include)
+target_link_libraries(probesynth-dsp INTERFACE supple::core-params)
 
 if (PROBESYNTH_BUILD_TOOLS)
     enable_testing()
@@ -78,6 +86,24 @@ if (PROBESYNTH_BUILD_TOOLS)
         target_link_options(probesynth-test PRIVATE -fsanitize=realtime)
     endif()
     add_test(NAME core COMMAND probesynth-test)
+    if (UNIX AND NOT APPLE)
+        find_package(Threads REQUIRED)
+        add_executable(probesynth-semantic-rt test/semantic_rt.cpp)
+        target_link_libraries(probesynth-semantic-rt PRIVATE
+            supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
+        probesynth_target_defaults(probesynth-semantic-rt)
+        if (PROBESYNTH_RTSAN)
+            target_compile_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
+            target_link_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
+        endif()
+        add_test(NAME semantic-rt COMMAND probesynth-semantic-rt
+            ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap)
+    endif()
+
+    if (SUPPLE_SEMANTIC_CONFORMANCE)
+        add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
+            ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap com.suppleaudio.probe-synth)
+    endif()
 endif()
 
 function(probesynth_add_gui_preview)
@@ -131,7 +157,10 @@ if (PROBESYNTH_BUILD_PLUGIN)
     endif()
 
     add_library(probesynth-impl STATIC plugin/src/probesynth_clap.cpp)
-    target_link_libraries(probesynth-impl PUBLIC clap clap-wrapper-extensions probesynth-dsp)
+    target_link_libraries(probesynth-impl PUBLIC clap clap-wrapper-extensions probesynth-dsp supple::plugin-support)
+    if (PROBESYNTH_RTSAN)
+        target_compile_options(probesynth-impl PRIVATE -fsanitize=realtime)
+    endif()
     probesynth_target_defaults(probesynth-impl)
 
     if (PROBESYNTH_BUILD_GUI)
@@ -141,7 +170,7 @@ if (PROBESYNTH_BUILD_PLUGIN)
         if (PROBESYNTH_BUILD_TOOLS)
             probesynth_add_gui_preview()
             add_executable(probesynth-editor-test test/editor_input.cpp)
-            target_link_libraries(probesynth-editor-test PRIVATE
+            target_link_libraries(probesynth-editor-test PRIVATE supple::plugin-support
                 $<IF:$<TARGET_EXISTS:probesynth-gui-gl>,probesynth-gui-gl,probesynth-gui>)
             target_include_directories(probesynth-editor-test PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
@@ -154,7 +183,7 @@ if (PROBESYNTH_BUILD_PLUGIN)
                 target_link_libraries(probesynth-linux-host-probe PRIVATE clap X11::X11 ${CMAKE_DL_LIBS} Threads::Threads)
             endif()
             add_executable(probesynth-clap-probe tools/clap_host_probe.cpp)
-            target_link_libraries(probesynth-clap-probe PRIVATE clap)
+            target_link_libraries(probesynth-clap-probe PRIVATE clap probesynth-dsp)
             target_include_directories(probesynth-clap-probe PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
             if (APPLE)
@@ -173,6 +202,9 @@ if (PROBESYNTH_BUILD_PLUGIN)
     if (PROBESYNTH_BUILD_TOOLS)
         add_executable(probesynth-host-smoke test/host_smoke.cpp)
         target_link_libraries(probesynth-host-smoke PRIVATE clap)
+        if (PROBESYNTH_RTSAN)
+            target_link_options(probesynth-host-smoke PRIVATE -fsanitize=realtime)
+        endif()
         target_compile_definitions(probesynth-host-smoke PRIVATE
             HOST_SMOKE_PLUGIN_ID="com.suppleaudio.probe-synth"
             HOST_SMOKE_PLAIN_PARAM="Output Gain")
@@ -210,6 +242,11 @@ if (PROBESYNTH_BUILD_PLUGIN)
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QPrb"
         AUV2_INSTRUMENT_TYPE "aumu")
+    if (PROBESYNTH_RTSAN AND TARGET probesynth-plugin_clap)
+        target_link_options(probesynth-plugin_clap PRIVATE -fsanitize=realtime)
+    elseif (SUPPLE_SANITIZE STREQUAL "thread" AND TARGET probesynth-plugin_clap)
+        target_link_options(probesynth-plugin_clap PRIVATE -fsanitize=thread)
+    endif()
 
     # The license and attribution have to travel with the binary. Files sitting
     # in the repository do nothing for someone who is handed only a bundle, and

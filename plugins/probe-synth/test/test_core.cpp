@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include <probesynth/Processor.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include "../plugin/src/ProbeSynthParams.h"
 using probesynth::Processor;
 int failures = 0;
 void check(bool ok, const char* name) {
@@ -26,6 +28,18 @@ std::vector<double> render(int block, int waveform = 0) {
     return out;
 }
 int main() {
+    auto tableStatus = supple::params::validateTable(probesynth::kParams);
+    if (!tableStatus) {
+        std::printf("table error: %s %s\n", tableStatus.error().code.c_str(),
+                    tableStatus.error().message.c_str());
+        for (const auto& d : tableStatus.error().details)
+            std::printf("  %s %s %s\n", d.code.c_str(), d.path.c_str(), d.message.c_str());
+    }
+    check(static_cast<bool>(tableStatus), "semantic parameter table validates");
+    const auto& cutoff = probesynth::kParams[probesynth::kCutoff];
+    check(supple::params::toClap(cutoff, cutoff.min) == 0.0 &&
+              supple::params::toClap(cutoff, cutoff.max) == 1.0,
+          "log cutoff uses normalized CLAP endpoints");
     for (int shape = 0; shape < 4; ++shape) {
         auto a = render(1, shape), b = render(257, shape);
         check(a == b, "block-size invariant waveform");

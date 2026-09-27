@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
+// The one product parameter table: permanent CLAP IDs, physical units and curves.
 #pragma once
+
 #include <algorithm>
-#include <cmath>
-#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+
+#include "supple/params/params.h"
 
 namespace probesynth {
 enum ParamId : uint32_t {
@@ -28,87 +29,188 @@ enum ParamId : uint32_t {
     kOutputMeter,
     kNumParams
 };
-struct ParamDef {
-    uint32_t id;
-    const char* name;
-    const char* module;
-    double min, max, def;
-    bool stepped, readonly, isBypass;
-    const char* unit;
+using ParamDef = supple::params::ParamSpec;
+namespace pa = supple::params;
+namespace un = supple::units;
+inline constexpr pa::Choice kWaveChoices[] = {
+    {"saw", "Saw"}, {"square", "Square"}, {"sine", "Sine"}, {"noise", "Noise"}};
+inline constexpr pa::Choice kSlopeChoices[] = {{"db12", "12 dB"}, {"db24", "24 dB"}};
+inline constexpr std::string_view kPitchTags[] = {"role:pitch"};
+inline constexpr std::string_view kBrightTags[] = {"role:brightness"};
+inline constexpr std::string_view kTimeTags[] = {"role:time"};
+inline constexpr std::string_view kLevelTags[] = {"role:level"};
+inline constexpr std::string_view kModeTags[] = {"role:mode"};
+inline constexpr pa::ParamSpec kParams[] = {
+    {.id = kWaveform,
+     .key = "osc.waveform",
+     .name = "Waveform",
+     .group = "Oscillator",
+     .type = pa::Type::Enum,
+     .max = 3,
+     .choices = kWaveChoices,
+     .tags = kModeTags,
+     .description = "Oscillator waveform."},
+    {.id = kCutoff,
+     .key = "filter.cutoff",
+     .name = "Cutoff",
+     .group = "Filter",
+     .unit = un::Unit::Hz,
+     .min = 20,
+     .max = 18000,
+     .def = 4000,
+     .curve = {pa::CurveKind::Log},
+     .tags = kBrightTags,
+     .description = "Low-pass cutoff frequency."},
+    {.id = kResonance,
+     .key = "filter.resonance",
+     .name = "Resonance",
+     .group = "Filter",
+     .def = 0.2,
+     .tags = kBrightTags,
+     .description = "Filter resonance."},
+    {.id = kFilterAmount,
+     .key = "filter.env_amount",
+     .name = "Env Amount",
+     .group = "Filter",
+     .unit = un::Unit::oct,
+     .min = -8,
+     .max = 8,
+     .def = 2,
+     .curve = {pa::CurveKind::Bipolar, 1.5},
+     .tags = kBrightTags,
+     .description = "Envelope modulation of cutoff in octaves."},
+    {.id = kFilterSlope,
+     .key = "filter.slope",
+     .name = "Slope",
+     .group = "Filter",
+     .type = pa::Type::Enum,
+     .max = 1,
+     .choices = kSlopeChoices,
+     .tags = kModeTags,
+     .description = "Low-pass filter slope."},
+    {.id = kAmpAttack,
+     .key = "amp.attack",
+     .name = "Amp Attack",
+     .group = "Amp Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 5,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Amp envelope attack time."},
+    {.id = kAmpDecay,
+     .key = "amp.decay",
+     .name = "Amp Decay",
+     .group = "Amp Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 100,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Amp envelope decay time."},
+    {.id = kAmpSustain,
+     .key = "amp.sustain",
+     .name = "Amp Sustain",
+     .group = "Amp Envelope",
+     .unit = un::Unit::percent,
+     .max = 100,
+     .def = 70,
+     .tags = kLevelTags,
+     .description = "Amp envelope sustain level."},
+    {.id = kAmpRelease,
+     .key = "amp.release",
+     .name = "Amp Release",
+     .group = "Amp Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 200,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Amp envelope release time."},
+    {.id = kFilterAttack,
+     .key = "filter.attack",
+     .name = "Filter Attack",
+     .group = "Filter Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 5,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Filter envelope attack time."},
+    {.id = kFilterDecay,
+     .key = "filter.decay",
+     .name = "Filter Decay",
+     .group = "Filter Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 150,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Filter envelope decay time."},
+    {.id = kFilterSustain,
+     .key = "filter.sustain",
+     .name = "Filter Sustain",
+     .group = "Filter Envelope",
+     .unit = un::Unit::percent,
+     .max = 100,
+     .def = 20,
+     .tags = kLevelTags,
+     .description = "Filter envelope sustain level."},
+    {.id = kFilterRelease,
+     .key = "filter.release",
+     .name = "Filter Release",
+     .group = "Filter Envelope",
+     .unit = un::Unit::ms,
+     .min = 0.1,
+     .max = 10000,
+     .def = 250,
+     .curve = {pa::CurveKind::Log},
+     .tags = kTimeTags,
+     .description = "Filter envelope release time."},
+    {.id = kOutputGain,
+     .key = "output.gain",
+     .name = "Output Gain",
+     .group = "Output",
+     .unit = un::Unit::dB,
+     .min = -60,
+     .max = 12,
+     .def = -12,
+     .tags = kLevelTags,
+     .description = "Master output gain."},
+    {.id = kSeed,
+     .key = "osc.seed",
+     .name = "Noise Seed",
+     .group = "Oscillator",
+     .type = pa::Type::Int,
+     .min = 1,
+     .max = 65535,
+     .def = 1,
+     .tags = kModeTags,
+     .description = "Deterministic noise seed."},
+    {.id = kOutputMeter,
+     .key = "output.level",
+     .name = "Output Level",
+     .group = "Meters",
+     .unit = un::Unit::dB,
+     .min = -120,
+     .max = 6,
+     .def = -120,
+     .description = "Output peak meter.",
+     .flags = pa::kReadonly},
 };
-inline constexpr ParamDef kParams[] = {
-    {kWaveform, "Waveform", "Oscillator", 0, 3, 0, true, false, false, ""},
-    {kCutoff, "Cutoff", "Filter", 20, 18000, 4000, false, false, false, "Hz"},
-    {kResonance, "Resonance", "Filter", 0, 1, 0.2, false, false, false, ""},
-    {kFilterAmount, "Env Amount", "Filter", -8, 8, 2, false, false, false, "oct"},
-    {kFilterSlope, "Slope", "Filter", 0, 1, 0, true, false, false, ""},
-    {kAmpAttack, "Amp Attack", "Amp Envelope", 0.1, 10000, 5, false, false, false, "ms"},
-    {kAmpDecay, "Amp Decay", "Amp Envelope", 0.1, 10000, 100, false, false, false, "ms"},
-    {kAmpSustain, "Amp Sustain", "Amp Envelope", 0, 1, 0.7, false, false, false, ""},
-    {kAmpRelease, "Amp Release", "Amp Envelope", 0.1, 10000, 200, false, false, false, "ms"},
-    {kFilterAttack, "Filter Attack", "Filter Envelope", 0.1, 10000, 5, false, false, false, "ms"},
-    {kFilterDecay, "Filter Decay", "Filter Envelope", 0.1, 10000, 150, false, false, false, "ms"},
-    {kFilterSustain, "Filter Sustain", "Filter Envelope", 0, 1, 0.2, false, false, false, ""},
-    {kFilterRelease, "Filter Release", "Filter Envelope", 0.1, 10000, 250, false, false, false,
-     "ms"},
-    {kOutputGain, "Output Gain", "Output", -60, 12, -12, false, false, false, "dB"},
-    {kSeed, "Noise Seed", "Oscillator", 1, 65535, 1, true, false, false, ""},
-    {kOutputMeter, "Output Level", "Meters", -120, 6, -120, false, true, false, "dBFS"},
-};
-inline constexpr int kParamCount = static_cast<int>(sizeof(kParams) / sizeof(kParams[0]));
-inline const ParamDef* findParam(uint32_t id) { return id < kNumParams ? &kParams[id] : nullptr; }
-inline double toNormalised(const ParamDef& p, double v) {
-    return std::clamp((v - p.min) / (p.max - p.min), 0.0, 1.0);
-}
-inline double fromNormalised(const ParamDef& p, double t) {
-    return p.min + std::clamp(t, 0.0, 1.0) * (p.max - p.min);
-}
-inline void formatValue(uint32_t id, double v, char* out, size_t size) {
-    const auto* p = findParam(id);
-    if (!p) {
-        std::snprintf(out, size, "%.2f", v);
-        return;
-    }
-    if (id == kWaveform) {
-        constexpr const char* names[] = {"Saw", "Square", "Sine", "Noise"};
-        std::snprintf(out, size, "%s", names[std::clamp(static_cast<int>(std::round(v)), 0, 3)]);
-    } else if (id == kFilterSlope)
-        std::snprintf(out, size, "%s", v >= 0.5 ? "24 dB" : "12 dB");
-    else if (p->stepped)
-        std::snprintf(out, size, "%.0f", v);
-    else
-        std::snprintf(out, size, "%.2f %s", v, p->unit);
-}
+inline constexpr int kParamCount = static_cast<int>(std::size(kParams));
+inline const ParamDef* findParam(uint32_t id) { return pa::findById(kParams, id); }
+inline double toNormalised(const ParamDef& p, double v) { return pa::toNormalized(p, v); }
+inline double fromNormalised(const ParamDef& p, double v) { return pa::fromNormalized(p, v); }
 inline void formatCompact(uint32_t id, double v, char* out, size_t size) {
-    formatValue(id, v, out, size);
-}
-inline bool parseValue(uint32_t id, const char* text, double& out) {
     const auto* p = findParam(id);
-    if (!p || !text) return false;
-    if (id == kWaveform) {
-        constexpr const char* names[] = {"Saw", "Square", "Sine", "Noise"};
-        for (int i = 0; i < 4; ++i)
-            if (!std::strcmp(text, names[i])) {
-                out = i;
-                return true;
-            }
-    }
-    if (id == kFilterSlope) {
-        if (!std::strcmp(text, "12 dB")) {
-            out = 0;
-            return true;
-        }
-        if (!std::strcmp(text, "24 dB")) {
-            out = 1;
-            return true;
-        }
-    }
-    char* end = nullptr;
-    const double v = std::strtod(text, &end);
-    if (end == text || !std::isfinite(v)) return false;
-    while (*end == ' ') ++end;
-    if (*end && std::strcmp(end, p->unit)) return false;
-    out = std::clamp(p->stepped ? std::round(v) : v, p->min, p->max);
-    return true;
+    if (!p || size == 0) return;
+    const auto s = pa::formatCompact(*p, v);
+    std::snprintf(out, size, "%s", s.c_str());
 }
 }  // namespace probesynth

@@ -34,7 +34,7 @@ class PreviewHost : public EditorHost {
     double paramValue(uint32_t id) const override { return values_[id]; }
     void beginEdit(uint32_t) override {}
     void setParam(uint32_t id, double value) override {
-        if (const ParamDef* p = findParam(id); p && !p->readonly)
+        if (const ParamDef* p = findParam(id); p && !(p->flags & pa::kReadonly))
             values_[id] = std::clamp(value, p->min, p->max);
     }
     void endEdit(uint32_t) override {}
@@ -51,8 +51,8 @@ class PreviewHost : public EditorHost {
             const double bed = -18.0 + 3.0 * std::sin(time_ * 0.7);
             Frame f;
             f.inputPeakDb = static_cast<float>(bed + transient * 17.0);
-            f.outputPeakDb = static_cast<float>(f.inputPeakDb + values_[kCutoff] +
-                                                 values_[kOutputGain]);
+            f.outputPeakDb =
+                static_cast<float>(f.inputPeakDb + values_[kCutoff] + values_[kOutputGain]);
             ring_.push(f);
         }
     }
@@ -90,8 +90,7 @@ int main(int argc, char** argv) {
     Gui gui(host, true);
     Capture cap;
     gui.setFrameCallback(&capture, &cap);
-    gui.setSize(static_cast<uint32_t>(kDesignW * scale),
-                static_cast<uint32_t>(kDesignH * scale));
+    gui.setSize(static_cast<uint32_t>(kDesignW * scale), static_cast<uint32_t>(kDesignH * scale));
     if (!gui.create() || !gui.setParent(0) || !gui.show()) return 1;
     // Let the X11 view realize before feeding it telemetry. Otherwise the
     // 256-slot queue fills while the map/expose travels through the server,
@@ -101,16 +100,18 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (!cap.frameSeen) return 2;
-    const int observations = static_cast<int>(kHistorySeconds * kRate) + 100 +
-                             std::max(0, frames) * 4;
+    const int observations =
+        static_cast<int>(kHistorySeconds * kRate) + 100 + std::max(0, frames) * 4;
     for (int i = 0; i < observations; i += 4) {
         host.advance(std::min(4, observations - i));
         gui.tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     if (argc > 4) {
-        if (std::strcmp(argv[4], "bypass-on") == 0) gui.previewClick(620, 382);
-        else if (std::strcmp(argv[4], "bypass-hover") != 0) return 4;
+        if (std::strcmp(argv[4], "bypass-on") == 0)
+            gui.previewClick(620, 382);
+        else if (std::strcmp(argv[4], "bypass-hover") != 0)
+            return 4;
         gui.previewMove(620, 382);
     }
     cap.want = true;

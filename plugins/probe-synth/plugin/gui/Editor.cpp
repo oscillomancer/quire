@@ -126,7 +126,7 @@ void Editor::render(NVGcontext* vg) {
         char value[32];
         formatCompact(g.id, host_.paramValue(g.id), value, sizeof(value));
         knob(vg, g.x, g.y, g.r, static_cast<float>(toNormalised(*p, host_.paramValue(g.id))),
-             p->name, value, p->unit, false,
+             p->name.data(), value, un::unitName(p->unit).data(), false,
              hover_ == static_cast<int>(g.id) || dragId_ == static_cast<int>(g.id));
     }
     label(vg, "CLAP instrument · sample-accurate notes", 30, kFooterTop + 1, 10, rgb(col::dim));
@@ -201,7 +201,7 @@ void Editor::onPointerLeave() {
 void Editor::onDoubleClick(float x, float y) {
     const int id = controlAt(x, y);
     const ParamDef* p = id >= 0 ? findParam(static_cast<uint32_t>(id)) : nullptr;
-    if (!p || p->readonly) return;
+    if (!p || (p->flags & pa::kReadonly)) return;
     if (dragId_ >= 0) onMouseUp();
     host_.beginEdit(p->id);
     host_.setParam(p->id, p->def);
@@ -212,7 +212,7 @@ void Editor::onDoubleClick(float x, float y) {
 bool Editor::onScroll(float x, float y, float dy) {
     const int id = controlAt(x, y);
     const ParamDef* p = id >= 0 ? findParam(static_cast<uint32_t>(id)) : nullptr;
-    if (!p || p->readonly) return false;
+    if (!p || (p->flags & pa::kReadonly)) return false;
     if (scrollId_ != id) {
         closeScrollGesture();
         scrollId_ = id;
@@ -232,8 +232,8 @@ void Editor::closeScrollGesture() {
 
 void Editor::setFromNormal(uint32_t id, double normal) {
     if (const ParamDef* p = findParam(id))
-        host_.setParam(
-            id, p->stepped ? std::round(fromNormalised(*p, normal)) : fromNormalised(*p, normal));
+        host_.setParam(id, (p->type != pa::Type::Float) ? std::round(fromNormalised(*p, normal))
+                                                        : fromNormalised(*p, normal));
     dirty_ = true;
 }
 
@@ -248,8 +248,8 @@ void Editor::onKey(EditorKey key, bool fineOrReverse) {
     }
     if (focus_ < 0) return;
     const ParamDef* p = findParam(static_cast<uint32_t>(focus_));
-    if (!p || p->readonly) return;
-    if ((key == EditorKey::Enter || key == EditorKey::Space) && p->stepped) {
+    if (!p || (p->flags & pa::kReadonly)) return;
+    if ((key == EditorKey::Enter || key == EditorKey::Space) && (p->type != pa::Type::Float)) {
         host_.beginEdit(p->id);
         host_.setParam(p->id,
                        host_.paramValue(p->id) >= p->max ? p->min : host_.paramValue(p->id) + 1.0);
