@@ -78,19 +78,21 @@ bool readAll(int s, void* data, std::size_t n, int* fd, int timeoutMs) {
 
 }  // namespace
 
-bool sendFrame(int socket, std::uint32_t head, const std::vector<std::uint8_t>& payload, int fd) {
-    std::uint32_t prefix[2] = {static_cast<std::uint32_t>(payload.size()), head};
+bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
+               const std::vector<std::uint8_t>& payload, int fd) {
+    std::uint32_t prefix[3] = {static_cast<std::uint32_t>(payload.size()), head, instance};
     return writeAll(socket, prefix, sizeof prefix, fd) &&
            (payload.empty() || writeAll(socket, payload.data(), payload.size(), -1));
 }
 
-bool recvFrame(int socket, std::uint32_t& head, std::vector<std::uint8_t>& payload, int* fd,
-               int timeoutMs) {
+bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
+               std::vector<std::uint8_t>& payload, int* fd, int timeoutMs) {
     if (fd) *fd = -1;
-    std::uint32_t prefix[2] = {0, 0};
+    std::uint32_t prefix[3] = {0, 0, 0};
     if (!readAll(socket, prefix, sizeof prefix, fd, timeoutMs)) return false;
     if (prefix[0] > kMaxMessage) return false;
     head = prefix[1];
+    instance = prefix[2];
     payload.resize(prefix[0]);
     return prefix[0] == 0 || readAll(socket, payload.data(), payload.size(), nullptr, timeoutMs);
 }

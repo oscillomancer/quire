@@ -42,7 +42,7 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
     // patches are designed for live changes and stay in place).
     const bool freshForState = e.instance && !fx.patch && fx.state && desired != e.appliedState &&
                                e.instance->processing();
-    if (!e.instance || e.pluginId != fx.plugin.id || e.isolated != isolated || freshForState) {
+    if (!e.instance || e.pluginId != fx.plugin.id || e.isolation != fx.isolation || freshForState) {
         // The plan playing now may still use the old instance: keep it alive
         // until prune() says every plan that could use it is gone.
         if (e.instance) retired_.emplace_back(generation_, std::move(e.instance));
@@ -51,14 +51,26 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
             instances_.erase(id);
             return std::move(info).error();
         }
-        auto made = host::Instance::create(*info, identity_, isolated);
+        std::shared_ptr<host::BridgeProcess> bridge;
+        if (fx.isolation == model::Isolation::SharedBridge) {
+            if (!sharedBridge_ || host::bridgeProcessFailed(sharedBridge_)) {
+                auto spawned = host::createBridgeProcess();
+                if (!spawned) {
+                    instances_.erase(id);
+                    return std::move(spawned).error();
+                }
+                sharedBridge_ = std::move(*spawned);
+            }
+            bridge = sharedBridge_;
+        }
+        auto made = host::Instance::create(*info, identity_, isolated, std::move(bridge));
         if (!made) {
             instances_.erase(id);
             return std::move(made).error();
         }
         e.instance = std::move(*made);
         e.pluginId = fx.plugin.id;
-        e.isolated = isolated;
+        e.isolation = fx.isolation;
         e.appliedState.clear();
     }
     if (desired != e.appliedState && !desired.empty()) {

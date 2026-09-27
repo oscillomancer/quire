@@ -1,8 +1,8 @@
 // Internal: the plugin bridge protocol (ADR-0013), shared by the host side
 // (bridge_client.cpp) and the bridge executable (bridge/bridge_main.cpp).
 //
-// Control plane: a Unix socketpair; messages are [u32 size][u32 op][payload]
-// and replies [u32 size][u32 status][payload], little endian, written and
+// Control plane: a Unix socketpair; messages are [u32 size][u32 op][u32 instance][payload]
+// and replies [u32 size][u32 status][u32 instance][payload], little endian, written and
 // read whole. File descriptors (the shared memory) ride SCM_RIGHTS.
 // Data plane: one memfd per active instance with a Header, the event arenas
 // and the audio buffers; each side wakes the other with a futex on a 32-bit
@@ -27,7 +27,7 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-inline constexpr std::uint32_t kVersion = 1;
+inline constexpr std::uint32_t kVersion = 2;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
@@ -153,10 +153,10 @@ class Reader {
 
 // Writes one whole frame ([u32 size][u32 head][payload]) with an optional
 // file descriptor; reads one (size-checked). False when the peer is gone.
-bool sendFrame(int socket, std::uint32_t head, const std::vector<std::uint8_t>& payload,
-               int fd = -1);
-bool recvFrame(int socket, std::uint32_t& head, std::vector<std::uint8_t>& payload,
-               int* fd = nullptr, int timeoutMs = -1);
+bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
+               const std::vector<std::uint8_t>& payload, int fd = -1);
+bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
+               std::vector<std::uint8_t>& payload, int* fd = nullptr, int timeoutMs = -1);
 
 // --- data plane ---------------------------------------------------------------------
 

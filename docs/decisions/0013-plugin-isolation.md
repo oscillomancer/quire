@@ -1,6 +1,6 @@
 # ADR-0013: Plugin process isolation
 
-**Status:** Accepted, 2026-09-26 (dedicated mode implemented; shared bridge next). Spec: `docs/specs/engine.md` §5,
+**Status:** Accepted, 2026-09-26 (dedicated and shared bridge modes implemented). Spec: `docs/specs/engine.md` §5,
 `docs/specs/session-model.md` §1.7 (`FxInstance.isolation`).
 
 ## Context
@@ -101,6 +101,12 @@ syscalls per block for the data, not just the wake-up).
   killed at the deadline; missing bridge → clean error; the Phase 4
   acceptance test (a session plays on while an isolated plugin crashes; only
   its node goes silent); crash → `fx.failed` → `fx.restart` over the bus.
-- Not yet: one process for all `shared_bridge` instances, GUI embedding
-  across processes, the pipelined mode, B6 overhead benchmark.
-
+- Shared bridge: each control frame carries an instance id. `Create` allocates
+  one id; `Destroy` removes just that instance, and the process exits after
+  the final destroy or host disconnect. Each instance has its own memfd and
+  bridge audio thread. `InstancePool` holds one `BridgeProcess` for all
+  `shared_bridge` instances and creates a new process after a crash; dedicated
+  instances continue to own independent processes. The shared process's
+  failure state is observed by every member instance.
+- Not yet: GUI embedding across processes, the pipelined mode, B6 overhead
+  benchmark.

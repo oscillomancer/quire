@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <set>
 #include <thread>
 
 #include <supple/audio/audio_file.h>
@@ -291,6 +292,72 @@ TEST_CASE("an isolated plugin that crashes is reported and restarted over the bu
     REQUIRE(again);
     CHECK(again != crash);
     CHECK_FALSE(again->failed());
+    call("engine.stop", "{}");
+}
+
+TEST_CASE("shared bridge crash reports both fx and both restart in one new process") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher dispatcher(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto result = dispatcher.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
+        return *result;
+    };
+    call("batch", R"({"steps": [
+        {"command":"track.add","args":{"name":"Shared"},"as":"t"},
+        {"command":"fx.add","args":{"track":"${t.track}","plugin":"Test Sine"}},
+        {"command":"fx.add","args":{"track":"${t.track}","plugin":"com.suppleaudio.test.gain"},"as":"a"},
+        {"command":"fx.set","args":{"fx":"${a.fx}","isolation":"shared_bridge"}},
+        {"command":"fx.add","args":{"track":"${t.track}","plugin":"com.suppleaudio.test.crash"},"as":"b"},
+        {"command":"fx.set","args":{"fx":"${b.fx}","isolation":"shared_bridge"}},
+        {"command":"fx.add","args":{"track":"${t.track}","plugin":"com.suppleaudio.test.gain"},"as":"d"},
+        {"command":"fx.set","args":{"fx":"${d.fx}","isolation":"dedicated"}},
+        {"command":"item.add","args":{"track":"${t.track}","bar":1,"notation":"voice lead; 1: C4:w"}}]})");
+    const auto firstId = *model::Id::parse("fx_2");
+    const auto crashId = *model::Id::parse("fx_3");
+    const auto dedicatedId = *model::Id::parse("fx_4");
+    call("engine.start", R"({"backend":"dummy"})");
+    call("transport.play", "{}");
+    auto* first = app->instanceOf(firstId);
+    auto* crash = app->instanceOf(crashId);
+    auto* dedicated = app->instanceOf(dedicatedId);
+    REQUIRE(first);
+    REQUIRE(crash);
+    REQUIRE(dedicated);
+    const int oldPid = first->bridgePid();
+    CHECK(oldPid > 0);
+    CHECK(crash->bridgePid() == oldPid);
+    CHECK(dedicated->bridgePid() != oldPid);
+    REQUIRE(crash->setParam(1, 1.0));
+    for (int i = 0; i < 2000 && !crash->failed(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(crash->failed());
+    CHECK(first->failed());
+    CHECK_FALSE(dedicated->failed());
+    auto status = call("engine.status", "{}");
+    CHECK(status["running"].asBool());
+    REQUIRE(status["failed_fx"].size() == 2);
+    std::set<std::string> reported;
+    for (const auto& [topic, payload] : app->takeEvents())
+        if (topic == "fx.failed") reported.insert(payload.find("fx")->asString());
+    CHECK((reported == std::set<std::string>{"fx_2", "fx_3"}));
+    call("fx.restart", R"({"fx":"fx_2"})");
+    call("fx.restart", R"({"fx":"fx_3"})");
+    first = app->instanceOf(firstId);
+    crash = app->instanceOf(crashId);
+    REQUIRE(first);
+    REQUIRE(crash);
+    CHECK_FALSE(first->failed());
+    CHECK_FALSE(crash->failed());
+    CHECK(first->bridgePid() > 0);
+    CHECK(first->bridgePid() == crash->bridgePid());
+    CHECK(first->bridgePid() != oldPid);
+    CHECK(dedicated->bridgePid() != first->bridgePid());
+    CHECK(call("engine.status", "{}")["failed_fx"].size() == 0);
     call("engine.stop", "{}");
 }
 

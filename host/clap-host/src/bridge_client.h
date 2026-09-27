@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -20,11 +21,36 @@ struct RemotePorts {
     bool acceptsNotes = false, semantic = false;
 };
 
+class BridgeProcess {
+  public:
+    static Result<std::shared_ptr<BridgeProcess>> spawn();
+    ~BridgeProcess();
+    Result<std::vector<std::uint8_t>> call(bridge::Op op, std::uint32_t instance,
+                                           const bridge::Writer& w, int fd = -1,
+                                           int timeoutMs = 10000);
+    bool failed() const { return failed_.load(); }
+    std::string failure() const;
+    void fail(int why);
+    void reap();  // main thread
+    bool alive() const;
+    void killBridge();
+    pid_t pid() const { return pid_.load(); }
+
+  private:
+    static constexpr int kHung = -2;
+    BridgeProcess() = default;
+    std::atomic<pid_t> pid_{-1};
+    int pidfd_ = -1, sock_ = -1;
+    std::mutex requests_;  // control calls from instances on the main thread
+    std::atomic<bool> failed_{false};
+    std::atomic<int> failSignal_{0};
+};
+
 class RemoteInstance {
   public:
-    static Result<std::unique_ptr<RemoteInstance>> spawn(const PluginInfo& info,
-                                                         const HostIdentity& identity,
-                                                         RemotePorts& ports);
+    static Result<std::unique_ptr<RemoteInstance>> spawn(
+        const PluginInfo& info, const HostIdentity& identity, RemotePorts& ports,
+        std::shared_ptr<BridgeProcess> process = {});
     ~RemoteInstance();
 
     // main thread
@@ -56,24 +82,20 @@ class RemoteInstance {
     void flush() SUPPLE_RT;
     bool process(const ProcessBlock& block, OutputEvents* out) SUPPLE_RT;
 
-    bool failed() const { return failed_.load(); }
+    bool failed() const { return process_->failed(); }
     std::string failure() const;
     void setDeadlineMs(int ms) { deadlineMs_ = ms; }
+    pid_t bridgePid() const { return process_->pid(); }
 
   private:
-    static constexpr int kHung = -2;
     RemoteInstance() = default;
     Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w, int fd = -1,
                                            int timeoutMs = 10000);
     bool command(bridge::Cmd cmd) SUPPLE_RT;
-    bool alive() const;
-    void fail(int why);
-    void reap();
-    void killBridge();
     void unmap();
 
-    pid_t pid_ = -1;
-    int pidfd_ = -1, sock_ = -1;
+    std::shared_ptr<BridgeProcess> process_;
+    std::uint32_t instanceId_ = 0;
     void* map_ = nullptr;
     bridge::Header* hdr_ = nullptr;
     bridge::Layout layout_{0, 0, 0};
@@ -81,8 +103,6 @@ class RemoteInstance {
     int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
     std::uint32_t latency_ = 0, tail_ = 0;
     bool reportsTail_ = false, needsAudioFlush_ = false;
-    std::atomic<bool> failed_{false};
-    std::atomic<int> failSignal_{0};  // a signal number, 0 (exited), -1 (not reaped), kHung
 };
 
 std::filesystem::path bridgeExecutable();
