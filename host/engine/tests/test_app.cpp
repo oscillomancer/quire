@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <thread>
 
+#include <supple/audio/audio_file.h>
 #include <supple/engine/app.h>
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
@@ -291,4 +292,55 @@ TEST_CASE("an isolated plugin that crashes is reported and restarted over the bu
     CHECK(again != crash);
     CHECK_FALSE(again->failed());
     call("engine.stop", "{}");
+}
+
+TEST_CASE("an LLM automates a plugin parameter over the bus and hears it in the render") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        return d.execute({std::move(command), j(args), kTest});
+    };
+    auto made = call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Pad"}, "as": "t"},
+        {"command": "fx.add", "args": {"track": "${t.track}", "plugin": "Test Sine"}},
+        {"command": "fx.add", "args": {"track": "${t.track}", "plugin": "com.suppleaudio.test.gain"}, "as": "g"},
+        {"command": "item.add", "args": {"track": "${t.track}", "bar": 1, "notation": "voice pad; 1: C4:w"}},
+        {"command": "env.add", "args": {"fx": "${g.fx}", "param": "gain",
+            "points": [{"beat": 0, "value": "0 dB", "shape": "square"}, {"beat": 2, "value": "-60 dB", "shape": "square"}]}}]})");
+    REQUIRE_MESSAGE(made, (made ? std::string() : made.error().toString()));
+    auto mix = call("render.mix", R"({"name": "automated", "end_beat": 4})");
+    REQUIRE_MESSAGE(mix, (mix ? std::string() : mix.error().toString()));
+    auto audio = audio::readAudio((*mix)["path"].asString());
+    REQUIRE(audio);
+    const auto& l = audio->channels[0];
+    double before = 0, after = 0;
+    for (std::size_t i = 40000; i < 48000; ++i) before = std::max(before, std::fabs(double(l[i])));
+    for (std::size_t i = 48000; i < 90000; ++i) after = std::max(after, std::fabs(double(l[i])));
+    CHECK(before > 0.05);
+    CHECK(after == 0.0);  // silent from beat 2 (sample 48000), off at min
+
+    auto listed = call("env.list", "{}");
+    REQUIRE(listed);
+    CHECK((*listed)["envelopes"].size() == 1);
+    // Errors say what to do.
+    auto twice = call("env.add", R"({"fx": "fx_2", "param": "gain"})");
+    REQUIRE_FALSE(twice);
+    CHECK(twice.error().code == "env.exists");
+    auto typo = call("env.add", R"({"fx": "fx_2", "param": "gian"})");
+    REQUIRE_FALSE(typo);
+    CHECK(typo.error().code == "env.param");
+    CHECK(typo.error().hint.find("gain") != std::string::npos);
+    auto both = call("env.add", R"({"fx": "fx_2", "track": "tr_1", "param": "gain"})");
+    REQUIRE_FALSE(both);
+    CHECK(both.error().code == "env.target");
+    auto badValue =
+        call("env.points.set", R"({"env": "en_1", "points": [{"beat": 0, "value": "loud"}]})");
+    REQUIRE_FALSE(badValue);
+    CHECK(badValue.error().path == "/args/points/0/value");
+    // Undo removes the envelope with the batch.
+    REQUIRE(call("history.undo", "{}"));
+    CHECK(app->head().envelopes.size() == 0);
 }

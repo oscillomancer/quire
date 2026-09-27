@@ -120,6 +120,12 @@ Result<json::Value> EngineApp::fxSchema(const model::FxInstance& fx) {
     return (*in)->semanticSchema();
 }
 
+Result<std::vector<host::ParamInfo>> EngineApp::fxParams(const model::FxInstance& fx) {
+    auto in = scratch(fx);
+    if (!in) return std::move(in).error();
+    return (*in)->params();
+}
+
 Result<json::Value> EngineApp::mergedPatch(const model::FxInstance& fx, const json::Value& patch,
                                            bool replace) {
     auto inr = scratch(fx);
@@ -490,6 +496,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     if (fixture == "song_with_item") return;
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})");
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain"})");
+    if (fixture == "song_with_env")  // + en_1: fx_2 gain, two points
+        run("env.add",
+            R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})");
 }
 
 }  // namespace supple::engine

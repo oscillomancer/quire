@@ -46,3 +46,24 @@ conflicts with the sound the human wants, say so and ask.
 - Keep the master under 0 dBTP while mixing; loudness comes at the end.
 - Work on a branch (`branch.create`) so the human can A/B your mix against
   theirs and merge or discard it.
+
+## Automation
+
+Anything that should change over time — a fade, a filter sweep, a send that
+opens for a chorus — is an envelope, not a series of edits:
+
+```
+env.add {"fx": "fx_3", "param": "filter1.cutoff",
+         "points": [{"bar": 9, "value": "400 Hz"},
+                    {"bar": 13, "value": "4 kHz", "shape": "slow"}]}
+env.add {"track": "tr_2", "param": "volume",
+         "points": [{"bar": 16, "value": 0}, {"bar": 17, "value": "-60 dB"}]}
+```
+
+Mixer targets: track `volume`, `trim` (dB), `pan`, `width` (%), `mute`;
+route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
+`fx.describe` lists (values in their unit; a cutoff sweep moves evenly in
+pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
+points (or a beat range of them); `env.set {active: false}` bypasses an
+envelope; render and `compare` to hear what it did.
+

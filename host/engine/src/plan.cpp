@@ -201,6 +201,54 @@ Result<std::vector<Id>> topoOrder(const Session& s) {
 
 }  // namespace
 
+// Resolves an envelope's plugin parameter: a semantic key (physical values)
+// or, for any plugin, a CLAP id ("12") or parameter name (CLAP values).
+struct ResolvedLane {
+    ParamLane lane;
+    double lo = 0.0, hi = 1.0;
+    double toLaneDomain(double v) const {
+        if (lane.spec)
+            return params::toNormalized(lane.spec->spec, params::clampPhysical(lane.spec->spec, v));
+        return std::clamp(v, lo, hi);
+    }
+};
+
+Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
+                               std::map<host::Instance*, json::Value>& schemas) {
+    ResolvedLane r;
+    if (in.info().semantic) {
+        auto it = schemas.find(&in);
+        if (it == schemas.end()) {
+            auto schema = in.semanticSchema();
+            it = schemas.emplace(&in, schema ? std::move(*schema) : json::Value()).first;
+        }
+        const json::Value* entry = nullptr;
+        if (const json::Value* ps = it->second.isObject() ? it->second.find("params") : nullptr)
+            entry = ps->find(param);
+        if (entry) {
+            auto d = params::fromDescription(param, *entry);
+            if (!d) return std::move(d).error();
+            if ((*d)->spec.flags & params::kReadonly)
+                return Error("engine.automation", param + " is read-only");
+            r.lane.clapId = (*d)->spec.id;
+            r.lane.spec = std::shared_ptr<const params::DescribedParam>(std::move(*d));
+            return r;
+        }
+    }
+    const auto list = in.params();
+    const bool numeric = !param.empty() && std::all_of(param.begin(), param.end(),
+                                                       [](char c) { return c >= '0' && c <= '9'; });
+    for (const host::ParamInfo& pi : list) {
+        const bool match = numeric ? std::to_string(pi.id) == param : pi.name == param;
+        if (!match) continue;
+        r.lane.clapId = pi.id;
+        r.lo = pi.min;
+        r.hi = pi.max;
+        return r;
+    }
+    return Error("engine.automation", in.info().name + " has no parameter \"" + param + "\"");
+}
+
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
                      std::uint32_t block) {
     Plan p;
@@ -238,6 +286,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
         for (Id fxId : t.chain) {
             const model::FxInstance& fx = *s.fx.find(fxId);
             Stage st;
+            st.fx = fxId;
             st.bypass = fx.bypass || fx.offline;
             st.wet = fx.wet / 100.0;
             if (!fx.offline) {
@@ -341,8 +390,9 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
             }
         }
     }
-    // Envelopes on mixer targets (plugin parameters come later).
+    // Envelopes on mixer targets and plugin parameters.
     const std::int64_t origin = time::samplesAt(startSeconds, p.rate);
+    std::map<host::Instance*, json::Value> schemas;  // semantic schemas, fetched once
     for (const auto& e : s.envelopes) {
         const model::Envelope& env = *e.value;
         if (!env.active || env.points.empty()) continue;
@@ -371,6 +421,24 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
                            : param == "pan"  ? &ed.autoPan
                            : param == "mute" ? &ed.autoMute
                                              : nullptr;
+        } else if (o.kind == Kind::Fx) {
+            bool placed = false;
+            for (Node& n : p.nodes)
+                for (Stage& st : n.chain) {
+                    if (st.fx != o || !st.instance) continue;
+                    auto lane = paramLane(*st.instance, param, schemas);
+                    if (!lane) {
+                        p.warnings.push_back(e.id.str() + ": " + lane.error().message);
+                        placed = true;  // reported
+                        continue;
+                    }
+                    lane->lane.curve = a;
+                    for (auto& pt : lane->lane.curve.points)
+                        pt.value = lane->toLaneDomain(pt.value);
+                    st.lanes.push_back(std::move(lane->lane));
+                    placed = true;
+                }
+            if (placed) continue;
         }
         if (slot)
             *slot = std::move(a);
@@ -438,6 +506,13 @@ Status prepare(Plan& p, const Session& s) {
             for (Automation* a :
                  {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
                 a->shift(n.latIn);
+        // A plugin's parameters: its input is the track's, delayed by the
+        // stages before it.
+        std::int64_t before = n.latIn;
+        for (Stage& st : n.chain) {
+            for (ParamLane& ln : st.lanes) ln.curve.shift(before);
+            before += st.latency;
+        }
     }
     // Audio items, like events shifted by the track's input latency.
     for (Node& n : p.nodes) {
@@ -509,7 +584,23 @@ Status prepare(Plan& p, const Session& s) {
                 ++b;
             windowMax = std::max(windowMax, b - a);
         }
-        for (Stage& st : n.chain) st.blockEvents.reserve(windowMax + 1);
+        for (Stage& st : n.chain) {
+            // Automation events: the grid plus the most points in a block window.
+            std::size_t lanes = 0;
+            for (const ParamLane& ln : st.lanes) {
+                std::size_t pts = 0;
+                for (std::size_t a = 0, b = 0; a < ln.curve.points.size(); ++a) {
+                    if (b < a) b = a;
+                    while (b < ln.curve.points.size() &&
+                           ln.curve.points[b].sample <
+                               ln.curve.points[a].sample + static_cast<std::int64_t>(block))
+                        ++b;
+                    pts = std::max(pts, b - a);
+                }
+                lanes += block / kAutomationStep + 2 + pts;
+            }
+            st.blockEvents.reserve(windowMax + 1 + lanes);
+        }
     }
     // The node graph for the worker pool: a node waits for its edges' sources.
     std::vector<std::vector<std::uint32_t>> deps(p.nodes.size());
@@ -627,6 +718,46 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
         if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
     }
+    // 2b. Plugin parameter automation: values at the block start, every
+    // kAutomationStep samples and at each point, in time order (the lane's
+    // cursor only moves forward), merged into the block's sorted events.
+    for (Stage& st : node.chain) {
+        if (st.lanes.empty()) continue;
+        const std::size_t before = st.blockEvents.size();
+        for (ParamLane& ln : st.lanes) {
+            const auto& pts = ln.curve.points;
+            auto pi = static_cast<std::size_t>(
+                std::lower_bound(
+                    pts.begin(), pts.end(), pos,
+                    [](const Automation::Pt& pt, std::int64_t x) { return pt.sample < x; }) -
+                pts.begin());
+            std::uint32_t grid = 0;
+            for (;;) {
+                const std::uint32_t atPoint = pi < pts.size() && pts[pi].sample < pos + n
+                                                  ? static_cast<std::uint32_t>(pts[pi].sample - pos)
+                                                  : n;
+                const std::uint32_t at = std::min(grid, atPoint);
+                if (at >= n) break;
+                const double v = ln.clapAt(pos + at);
+                if (v != ln.lastSent && st.blockEvents.size() < st.blockEvents.capacity()) {
+                    host::Event e;
+                    e.kind = host::Event::Kind::Param;
+                    e.time = at;
+                    e.paramId = ln.clapId;
+                    e.value = v;
+                    st.blockEvents.push_back(e);
+                    ln.lastSent = v;
+                }
+                if (at == grid) grid += kAutomationStep;
+                if (at == atPoint) ++pi;
+            }
+        }
+        if (st.blockEvents.size() > before)  // stable insertion sort by time: no allocation
+            for (std::size_t i = 1; i < st.blockEvents.size(); ++i)
+                for (std::size_t j = i;
+                     j > 0 && st.blockEvents[j - 1].time > st.blockEvents[j].time; --j)
+                    std::swap(st.blockEvents[j - 1], st.blockEvents[j]);
+    }
     // 3. The FX chain, in place on `sum`.
     for (Stage& st : node.chain) {
         // A stage whose plugin is not processing (start_processing failed)
@@ -735,7 +866,13 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
         for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
             a->cursor = 0;
-        for (Stage& st : n.chain) st.dry.clear();
+        for (Stage& st : n.chain) {
+            st.dry.clear();
+            for (ParamLane& ln : st.lanes) {
+                ln.curve.cursor = 0;
+                ln.lastSent = std::numeric_limits<double>::quiet_NaN();  // resend at once
+            }
+        }
     }
     for (Edge& e : p.edges) {
         e.delay.clear();

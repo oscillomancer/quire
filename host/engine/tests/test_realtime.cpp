@@ -612,3 +612,39 @@ TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the ses
     engine.stop();
     CHECK(engine.lastStopOnAudioThread());
 }
+
+TEST_CASE("plugin automation: real-time output equals the offline render" *
+          doctest::description("rt")) {
+    model::Session s = synthSession(0.0, "com.suppleaudio.test.gain");
+    Id gainFx;
+    for (const auto& e : s.fx)
+        if (e.value->plugin.id == "com.suppleaudio.test.gain") gainFx = e.id;
+    model::EditTxn t(s, 2);
+    model::Envelope env;
+    env.target = {gainFx, "gain"};
+    env.points = {{0.0, 0.0, model::PointShape::Linear, 0.0},
+                  {2.0, -30.0, model::PointShape::Slow, 0.0},
+                  {3.0, 6.0, model::PointShape::Square, 0.0}};
+    t.create(env);
+    s = t.commit().value();
+    auto pool = makePool();
+    auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
+        auto rtPool = makePool();
+        MediaCache media;
+        DummyBackend backend(
+            {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+        Engine engine(rtPool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+        else
+            backend.run((48000 * 2 + 4096) / 128);
+        engine.stop();
+        const std::uint32_t L = engine.outputLatency();
+        const auto& cap = backend.capture();
+        CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+    }
+}

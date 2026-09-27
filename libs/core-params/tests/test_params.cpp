@@ -428,3 +428,28 @@ TEST_CASE("review fixes: boundary-local range slack, log range limit, no bare in
     CHECK_FALSE(parse(P("out.level"), "inf").ok());  // "+inf" is not "off"
     CHECK(*parse(P("out.level"), "off") == -60);
 }
+
+TEST_CASE("a description reads back into a spec that converts identically (hosts)") {
+    for (const ParamSpec& p : kTable) {
+        INFO(std::string(p.key));
+        auto d = fromDescription(p.key, describeParamJson(p));
+        REQUIRE_MESSAGE(d, (d ? std::string() : d.error().toString()));
+        const ParamSpec& q = (*d)->spec;
+        CHECK(q.id == p.id);
+        CHECK(q.key == p.key);
+        CHECK(q.type == p.type);
+        CHECK(q.unit == p.unit);
+        CHECK(q.choices.size() == p.choices.size());
+        CHECK((q.flags & kReadonly) == (p.flags & kReadonly));
+        for (double n : {0.0, 0.1, 0.25, 0.5, 0.8, 1.0}) {
+            const double v = fromNormalized(p, n);
+            CHECK(fromNormalized(q, n) == doctest::Approx(v).epsilon(1e-12));
+            CHECK(toNormalized(q, v) == doctest::Approx(toNormalized(p, v)).epsilon(1e-12));
+            CHECK(toClap(q, v) == doctest::Approx(toClap(p, v)).epsilon(1e-12));
+        }
+        if (!(p.flags & kReadonly)) CHECK(q.def == doctest::Approx(p.def));
+    }
+    CHECK_FALSE(fromDescription("x", json::Value(3.0)));
+    CHECK_FALSE(fromDescription("x", json::parse(R"({"name": "X"})").value()));  // no id
+    CHECK_FALSE(fromDescription("x", json::parse(R"({"id": 1, "unit": "furlong"})").value()));
+}

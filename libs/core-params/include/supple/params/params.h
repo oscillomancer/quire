@@ -23,9 +23,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "supple/base/result.h"
 #include "supple/base/rt.h"
@@ -135,5 +137,17 @@ std::string describeParam(
     const ParamSpec& p,
     double physical);  // "Cutoff 1.20 kHz (filter.cutoff, 20.0 Hz..20.0 kHz, log)"
 std::string curveName(const Curve& c, Type type);  // "linear", "log", "pow:3", "bipolar:2"
+
+// A parameter read back from its description (describeParamJson), e.g. from a
+// plugin's semantic schema in a host, so the host converts values exactly as
+// the plugin does. Owns the strings its spec points into (keep it in place).
+struct DescribedParam {
+    ParamSpec spec;
+    std::string key, name, group;
+    std::vector<std::string> choiceKeys;
+    std::vector<Choice> choices;
+};
+Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
+                                                        const json::Value& description);
 
 }  // namespace supple::params

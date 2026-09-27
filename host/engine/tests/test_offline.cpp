@@ -487,3 +487,53 @@ TEST_CASE("a new state blob for a processing instance goes to a fresh instance (
     CHECK(pool.get(fx, *s3.fx.find(fx), s3).value() == b);
     CHECK(b->tail() == 3);
 }
+
+TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curve domain") {
+    auto pool = makePool();
+    auto build = [](std::string param, std::vector<model::EnvPoint> points) {
+        model::EditTxn t(model::Session::create(), 1);
+        const Id tr = addTrack(t, "Lead");
+        addFx(t, tr, kSine);
+        const Id g = addFx(t, tr, kGain);
+        addNote(t, tr, 0.0, 4.0);
+        model::Envelope env;
+        env.target = {g, std::move(param)};
+        env.points = std::move(points);
+        t.create(env);
+        return commit(t);
+    };
+    using model::PointShape;
+    // A step to -60 dB (off at min) at beat 1 = sample 24000: silence from that sample.
+    {
+        auto r = render(build("gain", {{0.0, 0.0, PointShape::Square, 0.0},
+                                       {1.0, -60.0, PointShape::Square, 0.0}}),
+                        pool, 1.0);
+        CHECK(r.warnings.empty());
+        CHECK(peak(r.audio.channels[0], 23800, 24000) > 0.05);
+        CHECK(peak(r.audio.channels[0], 24000, 48000) == 0.0);
+    }
+    // The same by CLAP id, in CLAP values (the normalized position for stock plugins).
+    {
+        auto r = render(build("0", {{0.0, 60.0 / 72.0, PointShape::Square, 0.0},
+                                    {1.0, 0.0, PointShape::Square, 0.0}}),
+                        pool, 1.0);
+        CHECK(r.warnings.empty());
+        CHECK(peak(r.audio.channels[0], 23800, 24000) > 0.05);
+        CHECK(peak(r.audio.channels[0], 24000, 48000) == 0.0);
+    }
+    // A linear ramp 0 → -24 dB over one second: -12 dB halfway.
+    {
+        auto r = render(build("gain", {{0.0, 0.0, PointShape::Linear, 0.0},
+                                       {2.0, -24.0, PointShape::Linear, 0.0}}),
+                        pool, 1.0);
+        const double start = peak(r.audio.channels[0], 200, 1000);
+        const double mid = peak(r.audio.channels[0], 23800, 24200);
+        CHECK(mid / start == doctest::Approx(std::pow(10.0, -12.0 / 20.0)).epsilon(0.03));
+    }
+    // An unknown parameter is reported, not fatal.
+    {
+        auto r = render(build("gian", {{0.0, 0.0, PointShape::Linear, 0.0}}), pool, 0.1);
+        REQUIRE(r.warnings.size() == 1);
+        CHECK(r.warnings[0].find("gian") != std::string::npos);
+    }
+}

@@ -10,6 +10,7 @@
 #include "supple/engine/app.h"
 #include "supple/model/schemas.h"
 #include "supple/notation/notation.h"
+#include "supple/params/params.h"
 
 namespace supple::engine {
 
@@ -119,6 +120,182 @@ schema::Schema<TransportInfo> transportSchema() {
         .field("beat", &TransportInfo::beat, schema::number())
         .field("sample", &TransportInfo::sample, schema::integer())
         .build();
+}
+
+// --- automation envelopes ---------------------------------------------------------------
+
+struct EnvPointArg {
+    std::optional<double> beat, seconds;
+    std::optional<std::int64_t> bar;
+    json::Value value;
+    std::optional<model::PointShape> shape;
+    std::optional<double> tension;
+};
+struct EnvAddArgs {
+    std::optional<std::string> track, fx, route;
+    std::string param;
+    std::optional<std::vector<EnvPointArg>> points;
+};
+struct EnvAddResult {
+    std::string env;
+    std::int64_t points = 0;
+};
+struct EnvPointsSetArgs {
+    std::string env;
+    std::vector<EnvPointArg> points;
+    std::optional<double> fromBeat, toBeat;
+};
+struct EnvCount {
+    std::int64_t points = 0;
+};
+struct EnvRef {
+    std::string env;
+};
+struct EnvSetArgs {
+    std::string env;
+    std::optional<bool> active;
+    std::optional<model::EnvMode> mode;
+};
+struct EnvListArgs {
+    std::optional<std::string> object;
+};
+struct EnvEntry {
+    std::string env, target, param, mode;
+    std::int64_t points = 0;
+    bool active = true;
+};
+struct EnvList {
+    std::vector<EnvEntry> envelopes;
+};
+
+schema::Schema<model::PointShape> pointShapeSchema() {
+    return schema::enumeration<model::PointShape>({{model::PointShape::Linear, "linear"},
+                                                   {model::PointShape::Square, "square"},
+                                                   {model::PointShape::Slow, "slow"},
+                                                   {model::PointShape::FastStart, "fast_start"},
+                                                   {model::PointShape::FastEnd, "fast_end"},
+                                                   {model::PointShape::Bezier, "bezier"}});
+}
+schema::Schema<model::EnvMode> envModeSchema() {
+    return schema::enumeration<model::EnvMode>({{model::EnvMode::Trim, "trim"},
+                                                {model::EnvMode::Read, "read"},
+                                                {model::EnvMode::Touch, "touch"},
+                                                {model::EnvMode::Latch, "latch"},
+                                                {model::EnvMode::LatchPreview, "latch_preview"},
+                                                {model::EnvMode::Write, "write"}});
+}
+schema::Schema<EnvPointArg> envPointSchema() {
+    return schema::object<EnvPointArg>("env_point_arg")
+        .field("beat", &EnvPointArg::beat, schema::number().min(0))
+        .field("bar", &EnvPointArg::bar, schema::integer().min(1))
+        .field("seconds", &EnvPointArg::seconds, schema::number().min(0))
+        .field("value", &EnvPointArg::value, schema::any())
+        .field("shape", &EnvPointArg::shape, pointShapeSchema())
+        .field("tension", &EnvPointArg::tension, schema::number().range(-1, 1))
+        .build();
+}
+
+// A mixer parameter's unit, or none when `param` is not one.
+std::optional<units::Unit> mixerUnit(model::Kind kind, const std::string& param) {
+    if (param == "volume" || (kind == model::Kind::Track && param == "trim"))
+        return units::Unit::dB;
+    if (param == "pan" || (kind == model::Kind::Track && param == "width"))
+        return units::Unit::percent;
+    if (param == "mute") return units::Unit::none;
+    return std::nullopt;
+}
+
+// How an envelope's values are read: a mixer unit, a plugin's semantic
+// parameter (physical units, text with units accepted), or a plain CLAP value.
+struct EnvDomain {
+    std::optional<units::Unit> mixer;
+    std::unique_ptr<params::DescribedParam> semantic;
+    std::optional<std::pair<double, double>> clapRange;
+};
+
+Result<EnvDomain> envDomain(EngineApp& app, const model::Session& s, const model::EnvTarget& t,
+                            const char* path) {
+    EnvDomain d;
+    if (t.object.kind != model::Kind::Fx) {
+        d.mixer = mixerUnit(t.object.kind, t.param);
+        if (!d.mixer)
+            return Error("env.param",
+                         "no automatable parameter \"" + t.param + "\" on " + t.object.str(), path,
+                         t.object.kind == model::Kind::Track ? "volume, trim, pan, width, mute"
+                                                             : "volume, pan, mute");
+        return d;
+    }
+    const model::FxInstance& fx = *s.fx.find(t.object);
+    auto schema = app.fxSchema(fx);
+    if (!schema) return std::move(schema).error();
+    if (const json::Value* ps = schema->isObject() ? schema->find("params") : nullptr) {
+        if (const json::Value* entry = ps->find(t.param)) {
+            auto spec = params::fromDescription(t.param, *entry);
+            if (!spec) return std::move(spec).error();
+            if ((*spec)->spec.flags & params::kReadonly)
+                return Error("env.param", t.param + " is read-only", path);
+            d.semantic = std::move(*spec);
+            return d;
+        }
+    }
+    auto list = app.fxParams(fx);
+    if (!list) return std::move(list).error();
+    for (const host::ParamInfo& p : *list)
+        if (std::to_string(p.id) == t.param || p.name == t.param) {
+            d.clapRange = std::pair{p.min, p.max};
+            return d;
+        }
+    std::string keys;
+    if (const json::Value* ps = schema->isObject() ? schema->find("params") : nullptr)
+        for (const auto& m : ps->asObject()) keys += (keys.empty() ? "" : ", ") + m.key;
+    return Error("env.param", fx.plugin.id + " has no parameter \"" + t.param + "\"", path,
+                 keys.empty() ? "use a CLAP id or parameter name (fx.describe)" : "keys: " + keys);
+}
+
+Result<double> envValue(const EnvDomain& d, const json::Value& v, const std::string& path) {
+    auto located = [&](Result<double> r) -> Result<double> {
+        if (r) return r;
+        Error e = std::move(r).error();
+        if (e.path.empty()) e.path = path;
+        return e;
+    };
+    if (d.semantic) return located(params::fromJson(d.semantic->spec, v, true));
+    if (d.mixer) {
+        if (v.isBool()) return v.asBool() ? 1.0 : 0.0;
+        if (v.isNumber()) return v.asDouble();
+        if (v.isString() && *d.mixer != units::Unit::none)
+            return located(units::parseQuantity(v.asString(), *d.mixer));
+        return Error("env.value", "a number (or text with a unit)", path);
+    }
+    if (!v.isNumber()) return Error("env.value", "a CLAP value (number)", path);
+    return std::clamp(v.asDouble(), d.clapRange->first, d.clapRange->second);
+}
+
+Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const EnvDomain& d,
+                                               const std::vector<EnvPointArg>& in,
+                                               const std::string& path) {
+    std::vector<model::EnvPoint> out;
+    for (std::size_t i = 0; i < in.size(); ++i) {
+        const EnvPointArg& a = in[i];
+        const std::string at = path + "/" + std::to_string(i);
+        const int given = a.beat.has_value() + a.bar.has_value() + a.seconds.has_value();
+        if (given != 1) return Error("env.position", "give one of beat, bar or seconds", at);
+        model::EnvPoint pt;
+        pt.pos = a.seconds
+                     ? s.timeMap->beatAt(*a.seconds)
+                     : beatsOf(s, a.beat,
+                               a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt);
+        auto v = envValue(d, a.value, at + "/value");
+        if (!v) return std::move(v).error();
+        pt.value = *v;
+        pt.shape = a.shape.value_or(model::PointShape::Linear);
+        pt.tension = a.tension.value_or(0.0);
+        out.push_back(pt);
+    }
+    std::stable_sort(
+        out.begin(), out.end(),
+        [](const model::EnvPoint& x, const model::EnvPoint& y) { return x.pos < y.pos; });
+    return out;
 }
 
 // --- tempo ------------------------------------------------------------------------------
@@ -1627,6 +1804,212 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const BranchName& a, Context& ctx) -> Result<Empty> {
             SUPPLE_TRY(A(ctx).versions().deleteBranch(a.name));
             return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    // ---------------------------------------------------------------- env.*
+    {
+        Command<EnvAddArgs, EnvAddResult> c;
+        c.name = "env.add";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Automate a parameter: a track's or route's mixer control, or a plugin's.";
+        c.description =
+            "Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or "
+            "fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a "
+            "CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; "
+            "values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for "
+            "plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values "
+            "move along the parameter's curve (a log cutoff sweeps evenly in pitch).";
+        c.tags = {"automation"};
+        c.args = schema::object<EnvAddArgs>("env_add_args")
+                     .field("track", &EnvAddArgs::track, idArg("tr", "Track"))
+                     .field("fx", &EnvAddArgs::fx, idArg("fx", "Plugin instance"))
+                     .field("route", &EnvAddArgs::route, idArg("sd", "Route"))
+                     .field("param", &EnvAddArgs::param, schema::string())
+                     .field("points", &EnvAddArgs::points, schema::arrayOf(envPointSchema()))
+                     .build();
+        c.result = schema::object<EnvAddResult>("env_add")
+                       .field("env", &EnvAddResult::env, schema::string())
+                       .field("points", &EnvAddResult::points, schema::integer())
+                       .build();
+        c.examples = {
+            {"Fade a track out over bar 2",
+             obj(R"({"track": "tr_1", "param": "volume", "points": [{"bar": 2, "value": 0}, {"bar": 3, "value": "-60 dB"}]})"),
+             obj(R"({"env": "en_1", "points": 2})"), "song"},
+            {"Sweep a plugin parameter",
+             obj(R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": "-12 dB", "shape": "slow"}, {"beat": 4, "value": 0}]})"),
+             obj(R"({"env": "en_1", "points": 2})"), "song_with_fx"}};
+        c.run = [](const EnvAddArgs& a, Context& ctx) -> Result<EnvAddResult> {
+            EngineApp& app = A(ctx);
+            const model::Session s = app.view();
+            if (a.track.has_value() + a.fx.has_value() + a.route.has_value() != 1)
+                return Error("env.target", "give one of track, fx or route", "",
+                             "e.g. {\"fx\": \"fx_1\", \"param\": \"filter1.cutoff\"}");
+            model::Envelope env;
+            if (a.track) {
+                auto id = existing<model::Track>(s, *a.track, "/track");
+                if (!id) return std::move(id).error();
+                env.target.object = *id;
+            } else if (a.fx) {
+                auto id = existing<model::FxInstance>(s, *a.fx, "/fx");
+                if (!id) return std::move(id).error();
+                env.target.object = *id;
+            } else {
+                auto id = existing<model::Route>(s, *a.route, "/route");
+                if (!id) return std::move(id).error();
+                env.target.object = *id;
+            }
+            env.target.param = a.param;
+            for (const auto& e : s.envelopes)
+                if (e.value->target.object == env.target.object && e.value->target.param == a.param)
+                    return Error("env.exists", "an envelope already automates this parameter",
+                                 "/param", "env.points.set " + e.id.str());
+            auto domain = envDomain(app, s, env.target, "/param");
+            if (!domain) return std::move(domain).error();
+            if (a.points) {
+                auto pts = envPoints(s, *domain, *a.points, "/points");
+                if (!pts) return std::move(pts).error();
+                env.points = std::move(*pts);
+            }
+            const Id id = app.txn().create(env);
+            return EnvAddResult{id.str(), static_cast<std::int64_t>(env.points.size())};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<EnvPointsSetArgs, EnvCount> c;
+        c.name = "env.points.set";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Replace an envelope's points (all of them, or those in a beat range).";
+        c.description = "from_beat/to_beat: replace only points with from_beat <= beat < to_beat.";
+        c.tags = {"automation"};
+        c.args = schema::object<EnvPointsSetArgs>("env_points_set_args")
+                     .field("env", &EnvPointsSetArgs::env, idArg("en", "Envelope"))
+                     .field("points", &EnvPointsSetArgs::points, schema::arrayOf(envPointSchema()))
+                     .field("from_beat", &EnvPointsSetArgs::fromBeat, schema::number().min(0))
+                     .field("to_beat", &EnvPointsSetArgs::toBeat, schema::number().min(0))
+                     .build();
+        c.result = schema::object<EnvCount>("env_count")
+                       .field("points", &EnvCount::points, schema::integer())
+                       .build();
+        c.examples = {
+            {"Three points",
+             obj(R"({"env": "en_1", "points": [{"beat": 0, "value": -6}, {"beat": 2, "value": 0, "shape": "square"}, {"beat": 3, "value": "-3 dB"}]})"),
+             obj(R"({"points": 3})"), "song_with_env"}};
+        c.run = [](const EnvPointsSetArgs& a, Context& ctx) -> Result<EnvCount> {
+            EngineApp& app = A(ctx);
+            const model::Session s = app.view();
+            auto id = existing<model::Envelope>(s, a.env, "/env");
+            if (!id) return std::move(id).error();
+            const model::Envelope& env = *s.envelopes.find(*id);
+            auto domain = envDomain(app, s, env.target, "/env");
+            if (!domain) return std::move(domain).error();
+            auto pts = envPoints(s, *domain, a.points, "/points");
+            if (!pts) return std::move(pts).error();
+            std::vector<model::EnvPoint> next;
+            if (a.fromBeat || a.toBeat) {
+                const double lo = a.fromBeat.value_or(0.0), hi = a.toBeat.value_or(1e300);
+                for (const auto& pt : env.points)
+                    if (pt.pos < lo || pt.pos >= hi) next.push_back(pt);
+            }
+            next.insert(next.end(), pts->begin(), pts->end());
+            std::stable_sort(next.begin(), next.end(),
+                             [](const auto& x, const auto& y) { return x.pos < y.pos; });
+            const auto count = static_cast<std::int64_t>(next.size());
+            app.txn().modify<model::Envelope>(
+                *id, [&](model::Envelope& e) { e.points = std::move(next); });
+            return EnvCount{count};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<EnvSetArgs, Empty> c;
+        c.name = "env.set";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Set an envelope's options: active (heard), mode (read, touch, latch, write).";
+        c.tags = {"automation"};
+        c.args = schema::object<EnvSetArgs>("env_set_args")
+                     .field("env", &EnvSetArgs::env, idArg("en", "Envelope"))
+                     .field("active", &EnvSetArgs::active, schema::boolean())
+                     .field("mode", &EnvSetArgs::mode, envModeSchema())
+                     .build();
+        c.result = emptySchema();
+        c.examples = {{"Mute the automation", obj(R"({"env": "en_1", "active": false})"), obj("{}"),
+                       "song_with_env"}};
+        c.run = [](const EnvSetArgs& a, Context& ctx) -> Result<Empty> {
+            EngineApp& app = A(ctx);
+            auto id = existing<model::Envelope>(app.view(), a.env, "/env");
+            if (!id) return std::move(id).error();
+            app.txn().modify<model::Envelope>(*id, [&](model::Envelope& e) {
+                if (a.active) e.active = *a.active;
+                if (a.mode) e.mode = *a.mode;
+            });
+            return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<EnvRef, Empty> c;
+        c.name = "env.remove";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Remove an envelope (the parameter returns to its set value).";
+        c.tags = {"automation"};
+        c.args = schema::object<EnvRef>("env_ref")
+                     .field("env", &EnvRef::env, idArg("en", "Envelope"))
+                     .build();
+        c.result = emptySchema();
+        c.examples = {{"Remove", obj(R"({"env": "en_1"})"), obj("{}"), "song_with_env"}};
+        c.run = [](const EnvRef& a, Context& ctx) -> Result<Empty> {
+            EngineApp& app = A(ctx);
+            auto id = existing<model::Envelope>(app.view(), a.env, "/env");
+            if (!id) return std::move(id).error();
+            app.txn().remove<model::Envelope>(*id);
+            return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<EnvListArgs, EnvList> c;
+        c.name = "env.list";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List envelopes (optionally of one track, route or plugin).";
+        c.tags = {"automation"};
+        c.args = schema::object<EnvListArgs>("env_list_args")
+                     .field("object", &EnvListArgs::object, schema::string())
+                     .build();
+        auto entry = schema::object<EnvEntry>("env_entry")
+                         .field("env", &EnvEntry::env, schema::string())
+                         .field("target", &EnvEntry::target, schema::string())
+                         .field("param", &EnvEntry::param, schema::string())
+                         .field("points", &EnvEntry::points, schema::integer())
+                         .field("active", &EnvEntry::active, schema::boolean())
+                         .field("mode", &EnvEntry::mode, schema::string())
+                         .build();
+        c.result = schema::object<EnvList>("env_list")
+                       .field("envelopes", &EnvList::envelopes, schema::arrayOf(entry))
+                       .build();
+        c.examples = {
+            {"All", obj("{}"),
+             obj(R"({"envelopes": [{"env": "en_1", "target": "fx_2", "param": "gain", "points": 2, "active": true, "mode": "read"}]})"),
+             "song_with_env"}};
+        c.run = [](const EnvListArgs& a, Context& ctx) -> Result<EnvList> {
+            const model::Session s = A(ctx).view();
+            static constexpr const char* kModes[] = {"trim",  "read",          "touch",
+                                                     "latch", "latch_preview", "write"};
+            EnvList out;
+            for (const auto& e : s.envelopes) {
+                const model::Envelope& env = *e.value;
+                if (a.object && env.target.object.str() != *a.object) continue;
+                out.envelopes.push_back({e.id.str(), env.target.object.str(), env.target.param,
+                                         kModes[static_cast<int>(env.mode)],
+                                         static_cast<std::int64_t>(env.points.size()), env.active});
+            }
+            return out;
         };
         registry.add(std::move(c));
     }

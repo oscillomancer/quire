@@ -374,8 +374,21 @@ granted, and CPU governor (read-only facts).
   a 2 s deadline (lifecycle commands 7 s)); a crash or hang fails only that instance (silent node,
   `fx.failed`, `engine.status.failed_fx`); `fx.restart` re-creates it from
   the model. Acceptance test in `engine.tests`.
+- **Plugin-parameter automation:** an envelope on `fx_* <param>` resolves the
+  parameter from the plugin's semantic schema (`params::fromDescription`
+  rebuilds its ParamSpec, so the host converts exactly as the plugin does)
+  or, for any plugin, by CLAP id or name (plain CLAP values). Semantic points
+  are physical and interpolated in the normalized (curve) domain (ADR-0010).
+  Per block the stage gets param events at the block start, every 32 samples
+  and at each point (in time order; unchanged values are not resent),
+  merged into its sorted event list by an allocation-free insertion sort,
+  within capacity reserved at prepare. Lanes shift by the latency ahead of
+  the stage; seeks reset them and resend. Real-time output equals the
+  offline render. Commands: `env.add`, `env.points.set`, `env.set`,
+  `env.remove`, `env.list` (values in the parameter's unit; text like
+  "800 Hz" for plugins). Write/touch/latch recording is not implemented.
 - **Not yet:** live nodes (monitoring/recording) and live multiprocessing,
   one shared process for `shared_bridge`,
-  automatic restart after device changes, MIDI ports, plugin-parameter
-  automation, stems and render jobs, resampling/stretching of audio items,
+  automatic restart after device changes, MIDI ports, automation recording
+  (write/touch/latch), stems and render jobs, resampling/stretching of audio items,
   the 10 ms crossfade on structural swaps, the B1 capacity benchmark.

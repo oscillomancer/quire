@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "supple/engine/offline.h"
+#include "supple/params/params.h"
 #include "supple/time/timeline.h"
 #include "workers.h"
 
@@ -129,8 +131,26 @@ struct Edge {
     Stereo tmp;
 };
 
+// An automated plugin parameter (engine.md §1.4, ADR-0010): semantic
+// parameters interpolate in the normalized (curve) domain from physical
+// points; plain CLAP parameters in their CLAP value. Values reach the plugin
+// as param events at every point and every kAutomationStep samples.
+inline constexpr std::uint32_t kAutomationStep = 32;
+struct ParamLane {
+    std::uint32_t clapId = 0;
+    Automation curve;
+    std::shared_ptr<const params::DescribedParam> spec;  // null: plain CLAP values
+    double lastSent = std::numeric_limits<double>::quiet_NaN();
+    double clapAt(std::int64_t sample) SUPPLE_RT {
+        const double v = curve.at(sample);
+        return spec ? params::toClap(spec->spec, params::fromNormalized(spec->spec, v)) : v;
+    }
+};
+
 struct Stage {
     host::Instance* instance = nullptr;  // null: placeholder (pass-through)
+    Id fx;
+    std::vector<ParamLane> lanes;
     bool bypass = false, instrument = false;
     double wet = 1.0;
     std::int64_t latency = 0;

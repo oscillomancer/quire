@@ -80,6 +80,8 @@ class EngineApp : public cmd::Host {
     MediaCache& media() { return media_; }
     // The plugin's semantic schema (null for plugins without the extension).
     Result<json::Value> fxSchema(const model::FxInstance& fx);
+    // The plugin's CLAP parameters (from a scratch instance).
+    Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
     // fx's patch after applying `patch` (a merge patch, or a complete patch
     // when `replace`), validated by the plugin; the complete canonical patch.
     Result<json::Value> mergedPatch(const model::FxInstance& fx, const json::Value& patch,
@@ -138,7 +140,8 @@ class EngineApp : public cmd::Host {
     void invoked(std::string_view command, int version, const json::Value& args,
                  cmd::Kind kind) override;
     // Example fixtures: empty, saved, song (tr_1 "Bass"), song_with_item
-    // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_undone,
+    // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_with_env (+ en_1
+    // on fx_2 gain), song_undone,
     // engine_running (the dummy backend), and the bus's job_running. Built by
     // running commands.
     void setupFixture(cmd::Dispatcher& dispatcher, std::string_view fixture) override;

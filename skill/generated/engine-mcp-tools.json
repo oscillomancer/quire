@@ -482,6 +482,286 @@
     }
   },
   {
+    "name": "env_add",
+    "title": "Automate a parameter: a track's or route's mixer control, or a plugin's.",
+    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "env_add_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Track id, e.g. \"tr_1\"."
+        },
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        },
+        "route": {
+          "type": "string",
+          "pattern": "^sd_[0-9]+$",
+          "description": "Route id, e.g. \"sd_1\"."
+        },
+        "param": {
+          "type": "string"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "env_point_arg",
+            "properties": {
+              "beat": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "bar": {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              "seconds": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "value": {},
+              "shape": {
+                "type": "string",
+                "enum": ["linear", "square", "slow", "fast_start", "fast_end", "bezier"]
+              },
+              "tension": {
+                "type": "number",
+                "minimum": -1.0,
+                "maximum": 1.0
+              }
+            },
+            "required": ["value"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["param"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "env_add",
+      "properties": {
+        "env": {
+          "type": "string"
+        },
+        "points": {
+          "type": "integer"
+        }
+      },
+      "required": ["env", "points"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "env_list",
+    "title": "List envelopes (optionally of one track, route or plugin).",
+    "description": "List envelopes (optionally of one track, route or plugin).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "env_list_args",
+      "properties": {
+        "object": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "env_list",
+      "properties": {
+        "envelopes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "env_entry",
+            "properties": {
+              "env": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "param": {
+                "type": "string"
+              },
+              "points": {
+                "type": "integer"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string"
+              }
+            },
+            "required": ["env", "target", "param", "points", "active", "mode"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["envelopes"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "env_points_set",
+    "title": "Replace an envelope's points (all of them, or those in a beat range).",
+    "description": "Replace an envelope's points (all of them, or those in a beat range). from_beat/to_beat: replace only points with from_beat <= beat < to_beat. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "env_points_set_args",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^en_[0-9]+$",
+          "description": "Envelope id, e.g. \"en_1\"."
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "env_point_arg",
+            "properties": {
+              "beat": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "bar": {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              "seconds": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "value": {},
+              "shape": {
+                "type": "string",
+                "enum": ["linear", "square", "slow", "fast_start", "fast_end", "bezier"]
+              },
+              "tension": {
+                "type": "number",
+                "minimum": -1.0,
+                "maximum": 1.0
+              }
+            },
+            "required": ["value"],
+            "additionalProperties": false
+          }
+        },
+        "from_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "to_beat": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "required": ["env", "points"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "env_count",
+      "properties": {
+        "points": {
+          "type": "integer"
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "env_remove",
+    "title": "Remove an envelope (the parameter returns to its set value).",
+    "description": "Remove an envelope (the parameter returns to its set value).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "env_ref",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^en_[0-9]+$",
+          "description": "Envelope id, e.g. \"en_1\"."
+        }
+      },
+      "required": ["env"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "env_set",
+    "title": "Set an envelope's options: active (heard), mode (read, touch, latch, write).",
+    "description": "Set an envelope's options: active (heard), mode (read, touch, latch, write).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "env_set_args",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^en_[0-9]+$",
+          "description": "Envelope id, e.g. \"en_1\"."
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["trim", "read", "touch", "latch", "latch_preview", "write"]
+        }
+      },
+      "required": ["env"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "fx_add",
     "title": "Insert a plugin into a track's FX chain and return its id.",
     "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. See describe for errors and examples.",

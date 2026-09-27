@@ -683,6 +683,351 @@ Result:
 
 ```
 
+## `env.add@1`
+
+Automate a parameter: a track's or route's mixer control, or a plugin's.
+
+Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch).
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  | Track id, e.g. "tr_1". |
+| `fx` | string |  |  |  | Plugin instance id, e.g. "fx_1". |
+| `route` | string |  |  |  | Route id, e.g. "sd_1". |
+| `param` | string |  |  |  |  |
+| `points` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "env_add",
+  "properties": {
+    "env": {
+      "type": "string"
+    },
+    "points": {
+      "type": "integer"
+    }
+  },
+  "required": ["env", "points"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Fade a track out over bar 2** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "param": "volume",
+  "points": [
+    {
+      "bar": 2,
+      "value": 0
+    },
+    {
+      "bar": 3,
+      "value": "-60 dB"
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "env": "en_1",
+  "points": 2
+}
+
+```
+
+**Sweep a plugin parameter** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "param": "gain",
+  "points": [
+    {
+      "beat": 0,
+      "value": "-12 dB",
+      "shape": "slow"
+    },
+    {
+      "beat": 4,
+      "value": 0
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "env": "en_1",
+  "points": 2
+}
+
+```
+
+## `env.list@1`
+
+List envelopes (optionally of one track, route or plugin).
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `object` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "env_list",
+  "properties": {
+    "envelopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "env_entry",
+        "properties": {
+          "env": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "param": {
+            "type": "string"
+          },
+          "points": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "required": ["env", "target", "param", "points", "active", "mode"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["envelopes"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**All** (`song_with_env`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "envelopes": [
+    {
+      "env": "en_1",
+      "target": "fx_2",
+      "param": "gain",
+      "points": 2,
+      "active": true,
+      "mode": "read"
+    }
+  ]
+}
+
+```
+
+## `env.points.set@1`
+
+Replace an envelope's points (all of them, or those in a beat range).
+
+from_beat/to_beat: replace only points with from_beat <= beat < to_beat.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `env` | string |  |  |  | Envelope id, e.g. "en_1". |
+| `points` | array |  |  |  |  |
+| `from_beat` | number |  | 0.0.. |  |  |
+| `to_beat` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "env_count",
+  "properties": {
+    "points": {
+      "type": "integer"
+    }
+  },
+  "required": ["points"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Three points** (`song_with_env`)
+
+```json
+{
+  "env": "en_1",
+  "points": [
+    {
+      "beat": 0,
+      "value": -6
+    },
+    {
+      "beat": 2,
+      "value": 0,
+      "shape": "square"
+    },
+    {
+      "beat": 3,
+      "value": "-3 dB"
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "points": 3
+}
+
+```
+
+## `env.remove@1`
+
+Remove an envelope (the parameter returns to its set value).
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `env` | string |  |  |  | Envelope id, e.g. "en_1". |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Remove** (`song_with_env`)
+
+```json
+{
+  "env": "en_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `env.set@1`
+
+Set an envelope's options: active (heard), mode (read, touch, latch, write).
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `env` | string |  |  |  | Envelope id, e.g. "en_1". |
+| `active` | boolean |  |  |  |  |
+| `mode` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Mute the automation** (`song_with_env`)
+
+```json
+{
+  "env": "en_1",
+  "active": false
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `fx.add@1`
 
 Insert a plugin into a track's FX chain and return its id.

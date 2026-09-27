@@ -6,6 +6,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <set>
 #include <string>
 #include <vector>
@@ -608,6 +609,90 @@ std::string describeParam(const ParamSpec& p, double physical) {
         for (const Choice& c : p.choices) s += " " + std::string(c.key);
     }
     return s + ")";
+}
+
+// --- read back a description (hosts) ----------------------------------------------
+
+Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
+                                                        const json::Value& e) {
+    if (!e.isObject()) return Error("params.description", "a parameter description is an object");
+    auto out = std::make_unique<DescribedParam>();
+    out->key = std::string(key);
+    ParamSpec& p = out->spec;
+    auto num = [&](const char* name, double fallback) {
+        const json::Value* v = e.find(name);
+        return v && v->isNumber() ? v->asDouble() : fallback;
+    };
+    auto str = [&](const char* name) {
+        const json::Value* v = e.find(name);
+        return v && v->isString() ? v->asString() : std::string();
+    };
+    const json::Value* id = e.find("id");
+    if (!id || !id->isNumber()) return Error("params.description", "no id", "/" + out->key);
+    p.id = static_cast<std::uint32_t>(id->asDouble());
+    out->name = str("name");
+    out->group = str("group");
+    const std::string type = str("type");
+    p.type = type == "int"    ? Type::Int
+             : type == "bool" ? Type::Bool
+             : type == "enum" ? Type::Enum
+                              : Type::Float;
+    if (const std::string unit = str("unit"); !unit.empty()) {
+        bool known = false;
+        for (int u = 0; u <= static_cast<int>(Unit::none); ++u)
+            if (units::unitName(static_cast<Unit>(u)) == unit) {
+                p.unit = static_cast<Unit>(u);
+                known = true;
+            }
+        if (!known) return Error("params.description", "unknown unit " + unit, "/" + out->key);
+    }
+    if (const json::Value* c = e.find("choices"); c && c->isArray()) {
+        for (std::size_t i = 0; i < c->size(); ++i) out->choiceKeys.push_back(c->at(i).asString());
+        for (const std::string& k : out->choiceKeys) out->choices.push_back({k, k});
+        p.choices = out->choices;
+        p.min = 0;
+        p.max = static_cast<double>(out->choices.size()) - 1;
+    } else if (p.type == Type::Bool) {
+        p.min = 0;
+        p.max = 1;
+    } else {
+        p.min = num("min", 0.0);
+        p.max = num("max", 1.0);
+    }
+    if (const std::string curve = str("curve"); !curve.empty()) {
+        // "linear", "log", "pow:<k>", "bipolar:<k>"
+        const auto colon = curve.find(':');
+        const std::string kind = curve.substr(0, colon);
+        const double k = colon == std::string::npos ? 1.0 : std::atof(curve.c_str() + colon + 1);
+        p.curve.kind = kind == "log"       ? CurveKind::Log
+                       : kind == "pow"     ? CurveKind::Pow
+                       : kind == "bipolar" ? CurveKind::Bipolar
+                                           : CurveKind::Linear;
+        p.curve.k = k > 0 ? k : 1.0;
+    }
+    p.key = out->key;
+    p.name = out->name;
+    p.group = out->group;
+    p.flags = 0;
+    if (const json::Value* f = e.find("flags"); f && f->isArray())
+        for (std::size_t i = 0; i < f->size(); ++i) {
+            const std::string flag = f->at(i).asString();
+            p.flags |= flag == "automatable"   ? kAutomatable
+                       : flag == "modulatable" ? kModulatable
+                       : flag == "readonly"    ? kReadonly
+                       : flag == "hidden"      ? kHidden
+                       : flag == "off_at_min"  ? kOffAtMin
+                       : flag == "bypass"      ? kBypass
+                       : flag == "periodic"    ? kPeriodic
+                                               : 0u;
+        }
+    if (const json::Value* d = e.find("default")) {
+        auto v = fromJson(p, *d, false);
+        p.def = v ? *v : p.min;
+    } else {
+        p.def = p.min;
+    }
+    return out;
 }
 
 }  // namespace supple::params
