@@ -1378,3 +1378,48 @@ TEST_CASE("a long, dense MIDI performance records without overflow (the writer d
     CHECK(t.midi.size() > 4096);
     engine.stop();
 }
+
+TEST_CASE("monitoring off while playing: the renderer takes over without a gap" *
+          doctest::description("rt")) {
+    // A monitored instrument track (live) playing short notes every ~1025
+    // frames; monitoring switches off mid-play. The renderer takes the track
+    // at its render horizon, before the callback has let go of the live
+    // instance: a fresh instance keeps the notes coming (it used to pass the
+    // track through for the render-ahead time, ~9600 silent frames).
+    model::Session s = synthSession(0.0);
+    {
+        model::EditTxn t(s, 2);
+        for (const auto& e : s.midi)
+            t.modify<model::MidiSource>(e.id, [](model::MidiSource& m) {
+                m.sequence.notes.clear();
+                for (std::int64_t k = 0; k * 41 < 16 * 960; ++k)
+                    m.sequence.notes.push_back({k * 41, 20, 0, 69, 100, 0});
+                m.sequence.length = 16 * 960;
+            });
+        s = t.commit().value();
+    }
+    const model::Session monitored = monitoring(s, model::Monitor::On);
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
+    Engine engine(pool, media, EngineOptions{.workers = 0});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.load(monitored).ok());
+    REQUIRE(engine.awaitPlan());
+    engine.play();
+    engine.awaitTransport();
+    backend.run(100);              // 25600 frames, all live (nothing renders ahead)
+    REQUIRE(engine.load(s).ok());  // monitoring off: the renderer takes the graph
+    REQUIRE(engine.awaitPlan());
+    runAhead(engine, backend, 250, 256);
+    CHECK(engine.processErrors() == 0);
+    CHECK(engine.transport().sample == 350 * 256);  // no replay from the epoch's start
+    engine.stop();
+    const auto& L = backend.capture().channels[0];
+    std::size_t longest = 0, run = 0;
+    for (std::size_t i = 20000; i < 88000; ++i) {
+        run = std::fabs(double(L[i])) < 1e-4 ? run + 1 : 0;
+        longest = std::max(longest, run);
+    }
+    CHECK(longest < 3000);  // the gaps between notes (~525) and one cut note, never ~9600
+}

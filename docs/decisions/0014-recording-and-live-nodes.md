@@ -146,9 +146,20 @@ when the machine is busiest, during a recording session).
   bit-identical to the in-callback reference over 100k frames; monitoring
   is heard while stopped; toggling monitoring while playing moves the
   plugin between executors with no errors; tsan and rtsan clean.
-- Not yet: live multiprocessing (live nodes run on the callback alone),
-  the crossfade at class changes (a pass-through gap until the new owner
-  starts), punch/loop.
+- Class changes (added after round 12): when a node leaves the live
+  region (monitoring off while playing), the renderer takes it at its
+  render horizon while the callback still plays the old instance up to
+  that point, so `load` gives the renderer a fresh instance
+  (`InstancePool::restart`) instead of waiting for the callback to let go
+  (which passed the track through, unprocessed, for the render-ahead
+  time). While every node is live the renderer renders nothing, but it
+  keeps its stream and timeline positions one render-ahead span past the
+  callback (advanced together, through the loop), so a plan that gives it
+  work takes over at the edit horizon, not at the epoch's start (which
+  replayed from there).
+- Not yet: live multiprocessing (live nodes run on the callback alone), a
+  crossfade at class changes (the fresh instance starts cold: reverb tails
+  and envelopes restart).
 
 ## Implementation notes: crash recovery (2026-09-27)
 

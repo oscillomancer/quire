@@ -211,14 +211,44 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     if (!backend_) return Error("engine.stopped", "start the engine first");
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
-    auto compiled = detail::compile(
-        session, plugins_, 0.0, options_.anticipative ? options_.renderBlock : config_.blockSize,
-        config_.sampleRate);  // the device's rate, whatever the project's
-    if (!compiled) return std::move(compiled).error();
-    auto plan = std::make_unique<detail::Plan>(std::move(*compiled));
-    plan->projectDir = projectDir;
-    plan->media = &media_;
-    SUPPLE_TRY(detail::prepare(*plan, session));
+    auto build = [&]() -> Result<std::unique_ptr<detail::Plan>> {
+        auto compiled =
+            detail::compile(session, plugins_, 0.0,
+                            options_.anticipative ? options_.renderBlock : config_.blockSize,
+                            config_.sampleRate);  // the device's rate, whatever the project's
+        if (!compiled) return std::move(compiled).error();
+        auto built = std::make_unique<detail::Plan>(std::move(*compiled));
+        built->projectDir = projectDir;
+        built->media = &media_;
+        SUPPLE_TRY(detail::prepare(*built, session));
+        return built;
+    };
+    auto first = build();
+    if (!first) return std::move(first).error();
+    std::unique_ptr<detail::Plan> plan = std::move(*first);
+    // ADR-0014: a plugin the callback plays live that the renderer now takes
+    // over (monitoring off) could only be rendered ahead once the callback
+    // lets go at the hand-over point — until then the renderer would pass it
+    // through, a gap of the render-ahead time. It gets a fresh instance from
+    // the model instead; the old one plays live until the hand-over.
+    if (options_.anticipative && !plans_.empty()) {
+        const detail::Plan& prev = *plans_.back();
+        bool moved = false;
+        for (const detail::Node& n : plan->nodes) {
+            if (n.live) continue;
+            for (const detail::Stage& st : n.chain)
+                if (st.instance && std::find(prev.liveInstances.begin(), prev.liveInstances.end(),
+                                             st.instance) != prev.liveInstances.end()) {
+                    plugins_.restart(st.fx);
+                    moved = true;
+                }
+        }
+        if (moved) {
+            auto again = build();
+            if (!again) return std::move(again).error();
+            plan = std::move(*again);
+        }
+    }
     if (std::any_of(plan->nodes.begin(), plan->nodes.end(),
                     [](const detail::Node& n) { return n.midiIn.has_value(); })) {
         const std::vector<std::string> ports = backend_->midiPorts();  // ADR-0016
@@ -675,6 +705,24 @@ void Engine::rendererLoop(std::uint64_t seen) {
     const auto nap = std::chrono::duration<double>(0.25 * block / config_.sampleRate);
     const void* self = &processing_;
     while (!rendererQuit_.load(std::memory_order_acquire)) {
+        if (playing_ && plan_ && plan_->split && plan_->frontier.empty()) {
+            // Everything is live: nothing to render. Stay one render-ahead
+            // span past what the callback played, so that a plan giving the
+            // renderer work takes over where it can still render ahead (the
+            // usual edit horizon), not back at the epoch's start. Advanced
+            // like rendering would (stream and timeline together, through the
+            // loop), before the adoption below: the callback may have run far
+            // since the last pass.
+            const std::int64_t target = playedStream(seen) + aheadFrames_;
+            for (std::int64_t left = target - streamLocal_; left > 0;) {
+                const std::uint32_t k = loopR_.until(
+                    pos_, static_cast<std::uint32_t>(std::min<std::int64_t>(left, 1 << 30)));
+                pos_ = loopR_.next(pos_, pos_ + k);
+                streamLocal_ += k;
+                left -= k;
+            }
+            renderedStream_.store(streamLocal_, std::memory_order_release);
+        }
         detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
         if (plan != plan_) {  // edits take effect here: after what is already rendered
             if (plan_ && plan) detail::carryMix(*plan_, *plan, 0);
