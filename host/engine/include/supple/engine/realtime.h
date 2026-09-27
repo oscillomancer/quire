@@ -173,6 +173,9 @@ class Engine {
     // transport epoch are rendered ahead of the playhead (at most the
     // render-ahead amount), or the transport is paused. False on timeout.
     bool awaitRendered(std::int64_t frames, double timeoutSeconds = 10.0);
+    // Main thread (tests, tools): waits until the renderer has adopted the
+    // newest plan (anticipative; immediately true otherwise).
+    bool awaitPlan(double timeoutSeconds = 10.0);
     // Audio cycles that found no rendered audio while playing (after the
     // pre-roll of a start or seek).
     std::uint64_t anticipationMisses() const { return misses_.load(); }
@@ -201,21 +204,37 @@ class Engine {
 
   private:
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
+    // Anticipative: the callback's work — the master ring, or the live nodes.
+    void anticipativeCycle(const float* const* in, float* const* out,
+                           std::uint32_t frames) SUPPLE_RT;
+    void liveRender(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
+    void adoptLive(detail::Plan* next) SUPPLE_RT;
     // Returns the timeline sample of the first frame played, or kNothingPlayed.
     std::int64_t pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
     static constexpr std::int64_t kNothingPlayed = INT64_MIN;
     void rendererLoop(std::uint64_t firstEpoch);
     void relocate(std::uint64_t previous, std::uint64_t epoch);
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
-    void adopt(detail::Plan* next) SUPPLE_RT;
-    void resetInstances(detail::Plan* plan) SUPPLE_RT;
+    // One executor's share of a plan: stops what it owns that `next` lacks,
+    // then starts what `next` has once the other executor has let go.
+    void adoptShare(std::vector<host::Instance*>& owned, const std::vector<host::Instance*>* next,
+                    const void* self) SUPPLE_RT;
+    void startFree(std::vector<host::Instance*>& owned, const std::vector<host::Instance*>* next,
+                   const void* self) SUPPLE_RT;
+    static void resetOwned(const std::vector<host::Instance*>& owned) SUPPLE_RT;
+    void collectPlans();
 
     InstancePool& plugins_;
     MediaCache& media_;
     EngineOptions options_;
     Backend* backend_ = nullptr;
     BackendConfig config_;
-    RtHandoff<detail::Plan> handoff_;
+    // Plans: published by the main thread, freed once no executor can use
+    // them (both acknowledged a newer generation).
+    std::vector<std::unique_ptr<detail::Plan>> plans_;
+    std::atomic<detail::Plan*> latestPlan_{nullptr};
+    std::atomic<detail::Plan*> handPlan_{nullptr};  // renderer -> callback (ADR-0014)
+    std::atomic<std::uint64_t> callbackGen_{0};     // the callback's plan generation
     // Transport requests: coalescing atomics (the latest request wins and none
     // is ever dropped), read by the audio thread at the start of each cycle.
     std::atomic<bool> wantPlaying_{false};
@@ -268,6 +287,14 @@ class Engine {
     std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     std::atomic<std::uint64_t> misses_{0};
+
+    // The callback's share when anticipative: its plan and the live instances
+    // it owns, and where it plays live nodes.
+    std::uint32_t deviceInputs_ = 0;  // written before the backend starts
+    detail::Plan* livePlan_ = nullptr;
+    std::vector<host::Instance*> liveProcessing_;
+    std::int64_t livePos_ = 0;
+    bool liveReady_ = false;  // livePos_ is valid for rtEpoch_
 
     // Recording: the callback captures while recorder_ is set.
     std::unique_ptr<detail::Recorder> recorderOwned_;

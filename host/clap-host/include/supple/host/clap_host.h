@@ -178,6 +178,11 @@ class Instance {
     bool startProcessing() SUPPLE_RT;
     void stopProcessing() SUPPLE_RT;
     bool processing() const { return processing_; }
+    // The host's executor that currently processes this instance (an opaque
+    // token, null for none): a host with several audio threads uses it so
+    // that exactly one of them calls the audio-thread API at a time.
+    void setOwner(const void* owner) SUPPLE_RT { owner_.store(owner, std::memory_order_release); }
+    const void* owner() const SUPPLE_RT { return owner_.load(std::memory_order_acquire); }
     // Returns false on CLAP_PROCESS_ERROR, or when not processing. Output
     // events are appended to `out` (may be null). Queued setParam() changes
     // are delivered first, at time 0, as far as the event arena has room
@@ -232,6 +237,7 @@ class Instance {
     std::uint32_t maxFrames_ = 0;
     double sampleRate_ = 0.0;
     std::unique_ptr<RemoteInstance> remote_;
+    std::atomic<const void*> owner_{nullptr};
     Notifications remoteNotes_;
     std::vector<std::string> remoteLog_;
 };

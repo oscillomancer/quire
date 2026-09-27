@@ -3,6 +3,8 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -119,6 +121,74 @@ struct Automation {
     }
 };
 
+// One render block of a signal (the master's, or a frontier edge's tap),
+// tagged with the transport epoch it belongs to (ADR-0012, ADR-0014).
+struct Chunk {
+    std::uint64_t epoch = 0;
+    std::int64_t start = 0;  // plan sample of the first frame
+    std::uint32_t frames = 0;
+    std::vector<float> l, r;
+};
+
+// Single producer (the renderer), single consumer (the audio callback).
+struct ChunkRing {
+    std::vector<Chunk> chunks;
+    std::size_t mask = 0;
+    alignas(64) std::atomic<std::size_t> write{0};
+    alignas(64) std::atomic<std::size_t> read{0};
+
+    ChunkRing(std::size_t capacity, std::uint32_t frames) {
+        chunks.resize(std::bit_ceil(std::max<std::size_t>(capacity, 4)));
+        mask = chunks.size() - 1;
+        for (Chunk& c : chunks) {
+            c.l.assign(frames, 0.0f);
+            c.r.assign(frames, 0.0f);
+        }
+    }
+    // Producer: the next free chunk, or null when the ring is full.
+    Chunk* slot() {
+        const std::size_t w = write.load(std::memory_order_relaxed);
+        return w - read.load(std::memory_order_acquire) > mask ? nullptr : &chunks[w & mask];
+    }
+    void publish() {
+        write.store(write.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+    }
+    // Consumer.
+    const Chunk* front() const SUPPLE_RT {
+        const std::size_t r = read.load(std::memory_order_relaxed);
+        return r == write.load(std::memory_order_acquire) ? nullptr : &chunks[r & mask];
+    }
+    void pop() SUPPLE_RT {
+        read.store(read.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+    }
+    // Consumer: frames [pos, pos + n) of epoch `e` into l/r, dropping older
+    // chunks; frames not rendered yet are zero. Returns the frames found.
+    std::uint32_t pullAt(std::uint64_t e, std::int64_t pos, float* l, float* r,
+                         std::uint32_t n) SUPPLE_RT {
+        std::uint32_t found = 0;
+        for (std::uint32_t done = 0; done < n;) {
+            const Chunk* c = front();
+            if (c && (c->epoch < e || (c->epoch == e && c->start + c->frames <= pos + done))) {
+                pop();  // flushed, or behind the play position
+                continue;
+            }
+            if (!c || c->epoch != e || c->start > pos + done) {
+                std::fill_n(l + done, n - done, 0.0f);
+                std::fill_n(r + done, n - done, 0.0f);
+                break;
+            }
+            const auto at = static_cast<std::uint32_t>(pos + done - c->start);
+            const std::uint32_t take = std::min(n - done, c->frames - at);
+            std::copy_n(c->l.begin() + at, take, l + done);
+            std::copy_n(c->r.begin() + at, take, r + done);
+            done += take;
+            found += take;
+            if (at + take == c->frames) pop();
+        }
+        return found;
+    }
+};
+
 struct Edge {
     std::size_t from = 0;     // node index
     std::optional<Id> route;  // empty for parent sends
@@ -129,6 +199,11 @@ struct Edge {
     Automation autoVolume, autoPan, autoMute;  // route envelopes (dB, %, 0/1)
     Delay delay;
     Stereo tmp;
+    // A frontier edge (anticipative source, live target): its source's tap
+    // arrives through a ring, and the callback copies it here for the target.
+    bool frontier = false;
+    std::size_t ring = 0;  // index into Plan::frontierRings
+    Stereo frontierBuf;
 };
 
 // An automated plugin parameter (engine.md §1.4, ADR-0010): semantic
@@ -193,6 +268,11 @@ struct Node {
     double volumeDb = 0.0, pan = 0.0, panLawDb = -3.0;
     bool mute = false, master = false;
     bool soloSilenced = false;  // another track is soloed and this one is not on its path
+    // Input monitoring (ADR-0014): the device inputs this track hears (0-based;
+    // one = mono to both sides), and whether it is live (monitors, or is fed
+    // by a node that does).
+    std::vector<int> monitorInputs;
+    bool live = false;
     Automation autoVolume, autoTrim, autoPan, autoWidth, autoMute;  // dB, dB, %, %, 0/1
     bool automated() const {
         return autoVolume.active() || autoTrim.active() || autoPan.active() || autoWidth.active() ||
@@ -216,6 +296,26 @@ struct Plan {
     MediaCache* media = nullptr;
     std::vector<host::Instance*> instances;  // every instance the plan processes, sorted
     std::unique_ptr<TaskGraph> graph;        // node dependencies, for processBlockOn
+    bool anyLive = false;                    // some node monitors input
+    // The two executors' shares (ADR-0014): the renderer's nodes (all when
+    // nothing is live) with their task graph, the callback's live nodes (in
+    // order), each side's instances (sorted), and the frontier edges.
+    std::vector<std::size_t> rendererNodes, liveNodes;
+    std::unique_ptr<TaskGraph> rendererGraph;
+    std::vector<host::Instance*> rendererInstances, liveInstances;
+    std::vector<std::size_t> frontier;
+    std::vector<std::unique_ptr<ChunkRing>> frontierRings;  // allocated by the engine
+    // Set by the renderer when it adopts the plan, read by the callback after
+    // the plan is handed over: the render position (and epoch) where it applies.
+    std::int64_t handAt = 0;
+    std::uint64_t handEpoch = 0;
+    // Two executors at work (anticipative engine with live nodes): frontier
+    // edges read their rings, not their sources' taps.
+    bool split = false;
+    // The device's input for this cycle, set by the audio callback before it
+    // processes live nodes (null: no device, e.g. offline).
+    const float* const* deviceIn = nullptr;
+    std::uint32_t deviceInChannels = 0;
 };
 
 // Builds the plan's structure (nodes in topological order, edges, plugin
@@ -228,13 +328,23 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
 Status prepare(Plan& p, const Session& s);
 // Audio thread: one block of node `index` at plan sample `pos` (its sources
 // must have been processed for this block).
+// `self`: with several executors, only stages whose instance this executor
+// owns are processed (the rest pass through); null: no ownership check.
 bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t frames,
-                 const host::Transport& transport) SUPPLE_RT;
+                 const host::Transport& transport, const void* self = nullptr) SUPPLE_RT;
 // Audio thread: one block of every node at plan sample `pos`, in order.
-bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames) SUPPLE_RT;
+// `playing` false: the transport is stopped — plugins and monitored inputs
+// run, items and MIDI do not play (and `pos` should not advance).
+bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames, bool playing = true) SUPPLE_RT;
 // The same on the worker pool (the caller helps): bit-identical results.
 // Not SUPPLE_RT itself (it wakes the helpers); every node task is.
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t frames);
+// The renderer's nodes only (rendererGraph), serially without helpers.
+bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t frames,
+                          const void* self);
+// Repositions the cursors and clears the delay lines of the live nodes (or
+// of the others) and of the edges into them.
+void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT;
 // Audio thread: repositions every playback cursor at `pos` (events,
 // automation) and clears delay lines. Plugins are not touched.
 void locate(Plan& p, std::int64_t pos) SUPPLE_RT;

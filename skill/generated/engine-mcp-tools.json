@@ -1887,7 +1887,7 @@
   {
     "name": "track_set",
     "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.",
-    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (input monitoring is not heard yet). See describe for errors and examples.",
+    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (auto: while armed) — a monitored track hears its input live, also while stopped. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_set_args",

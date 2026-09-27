@@ -706,3 +706,171 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
         std::filesystem::remove_all(dir);
     }
 }
+
+namespace {
+// `s` with its first track monitoring device inputs 1-2 (monitor on).
+model::Session monitoring(model::Session s, model::Monitor mode = model::Monitor::On,
+                          bool armed = false) {
+    model::EditTxn t(s, 9);
+    Id track;
+    for (const auto& e : s.tracks)
+        if (e.id != kMaster) track = e.id;
+    model::Route r;
+    r.from.hwChannels = std::vector<int>{1, 2};
+    r.to.track = track;
+    const Id in = t.create(r);
+    t.modify<model::Track>(track, [&](model::Track& x) {
+        x.record.input = in;
+        x.record.monitor = mode;
+        x.record.armed = armed;
+    });
+    return t.commit().value();
+}
+
+// Device inputs: a constant 0.5 on input 1 and -0.25 on input 2.
+DummyBackend::Options constantInput(std::int64_t captureFrames) {
+    return {.mode = DummyBackend::Mode::Manual,
+            .captureFrames = captureFrames,
+            .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    in[0][i] = 0.5f;
+                    if (channels > 1) in[1][i] = -0.25f;
+                }
+            }};
+}
+}  // namespace
+
+TEST_CASE("monitoring in the callback: the input is heard through the track, stopped or playing" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(constantInput(48000));
+    Engine engine(pool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    // The sine track, monitoring; its notes are silent at 1.75 s (between notes).
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206))).ok());
+    backend.run(4);  // stopped: input only, through the fader (-6 dB) and centre pan (-3 dB)
+    const auto& cap = backend.capture();
+    const double g = 0.5 * 0.70710678;
+    CHECK(double(cap.channels[0][600]) == doctest::Approx(0.5 * g).epsilon(1e-4));
+    CHECK(double(cap.channels[1][600]) == doctest::Approx(-0.25 * g).epsilon(1e-4));
+    CHECK(engine.transport().sample == 0);  // stopped: time stands still
+    engine.seek(1.75);
+    engine.play();
+    backend.run(4);
+    CHECK(double(cap.channels[0][1024 + 600]) == doctest::Approx(0.5 * g).epsilon(1e-4));
+    CHECK(engine.transport().sample == static_cast<std::int64_t>(1.75 * 48000) + 1024);
+    engine.stop();
+}
+
+namespace {
+// The sine track plus a "Vocal" track (a gain plugin at -6 dB) that monitors
+// device inputs 1-2 when `monitored`.
+model::Session withVocal(bool monitored) {
+    model::Session s = synthSession(0.0);
+    model::EditTxn t(s, 8);
+    model::Track tr;
+    tr.name = "Vocal";
+    tr.parent = kMaster;
+    tr.pan = 30.0;
+    const Id vocal = t.create(tr);
+    t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(vocal); });
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.gain";
+    fx.patch =
+        json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"gain": -6}})").value();
+    const Id f = t.create(fx);
+    t.modify<model::Track>(vocal, [&](model::Track& x) { x.chain.push_back(f); });
+    model::Route r;
+    r.from.hwChannels = std::vector<int>{1, 2};
+    r.to.track = vocal;
+    const Id in = t.create(r);
+    t.modify<model::Track>(vocal, [&](model::Track& x) {
+        x.record.input = in;
+        x.record.monitor = monitored ? model::Monitor::On : model::Monitor::Off;
+    });
+    return t.commit().value();
+}
+
+// Device input: a slow ramp on input 1, its negative on input 2.
+DummyBackend::Options rampInput(std::int64_t captureFrames) {
+    return {
+        .mode = DummyBackend::Mode::Manual,
+        .captureFrames = captureFrames,
+        .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t frame) {
+            for (std::uint32_t i = 0; i < n; ++i) {
+                const float v = static_cast<float>((frame + i) % 4800) / 4800.0f - 0.5f;
+                in[0][i] = v;
+                if (channels > 1) in[1][i] = -v;
+            }
+        }};
+}
+}  // namespace
+
+TEST_CASE("anticipative monitoring: live input and rendered playback, identical to the reference" *
+          doctest::description("rt")) {
+    const model::Session s = withVocal(true);
+    constexpr std::int64_t kCycles = 400;  // 102400 frames at 256
+    audio::AudioData reference;
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend(rampInput(kCycles * 256));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, kCycles, 256);
+        else
+            backend.run(kCycles);
+        CHECK(engine.anticipationMisses() == 0);
+        CHECK(engine.processErrors() == 0);
+        CHECK(engine.transport().sample == kCycles * 256);
+        engine.stop();
+        CHECK(engine.lastStopOnAudioThread());
+        const auto& cap = backend.capture();
+        double live = 0;
+        for (std::size_t i = 60000; i < 70000; ++i)
+            live = std::max(live, std::fabs(double(cap.channels[1][i])));
+        CHECK(live > 0.05);  // the ramp, through the vocal chain
+        if (!options.anticipative) {
+            reference = cap;
+        } else {
+            CHECK(cap.channels[0] == reference.channels[0]);
+            CHECK(cap.channels[1] == reference.channels[1]);
+        }
+    }
+}
+
+TEST_CASE("anticipative monitoring: heard while stopped; arming mid-play hands the plugin over" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(rampInput(96000));
+    Engine engine(pool, media, {.workers = 2});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.load(withVocal(true)).ok());
+    REQUIRE(engine.awaitPlan());
+    backend.run(20);  // stopped: the vocal is heard, nothing else plays
+    const auto& cap = backend.capture();
+    double stopped = 0;
+    for (std::size_t i = 2560; i < 5120; ++i)
+        stopped = std::max(stopped, std::fabs(double(cap.channels[0][i])));
+    CHECK(stopped > 0.05);
+    CHECK(engine.transport().sample == 0);
+    // Play, then turn monitoring off and on again while playing: the gain
+    // plugin moves between the callback and the renderer.
+    engine.play();
+    runAhead(engine, backend, 40, 256);
+    for (bool monitored : {false, true, false, true}) {
+        REQUIRE(engine.load(withVocal(monitored)).ok());
+        runAhead(engine, backend, 60, 256);
+        engine.service();
+    }
+    CHECK(engine.processErrors() == 0);
+    CHECK(engine.transport().sample == (40 + 4 * 60) * 256);
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());
+}

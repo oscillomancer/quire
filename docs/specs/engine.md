@@ -387,8 +387,9 @@ granted, and CPU governor (read-only facts).
   offline render. Commands: `env.add`, `env.points.set`, `env.set`,
   `env.remove`, `env.list` (values in the parameter's unit; text like
   "800 Hz" for plugins). Write/touch/latch recording is not implemented.
-- **Recording** (ADR-0014 phase 1): see the ADR's implementation notes.
-- **Not yet:** live nodes (input monitoring) and live multiprocessing,
+- **Recording and input monitoring** (ADR-0014): see the ADR's
+  implementation notes (recording; the live region with two executors).
+- **Not yet:** live multiprocessing,
   one shared process for `shared_bridge`,
   automatic restart after device changes, MIDI ports, automation recording
   (write/touch/latch), stems and render jobs, resampling/stretching of audio items,

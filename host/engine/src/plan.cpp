@@ -446,6 +446,23 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds,
             p.warnings.push_back(e.id.str() + ": automation of " + o.str() + " " + param +
                                  " is not rendered yet");
     }
+    // Input monitoring and the live region (ADR-0014): a track monitors its
+    // record input when monitor is on, or auto while armed; whatever it feeds
+    // is live too (nodes are in topological order, so one pass propagates).
+    for (Node& n : p.nodes) {
+        const model::Track& t = *s.tracks.find(n.id);
+        const bool monitoring = t.record.monitor == model::Monitor::On ||
+                                (t.record.monitor == model::Monitor::Auto && t.record.armed);
+        if (monitoring && t.record.input)
+            if (const model::Route* in = s.routes.find(*t.record.input); in && in->from.hwChannels)
+                for (int ch : *in->from.hwChannels) n.monitorInputs.push_back(ch - 1);
+        n.live = !n.monitorInputs.empty();
+        for (std::size_t e : n.in) n.live = n.live || p.nodes[p.edges[e].from].live;
+        p.anyLive = p.anyLive || n.live;
+    }
+    // The master is the output: live whenever anything is (even a monitored
+    // track that feeds nothing).
+    if (p.anyLive) p.nodes.back().live = true;
     return p;
 }
 
@@ -609,6 +626,35 @@ Status prepare(Plan& p, const Session& s) {
             deps[i].push_back(static_cast<std::uint32_t>(p.edges[e].from));
     p.graph = std::make_unique<TaskGraph>();
     p.graph->build(deps);
+    // The executors' shares (ADR-0014). Live propagates downstream, so a
+    // renderer node never depends on a live one.
+    std::vector<std::uint32_t> task(p.nodes.size(), 0);
+    for (std::size_t i = 0; i < p.nodes.size(); ++i) {
+        (p.nodes[i].live ? p.liveNodes : p.rendererNodes).push_back(i);
+        task[i] = static_cast<std::uint32_t>(p.rendererNodes.size() - 1);
+        for (const Stage& st : p.nodes[i].chain)
+            if (st.instance)
+                (p.nodes[i].live ? p.liveInstances : p.rendererInstances).push_back(st.instance);
+    }
+    std::vector<std::vector<std::uint32_t>> rdeps;
+    for (std::size_t i : p.rendererNodes) {
+        rdeps.emplace_back();
+        for (std::uint32_t d : deps[i]) rdeps.back().push_back(task[d]);
+    }
+    p.rendererGraph = std::make_unique<TaskGraph>();
+    p.rendererGraph->build(rdeps);
+    for (auto* list : {&p.rendererInstances, &p.liveInstances}) {
+        std::sort(list->begin(), list->end());
+        list->erase(std::unique(list->begin(), list->end()), list->end());
+    }
+    for (std::size_t i : p.liveNodes)
+        for (std::size_t e : p.nodes[i].in)
+            if (!p.nodes[p.edges[e].from].live) {
+                p.edges[e].frontier = true;
+                p.edges[e].ring = p.frontier.size();
+                p.edges[e].frontierBuf.init(block);
+                p.frontier.push_back(e);
+            }
     return okStatus();
 }
 
@@ -631,14 +677,15 @@ host::Transport transportAt(const Plan& p, std::int64_t sample) {
 
 // One block of every node, in order. Returns false on a plugin error.
 bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
-                 const host::Transport& transport) SUPPLE_RT {
+                 const host::Transport& transport, const void* self) SUPPLE_RT {
     Node& node = p.nodes[index];
     // 1. Sum the inputs (fixed order), each through its compensation delay.
     node.sum.clear(n);
     for (std::size_t ei : node.in) {
         Edge& e = p.edges[ei];
         const Node& src = p.nodes[e.from];
-        const Stereo& tap = e.tap == model::Tap::PreFx      ? src.preFx
+        const Stereo& tap = p.split && e.frontier           ? e.frontierBuf
+                            : e.tap == model::Tap::PreFx    ? src.preFx
                             : e.tap == model::Tap::PreFader ? src.preFader
                                                             : src.post;
         e.tmp.copyFrom(tap, n);
@@ -664,9 +711,22 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             node.sum.r[i] += r * gr;
         }
     }
+    // Monitored device input enters with the inputs (spec §1.1).
+    if (!node.monitorInputs.empty() && p.deviceIn) {
+        const auto channel = [&](std::size_t k) -> const float* {
+            const int c = node.monitorInputs[std::min(k, node.monitorInputs.size() - 1)];
+            return c >= 0 && static_cast<std::uint32_t>(c) < p.deviceInChannels ? p.deviceIn[c]
+                                                                                : nullptr;
+        };
+        if (const float* l = channel(0))
+            for (std::uint32_t i = 0; i < n; ++i) node.sum.l[i] += l[i];
+        if (const float* r = channel(1))
+            for (std::uint32_t i = 0; i < n; ++i) node.sum.r[i] += r[i];
+    }
     node.preFx.copyFrom(node.sum, n);
-    // Audio items play after the pre-FX tap, before the chain.
+    // Audio items play after the pre-FX tap, before the chain (not when stopped).
     for (const Clip& c : node.clips) {
+        if (!transport.playing) break;
         const std::int64_t from = std::max<std::int64_t>(pos, c.start);
         const std::int64_t to = std::min<std::int64_t>(pos + n, c.start + c.length);
         const auto& ch = c.data->channels;
@@ -710,7 +770,8 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     }
     // 2. Route this block's events to the note target.
     for (Stage& st : node.chain) st.blockEvents.clear();
-    while (node.nextEvent < node.events.size() && node.events[node.nextEvent].sample < pos + n) {
+    while (transport.playing && node.nextEvent < node.events.size() &&
+           node.events[node.nextEvent].sample < pos + n) {
         const TimedEvent& te = node.events[node.nextEvent++];
         if (node.noteTarget < 0) continue;
         host::Event e = te.event;
@@ -762,7 +823,8 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     for (Stage& st : node.chain) {
         // A stage whose plugin is not processing (start_processing failed)
         // passes audio through, delay-compensated, like a bypass.
-        if (st.bypass || !st.instance || !st.instance->processing()) {
+        if (st.bypass || !st.instance || !st.instance->processing() ||
+            (self && st.instance->owner() != self)) {
             st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
             continue;
         }
@@ -829,8 +891,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     return true;
 }
 
-bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
-    const host::Transport transport = transportAt(p, pos);
+bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n, bool playing) SUPPLE_RT {
+    host::Transport transport = transportAt(p, pos);
+    transport.playing = playing;
     for (std::size_t i = 0; i < p.nodes.size(); ++i)
         if (!processNode(p, i, pos, n, transport)) return false;
     return true;
@@ -842,14 +905,54 @@ struct BlockRun {
     std::int64_t pos;
     std::uint32_t frames;
     const host::Transport* transport;
+    const std::vector<std::size_t>* nodes = nullptr;  // task -> node; null: identity
+    const void* self = nullptr;
     std::atomic<bool> ok{true};
 };
-void runNode(void* ctx, std::uint32_t index) SUPPLE_RT {
+void runNode(void* ctx, std::uint32_t task) SUPPLE_RT {
     auto* b = static_cast<BlockRun*>(ctx);
-    if (!processNode(*b->plan, index, b->pos, b->frames, *b->transport))
+    const std::size_t index = b->nodes ? (*b->nodes)[task] : task;
+    if (!processNode(*b->plan, index, b->pos, b->frames, *b->transport, b->self))
         b->ok.store(false, std::memory_order_relaxed);
 }
 }  // namespace
+
+bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
+                          const void* self) {
+    const host::Transport transport = transportAt(p, pos);
+    if (!workers || workers->helpers() == 0) {
+        bool ok = true;
+        for (std::size_t i : p.rendererNodes) ok = processNode(p, i, pos, n, transport, self) && ok;
+        return ok;
+    }
+    BlockRun run{&p, pos, n, &transport, &p.rendererNodes, self};
+    workers->run(*p.rendererGraph, &runNode, &run);
+    return run.ok.load(std::memory_order_relaxed);
+}
+
+void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT {
+    for (Node& n : p.nodes) {
+        if (n.live != live) continue;
+        auto it =
+            std::lower_bound(n.events.begin(), n.events.end(), pos,
+                             [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
+        n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
+            a->cursor = 0;
+        for (Stage& st : n.chain) {
+            st.dry.clear();
+            for (ParamLane& ln : st.lanes) {
+                ln.curve.cursor = 0;
+                ln.lastSent = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
+        for (std::size_t ei : n.in) {
+            Edge& e = p.edges[ei];
+            e.delay.clear();
+            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute}) a->cursor = 0;
+        }
+    }
+}
 
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t n) {
     const host::Transport transport = transportAt(p, pos);

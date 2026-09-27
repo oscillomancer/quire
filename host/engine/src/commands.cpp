@@ -840,7 +840,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
-            "transport.record; monitor: off | on | auto (input monitoring is not heard yet).";
+            "transport.record; monitor: off | on | auto (auto: while armed) — a monitored track "
+            "hears its input live, also while stopped.";
         c.tags = {"track", "mixer"};
         c.args = schema::object<TrackSetArgs>("track_set_args")
                      .field("track", &TrackSetArgs::track, idArg("tr", "Track"))

@@ -1,6 +1,6 @@
 # ADR-0014: Recording, input monitoring and the live region
 
-**Status:** Accepted, 2026-09-27 (recording implemented; monitoring and recovery next). Spec: `docs/specs/engine.md` §2.1, §4
+**Status:** Accepted, 2026-09-27 (recording and input monitoring implemented; recovery next). Spec: `docs/specs/engine.md` §2.1, §4
 (recording), `docs/specs/session-model.md` (`track.record`, routes from
 `hw_input`). Builds on ADR-0012 (anticipation) and ADR-0004 (JACK inputs).
 
@@ -118,4 +118,35 @@ when the machine is busiest, during a recording session).
 - Not yet: `project.recover`, punch/loop takes, RF64, monitoring (§4–5),
   and replaying a recording in a branch merge (the version has no
   invocation to replay).
+
+## Implementation notes: the live region (2026-09-27)
+
+- Compile marks a node live when it monitors (`monitor: on`, or `auto`
+  while armed, with a hw_input record route) or is fed by a live node; the
+  master is live whenever anything is. Monitored input is added to the
+  node's input sum (before the pre-FX tap). Stopped, a plan with live nodes
+  still runs them (plugins process, items and MIDI do not play).
+- `prepare` splits each plan: renderer nodes with their own task graph,
+  live nodes in order, each side's instances, and the frontier edges; the
+  anticipative engine gives each frontier edge a chunk ring and sets
+  `split`, so live nodes read those rings instead of their sources' taps
+  (`ChunkRing::pullAt` aligns by timeline sample).
+- Plans are kept in a registry and freed once the renderer
+  (`stoppedGen_`) and the callback (`callbackGen_`) have both moved past
+  them; instance pruning waits for both too.
+- The renderer adopts a plan at its render position R (`handAt`,
+  `handEpoch` stored in the plan before it is handed over); the callback
+  adopts it when its play position reaches R (splitting the cycle there),
+  immediately when stopped or after a seek. Each executor keeps its own
+  list of owned instances; `host::Instance` carries the owner token;
+  `processNode` skips stages the calling executor does not own;
+  `startFree` starts an instance only once nobody owns it (a refused start
+  is marked and retried with the next plan).
+- Tests: with a monitored track, the anticipative engine's output is
+  bit-identical to the in-callback reference over 100k frames; monitoring
+  is heard while stopped; toggling monitoring while playing moves the
+  plugin between executors with no errors; tsan and rtsan clean.
+- Not yet: live multiprocessing (live nodes run on the callback alone),
+  the crossfade at class changes (a pass-through gap until the new owner
+  starts), `project.recover`, punch/loop.
 

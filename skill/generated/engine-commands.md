@@ -2865,7 +2865,7 @@ Result:
 
 Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
 
-Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (input monitoring is not heard yet).
+Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (auto: while armed) — a monitored track hears its input live, also while stopped.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
