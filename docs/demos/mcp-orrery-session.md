@@ -310,7 +310,7 @@ that exactly duplicates structuredContent is shown once.
           "filters.balance = 0.0 %  (-100.0..100.0 %)"
         ],
         "Filter 1": [
-          "filter1.cutoff = 1000 Hz  (20.0..20000.0 Hz, log)",
+          "filter1.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
           "filter1.resonance = 0.0 %  (0.0..100.0 %)",
           "filter1.keytrack = 0.0 %  (0.0..200.0 %)",
           "filter1.drive = 0.0 dB  (0.0..24.0 dB)",
@@ -323,7 +323,7 @@ that exactly duplicates structuredContent is shown once.
           "filter1.shift = 0.0 st  (-12.0..12.0 st)"
         ],
         "Filter 2": [
-          "filter2.cutoff = 1000 Hz  (20.0..20000.0 Hz, log)",
+          "filter2.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
           "filter2.resonance = 0.0 %  (0.0..100.0 %)",
           "filter2.keytrack = 0.0 %  (0.0..200.0 %)",
           "filter2.drive = 0.0 dB  (0.0..24.0 dB)",
@@ -476,7 +476,7 @@ that exactly duplicates structuredContent is shown once.
         ],
         "FX/EQ": [
           "fx.eq.low_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_freq = 1000 Hz  (200.0..8000.0 Hz, log)",
+          "fx.eq.mid_freq = 1.00 kHz  (200.0..8000.0 Hz, log)",
           "fx.eq.mid_gain = 0.0 dB  (-18.0..18.0 dB)",
           "fx.eq.mid_q = 0.700  (0.3..8.0, log)",
           "fx.eq.high_gain = 0.0 dB  (-18.0..18.0 dB)"
@@ -1800,7 +1800,7 @@ that exactly duplicates structuredContent is shown once.
           "filters.balance = 0.0 %  (-100.0..100.0 %)"
         ],
         "Filter 1": [
-          "filter1.cutoff = 1000 Hz  (20.0..20000.0 Hz, log)",
+          "filter1.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
           "filter1.resonance = 0.0 %  (0.0..100.0 %)",
           "filter1.keytrack = 0.0 %  (0.0..200.0 %)",
           "filter1.drive = 0.0 dB  (0.0..24.0 dB)",
@@ -1813,7 +1813,7 @@ that exactly duplicates structuredContent is shown once.
           "filter1.shift = 0.0 st  (-12.0..12.0 st)"
         ],
         "Filter 2": [
-          "filter2.cutoff = 1000 Hz  (20.0..20000.0 Hz, log)",
+          "filter2.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
           "filter2.resonance = 0.0 %  (0.0..100.0 %)",
           "filter2.keytrack = 0.0 %  (0.0..200.0 %)",
           "filter2.drive = 0.0 dB  (0.0..24.0 dB)",
@@ -1966,7 +1966,7 @@ that exactly duplicates structuredContent is shown once.
         ],
         "FX/EQ": [
           "fx.eq.low_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_freq = 1000 Hz  (200.0..8000.0 Hz, log)",
+          "fx.eq.mid_freq = 1.00 kHz  (200.0..8000.0 Hz, log)",
           "fx.eq.mid_gain = 0.0 dB  (-18.0..18.0 dB)",
           "fx.eq.mid_q = 0.700  (0.3..8.0, log)",
           "fx.eq.high_gain = 0.0 dB  (-18.0..18.0 dB)"
