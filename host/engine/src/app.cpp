@@ -316,7 +316,8 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     BackendConfig config;
     config.sampleRate = view().project->sampleRate;
     config.blockSize = block;
-    config.inputs = 2;  // the device's first stereo pair, for recording
+    config.inputs = 2;         // the device's first stereo pair, for recording
+    config.midiInputs = true;  // its MIDI inputs, for MIDI tracks (ADR-0016)
     if (backend == "jack") {
         JackOptions o;
         o.clientName = std::string(product::kSlug);
@@ -396,6 +397,15 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             const model::Track& tr = *e.value;
             if (!tr.record.armed || !tr.record.input) continue;
             const model::Route* in = s.routes.find(*tr.record.input);
+            if (in && in->from.midiDevice) {  // MIDI (ADR-0016): events, no file
+                RecordTarget t;
+                t.track = e.id;
+                t.midi = RecordTarget::Midi{
+                    midiPortMask(engine_->midiPorts(), *in->from.midiDevice),
+                    in->midi ? in->midi->fromChannel : 0, in->midi ? in->midi->toChannel : 0};
+                targets.push_back(std::move(t));
+                continue;
+            }
             if (!in || !in->from.hwChannels) continue;
             RecordTarget t;
             t.track = e.id;
@@ -416,7 +426,8 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             targets.push_back(std::move(t));
         }
         std::vector<fs::path> files;
-        for (const RecordTarget& t : targets) files.push_back(t.file);
+        for (const RecordTarget& t : targets)
+            if (!t.midi) files.push_back(t.file);
         SUPPLE_TRY(engine_->startRecording(std::move(targets)));
         recordingFiles_ = std::move(files);
         playStart_ = engine_->transport().seconds;
@@ -460,6 +471,135 @@ void EngineApp::setLoop(const TransportRange& loop) {
     if (engine_) engine_->setLoop(loop.start, loop.end, loop.enabled);
 }
 
+namespace {
+
+// A recording's runs on the timeline, and the items and takes they become
+// (ADR-0015, ADR-0016).
+struct Run {
+    std::int64_t from, to, t0;  // file frames [from, to) heard from timeline t0
+    std::size_t index;          // into the segments (a MIDI event's run)
+};
+struct TakePlan {
+    std::int64_t fileFrame;  // at the item's start (audio)
+    bool whole;              // the run covers the whole item
+    std::size_t run;         // into the runs
+};
+struct ItemPlan {
+    std::int64_t start, end;
+    std::vector<TakePlan> takes;
+};
+
+// MIDI (ADR-0016): a source per take, notes paired from note-on/off (still
+// held at the end of the run: ended there), other channel messages as
+// controls, in the project's PPQ from the item's start.
+void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
+                    const std::vector<Run>& runs, const std::vector<ItemPlan>& items, double rate,
+                    std::vector<RecordedInfo>& out) {
+    const model::Track* tr = s.tracks.find(r.track);
+    const int ppq = s.project->ppq;
+    for (const ItemPlan& ip : items) {
+        model::Item item;
+        item.track = r.track;
+        const double start = static_cast<double>(ip.start) / rate;
+        const double end = static_cast<double>(ip.end) / rate;
+        item.position = s.timeMap->beatAt(start);
+        item.length = s.timeMap->beatAt(end) - item.position;
+        auto tick = [&](std::int64_t sample) {
+            return static_cast<std::int64_t>(std::llround(
+                (s.timeMap->beatAt(static_cast<double>(sample) / rate) - item.position) * ppq));
+        };
+        RecordedInfo info;
+        std::optional<Id> active;
+        for (std::size_t k = 0; k < ip.takes.size(); ++k) {
+            const Run& run = runs[ip.takes[k].run];
+            const std::int64_t runEnd = run.t0 + (run.to - run.from);
+            midi::Sequence seq;
+            seq.ppq = ppq;
+            seq.length = tick(ip.end);
+            std::map<std::pair<int, int>, std::pair<std::int64_t, int>> open;
+            auto close = [&](std::pair<int, int> key, std::int64_t at, int offVelocity) {
+                auto it = open.find(key);
+                if (it == open.end()) return;
+                const auto [on, velocity] = it->second;
+                open.erase(it);
+                if (on < ip.start || on >= ip.end) return;  // outside the item
+                midi::Note n;
+                n.start = tick(on);
+                n.length = std::max<std::int64_t>(1, tick(std::min(at, ip.end)) - n.start);
+                n.channel = static_cast<std::uint8_t>(key.first);
+                n.pitch = static_cast<std::uint8_t>(key.second);
+                n.velocity = static_cast<std::uint8_t>(velocity);
+                n.offVelocity = static_cast<std::uint8_t>(offVelocity);
+                seq.notes.push_back(n);
+            };
+            for (const RecordedMidiEvent& ev : r.midi) {
+                if (ev.run != run.index) continue;
+                const int status = ev.bytes[0] & 0xf0, ch = ev.bytes[0] & 0x0f;
+                const int b1 = ev.bytes[1], b2 = ev.bytes[2];
+                if (status == 0x90 && b2 > 0) {
+                    close({ch, b1}, ev.timeline, 0);  // a retrigger ends the last one
+                    open[{ch, b1}] = {ev.timeline, b2};
+                } else if (status == 0x80 || status == 0x90) {
+                    close({ch, b1}, ev.timeline, status == 0x80 ? b2 : 0);
+                } else if (ev.timeline >= ip.start && ev.timeline < ip.end) {
+                    midi::Control c;
+                    c.tick = tick(ev.timeline);
+                    c.channel = static_cast<std::uint8_t>(ch);
+                    switch (status) {
+                        case 0xb0:
+                            c.kind = midi::ControlKind::CC;
+                            c.number = static_cast<std::uint8_t>(b1);
+                            c.value = b2;
+                            break;
+                        case 0xc0:
+                            c.kind = midi::ControlKind::ProgramChange;
+                            c.value = b1;
+                            break;
+                        case 0xd0:
+                            c.kind = midi::ControlKind::ChannelPressure;
+                            c.value = b1;
+                            break;
+                        case 0xa0:
+                            c.kind = midi::ControlKind::PolyPressure;
+                            c.number = static_cast<std::uint8_t>(b1);
+                            c.value = b2;
+                            break;
+                        default:  // 0xe0
+                            c.kind = midi::ControlKind::PitchBend;
+                            c.value = ((b2 << 7) | b1) - 8192;
+                            break;
+                    }
+                    seq.controls.push_back(c);
+                }
+            }
+            while (!open.empty()) close(open.begin()->first, runEnd, 0);  // still held
+            seq.canonicalize();
+            model::MidiSource src;
+            src.sequence = std::move(seq);
+            const Id mi = t.create(std::move(src));
+            model::Take take;
+            take.source = mi;
+            take.name = (tr && !tr->name.empty() ? tr->name : r.track.str()) + " MIDI";
+            if (ip.takes.size() > 1) take.name += " pass " + std::to_string(k + 1);
+            const Id tk = t.create(std::move(take));
+            item.takes.push_back(tk);
+            info.takes.push_back(tk.str());
+            if (ip.takes[k].whole) active = tk;  // the newest whole pass...
+        }
+        if (!active) active = item.takes.back();  // ...or the last one
+        item.activeTake = active;
+        const Id it = t.create(std::move(item));
+        info.track = r.track.str();
+        info.item = it.str();
+        info.take = active->str();
+        info.seconds = end - start;
+        info.lostFrames = static_cast<std::int64_t>(r.overflowFrames);  // events, for MIDI
+        out.push_back(std::move(info));
+    }
+}
+
+}  // namespace
+
 Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes,
                                                          std::string_view label) {
     std::vector<RecordedInfo> out;
@@ -481,14 +621,12 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         // The runs on the timeline (ADR-0015): one per loop pass, or one.
         std::vector<RecordedSegment> segs = r.segments;
         if (segs.empty()) segs.push_back({0, r.startSample});
-        struct Run {
-            std::int64_t from, to, t0;  // file frames [from, to) heard from timeline t0
-        };
         std::vector<Run> runs;
         for (std::size_t k = 0; k < segs.size(); ++k) {
             const std::int64_t to =
                 std::min(r.frames, k + 1 < segs.size() ? segs[k + 1].fileFrame : r.frames);
-            if (to > segs[k].fileFrame) runs.push_back({segs[k].fileFrame, to, segs[k].timeline});
+            if (to > segs[k].fileFrame)
+                runs.push_back({segs[k].fileFrame, to, segs[k].timeline, k});
         }
         const bool passes = runs.size() > 1 && r.loop.end > r.loop.start;
         // Items: the loop range for passes (one take per pass), else one per
@@ -504,31 +642,33 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             from = std::max<std::int64_t>(from, 0);
             return to > from;
         };
-        struct ItemPlan {
-            std::int64_t start, end;
-            std::vector<std::pair<std::int64_t, bool>> takes;  // file frame at start; whole
-        };
         std::vector<ItemPlan> items;
         if (passes) {
             ItemPlan ip{r.loop.start, r.loop.end, {}};
             if (clip(ip.start, ip.end)) {
-                for (const Run& run : runs) {
+                for (std::size_t k = 0; k < runs.size(); ++k) {
+                    const Run& run = runs[k];
                     const std::int64_t t1 = run.t0 + (run.to - run.from);
                     if (t1 <= ip.start || run.t0 >= ip.end) continue;
                     ip.takes.push_back(
-                        {run.from + (ip.start - run.t0), run.t0 <= ip.start && t1 >= ip.end});
+                        {run.from + (ip.start - run.t0), run.t0 <= ip.start && t1 >= ip.end, k});
                 }
                 if (!ip.takes.empty()) items.push_back(std::move(ip));
             }
         } else {
-            for (const Run& run : runs) {
+            for (std::size_t k = 0; k < runs.size(); ++k) {
+                const Run& run = runs[k];
                 ItemPlan ip{run.t0, run.t0 + (run.to - run.from), {}};
                 if (!clip(ip.start, ip.end)) continue;
-                ip.takes.push_back({run.from + (ip.start - run.t0), true});
+                ip.takes.push_back({run.from + (ip.start - run.t0), true, k});
                 items.push_back(std::move(ip));
             }
         }
         if (items.empty()) continue;
+        if (r.isMidi) {
+            if (!r.midi.empty()) commitMidiTake(txn(), s, r, runs, items, rate, out);
+            continue;
+        }
         model::MediaSource md;
         std::error_code ec;
         const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
@@ -554,13 +694,13 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
                 model::Take take;
                 take.source = source;
                 take.startOffset =
-                    static_cast<double>(ip.takes[k].first) / rate;  // < 0: silence first
+                    static_cast<double>(ip.takes[k].fileFrame) / rate;  // < 0: silence first
                 take.name = r.file.stem().string();
                 if (ip.takes.size() > 1) take.name += " pass " + std::to_string(k + 1);
                 const Id tk = t.create(std::move(take));
                 item.takes.push_back(tk);
                 info.takes.push_back(tk.str());
-                if (ip.takes[k].second) active = tk;  // the newest whole pass...
+                if (ip.takes[k].whole) active = tk;  // the newest whole pass...
             }
             if (!active) active = item.takes.back();  // ...or the last one
             item.activeTake = active;

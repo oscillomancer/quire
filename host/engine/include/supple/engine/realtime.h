@@ -18,7 +18,10 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -41,6 +44,19 @@ struct RecordTarget {
     model::Id track;
     std::vector<int> inputs;  // device input channels, 0-based (one per file channel)
     std::filesystem::path file;
+    // MIDI instead of audio (ADR-0016): which device events it records.
+    struct Midi {
+        std::uint64_t ports = 0;
+        int fromChannel = 0, toChannel = 0;
+    };
+    std::optional<Midi> midi;
+};
+
+// A recorded MIDI message, where it was heard, and in which run (loop pass).
+struct RecordedMidiEvent {
+    std::int64_t timeline = 0;
+    std::uint32_t run = 0;
+    std::uint8_t bytes[3] = {0, 0, 0};
 };
 
 // A contiguous run of a recording on the timeline (ADR-0015): a loop wrap
@@ -64,13 +80,48 @@ struct RecordedTake {
     std::uint64_t overflowFrames = 0;  // input lost because the disk fell behind
     std::string error;                 // a failed disk write (what came after it is lost), if any
     double sampleRate = 0;             // of the file and of startSample (the engine's rate)
+    // MIDI (ADR-0016): no file; `frames` is the length recorded, `segments`
+    // the runs, the events in time order.
+    bool isMidi = false;
+    std::vector<RecordedMidiEvent> midi;
 };
 
 struct BackendConfig {
     double sampleRate = 48000.0;
     std::uint32_t blockSize = 256;
     std::uint32_t inputs = 0, outputs = 2;
+    bool midiInputs = false;  // open the device's MIDI inputs too (ADR-0016)
 };
+
+// A short MIDI message from a device input during one callback (ADR-0016).
+struct MidiInputEvent {
+    std::uint32_t frame = 0;  // within the callback's frames
+    std::uint16_t port = 0;   // index into Backend::midiPorts()
+    std::uint8_t size = 0;    // 1..3
+    std::uint8_t bytes[3] = {0, 0, 0};
+};
+inline constexpr std::size_t kMaxMidiInputEvents = 1024;  // per callback
+
+// Whether a device event passes a MIDI route: its port is in `ports` (bit
+// per Backend::midiPorts() index) and its channel matches `fromChannel`
+// (1-based, 0: any). `out` gets the message with its channel set to
+// `toChannel` (0: kept). Only channel messages pass.
+inline bool routeMidi(const MidiInputEvent& e, std::uint64_t ports, int fromChannel, int toChannel,
+                      std::uint8_t out[3]) {
+    if (e.size == 0 || e.port >= 64 || ((ports >> e.port) & 1u) == 0) return false;
+    const std::uint8_t status = e.bytes[0];
+    if (status < 0x80 || status >= 0xf0) return false;
+    const int ch = status & 0x0f;
+    if (fromChannel > 0 && ch != fromChannel - 1) return false;
+    out[0] =
+        static_cast<std::uint8_t>((status & 0xf0) | (toChannel > 0 ? (toChannel - 1) & 0x0f : ch));
+    out[1] = e.size > 1 ? e.bytes[1] : 0;
+    out[2] = e.size > 2 ? e.bytes[2] : 0;
+    return true;
+}
+// The ports a route's device name selects: a case-insensitive substring of
+// the port name; "" or "*" selects every port.
+std::uint64_t midiPortMask(const std::vector<std::string>& ports, std::string_view device);
 
 // What a running backend reports (for engine.status).
 struct BackendStatus {
@@ -99,6 +150,11 @@ class Backend {
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
     virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false}; }
+    // MIDI (ADR-0016). Inside the callback only: this cycle's device events,
+    // sorted by frame (at most kMaxMidiInputEvents; more are dropped).
+    virtual std::span<const MidiInputEvent> midiInput() const { return {}; }
+    // The MIDI input ports, named after their devices (fixed while running).
+    virtual std::vector<std::string> midiPorts() const { return {}; }
 };
 
 // No device. `Manual` runs cycles on the caller's thread (deterministic
@@ -116,6 +172,12 @@ class DummyBackend : public Backend {
         std::function<void(float* const* in, std::uint32_t channels, std::uint32_t frames,
                            std::int64_t frame)>
             input;
+        // Tests: MIDI input ports and the events of each cycle (appended to
+        // `events`, frames within the cycle; `frame` as for `input`).
+        std::vector<std::string> midiPorts;
+        std::function<void(std::vector<MidiInputEvent>& events, std::uint32_t frames,
+                           std::int64_t frame)>
+            midi;
     };
     explicit DummyBackend(Options options);
     ~DummyBackend() override;
@@ -125,12 +187,15 @@ class DummyBackend : public Backend {
     BackendConfig config() const override { return config_; }
     std::string name() const override { return "dummy"; }
     bool ownsThread() const override { return options_.mode == Mode::Thread; }
+    std::span<const MidiInputEvent> midiInput() const override { return midi_; }
+    std::vector<std::string> midiPorts() const override { return options_.midiPorts; }
 
     void run(std::int64_t cycles);  // Manual mode: run cycles now, on this thread
     std::int64_t cycles() const { return cycles_.load(); }
     const audio::AudioData& capture() const { return capture_; }  // read after stop() / run()
 
   private:
+    std::vector<MidiInputEvent> midi_;  // this cycle's (capacity reserved)
     void cycle();
     Options options_;
     BackendConfig config_;
@@ -201,6 +266,10 @@ class Engine {
     // re-renders what was rendered ahead, like a seek to where the listener is.
     void setLoop(double startSeconds, double endSeconds, bool on);
     LoopRange loop() const { return readLoop(); }
+    // The backend's MIDI input ports (ADR-0016); empty when stopped.
+    std::vector<std::string> midiPorts() const {
+        return backend_ ? backend_->midiPorts() : std::vector<std::string>{};
+    }
     TransportState transport() const;
     // Main thread: waits (bounded) until the renderer has acted on every
     // transport request, so transport() reports the new state. With the
@@ -245,8 +314,9 @@ class Engine {
     void anticipativeCycle(const float* const* in, float* const* out,
                            std::uint32_t frames) SUPPLE_RT;
     // Returns the frames rendered (fewer than asked at a loop wrap).
-    std::uint32_t liveRender(const float* const* in, float* const* out,
-                             std::uint32_t frames) SUPPLE_RT;
+    // `offset`: where this part starts in the cycle (for the device MIDI).
+    std::uint32_t liveRender(const float* const* in, float* const* out, std::uint32_t frames,
+                             std::uint32_t offset) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;
     // What a pull played: the timeline sample of its first frame (or
     // kNothingPlayed) and how many frames, from the start of the buffer, came
@@ -345,6 +415,7 @@ class Engine {
     // The callback's share when anticipative: its plan and the live instances
     // it owns, and where it plays live nodes.
     std::uint32_t deviceInputs_ = 0;  // written before the backend starts
+    Backend* midiSource_ = nullptr;   // the backend, for the callback: set before it starts
     detail::Plan* livePlan_ = nullptr;
     std::vector<host::Instance*> liveProcessing_;
     std::int64_t livePos_ = 0;

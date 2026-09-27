@@ -13,6 +13,7 @@
 #include <memory>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -280,6 +281,15 @@ struct Node {
     // one = mono to both sides), and whether it is live (monitors, or is fed
     // by a node that does).
     std::vector<int> monitorInputs;
+    // MIDI monitoring (ADR-0016): the device and channel mapping this track
+    // plays live; the engine resolves the device to ports.
+    struct MidiIn {
+        std::string device;
+        int fromChannel = 0, toChannel = 0;
+        std::uint64_t ports = 0;
+    };
+    std::optional<MidiIn> midiIn;
+    std::array<std::uint8_t, 16 * 128> liveHeld{};  // device notes sounding (per channel/key)
     bool live = false;
     Automation autoVolume, autoTrim, autoPan, autoWidth, autoMute;  // dB, dB, %, %, 0/1
     bool automated() const {
@@ -325,6 +335,10 @@ struct Plan {
     // processes live nodes (null: no device, e.g. offline).
     const float* const* deviceIn = nullptr;
     std::uint32_t deviceInChannels = 0;
+    // The callback's device MIDI (frames within the cycle) and where the part
+    // of the cycle being processed starts.
+    std::span<const MidiInputEvent> deviceMidi;
+    std::uint32_t deviceMidiOffset = 0;
 };
 
 // Builds the plan's structure (nodes in topological order, edges, plugin
@@ -365,6 +379,12 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT;
 // delay lines and plugin state (tails ring on); notes held at the wrap get
 // note-offs at the start of the next block.
 void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
+// A plan swap (ADR-0016): device notes still sounding on a track carry over
+// to the new plan's node, which releases them if it no longer plays MIDI
+// live (so monitoring off never leaves a note hanging). `liveOnly`: only
+// into live nodes (the anticipative callback; a node that left it belongs to
+// the renderer, and its instance was reset on the way).
+void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
 
 // `loop`: the executor's transport loop, for plugins that follow it.
 host::Transport transportAt(const Plan& p, std::int64_t sample,

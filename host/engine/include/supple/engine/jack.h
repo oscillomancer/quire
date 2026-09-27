@@ -13,6 +13,7 @@
 // audio thread beyond counting.
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -61,6 +62,8 @@ class JackBackend : public Backend {
     bool ownsThread() const override { return true; }
     Stats stats() const;
     BackendStatus status() const override;
+    std::span<const MidiInputEvent> midiInput() const override;
+    std::vector<std::string> midiPorts() const override;
 
     // Whether libjack can be loaded and has every symbol we use. Does not
     // contact a server.
@@ -71,6 +74,7 @@ class JackBackend : public Backend {
     Options options_;
     BackendConfig config_;
     std::unique_ptr<Impl> impl_;
+    std::atomic<const Impl*> active_{nullptr};  // set before activation (audio-thread reads)
 };
 
 }  // namespace supple::engine

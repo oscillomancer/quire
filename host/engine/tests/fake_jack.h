@@ -31,6 +31,8 @@ struct FakeJack {
     std::uint64_t (*cycles)() = fn<std::uint64_t (*)()>("fakejack_cycles");
     std::uint32_t (*bufferSizeRequest)() = fn<std::uint32_t (*)()>("fakejack_buffer_size_request");
     int (*connections)() = fn<int (*)()>("fakejack_connections");
+    void (*midi)(int, std::uint32_t, int, int,
+                 int) = fn<void (*)(int, std::uint32_t, int, int, int)>("fakejack_midi");
     const char* (*latencyEnv)() = fn<const char* (*)()>("fakejack_latency_env");
     float (*outputPeak)(const char*) = fn<float (*)(const char*)>("fakejack_output_peak");
 

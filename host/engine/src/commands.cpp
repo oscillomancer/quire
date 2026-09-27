@@ -401,6 +401,8 @@ struct TrackSetArgs {
     std::optional<std::string> solo;
     std::optional<bool> armed;
     std::optional<std::vector<std::int64_t>> recordInput;
+    std::optional<std::string> recordMidi;
+    std::optional<std::int64_t> midiChannel;
     std::optional<model::Monitor> monitor;
 };
 struct TrackMoveArgs {
@@ -954,47 +956,58 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
-            "transport.record; monitor: off | on | auto (auto: while armed) — a monitored track "
-            "hears its input live, also while stopped.";
+            "transport.record; record_midi records MIDI instead: a device name (substring of "
+            "the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: "
+            "off | on | auto (auto: while armed) — a monitored track hears its input live (an "
+            "instrument plays the keyboard), also while stopped.";
         c.tags = {"track", "mixer"};
-        c.args = schema::object<TrackSetArgs>("track_set_args")
-                     .field("track", &TrackSetArgs::track, idArg("tr", "Track"))
-                     .field("name", &TrackSetArgs::name, schema::string())
-                     .field("color", &TrackSetArgs::color, schema::string())
-                     .field("notes", &TrackSetArgs::notes, schema::string())
-                     .field("volume_db", &TrackSetArgs::volumeDb,
-                            schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB))
-                     .field("pan", &TrackSetArgs::pan,
-                            schema::number().range(-100, 100).unit(units::Unit::percent))
-                     .field("width", &TrackSetArgs::width,
-                            schema::number().range(-100, 100).unit(units::Unit::percent))
-                     .field("mute", &TrackSetArgs::mute, schema::boolean())
-                     .field("phase_invert", &TrackSetArgs::phaseInvert, schema::boolean())
-                     .field("solo", &TrackSetArgs::solo,
-                            schema::string().pattern("^(off|on|in_place|defeat)$",
-                                                     "off, on, in_place or defeat"))
-                     .field("armed", &TrackSetArgs::armed, schema::boolean())
-                     .field("record_input", &TrackSetArgs::recordInput,
-                            schema::arrayOf(schema::integer().range(1, 64)))
-                     .field("monitor", &TrackSetArgs::monitor,
-                            schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
-                                                                 {model::Monitor::On, "on"},
-                                                                 {model::Monitor::Auto, "auto"}}))
-                     .build();
+        c.args =
+            schema::object<TrackSetArgs>("track_set_args")
+                .field("track", &TrackSetArgs::track, idArg("tr", "Track"))
+                .field("name", &TrackSetArgs::name, schema::string())
+                .field("color", &TrackSetArgs::color, schema::string())
+                .field("notes", &TrackSetArgs::notes, schema::string())
+                .field("volume_db", &TrackSetArgs::volumeDb,
+                       schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB))
+                .field("pan", &TrackSetArgs::pan,
+                       schema::number().range(-100, 100).unit(units::Unit::percent))
+                .field("width", &TrackSetArgs::width,
+                       schema::number().range(-100, 100).unit(units::Unit::percent))
+                .field("mute", &TrackSetArgs::mute, schema::boolean())
+                .field("phase_invert", &TrackSetArgs::phaseInvert, schema::boolean())
+                .field("solo", &TrackSetArgs::solo,
+                       schema::string().pattern("^(off|on|in_place|defeat)$",
+                                                "off, on, in_place or defeat"))
+                .field("armed", &TrackSetArgs::armed, schema::boolean())
+                .field("record_input", &TrackSetArgs::recordInput,
+                       schema::arrayOf(schema::integer().range(1, 64)))
+                .field("record_midi", &TrackSetArgs::recordMidi, schema::string())
+                .field("midi_channel", &TrackSetArgs::midiChannel, schema::integer().range(0, 16))
+                .field("monitor", &TrackSetArgs::monitor,
+                       schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
+                                                            {model::Monitor::On, "on"},
+                                                            {model::Monitor::Auto, "auto"}}))
+                .build();
         c.result = emptySchema();
         c.examples = {
             {"Turn the bass down 4 dB and a little left",
              obj(R"({"track": "tr_1", "volume_db": "-4 dB", "pan": -15})"), obj("{}"), "song"},
             {"Arm for recording from inputs 1 and 2",
-             obj(R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})"), obj("{}"),
-             "song"}};
+             obj(R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})"), obj("{}"), "song"},
+            {"Play and record a MIDI keyboard (any device, channel 1)",
+             obj(R"({"track": "tr_1", "armed": true, "record_midi": "*", "midi_channel": 1, "monitor": "auto"})"),
+             obj("{}"), "song"}};
         c.run = [](const TrackSetArgs& a, Context& ctx) -> Result<Empty> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
             auto id = existing<model::Track>(s, a.track, "/track");
             if (!id) return std::move(id).error();
-            if ((a.armed || a.recordInput || a.monitor) && *id == model::kMaster)
+            if ((a.armed || a.recordInput || a.recordMidi || a.midiChannel || a.monitor) &&
+                *id == model::kMaster)
                 return Error("track.master", "the master does not record", "/track");
+            if (a.recordInput && a.recordMidi)
+                return Error("track.record_input", "record audio or MIDI, not both",
+                             "/record_midi");
             // The record input is a route from the device inputs (hw_input).
             std::optional<Id> input = s.tracks.find(*id)->record.input;
             if (a.recordInput) {
@@ -1003,8 +1016,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                                  "/record_input", "e.g. [1, 2] for a stereo pair");
                 std::vector<int> channels(a.recordInput->begin(), a.recordInput->end());
                 if (input && s.routes.find(*input)) {
-                    app.txn().modify<model::Route>(
-                        *input, [&](model::Route& r) { r.from.hwChannels = channels; });
+                    app.txn().modify<model::Route>(*input, [&](model::Route& r) {
+                        r.from.hwChannels = channels;
+                        r.from.midiDevice.reset();  // audio replaces MIDI
+                        r.midi.reset();
+                    });
                 } else {
                     model::Route r;
                     r.from.hwChannels = channels;
@@ -1012,9 +1028,30 @@ void registerEngineCommands(cmd::Registry& registry) {
                     input = app.txn().create(r);
                 }
             }
+            if (a.recordMidi || a.midiChannel) {  // a route from midi_input (ADR-0016)
+                const model::Route* old = input ? s.routes.find(*input) : nullptr;
+                if (!a.recordMidi && !(old && old->from.midiDevice))
+                    return Error("track.record_midi", "give record_midi (the device) first",
+                                 "/midi_channel");
+                auto setMidi = [&](model::Route& r) {
+                    r.from.hwChannels.reset();
+                    if (a.recordMidi) r.from.midiDevice = *a.recordMidi;
+                    model::MidiRouting m = r.midi.value_or(model::MidiRouting{});
+                    if (a.midiChannel) m.fromChannel = static_cast<int>(*a.midiChannel);
+                    r.midi = m;
+                };
+                if (old) {
+                    app.txn().modify<model::Route>(*input, setMidi);
+                } else {
+                    model::Route r;
+                    r.to.track = *id;
+                    setMidi(r);
+                    input = app.txn().create(r);
+                }
+            }
             app.txn().modify<model::Track>(*id, [&](model::Track& t) {
                 if (a.armed) t.record.armed = *a.armed;
-                if (a.recordInput) t.record.input = input;
+                if (a.recordInput || a.recordMidi || a.midiChannel) t.record.input = input;
                 if (a.monitor) t.record.monitor = *a.monitor;
                 if (a.name) t.name = *a.name;
                 if (a.color) t.color = *a.color;

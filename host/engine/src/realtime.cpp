@@ -12,6 +12,20 @@
 
 namespace supple::engine {
 
+std::uint64_t midiPortMask(const std::vector<std::string>& ports, std::string_view device) {
+    auto lower = [](std::string_view v) {
+        std::string out(v);
+        for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return out;
+    };
+    const std::string want = lower(device);
+    std::uint64_t mask = 0;
+    for (std::size_t i = 0; i < ports.size() && i < 64; ++i)
+        if (want.empty() || want == "*" || lower(ports[i]).find(want) != std::string::npos)
+            mask |= std::uint64_t{1} << i;
+    return mask;
+}
+
 // --- dummy backend -----------------------------------------------------------------
 
 DummyBackend::DummyBackend(Options options) : options_(options) {}
@@ -28,6 +42,8 @@ Status DummyBackend::start(const BackendConfig& config, Callback callback) {
     inPtrs_.clear();
     for (auto& c : inputs_) inPtrs_.push_back(c.data());
     inputFrame_ = 0;
+    midi_.clear();
+    midi_.reserve(kMaxMidiInputEvents);
     capture_.sampleRate = config.sampleRate;
     capture_.channels.assign(
         2, std::vector<float>(static_cast<std::size_t>(options_.captureFrames), 0.0f));
@@ -71,6 +87,14 @@ void DummyBackend::cycle() {
     float* out[2] = {outL_.data(), outR_.data()};
     if (options_.input && !inPtrs_.empty())
         options_.input(inPtrs_.data(), config_.inputs, config_.blockSize, inputFrame_);
+    midi_.clear();
+    if (options_.midi && config_.midiInputs) {
+        options_.midi(midi_, config_.blockSize, inputFrame_);
+        if (midi_.size() > kMaxMidiInputEvents) midi_.resize(kMaxMidiInputEvents);
+        for (std::size_t i = 1; i < midi_.size(); ++i)  // stable, allocation-free
+            for (std::size_t k = i; k > 0 && midi_[k].frame < midi_[k - 1].frame; --k)
+                std::swap(midi_[k], midi_[k - 1]);
+    }
     inputFrame_ += config_.blockSize;
     callback_(inPtrs_.empty() ? nullptr : inPtrs_.data(), out, config_.blockSize);
     const auto room = std::min<std::int64_t>(config_.blockSize, options_.captureFrames - captured_);
@@ -115,6 +139,7 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     }
     deviceInputs_ =
         std::min<std::uint32_t>(config.inputs, 64);  // the callback's copy, set before it runs
+    midiSource_ = &backend;  // before any callback (backend_ is set after start returns)
     auto started = backend.start(config, [this](const float* const* in, float* const* out,
                                                 std::uint32_t n) { cycle(in, out, n); });
     if (!started) {
@@ -194,6 +219,12 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     plan->projectDir = projectDir;
     plan->media = &media_;
     SUPPLE_TRY(detail::prepare(*plan, session));
+    if (std::any_of(plan->nodes.begin(), plan->nodes.end(),
+                    [](const detail::Node& n) { return n.midiIn.has_value(); })) {
+        const std::vector<std::string> ports = backend_->midiPorts();  // ADR-0016
+        for (detail::Node& n : plan->nodes)
+            if (n.midiIn) n.midiIn->ports = midiPortMask(ports, n.midiIn->device);
+    }
     if (plan->instances.size() > kMaxInstances)
         return Error("engine.too_many_plugins",
                      "more than " + std::to_string(kMaxInstances) + " plugin instances");
@@ -339,6 +370,7 @@ void Engine::collectPlans() {
 
 void Engine::service() {
     collectPlans();
+    if (recorderOwned_) recorderOwned_->drainMidi();  // (the rings are bounded)
     const std::uint64_t rendered = stoppedGen_.load(std::memory_order_acquire);
     const std::uint64_t live =
         options_.anticipative ? std::min(rendered, callbackGen_.load(std::memory_order_acquire))
@@ -365,6 +397,9 @@ void Engine::adoptShare(std::vector<host::Instance*>& owned,
         if (next && std::binary_search(next->begin(), next->end(), in)) {
             owned[kept++] = in;
         } else {
+            // Leaving this executor (removed, or moving to the other one):
+            // no voice may hang on, e.g. live MIDI notes when monitoring stops.
+            in->reset();
             in->stopProcessing();
             in->setOwner(nullptr);
         }
@@ -429,6 +464,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
     }
     detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
     if (plan != plan_) {
+        if (plan_ && plan) detail::carryLiveNotes(*plan_, *plan, false);  // old plan still ours
         adoptShare(processing_, plan ? &plan->instances : nullptr, &processing_);
         plan_ = plan;
         if (plan) {
@@ -462,9 +498,11 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         loopC_ = readLoop(&loopSeqSeen_);
     if (plan) {
         startFree(processing_, &plan->instances, &processing_);  // any refused, retried
-        // For monitored inputs.
+        // For monitored inputs (audio and MIDI).
         plan->deviceIn = in;
         plan->deviceInChannels = deviceInputs_;
+        plan->deviceMidi = midiSource_->midiInput();
+        plan->deviceMidiOffset = 0;
     }
     if (plan && !playing_ && plan->anyLive && !shutDown_.load() && frames <= plan->block) {
         // Stopped, but a track monitors its input: plugins run, nothing plays.
@@ -491,6 +529,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             inAt[c] = in && in[c] ? in[c] + done : nullptr;
         const float* const* ins = in ? inAt.data() : nullptr;
         plan->deviceIn = ins;  // monitored input for this part of the cycle
+        plan->deviceMidiOffset = done;
         if (!detail::processBlock(*plan, pos_, k, true, &loopC_)) {
             ok = false;
             break;
@@ -498,7 +537,10 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         const detail::Node& master = plan->nodes.back();
         std::copy_n(master.post.l.begin(), k, out[0] + done);
         std::copy_n(master.post.r.begin(), k, out[1] + done);
-        if (detail::Recorder* r = recorder_.load()) r->capture(ins, deviceInputs_, k, pos_);
+        if (detail::Recorder* r = recorder_.load()) {
+            r->capture(ins, deviceInputs_, k, pos_);
+            r->captureMidi(plan->deviceMidi, done, k, pos_);
+        }
         const std::int64_t next = loopC_.next(pos_, pos_ + k);
         if (next != pos_ + k) detail::wrapTo(*plan, next, -1);
         pos_ = next;
@@ -717,6 +759,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
 // --- the live region (ADR-0014) -----------------------------------------------------------
 
 void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
+    if (livePlan_ && next && next->split) detail::carryLiveNotes(*livePlan_, *next, true);
     adoptShare(liveProcessing_, next ? &next->liveInstances : nullptr, &liveProcessing_);
     const bool wasLive = livePlan_ && livePlan_->split;
     livePlan_ = next;
@@ -758,7 +801,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         float* outAt[2] = {out[0] + done, out[1] + done};
         const float* const* ins = in ? inAt.data() : nullptr;
         if (livePlan_ && livePlan_->split) {
-            k = liveRender(ins, outAt, k);
+            k = liveRender(ins, outAt, k, done);
         } else {
             const Pulled played = pullAhead(outAt, k);
             if (played.wrapped) k = played.frames;  // the rest continues at the loop start
@@ -767,6 +810,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
             if (detail::Recorder* r = recorder_.load()) {
                 if (played.first != kNothingPlayed) {
                     r->capture(ins, inputs, played.frames, played.first);
+                    r->captureMidi(midiSource_->midiInput(), done, played.frames, played.first);
                     r->lose(k - played.frames);
                 } else if (playing) {
                     r->lose(k);
@@ -777,8 +821,8 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
     }
 }
 
-std::uint32_t Engine::liveRender(const float* const* in, float* const* out,
-                                 std::uint32_t k) SUPPLE_RT {
+std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std::uint32_t k,
+                                 std::uint32_t offset) SUPPLE_RT {
     detail::Plan& p = *livePlan_;
     const void* self = &liveProcessing_;
     if (!liveReady_) {
@@ -818,6 +862,8 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out,
     }
     p.deviceIn = in;
     p.deviceInChannels = deviceInputs_;
+    p.deviceMidi = midiSource_->midiInput();
+    p.deviceMidiOffset = offset;
     host::Transport t = detail::transportAt(p, livePos_, &loopC_);
     t.playing = playing;
     bool ok = true;
@@ -827,7 +873,10 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out,
     std::copy_n(master.post.l.begin(), k, out[0]);
     std::copy_n(master.post.r.begin(), k, out[1]);
     if (playing) {
-        if (detail::Recorder* r = recorder_.load()) r->capture(in, deviceInputs_, k, livePos_);
+        if (detail::Recorder* r = recorder_.load()) {
+            r->capture(in, deviceInputs_, k, livePos_);
+            r->captureMidi(p.deviceMidi, offset, k, livePos_);
+        }
         const std::int64_t next = loopC_.next(livePos_, livePos_ + k);
         if (next != livePos_ + k) detail::wrapTo(p, next, 1);
         livePos_ = next;

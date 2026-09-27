@@ -750,3 +750,71 @@ TEST_CASE("an LLM loop-records over the bus: one item, a take per pass, punch tr
     const model::Take* first = p.takes.find(pi.takes[0]);
     CHECK(first->startOffset == doctest::Approx(0.1));  // 0.1 s into the first pass
 }
+
+TEST_CASE("an LLM records a MIDI performance over the bus and reads it back as notes") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Keys"}, "as": "k"},
+        {"command": "fx.add", "args": {"track": "${k.track}", "plugin": "com.suppleaudio.test.sine"}},
+        {"command": "track.set", "args": {"track": "${k.track}", "armed": true, "record_midi": "*", "midi_channel": 1}}]})");
+    const model::Session armed = app->head();
+    const model::Route* route =
+        armed.routes.find(*armed.tracks.find(model::Id{model::Kind::Track, 1})->record.input);
+    REQUIRE(route);
+    CHECK(route->from.midiDevice == std::optional<std::string>("*"));
+    CHECK(route->midi->fromChannel == 1);
+    // A keyboard: every 24000 device frames (0.5 s) a note on, off 12000 later.
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .midiPorts = {"USB Keyboard"},
+         .midi = [](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
+             for (std::int64_t f = frame; f < frame + n; ++f) {
+                 if (f % 12000 != 0) continue;
+                 MidiInputEvent m;
+                 m.frame = static_cast<std::uint32_t>(f - frame);
+                 m.size = 3;
+                 const bool on = f % 24000 == 0;
+                 m.bytes[0] = on ? 0x90 : 0x80;
+                 m.bytes[1] = 60;
+                 m.bytes[2] = on ? 100 : 0;
+                 out.push_back(m);
+             }
+         }});
+    REQUIRE(
+        app->startEngine(backend,
+                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true})
+            .ok());
+    call("transport.record", "{}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
+    auto stopped = call("transport.stop", "{}");
+    app->stopEngine();
+    REQUIRE(stopped["recorded"].size() == 1);
+    const std::string itemId = stopped["recorded"].at(0).find("item")->asString();
+    const model::Session s = app->head();
+    const model::Item& item = *s.items.find(*model::Id::parse(itemId));
+    const model::Take& take = *s.takes.find(*item.activeTake);
+    REQUIRE(take.source);
+    const midi::Sequence& seq = s.midi.find(*take.source)->sequence;
+    REQUIRE(seq.notes.size() >= 2);
+    for (std::size_t i = 0; i < seq.notes.size(); ++i) {
+        CHECK(seq.notes[i].pitch == 60);
+        CHECK(seq.notes[i].velocity == 100);
+        if (i + 1 < seq.notes.size()) {
+            CHECK(seq.notes[i].length == 480);                          // half a beat
+            CHECK(seq.notes[i + 1].start - seq.notes[i].start == 960);  // one beat apart
+        }
+    }
+    // Read back as notation.
+    auto text = call("midi.get", std::string(R"({"item": ")") + itemId + R"("})");
+    CHECK(text["text"].asString().find("C4") != std::string::npos);
+}

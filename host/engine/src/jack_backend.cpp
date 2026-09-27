@@ -27,6 +27,12 @@ constexpr int kNoStartServer = 0x01;
 constexpr unsigned long kPortIsInput = 0x1, kPortIsOutput = 0x2, kPortIsPhysical = 0x4;
 constexpr int kPlaybackLatency = 1;
 constexpr const char* kAudioType = "32 bit float mono audio";
+constexpr const char* kMidiType = "8 bit raw midi";
+struct MidiEvent {  // jack_midi_event_t
+    Frames time;
+    std::size_t size;
+    unsigned char* buffer;
+};
 
 struct Api {
     JackClient* (*clientOpen)(const char*, int, int*, ...) = nullptr;
@@ -49,6 +55,8 @@ struct Api {
     const char** (*getPorts)(JackClient*, const char*, const char*, unsigned long) = nullptr;
     int (*connect)(JackClient*, const char*, const char*) = nullptr;
     void (*free)(void*) = nullptr;
+    std::uint32_t (*midiGetEventCount)(void*) = nullptr;  // optional: MIDI (ADR-0016)
+    int (*midiEventGet)(MidiEvent*, void*, std::uint32_t) = nullptr;
 };
 
 template <class F>
@@ -94,6 +102,8 @@ Result<const Api*> loadApi(const std::string& library) {
     bind(h, "jack_free", api.free, missing);
     std::string optional;  // latency reporting is informational
     bind(h, "jack_port_get_latency_range", api.portGetLatencyRange, optional);
+    bind(h, "jack_midi_get_event_count", api.midiGetEventCount, optional);
+    bind(h, "jack_midi_event_get", api.midiEventGet, optional);
     if (!missing.empty()) {
         ::dlclose(h);
         return Error("backend.unavailable", library + " lacks JACK symbols: " + missing);
@@ -123,6 +133,14 @@ struct JackBackend::Impl {
     JackClient* client = nullptr;
     std::array<JackPort*, kMaxPorts> inPorts{}, outPorts{};
     std::uint32_t inputs = 0, outputs = 0, block = 0;
+    // MIDI (ADR-0016): one input port per physical MIDI capture port; this
+    // period's events, and the current block's (frames from its start).
+    static constexpr std::uint32_t kMaxMidiPorts = 16;
+    std::array<JackPort*, kMaxMidiPorts> midiPorts{};
+    std::uint32_t midiInputs = 0;
+    std::vector<std::string> midiNames;
+    std::vector<MidiInputEvent> periodMidi, blockMidi;  // capacity reserved
+    std::atomic<std::uint64_t> midiDropped{0};
     Frames rate = 0;
     Callback callback;
 
@@ -140,15 +158,24 @@ struct JackBackend::Impl {
             in[c] = static_cast<const float*>(api->portGetBuffer(inPorts[c], n));
         const int s = state.load(std::memory_order_acquire);
         if (s == kRunning) {
+            collectMidi(n);
             std::array<float*, kMaxPorts> o;
             std::array<const float*, kMaxPorts> i;
+            std::size_t next = 0;  // into periodMidi
             for (Frames at = 0; at < n;) {
                 const Frames len = std::min<Frames>(block, n - at);
                 for (std::uint32_t c = 0; c < outputs; ++c) o[c] = out[c] + at;
                 for (std::uint32_t c = 0; c < inputs; ++c) i[c] = in[c] + at;
+                blockMidi.clear();
+                for (; next < periodMidi.size() && periodMidi[next].frame < at + len; ++next) {
+                    MidiInputEvent e = periodMidi[next];
+                    e.frame -= at;
+                    blockMidi.push_back(e);
+                }
                 callback(inputs ? i.data() : nullptr, o.data(), len);
                 at += len;
             }
+            blockMidi.clear();
         } else {
             for (std::uint32_t c = 0; c < outputs; ++c) std::fill_n(out[c], n, 0.0f);
             if (s == kStopping) {
@@ -158,6 +185,34 @@ struct JackBackend::Impl {
         }
         cycles.fetch_add(1, std::memory_order_relaxed);
         return 0;
+    }
+
+    // This period's short MIDI messages from every port, sorted by frame
+    // (longer ones, e.g. system exclusive, and overflow are counted).
+    void collectMidi(Frames n) SUPPLE_RT {
+        periodMidi.clear();
+        for (std::uint32_t p = 0; p < midiInputs; ++p) {
+            void* buffer = api->portGetBuffer(midiPorts[p], n);
+            const std::uint32_t count = buffer ? api->midiGetEventCount(buffer) : 0;
+            for (std::uint32_t k = 0; k < count; ++k) {
+                MidiEvent ev{};
+                if (api->midiEventGet(&ev, buffer, k) != 0) continue;
+                if (ev.size == 0 || ev.size > 3 || ev.buffer[0] >= 0xf0 ||
+                    periodMidi.size() == periodMidi.capacity()) {
+                    midiDropped.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+                MidiInputEvent e;
+                e.frame = std::min<Frames>(ev.time, n - 1);
+                e.port = static_cast<std::uint16_t>(p);
+                e.size = static_cast<std::uint8_t>(ev.size);
+                std::copy_n(ev.buffer, ev.size, e.bytes);
+                periodMidi.push_back(e);
+            }
+        }
+        for (std::size_t i = 1; i < periodMidi.size(); ++i)  // stable, allocation-free
+            for (std::size_t k = i; k > 0 && periodMidi[k].frame < periodMidi[k - 1].frame; --k)
+                std::swap(periodMidi[k], periodMidi[k - 1]);
     }
 
     static int processThunk(Frames n, void* self) SUPPLE_RT {
@@ -244,6 +299,24 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
             api->portRegister(impl->client, port.c_str(), kAudioType, kPortIsInput, 0);
         if (!impl->inPorts[c]) return fail("could not register port " + port);
     }
+    impl->periodMidi.reserve(kMaxMidiInputEvents);
+    impl->blockMidi.reserve(kMaxMidiInputEvents);
+    std::vector<std::string> midiSources;  // the physical MIDI capture ports we listen to
+    if (config.midiInputs && api->midiGetEventCount && api->midiEventGet) {
+        if (const char** ports =
+                api->getPorts(impl->client, nullptr, kMidiType, kPortIsPhysical | kPortIsOutput)) {
+            for (std::uint32_t k = 0; ports[k] && k < Impl::kMaxMidiPorts; ++k) {
+                const std::string port = "midi_in_" + std::to_string(k + 1);
+                JackPort* p =
+                    api->portRegister(impl->client, port.c_str(), kMidiType, kPortIsInput, 0);
+                if (!p) continue;  // a port we cannot open is left out
+                impl->midiPorts[impl->midiInputs++] = p;
+                impl->midiNames.emplace_back(ports[k]);
+                midiSources.emplace_back(ports[k]);
+            }
+            api->free(static_cast<void*>(ports));
+        }
+    }
     impl->rate = api->getSampleRate(impl->client);
     if (options_.forceBufferSize && api->getBufferSize(impl->client) != config.blockSize)
         api->setBufferSize(impl->client, config.blockSize);  // granted or not: period is reported
@@ -255,7 +328,11 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     api->setBufferSizeCallback(impl->client, &Impl::bufferSizeThunk, self);
     api->setSampleRateCallback(impl->client, &Impl::sampleRateThunk, self);
     api->onShutdown(impl->client, &Impl::shutdownThunk, self);
-    if (api->activate(impl->client) != 0) return fail("could not activate the client");
+    active_.store(self, std::memory_order_release);  // midiInput() from the first callback
+    if (api->activate(impl->client) != 0) {
+        active_.store(nullptr);
+        return fail("could not activate the client");
+    }
 
     if (options_.connectOutputs) {
         // Our outputs to the physical playback ports, in order; a device with
@@ -274,6 +351,8 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
             api->free(static_cast<void*>(ports));
         }
     }
+    for (std::uint32_t k = 0; k < impl->midiInputs; ++k)  // each device into its port
+        api->connect(impl->client, midiSources[k].c_str(), api->portName(impl->midiPorts[k]));
     config_ = config;
     config_.sampleRate = static_cast<double>(impl->rate);
     impl_ = std::move(impl);
@@ -294,6 +373,7 @@ void JackBackend::stop() {
     // final callback, the engine stops its plugins on this thread.
     if (!m.serverGone.load()) m.api->deactivate(m.client);
     m.close();
+    active_.store(nullptr, std::memory_order_release);
     impl_.reset();
 }
 
@@ -323,6 +403,15 @@ BackendStatus JackBackend::status() const {
         inputLatency = range.max;
     }
     return {s.period, s.xruns, s.outputLatency, inputLatency, s.rateChanged || s.serverGone};
+}
+
+std::span<const MidiInputEvent> JackBackend::midiInput() const {
+    const Impl* m = active_.load(std::memory_order_acquire);  // the audio thread's view
+    return m ? std::span<const MidiInputEvent>(m->blockMidi) : std::span<const MidiInputEvent>();
+}
+
+std::vector<std::string> JackBackend::midiPorts() const {
+    return impl_ ? impl_->midiNames : std::vector<std::string>{};
 }
 
 }  // namespace supple::engine

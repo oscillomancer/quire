@@ -454,9 +454,15 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         const bool monitoring = t.record.monitor == model::Monitor::On ||
                                 (t.record.monitor == model::Monitor::Auto && t.record.armed);
         if (monitoring && t.record.input)
-            if (const model::Route* in = s.routes.find(*t.record.input); in && in->from.hwChannels)
-                for (int ch : *in->from.hwChannels) n.monitorInputs.push_back(ch - 1);
-        n.live = !n.monitorInputs.empty();
+            if (const model::Route* in = s.routes.find(*t.record.input)) {
+                if (in->from.hwChannels)
+                    for (int ch : *in->from.hwChannels) n.monitorInputs.push_back(ch - 1);
+                if (in->from.midiDevice)
+                    n.midiIn =
+                        Node::MidiIn{*in->from.midiDevice, in->midi ? in->midi->fromChannel : 0,
+                                     in->midi ? in->midi->toChannel : 0, 0};
+            }
+        n.live = !n.monitorInputs.empty() || n.midiIn.has_value();
         for (std::size_t e : n.in) n.live = n.live || p.nodes[p.edges[e].from].live;
         p.anyLive = p.anyLive || n.live;
     }
@@ -804,6 +810,49 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                 --node.held[k];
         }
     }
+    // Live MIDI from the device (ADR-0016), playing or not, after timeline MIDI
+    // at the same frame; not counted as held (a loop wrap does not cut what
+    // the performer holds).
+    if (node.midiIn && node.noteTarget >= 0 && !p.deviceMidi.empty()) {
+        auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
+        const std::size_t before = target.size();
+        for (const MidiInputEvent& ev : p.deviceMidi) {
+            if (ev.frame < p.deviceMidiOffset) continue;
+            if (ev.frame >= p.deviceMidiOffset + n || target.size() >= target.capacity()) break;
+            std::uint8_t m[3];
+            if (!routeMidi(ev, node.midiIn->ports, node.midiIn->fromChannel, node.midiIn->toChannel,
+                           m))
+                continue;
+            host::Event e;
+            e.time = ev.frame - p.deviceMidiOffset;
+            e.channel = static_cast<std::int16_t>(m[0] & 0x0f);
+            const int kind = m[0] & 0xf0;
+            if (kind == 0x90 && m[2] > 0) {
+                e.kind = host::Event::Kind::NoteOn;
+                e.key = m[1];
+                e.velocity = m[2] / 127.0;
+            } else if (kind == 0x80 || kind == 0x90) {
+                e.kind = host::Event::Kind::NoteOff;
+                e.key = m[1];
+                e.velocity = m[2] / 127.0;
+            } else {
+                e.kind = host::Event::Kind::Midi;
+                std::copy_n(m, 3, e.midi);
+            }
+            target.push_back(e);
+            if (e.kind == host::Event::Kind::NoteOn || e.kind == host::Event::Kind::NoteOff) {
+                const auto k = static_cast<std::size_t>((e.channel & 15) * 128 + (e.key & 127));
+                if (e.kind == host::Event::Kind::NoteOn && node.liveHeld[k] < 255)
+                    ++node.liveHeld[k];
+                else if (e.kind == host::Event::Kind::NoteOff && node.liveHeld[k] > 0)
+                    --node.liveHeld[k];
+            }
+        }
+        if (target.size() > before)  // stable insertion sort by time: no allocation
+            for (std::size_t i = 1; i < target.size(); ++i)
+                for (std::size_t j = i; j > 0 && target[j - 1].time > target[j].time; --j)
+                    std::swap(target[j - 1], target[j]);
+    }
     // 2b. Plugin parameter automation: values at the block start, every
     // kAutomationStep samples and at each point, in time order (the lane's
     // cursor only moves forward), merged into the block's sorted events.
@@ -1032,6 +1081,28 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
             for (Automation* a :
                  {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
                 a->cursor = 0;
+    }
+}
+
+void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT {
+    for (Node& old : from.nodes) {
+        if (!old.midiIn) continue;
+        const bool sounding = std::any_of(old.liveHeld.begin(), old.liveHeld.end(),
+                                          [](std::uint8_t c) { return c != 0; });
+        if (!sounding) continue;
+        for (Node& n : to.nodes) {
+            if (n.id != old.id) continue;
+            if (liveOnly && !n.live) break;
+            if (n.midiIn) {
+                n.liveHeld = old.liveHeld;  // still live: its note-offs will come
+            } else {
+                for (std::size_t k = 0; k < n.held.size(); ++k)
+                    n.held[k] =
+                        static_cast<std::uint8_t>(std::min(255, n.held[k] + old.liveHeld[k]));
+                n.releaseHeld = true;  // ended at the start of the next block
+            }
+            break;
+        }
     }
 }
 

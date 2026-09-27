@@ -694,7 +694,7 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
         const auto dir =
             std::filesystem::temp_directory_path() / ("supple-rec-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
-        REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav"}}).ok());
+        REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}).ok());
         CHECK(engine.recording());
         engine.seek(1.0);
         engine.play();
@@ -749,7 +749,7 @@ TEST_CASE("recording through a playback dropout keeps the take on the timeline" 
     const auto dir =
         std::filesystem::temp_directory_path() / ("supple-rec-gap-" + std::to_string(::getpid()));
     std::filesystem::remove_all(dir);
-    REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav"}}).ok());
+    REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}).ok());
     engine.play();
     runAhead(engine, backend, 20, 384);
     engine.holdRenderer(true);
@@ -1093,7 +1093,7 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
         std::filesystem::remove_all(dir);
         engine.setLoop(0.5, 1.0, true);
         engine.seek(0.25);
-        REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav"}}).ok());
+        REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}).ok());
         engine.play();
         constexpr std::int64_t kCycles = 400;  // 102400 frames: 36000 + 24000 * 2 + 18400
         if (options.anticipative)
@@ -1122,5 +1122,180 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
         CHECK(breaks == 0);
         engine.stop();
         std::filesystem::remove_all(dir);
+    }
+}
+
+// --- MIDI input (ADR-0016)
+// ------------------------------------------------------------------------
+
+namespace {
+// A sine instrument track that monitors (and may record) every MIDI device.
+model::Session keyboardSession(bool armed = false) {
+    model::EditTxn t(model::Session::create(), 1);
+    model::Track tr;
+    tr.name = "Keys";
+    tr.parent = kMaster;
+    const Id track = t.create(tr);
+    t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(track); });
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.sine";
+    const Id f = t.create(fx);
+    model::Route in;
+    in.from.midiDevice = "key";  // matches the "Keyboard" port
+    in.to.track = track;
+    in.midi = model::MidiRouting{1, 0};  // channel 1 only
+    const Id r = t.create(in);
+    t.modify<model::Track>(track, [&](model::Track& x) {
+        x.chain.push_back(f);
+        x.record.input = r;
+        x.record.armed = armed;
+        x.record.monitor = armed ? model::Monitor::Auto : model::Monitor::On;
+    });
+    return t.commit().value();
+}
+
+// Device MIDI at fixed device frames: {frame, status, data1, data2}.
+DummyBackend::Options keyboard(std::vector<std::array<int, 4>> events, std::int64_t capture) {
+    return {
+        .mode = DummyBackend::Mode::Manual,
+        .captureFrames = capture,
+        .midiPorts = {"Keyboard", "Pads"},
+        .midi = [events](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
+            for (const auto& e : events)
+                if (e[0] >= frame && e[0] < frame + n) {
+                    MidiInputEvent m;
+                    m.frame = static_cast<std::uint32_t>(e[0] - frame);
+                    m.size = 3;
+                    m.bytes[0] = static_cast<std::uint8_t>(e[1]);
+                    m.bytes[1] = static_cast<std::uint8_t>(e[2]);
+                    m.bytes[2] = static_cast<std::uint8_t>(e[3]);
+                    out.push_back(m);
+                }
+        }};
+}
+}  // namespace
+
+TEST_CASE("MIDI monitoring: a keyboard plays the instrument live, sample-accurately" *
+          doctest::description("rt")) {
+    // Note on at device frame 1000, off at 20000; a note on channel 2 and one
+    // from the other port are filtered out by the route.
+    const std::vector<std::array<int, 4>> events = {
+        {1000, 0x90, 60, 100}, {5000, 0x91, 67, 100}, {20000, 0x80, 60, 0}, {25000, 0x90, 72, 100}};
+    for (const bool playing : {false, true})
+        for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+            INFO("playing " << playing << ", anticipative " << options.anticipative);
+            auto pool = makePool();
+            MediaCache media;
+            auto opts = keyboard(events, 30720);
+            opts.midi = [inner = opts.midi](std::vector<MidiInputEvent>& out, std::uint32_t n,
+                                            std::int64_t frame) {
+                inner(out, n, frame);
+                for (auto& m : out)
+                    if (m.bytes[1] == 72) m.port = 1;  // the note at 25000 comes from "Pads"
+            };
+            DummyBackend backend(opts);
+            Engine engine(pool, media, options);
+            REQUIRE(
+                engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
+                    .ok());
+            REQUIRE(engine.load(keyboardSession()).ok());
+            REQUIRE(engine.awaitPlan());  // everything is live: nothing renders ahead
+            if (playing) engine.play();
+            if (playing) engine.awaitTransport();
+            backend.run(120);
+            engine.stop();
+            const auto& L = backend.capture().channels[0];
+            auto peakIn = [&](std::size_t from, std::size_t to) {
+                double m = 0;
+                for (std::size_t i = from; i < to; ++i) m = std::max(m, std::fabs(double(L[i])));
+                return m;
+            };
+            CHECK(peakIn(0, 1000) == 0.0);
+            CHECK(peakIn(1000, 1010) > 0.0);  // starts at its frame
+            CHECK(peakIn(2000, 19000) > 0.1);
+            CHECK(peakIn(20000, 30720) == 0.0);  // off at 20000; channel 2 and "Pads" never sound
+        }
+}
+
+TEST_CASE("MIDI recording: events land on the timeline where they were heard, per loop pass" *
+          doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        // Loop 0.5 s .. 1 s from 0: pass 0 is 0 .. 1 s, then passes of 0.5 s
+        // (device frames 48000.. and 72000..). The same note in each pass.
+        DummyBackend backend(keyboard({{30000, 0x90, 60, 90},
+                                       {36000, 0x80, 60, 40},
+                                       {54000, 0x90, 60, 90},
+                                       {60000, 0x80, 60, 40},
+                                       {78000, 0x90, 62, 90},
+                                       {84000, 0x80, 62, 40},
+                                       {90000, 0xb0, 1, 64}},
+                                      0));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
+                    .ok());
+        const model::Session s = keyboardSession(true);
+        REQUIRE(engine.load(s).ok());
+        Id track;
+        for (const auto& e : s.tracks)
+            if (e.id != kMaster) track = e.id;
+        engine.setLoop(0.5, 1.0, true);
+        RecordTarget target;
+        target.track = track;
+        target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "key"), 1, 0};
+        REQUIRE(engine.startRecording({target}).ok());
+        REQUIRE(engine.awaitPlan());  // everything is live: nothing renders ahead
+        engine.play();
+        engine.awaitTransport();
+        backend.run(400);  // 102400 frames
+        auto takes = engine.stopRecording();
+        REQUIRE(takes);
+        REQUIRE(takes->size() == 1);
+        const RecordedTake& t = (*takes)[0];
+        CHECK(t.isMidi);
+        REQUIRE(t.midi.size() == 7);
+        const std::int64_t want[7][2] = {{30000, 0}, {36000, 0}, {30000, 1}, {36000, 1},
+                                         {30000, 2}, {36000, 2}, {42000, 2}};
+        for (std::size_t i = 0; i < 7; ++i) {
+            CHECK(t.midi[i].timeline == want[i][0]);
+            CHECK(t.midi[i].run == static_cast<std::uint32_t>(want[i][1]));
+        }
+        engine.stop();
+    }
+}
+
+TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
+          doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend(keyboard({{500, 0x90, 60, 100}}, 40960));  // held, never released
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
+                    .ok());
+        model::Session s = keyboardSession();
+        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.awaitPlan());
+        backend.run(40);  // 10240 frames: the note sounds
+        model::EditTxn t(s, 2);
+        for (const auto& e : s.tracks)
+            if (e.id != kMaster)
+                t.modify<model::Track>(
+                    e.id, [](model::Track& x) { x.record.monitor = model::Monitor::Off; });
+        REQUIRE(engine.load(t.commit().value()).ok());
+        REQUIRE(engine.awaitPlan());
+        backend.run(120);
+        engine.stop();
+        const auto& L = backend.capture().channels[0];
+        double before = 0, after = 0;
+        for (std::size_t i = 2000; i < 10000; ++i)
+            before = std::max(before, std::fabs(double(L[i])));
+        for (std::size_t i = 30000; i < 40960; ++i)
+            after = std::max(after, std::fabs(double(L[i])));
+        CHECK(before > 0.1);
+        CHECK(after == 0.0);
     }
 }

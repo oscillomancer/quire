@@ -3257,7 +3257,7 @@ Result:
 
 Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
 
-Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; monitor: off | on | auto (auto: while armed) — a monitored track hears its input live, also while stopped.
+Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3277,6 +3277,8 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `solo` | string |  |  |  |  |
 | `armed` | boolean |  |  |  |  |
 | `record_input` | array |  |  |  |  |
+| `record_midi` | string |  |  |  |  |
+| `midi_channel` | integer |  | 0.0..16.0 |  |  |
 | `monitor` | string |  |  |  |  |
 
 ### Result
@@ -3318,6 +3320,26 @@ Result:
   "track": "tr_1",
   "armed": true,
   "record_input": [1, 2]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Play and record a MIDI keyboard (any device, channel 1)** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "armed": true,
+  "record_midi": "*",
+  "midi_channel": 1,
+  "monitor": "auto"
 }
 
 ```

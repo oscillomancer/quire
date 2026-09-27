@@ -61,6 +61,12 @@ class Recorder {
     // Audio thread: `pos` is the timeline sample of this callback's output.
     void capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
                  std::int64_t pos) SUPPLE_RT;
+    // Audio thread, after capture() for the same part of the cycle: the
+    // device MIDI in frames [offset, offset + frames) of `events` (ADR-0016).
+    void captureMidi(std::span<const MidiInputEvent> events, std::uint32_t offset,
+                     std::uint32_t frames, std::int64_t pos) SUPPLE_RT;
+    // Main thread: moves captured MIDI out of the rings (they are bounded).
+    void drainMidi();
     // Audio thread: input that could not be placed (a playback dropout).
     void lose(std::uint32_t frames) SUPPLE_RT;
     // Main thread, once capture() can no longer run: drains, closes, reports
@@ -74,11 +80,27 @@ class Recorder {
         audio::WavStreamWriter writer;
         std::atomic<std::uint64_t> overflow{0};
     };
+    // MIDI: events stamped with the captured-frame position they arrived at
+    // (placed on the timeline by finish(), knowing the runs).
+    struct MidiEvent {
+        std::int64_t at = 0;
+        std::uint8_t bytes[3] = {0, 0, 0};
+    };
+    struct MidiTrack {
+        RecordTarget target;
+        static constexpr std::size_t kRing = 4096;
+        std::array<MidiEvent, kRing> ring{};
+        alignas(64) std::atomic<std::size_t> write{0};
+        alignas(64) std::atomic<std::size_t> read{0};
+        std::vector<MidiEvent> drained;  // main thread
+        std::atomic<std::uint64_t> overflow{0};
+    };
     void writerLoop();
     void drain(Track& t, std::vector<float>& scratch);
     void writeSidecars();
 
     std::vector<std::unique_ptr<Track>> tracks_;
+    std::vector<std::unique_ptr<MidiTrack>> midiTracks_;
     double rate_;
     std::int64_t latency_;
     std::atomic<bool> started_{false};

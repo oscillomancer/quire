@@ -394,6 +394,7 @@ granted, and CPU governor (read-only facts).
   implementation notes (recording; the live region with two executors;
   crash recovery).
 - **Loop and punch** (ADR-0015): see the ADR's implementation notes.
+- **MIDI input** (ADR-0016): see the ADR's implementation notes.
 - **Media resampling:** `MediaCache::get(path, rate)` decodes and resamples
   once per (file, rate) with the audio-file polyphase resampler (Kaiser
   windowed sinc; deterministic, so offline ≡ real time); plans ask for their
@@ -403,7 +404,7 @@ granted, and CPU governor (read-only facts).
   cache and background decode above are still to come.
 - **Not yet:** live multiprocessing,
   one shared process for `shared_bridge`,
-  automatic restart after device changes, MIDI ports, automation recording
+  automatic restart after device changes, MIDI output ports, automation recording
   (write/touch/latch), stems and render jobs, stretching/playrate of audio items,
   the 10 ms crossfade on structural swaps, B1 proper (preliminary:
   docs/benchmarks/b1-preliminary.md).

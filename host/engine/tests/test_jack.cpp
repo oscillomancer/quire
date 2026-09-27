@@ -3,11 +3,14 @@
 //   SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='*real JACK*'
 #include <doctest/doctest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <functional>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include <supple/engine/jack.h>
 
@@ -267,4 +270,52 @@ TEST_CASE("real JACK: silence at 64 frames" *
     CHECK(rec.maxFrames.load() <= 64);
     CHECK(rec.finals.load() == 1);
     CHECK(rec.finalOnAudioThread.load());
+}
+
+TEST_CASE("MIDI from each device reaches the callback in its block (ADR-0016)") {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);  // four engine blocks of 256 per period
+    JackBackend backend(fakeOptions());
+    std::mutex m;
+    std::vector<std::array<int, 4>> seen;  // {block frame, port, status, data1}
+    std::atomic<std::uint64_t> blocks{0};
+    BackendConfig cfg;
+    cfg.midiInputs = true;
+    REQUIRE(backend.start(cfg, [&](const float* const*, float* const* out, std::uint32_t n) {
+        if (n == 0) return;
+        const auto b = blocks.fetch_add(1);
+        for (const MidiInputEvent& e : backend.midiInput()) {
+            std::lock_guard lock(m);
+            seen.push_back(
+                {static_cast<int>(b % 4 * 256 + e.frame), e.port, e.bytes[0], e.bytes[1]});
+        }
+        for (std::uint32_t i = 0; i < n; ++i) out[0][i] = out[1][i] = 0.0f;
+    }));
+    const std::vector<std::string> ports = backend.midiPorts();
+    REQUIRE(ports.size() == 2);
+    CHECK(ports[1] == "USB Keyboard:midi_out");
+    CHECK(midiPortMask(ports, "keyboard") == 2u);
+    CHECK(midiPortMask(ports, "*") == 3u);
+    CHECK(midiPortMask(ports, "nothing") == 0u);
+    // Wait for a period boundary, then queue: a note on the keyboard at 300
+    // (the second block), a CC on the first device at 900 (the fourth), and a
+    // system message that is not passed on.
+    REQUIRE(waitFor([&] { return blocks.load() >= 8; }));
+    {
+        std::lock_guard lock(m);
+        seen.clear();
+    }
+    fake.midi(1, 300, 0x90, 60, 100);
+    fake.midi(0, 900, 0xb0, 7, 90);
+    fake.midi(0, 10, 0xf8, 0, 0);
+    REQUIRE(waitFor([&] {
+        std::lock_guard lock(m);
+        return seen.size() >= 2;
+    }));
+    backend.stop();
+    std::lock_guard lock(m);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0] == std::array<int, 4>{300, 1, 0x90, 60});
+    CHECK(seen[1] == std::array<int, 4>{900, 0, 0xb0, 7});
+    fake.reset();
 }

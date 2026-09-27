@@ -105,6 +105,12 @@ std::size_t FrameRing::read(float* out, std::size_t maxFrames) {
 Recorder::Recorder(std::vector<RecordTarget> targets, double rate, std::int64_t latency)
     : rate_(rate), latency_(latency) {
     for (RecordTarget& t : targets) {
+        if (t.midi) {
+            auto track = std::make_unique<MidiTrack>();
+            track->target = std::move(t);
+            midiTracks_.push_back(std::move(track));
+            continue;
+        }
         auto track = std::make_unique<Track>();
         track->target = std::move(t);
         track->ring.init(
@@ -148,6 +154,42 @@ void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::ui
     for (auto& t : tracks_) {
         const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames);
         if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
+    }
+}
+
+void Recorder::captureMidi(std::span<const MidiInputEvent> events, std::uint32_t offset,
+                           std::uint32_t frames, std::int64_t pos) SUPPLE_RT {
+    (void)pos;  // placed by finish() from the captured position and the runs
+    if (midiTracks_.empty() || events.empty() || !started_.load(std::memory_order_relaxed)) return;
+    // capture() has counted this part: it began at captured_ - frames.
+    const std::int64_t base = captured_ - frames;
+    for (const MidiInputEvent& ev : events) {
+        if (ev.frame < offset) continue;
+        if (ev.frame >= offset + frames) break;
+        for (auto& t : midiTracks_) {
+            std::uint8_t m[3];
+            if (!routeMidi(ev, t->target.midi->ports, t->target.midi->fromChannel,
+                           t->target.midi->toChannel, m))
+                continue;
+            const std::size_t w = t->write.load(std::memory_order_relaxed);
+            if (w - t->read.load(std::memory_order_acquire) >= MidiTrack::kRing) {
+                t->overflow.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            MidiEvent& slot = t->ring[w % MidiTrack::kRing];
+            slot.at = base + (ev.frame - offset);
+            std::copy_n(m, 3, slot.bytes);
+            t->write.store(w + 1, std::memory_order_release);
+        }
+    }
+}
+
+void Recorder::drainMidi() {
+    for (auto& t : midiTracks_) {
+        const std::size_t end = t->write.load(std::memory_order_acquire);
+        for (std::size_t r = t->read.load(std::memory_order_relaxed); r != end; ++r)
+            t->drained.push_back(t->ring[r % MidiTrack::kRing]);
+        t->read.store(end, std::memory_order_release);
     }
 }
 
@@ -212,6 +254,35 @@ std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
     const std::size_t count = segmentCount_.load(std::memory_order_acquire);
     for (std::size_t i = 0; i < count; ++i)
         segments.push_back({segments_[i].fileFrame + latency_, segments_[i].timeline});
+    // MIDI (ADR-0016): each event was played `latency` frames before it was
+    // captured; the run holding that moment gives its timeline position.
+    drainMidi();
+    for (auto& t : midiTracks_) {
+        RecordedTake r;
+        r.track = t->target.track;
+        r.isMidi = true;
+        r.startSample = start;
+        r.sampleRate = rate_;
+        r.frames = captured_;
+        for (const RecordedSegment& sg : segments)
+            if (sg.fileFrame < r.frames) r.segments.push_back(sg);
+        r.loop = {loop.start, loop.end};
+        r.overflowFrames = t->overflow.load();
+        for (const MidiEvent& ev : t->drained) {
+            // ev.at counts captured frames like an audio file's frames; the
+            // runs are in those units, already shifted by the latency.
+            std::size_t k = 0;
+            while (k + 1 < r.segments.size() && r.segments[k + 1].fileFrame <= ev.at) ++k;
+            const RecordedSegment sg =
+                r.segments.empty() ? RecordedSegment{0, start} : r.segments[k];
+            RecordedMidiEvent e;
+            e.timeline = sg.timeline + (ev.at - sg.fileFrame);
+            e.run = static_cast<std::uint32_t>(k);
+            std::copy_n(ev.bytes, 3, e.bytes);
+            r.midi.push_back(e);
+        }
+        out.push_back(std::move(r));
+    }
     for (auto& t : tracks_) {
         RecordedTake r;
         r.track = t->target.track;

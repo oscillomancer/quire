@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -19,11 +20,25 @@ namespace {
 using Frames = std::uint32_t;
 constexpr Frames kMaxPeriod = 8192;
 
+struct MidiMessage {
+    Frames time;
+    unsigned char bytes[3];
+};
+
 struct Port {
     std::string name;
     bool output = false;
+    bool midi = false;
     std::vector<float> buffer = std::vector<float>(kMaxPeriod, 0.0f);
     std::atomic<float> peak{0.0f};
+    std::vector<MidiMessage> events;  // this cycle's (MIDI input ports)
+};
+
+// jack_midi_event_t
+struct MidiEvent {
+    Frames time;
+    std::size_t size;
+    unsigned char* buffer;
 };
 
 struct Client {
@@ -54,6 +69,8 @@ std::atomic<Frames> g_bufferSizeRequest{0};
 std::atomic<int> g_connections{0};
 std::atomic<float> g_inputValue{0.0f};
 std::string g_latencyEnv;
+std::mutex g_midiMutex;  // (not g_mutex: fakejack_stall holds that while the loop idles)
+std::vector<std::pair<int, MidiMessage>> g_midiQueue;  // (our MIDI port index, message)
 
 void run(Client* c) {
     while (c->active.load()) {
@@ -69,7 +86,22 @@ void run(Client* c) {
             if (c->bufferSize) c->bufferSize(n, c->bufferSizeArg);
         }
         for (Port* p : c->ports)
-            if (!p->output) std::fill_n(p->buffer.begin(), n, g_inputValue.load());
+            if (!p->output && !p->midi) std::fill_n(p->buffer.begin(), n, g_inputValue.load());
+        {
+            // Queued MIDI goes to the next cycle, on the port it was queued for.
+            std::lock_guard lock(g_midiMutex);
+            int index = 0;
+            for (Port* p : c->ports) {
+                if (!p->midi) continue;
+                p->events.clear();
+                for (const auto& [port, m] : g_midiQueue)
+                    if (port == index)
+                        p->events.push_back(
+                            {std::min(m.time, n - 1), {m.bytes[0], m.bytes[1], m.bytes[2]}});
+                ++index;
+            }
+            g_midiQueue.clear();
+        }
         c->process(n, c->processArg);
         for (Port* p : c->ports) {
             if (!p->output) continue;
@@ -169,16 +201,34 @@ void jack_on_shutdown(Client* c, void (*cb)(void*), void* arg) {
     c->shutdownArg = arg;
 }
 
-Port* jack_port_register(Client* c, const char* name, const char*, unsigned long flags,
+Port* jack_port_register(Client* c, const char* name, const char* type, unsigned long flags,
                          unsigned long) {
     auto* p = new Port;
     p->name = c->name + ":" + name;
     p->output = (flags & 0x2) != 0;
+    p->midi = type && std::strcmp(type, "8 bit raw midi") == 0;
     c->ports.push_back(p);
     return p;
 }
 
-void* jack_port_get_buffer(Port* p, Frames) { return p->buffer.data(); }
+// A MIDI port's buffer is the port itself (read by the jack_midi_* calls).
+void* jack_port_get_buffer(Port* p, Frames) {
+    return p->midi ? static_cast<void*>(p) : static_cast<void*>(p->buffer.data());
+}
+
+std::uint32_t jack_midi_get_event_count(void* buffer) {
+    return static_cast<std::uint32_t>(static_cast<Port*>(buffer)->events.size());
+}
+
+int jack_midi_event_get(MidiEvent* event, void* buffer, std::uint32_t index) {
+    auto* p = static_cast<Port*>(buffer);
+    if (index >= p->events.size()) return -1;
+    MidiMessage& m = p->events[index];
+    event->time = m.time;
+    event->size = (m.bytes[0] & 0xf0) == 0xc0 || (m.bytes[0] & 0xf0) == 0xd0 ? 2 : 3;
+    event->buffer = m.bytes;
+    return 0;
+}
 
 const char* jack_port_name(const Port* p) { return p->name.c_str(); }
 
@@ -196,7 +246,16 @@ int jack_set_buffer_size(Client*, Frames n) {
     return 0;
 }
 
-const char** jack_get_ports(Client*, const char*, const char*, unsigned long flags) {
+const char** jack_get_ports(Client*, const char*, const char* type, unsigned long flags) {
+    if (type && std::strcmp(type, "8 bit raw midi") == 0) {  // physical MIDI capture ports
+        if ((flags & 0x6) != 0x6) return nullptr;
+        static const char* kMidi[] = {"system:midi_capture_1", "USB Keyboard:midi_out"};
+        auto** out = static_cast<const char**>(std::malloc(3 * sizeof(const char*)));
+        out[0] = kMidi[0];
+        out[1] = kMidi[1];
+        out[2] = nullptr;
+        return out;
+    }
     if ((flags & 0x5) != 0x5) return nullptr;  // physical inputs (playback) only
     static const char* kPlayback[] = {"system:playback_1", "system:playback_2"};
     auto** out = static_cast<const char**>(std::malloc(3 * sizeof(const char*)));
@@ -207,6 +266,10 @@ const char** jack_get_ports(Client*, const char*, const char*, unsigned long fla
 }
 
 int jack_connect(Client*, const char* from, const char* to) {
+    if (Port* p = findPort(to); p && p->midi) {  // a MIDI device into our input
+        g_connections.fetch_add(1);
+        return 0;
+    }
     if (!findPort(from) || std::strncmp(to, "system:playback_", 16) != 0) return 1;
     g_connections.fetch_add(1);
     return 0;
@@ -249,6 +312,14 @@ int fakejack_open() {
 std::uint64_t fakejack_cycles() { return g_cycles.load(); }
 Frames fakejack_buffer_size_request() { return g_bufferSizeRequest.load(); }
 int fakejack_connections() { return g_connections.load(); }
+// A MIDI message for the next cycle on our `port`-th MIDI input (0-based).
+void fakejack_midi(int port, Frames time, int status, int data1, int data2) {
+    std::lock_guard lock(g_midiMutex);
+    g_midiQueue.push_back({port,
+                           {time,
+                            {static_cast<unsigned char>(status), static_cast<unsigned char>(data1),
+                             static_cast<unsigned char>(data2)}}});
+}
 const char* fakejack_latency_env() { return g_latencyEnv.c_str(); }
 // The peak so far on one output port, or on all of them for "".
 float fakejack_output_peak(const char* port) {
