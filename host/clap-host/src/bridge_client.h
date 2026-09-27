@@ -1,0 +1,90 @@
+// Internal: the host side of a bridged plugin instance (ADR-0013).
+#pragma once
+
+#include <sys/types.h>
+
+#include <atomic>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+#include "bridge_protocol.h"
+#include "supple/host/clap_host.h"
+
+namespace supple::host {
+
+struct RemotePorts {
+    std::uint32_t inChannels = 0, outChannels = 0;
+    bool acceptsNotes = false, semantic = false;
+};
+
+class RemoteInstance {
+  public:
+    static Result<std::unique_ptr<RemoteInstance>> spawn(const PluginInfo& info,
+                                                         const HostIdentity& identity,
+                                                         RemotePorts& ports);
+    ~RemoteInstance();
+
+    // main thread
+    Status activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
+                    std::uint32_t inChannels, std::uint32_t outChannels);
+    void deactivate();
+    std::vector<ParamInfo> params();
+    Result<double> paramValue(std::uint32_t id);
+    Result<std::string> paramText(std::uint32_t id, double value);
+    Result<double> paramFromText(std::uint32_t id, std::string_view text);
+    Status setParam(std::uint32_t id, double value);
+    void refreshLatency();
+    std::uint32_t latency() const { return latency_; }
+    std::uint32_t tail() const { return tail_; }
+    bool reportsTail() const { return reportsTail_; }
+    // SemanticSchema/Describe/GetPatch: a string reply; `flag` = changedOnly.
+    Result<std::string> text(bridge::Op op, std::optional<bool> flag = {});
+    Status setPatch(std::string_view json, std::uint32_t mode);
+    Result<std::vector<std::uint8_t>> saveState();
+    Status loadState(std::span<const std::uint8_t> bytes);
+    // serviceMainThread + notifications + log in one round trip.
+    bool service(Instance::Notifications& notes, std::vector<std::string>& log);
+    bool needsAudioFlush() const { return needsAudioFlush_; }
+
+    // audio thread
+    bool startProcessing() SUPPLE_RT;
+    void stopProcessing() SUPPLE_RT;
+    void reset() SUPPLE_RT;
+    void flush() SUPPLE_RT;
+    bool process(const ProcessBlock& block, OutputEvents* out) SUPPLE_RT;
+
+    bool failed() const { return failed_.load(); }
+    std::string failure() const;
+    void setDeadlineMs(int ms) { deadlineMs_ = ms; }
+
+  private:
+    static constexpr int kHung = -2;
+    RemoteInstance() = default;
+    Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w, int fd = -1,
+                                           int timeoutMs = 10000);
+    bool command(bridge::Cmd cmd) SUPPLE_RT;
+    bool alive() const;
+    void fail(int why);
+    void reap();
+    void killBridge();
+    void unmap();
+
+    pid_t pid_ = -1;
+    int pidfd_ = -1, sock_ = -1;
+    void* map_ = nullptr;
+    bridge::Header* hdr_ = nullptr;
+    bridge::Layout layout_{0, 0, 0};
+    std::uint32_t seq_ = 0;
+    int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
+    std::uint32_t latency_ = 0, tail_ = 0;
+    bool reportsTail_ = false, needsAudioFlush_ = false;
+    std::atomic<bool> failed_{false};
+    std::atomic<int> failSignal_{0};  // a signal number, 0 (exited), -1 (not reaped), kHung
+};
+
+std::filesystem::path bridgeExecutable();
+
+}  // namespace supple::host

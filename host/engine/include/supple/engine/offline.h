@@ -41,19 +41,34 @@ class InstancePool {
     // turn into a pass-through placeholder.
     Result<host::Instance*> get(model::Id id, const model::FxInstance& fx,
                                 const model::Session& session);
-    // Destroys instances whose fx no longer exists in `session`.
-    void prune(const model::Session& session);
+    // Destroys instances whose fx no longer exists in `session` (call it once
+    // no plan uses them), and replaced instances retired at a generation up
+    // to `liveGeneration` (the newest plan the audio side has adopted).
+    void prune(const model::Session& session, std::uint64_t liveGeneration = UINT64_MAX);
+    // Instances replaced from now on may still be used by plans before
+    // `generation` (the real-time engine sets the next plan's generation).
+    void setGeneration(std::uint64_t generation) { generation_ = generation; }
+    // The next get() for `id` creates a new instance (fx.restart); the old
+    // one lives until prune().
+    void restart(model::Id id);
+    // Isolated instances whose bridge crashed or hung, with the reason.
+    std::vector<std::pair<model::Id, std::string>> failed() const;
+    host::Instance* find(model::Id id) const;
+    std::size_t retired() const { return retired_.size(); }
     std::size_t size() const { return instances_.size(); }
 
   private:
     struct Entry {
         std::unique_ptr<host::Instance> instance;
         std::string pluginId;
+        bool isolated = false;
         std::string appliedState;  // canonical patch text or blob hash last applied
     };
     Resolver resolve_;
     host::HostIdentity identity_;
     std::map<model::Id, Entry> instances_;
+    std::vector<std::pair<std::uint64_t, std::unique_ptr<host::Instance>>> retired_;
+    std::uint64_t generation_ = 0;
 };
 
 // Decoded audio media, keyed by resolved path (main thread). Reused across

@@ -454,6 +454,12 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "anticipation_misses": {
       "type": "integer"
+    },
+    "failed_fx": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -469,7 +475,8 @@ Kind: `action`. Exposure: `mcp-tool`.
     "process_errors",
     "restart_needed",
     "anticipative",
-    "anticipation_misses"
+    "anticipation_misses",
+    "failed_fx"
   ],
   "additionalProperties": false
 }
@@ -511,7 +518,8 @@ Result:
   "process_errors": 0,
   "restart_needed": false,
   "anticipative": true,
-  "anticipation_misses": 0
+  "anticipation_misses": 0,
+  "failed_fx": []
 }
 
 ```
@@ -520,7 +528,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again.
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -574,6 +582,12 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "anticipation_misses": {
       "type": "integer"
+    },
+    "failed_fx": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -589,7 +603,8 @@ Kind: `query`. Exposure: `mcp-tool`.
     "process_errors",
     "restart_needed",
     "anticipative",
-    "anticipation_misses"
+    "anticipation_misses",
+    "failed_fx"
   ],
   "additionalProperties": false
 }
@@ -621,7 +636,8 @@ Result:
   "process_errors": 0,
   "restart_needed": false,
   "anticipative": false,
-  "anticipation_misses": 0
+  "anticipation_misses": 0,
+  "failed_fx": []
 }
 
 ```
@@ -963,11 +979,55 @@ Result:
 
 ```
 
+## `fx.restart@1`
+
+Re-create a plugin instance from its saved patch/state (after a crash).
+
+engine.status lists failed_fx: isolated plugins whose process crashed or hung. The new instance starts from the model's patch or state.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  | Plugin instance id, e.g. "fx_1". |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Restart** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `fx.set@1`
 
-Set instance options: bypass, offline, wet (%), label.
+Set instance options: bypass, offline, wet (%), label, isolation.
 
-
+isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -980,6 +1040,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `offline` | boolean |  |  |  |  |
 | `wet` | value | % | 0.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `label` | string |  |  |  |  |
+| `isolation` | string |  |  |  |  |
 
 ### Result
 

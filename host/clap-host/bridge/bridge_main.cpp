@@ -1,0 +1,332 @@
+// <slug>-bridge: hosts one plugin instance for an isolated fx (ADR-0013).
+// Started by the host with its end of the control socket on fd 3 (or
+// --control-fd N). Main-thread requests arrive on the socket; audio-thread
+// commands arrive in the shared memory sent with Activate and run on this
+// process's audio thread. Exits on Destroy or when the host goes away.
+#include <poll.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+
+#include "../src/bridge_protocol.h"
+#include "supple/host/clap_host.h"
+#include "supple/json/json.h"
+
+using namespace supple;
+using namespace supple::host;
+using namespace supple::host::bridge;
+
+namespace {
+
+struct Bridge {
+    int sock = kControlFd;
+    std::unique_ptr<Instance> instance;
+    void* map = nullptr;
+    std::size_t mapSize = 0;
+    Header* hdr = nullptr;
+    Layout layout{0, 0, 0};
+    std::thread audio;
+    std::atomic<bool> quit{false};
+    // Serializes the plugin's lifecycle: the main thread's servicing (which
+    // may restart the plugin: deactivate + activate) against the audio
+    // thread's start/stop/reset/flush commands. process() takes no lock: it
+    // only runs between start and stop, when no restart can happen.
+    std::mutex lifecycle;
+
+    // --- the audio thread ---------------------------------------------------------------
+
+    // `last`: the request sequence when Activate was handled — taken on the
+    // main thread before its reply, so a command the host sends right after
+    // is never mistaken for one already served, however late this starts.
+    void audioLoop(std::uint32_t last) {
+        auto* base = static_cast<std::uint8_t*>(map);
+        auto* events = reinterpret_cast<const Event*>(base + layout.events);
+        auto* outEvents = reinterpret_cast<OutputEvent*>(base + layout.outEvents);
+        auto* inAudio = reinterpret_cast<float*>(base + layout.inAudio);
+        auto* outAudio = reinterpret_cast<float*>(base + layout.outAudio);
+        const float* in[kMaxChannels];
+        float* out[kMaxChannels];
+        for (std::uint32_t c = 0; c < layout.inChannels; ++c)
+            in[c] = inAudio + static_cast<std::size_t>(c) * layout.maxFrames;
+        for (std::uint32_t c = 0; c < layout.outChannels; ++c)
+            out[c] = outAudio + static_cast<std::size_t>(c) * layout.maxFrames;
+        while (!quit.load()) {
+            const std::uint32_t req = hdr->request.load(std::memory_order_acquire);
+            if (req == last) {
+                futexWait(hdr->request, last, 100);
+                continue;
+            }
+            last = req;
+            std::uint32_t result = 1;
+            switch (static_cast<Cmd>(hdr->cmd)) {
+                case Cmd::Process: {
+                    ProcessBlock b;
+                    b.inputs = layout.inChannels ? in : nullptr;
+                    b.inputChannels = layout.inChannels;
+                    b.outputs = out;
+                    b.outputChannels = layout.outChannels;
+                    b.frames = std::min(hdr->frames, layout.maxFrames);
+                    b.events =
+                        std::span<const Event>(events, std::min(hdr->eventCount, kMaxEvents));
+                    b.transport = hdr->hasTransport ? &hdr->transport : nullptr;
+                    b.steadyTime = hdr->steadyTime;
+                    OutputEvents sink{std::span<OutputEvent>(outEvents, kMaxOutEvents)};
+                    result = instance->process(b, &sink) ? 1 : 0;
+                    hdr->outEventCount = static_cast<std::uint32_t>(sink.count);
+                    hdr->outEventsDropped = static_cast<std::uint32_t>(sink.dropped);
+                    break;
+                }
+                case Cmd::StartProcessing: {
+                    std::lock_guard lock(lifecycle);
+                    result = instance->startProcessing() ? 1 : 0;
+                    break;
+                }
+                case Cmd::StopProcessing: {
+                    std::lock_guard lock(lifecycle);
+                    instance->stopProcessing();
+                    break;
+                }
+                case Cmd::Reset: {
+                    std::lock_guard lock(lifecycle);
+                    instance->reset();
+                    break;
+                }
+                case Cmd::Flush: {
+                    std::lock_guard lock(lifecycle);
+                    instance->flushParams();
+                    break;
+                }
+                case Cmd::Quit:
+                    quit = true;
+                    break;
+            }
+            hdr->result = result;
+            hdr->processing = instance->processing() ? 1 : 0;
+            hdr->done.store(req, std::memory_order_release);
+            futexWake(hdr->done);
+        }
+    }
+
+    void stopAudio() {
+        if (!audio.joinable()) return;
+        quit = true;
+        audio.join();
+        quit = false;
+    }
+
+    void unmap() {
+        if (map) ::munmap(map, mapSize);
+        map = nullptr;
+        hdr = nullptr;
+    }
+
+    // --- the control plane ---------------------------------------------------------------
+
+    bool reply(const Writer& w) {
+        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Ok), w.bytes);
+    }
+    bool fail(const Error& e) {
+        Writer w;
+        w.error(e);
+        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Error), w.bytes);
+    }
+    template <class T>
+    bool replyOr(const Result<T>& r, auto&& write) {
+        if (!r) return fail(r.error());
+        Writer w;
+        write(w, *r);
+        return reply(w);
+    }
+    bool replyStatus(const supple::Status& st) { return st ? reply(Writer{}) : fail(st.error()); }
+
+    // Returns false to exit.
+    bool handle(Op op, Reader& r, int fd) {
+        if (op != Op::Create && !instance) return fail(Error("bridge.no_instance", "no instance"));
+        switch (op) {
+            case Op::Create: {
+                PluginInfo info;
+                info.path = r.str();
+                info.id = r.str();
+                HostIdentity id;
+                id.name = r.str();
+                id.vendor = r.str();
+                id.url = r.str();
+                id.version = r.str();
+                auto made = Instance::create(info, id);
+                if (!made) return fail(made.error());
+                instance = std::move(*made);
+                Writer w;
+                w.u32(instance->audioInputChannels());
+                w.u32(instance->audioOutputChannels());
+                w.u8(instance->acceptsNotes() ? 1 : 0);
+                w.u8(instance->info().semantic ? 1 : 0);
+                return reply(w);
+            }
+            case Op::Activate: {
+                const double rate = r.f64();
+                const std::uint32_t minFrames = r.u32(), maxFrames = r.u32(), size = r.u32();
+                if (fd < 0) return fail(Error("bridge.activate", "no shared memory"));
+                stopAudio();
+                unmap();
+                map = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+                ::close(fd);
+                if (map == MAP_FAILED) {
+                    map = nullptr;
+                    return fail(Error("bridge.activate", "could not map the shared memory"));
+                }
+                mapSize = size;
+                hdr = static_cast<Header*>(map);
+                layout = Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels);
+                if (hdr->magic != kMagic || hdr->version != kVersion || layout.size > size ||
+                    hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels) {
+                    unmap();
+                    return fail(Error("bridge.activate", "shared memory layout mismatch"));
+                }
+                auto st = instance->activate(rate, minFrames, maxFrames);
+                if (!st) {
+                    unmap();
+                    return fail(st.error());
+                }
+                const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
+                audio = std::thread([this, first] { audioLoop(first); });
+                return reply(Writer{});
+            }
+            case Op::Deactivate:
+                stopAudio();
+                instance->deactivate();
+                unmap();
+                return reply(Writer{});
+            case Op::Params: {
+                const auto params = instance->params();
+                Writer w;
+                w.u32(static_cast<std::uint32_t>(params.size()));
+                for (const ParamInfo& p : params) {
+                    w.u32(p.id);
+                    w.str(p.name);
+                    w.str(p.module);
+                    w.f64(p.min);
+                    w.f64(p.max);
+                    w.f64(p.def);
+                    w.u32(p.flags);
+                }
+                return reply(w);
+            }
+            case Op::ParamValue:
+                return replyOr(instance->paramValue(r.u32()),
+                               [](Writer& w, double v) { w.f64(v); });
+            case Op::ParamText: {
+                const std::uint32_t id = r.u32();
+                return replyOr(instance->paramText(id, r.f64()),
+                               [](Writer& w, const std::string& s) { w.str(s); });
+            }
+            case Op::ParamFromText: {
+                const std::uint32_t id = r.u32();
+                return replyOr(instance->paramFromText(id, r.str()),
+                               [](Writer& w, double v) { w.f64(v); });
+            }
+            case Op::SetParam: {
+                const std::uint32_t id = r.u32();
+                return replyStatus(instance->setParam(id, r.f64()));
+            }
+            case Op::Latency: {
+                Writer w;
+                w.u32(instance->latency());
+                w.u32(instance->tail());
+                w.u8(instance->reportsTail() ? 1 : 0);
+                return reply(w);
+            }
+            case Op::SemanticSchema:
+                return replyOr(instance->semanticSchema(), [](Writer& w, const json::Value& v) {
+                    w.str(json::writeCompact(v));
+                });
+            case Op::GetPatch:
+                return replyOr(instance->getPatch(r.u8() != 0),
+                               [](Writer& w, const std::string& s) { w.str(s); });
+            case Op::SetPatch: {
+                const std::string text = r.str();
+                return replyStatus(instance->setPatch(text, r.u32()));
+            }
+            case Op::Describe:
+                return replyOr(instance->describe(r.u8() != 0),
+                               [](Writer& w, const std::string& s) { w.str(s); });
+            case Op::SaveState:
+                return replyOr(instance->saveState(),
+                               [](Writer& w, const std::vector<std::uint8_t>& b) { w.blob(b); });
+            case Op::LoadState: {
+                const auto bytes = r.blob();
+                return replyStatus(instance->loadState(bytes));
+            }
+            case Op::Service: {
+                bool did = false;
+                {
+                    std::lock_guard lock(lifecycle);
+                    did = instance->serviceMainThread();
+                }
+                const auto n = instance->takeNotifications();
+                const auto log = instance->takeLog();
+                Writer w;
+                w.u8(did ? 1 : 0);
+                w.u8(n.stateDirty ? 1 : 0);
+                w.u8(n.paramsRescan ? 1 : 0);
+                w.u8(n.latencyChanged ? 1 : 0);
+                w.u8(n.semanticChanged ? 1 : 0);
+                w.u8(n.tailChanged ? 1 : 0);
+                w.u32(n.paramsRescanFlags);
+                w.u32(n.droppedEvents);
+                w.u8(instance->needsAudioFlush() ? 1 : 0);
+                w.u32(static_cast<std::uint32_t>(log.size()));
+                for (const auto& line : log) w.str(line);
+                w.u32(instance->latency());  // a restart may have changed them silently
+                w.u32(instance->tail());
+                w.u8(instance->reportsTail() ? 1 : 0);
+                return reply(w);
+            }
+            case Op::Destroy:
+                stopAudio();
+                if (instance->processing()) instance->stopProcessing();
+                instance.reset();
+                unmap();
+                reply(Writer{});
+                return false;
+        }
+        return fail(Error("bridge.op", "unknown request"));
+    }
+};
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    ::signal(SIGPIPE, SIG_IGN);
+    Bridge b;
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);
+    for (;;) {
+        pollfd p{b.sock, POLLIN, 0};
+        const int ready = ::poll(&p, 1, 10);
+        if (ready == 0) {  // idle: the plugin's own main-thread work (timers, callbacks)
+            if (b.instance) {
+                std::lock_guard lock(b.lifecycle);
+                (void)b.instance->serviceMainThread();
+            }
+            continue;
+        }
+        std::uint32_t op = 0;
+        std::vector<std::uint8_t> payload;
+        int fd = -1;
+        if (!recvFrame(b.sock, op, payload, &fd)) break;  // the host is gone
+        Reader r(payload.data(), payload.size());
+        if (!b.handle(static_cast<Op>(op), r, fd)) break;
+    }
+    b.stopAudio();
+    if (b.instance && b.instance->processing()) b.instance->stopProcessing();
+    b.instance.reset();
+    return 0;
+}

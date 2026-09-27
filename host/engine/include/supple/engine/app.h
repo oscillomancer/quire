@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -45,6 +46,7 @@ struct EngineStatus {
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;
+    std::vector<std::string> failedFx;  // isolated instances whose bridge crashed or hung
 };
 
 struct TransportInfo {
@@ -111,7 +113,14 @@ class EngineApp : public cmd::Host {
     Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
     void stopEngine();
     Engine* engine() { return engine_.get(); }
-    EngineStatus engineStatus() const;
+    EngineStatus engineStatus();
+    // fx.restart: the next plan gets a new instance of `fx` (the failed one is
+    // freed once no plan uses it).
+    void restartFx(model::Id fx);
+    // Emits fx.failed once for each isolated instance that has failed.
+    void checkFailures();
+    // The real-time engine's instance of `fx` (tests and tools), or null.
+    host::Instance* instanceOf(model::Id fx) const { return pool_ ? pool_->find(fx) : nullptr; }
     // Transport requests. With a device, each waits (at most a second) until
     // the audio thread has acted on it, so the answer is the new state.
     Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
@@ -159,6 +168,7 @@ class EngineApp : public cmd::Host {
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
     double playStart_ = 0.0;  // transport.stop returns here
+    std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;
     std::vector<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;

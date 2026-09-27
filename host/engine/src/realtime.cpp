@@ -209,6 +209,8 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
                      "the project is at " + std::to_string(session.project->sampleRate) +
                          " Hz, the device at " + std::to_string(config_.sampleRate),
                      {}, "run the project and the device at the same rate");
+    // Instances the compile replaces may still play in plans up to this one.
+    plugins_.setGeneration(publishedGen_ + 1);
     auto compiled = detail::compile(
         session, plugins_, 0.0, options_.anticipative ? options_.renderBlock : config_.blockSize);
     if (!compiled) return std::move(compiled).error();
@@ -225,6 +227,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     prunePending_ = true;
     plan->generation = ++publishedGen_;
     handoff_.publish(std::move(plan));
+    plugins_.setGeneration(publishedGen_ + 1);  // later replacements: after this plan
     return okStatus();
 }
 
@@ -293,7 +296,8 @@ bool Engine::awaitRendered(std::int64_t frames, double timeoutSeconds) {
 void Engine::service() {
     handoff_.collect();
     if (prunePending_ && latest_ && stoppedGen_.load(std::memory_order_acquire) >= publishedGen_) {
-        plugins_.prune(*latest_);  // the audio thread finished stopping removed instances
+        // The audio side has adopted the newest plan and stopped what it dropped.
+        plugins_.prune(*latest_, stoppedGen_.load(std::memory_order_acquire));
         prunePending_ = false;
     }
 }

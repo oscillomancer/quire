@@ -7,6 +7,7 @@
 #include <thread>
 
 #include <supple/engine/app.h>
+#include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
 
 #include "fake_jack.h"
@@ -246,4 +247,48 @@ TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)"
     CHECK(fake.open() == 0);
     CHECK_FALSE(app->engine());
     fake.reset();
+}
+
+TEST_CASE("an isolated plugin that crashes is reported and restarted over the bus") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Lead"}, "as": "t"},
+        {"command": "fx.add", "args": {"track": "${t.track}", "plugin": "Test Sine"}},
+        {"command": "fx.add", "args": {"track": "${t.track}", "plugin": "com.suppleaudio.test.crash"}, "as": "c"},
+        {"command": "fx.set", "args": {"fx": "${c.fx}", "isolation": "dedicated"}},
+        {"command": "item.add", "args": {"track": "${t.track}", "bar": 1, "notation": "voice lead; 1: C4:w"}}]})");
+    const model::Id crashFx = *model::Id::parse("fx_2");
+    call("engine.start", R"({"backend": "dummy"})");
+    call("transport.play", "{}");
+    host::Instance* crash = app->instanceOf(crashFx);
+    REQUIRE(crash);
+    CHECK(crash->isolated());
+    REQUIRE(crash->setParam(1, 1.0).ok());  // crash in its next process()
+    for (int i = 0; i < 2000 && !crash->failed(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto status = call("engine.status", "{}");
+    REQUIRE(status["failed_fx"].size() == 1);
+    CHECK(status["failed_fx"].at(0).asString() == "fx_2");
+    CHECK(status["running"].asBool());  // the engine plays on
+    bool reported = false;
+    for (const auto& [topic, payload] : app->takeEvents())
+        if (topic == "fx.failed") reported = payload.find("fx")->asString() == "fx_2";
+    CHECK(reported);
+    call("fx.restart", R"({"fx": "fx_2"})");
+    CHECK(call("engine.status", "{}")["failed_fx"].size() == 0);
+    host::Instance* again = app->instanceOf(crashFx);
+    REQUIRE(again);
+    CHECK(again != crash);
+    CHECK_FALSE(again->failed());
+    call("engine.stop", "{}");
 }

@@ -55,7 +55,7 @@ double gainClap(double db) {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 3);
+    REQUIRE(list->size() == 4);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -309,4 +309,117 @@ TEST_CASE("events: queued params wait when the arena is full; overflow is counte
     REQUIRE(g.process(buf.block(256)));
     CHECK(g.paramValue(0).value() == doctest::Approx(gainClap(-6)));
     g.stopProcessing();
+}
+
+// --- isolation (ADR-0013) ----------------------------------------------------------------
+
+TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto local = Instance::create(find("com.suppleaudio.test.gain"), {});
+    auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE(local);
+    REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
+    Instance& l = **local;
+    Instance& r = **remote;
+    CHECK(r.isolated());
+    CHECK_FALSE(l.isolated());
+    CHECK(r.audioInputChannels() == 2);
+    CHECK(r.audioOutputChannels() == 2);
+    CHECK(r.info().semantic);
+    const auto lp = l.params(), rp = r.params();
+    REQUIRE(rp.size() == lp.size());
+    for (std::size_t i = 0; i < lp.size(); ++i) {
+        CHECK(rp[i].id == lp[i].id);
+        CHECK(rp[i].name == lp[i].name);
+        CHECK(rp[i].max == lp[i].max);
+    }
+    CHECK(*r.paramText(0, gainClap(-6)) == "-6.0 dB");
+    CHECK(*r.paramFromText(0, "-6 dB") == doctest::Approx(gainClap(-6)));
+    CHECK_FALSE(r.paramFromText(0, "loud"));
+    REQUIRE(r.semanticSchema());
+    REQUIRE(r.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    CHECK(*r.describe(true) == "Gain: Gain -4.5 dB");
+    auto bad = r.setPatch(R"({"params": {"gian": 1}})", CLAP_SUPPLE_SET_MERGE);
+    REQUIRE_FALSE(bad.ok());
+    CHECK(bad.error().code == "params.unknown_key");  // errors cross the bridge intact
+    CHECK(bad.error().path == "/params/gian");
+    auto state = r.saveState();
+    REQUIRE(state);
+    REQUIRE(l.loadState(*state).ok());
+    CHECK(*l.paramValue(0) == doctest::Approx(gainClap(-4.5)));
+
+    // Latency: a restart in the bridge, reported back.
+    REQUIRE(r.activate(48000, 1, 256).ok());
+    REQUIRE(l.activate(48000, 1, 256).ok());
+    REQUIRE(r.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(l.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    for (int i = 0; i < 10 && r.latency() != 64; ++i) r.serviceMainThread();
+    l.serviceMainThread();
+    CHECK(r.latency() == 64);
+
+    // Processing: identical output, sample-accurate events.
+    REQUIRE(r.startProcessing());
+    REQUIRE(l.startProcessing());
+    Buffers bl(256), br(256);
+    for (std::uint32_t i = 0; i < 256; ++i)
+        bl.l[i] = bl.r[i] = br.l[i] = br.r[i] = std::sin(0.01f * static_cast<float>(i));
+    Event e{.kind = Event::Kind::Param, .time = 100, .paramId = 0, .value = gainClap(-60)};
+    for (int block = 0; block < 4; ++block) {
+        REQUIRE(l.process(bl.block(256, std::span<const Event>(&e, block == 1 ? 1 : 0))));
+        REQUIRE(r.process(br.block(256, std::span<const Event>(&e, block == 1 ? 1 : 0))));
+        CHECK(bl.ol == br.ol);
+        CHECK(bl.orr == br.orr);
+    }
+    r.reset();
+    r.stopProcessing();
+    l.stopProcessing();
+    CHECK_FALSE(r.failed());
+    r.deactivate();
+}
+
+TEST_CASE("isolation: a crashing plugin fails its instance, not the host") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto inst = Instance::create(find("com.suppleaudio.test.crash"), {}, true);
+    REQUIRE_MESSAGE(inst, (inst ? "" : inst.error().toString()));
+    Instance& c = **inst;
+    REQUIRE(c.activate(48000, 1, 256).ok());
+    REQUIRE(c.startProcessing());
+    Buffers buf(256);
+    std::fill(buf.l.begin(), buf.l.end(), 0.25f);
+    std::fill(buf.r.begin(), buf.r.end(), 0.25f);
+    REQUIRE(c.process(buf.block(256)));
+    CHECK(buf.ol[10] == 0.25f);          // passes audio through
+    REQUIRE(c.setParam(1, 1.0).ok());    // crash in the next process()
+    REQUIRE(c.process(buf.block(256)));  // the node goes silent; no error for the host
+    CHECK(c.failed());
+    CHECK(buf.ol[10] == 0.0f);
+    CHECK_FALSE(c.failure().empty());
+    auto after = c.paramValue(1);
+    REQUIRE_FALSE(after);
+    CHECK(after.error().code == "host.bridge_failed");
+    c.stopProcessing();
+    c.deactivate();
+}  // destruction after a crash must not hang or throw
+
+TEST_CASE("isolation: a hanging plugin is killed at the deadline") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto inst = Instance::create(find("com.suppleaudio.test.crash"), {}, true);
+    REQUIRE(inst);
+    Instance& c = **inst;
+    REQUIRE(c.activate(48000, 1, 256).ok());
+    REQUIRE(c.startProcessing());
+    REQUIRE(c.setParam(1, 2.0).ok());  // hang in the next process()
+    Buffers buf(256);
+    REQUIRE(c.process(buf.block(256)));
+    CHECK(c.failed());
+    CHECK(c.failure().find("stopped responding") != std::string::npos);
+    c.stopProcessing();
+}
+
+TEST_CASE("isolation: a missing bridge is a clean error") {
+    setBridgeExecutable("/nonexistent/supple-bridge");
+    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE_FALSE(inst);
+    CHECK(inst.error().code.rfind("host.bridge", 0) == 0);
+    setBridgeExecutable(BRIDGE_PATH);
 }

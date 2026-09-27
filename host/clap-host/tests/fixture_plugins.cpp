@@ -15,11 +15,15 @@
 //     params.flush has been called.
 #include <clap/clap.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
@@ -522,6 +526,88 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_proces
     return CLAP_PROCESS_CONTINUE;
 }
 
+// --- crash (the isolation fixture) -------------------------------------------------------
+// An effect that passes audio through until its Mode parameter says otherwise:
+// 1 crashes the process in process() (SIGSEGV), 2 hangs it there.
+
+const clap_plugin_descriptor_t* crashDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
+    static const clap_plugin_descriptor_t d = {
+        CLAP_VERSION_INIT,
+        "com.suppleaudio.test.crash",
+        "Test Crash",
+        "Supple Audio",
+        "",
+        "",
+        "",
+        "0.1.0",
+        "Crashes or hangs on request (plugin isolation tests)",
+        features};
+    return &d;
+}
+
+struct Crash {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+    std::atomic<int> mode{0};
+};
+Crash* C(const clap_plugin_t* p) { return static_cast<Crash*>(p->plugin_data); }
+
+uint32_t CLAP_ABI crashParamCount(const clap_plugin_t*) { return 1; }
+bool CLAP_ABI crashParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
+    if (index != 0) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->id = 1;
+    info->flags = CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_AUTOMATABLE;
+    std::snprintf(info->name, sizeof(info->name), "Mode");
+    info->max_value = 2;
+    return true;
+}
+bool CLAP_ABI crashParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+    if (id != 1) return false;
+    *out = C(pl)->mode.load();
+    return true;
+}
+bool CLAP_ABI crashValueToText(const clap_plugin_t*, clap_id, double v, char* out, uint32_t size) {
+    static const char* kNames[] = {"pass", "crash", "hang"};
+    std::snprintf(out, size, "%s", kNames[std::clamp(static_cast<int>(v), 0, 2)]);
+    return true;
+}
+bool CLAP_ABI crashTextToValue(const clap_plugin_t*, clap_id, const char*, double*) {
+    return false;
+}
+void crashEvents(const clap_plugin_t* pl, const clap_input_events_t* in) {
+    for (uint32_t i = 0, n = in->size(in); i < n; ++i) {
+        const clap_event_header_t* h = in->get(in, i);
+        if (h->space_id == CLAP_CORE_EVENT_SPACE_ID && h->type == CLAP_EVENT_PARAM_VALUE) {
+            const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(h);
+            if (ev->param_id == 1) C(pl)->mode = static_cast<int>(ev->value + 0.5);
+        }
+    }
+}
+void CLAP_ABI crashFlush(const clap_plugin_t* pl, const clap_input_events_t* in,
+                         const clap_output_events_t*) {
+    crashEvents(pl, in);
+}
+const clap_plugin_params_t kCrashParams = {crashParamCount,  crashParamInfo,   crashParamValue,
+                                           crashValueToText, crashTextToValue, crashFlush};
+const void* CLAP_ABI crashExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kCrashParams;
+    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kGainPorts;
+    return nullptr;
+}
+bool CLAP_ABI crashActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
+clap_process_status CLAP_ABI crashProcess(const clap_plugin_t* pl, const clap_process_t* p) {
+    crashEvents(pl, p->in_events);
+    if (C(pl)->mode.load() == 1) std::raise(SIGSEGV);
+    while (C(pl)->mode.load() == 2) {  // spin (no system call: sanitizers see a hang, not a call)
+    }
+    for (uint32_t c = 0; c < 2; ++c)
+        for (uint32_t i = 0; i < p->frames_count; ++i)
+            p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i];
+    return CLAP_PROCESS_CONTINUE;
+}
+
 // --- shared lifecycle ------------------------------------------------------------------
 
 bool CLAP_ABI initOk(const clap_plugin_t*) { return true; }
@@ -550,11 +636,12 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 3; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 4; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0   ? gainDescriptor()
            : i == 1 ? sineDescriptor()
            : i == 2 ? edgeDescriptor()
+           : i == 3 ? crashDescriptor()
                     : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
@@ -577,6 +664,8 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
         const_cast<clap_plugin_t*>(p)->start_processing = edgeStart;
         return p;
     }
+    if (!std::strcmp(id, crashDescriptor()->id))
+        return make<Crash>(host, crashDescriptor(), crashActivate, crashProcess, crashExt);
     return nullptr;
 }
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};

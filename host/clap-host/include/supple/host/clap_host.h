@@ -112,12 +112,19 @@ struct OutputEvents {
     void clear() { count = dropped = 0; }
 };
 
-class Library;  // a loaded .clap binary (shared by its instances)
+class Library;         // a loaded .clap binary (shared by its instances)
+class RemoteInstance;  // an instance in a bridge process
+
+// The bridge executable for isolated instances (process-wide, set at startup).
+void setBridgeExecutable(std::filesystem::path path);
 
 class Instance {
   public:
+    // `isolated`: the plugin runs in a bridge process of its own (ADR-0013;
+    // setBridgeExecutable() must have been called). The API is the same.
     static Result<std::unique_ptr<Instance>> create(const PluginInfo& info,
-                                                    const HostIdentity& host);
+                                                    const HostIdentity& host,
+                                                    bool isolated = false);
     ~Instance();
     Instance(const Instance&) = delete;
     Instance& operator=(const Instance&) = delete;
@@ -134,7 +141,12 @@ class Instance {
     std::uint32_t maxFrames() const { return maxFrames_; }
     std::uint32_t latency() const;
     std::uint32_t tail() const;  // UINT32_MAX = infinite; 0 when not reported
-    bool reportsTail() const { return extTail_ != nullptr; }
+    bool reportsTail() const;
+    // Isolated instances: the bridge crashed, hung or exited. The instance
+    // then outputs silence and every call fails; re-create it to recover.
+    bool failed() const;
+    std::string failure() const;
+    bool isolated() const { return remote_ != nullptr; }
 
     // --- ports (valid after create; a stereo configuration is selected when offered) ---
     std::uint32_t audioInputChannels() const { return inChannels_; }
@@ -219,6 +231,9 @@ class Instance {
     std::atomic<bool> processing_{false};  // written on the audio thread
     std::uint32_t maxFrames_ = 0;
     double sampleRate_ = 0.0;
+    std::unique_ptr<RemoteInstance> remote_;
+    Notifications remoteNotes_;
+    std::vector<std::string> remoteLog_;
 };
 
 }  // namespace supple::host

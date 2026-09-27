@@ -6,6 +6,7 @@
 
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
+#include <supple/host/clap_host.h>
 
 #include "fake_jack.h"
 
@@ -535,4 +536,79 @@ TEST_CASE("anticipative: the renderer stops the plugins when the JACK server goe
     CHECK(engine.lastStopOnAudioThread());
     CHECK_FALSE(engine.running());
     fake.reset();
+}
+
+// Phase 4 acceptance (engine.md §5): a crashing plugin in dedicated isolation
+// does not take down the engine; only its node goes silent.
+TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the session plays on" *
+          doctest::description("rt")) {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    model::EditTxn t(model::Session::create(), 1);
+    Id tracks[2];
+    for (int k = 0; k < 2; ++k) {
+        model::Track tr;
+        tr.name = k ? "Isolated" : "Steady";
+        tr.parent = kMaster;
+        tr.pan = k ? 100.0 : -100.0;  // steady left, isolated right
+        tracks[k] = t.create(tr);
+        t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(tracks[k]); });
+        std::vector<const char*> chain = {"com.suppleaudio.test.sine"};
+        if (k) chain.push_back("com.suppleaudio.test.crash");
+        for (const char* plugin : chain) {
+            model::FxInstance fx;
+            fx.plugin.id = plugin;
+            if (k) fx.isolation = model::Isolation::Dedicated;
+            const Id f = t.create(fx);
+            t.modify<model::Track>(tracks[k], [&](model::Track& x) { x.chain.push_back(f); });
+        }
+        model::MidiSource src;
+        src.sequence.ppq = 960;
+        src.sequence.length = 8 * 960;
+        src.sequence.notes.push_back(
+            {0, 8 * 960, 0, static_cast<std::uint8_t>(60 + 7 * k), 100, 0});
+        const Id mi = t.create(src);
+        model::Take take;
+        take.source = mi;
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = tracks[k];
+        item.length = 8.0;
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
+    }
+    const model::Session s = t.commit().value();
+    Id crashFx;
+    for (const auto& e : s.fx)
+        if (e.value->plugin.id == "com.suppleaudio.test.crash") crashFx = e.id;
+
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(s).ok());
+    host::Instance* crash = pool.find(crashFx);
+    REQUIRE(crash);
+    CHECK(crash->isolated());
+    engine.play();
+    runAhead(engine, backend, 40, 256);  // 10240 frames: both tracks sound
+    const auto& cap = backend.capture();
+    auto peak = [&](int ch, std::size_t from, std::size_t to) {
+        double m = 0;
+        for (std::size_t i = from; i < to; ++i)
+            m = std::max(m, std::fabs(double(cap.channels[static_cast<std::size_t>(ch)][i])));
+        return m;
+    };
+    CHECK(peak(0, 5000, 10240) > 0.1);
+    CHECK(peak(1, 5000, 10240) > 0.1);
+    REQUIRE(crash->setParam(1, 1.0).ok());  // crash in its next process()
+    runAhead(engine, backend, 200, 256);    // 51200 more frames
+    CHECK(crash->failed());
+    CHECK(pool.failed().size() == 1);
+    CHECK(peak(0, 50000, 61440) > 0.1);   // the steady track plays on
+    CHECK(peak(1, 50000, 61440) == 0.0);  // the crashed node is silent
+    CHECK(engine.processErrors() == 0);
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());
 }

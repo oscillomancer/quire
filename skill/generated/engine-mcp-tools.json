@@ -343,6 +343,12 @@
         },
         "anticipation_misses": {
           "type": "integer"
+        },
+        "failed_fx": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -358,7 +364,8 @@
         "process_errors",
         "restart_needed",
         "anticipative",
-        "anticipation_misses"
+        "anticipation_misses",
+        "failed_fx"
       ],
       "additionalProperties": false
     },
@@ -371,7 +378,7 @@
   {
     "name": "engine_status",
     "title": "Real-time engine state: backend, rate, block, device period, latency, xruns.",
-    "description": "Real-time engine state: backend, rate, block, device period, latency, xruns. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. See describe for errors and examples.",
+    "description": "Real-time engine state: backend, rate, block, device period, latency, xruns. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -420,6 +427,12 @@
         },
         "anticipation_misses": {
           "type": "integer"
+        },
+        "failed_fx": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -435,7 +448,8 @@
         "process_errors",
         "restart_needed",
         "anticipative",
-        "anticipation_misses"
+        "anticipation_misses",
+        "failed_fx"
       ],
       "additionalProperties": false
     },
@@ -670,9 +684,38 @@
     }
   },
   {
+    "name": "fx_restart",
+    "title": "Re-create a plugin instance from its saved patch/state (after a crash).",
+    "description": "Re-create a plugin instance from its saved patch/state (after a crash). engine.status lists failed_fx: isolated plugins whose process crashed or hung. The new instance starts from the model's patch or state. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_ref",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Plugin instance id, e.g. \"fx_1\"."
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_set",
-    "title": "Set instance options: bypass, offline, wet (%), label.",
-    "description": "Set instance options: bypass, offline, wet (%), label.  See describe for errors and examples.",
+    "title": "Set instance options: bypass, offline, wet (%), label, isolation.",
+    "description": "Set instance options: bypass, offline, wet (%), label, isolation. isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_set_args",
@@ -706,6 +749,10 @@
         },
         "label": {
           "type": "string"
+        },
+        "isolation": {
+          "type": "string",
+          "enum": ["inherit", "in_process", "shared_bridge", "dedicated"]
         }
       },
       "required": ["fx"],

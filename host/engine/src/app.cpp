@@ -309,13 +309,32 @@ void EngineApp::stopEngine() {
         engine_->stop();
         engine_->service();
         engine_.reset();
+        pool_->prune(head());  // nothing processes now: replaced instances can go
     }
     backend_ = nullptr;
     ownedBackend_.reset();
 }
 
-EngineStatus EngineApp::engineStatus() const {
+void EngineApp::checkFailures() {
+    for (const auto& [id, why] : pool_->failed()) {
+        if (!reportedFailures_.insert(id).second) continue;
+        json::Value payload = json::Value::object();
+        payload["fx"] = id.str();
+        payload["reason"] = why;
+        emit("fx.failed", std::move(payload));
+    }
+}
+
+void EngineApp::restartFx(model::Id fx) {
+    pool_->restart(fx);
+    reportedFailures_.erase(fx);
+    headChanged();  // a running engine gets the new instance in its next plan
+}
+
+EngineStatus EngineApp::engineStatus() {
+    checkFailures();
     EngineStatus st;
+    for (const auto& [id, why] : pool_->failed()) st.failedFx.push_back(id.str());
     if (!engine_ || !backend_) return st;
     const BackendStatus b = backend_->status();
     st.running = true;
@@ -352,6 +371,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     }
     if (action != "get") engine_->awaitTransport();
     engine_->service();
+    checkFailures();
     const TransportState t = engine_->transport();
     return TransportInfo{t.playing, t.seconds, view().timeMap->beatAt(t.seconds), t.sample};
 }

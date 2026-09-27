@@ -28,27 +28,39 @@ InstancePool::~InstancePool() = default;
 
 Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
                                           const Session& session) {
+    const bool isolated = fx.isolation == model::Isolation::SharedBridge ||
+                          fx.isolation == model::Isolation::Dedicated;
+    std::string desired;
+    if (fx.patch)
+        desired = "patch:" + json::writeCompact(*fx.patch);
+    else if (fx.state)
+        desired = "blob:" + *fx.state;
     auto& e = instances_[id];
-    if (!e.instance || e.pluginId != fx.plugin.id) {
+    // A new state blob is loaded into a fresh instance when the current one
+    // may be processing: CLAP's state.load runs on the main thread and a
+    // plugin need not guard its DSP against a concurrent process() (semantic
+    // patches are designed for live changes and stay in place).
+    const bool freshForState = e.instance && !fx.patch && fx.state && desired != e.appliedState &&
+                               e.instance->processing();
+    if (!e.instance || e.pluginId != fx.plugin.id || e.isolated != isolated || freshForState) {
+        // The plan playing now may still use the old instance: keep it alive
+        // until prune() says every plan that could use it is gone.
+        if (e.instance) retired_.emplace_back(generation_, std::move(e.instance));
         auto info = resolve_(fx.plugin);
         if (!info) {
             instances_.erase(id);
             return std::move(info).error();
         }
-        auto made = host::Instance::create(*info, identity_);
+        auto made = host::Instance::create(*info, identity_, isolated);
         if (!made) {
             instances_.erase(id);
             return std::move(made).error();
         }
         e.instance = std::move(*made);
         e.pluginId = fx.plugin.id;
+        e.isolated = isolated;
         e.appliedState.clear();
     }
-    std::string desired;
-    if (fx.patch)
-        desired = "patch:" + json::writeCompact(*fx.patch);
-    else if (fx.state)
-        desired = "blob:" + *fx.state;
     if (desired != e.appliedState && !desired.empty()) {
         if (fx.patch) {
             SUPPLE_TRY(
@@ -65,9 +77,29 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
     return e.instance.get();
 }
 
-void InstancePool::prune(const Session& session) {
+void InstancePool::prune(const Session& session, std::uint64_t liveGeneration) {
     for (auto it = instances_.begin(); it != instances_.end();)
         it = session.fx.contains(it->first) ? std::next(it) : instances_.erase(it);
+    std::erase_if(retired_, [&](const auto& r) { return r.first <= liveGeneration; });
+}
+
+void InstancePool::restart(Id id) {
+    if (auto it = instances_.find(id); it != instances_.end()) {
+        if (it->second.instance) retired_.emplace_back(generation_, std::move(it->second.instance));
+        instances_.erase(it);
+    }
+}
+
+std::vector<std::pair<Id, std::string>> InstancePool::failed() const {
+    std::vector<std::pair<Id, std::string>> out;
+    for (const auto& [id, e] : instances_)
+        if (e.instance && e.instance->failed()) out.emplace_back(id, e.instance->failure());
+    return out;
+}
+
+host::Instance* InstancePool::find(Id id) const {
+    auto it = instances_.find(id);
+    return it == instances_.end() ? nullptr : it->second.instance.get();
 }
 
 // --- media -----------------------------------------------------------------------------

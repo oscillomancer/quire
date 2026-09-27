@@ -369,7 +369,13 @@ granted, and CPU governor (read-only facts).
   processes its own edges, items and chain), so results are bit-identical
   for any thread count — the offline renderer uses the pool too (B4 test:
   1, 2, 8 threads byte-identical) and defaults to all cores.
+- **Plugin isolation** (ADR-0013): `dedicated` fx run in `<slug>-bridge`
+  processes (control socketpair + memfd data plane + futex, synchronous with
+  a 2 s deadline (lifecycle commands 7 s)); a crash or hang fails only that instance (silent node,
+  `fx.failed`, `engine.status.failed_fx`); `fx.restart` re-creates it from
+  the model. Acceptance test in `engine.tests`.
 - **Not yet:** live nodes (monitoring/recording) and live multiprocessing,
+  one shared process for `shared_bridge`,
   automatic restart after device changes, MIDI ports, plugin-parameter
   automation, stems and render jobs, resampling/stretching of audio items,
   the 10 ms crossfade on structural swaps, the B1 capacity benchmark.

@@ -3,7 +3,7 @@
 // SUPPLE_RT marks a function as real-time: RealtimeSanitizer (the `rtsan`
 // preset, -fsanitize=realtime) aborts if anything it calls allocates, locks,
 // blocks or performs a system call. Mark every audio-thread entry point.
-// SUPPLE_RT_UNSAFE_OK scopes a deliberate, reviewed exception (none today).
+// rt::ScopedSanctionedSyscall scopes the one reviewed exception (bridged plugins).
 #pragma once
 
 #if defined(__clang__) && defined(__has_cpp_attribute)
@@ -31,6 +31,23 @@ struct ScopedRtsanDisabler {
     ScopedRtsanDisabler() { __rtsan_disable(); }
     ~ScopedRtsanDisabler() { __rtsan_enable(); }
 #endif
+};
+
+// RAII: the sanctioned system calls of an audio thread -- the futex wake and
+// bounded wait of a bridged plugin (ADR-0013). Product code uses it there only.
+struct ScopedSanctionedSyscall {
+    ScopedSanctionedSyscall() {
+#ifdef SUPPLE_RTSAN_ENABLED
+        __rtsan_disable();
+#endif
+    }
+    ~ScopedSanctionedSyscall() {
+#ifdef SUPPLE_RTSAN_ENABLED
+        __rtsan_enable();
+#endif
+    }
+    ScopedSanctionedSyscall(const ScopedSanctionedSyscall&) = delete;
+    ScopedSanctionedSyscall& operator=(const ScopedSanctionedSyscall&) = delete;
 };
 
 }  // namespace supple::rt

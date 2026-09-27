@@ -1,5 +1,7 @@
 #include "supple/host/clap_host.h"
 
+#include "bridge_client.h"
+
 #include <dlfcn.h>
 
 #include <algorithm>
@@ -460,7 +462,21 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> dirsOrFiles) {
 // ---------------------------------------------------------------------------
 
 Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
-                                                   const HostIdentity& identity) {
+                                                   const HostIdentity& identity, bool isolated) {
+    if (isolated) {
+        RemotePorts ports;
+        auto remote = RemoteInstance::spawn(info, identity, ports);
+        if (!remote) return std::move(remote).error();
+        std::unique_ptr<Instance> self(new Instance());
+        self->info_ = info;
+        self->info_.semantic = ports.semantic;
+        self->inChannels_ = ports.inChannels;
+        self->outChannels_ = ports.outChannels;
+        self->acceptsNotes_ = ports.acceptsNotes;
+        self->hostState_ = std::make_unique<HostState>();
+        self->remote_ = std::move(*remote);
+        return self;
+    }
     auto lib = Library::open(info.path);
     if (!lib) return std::move(lib).error();
 
@@ -552,6 +568,12 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
 }
 
 Instance::~Instance() {
+    if (remote_) {
+        if (processing_) stopProcessing();
+        if (active_) deactivate();
+        remote_.reset();
+        return;
+    }
     if (!plugin_) return;
     // Destroying a processing instance is a caller bug (the audio thread must
     // stop processing first); recover by stopping on this thread.
@@ -562,6 +584,15 @@ Instance::~Instance() {
 }
 
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
+    if (remote_) {
+        if (active_) return okStatus();
+        SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_));
+        remote_->refreshLatency();
+        active_ = true;
+        sampleRate_ = sampleRate;
+        maxFrames_ = maxFrames;
+        return okStatus();
+    }
     if (active_) return okStatus();
     hostState_->events.assign(kMaxInputEvents, ClapEvent{});
     if (!plugin_->activate(plugin_, sampleRate, minFrames, maxFrames))
@@ -576,6 +607,11 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
 }
 
 void Instance::deactivate() {
+    if (remote_ && active_ && !processing_) {
+        remote_->deactivate();
+        active_ = false;
+        return;
+    }
     if (!active_) return;
     if (processing_) {
         // CLAP forbids deactivating while processing: the audio thread must
@@ -589,12 +625,25 @@ void Instance::deactivate() {
 }
 
 std::uint32_t Instance::latency() const {
+    if (remote_) return active_ ? remote_->latency() : 0;
     return active_ && extLatency_ ? extLatency_->get(plugin_) : 0;
 }
 
-std::uint32_t Instance::tail() const { return extTail_ ? extTail_->get(plugin_) : 0; }
+std::uint32_t Instance::tail() const {
+    if (remote_) return remote_->tail();
+    return extTail_ ? extTail_->get(plugin_) : 0;
+}
+
+bool Instance::reportsTail() const {
+    return remote_ ? remote_->reportsTail() : extTail_ != nullptr;
+}
+
+bool Instance::failed() const { return remote_ && remote_->failed(); }
+
+std::string Instance::failure() const { return remote_ ? remote_->failure() : std::string(); }
 
 std::vector<ParamInfo> Instance::params() const {
+    if (remote_) return remote_->params();
     std::vector<ParamInfo> out;
     if (!extParams_) return out;
     const uint32_t n = extParams_->count(plugin_);
@@ -607,6 +656,7 @@ std::vector<ParamInfo> Instance::params() const {
 }
 
 Result<double> Instance::paramValue(std::uint32_t id) const {
+    if (remote_) return remote_->paramValue(id);
     double v = 0;
     if (!extParams_ || !extParams_->get_value(plugin_, id, &v))
         return Error("host.param", "no parameter with id " + std::to_string(id));
@@ -614,6 +664,7 @@ Result<double> Instance::paramValue(std::uint32_t id) const {
 }
 
 Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) const {
+    if (remote_) return remote_->paramText(id, clapValue);
     char buf[256] = {};
     if (!extParams_ || !extParams_->value_to_text(plugin_, id, clapValue, buf, sizeof(buf)))
         return Error("host.param", "the plugin has no text for parameter " + std::to_string(id));
@@ -621,6 +672,7 @@ Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) cons
 }
 
 Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) const {
+    if (remote_) return remote_->paramFromText(id, text);
     double v = 0;
     const std::string s(text);
     if (!extParams_ || !extParams_->text_to_value(plugin_, id, s.c_str(), &v))
@@ -631,6 +683,7 @@ Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) 
 }
 
 Status Instance::setParam(std::uint32_t id, double clapValue) {
+    if (remote_) return remote_->setParam(id, clapValue);
     if (!extParams_) return Error("host.param", "the plugin has no parameters");
     if (!active_) {
         // Inactive: flush on the main thread.
@@ -687,6 +740,10 @@ void drainParamQueue(Instance::HostState& h, std::size_t reserve) SUPPLE_RT {
 }  // namespace
 
 void Instance::flushParams() SUPPLE_RT {
+    if (remote_) {
+        if (active_ && !processing_) remote_->flush();
+        return;
+    }
     AudioThreadScope scope;
     HostState& h = *hostState_;
     h.eventCount = 0;
@@ -700,6 +757,12 @@ void Instance::flushParams() SUPPLE_RT {
 }
 
 bool Instance::startProcessing() SUPPLE_RT {
+    if (remote_) {
+        if (processing_) return true;
+        if (!active_) return false;
+        processing_ = remote_->startProcessing();
+        return processing_;
+    }
     if (processing_) return true;
     if (!active_) return false;
     AudioThreadScope scope;
@@ -708,6 +771,11 @@ bool Instance::startProcessing() SUPPLE_RT {
 }
 
 void Instance::stopProcessing() SUPPLE_RT {
+    if (remote_) {
+        if (processing_) remote_->stopProcessing();
+        processing_ = false;
+        return;
+    }
     if (!processing_) return;
     AudioThreadScope scope;
     plugin_->stop_processing(plugin_);
@@ -715,11 +783,16 @@ void Instance::stopProcessing() SUPPLE_RT {
 }
 
 void Instance::reset() SUPPLE_RT {
+    if (remote_) {
+        if (active_) remote_->reset();
+        return;
+    }
     AudioThreadScope scope;  // CLAP: [audio-thread & active]
     if (active_) plugin_->reset(plugin_);
 }
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
+    if (remote_) return active_ && processing_ && remote_->process(b, out);
     if (!active_ || !processing_) return false;
     AudioThreadScope scope;
     HostState& h = *hostState_;
@@ -824,6 +897,11 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
 }
 
 Result<json::Value> Instance::semanticSchema() {
+    if (remote_) {
+        auto text = remote_->text(bridge::Op::SemanticSchema);
+        if (!text) return std::move(text).error();
+        return json::parse(*text);
+    }
     if (!extSemantic_)
         return Error("host.semantic.unsupported", info_.id + " has no semantic-params extension");
     StringSink sink;
@@ -833,6 +911,7 @@ Result<json::Value> Instance::semanticSchema() {
 }
 
 Result<std::string> Instance::getPatch(bool changedOnly) {
+    if (remote_) return remote_->text(bridge::Op::GetPatch, changedOnly);
     if (!extSemantic_)
         return Error("host.semantic.unsupported", info_.id + " has no semantic-params extension");
     StringSink sink;
@@ -844,6 +923,7 @@ Result<std::string> Instance::getPatch(bool changedOnly) {
 }
 
 Status Instance::setPatch(std::string_view text, std::uint32_t mode) {
+    if (remote_) return remote_->setPatch(text, mode);
     if (!extSemantic_)
         return Error("host.semantic.unsupported", info_.id + " has no semantic-params extension");
     StringSink errors;
@@ -855,6 +935,7 @@ Status Instance::setPatch(std::string_view text, std::uint32_t mode) {
 }
 
 Result<std::string> Instance::describe(bool changedOnly) {
+    if (remote_) return remote_->text(bridge::Op::Describe, changedOnly);
     if (!extSemantic_)
         return Error("host.semantic.unsupported", info_.id + " has no semantic-params extension");
     StringSink sink;
@@ -866,6 +947,7 @@ Result<std::string> Instance::describe(bool changedOnly) {
 }
 
 Result<std::vector<std::uint8_t>> Instance::saveState() {
+    if (remote_) return remote_->saveState();
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
     ByteSink sink;
     if (!extState_->save(plugin_, &sink.stream))
@@ -874,6 +956,7 @@ Result<std::vector<std::uint8_t>> Instance::saveState() {
 }
 
 Status Instance::loadState(std::span<const std::uint8_t> bytes) {
+    if (remote_) return remote_->loadState(bytes);
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
     ByteSource source{bytes};
     if (!extState_->load(plugin_, &source.stream))
@@ -882,9 +965,13 @@ Status Instance::loadState(std::span<const std::uint8_t> bytes) {
     return okStatus();
 }
 
-bool Instance::needsAudioFlush() const { return active_ && hostState_->flushRequested.load(); }
+bool Instance::needsAudioFlush() const {
+    if (remote_) return active_ && remote_->needsAudioFlush();
+    return active_ && hostState_->flushRequested.load();
+}
 
 bool Instance::serviceMainThread() {
+    if (remote_) return remote_->service(remoteNotes_, remoteLog_);
     HostState& h = *hostState_;
     bool did = false;
     if (h.callbackRequested.exchange(false)) {
@@ -923,6 +1010,7 @@ bool Instance::serviceMainThread() {
 }
 
 Instance::Notifications Instance::takeNotifications() {
+    if (remote_) return std::exchange(remoteNotes_, Notifications{});
     HostState& h = *hostState_;
     Notifications n;
     n.stateDirty = h.stateDirty.exchange(false);
@@ -936,6 +1024,7 @@ Instance::Notifications Instance::takeNotifications() {
 }
 
 std::vector<std::string> Instance::takeLog() {
+    if (remote_) return std::exchange(remoteLog_, {});
     HostState& h = *hostState_;
     std::vector<std::string> out;
     LogLine line{};

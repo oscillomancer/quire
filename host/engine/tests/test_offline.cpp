@@ -418,3 +418,72 @@ TEST_CASE("offline renders are bit-identical for any thread count (B4)") {
         CHECK(r.audio.channels[1] == runs[0].audio.channels[1]);
     }
 }
+
+TEST_CASE("the pool retires replaced instances until no plan can use them (review round 6)") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id tr = addTrack(t, "T");
+    const Id fx = addFx(t, tr, kGain);
+    const auto s1 = commit(t);
+    pool.setGeneration(1);
+    host::Instance* a = pool.get(fx, *s1.fx.find(fx), s1).value();
+
+    // Another plugin under the same fx id: a new instance; the old one waits.
+    model::EditTxn t2(s1, 2);
+    t2.modify<model::FxInstance>(
+        fx, [](model::FxInstance& f) { f.plugin.id = "com.suppleaudio.test.edge"; });
+    const auto s2 = commit(t2);
+    pool.setGeneration(2);
+    host::Instance* b = pool.get(fx, *s2.fx.find(fx), s2).value();
+    CHECK(b != a);
+    CHECK(pool.retired() == 1);
+    pool.prune(s2, 1);  // plan 1 (which used `a`) may still play
+    CHECK(pool.retired() == 1);
+    pool.prune(s2, 2);
+    CHECK(pool.retired() == 0);
+
+    // A plugin that cannot be found: the live instance is retired, not freed.
+    model::EditTxn t3(s2, 3);
+    t3.modify<model::FxInstance>(
+        fx, [](model::FxInstance& f) { f.plugin.id = "com.suppleaudio.test.nope"; });
+    const auto s3 = commit(t3);
+    pool.setGeneration(3);
+    CHECK_FALSE(pool.get(fx, *s3.fx.find(fx), s3));
+    CHECK(pool.retired() == 1);
+    CHECK(pool.find(fx) == nullptr);
+    pool.prune(s3, 2);
+    CHECK(pool.retired() == 1);
+    pool.prune(s3, 3);
+    CHECK(pool.retired() == 0);
+}
+
+TEST_CASE("a new state blob for a processing instance goes to a fresh instance (review round 6)") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id tr = addTrack(t, "T");
+    const Id fx = addFx(t, tr, "com.suppleaudio.test.edge");
+    t.modify<model::FxInstance>(fx, [](model::FxInstance& f) { f.state = "sha256:one"; });
+    t.putBlob("sha256:one", std::make_shared<const model::Blob>(model::Blob{{0, 1, 0, 0}}));
+    const auto s1 = commit(t);
+    host::Instance* a = pool.get(fx, *s1.fx.find(fx), s1).value();
+    REQUIRE(a->activate(48000, 1, 256).ok());
+    REQUIRE(a->startProcessing());  // as if a plan were playing it
+
+    model::EditTxn t2(s1, 2);
+    t2.modify<model::FxInstance>(fx, [](model::FxInstance& f) { f.state = "sha256:two"; });
+    t2.putBlob("sha256:two", std::make_shared<const model::Blob>(model::Blob{{0, 2, 0, 0}}));
+    const auto s2 = commit(t2);
+    host::Instance* b = pool.get(fx, *s2.fx.find(fx), s2).value();
+    CHECK(b != a);  // `a` keeps processing untouched until a plan stops it
+    CHECK(pool.retired() == 1);
+    CHECK(b->tail() == 2);  // the edge fixture reports its state bytes as its tail
+    a->stopProcessing();
+
+    // Not processing: the state is loaded in place.
+    model::EditTxn t3(s2, 3);
+    t3.modify<model::FxInstance>(fx, [](model::FxInstance& f) { f.state = "sha256:three"; });
+    t3.putBlob("sha256:three", std::make_shared<const model::Blob>(model::Blob{{0, 3, 0, 0}}));
+    const auto s3 = commit(t3);
+    CHECK(pool.get(fx, *s3.fx.find(fx), s3).value() == b);
+    CHECK(b->tail() == 3);
+}

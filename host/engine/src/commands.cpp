@@ -108,6 +108,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
         .field("anticipative", &EngineStatus::anticipative, schema::boolean())
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
+        .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
         .build();
 }
 
@@ -224,6 +225,7 @@ struct FxSetArgs {
     std::optional<bool> bypass, offline;
     std::optional<double> wet;
     std::optional<std::string> label;
+    std::optional<model::Isolation> isolation;
 };
 struct FxPatchArgs {
     std::string fx;
@@ -1089,7 +1091,11 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "fx.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set instance options: bypass, offline, wet (%), label.";
+        c.summary = "Set instance options: bypass, offline, wet (%), label, isolation.";
+        c.description =
+            "isolation: in_process, dedicated (the plugin runs in a process of its own: a "
+            "crash silences only it), shared_bridge (one process for all such plugins), "
+            "inherit (the project default: in_process).";
         c.tags = {"fx"};
         c.args = schema::object<FxSetArgs>("fx_set_args")
                      .field("fx", &FxSetArgs::fx, idArg("fx", "Plugin instance"))
@@ -1098,6 +1104,12 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("wet", &FxSetArgs::wet,
                             schema::number().range(0, 100).unit(units::Unit::percent))
                      .field("label", &FxSetArgs::label, schema::string())
+                     .field("isolation", &FxSetArgs::isolation,
+                            schema::enumeration<model::Isolation>(
+                                {{model::Isolation::Inherit, "inherit"},
+                                 {model::Isolation::InProcess, "in_process"},
+                                 {model::Isolation::SharedBridge, "shared_bridge"},
+                                 {model::Isolation::Dedicated, "dedicated"}}))
                      .build();
         c.result = emptySchema();
         c.examples = {
@@ -1111,7 +1123,32 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.offline) f.offline = *a.offline;
                 if (a.wet) f.wet = *a.wet;
                 if (a.label) f.label = *a.label;
+                if (a.isolation) f.isolation = *a.isolation;
             });
+            return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<FxRef, Empty> c;
+        c.name = "fx.restart";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Re-create a plugin instance from its saved patch/state (after a crash).";
+        c.description =
+            "engine.status lists failed_fx: isolated plugins whose process crashed or hung. "
+            "The new instance starts from the model's patch or state.";
+        c.tags = {"fx"};
+        c.args = schema::object<FxRef>("fx_ref")
+                     .field("fx", &FxRef::fx, idArg("fx", "Plugin instance"))
+                     .build();
+        c.result = emptySchema();
+        c.examples = {{"Restart", obj(R"({"fx": "fx_1"})"), obj("{}"), "song_with_fx"}};
+        c.run = [](const FxRef& a, Context& ctx) -> Result<Empty> {
+            EngineApp& app = A(ctx);
+            auto id = existing<model::FxInstance>(app.view(), a.fx, "/fx");
+            if (!id) return std::move(id).error();
+            app.restartFx(*id);
             return Empty{};
         };
         registry.add(std::move(c));
@@ -1624,7 +1661,7 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
-                     "anticipative": true, "anticipation_misses": 0})"),
+                     "anticipative": true, "anticipation_misses": 0, "failed_fx": []})"),
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
@@ -1661,7 +1698,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
-            "away; engine.stop and engine.start again.";
+            "away; engine.stop and engine.start again. failed_fx: isolated plugins whose "
+            "process crashed or hung (silent now; fx.restart re-creates them).";
         c.tags = {"engine"};
         c.args = schema::object<NoArgs>("no_args").build();
         c.result = engineStatusSchema();
@@ -1669,7 +1707,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
-                     "anticipative": false, "anticipation_misses": 0})"),
+                     "anticipative": false, "anticipation_misses": 0, "failed_fx": []})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();
