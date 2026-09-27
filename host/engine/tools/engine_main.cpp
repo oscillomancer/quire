@@ -10,12 +10,19 @@
 //       Serve MCP over stdio against the in-process engine session.
 //   <slug>-engine serve [--project FILE] [--instance NAME] [--socket PATH]
 //       Serve the command bus on a Unix socket from the model thread.
+//   <slug>-engine play FILE [--bar N] [--seconds S] [--block N] [--backend jack|dummy]
+//       Play a project through the audio device (to its end, or for S
+//       seconds; Ctrl-C stops), then print engine.status.
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <supple/product.h>
@@ -34,8 +41,10 @@ int usage() {
                  "[--plugin-path P]...\n"
                  "       %s-engine registry [--markdown | --mcp-tools]\n"
                  "       %s-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...\n"
-                 "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n",
-                 slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str());
+                 "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n"
+                 "       %s-engine play FILE [--bar N] [--seconds S] [--block N] "
+                 "[--backend jack|dummy] [--plugin-path P]...\n",
+                 slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str());
     return 2;
 }
 
@@ -69,6 +78,87 @@ fs::path defaultWorkdir() {
     const fs::path base =
         cache && *cache ? fs::path(cache) : fs::path(home ? home : "/tmp") / ".cache";
     return base / std::string(product::kSlug) / "engine";
+}
+
+std::atomic<bool> g_interrupted{false};
+
+engine::AppOptions cliOptions() {
+    engine::AppOptions options;
+    options.identity.name = std::string(product::kName);
+    options.identity.vendor = std::string(product::kVendor);
+    options.identity.version = std::string(product::kVersion);
+    return options;
+}
+
+int play(cmd::Registry& registry, const std::vector<std::string>& args) {
+    if (args.size() < 2) return usage();
+    const fs::path project = fs::absolute(args[1]);
+    engine::AppOptions options = cliOptions();
+    json::Value start = json::Value::object();
+    std::optional<std::int64_t> bar;
+    std::optional<double> seconds;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        if (i + 1 >= args.size()) return usage();
+        if (args[i] == "--bar")
+            bar = std::atoll(args[++i].c_str());
+        else if (args[i] == "--seconds")
+            seconds = std::atof(args[++i].c_str());
+        else if (args[i] == "--block")
+            start["block"] = std::int64_t{std::atoll(args[++i].c_str())};
+        else if (args[i] == "--backend")
+            start["backend"] = args[++i];
+        else if (args[i] == "--plugin-path")
+            options.pluginPath.emplace_back(args[++i]);
+        else
+            return usage();
+    }
+    options.workdir = project.parent_path();
+    if (!options.pluginPath.empty())
+        for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
+    auto app = engine::EngineApp::create(options);
+    if (!app) {
+        print(errorJson(app.error()));
+        return 1;
+    }
+    if (auto st = (*app)->open(project); !st) {
+        print(errorJson(st.error()));
+        return 1;
+    }
+    cmd::Dispatcher dispatcher(registry, **app);
+    auto run = [&](const char* command, json::Value a) {
+        return dispatcher.execute({command, std::move(a), {cmd::Origin::Type::Rpc, "cli", ""}});
+    };
+    json::Value seek = json::Value::object();
+    seek["bar"] = bar.value_or(1);
+    for (auto [command, a] : {std::pair{"engine.start", start}, std::pair{"transport.seek", seek},
+                              std::pair{"transport.play", json::Value::object()}}) {
+        if (auto r = run(command, a); !r) {
+            print(errorJson(r.error()));
+            return 1;
+        }
+    }
+    // Default length: from the start position to the last item's end, plus a second.
+    const model::Session s = (*app)->view();
+    double endBeat = 0;
+    for (const auto& e : s.items) endBeat = std::max(endBeat, e.value->position + e.value->length);
+    const double from = (*app)->engine()->transport().seconds;
+    const double length = seconds.value_or(s.timeMap->secondsAt(endBeat) - from + 1.0);
+    std::signal(SIGINT, [](int) { g_interrupted = true; });
+    std::fprintf(stderr, "playing %s for %.1f s (Ctrl-C stops)\n", project.filename().c_str(),
+                 length);
+    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(length);
+    while (!g_interrupted && std::chrono::steady_clock::now() < end) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        (*app)->engine()->service();
+    }
+    auto status = run("engine.status", json::Value::object());
+    (void)run("engine.stop", json::Value::object());
+    if (!status) {
+        print(errorJson(status.error()));
+        return 1;
+    }
+    print(*status);
+    return 0;
 }
 
 }  // namespace
@@ -158,12 +248,10 @@ int main(int argc, char** argv) {
             return usage();
         return 0;
     }
+    if (args[0] == "play") return play(registry, args);
     if (args[0] != "exec" || args.size() < 2) return usage();
 
-    engine::AppOptions options;
-    options.identity.name = std::string(product::kName);
-    options.identity.vendor = std::string(product::kVendor);
-    options.identity.version = std::string(product::kVersion);
+    engine::AppOptions options = cliOptions();
     fs::path project;
     bool save = false;
     for (std::size_t i = 2; i < args.size(); ++i) {

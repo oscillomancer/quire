@@ -56,3 +56,14 @@ Native PipeWire first (best integration, but a larger API, no ecosystem
 portability and the JACK API already works here); ALSA first (bypasses the
 desktop graph and competes for the MOTU); linking libjack directly (simpler,
 but a hard runtime dependency).
+
+## Amendment (2026-09-26, implementation)
+
+pipewire-jack reads `PIPEWIRE_LATENCY` as `node.latency` (a request) and
+`PIPEWIRE_QUANTUM` as `node.force-quantum` + `node.force-rate` (forcing the
+whole graph, including its rate). The backend therefore requests the block
+with `PIPEWIRE_LATENCY` and keeps `jack_set_buffer_size` behind an explicit
+option for benchmarks. First device run: a 64-frame request was granted a
+128-frame period at 48 kHz with zero xruns over 2 s; the 64-frame acceptance
+benchmark will need the forced period (reported with the results).
+

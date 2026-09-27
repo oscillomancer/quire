@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <thread>
 
 #include "supple/base/closest.h"
 #include "supple/base/files.h"
 #include "supple/clap/semantic_params.h"
+#include "supple/engine/jack.h"
 #include "supple/model/schemas.h"
+#include "supple/product.h"
 
 namespace supple::engine {
 
@@ -267,14 +270,89 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
         engine_.reset();
         return st;
     }
+    backend_ = &backend;
+    playStart_ = 0.0;
     return engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
 }
 
+Status EngineApp::startEngine(std::string_view backend, std::uint32_t block) {
+    if (engine_)
+        return Error("engine.running", "the engine is already running", {},
+                     "engine.stop first to change the backend or block size");
+    BackendConfig config;
+    config.sampleRate = view().project->sampleRate;
+    config.blockSize = block;
+    if (backend == "jack") {
+        JackOptions o;
+        o.clientName = std::string(product::kSlug);
+        o.library = options_.jackLibrary;
+        ownedBackend_ = std::make_unique<JackBackend>(o);
+    } else if (backend == "dummy") {
+        ownedBackend_ = std::make_unique<DummyBackend>(
+            DummyBackend::Options{.mode = DummyBackend::Mode::Thread, .paced = true});
+    } else {
+        return Error("engine.backend", "unknown backend " + std::string(backend), {},
+                     "jack or dummy");
+    }
+    auto st = startEngine(*ownedBackend_, config);
+    if (!st) stopEngine();  // e.g. the project's rate is not the device's
+    return st;
+}
+
 void EngineApp::stopEngine() {
-    if (!engine_) return;
-    engine_->stop();
+    if (engine_) {
+        engine_->stop();
+        engine_->service();
+        engine_.reset();
+    }
+    backend_ = nullptr;
+    ownedBackend_.reset();
+}
+
+EngineStatus EngineApp::engineStatus() const {
+    EngineStatus st;
+    if (!engine_ || !backend_) return st;
+    const BackendStatus b = backend_->status();
+    st.running = true;
+    st.backend = backend_->name();
+    st.sampleRate = engine_->config().sampleRate;
+    st.block = engine_->config().blockSize;
+    st.period = b.period;
+    st.planLatency = engine_->outputLatency();
+    st.deviceLatency = b.outputLatency;
+    st.xruns = static_cast<std::int64_t>(b.xruns);
+    st.cycles = static_cast<std::int64_t>(engine_->cycles());
+    st.processErrors = static_cast<std::int64_t>(engine_->processErrors());
+    st.restartNeeded = b.restartNeeded;
+    return st;
+}
+
+Result<TransportInfo> EngineApp::transport(std::string_view action, std::optional<double> seconds) {
+    if (!engine_)
+        return Error("engine.stopped", "the real-time engine is not running", {},
+                     "engine.start first");
+    const std::uint64_t before = engine_->cycles();
+    if (action == "play") {
+        playStart_ = engine_->transport().seconds;
+        engine_->play();
+    } else if (action == "pause") {
+        engine_->pause();
+    } else if (action == "stop") {
+        engine_->pause();
+        engine_->seek(playStart_);
+    } else if (action == "seek") {
+        engine_->seek(seconds.value_or(0.0));
+        if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
+    }
+    if (action != "get" && backend_->ownsThread()) {
+        // Two cycles: the first may have begun before the request.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (engine_->cycles() < before + 2 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     engine_->service();
-    engine_.reset();
+    const TransportState t = engine_->transport();
+    return TransportInfo{t.playing, t.seconds, view().timeMap->beatAt(t.seconds), t.sample};
 }
 
 void EngineApp::headChanged() {
@@ -352,6 +430,12 @@ void EngineApp::invoked(std::string_view command, int, const json::Value& args, 
 
 void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     if (fixture == "empty") return;
+    if (fixture == "engine_running") {  // the dummy backend: no device
+        auto st = startEngine("dummy", 256);
+        assert(st && "fixture engine failed");
+        (void)st;
+        return;
+    }
     if (fixture == "job_running") {
         (void)d.jobs().create();
         return;

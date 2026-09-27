@@ -3,7 +3,10 @@
 #include <cmath>
 #include <thread>
 
+#include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
+
+#include "fake_jack.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -291,4 +294,66 @@ TEST_CASE("a manual backend's stop is the audio thread's stop") {
     backend.run(2);
     engine.stop();
     CHECK(engine.lastStopOnAudioThread());
+}
+
+TEST_CASE("the engine plays through the JACK backend (a stand-in libjack)" *
+          doctest::description("rt")) {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);  // the graph's period is four engine blocks
+    auto pool = makePool();
+    MediaCache media;
+    JackBackend::Options o;
+    o.library = FakeJack::kPath;
+    JackBackend backend(o);
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    const auto until = fake.cycles() + 20;
+    while (fake.cycles() < until) std::this_thread::yield();
+    CHECK(engine.transport().sample >= 256);
+    CHECK(fake.outputPeak("supple:out_1") > 0.01f);
+    engine.stop();
+    CHECK(engine.lastStopOnAudioThread());
+    CHECK(engine.processErrors() == 0);
+    fake.reset();
+}
+
+TEST_CASE("the engine survives the JACK server going away") {
+    FakeJack& fake = fakeJack();
+    fake.reset(256);
+    auto pool = makePool();
+    MediaCache media;
+    JackBackend::Options o;
+    o.library = FakeJack::kPath;
+    JackBackend backend(o);
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.load(synthSession(0.0)).ok());
+    engine.play();
+    const auto until = fake.cycles() + 5;
+    while (fake.cycles() < until) std::this_thread::yield();
+    fake.shutdown();
+    CHECK(backend.stats().serverGone);
+    engine.stop();  // no final callback: the plugins are stopped on this thread
+    CHECK_FALSE(engine.lastStopOnAudioThread());
+    CHECK_FALSE(engine.running());
+    fake.reset();
+}
+
+TEST_CASE("the engine refuses a session at a rate the graph does not run") {
+    FakeJack& fake = fakeJack();
+    fake.reset();
+    fake.setRate(44100);
+    auto pool = makePool();
+    MediaCache media;
+    JackBackend::Options o;
+    o.library = FakeJack::kPath;
+    JackBackend backend(o);
+    Engine engine(pool, media);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    auto st = engine.load(synthSession(0.0));  // the session runs at 48 kHz
+    CHECK_FALSE(st.ok());
+    engine.stop();
+    fake.reset();
 }

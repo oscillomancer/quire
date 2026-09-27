@@ -38,6 +38,14 @@ struct BackendConfig {
     std::uint32_t inputs = 0, outputs = 2;
 };
 
+// What a running backend reports (for engine.status).
+struct BackendStatus {
+    std::uint32_t period = 0;         // the device's period, in frames
+    std::uint64_t xruns = 0;          // reported by the device
+    std::uint32_t outputLatency = 0;  // frames from the backend's outputs to the device
+    bool restartNeeded = false;       // the device's rate changed or it went away
+};
+
 // An audio device driver. The callback runs on the backend's audio thread.
 // Contract for stop(): after the last audio cycle and before stop() returns,
 // the backend calls the callback once more with frames == 0 on its audio
@@ -55,6 +63,7 @@ class Backend {
     // True when callbacks run on a thread of the backend's own (a device);
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
+    virtual BackendStatus status() const { return {config().blockSize, 0, 0, false}; }
 };
 
 // No device. `Manual` runs cycles on the caller's thread (deterministic
@@ -127,6 +136,9 @@ class Engine {
     std::uint32_t outputLatency() const { return outputLatency_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
     std::uint64_t processErrors() const { return processErrors_.load(); }
+    // Audio cycles run since start (the main thread's way to see a request acted on).
+    std::uint64_t cycles() const { return cycles_.load(std::memory_order_acquire); }
+    const BackendConfig& config() const { return config_; }
     // True when the last stop() stopped the plugins in the backend's final
     // (audio-thread) callback, as the Backend contract promises.
     bool lastStopOnAudioThread() const { return stoppedOnAudioThread_.load(); }
@@ -171,6 +183,7 @@ class Engine {
     std::atomic<bool> shutDown_{false};
     std::atomic<bool> stoppedOnAudioThread_{false};
     std::atomic<std::uint64_t> processErrors_{0};
+    std::atomic<std::uint64_t> cycles_{0};
 };
 
 }  // namespace supple::engine

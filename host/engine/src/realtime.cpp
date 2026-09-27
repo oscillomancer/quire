@@ -80,11 +80,13 @@ Engine::~Engine() { stop(); }
 
 Status Engine::start(Backend& backend, const BackendConfig& config) {
     if (backend_) return Error("engine.running", "the engine is already running");
-    config_ = config;
+    if (config.outputs < 2 || config.blockSize == 0)
+        return Error("engine.config", "the engine needs a block size and two outputs");
     shutDown_ = false;
     shutdownRequested_ = false;
     SUPPLE_TRY(backend.start(config, [this](const float* const* in, float* const* out,
                                             std::uint32_t n) { cycle(in, out, n); }));
+    config_ = backend.config();  // what the device granted (e.g. its rate)
     backend_ = &backend;
     return okStatus();
 }
@@ -113,7 +115,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         return Error("engine.sample_rate",
                      "the project is at " + std::to_string(session.project->sampleRate) +
                          " Hz, the device at " + std::to_string(config_.sampleRate),
-                     {}, "restart the engine at the project rate");
+                     {}, "run the project and the device at the same rate");
     auto compiled = detail::compile(session, plugins_, 0.0, config_.blockSize);
     if (!compiled) return std::move(compiled).error();
     auto plan = std::make_unique<detail::Plan>(std::move(*compiled));
@@ -234,6 +236,7 @@ void Engine::cycle(const float* const*, float* const* out, std::uint32_t frames)
     }
     reportedPos_.store(pos_);
     reportedPlaying_.store(playing_);
+    cycles_.fetch_add(1, std::memory_order_release);
 }
 
 }  // namespace supple::engine

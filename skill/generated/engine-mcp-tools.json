@@ -279,6 +279,176 @@
     }
   },
   {
+    "name": "engine_start",
+    "title": "Start real-time playback on the audio device (jack) or without one (dummy).",
+    "description": "Start real-time playback on the audio device (jack) or without one (dummy). backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the engine's block in frames (default 256); the device's period may differ and is reported. The project must run at the device's rate. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "engine_start_args",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["jack", "dummy"]
+        },
+        "block": {
+          "type": "integer",
+          "minimum": 16.0,
+          "maximum": 4096.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "engine_status",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "sample_rate": {
+          "type": "number"
+        },
+        "block": {
+          "type": "integer"
+        },
+        "period": {
+          "type": "integer"
+        },
+        "plan_latency": {
+          "type": "integer"
+        },
+        "device_latency": {
+          "type": "integer"
+        },
+        "xruns": {
+          "type": "integer"
+        },
+        "cycles": {
+          "type": "integer"
+        },
+        "process_errors": {
+          "type": "integer"
+        },
+        "restart_needed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "running",
+        "backend",
+        "sample_rate",
+        "block",
+        "period",
+        "plan_latency",
+        "device_latency",
+        "xruns",
+        "cycles",
+        "process_errors",
+        "restart_needed"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "engine_status",
+    "title": "Real-time engine state: backend, rate, block, device period, latency, xruns.",
+    "description": "Real-time engine state: backend, rate, block, device period, latency, xruns. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "engine_status",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "sample_rate": {
+          "type": "number"
+        },
+        "block": {
+          "type": "integer"
+        },
+        "period": {
+          "type": "integer"
+        },
+        "plan_latency": {
+          "type": "integer"
+        },
+        "device_latency": {
+          "type": "integer"
+        },
+        "xruns": {
+          "type": "integer"
+        },
+        "cycles": {
+          "type": "integer"
+        },
+        "process_errors": {
+          "type": "integer"
+        },
+        "restart_needed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "running",
+        "backend",
+        "sample_rate",
+        "block",
+        "period",
+        "plan_latency",
+        "device_latency",
+        "xruns",
+        "cycles",
+        "process_errors",
+        "restart_needed"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "engine_stop",
+    "title": "Stop real-time playback and release the audio device.",
+    "description": "Stop real-time playback and release the audio device.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_add",
     "title": "Insert a plugin into a track's FX chain and return its id.",
     "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. See describe for errors and examples.",
@@ -1462,6 +1632,199 @@
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true
+    }
+  },
+  {
+    "name": "transport_get",
+    "title": "The play position and whether it is playing.",
+    "description": "The play position and whether it is playing.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        }
+      },
+      "required": ["playing", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_pause",
+    "title": "Pause playback where it is.",
+    "description": "Pause playback where it is.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        }
+      },
+      "required": ["playing", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_play",
+    "title": "Start playback from the current position.",
+    "description": "Start playback from the current position.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        }
+      },
+      "required": ["playing", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_seek",
+    "title": "Move the play position (one of seconds, beat or bar).",
+    "description": "Move the play position (one of seconds, beat or bar).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "seek_args",
+      "properties": {
+        "seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        }
+      },
+      "required": ["playing", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_stop",
+    "title": "Stop playback and return to where it started.",
+    "description": "Stop playback and return to where it started.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport",
+      "properties": {
+        "playing": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "sample": {
+          "type": "integer"
+        }
+      },
+      "required": ["playing", "seconds", "beat", "sample"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
     }
   }
 ]

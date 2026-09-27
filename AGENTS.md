@@ -70,6 +70,10 @@ Phase 3 acceptance in REAPER (only when the plugin is installed in a CLAP path
 REAPER scans, e.g. ~/.clap; opens the audio device):
 `tools/reaper/load-test.sh <plugin display name>`.
 
+The JACK backend's tests use a stand-in libjack; the real server (the audio
+device, 2 s of silence) only on request:
+`SUPPLE_AUDIO_DEVICE_TEST=1 build/dev/host/engine/engine.tests -tc='real JACK*'`.
+
 CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
 from the tsan preset: timing-heavy tests TSan makes impractically slow), `slow`
 (minutes-long end-to-end tests: run in dev, gcc and asan only). A test that

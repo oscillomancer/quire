@@ -3,9 +3,12 @@
 
 #include <cmath>
 #include <filesystem>
+#include <thread>
 
 #include <supple/engine/app.h>
 #include <supple/model/schemas.h>
+
+#include "fake_jack.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -183,4 +186,63 @@ TEST_CASE("agent branches: parallel edits merge by replay; conflicts are reporte
     CHECK(app->head().tracks.find(*model::Id::parse("tr_4"))->name == "Lead");
     CHECK(app->head().tracks.find(*model::Id::parse("tr_5"))->name == "tr_4");
     CHECK(app->head().tracks.find(*model::Id::parse("tr_5"))->notes == "copy of tr_1");
+}
+
+TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)") {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    AppOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {kFixture};
+    o.jackLibrary = FakeJack::kPath;
+    auto created = EngineApp::create(o);
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Bass"}, "as": "bass"},
+        {"command": "fx.add", "args": {"track": "${bass.track}", "plugin": "Test Sine"}},
+        {"command": "item.add", "args": {"track": "${bass.track}", "bar": 1,
+                                          "notation": "voice bass; 1: A2:w | D3:w"}}]})");
+
+    auto status = call("engine.start", "{}");  // jack by default
+    CHECK(status["backend"].asString() == "jack");
+    CHECK(status["period"].asInt() == 1024);
+    CHECK(status["device_latency"].asInt() == 512);
+    CHECK(call("transport.play", "{}")["playing"].asBool());
+    const auto until = fake.cycles() + 10;
+    while (fake.cycles() < until) std::this_thread::yield();
+    CHECK(fake.outputPeak("") > 0.01f);
+    CHECK(call("transport.get", "{}")["sample"].asInt() > 0);
+
+    call("track.set", R"({"track": "tr_1", "volume_db": -6})");  // a new plan while playing
+    fake.xrun();
+    status = call("engine.status", "{}");
+    CHECK(status["xruns"].asInt() == 1);
+    CHECK(status["process_errors"].asInt() == 0);
+    CHECK_FALSE(status["restart_needed"].asBool());
+
+    auto t = call("transport.stop", "{}");  // back to where play started
+    CHECK_FALSE(t["playing"].asBool());
+    CHECK(t["sample"].asInt() == 0);
+    call("engine.stop", "{}");
+    CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
+    CHECK(fake.open() == 0);
+
+    // A device at another rate than the project: a clean error, nothing left open.
+    fake.setRate(44100);
+    auto refused = d.execute({"engine.start", j("{}"), kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "engine.sample_rate");
+    CHECK(fake.open() == 0);
+    CHECK_FALSE(app->engine());
+    fake.reset();
 }

@@ -315,7 +315,37 @@ granted, and CPU governor (read-only facts).
   compensated (a delay of the stage's latency); the pan law applies to tracks,
   the master pans as a balance; mute silences the post-fader tap only; a
   solo-silenced track is still processed.
+- **JACK backend** (`jack.h`, `jack_backend.cpp`): libjack is dlopen'ed
+  (default `libjack.so.0`) through our own declarations of the API subset we
+  use, loaded once per path and never unloaded. The engine block is the
+  largest callback: a device period larger than the block is split into
+  block-sized calls (an odd period leaves a shorter last call), so period
+  changes need no restart. The block is requested from PipeWire as the
+  client's latency (`PIPEWIRE_LATENCY=<block>/<rate>`, set only for the
+  `jack_client_open` call and only when the user has not set it) — a request
+  the graph honours unless another client needs a longer period;
+  `PIPEWIRE_QUANTUM` is not used because pipewire-jack maps it to
+  `node.force-quantum` + `node.force-rate` (the whole graph).
+  `forceBufferSize` (`jack_set_buffer_size`) is the opt-in for benchmarks.
+  The granted rate is the engine's rate (a project at another rate is refused
+  with `engine.sample_rate`; resampling comes with media resampling). Stop:
+  the next process cycle makes the final zero-frame callback; if the server
+  is gone or no cycle comes within 2 s, the client is deactivated and closed
+  and the engine stops its plugins on the main thread. Xruns (server
+  callback), rate changes and server shutdown are atomics read by
+  `engine.status` (`restart_needed`); automatic restart is not implemented
+  yet. Tests use a stand-in libjack (`tests/fake_jack.cpp`) that drives the
+  process callback from its own thread and injects period/rate changes,
+  xruns, stalls and shutdown; the real server is used only by
+  `SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='real JACK*'` (2 s of silence
+  at a 64-frame block). First run on this machine: 48 kHz, period 128 for a
+  64-frame request, 0 xruns, final callback on the JACK thread.
+- **Control:** `engine.start {backend: jack|dummy, block}`, `engine.stop`,
+  `engine.status`, `transport.play|pause|stop|seek|get`. Transport actions
+  wait (≤ 1 s) for two audio cycles so their answer is the new state;
+  `transport.stop` returns to where play started. `<slug>-engine play FILE`
+  plays a project through the device from the CLI.
 - **Not yet:** anticipative processing and the worker pool (every node runs
-  in the callback), the JACK backend, plugin-parameter automation, stems and
-  render jobs, resampling/stretching of audio items, the 10 ms crossfade on
-  structural swaps.
+  in the callback), automatic restart after device changes, MIDI ports,
+  plugin-parameter automation, stems and render jobs, resampling/stretching
+  of audio items, the 10 ms crossfade on structural swaps.

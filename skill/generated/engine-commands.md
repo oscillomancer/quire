@@ -393,6 +393,259 @@ Result:
 
 ```
 
+## `engine.start@1`
+
+Start real-time playback on the audio device (jack) or without one (dummy).
+
+backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the engine's block in frames (default 256); the device's period may differ and is reported. The project must run at the device's rate.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `backend` | string |  |  |  |  |
+| `block` | integer |  | 16.0..4096.0 |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "engine_status",
+  "properties": {
+    "running": {
+      "type": "boolean"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "sample_rate": {
+      "type": "number"
+    },
+    "block": {
+      "type": "integer"
+    },
+    "period": {
+      "type": "integer"
+    },
+    "plan_latency": {
+      "type": "integer"
+    },
+    "device_latency": {
+      "type": "integer"
+    },
+    "xruns": {
+      "type": "integer"
+    },
+    "cycles": {
+      "type": "integer"
+    },
+    "process_errors": {
+      "type": "integer"
+    },
+    "restart_needed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "running",
+    "backend",
+    "sample_rate",
+    "block",
+    "period",
+    "plan_latency",
+    "device_latency",
+    "xruns",
+    "cycles",
+    "process_errors",
+    "restart_needed"
+  ],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.running`: the engine is already running Hint: engine.stop first
+- `backend.unavailable`: JACK is not installed Hint: install pipewire-jack
+- `backend.open`: no JACK server answered Hint: is PipeWire running?
+- `engine.sample_rate`: the project's rate is not the device's Hint: match them
+
+### Examples
+
+**Without a device** (`empty`)
+
+```json
+{
+  "backend": "dummy",
+  "block": 128
+}
+
+```
+
+Result:
+
+```json
+{
+  "running": true,
+  "backend": "dummy",
+  "sample_rate": 48000.0,
+  "block": 128,
+  "period": 128,
+  "plan_latency": 0,
+  "device_latency": 0,
+  "xruns": 0,
+  "cycles": "<any>",
+  "process_errors": 0,
+  "restart_needed": false
+}
+
+```
+
+## `engine.status@1`
+
+Real-time engine state: backend, rate, block, device period, latency, xruns.
+
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "engine_status",
+  "properties": {
+    "running": {
+      "type": "boolean"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "sample_rate": {
+      "type": "number"
+    },
+    "block": {
+      "type": "integer"
+    },
+    "period": {
+      "type": "integer"
+    },
+    "plan_latency": {
+      "type": "integer"
+    },
+    "device_latency": {
+      "type": "integer"
+    },
+    "xruns": {
+      "type": "integer"
+    },
+    "cycles": {
+      "type": "integer"
+    },
+    "process_errors": {
+      "type": "integer"
+    },
+    "restart_needed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "running",
+    "backend",
+    "sample_rate",
+    "block",
+    "period",
+    "plan_latency",
+    "device_latency",
+    "xruns",
+    "cycles",
+    "process_errors",
+    "restart_needed"
+  ],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Not running** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "running": false,
+  "backend": "",
+  "sample_rate": 0.0,
+  "block": 0,
+  "period": 0,
+  "plan_latency": 0,
+  "device_latency": 0,
+  "xruns": 0,
+  "cycles": 0,
+  "process_errors": 0,
+  "restart_needed": false
+}
+
+```
+
+## `engine.stop@1`
+
+Stop real-time playback and release the audio device.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Stop** (`engine_running`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `fx.add@1`
 
 Insert a plugin into a track's FX chain and return its id.
@@ -2233,5 +2486,331 @@ Result:
 
 ```json
 {}
+
+```
+
+## `transport.get@1`
+
+The play position and whether it is playing.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    }
+  },
+  "required": ["playing", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+
+### Examples
+
+**Stopped at the start** (`engine_running`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "playing": false,
+  "seconds": 0.0,
+  "beat": 0.0,
+  "sample": 0
+}
+
+```
+
+## `transport.pause@1`
+
+Pause playback where it is.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    }
+  },
+  "required": ["playing", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+
+### Examples
+
+**While the engine runs** (`engine_running`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "playing": false,
+  "seconds": "<any>",
+  "beat": "<any>",
+  "sample": "<any>"
+}
+
+```
+
+## `transport.play@1`
+
+Start playback from the current position.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    }
+  },
+  "required": ["playing", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+
+### Examples
+
+**While the engine runs** (`engine_running`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "playing": true,
+  "seconds": "<any>",
+  "beat": "<any>",
+  "sample": "<any>"
+}
+
+```
+
+## `transport.seek@1`
+
+Move the play position (one of seconds, beat or bar).
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `seconds` | number |  | 0.0.. |  |  |
+| `beat` | number |  | 0.0.. |  |  |
+| `bar` | integer |  | 1.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    }
+  },
+  "required": ["playing", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+- `transport.position`: not exactly one position Hint: give seconds, beat or bar
+
+### Examples
+
+**To bar 2 (120 BPM, 4/4)** (`engine_running`)
+
+```json
+{
+  "bar": 2
+}
+
+```
+
+Result:
+
+```json
+{
+  "playing": false,
+  "seconds": 2.0,
+  "beat": 4.0,
+  "sample": 96000
+}
+
+```
+
+## `transport.stop@1`
+
+Stop playback and return to where it started.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "transport",
+  "properties": {
+    "playing": {
+      "type": "boolean"
+    },
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "sample": {
+      "type": "integer"
+    }
+  },
+  "required": ["playing", "seconds", "beat", "sample"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `engine.stopped`: the engine is not running Hint: engine.start first
+
+### Examples
+
+**While the engine runs** (`engine_running`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "playing": false,
+  "seconds": "<any>",
+  "beat": "<any>",
+  "sample": "<any>"
+}
 
 ```

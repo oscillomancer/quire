@@ -80,6 +80,43 @@ struct TextResult {
     std::string text;
 };
 
+// --- engine / transport -------------------------------------------------------------------
+
+enum class BackendArg { Jack, Dummy };
+struct EngineStartArgs {
+    std::optional<BackendArg> backend;
+    std::optional<std::int64_t> block;
+};
+struct SeekArgs {
+    std::optional<double> seconds, beat;
+    std::optional<std::int64_t> bar;
+};
+
+schema::Schema<EngineStatus> engineStatusSchema() {
+    return schema::object<EngineStatus>("engine_status")
+        .field("running", &EngineStatus::running, schema::boolean())
+        .field("backend", &EngineStatus::backend, schema::string())
+        .field("sample_rate", &EngineStatus::sampleRate, schema::number())
+        .field("block", &EngineStatus::block, schema::integer())
+        .field("period", &EngineStatus::period, schema::integer())
+        .field("plan_latency", &EngineStatus::planLatency, schema::integer())
+        .field("device_latency", &EngineStatus::deviceLatency, schema::integer())
+        .field("xruns", &EngineStatus::xruns, schema::integer())
+        .field("cycles", &EngineStatus::cycles, schema::integer())
+        .field("process_errors", &EngineStatus::processErrors, schema::integer())
+        .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
+        .build();
+}
+
+schema::Schema<TransportInfo> transportSchema() {
+    return schema::object<TransportInfo>("transport")
+        .field("playing", &TransportInfo::playing, schema::boolean())
+        .field("seconds", &TransportInfo::seconds, schema::number())
+        .field("beat", &TransportInfo::beat, schema::number())
+        .field("sample", &TransportInfo::sample, schema::integer())
+        .build();
+}
+
 // --- tempo ------------------------------------------------------------------------------
 
 struct TempoPointArg {
@@ -1550,6 +1587,159 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const BranchName& a, Context& ctx) -> Result<Empty> {
             SUPPLE_TRY(A(ctx).versions().deleteBranch(a.name));
             return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    // ---------------------------------------------------------------- engine.*
+    {
+        Command<EngineStartArgs, EngineStatus> c;
+        c.name = "engine.start";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Start real-time playback on the audio device (jack) or without one (dummy).";
+        c.description =
+            "backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, "
+            "paced like one). block: the engine's block in frames (default 256); the device's "
+            "period may differ and is reported. The project must run at the device's rate.";
+        c.tags = {"engine"};
+        c.args = schema::object<EngineStartArgs>("engine_start_args")
+                     .field("backend", &EngineStartArgs::backend,
+                            schema::enumeration<BackendArg>(
+                                {{BackendArg::Jack, "jack"}, {BackendArg::Dummy, "dummy"}}))
+                     .field("block", &EngineStartArgs::block, schema::integer().range(16, 4096))
+                     .build();
+        c.result = engineStatusSchema();
+        c.errors = {{"engine.running", "the engine is already running", "engine.stop first"},
+                    {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
+                    {"backend.open", "no JACK server answered", "is PipeWire running?"},
+                    {"engine.sample_rate", "the project's rate is not the device's", "match them"}};
+        c.examples = {
+            {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
+             obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
+                     "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
+                     "cycles": "<any>", "process_errors": 0, "restart_needed": false})"),
+             "empty"}};
+        c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
+            EngineApp& app = A(ctx);
+            const bool dummy = a.backend.value_or(BackendArg::Jack) == BackendArg::Dummy;
+            SUPPLE_TRY(app.startEngine(dummy ? "dummy" : "jack",
+                                       static_cast<std::uint32_t>(a.block.value_or(256))));
+            return app.engineStatus();
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<NoArgs, Empty> c;
+        c.name = "engine.stop";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Stop real-time playback and release the audio device.";
+        c.tags = {"engine"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = emptySchema();
+        c.examples = {{"Stop", obj("{}"), obj("{}"), "engine_running"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<Empty> {
+            A(ctx).stopEngine();
+            return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<NoArgs, EngineStatus> c;
+        c.name = "engine.status";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Real-time engine state: backend, rate, block, device period, latency, xruns.";
+        c.description =
+            "plan_latency: the session's plugin delay in frames; device_latency: frames from "
+            "the engine's outputs to the device. restart_needed: the device changed rate or went "
+            "away; engine.stop and engine.start again.";
+        c.tags = {"engine"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = engineStatusSchema();
+        c.examples = {{"Not running", obj("{}"),
+                       obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
+                     "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
+                     "cycles": 0, "process_errors": 0, "restart_needed": false})"),
+                       "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
+            return A(ctx).engineStatus();
+        };
+        registry.add(std::move(c));
+    }
+    // ---------------------------------------------------------------- transport.*
+    for (const auto& [action, summary, playing] :
+         {std::tuple{"play", "Start playback from the current position.", true},
+          std::tuple{"pause", "Pause playback where it is.", false},
+          std::tuple{"stop", "Stop playback and return to where it started.", false}}) {
+        Command<NoArgs, TransportInfo> c;
+        c.name = std::string("transport.") + action;
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = summary;
+        c.tags = {"transport"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = transportSchema();
+        c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
+        c.examples = {{"While the engine runs", obj("{}"),
+                       obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +
+                           R"(, "seconds": "<any>", "beat": "<any>", "sample": "<any>"})"),
+                       "engine_running"}};
+        c.run = [act = std::string(action)](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
+            return A(ctx).transport(act);
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<SeekArgs, TransportInfo> c;
+        c.name = "transport.seek";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Move the play position (one of seconds, beat or bar).";
+        c.tags = {"transport"};
+        c.args = schema::object<SeekArgs>("seek_args")
+                     .field("seconds", &SeekArgs::seconds, schema::number().min(0))
+                     .field("beat", &SeekArgs::beat, schema::number().min(0))
+                     .field("bar", &SeekArgs::bar, schema::integer().min(1))
+                     .build();
+        c.result = transportSchema();
+        c.errors = {
+            {"engine.stopped", "the engine is not running", "engine.start first"},
+            {"transport.position", "not exactly one position", "give seconds, beat or bar"}};
+        c.examples = {{"To bar 2 (120 BPM, 4/4)", obj(R"({"bar": 2})"),
+                       obj(R"({"playing": false, "seconds": 2.0, "beat": 4.0, "sample": 96000})"),
+                       "engine_running"}};
+        c.run = [](const SeekArgs& a, Context& ctx) -> Result<TransportInfo> {
+            EngineApp& app = A(ctx);
+            if (a.seconds.has_value() + a.beat.has_value() + a.bar.has_value() != 1)
+                return Error("transport.position", "give exactly one position", "",
+                             "seconds, beat or bar");
+            const model::Session s = app.view();
+            const double seconds =
+                a.seconds
+                    ? *a.seconds
+                    : s.timeMap->secondsAt(beatsOf(
+                          s, a.beat,
+                          a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt));
+            return app.transport("seek", seconds);
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<NoArgs, TransportInfo> c;
+        c.name = "transport.get";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "The play position and whether it is playing.";
+        c.tags = {"transport"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = transportSchema();
+        c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
+        c.examples = {{"Stopped at the start", obj("{}"),
+                       obj(R"({"playing": false, "seconds": 0.0, "beat": 0.0, "sample": 0})"),
+                       "engine_running"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
+            return A(ctx).transport("get");
         };
         registry.add(std::move(c));
     }

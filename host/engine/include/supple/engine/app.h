@@ -30,7 +30,25 @@ namespace supple::engine {
 struct AppOptions {
     std::vector<std::filesystem::path> pluginPath;  // empty = host::defaultSearchPath()
     host::HostIdentity identity;
-    std::filesystem::path workdir;  // renders are written to <workdir>/renders
+    std::filesystem::path workdir;             // renders are written to <workdir>/renders
+    std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
+};
+
+// The real-time engine as engine.status reports it.
+struct EngineStatus {
+    bool running = false;
+    std::string backend;
+    double sampleRate = 0;
+    std::int64_t block = 0, period = 0;
+    std::int64_t planLatency = 0, deviceLatency = 0;  // frames
+    std::int64_t xruns = 0, cycles = 0, processErrors = 0;
+    bool restartNeeded = false;
+};
+
+struct TransportInfo {
+    bool playing = false;
+    double seconds = 0, beat = 0;
+    std::int64_t sample = 0;
 };
 
 class EngineApp : public cmd::Host {
@@ -85,8 +103,15 @@ class EngineApp : public cmd::Host {
 
     // --- real-time engine (optional) ------------------------------------------------
     Status startEngine(Backend& backend, const BackendConfig& config);
+    // On a backend the app owns: "jack" (the audio device, at the graph's
+    // rate) or "dummy" (no device, paced like one, at the project's rate).
+    Status startEngine(std::string_view backend, std::uint32_t block);
     void stopEngine();
     Engine* engine() { return engine_.get(); }
+    EngineStatus engineStatus() const;
+    // Transport requests. With a device, each waits (at most a second) until
+    // the audio thread has acted on it, so the answer is the new state.
+    Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
 
     // --- cmd::Host ------------------------------------------------------------------
     cmd::Context makeContext(const cmd::Origin& origin) override;
@@ -102,7 +127,8 @@ class EngineApp : public cmd::Host {
                  cmd::Kind kind) override;
     // Example fixtures: empty, saved, song (tr_1 "Bass"), song_with_item
     // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_undone,
-    // and the bus's job_running. Built by running commands.
+    // engine_running (the dummy backend), and the bus's job_running. Built by
+    // running commands.
     void setupFixture(cmd::Dispatcher& dispatcher, std::string_view fixture) override;
     // Relative project paths resolve against the work directory.
     std::filesystem::path resolve(const std::filesystem::path& path) const;
@@ -127,6 +153,9 @@ class EngineApp : public cmd::Host {
     MediaCache media_;
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
     std::unique_ptr<Engine> engine_;
+    Backend* backend_ = nullptr;
+    std::unique_ptr<Backend> ownedBackend_;
+    double playStart_ = 0.0;  // transport.stop returns here
     std::filesystem::path projectPath_;
     std::vector<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
