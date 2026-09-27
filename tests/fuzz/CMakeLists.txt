@@ -51,3 +51,26 @@ add_test(NAME notation.fuzz-smoke COMMAND notation.fuzz -runs=100
   ${CMAKE_CURRENT_BINARY_DIR}/notation-corpus)
 set_tests_properties(notation.fuzz-smoke PROPERTIES
   ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0")
+
+# The project target calls the exact parse/validate path used by project.open.
+# The history target calls the real EngineApp command catalogue and saves/opens
+# its final session. Both link the engine/model libraries built by this tree.
+foreach(name IN ITEMS project history)
+  add_executable(${name}.fuzz ${name}_fuzz.cpp)
+  target_link_libraries(${name}.fuzz PRIVATE supple::engine)
+  target_compile_options(${name}.fuzz PRIVATE -fsanitize=fuzzer,address)
+  target_link_options(${name}.fuzz PRIVATE -fsanitize=fuzzer,address)
+  supple_target_defaults(${name}.fuzz)
+endforeach()
+target_compile_definitions(history.fuzz PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+add_dependencies(history.fuzz clap-host-fixtures)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/project-corpus DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/history-corpus DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME project.fuzz-smoke COMMAND project.fuzz -runs=100
+  ${CMAKE_CURRENT_BINARY_DIR}/project-corpus)
+add_test(NAME history.fuzz-smoke COMMAND history.fuzz -runs=100
+  ${CMAKE_CURRENT_BINARY_DIR}/history-corpus)
+# libstdc++'s stable_sort temporary buffer uses get_temporary_buffer's
+# operator new/free pair; Clang ASan flags that library implementation.
+set_tests_properties(project.fuzz-smoke history.fuzz-smoke PROPERTIES
+  ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0")

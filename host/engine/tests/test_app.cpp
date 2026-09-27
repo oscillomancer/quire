@@ -13,6 +13,7 @@
 #include <supple/model/schemas.h>
 
 #include "fake_jack.h"
+#include "history_sequence.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -41,6 +42,29 @@ json::Value j(std::string_view text) { return json::parse(text).value(); }
 const cmd::Origin kTest{cmd::Origin::Type::Test, "unit", ""};
 
 }  // namespace
+
+TEST_CASE("seeded command histories preserve invariants, undo and saved projects") {
+    Root root;
+    for (std::uint32_t seed : {1U, 7U, 42U, 2026U}) {
+        cmd::Registry registry;
+        registerEngineCommands(registry);
+        auto app = makeApp(root.path / std::to_string(seed));
+        cmd::Dispatcher bus(registry, *app);
+        std::vector<std::uint8_t> stream;
+        std::uint32_t state = seed;
+        for (int i = 0; i < 64; ++i) {
+            state = state * 1664525U + 1013904223U;
+            stream.push_back(static_cast<std::uint8_t>(state >> 24));
+        }
+        // Ensure every command family is exercised even when a seeded stream
+        // happens to miss it. Vary the high bits to select existing or bad IDs.
+        for (int op = 0; op < 19; ++op) stream.push_back(static_cast<std::uint8_t>(op));
+        auto result = test::historySequence(*app, bus, stream);
+        INFO("seed: " << seed);
+        INFO((result ? std::string() : result.error().toString()));
+        CHECK(result.ok());
+    }
+}
 
 TEST_CASE("every engine command example runs against its fixture") {
     Root root;

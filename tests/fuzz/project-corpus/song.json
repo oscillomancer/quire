@@ -1,0 +1,87 @@
+{
+  "schema": "supple.project/1.0",
+  "project": {
+    "next_ids": {
+      "tr": 2,
+      "it": 2,
+      "tk": 2,
+      "md": 1,
+      "mi": 2,
+      "fx": 1,
+      "sd": 1,
+      "en": 1,
+      "ai": 1,
+      "mk": 1,
+      "rg": 1,
+      "tp": 2,
+      "ts": 2,
+      "gr": 1,
+      "ln": 1,
+      "rj": 1
+    }
+  },
+  "tempo": {
+    "points": {
+      "tp_1": {
+        "beat": 0.0,
+        "bpm": 120.0
+      }
+    },
+    "meters": {
+      "ts_1": {
+        "bar": 1,
+        "numerator": 4,
+        "denominator": 4
+      }
+    }
+  },
+  "rulers": {
+    "markers": {},
+    "regions": {}
+  },
+  "tracks": {
+    "tr_0": {
+      "name": "Master",
+      "children": ["tr_1"]
+    },
+    "tr_1": {
+      "name": "Bass",
+      "parent": "tr_0"
+    }
+  },
+  "items": {
+    "it_1": {
+      "track": "tr_1",
+      "position": 0.0,
+      "length": 4.0,
+      "takes": ["tk_1"],
+      "active_take": "tk_1"
+    }
+  },
+  "takes": {
+    "tk_1": {
+      "source": "mi_1"
+    }
+  },
+  "fx": {},
+  "sources": {
+    "media": {},
+    "midi": {
+      "mi_1": {
+        "sequence": {
+          "ppq": 960,
+          "length": 3840,
+          "notes": [
+            [0, 960, 1, 36, 96, 0],
+            [1920, 960, 1, 40, 96, 0]
+          ]
+        }
+      }
+    }
+  },
+  "routes": {},
+  "envelopes": {},
+  "groups": {},
+  "blobs": {}
+}
+
