@@ -74,6 +74,26 @@ TEST_CASE("ClapParams: info and text follow core-params") {
     CHECK(std::string(tiny) == "20.");
 }
 
+TEST_CASE("ClapParams: unit-prefix boundary text is stable") {
+    const params::ParamSpec time{.id = 20,
+                                 .key = "delay.time",
+                                 .name = "Delay Time",
+                                 .unit = units::Unit::ms,
+                                 .min = 1,
+                                 .max = 2000,
+                                 .def = 500};
+    for (const auto& p : {kT[0], time}) {
+        const double physical = p.unit == units::Unit::Hz ? 1000.6 : 999.6;
+        char first[64], second[64];
+        const double initial = params::toClap(p, physical);
+        REQUIRE(clapx::ClapParams::valueToText({&p, 1}, p.id, initial, first, sizeof(first)));
+        double parsed = 0;
+        REQUIRE(clapx::ClapParams::textToValue({&p, 1}, p.id, first, &parsed));
+        REQUIRE(clapx::ClapParams::valueToText({&p, 1}, p.id, parsed, second, sizeof(second)));
+        CHECK(std::string(first) == second);
+    }
+}
+
 TEST_CASE("errorsToJson flattens schema.invalid into its details") {
     Error e("schema.invalid", "2 problems");
     e.details.push_back(Error("a", "first", "/x", "fix x"));

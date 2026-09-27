@@ -166,7 +166,12 @@ bool ClapParams::valueToText(params::Table t, clap_id id, double clapValue, char
                              std::uint32_t size) {
     const auto* p = params::findById(t, id);
     if (!p || size == 0) return false;
-    copyName(out, size, params::format(*p, params::fromClap(*p, clapValue)));
+    std::string display = params::format(*p, params::fromClap(*p, clapValue));
+    // Unit formatting can round across a prefix boundary (for example,
+    // 999.6 Hz -> "1.00 kHz"). Canonicalize the displayed value so a host's
+    // text -> value -> text round trip keeps the same string.
+    if (auto parsed = params::parse(*p, display)) display = params::format(*p, *parsed);
+    copyName(out, size, display);
     return true;
 }
 

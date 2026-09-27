@@ -35,3 +35,10 @@ Template-derived stock plugins build offline against the vendored clap,
 clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK (MIT as of
 3.8.0) is not vendored yet; VST3 builds are opt-in. Plugin fonts (Inter, IBM
 Plex; OFL-1.1) travel with each plugin copy with their license files.
+
+Development tool (not linked, bundled, or used at runtime):
+`free-audio/clap-validator` 0.4.1, tag `0.4.1` at
+`152b9823e992d782c5c1fd33bca0295478b919aa`, MIT license. The source,
+license, Cargo packages and binary live in the user's tool cache outside this
+repository; `tools/validator/build.sh` pins and builds it for optional CLAP
+conformance checks.
