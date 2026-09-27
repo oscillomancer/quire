@@ -93,8 +93,9 @@ select a device).
   when monitoring stops). Loop wraps do not cut device notes.
 - Recording: MIDI targets have no file; the audio thread stamps each
   routed event with its captured-frame position into a per-track SPSC ring
-  (4096; overflow counted); the main thread drains the rings in
-  `Engine::service()` and at the stop. `finish()` places each event with
+  (4096; overflow counted); the recorder's writer thread drains the rings
+  every 20 ms (and finish() after joining it), so a long performance does
+  not depend on the main thread. `finish()` places each event with
   the recording's runs (the same latency-shifted run table as audio), so
   an event played just before a loop wrap stays in its pass.
 - Commit: runs/passes/punch as for audio; each take gets a new `mi_*`

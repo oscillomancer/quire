@@ -65,7 +65,8 @@ class Recorder {
     // device MIDI in frames [offset, offset + frames) of `events` (ADR-0016).
     void captureMidi(std::span<const MidiInputEvent> events, std::uint32_t offset,
                      std::uint32_t frames, std::int64_t pos) SUPPLE_RT;
-    // Main thread: moves captured MIDI out of the rings (they are bounded).
+    // The consumer of the MIDI rings: the writer thread while recording, then
+    // finish() after joining it.
     void drainMidi();
     // Audio thread: input that could not be placed (a playback dropout).
     void lose(std::uint32_t frames) SUPPLE_RT;
@@ -92,7 +93,7 @@ class Recorder {
         std::array<MidiEvent, kRing> ring{};
         alignas(64) std::atomic<std::size_t> write{0};
         alignas(64) std::atomic<std::size_t> read{0};
-        std::vector<MidiEvent> drained;  // main thread
+        std::vector<MidiEvent> drained;  // the writer thread, then finish()
         std::atomic<std::uint64_t> overflow{0};
     };
     void writerLoop();

@@ -370,7 +370,6 @@ void Engine::collectPlans() {
 
 void Engine::service() {
     collectPlans();
-    if (recorderOwned_) recorderOwned_->drainMidi();  // (the rings are bounded)
     const std::uint64_t rendered = stoppedGen_.load(std::memory_order_acquire);
     const std::uint64_t live =
         options_.anticipative ? std::min(rendered, callbackGen_.load(std::memory_order_acquire))

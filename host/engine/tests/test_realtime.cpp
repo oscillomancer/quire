@@ -1335,3 +1335,46 @@ TEST_CASE("a mute while playing fades over 10 ms instead of clicking" *
         jump = std::max(jump, std::fabs(double(L[i]) - double(L[i - 1])));
     CHECK(jump < 0.02);
 }
+
+TEST_CASE("a long, dense MIDI performance records without overflow (the writer drains)" *
+          doctest::description("rt")) {
+    // A controller sweep every 8 frames (6000 events/s) for over a second:
+    // more than one ring holds, drained while recording.
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .midiPorts = {"Keyboard"},
+         .midi = [](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
+             for (std::uint32_t i = 0; i < n; i += 8) {
+                 MidiInputEvent m;
+                 m.frame = i;
+                 m.size = 3;
+                 m.bytes[0] = 0xb0;
+                 m.bytes[1] = 1;
+                 m.bytes[2] = static_cast<std::uint8_t>((frame + i) / 8 % 128);
+                 out.push_back(m);
+             }
+         }});
+    Engine engine(pool, media, kInCallback);
+    REQUIRE(
+        engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true}).ok());
+    const model::Session s = keyboardSession(true);
+    REQUIRE(engine.load(s).ok());
+    Id track;
+    for (const auto& e : s.tracks)
+        if (e.id != kMaster) track = e.id;
+    RecordTarget target;
+    target.track = track;
+    target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "*"), 0, 0};
+    REQUIRE(engine.startRecording({target}).ok());
+    engine.play();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    auto takes = engine.stopRecording();
+    REQUIRE(takes);
+    const RecordedTake& t = (*takes)[0];
+    CHECK(t.overflowFrames == 0);
+    CHECK(t.midi.size() > 4096);
+    engine.stop();
+}

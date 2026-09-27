@@ -232,6 +232,7 @@ void Recorder::writerLoop() {
     while (!stop_.load(std::memory_order_acquire)) {
         writeSidecars();
         for (auto& t : tracks_) drain(*t, scratch);
+        drainMidi();  // the MIDI rings too (bounded: a long performance must not overflow)
         if (std::chrono::steady_clock::now() - lastHeader > std::chrono::seconds(5)) {
             for (auto& t : tracks_) (void)t->writer.updateHeader();  // a crash keeps this much
             lastHeader = std::chrono::steady_clock::now();
