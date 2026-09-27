@@ -137,7 +137,9 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         const std::uint64_t first = epoch_.load(std::memory_order_acquire);
         epochStartLocal_ = pos_;
         epochStart_.store(pos_);
-        renderedTo_.store(pos_);
+        streamLocal_ = 0;
+        renderedStream_.store(0);
+        loopR_ = readLoop();
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
         renderer_ = std::thread([this, first] { rendererLoop(first); });
@@ -157,7 +159,7 @@ void Engine::stop() {
     }
     recorder_.store(nullptr, std::memory_order_release);
     backend_->stop();
-    if (recorderOwned_) (void)recorderOwned_->finish();  // no callback runs now: keep the files
+    if (recorderOwned_) (void)recorderOwned_->finish(readLoop());  // no callback now: keep files
     recorderOwned_.reset();
     // A backend that broke its stop() contract has already joined its
     // thread, so nothing else touches the plugins: recover here.
@@ -228,8 +230,40 @@ void Engine::seek(double seconds) {
     epoch_.fetch_add(1, std::memory_order_release);
 }
 
+void Engine::setLoop(double startSeconds, double endSeconds, bool on) {
+    const std::uint64_t seq = loopSeq_.load(std::memory_order_relaxed);
+    loopSeq_.store(seq + 1, std::memory_order_relaxed);  // odd: being written
+    std::atomic_thread_fence(std::memory_order_release);
+    loopStart_.store(time::samplesAt(std::max(0.0, startSeconds), config_.sampleRate),
+                     std::memory_order_relaxed);
+    loopEnd_.store(time::samplesAt(std::max(0.0, endSeconds), config_.sampleRate),
+                   std::memory_order_relaxed);
+    loopOn_.store(on, std::memory_order_relaxed);
+    loopSeq_.store(seq + 2, std::memory_order_release);
+    epoch_.fetch_add(1, std::memory_order_release);  // anticipative: re-render ahead
+}
+
+LoopRange Engine::readLoop(std::uint64_t* seqOut) const SUPPLE_RT {
+    for (;;) {
+        const std::uint64_t seq = loopSeq_.load(std::memory_order_acquire);
+        LoopRange l;
+        l.start = loopStart_.load(std::memory_order_relaxed);
+        l.end = loopEnd_.load(std::memory_order_relaxed);
+        l.on = loopOn_.load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if ((seq & 1) == 0 && loopSeq_.load(std::memory_order_relaxed) == seq) {
+            if (seqOut) *seqOut = seq;
+            return l;
+        }
+    }
+}
+
 std::int64_t Engine::playedPosition(std::uint64_t epoch, std::int64_t epochStart) const {
     return rtPosEpoch_.load(std::memory_order_acquire) == epoch ? rtPos_.load() : epochStart;
+}
+
+std::int64_t Engine::playedStream(std::uint64_t epoch) const {
+    return rtPosEpoch_.load(std::memory_order_acquire) == epoch ? rtStream_.load() : 0;
 }
 
 TransportState Engine::transport() const {
@@ -238,6 +272,7 @@ TransportState Engine::transport() const {
     t.sample = options_.anticipative ? playedPosition(epoch_.load(), epochStart_.load())
                                      : reportedPos_.load();
     t.seconds = static_cast<double>(t.sample) / config_.sampleRate;
+    t.loop = readLoop();
     return t;
 }
 
@@ -282,7 +317,7 @@ bool Engine::awaitRendered(std::int64_t frames, double timeoutSeconds) {
         if (epochDone_.load() >= e && reportedPlaying_.load() == want) {
             if (!want) return true;
             const std::int64_t ahead =
-                renderedTo_.load(std::memory_order_acquire) - playedPosition(e, epochStart_.load());
+                renderedStream_.load(std::memory_order_acquire) - playedStream(e);
             if (ahead >= goal) return true;
         }
         if (std::chrono::steady_clock::now() > deadline) return false;
@@ -423,6 +458,8 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         playing_ = want;
         if (!want) resetOwned(processing_);  // no hanging notes
     }
+    if (const std::uint64_t seq = loopSeq_.load(std::memory_order_acquire); seq != loopSeqSeen_)
+        loopC_ = readLoop(&loopSeqSeen_);
     if (plan) {
         startFree(processing_, &plan->instances, &processing_);  // any refused, retried
         // For monitored inputs.
@@ -446,13 +483,28 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         return;
     }
     const bool run = plan && playing_ && !shutDown_.load() && frames <= plan->block;
-    if (run && detail::processBlock(*plan, pos_, frames)) {
+    bool ok = run;
+    std::array<const float*, 64> inAt{};
+    for (std::uint32_t done = 0; ok && done < frames;) {
+        const std::uint32_t k = loopC_.until(pos_, frames - done);  // split at a loop wrap
+        for (std::uint32_t c = 0; c < deviceInputs_ && c < inAt.size(); ++c)
+            inAt[c] = in && in[c] ? in[c] + done : nullptr;
+        const float* const* ins = in ? inAt.data() : nullptr;
+        plan->deviceIn = ins;  // monitored input for this part of the cycle
+        if (!detail::processBlock(*plan, pos_, k, true, &loopC_)) {
+            ok = false;
+            break;
+        }
         const detail::Node& master = plan->nodes.back();
-        std::copy_n(master.post.l.begin(), frames, out[0]);
-        std::copy_n(master.post.r.begin(), frames, out[1]);
-        if (detail::Recorder* r = recorder_.load()) r->capture(in, deviceInputs_, frames, pos_);
-        pos_ += frames;
-    } else {
+        std::copy_n(master.post.l.begin(), k, out[0] + done);
+        std::copy_n(master.post.r.begin(), k, out[1] + done);
+        if (detail::Recorder* r = recorder_.load()) r->capture(ins, deviceInputs_, k, pos_);
+        const std::int64_t next = loopC_.next(pos_, pos_ + k);
+        if (next != pos_ + k) detail::wrapTo(*plan, next, -1);
+        pos_ = next;
+        done += k;
+    }
+    if (!ok) {
         if (run) processErrors_.fetch_add(1);
         std::fill_n(out[0], frames, 0.0f);
         std::fill_n(out[1], frames, 0.0f);
@@ -482,6 +534,8 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
     while (done < frames) {
         const detail::Chunk* c = ring.front();
         if (!c || c->epoch != e) break;
+        if (done > 0 && c->start + rtOffset_ != first + done)  // a loop wrap: stop there
+            return {first, done, true};
         const std::uint32_t take = std::min(frames - done, c->frames - rtOffset_);
         if (first == kNothingPlayed) first = c->start + rtOffset_;
         std::copy_n(c->l.begin() + rtOffset_, take, out[0] + done);
@@ -489,6 +543,7 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
         done += take;
         rtOffset_ += take;
         rtPos_.store(c->start + rtOffset_, std::memory_order_relaxed);
+        rtStream_.store(c->stream + rtOffset_, std::memory_order_relaxed);
         rtPosEpoch_.store(e, std::memory_order_release);
         if (rtOffset_ == c->frames) {
             ring.pop();
@@ -502,7 +557,7 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
             misses_.fetch_add(1, std::memory_order_relaxed);
     }
     if (done > 0) rtPrimed_ = true;
-    return {first, done};
+    return {first, done, false};
 }
 
 // --- recording (ADR-0014) --------------------------------------------------------------------
@@ -538,7 +593,7 @@ Result<std::vector<RecordedTake>> Engine::stopRecording() {
                          "the audio callback has not returned for 2 s; the recording is kept", {},
                          "stop again, or stop the engine (the files stay recoverable)");
     }
-    auto takes = recorderOwned_->finish();
+    auto takes = recorderOwned_->finish(readLoop());
     recorderOwned_.reset();
     return takes;
 }
@@ -565,7 +620,9 @@ void Engine::relocate(std::uint64_t previous, std::uint64_t epoch) {
     }
     epochStartLocal_ = pos_;
     epochStart_.store(pos_);
-    renderedTo_.store(pos_, std::memory_order_release);
+    streamLocal_ = 0;
+    renderedStream_.store(0, std::memory_order_release);
+    loopR_ = readLoop();  // a loop change bumps the epoch: this is the new one
     epochDone_.store(epoch, std::memory_order_release);
 }
 
@@ -580,7 +637,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
             plan_ = plan;
             if (plan) {
                 detail::locateClass(*plan, pos_, false);
-                plan->handAt = pos_;  // where the callback follows (ADR-0014)
+                plan->handAt = streamLocal_;  // where the callback follows (ADR-0014)
                 plan->handEpoch = seen;
                 stoppedGen_.store(plan->generation, std::memory_order_release);
                 handPlan_.store(plan, std::memory_order_release);
@@ -597,7 +654,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
             if (!want) resetOwned(processing_);  // no hanging notes
             reportedPlaying_.store(playing_);
         }
-        const std::int64_t ahead = pos_ - playedPosition(seen, epochStartLocal_);
+        const std::int64_t ahead = streamLocal_ - playedStream(seen);
         bool room = playing_ && plan_ && !hold_.load() && ahead < aheadFrames_;
         if (room && plan_->split) {
             room = !plan_->frontier.empty();  // nothing to hand over: all is live
@@ -609,19 +666,22 @@ void Engine::rendererLoop(std::uint64_t seen) {
             std::this_thread::sleep_for(playing_ ? nap : std::chrono::duration<double>(0.001));
             continue;
         }
-        const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block, self);
+        const std::uint32_t n = loopR_.until(pos_, block);  // no chunk crosses a loop wrap
+        const bool ok =
+            detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
         if (!ok) processErrors_.fetch_add(1);
         auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
             if (ok) {
-                std::copy_n(from.l.begin(), block, c->l.begin());
-                std::copy_n(from.r.begin(), block, c->r.begin());
+                std::copy_n(from.l.begin(), n, c->l.begin());
+                std::copy_n(from.r.begin(), n, c->r.begin());
             } else {
                 std::fill(c->l.begin(), c->l.end(), 0.0f);
                 std::fill(c->r.begin(), c->r.end(), 0.0f);
             }
             c->epoch = seen;
             c->start = pos_;
-            c->frames = block;
+            c->stream = streamLocal_;
+            c->frames = n;
         };
         if (plan_->split) {  // the frontier taps, for the callback's live nodes
             for (std::size_t j = 0; j < plan_->frontier.size(); ++j) {
@@ -636,8 +696,11 @@ void Engine::rendererLoop(std::uint64_t seen) {
             fill(ring_->slot(), plan_->nodes.back().post);
             ring_->publish();
         }
-        pos_ += block;
-        renderedTo_.store(pos_, std::memory_order_release);
+        const std::int64_t next = loopR_.next(pos_, pos_ + n);
+        if (next != pos_ + n) detail::wrapTo(*plan_, next, 0);
+        pos_ = next;
+        streamLocal_ += n;
+        renderedStream_.store(streamLocal_, std::memory_order_release);
     }
     // The renderer is its plugins' audio thread: stop them here.
     for (host::Instance* in : processing_) {
@@ -674,6 +737,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         rtEpoch_ = e;
         rtPrimed_ = false;
         liveReady_ = false;
+        loopC_ = readLoop();  // the renderer takes the loop with the epoch too
         rtEpochSeen_.store(e, std::memory_order_release);
     }
     const bool playing = wantPlaying_.load(std::memory_order_acquire);
@@ -683,9 +747,8 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         std::uint32_t k = frames - done;
         // Follow the renderer's plan where it took effect (split the cycle there).
         if (detail::Plan* h = handPlan_.load(std::memory_order_acquire); h != livePlan_) {
-            const std::int64_t here = livePlan_ && livePlan_->split && liveReady_
-                                          ? livePos_
-                                          : playedPosition(e, epochStart_.load());
+            const std::int64_t here =  // stream positions: they only grow (ADR-0015)
+                livePlan_ && livePlan_->split && liveReady_ ? liveStream_ : playedStream(e);
             if (!h || h->handEpoch != e || !playing || here >= h->handAt)
                 adoptLive(h);
             else if (h->handAt - here < k)
@@ -695,9 +758,10 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         float* outAt[2] = {out[0] + done, out[1] + done};
         const float* const* ins = in ? inAt.data() : nullptr;
         if (livePlan_ && livePlan_->split) {
-            liveRender(ins, outAt, k);
+            k = liveRender(ins, outAt, k);
         } else {
             const Pulled played = pullAhead(outAt, k);
+            if (played.wrapped) k = played.frames;  // the rest continues at the loop start
             // Only input that went with played audio is recorded; what came
             // during a dropout had no timeline position and counts as lost.
             if (detail::Recorder* r = recorder_.load()) {
@@ -713,16 +777,18 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
     }
 }
 
-void Engine::liveRender(const float* const* in, float* const* out, std::uint32_t k) SUPPLE_RT {
+std::uint32_t Engine::liveRender(const float* const* in, float* const* out,
+                                 std::uint32_t k) SUPPLE_RT {
     detail::Plan& p = *livePlan_;
     const void* self = &liveProcessing_;
     if (!liveReady_) {
         if (epochDone_.load(std::memory_order_acquire) < rtEpoch_) {  // not placed yet
             std::fill_n(out[0], k, 0.0f);
             std::fill_n(out[1], k, 0.0f);
-            return;
+            return k;
         }
         livePos_ = playedPosition(rtEpoch_, epochStart_.load());
+        liveStream_ = playedStream(rtEpoch_);
         detail::locateClass(p, livePos_, true);
         resetOwned(liveProcessing_);
         liveReady_ = true;
@@ -731,11 +797,12 @@ void Engine::liveRender(const float* const* in, float* const* out, std::uint32_t
     // The frontier: what the renderer made for this position. Before its
     // first chunk (pre-roll) time holds still; the monitored input is heard.
     bool playing = wantPlaying_.load(std::memory_order_acquire);
+    if (playing) k = loopC_.until(livePos_, k);  // stop at a loop wrap
     std::uint32_t found = k;
     for (std::size_t j = 0; j < p.frontier.size(); ++j) {
         detail::Edge& e = p.edges[p.frontier[j]];
         const std::uint32_t got =
-            playing ? p.frontierRings[j]->pullAt(rtEpoch_, livePos_, e.frontierBuf.l.data(),
+            playing ? p.frontierRings[j]->pullAt(rtEpoch_, liveStream_, e.frontierBuf.l.data(),
                                                  e.frontierBuf.r.data(), k)
                     : 0;
         if (!playing) e.frontierBuf.clear(k);
@@ -751,7 +818,7 @@ void Engine::liveRender(const float* const* in, float* const* out, std::uint32_t
     }
     p.deviceIn = in;
     p.deviceInChannels = deviceInputs_;
-    host::Transport t = detail::transportAt(p, livePos_);
+    host::Transport t = detail::transportAt(p, livePos_, &loopC_);
     t.playing = playing;
     bool ok = true;
     for (std::size_t i : p.liveNodes) ok = detail::processNode(p, i, livePos_, k, t, self) && ok;
@@ -761,10 +828,15 @@ void Engine::liveRender(const float* const* in, float* const* out, std::uint32_t
     std::copy_n(master.post.r.begin(), k, out[1]);
     if (playing) {
         if (detail::Recorder* r = recorder_.load()) r->capture(in, deviceInputs_, k, livePos_);
-        livePos_ += k;
+        const std::int64_t next = loopC_.next(livePos_, livePos_ + k);
+        if (next != livePos_ + k) detail::wrapTo(p, next, 1);
+        livePos_ = next;
+        liveStream_ += k;
         rtPos_.store(livePos_, std::memory_order_relaxed);
+        rtStream_.store(liveStream_, std::memory_order_relaxed);
         rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
     }
+    return k;
 }
 
 }  // namespace supple::engine

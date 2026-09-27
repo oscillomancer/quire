@@ -615,3 +615,77 @@ TEST_CASE("recovery touches only files in rec/, once each (review round 8)") {
     CHECK((*all)["recovered"].size() == 1);
     CHECK(bytes(outside) == before);  // never rewritten through the link
 }
+
+TEST_CASE("an LLM loop-records over the bus: one item, a take per pass, punch trims it") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Vocal"}, "as": "v"},
+        {"command": "track.set", "args": {"track": "${v.track}", "armed": true, "record_input": [1]}}]})");
+    // Loop beats 1..2 (0.5 s .. 1 s at 120 BPM), set before the engine runs.
+    auto loop = call("transport.loop", R"({"start_beat": 1, "end_beat": 2})");
+    CHECK(loop["enabled"].asBool());
+    CHECK(loop["start_seconds"].asDouble() == 0.5);
+    auto bad = d.execute({"transport.loop", j(R"({"start_beat": 2, "end_beat": 1})"), kTest});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "transport.range");
+
+    DummyBackend backend(
+        {.mode = DummyBackend::Mode::Thread,
+         .paced = true,
+         .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
+             for (std::uint32_t c = 0; c < channels; ++c)
+                 for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.25f;
+         }});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    call("transport.seek", R"({"seconds": 0.5})");
+    auto got = call("transport.get", "{}");
+    CHECK(got["loop"].find("enabled")->asBool());
+    call("transport.record", "{}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1300));  // two whole passes and a bit
+    auto stopped = call("transport.stop", "{}");
+    REQUIRE(stopped["recorded"].size() == 1);
+    const json::Value& rec = stopped["recorded"].at(0);
+    const std::size_t passes = rec.find("takes")->size();
+    CHECK(passes >= 2);  // (about 2.6 on an unloaded machine)
+    CHECK(rec.find("seconds")->asDouble() == doctest::Approx(0.5));
+    const model::Session s = app->head();
+    REQUIRE(s.items.size() == 1);
+    const model::Item& item = *s.items.begin()->value;
+    CHECK(item.position == doctest::Approx(1.0));
+    CHECK(item.length == doctest::Approx(1.0));
+    REQUIRE(item.takes.size() == passes);
+    for (std::size_t k = 0; k < passes; ++k)  // pass k starts k * 0.5 s into the file
+        CHECK(s.takes.find(item.takes[k])->startOffset == doctest::Approx(0.5 * double(k)));
+    // The newest whole pass is active: the last, or the one before it when
+    // the stop cut the last one short.
+    const std::string active = rec.find("take")->asString();
+    CHECK((active == rec.find("takes")->at(passes - 1).asString() ||
+           active == rec.find("takes")->at(passes - 2).asString()));
+    CHECK(item.activeTake->str() == active);
+
+    // With a punch range, the same kind of recording keeps 0.6 s .. 0.8 s.
+    call("history.undo", "{}");
+    call("transport.punch", R"({"start_seconds": 0.6, "end_seconds": 0.8})");
+    call("transport.seek", R"({"seconds": 0.5})");
+    call("transport.record", "{}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    auto punched = call("transport.stop", "{}");
+    app->stopEngine();
+    REQUIRE(punched["recorded"].size() == 1);
+    CHECK(punched["recorded"].at(0).find("seconds")->asDouble() == doctest::Approx(0.2));
+    const model::Session p = app->head();
+    REQUIRE(p.items.size() == 1);
+    const model::Item& pi = *p.items.begin()->value;
+    CHECK(pi.position == doctest::Approx(1.2));  // 0.6 s
+    const model::Take* first = p.takes.find(pi.takes[0]);
+    CHECK(first->startOffset == doctest::Approx(0.1));  // 0.1 s into the first pass
+}

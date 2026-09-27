@@ -393,6 +393,7 @@ granted, and CPU governor (read-only facts).
 - **Recording and input monitoring** (ADR-0014): see the ADR's
   implementation notes (recording; the live region with two executors;
   crash recovery).
+- **Loop and punch** (ADR-0015): see the ADR's implementation notes.
 - **Media resampling:** `MediaCache::get(path, rate)` decodes and resamples
   once per (file, rate) with the audio-file polyphase resampler (Kaiser
   windowed sinc; deterministic, so offline ≡ real time); plans ask for their

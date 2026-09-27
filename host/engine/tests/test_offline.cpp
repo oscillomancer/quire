@@ -5,6 +5,8 @@
 
 #include <supple/engine/offline.h>
 
+#include "plan.h"
+
 using namespace supple;
 using namespace supple::engine;
 using model::Id;
@@ -550,4 +552,23 @@ TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curv
         REQUIRE(r.warnings.size() == 1);
         CHECK(r.warnings[0].find("gian") != std::string::npos);
     }
+}
+
+TEST_CASE("plugins see the transport loop (CLAP loop flags)") {
+    model::EditTxn t(model::Session::create(), 1);
+    addTrack(t, "Track");
+    const model::Session s = commit(t);
+    auto pool = makePool();
+    auto plan = detail::compile(s, pool, 0.0, 256).value();
+    const host::Transport none = detail::transportAt(plan, 1000);
+    CHECK_FALSE(none.loopActive);
+    const LoopRange loop{48000, 96000, true};  // 1 s .. 2 s = beats 2 .. 4 at 120 BPM
+    const host::Transport t2 = detail::transportAt(plan, 60000, &loop);
+    CHECK(t2.loopActive);
+    CHECK(t2.loopStartSeconds == doctest::Approx(1.0));
+    CHECK(t2.loopEndSeconds == doctest::Approx(2.0));
+    CHECK(t2.loopStartBeat == doctest::Approx(2.0));
+    CHECK(t2.loopEndBeat == doctest::Approx(4.0));
+    const LoopRange off{48000, 96000, false};
+    CHECK_FALSE(detail::transportAt(plan, 60000, &off).loopActive);
 }

@@ -50,9 +50,16 @@ struct EngineStatus {
 };
 
 struct RecordedInfo {
-    std::string track, item, take, file;
+    std::string track, item, take, file;  // take: the active one
     double seconds = 0;
-    std::int64_t lostFrames = 0;  // input the disk could not keep up with
+    std::int64_t lostFrames = 0;     // input lost (the disk fell behind, playback dropped out)
+    std::vector<std::string> takes;  // every take (one per loop pass)
+};
+
+// A transport range (loop or punch), in seconds (ADR-0015).
+struct TransportRange {
+    bool enabled = false;
+    double start = 0, end = 0;
 };
 
 // A recording no version of the session uses (after a crash: a take that
@@ -69,6 +76,7 @@ struct TransportInfo {
     bool playing = false, recording = false;
     double seconds = 0, beat = 0;
     std::int64_t sample = 0;
+    TransportRange loop, punch;
     std::optional<std::vector<RecordedInfo>> recorded;  // takes a stop/pause just committed
 };
 
@@ -161,6 +169,13 @@ class EngineApp : public cmd::Host {
     // Transport requests. With a device, each waits (at most a second) until
     // the audio thread has acted on it, so the answer is the new state.
     Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
+    // transport.loop / transport.punch (ADR-0015): transport state, not
+    // versioned; the loop reaches the engine (now, and whenever it starts),
+    // the punch range trims takes when a recording is committed.
+    void setLoop(const TransportRange& loop);
+    void setPunch(const TransportRange& punch) { punch_ = punch; }
+    const TransportRange& loop() const { return loop_; }
+    const TransportRange& punch() const { return punch_; }
 
     // --- cmd::Host ------------------------------------------------------------------
     cmd::Context makeContext(const cmd::Origin& origin) override;
@@ -207,7 +222,8 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
-    double playStart_ = 0.0;                             // transport.stop returns here
+    double playStart_ = 0.0;       // transport.stop returns here
+    TransportRange loop_, punch_;  // kept across engine restarts (not in the session)
     std::vector<std::filesystem::path> recordingFiles_;  // while recording
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;

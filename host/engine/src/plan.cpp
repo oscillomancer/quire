@@ -652,7 +652,7 @@ Status prepare(Plan& p, const Session& s) {
     return okStatus();
 }
 
-host::Transport transportAt(const Plan& p, std::int64_t sample) {
+host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange* loop) SUPPLE_RT {
     host::Transport t;
     const double seconds = p.startSeconds + static_cast<double>(sample) / p.rate;
     const double beat = p.timeMap->beatAt(seconds);
@@ -666,6 +666,13 @@ host::Transport transportAt(const Plan& p, std::int64_t sample) {
     t.numerator = static_cast<std::uint16_t>(meter.numerator);
     t.denominator = static_cast<std::uint16_t>(meter.denominator);
     t.seconds = seconds;
+    if (loop && loop->active()) {
+        t.loopActive = true;
+        t.loopStartSeconds = p.startSeconds + static_cast<double>(loop->start) / p.rate;
+        t.loopEndSeconds = p.startSeconds + static_cast<double>(loop->end) / p.rate;
+        t.loopStartBeat = p.timeMap->beatAt(t.loopStartSeconds);
+        t.loopEndBeat = p.timeMap->beatAt(t.loopEndSeconds);
+    }
     return t;
 }
 
@@ -762,8 +769,25 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             node.sum.r[i] += static_cast<float>(static_cast<double>(r) * c.gainR * fade);
         }
     }
-    // 2. Route this block's events to the note target.
+    // 2. Route this block's events to the note target. Notes still held at
+    // a loop wrap end first, at the start of the block after it.
     for (Stage& st : node.chain) st.blockEvents.clear();
+    if (node.releaseHeld) {
+        node.releaseHeld = false;
+        if (node.noteTarget >= 0) {
+            auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
+            for (std::size_t k = 0; k < node.held.size(); ++k) {
+                if (node.held[k] == 0 || target.size() >= target.capacity()) continue;
+                host::Event off;
+                off.kind = host::Event::Kind::NoteOff;
+                off.channel = static_cast<std::int16_t>(k / 128);
+                off.key = static_cast<std::int16_t>(k % 128);
+                off.velocity = 0.0;
+                target.push_back(off);
+            }
+        }
+        node.held.fill(0);
+    }
     while (transport.playing && node.nextEvent < node.events.size() &&
            node.events[node.nextEvent].sample < pos + n) {
         const TimedEvent& te = node.events[node.nextEvent++];
@@ -772,6 +796,13 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
         auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
         if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
+        if (e.kind == host::Event::Kind::NoteOn || e.kind == host::Event::Kind::NoteOff) {
+            const auto k = static_cast<std::size_t>((e.channel & 15) * 128 + (e.key & 127));
+            if (e.kind == host::Event::Kind::NoteOn && node.held[k] < 255)
+                ++node.held[k];
+            else if (e.kind == host::Event::Kind::NoteOff && node.held[k] > 0)
+                --node.held[k];
+        }
     }
     // 2b. Plugin parameter automation: values at the block start, every
     // kAutomationStep samples and at each point, in time order (the lane's
@@ -885,8 +916,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     return true;
 }
 
-bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n, bool playing) SUPPLE_RT {
-    host::Transport transport = transportAt(p, pos);
+bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n, bool playing,
+                  const LoopRange* loop) SUPPLE_RT {
+    host::Transport transport = transportAt(p, pos, loop);
     transport.playing = playing;
     for (std::size_t i = 0; i < p.nodes.size(); ++i)
         if (!processNode(p, i, pos, n, transport)) return false;
@@ -912,8 +944,8 @@ void runNode(void* ctx, std::uint32_t task) SUPPLE_RT {
 }  // namespace
 
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
-                          const void* self) {
-    const host::Transport transport = transportAt(p, pos);
+                          const void* self, const LoopRange* loop) {
+    const host::Transport transport = transportAt(p, pos, loop);
     if (!workers || workers->helpers() == 0) {
         bool ok = true;
         for (std::size_t i : p.rendererNodes) ok = processNode(p, i, pos, n, transport, self) && ok;
@@ -931,6 +963,8 @@ void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.held.fill(0);  // a relocation resets the plugins: nothing is held
+        n.releaseHeld = false;
         for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
             a->cursor = 0;
         for (Stage& st : n.chain) {
@@ -961,6 +995,8 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.held.fill(0);
+        n.releaseHeld = false;
         for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
             a->cursor = 0;
         for (Stage& st : n.chain) {
@@ -974,6 +1010,28 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
     for (Edge& e : p.edges) {
         e.delay.clear();
         for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute}) a->cursor = 0;
+    }
+}
+
+void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
+    for (Node& n : p.nodes) {
+        if (liveClass >= 0 && n.live != (liveClass == 1)) continue;
+        auto it =
+            std::lower_bound(n.events.begin(), n.events.end(), pos,
+                             [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
+        n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.releaseHeld = true;
+        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
+            a->cursor = 0;
+        for (Stage& st : n.chain)
+            for (ParamLane& ln : st.lanes) {
+                ln.curve.cursor = 0;
+                ln.lastSent = std::numeric_limits<double>::quiet_NaN();  // the loop start's value
+            }
+        for (std::size_t ei : n.in)
+            for (Automation* a :
+                 {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
+                a->cursor = 0;
     }
 }
 

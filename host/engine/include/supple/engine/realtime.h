@@ -43,11 +43,24 @@ struct RecordTarget {
     std::filesystem::path file;
 };
 
+// A contiguous run of a recording on the timeline (ADR-0015): a loop wrap
+// starts a new one. Frames from `fileFrame` on were heard at `timeline` on.
+struct RecordedSegment {
+    std::int64_t fileFrame = 0;
+    std::int64_t timeline = 0;
+};
+
 struct RecordedTake {
     model::Id track;
     std::filesystem::path file;
     std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
     std::int64_t frames = 0;
+    // The runs, in file order; the first is {0, startSample}. More than one:
+    // loop passes (`loop` is the loop they were recorded in).
+    std::vector<RecordedSegment> segments;
+    struct {
+        std::int64_t start = 0, end = 0;
+    } loop;
     std::uint64_t overflowFrames = 0;  // input lost because the disk fell behind
     std::string error;                 // a failed disk write (what came after it is lost), if any
     double sampleRate = 0;             // of the file and of startSample (the engine's rate)
@@ -133,10 +146,27 @@ class DummyBackend : public Backend {
     std::int64_t captured_ = 0;
 };
 
+// The transport's loop (ADR-0015), in plan samples.
+struct LoopRange {
+    std::int64_t start = 0, end = 0;
+    bool on = false;
+    bool active() const { return on && end > start; }
+    // Frames of [pos, pos + n) before the loop end (n when it is not crossed;
+    // a block starting at or past the end never wraps).
+    std::uint32_t until(std::int64_t pos, std::uint32_t n) const {
+        return active() && pos < end && pos + n > end ? static_cast<std::uint32_t>(end - pos) : n;
+    }
+    // After frames [from, to): where playback continues.
+    std::int64_t next(std::int64_t from, std::int64_t to) const {
+        return active() && from < end && to == end ? start : to;
+    }
+};
+
 struct TransportState {
     bool playing = false;
     std::int64_t sample = 0;  // render position
     double seconds = 0.0;
+    LoopRange loop;
 };
 
 struct EngineOptions {
@@ -166,6 +196,11 @@ class Engine {
     void play();
     void pause();  // stops the transport; plugin state is reset (no hanging notes)
     void seek(double seconds);
+    // The transport loop (ADR-0015): playback reaching `end` continues at
+    // `start` (a play position at or past the end plays on). Changing it
+    // re-renders what was rendered ahead, like a seek to where the listener is.
+    void setLoop(double startSeconds, double endSeconds, bool on);
+    LoopRange loop() const { return readLoop(); }
     TransportState transport() const;
     // Main thread: waits (bounded) until the renderer has acted on every
     // transport request, so transport() reports the new state. With the
@@ -209,7 +244,9 @@ class Engine {
     // Anticipative: the callback's work — the master ring, or the live nodes.
     void anticipativeCycle(const float* const* in, float* const* out,
                            std::uint32_t frames) SUPPLE_RT;
-    void liveRender(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
+    // Returns the frames rendered (fewer than asked at a loop wrap).
+    std::uint32_t liveRender(const float* const* in, float* const* out,
+                             std::uint32_t frames) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;
     // What a pull played: the timeline sample of its first frame (or
     // kNothingPlayed) and how many frames, from the start of the buffer, came
@@ -217,12 +254,16 @@ class Engine {
     struct Pulled {
         std::int64_t first;
         std::uint32_t frames;
+        bool wrapped;  // stopped at a loop wrap (the rest is for the next pull)
     };
     Pulled pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
     static constexpr std::int64_t kNothingPlayed = INT64_MIN;
     void rendererLoop(std::uint64_t firstEpoch);
     void relocate(std::uint64_t previous, std::uint64_t epoch);
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
+    // Frames the callback has played in `epoch` (0 before its first).
+    std::int64_t playedStream(std::uint64_t epoch) const;
+    LoopRange readLoop(std::uint64_t* seq = nullptr) const SUPPLE_RT;
     // One executor's share of a plan: stops what it owns that `next` lacks,
     // then starts what `next` has once the other executor has let go.
     void adoptShare(std::vector<host::Instance*>& owned, const std::vector<host::Instance*>* next,
@@ -282,18 +323,23 @@ class Engine {
     std::unique_ptr<detail::Workers> workers_;
     std::thread renderer_;
     std::atomic<bool> rendererQuit_{false}, hold_{false};
-    std::int64_t aheadFrames_ = 0;             // render-ahead target
-    std::atomic<std::uint64_t> epoch_{0};      // main thread: bumped by seek and pause
-    std::atomic<std::uint64_t> epochDone_{0};  // renderer: the epoch it has relocated for
-    std::atomic<std::int64_t> epochStart_{0};  // ... and where that epoch starts
-    std::atomic<std::int64_t> renderedTo_{0};  // renderer: after its last chunk
-    std::int64_t epochStartLocal_ = 0;         // renderer
-    std::uint64_t rtEpoch_ = 0;                // audio thread
-    std::uint32_t rtOffset_ = 0;               // audio thread: into the front chunk
-    bool rtPrimed_ = false;                    // audio thread: played a chunk of rtEpoch_
+    std::int64_t aheadFrames_ = 0;                 // render-ahead target
+    std::atomic<std::uint64_t> epoch_{0};          // main thread: bumped by seek and pause
+    std::atomic<std::uint64_t> epochDone_{0};      // renderer: the epoch it has relocated for
+    std::atomic<std::int64_t> epochStart_{0};      // ... and where that epoch starts
+    std::atomic<std::int64_t> renderedStream_{0};  // renderer: frames rendered in the epoch
+    std::int64_t epochStartLocal_ = 0;             // renderer
+    std::int64_t streamLocal_ = 0;                 // renderer: frames rendered in the epoch
+    LoopRange loopR_;                              // renderer: the loop of its epoch
+    std::uint64_t rtEpoch_ = 0;                    // audio thread
+    std::uint32_t rtOffset_ = 0;                   // audio thread: into the front chunk
+    bool rtPrimed_ = false;                        // audio thread: played a chunk of rtEpoch_
     std::atomic<std::uint64_t> rtEpochSeen_{0};
     std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
+    std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
+    LoopRange loopC_;                           // audio thread: the loop it plays
+    std::uint64_t loopSeqSeen_ = ~0ull;         // audio thread (in-callback mode)
     std::atomic<std::uint64_t> misses_{0};
 
     // The callback's share when anticipative: its plan and the live instances
@@ -302,7 +348,14 @@ class Engine {
     detail::Plan* livePlan_ = nullptr;
     std::vector<host::Instance*> liveProcessing_;
     std::int64_t livePos_ = 0;
-    bool liveReady_ = false;  // livePos_ is valid for rtEpoch_
+    std::int64_t liveStream_ = 0;  // frames the live nodes played in rtEpoch_
+    bool liveReady_ = false;       // livePos_ is valid for rtEpoch_
+
+    // The loop, written by the main thread under a sequence lock (odd while
+    // writing), read by the executors when they start an epoch.
+    std::atomic<std::uint64_t> loopSeq_{0};
+    std::atomic<std::int64_t> loopStart_{0}, loopEnd_{0};
+    std::atomic<bool> loopOn_{false};
 
     // Recording: the callback captures while recorder_ is set. cycleSeq_ is
     // odd while a callback runs (seq_cst with recorder_, so stopRecording

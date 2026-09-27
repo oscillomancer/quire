@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "supple/engine/offline.h"
+#include "supple/engine/realtime.h"
 #include "supple/params/params.h"
 #include "supple/time/timeline.h"
 #include "workers.h"
@@ -125,7 +127,8 @@ struct Automation {
 // tagged with the transport epoch it belongs to (ADR-0012, ADR-0014).
 struct Chunk {
     std::uint64_t epoch = 0;
-    std::int64_t start = 0;  // plan sample of the first frame
+    std::int64_t start = 0;   // plan (timeline) sample of the first frame
+    std::int64_t stream = 0;  // frames rendered in this epoch before it (ADR-0015)
     std::uint32_t frames = 0;
     std::vector<float> l, r;
 };
@@ -161,23 +164,24 @@ struct ChunkRing {
     void pop() SUPPLE_RT {
         read.store(read.load(std::memory_order_relaxed) + 1, std::memory_order_release);
     }
-    // Consumer: frames [pos, pos + n) of epoch `e` into l/r, dropping older
-    // chunks; frames not rendered yet are zero. Returns the frames found.
-    std::uint32_t pullAt(std::uint64_t e, std::int64_t pos, float* l, float* r,
+    // Consumer: frames [stream, stream + n) of epoch `e` into l/r, dropping
+    // older chunks; frames not rendered yet are zero. Returns the frames
+    // found. Stream positions only grow, so a loop wrap needs nothing here.
+    std::uint32_t pullAt(std::uint64_t e, std::int64_t stream, float* l, float* r,
                          std::uint32_t n) SUPPLE_RT {
         std::uint32_t found = 0;
         for (std::uint32_t done = 0; done < n;) {
             const Chunk* c = front();
-            if (c && (c->epoch < e || (c->epoch == e && c->start + c->frames <= pos + done))) {
+            if (c && (c->epoch < e || (c->epoch == e && c->stream + c->frames <= stream + done))) {
                 pop();  // flushed, or behind the play position
                 continue;
             }
-            if (!c || c->epoch != e || c->start > pos + done) {
+            if (!c || c->epoch != e || c->stream > stream + done) {
                 std::fill_n(l + done, n - done, 0.0f);
                 std::fill_n(r + done, n - done, 0.0f);
                 break;
             }
-            const auto at = static_cast<std::uint32_t>(pos + done - c->start);
+            const auto at = static_cast<std::uint32_t>(stream + done - c->stream);
             const std::uint32_t take = std::min(n - done, c->frames - at);
             std::copy_n(c->l.begin() + at, take, l + done);
             std::copy_n(c->r.begin() + at, take, r + done);
@@ -262,6 +266,10 @@ struct Node {
     Stereo sum, preFx, preFader, post;
     std::vector<TimedEvent> events;
     std::size_t nextEvent = 0;
+    // Notes delivered and not yet ended, per MIDI channel and key; a loop
+    // wrap ends them (note-offs at the start of the next block).
+    std::array<std::uint8_t, 16 * 128> held{};
+    bool releaseHeld = false;
     std::vector<Clip> clips;
     int noteTarget = -1;  // chain index receiving note events
     double volume = 1.0, width = 1.0, panL = 1.0, panR = 1.0;
@@ -306,7 +314,8 @@ struct Plan {
     std::vector<std::size_t> frontier;
     std::vector<std::unique_ptr<ChunkRing>> frontierRings;  // allocated by the engine
     // Set by the renderer when it adopts the plan, read by the callback after
-    // the plan is handed over: the render position (and epoch) where it applies.
+    // the plan is handed over: the stream position (frames into the epoch,
+    // ADR-0015) and epoch where it applies.
     std::int64_t handAt = 0;
     std::uint64_t handEpoch = 0;
     // Two executors at work (anticipative engine with live nodes): frontier
@@ -337,19 +346,28 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t fra
 // Audio thread: one block of every node at plan sample `pos`, in order.
 // `playing` false: the transport is stopped — plugins and monitored inputs
 // run, items and MIDI do not play (and `pos` should not advance).
-bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames, bool playing = true) SUPPLE_RT;
+bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames, bool playing = true,
+                  const LoopRange* loop = nullptr) SUPPLE_RT;
 // The same on the worker pool (the caller helps): bit-identical results.
 // Not SUPPLE_RT itself (it wakes the helpers); every node task is.
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t frames);
 // The renderer's nodes only (rendererGraph), serially without helpers.
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t frames,
-                          const void* self);
+                          const void* self, const LoopRange* loop = nullptr);
 // Repositions the cursors and clears the delay lines of the live nodes (or
 // of the others) and of the edges into them.
 void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT;
 // Audio thread: repositions every playback cursor at `pos` (events,
 // automation) and clears delay lines. Plugins are not touched.
 void locate(Plan& p, std::int64_t pos) SUPPLE_RT;
-host::Transport transportAt(const Plan& p, std::int64_t sample);
+// A loop wrap (ADR-0015): moves the event and automation cursors of one
+// class of nodes (0: the renderer's, 1: live, -1: all) to `pos`, keeping
+// delay lines and plugin state (tails ring on); notes held at the wrap get
+// note-offs at the start of the next block.
+void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
+
+// `loop`: the executor's transport loop, for plugins that follow it.
+host::Transport transportAt(const Plan& p, std::int64_t sample,
+                            const LoopRange* loop = nullptr) SUPPLE_RT;
 
 }  // namespace supple::engine::detail

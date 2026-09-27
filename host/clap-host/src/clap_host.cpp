@@ -881,6 +881,17 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
         tr.bar_number = b.transport->bar;
         tr.tsig_num = b.transport->numerator;
         tr.tsig_denom = b.transport->denominator;
+        if (b.transport->loopActive) {
+            tr.flags |= CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+            tr.loop_start_beats = static_cast<clap_beattime>(
+                std::llround(b.transport->loopStartBeat * CLAP_BEATTIME_FACTOR));
+            tr.loop_end_beats = static_cast<clap_beattime>(
+                std::llround(b.transport->loopEndBeat * CLAP_BEATTIME_FACTOR));
+            tr.loop_start_seconds = static_cast<clap_sectime>(
+                std::llround(b.transport->loopStartSeconds * CLAP_SECTIME_FACTOR));
+            tr.loop_end_seconds = static_cast<clap_sectime>(
+                std::llround(b.transport->loopEndSeconds * CLAP_SECTIME_FACTOR));
+        }
         p.transport = &tr;
     }
     p.audio_inputs = b.inputChannels ? &in : nullptr;

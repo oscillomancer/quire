@@ -1540,9 +1540,15 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
@@ -2163,6 +2169,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2186,19 +2226,86 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
       "additionalProperties": false
     },
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_loop",
+    "title": "Set or toggle the loop range: playback reaching its end repeats it.",
+    "description": "Set or toggle the loop range: playback reaching its end repeats it. start and end as seconds, beat or bar (start_bar 5, end_bar 9 = bars 5-8); a range turns the loop on unless enabled says otherwise; enabled alone toggles the current range. Recording while looping makes one take per pass on one item. Transport state: not an undo step, not saved in the project. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "range_args",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "start_bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "end_seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_bar": {
+          "type": "integer",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
       "idempotentHint": false
     }
   },
@@ -2231,6 +2338,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2254,14 +2395,20 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2299,6 +2446,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2322,14 +2503,81 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_punch",
+    "title": "Set or toggle the punch range: recordings keep only that range.",
+    "description": "Set or toggle the punch range: recordings keep only that range. start and end as seconds, beat or bar; a range turns punch on unless enabled says otherwise. The recording keeps running; the committed items cover only the punch range (the file keeps everything). Not an undo step. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "range_args",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "start_bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "end_seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_bar": {
+          "type": "integer",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2367,6 +2615,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2390,14 +2672,20 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2448,6 +2736,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2471,14 +2793,20 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2516,6 +2844,40 @@
         "sample": {
           "type": "integer"
         },
+        "loop": {
+          "type": "object",
+          "title": "loop",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
+        "punch": {
+          "type": "object",
+          "title": "punch",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start_seconds": {
+              "type": "number"
+            },
+            "end_seconds": {
+              "type": "number"
+            }
+          },
+          "required": ["enabled", "start_seconds", "end_seconds"],
+          "additionalProperties": false
+        },
         "recorded": {
           "type": "array",
           "items": {
@@ -2539,14 +2901,20 @@
               },
               "lost_frames": {
                 "type": "integer"
+              },
+              "takes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
-            "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+            "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
             "additionalProperties": false
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample"],
+      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
       "additionalProperties": false
     },
     "annotations": {

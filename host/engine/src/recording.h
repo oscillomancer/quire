@@ -4,6 +4,7 @@
 // leaves readable takes. The callback never blocks; overflow is counted.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -44,6 +45,9 @@ struct RecordingInfo {
     model::Id track;
     std::int64_t startSample = 0;  // timeline sample of the file's first frame
     double sampleRate = 0;
+    // Written when the recording ends (loop passes, ADR-0015); empty before.
+    std::vector<RecordedSegment> segments;
+    std::int64_t loopStart = 0, loopEnd = 0;
 };
 std::filesystem::path sidecarPath(const std::filesystem::path& wav);
 Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info);
@@ -59,8 +63,9 @@ class Recorder {
                  std::int64_t pos) SUPPLE_RT;
     // Audio thread: input that could not be placed (a playback dropout).
     void lose(std::uint32_t frames) SUPPLE_RT;
-    // Main thread, once capture() can no longer run: drains, closes, reports.
-    std::vector<RecordedTake> finish();
+    // Main thread, once capture() can no longer run: drains, closes, reports
+    // (`loop`: the loop in effect, for takes per pass).
+    std::vector<RecordedTake> finish(LoopRange loop = {});
 
   private:
     struct Track {
@@ -78,6 +83,13 @@ class Recorder {
     std::int64_t latency_;
     std::atomic<bool> started_{false};
     std::atomic<std::int64_t> start_{0};
+    // Audio thread: where the next captured frame would continue the run,
+    // frames captured so far, and the runs after the first (preallocated;
+    // read by finish() after capture has stopped).
+    std::int64_t expected_ = 0, captured_ = 0;
+    static constexpr std::size_t kMaxSegments = 4096;
+    std::array<RecordedSegment, kMaxSegments> segments_{};
+    std::atomic<std::size_t> segmentCount_{0};
     std::atomic<bool> stop_{false};
     std::thread writer_;
     bool sidecars_ = false;           // writer thread

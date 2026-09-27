@@ -935,3 +935,192 @@ TEST_CASE("anticipative monitoring: heard while stopped; arming mid-play hands t
     engine.stop();
     CHECK(engine.lastStopOnAudioThread());
 }
+
+// --- the transport loop (ADR-0015) --------------------------------------------------------------
+
+TEST_CASE("loop playback wraps without a gap: the output is the offline render, unrolled" *
+          doctest::description("rt")) {
+    // Loop 1 s .. 2 s (beats 2..4: two notes); play from 0 for 3.5 s. Blocks
+    // of 256 and chunks of 1024 do not divide the loop, so wraps fall
+    // mid-block and chunks are cut short at the loop end.
+    constexpr std::int64_t kFrames = 168000;
+    auto timelineOf = [](std::int64_t s) { return s < 96000 ? s : 48000 + (s - 96000) % 48000; };
+    for (const EngineOptions& options :
+         {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}})
+        for (const char* extra : {static_cast<const char*>(nullptr), "com.suppleaudio.test.gain"}) {
+            INFO("anticipative " << options.anticipative << ", workers " << options.workers
+                                 << ", latency " << (extra != nullptr));
+            const model::Session s = synthSession(-3.0, extra);
+            auto pool = makePool();
+            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+            auto rtPool = makePool();
+            MediaCache media;
+            DummyBackend backend(
+                {.mode = DummyBackend::Mode::Manual, .captureFrames = kFrames + 4096});
+            Engine engine(rtPool, media, options);
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+            REQUIRE(engine.load(s).ok());
+            engine.setLoop(1.0, 2.0, true);
+            engine.play();
+            const std::int64_t cycles = (kFrames + 4096) / 256;
+            if (options.anticipative)
+                runAhead(engine, backend, cycles, 256);
+            else
+                backend.run(cycles);
+            CHECK(engine.anticipationMisses() == 0);
+            CHECK(engine.processErrors() == 0);
+            const TransportState t = engine.transport();
+            CHECK(t.loop.active());
+            CHECK(t.sample == timelineOf(cycles * 256));  // the listener's position wrapped
+            engine.stop();
+            const std::int64_t L = engine.outputLatency();
+            const auto& cap = backend.capture();
+            double worst = 0;
+            std::int64_t at = -1;
+            for (std::int64_t j = L; j < kFrames; ++j)
+                for (int c = 0; c < 2; ++c) {
+                    const double d = std::fabs(
+                        double(cap.channels[c][static_cast<std::size_t>(j)]) -
+                        double(offline.audio
+                                   .channels[c][static_cast<std::size_t>(timelineOf(j - L))]));
+                    if (d > worst) {
+                        worst = d;
+                        at = j;
+                    }
+                }
+            INFO("worst at " << at);
+            CHECK(worst == 0.0);
+        }
+}
+
+TEST_CASE("a note held across the loop end is released at the wrap" * doctest::description("rt")) {
+    // One note from 0 to 2 s; loop 0.5 s .. 1 s. The note started before the
+    // loop, so after the first wrap nothing plays it again: silence.
+    model::Session s = synthSession(0.0);
+    {
+        model::EditTxn t(s, 2);
+        for (const auto& e : s.midi)
+            t.modify<model::MidiSource>(e.id, [](model::MidiSource& m) {
+                m.sequence.notes = {{0, 4 * 960, 0, 60, 100, 0}};
+            });
+        s = t.commit().value();
+    }
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.setLoop(0.5, 1.0, true);
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 96000 / 256, 256);
+        else
+            backend.run(96000 / 256);
+        engine.stop();
+        const auto& L = backend.capture().channels[0];
+        double before = 0, after = 0;
+        for (std::size_t i = 30000; i < 47000; ++i)
+            before = std::max(before, std::fabs(double(L[i])));
+        for (std::size_t i = 49000; i < 90000; ++i)
+            after = std::max(after, std::fabs(double(L[i])));
+        CHECK(before > 0.1);
+        CHECK(after == 0.0);
+    }
+}
+
+TEST_CASE("anticipative monitoring with a loop: identical to the in-callback reference" *
+          doctest::description("rt")) {
+    const model::Session s = withVocal(true);
+    constexpr std::int64_t kCycles = 400;  // 102400 frames: several passes of 0.5 .. 1.2 s
+    audio::AudioData reference;
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend(rampInput(kCycles * 256));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.setLoop(0.5, 1.2, true);
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, kCycles, 256);
+        else
+            backend.run(kCycles);
+        CHECK(engine.anticipationMisses() == 0);
+        CHECK(engine.processErrors() == 0);
+        const std::int64_t played = kCycles * 256;
+        CHECK(engine.transport().sample == 24000 + (played - 24000) % 33600);
+        engine.stop();
+        const auto& cap = backend.capture();
+        if (!options.anticipative) {
+            reference = cap;
+        } else {
+            CHECK(cap.channels[0] == reference.channels[0]);
+            CHECK(cap.channels[1] == reference.channels[1]);
+        }
+    }
+}
+
+TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the timeline" *
+          doctest::description("rt")) {
+    // Loop 0.5 s .. 1 s, recording from 0.25 s: the first run is heard from
+    // 0.25 s, every later one from the loop start. The input counts device
+    // frames, so the file shows exactly what was captured.
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                              .input = [](float* const* in, std::uint32_t channels, std::uint32_t n,
+                                          std::int64_t frame) {
+                                  for (std::uint32_t c = 0; c < channels; ++c)
+                                      for (std::uint32_t i = 0; i < n; ++i)
+                                          in[c][i] = static_cast<float>(frame + i);
+                              }});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        const model::Session s = synthSession(0.0);
+        REQUIRE(engine.load(s).ok());
+        Id track;
+        for (const auto& e : s.tracks)
+            if (e.id != kMaster) track = e.id;
+        const auto dir = std::filesystem::temp_directory_path() /
+                         ("supple-rec-loop-" + std::to_string(::getpid()));
+        std::filesystem::remove_all(dir);
+        engine.setLoop(0.5, 1.0, true);
+        engine.seek(0.25);
+        REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav"}}).ok());
+        engine.play();
+        constexpr std::int64_t kCycles = 400;  // 102400 frames: 36000 + 24000 * 2 + 18400
+        if (options.anticipative)
+            runAhead(engine, backend, kCycles, 256);
+        else
+            backend.run(kCycles);
+        auto takes = engine.stopRecording();
+        REQUIRE(takes);
+        const RecordedTake& t = (*takes)[0];
+        CHECK(t.frames == kCycles * 256);
+        CHECK(t.loop.start == 24000);
+        CHECK(t.loop.end == 48000);
+        REQUIRE(t.segments.size() == 4);
+        const std::int64_t want[4][2] = {
+            {0, 12000}, {36000, 24000}, {60000, 24000}, {84000, 24000}};
+        for (int k = 0; k < 4; ++k) {
+            CHECK(t.segments[static_cast<std::size_t>(k)].fileFrame == want[k][0]);
+            CHECK(t.segments[static_cast<std::size_t>(k)].timeline == want[k][1]);
+        }
+        auto audio = audio::readAudio(t.file);
+        REQUIRE(audio);
+        REQUIRE(audio->frames() == static_cast<std::size_t>(t.frames));
+        std::size_t breaks = 0;  // contiguous device input, nothing lost or doubled
+        for (std::size_t i = 1; i < audio->frames(); ++i)
+            if (audio->channels[0][i] != audio->channels[0][i - 1] + 1.0f) ++breaks;
+        CHECK(breaks == 0);
+        engine.stop();
+        std::filesystem::remove_all(dir);
+    }
+}

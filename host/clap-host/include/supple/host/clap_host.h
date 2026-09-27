@@ -79,7 +79,9 @@ struct Transport {
     double barStartBeat = 0.0;
     std::int32_t bar = 0;  // 0-based bar index
     std::uint16_t numerator = 4, denominator = 4;
-    double seconds = 0.0;  // song position in seconds at block start
+    double seconds = 0.0;     // song position in seconds at block start
+    bool loopActive = false;  // the transport loop (CLAP_TRANSPORT_IS_LOOP_ACTIVE)
+    double loopStartBeat = 0.0, loopEndBeat = 0.0, loopStartSeconds = 0.0, loopEndSeconds = 0.0;
 };
 
 struct ProcessBlock {

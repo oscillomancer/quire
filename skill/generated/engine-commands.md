@@ -2260,9 +2260,15 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
@@ -2300,7 +2306,8 @@ Result:
       "take": "tk_1",
       "file": "<any>",
       "seconds": 1.0,
-      "lost_frames": 0
+      "lost_frames": 0,
+      "takes": ["tk_1"]
     }
   ]
 }
@@ -3166,6 +3173,40 @@ Kind: `query`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3189,14 +3230,20 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3223,7 +3270,87 @@ Result:
   "recording": false,
   "seconds": 0.0,
   "beat": 0.0,
-  "sample": 0
+  "sample": 0,
+  "loop": {
+    "enabled": false,
+    "start_seconds": 0.0,
+    "end_seconds": 0.0
+  },
+  "punch": {
+    "enabled": false,
+    "start_seconds": 0.0,
+    "end_seconds": 0.0
+  }
+}
+
+```
+
+## `transport.loop@1`
+
+Set or toggle the loop range: playback reaching its end repeats it.
+
+start and end as seconds, beat or bar (start_bar 5, end_bar 9 = bars 5-8); a range turns the loop on unless enabled says otherwise; enabled alone toggles the current range. Recording while looping makes one take per pass on one item. Transport state: not an undo step, not saved in the project.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | boolean |  |  |  |  |
+| `start_seconds` | number |  | 0.0.. |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `start_bar` | integer |  | 1.0.. |  |  |
+| `end_seconds` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  | 0.0.. |  |  |
+| `end_bar` | integer |  | 1.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "loop",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "start_seconds": {
+      "type": "number"
+    },
+    "end_seconds": {
+      "type": "number"
+    }
+  },
+  "required": ["enabled", "start_seconds", "end_seconds"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `transport.range`: not one start and one end, or end not after start Hint: e.g. start_bar 5, end_bar 9
+
+### Examples
+
+**Bars 2-3 (120 BPM, 4/4)** (`empty`)
+
+```json
+{
+  "start_bar": 2,
+  "end_bar": 4
+}
+
+```
+
+Result:
+
+```json
+{
+  "enabled": true,
+  "start_seconds": 2.0,
+  "end_seconds": 6.0
 }
 
 ```
@@ -3263,6 +3390,40 @@ Kind: `action`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3286,14 +3447,20 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3322,7 +3489,9 @@ Result:
   "recording": false,
   "seconds": "<any>",
   "beat": "<any>",
-  "sample": "<any>"
+  "sample": "<any>",
+  "loop": "<any>",
+  "punch": "<any>"
 }
 
 ```
@@ -3362,6 +3531,40 @@ Kind: `action`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3385,14 +3588,20 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3421,7 +3630,79 @@ Result:
   "recording": false,
   "seconds": "<any>",
   "beat": "<any>",
-  "sample": "<any>"
+  "sample": "<any>",
+  "loop": "<any>",
+  "punch": "<any>"
+}
+
+```
+
+## `transport.punch@1`
+
+Set or toggle the punch range: recordings keep only that range.
+
+start and end as seconds, beat or bar; a range turns punch on unless enabled says otherwise. The recording keeps running; the committed items cover only the punch range (the file keeps everything). Not an undo step.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | boolean |  |  |  |  |
+| `start_seconds` | number |  | 0.0.. |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `start_bar` | integer |  | 1.0.. |  |  |
+| `end_seconds` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  | 0.0.. |  |  |
+| `end_bar` | integer |  | 1.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "punch",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "start_seconds": {
+      "type": "number"
+    },
+    "end_seconds": {
+      "type": "number"
+    }
+  },
+  "required": ["enabled", "start_seconds", "end_seconds"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `transport.range`: not one start and one end, or end not after start Hint: e.g. start_bar 5, end_bar 9
+
+### Examples
+
+**Bars 2-3 (120 BPM, 4/4)** (`empty`)
+
+```json
+{
+  "start_bar": 2,
+  "end_bar": 4
+}
+
+```
+
+Result:
+
+```json
+{
+  "enabled": true,
+  "start_seconds": 2.0,
+  "end_seconds": 6.0
 }
 
 ```
@@ -3461,6 +3742,40 @@ Kind: `action`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3484,14 +3799,20 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3520,7 +3841,9 @@ Result:
   "recording": true,
   "seconds": "<any>",
   "beat": "<any>",
-  "sample": "<any>"
+  "sample": "<any>",
+  "loop": "<any>",
+  "punch": "<any>"
 }
 
 ```
@@ -3563,6 +3886,40 @@ Kind: `action`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3586,14 +3943,20 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3623,7 +3986,9 @@ Result:
   "recording": false,
   "seconds": 2.0,
   "beat": 4.0,
-  "sample": 96000
+  "sample": 96000,
+  "loop": "<any>",
+  "punch": "<any>"
 }
 
 ```
@@ -3663,6 +4028,40 @@ Kind: `action`. Exposure: `mcp-tool`.
     "sample": {
       "type": "integer"
     },
+    "loop": {
+      "type": "object",
+      "title": "loop",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
+    "punch": {
+      "type": "object",
+      "title": "punch",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "start_seconds", "end_seconds"],
+      "additionalProperties": false
+    },
     "recorded": {
       "type": "array",
       "items": {
@@ -3686,14 +4085,20 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "lost_frames": {
             "type": "integer"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
-        "required": ["track", "item", "take", "file", "seconds", "lost_frames"],
+        "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample"],
+  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -3722,7 +4127,9 @@ Result:
   "recording": false,
   "seconds": "<any>",
   "beat": "<any>",
-  "sample": "<any>"
+  "sample": "<any>",
+  "loop": "<any>",
+  "punch": "<any>"
 }
 
 ```

@@ -287,6 +287,8 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     }
     backend_ = &backend;
     playStart_ = 0.0;
+    if (loop_.enabled || loop_.end > loop_.start)
+        engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
     return engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
 }
 
@@ -424,9 +426,21 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     engine_->service();
     checkFailures();
     const TransportState t = engine_->transport();
-    return TransportInfo{t.playing, engine_->recording(),
-                         t.seconds, view().timeMap->beatAt(t.seconds),
-                         t.sample,  std::move(recorded)};
+    TransportInfo info;
+    info.playing = t.playing;
+    info.recording = engine_->recording();
+    info.seconds = t.seconds;
+    info.beat = view().timeMap->beatAt(t.seconds);
+    info.sample = t.sample;
+    info.loop = loop_;
+    info.punch = punch_;
+    info.recorded = std::move(recorded);
+    return info;
+}
+
+void EngineApp::setLoop(const TransportRange& loop) {
+    loop_ = loop;
+    if (engine_) engine_->setLoop(loop.start, loop.end, loop.enabled);
 }
 
 Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes,
@@ -446,37 +460,102 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             emit("record.error", std::move(ev));
         }
         const double rate = r.sampleRate > 0 ? r.sampleRate : s.project->sampleRate;
-        // Material before the timeline's start is kept in the file, skipped by the take.
-        const double offset = r.startSample < 0 ? static_cast<double>(-r.startSample) / rate : 0.0;
-        const double start = static_cast<double>(std::max<std::int64_t>(r.startSample, 0)) / rate;
-        const double seconds = static_cast<double>(r.frames) / rate - offset;
-        if (seconds <= 0 || !s.tracks.find(r.track)) continue;
+        if (r.frames <= 0 || !s.tracks.find(r.track)) continue;
+        // The runs on the timeline (ADR-0015): one per loop pass, or one.
+        std::vector<RecordedSegment> segs = r.segments;
+        if (segs.empty()) segs.push_back({0, r.startSample});
+        struct Run {
+            std::int64_t from, to, t0;  // file frames [from, to) heard from timeline t0
+        };
+        std::vector<Run> runs;
+        for (std::size_t k = 0; k < segs.size(); ++k) {
+            const std::int64_t to =
+                std::min(r.frames, k + 1 < segs.size() ? segs[k + 1].fileFrame : r.frames);
+            if (to > segs[k].fileFrame) runs.push_back({segs[k].fileFrame, to, segs[k].timeline});
+        }
+        const bool passes = runs.size() > 1 && r.loop.end > r.loop.start;
+        // Items: the loop range for passes (one take per pass), else one per
+        // run; within the punch range and never before the timeline's start
+        // (material outside stays in the file, skipped by the take).
+        const auto punchFrom = static_cast<std::int64_t>(std::llround(punch_.start * rate));
+        const auto punchTo = static_cast<std::int64_t>(std::llround(punch_.end * rate));
+        auto clip = [&](std::int64_t& from, std::int64_t& to) {
+            if (punch_.enabled) {
+                from = std::max(from, punchFrom);
+                to = std::min(to, punchTo);
+            }
+            from = std::max<std::int64_t>(from, 0);
+            return to > from;
+        };
+        struct ItemPlan {
+            std::int64_t start, end;
+            std::vector<std::pair<std::int64_t, bool>> takes;  // file frame at start; whole
+        };
+        std::vector<ItemPlan> items;
+        if (passes) {
+            ItemPlan ip{r.loop.start, r.loop.end, {}};
+            if (clip(ip.start, ip.end)) {
+                for (const Run& run : runs) {
+                    const std::int64_t t1 = run.t0 + (run.to - run.from);
+                    if (t1 <= ip.start || run.t0 >= ip.end) continue;
+                    ip.takes.push_back(
+                        {run.from + (ip.start - run.t0), run.t0 <= ip.start && t1 >= ip.end});
+                }
+                if (!ip.takes.empty()) items.push_back(std::move(ip));
+            }
+        } else {
+            for (const Run& run : runs) {
+                ItemPlan ip{run.t0, run.t0 + (run.to - run.from), {}};
+                if (!clip(ip.start, ip.end)) continue;
+                ip.takes.push_back({run.from + (ip.start - run.t0), true});
+                items.push_back(std::move(ip));
+            }
+        }
+        if (items.empty()) continue;
         model::MediaSource md;
         std::error_code ec;
         const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
         md.path = !ec && !rel.empty() && *rel.begin() != ".." ? rel.string() : r.file.string();
         md.format = "wav";
-        md.sampleRate = rate;  // the device's (playback warns if it is not the project's)
+        md.sampleRate = rate;  // the device's (resampled to the plan's rate on playback)
         md.channels = 0;
-        if (auto head = audio::readAudio(r.file))
-            md.channels = static_cast<int>(head->channelCount());
+        if (auto head = audio::inspectWavStream(r.file))
+            md.channels = static_cast<int>(head->channels);
         md.frames = r.frames;
         model::EditTxn& t = txn();
         const Id source = t.create(std::move(md));
-        model::Take take;
-        take.source = source;
-        take.startOffset = offset;
-        take.name = r.file.stem().string();
-        const Id tk = t.create(std::move(take));
-        model::Item item;
-        item.track = r.track;
-        item.position = s.timeMap->beatAt(start);
-        item.length = s.timeMap->beatAt(start + seconds) - item.position;
-        item.takes = {tk};
-        item.activeTake = tk;
-        const Id it = t.create(std::move(item));
-        out.push_back({r.track.str(), it.str(), tk.str(), r.file.string(), seconds,
-                       static_cast<std::int64_t>(r.overflowFrames)});
+        for (const ItemPlan& ip : items) {
+            model::Item item;
+            item.track = r.track;
+            const double start = static_cast<double>(ip.start) / rate;
+            const double end = static_cast<double>(ip.end) / rate;
+            item.position = s.timeMap->beatAt(start);
+            item.length = s.timeMap->beatAt(end) - item.position;
+            RecordedInfo info;
+            std::optional<Id> active;
+            for (std::size_t k = 0; k < ip.takes.size(); ++k) {
+                model::Take take;
+                take.source = source;
+                take.startOffset =
+                    static_cast<double>(ip.takes[k].first) / rate;  // < 0: silence first
+                take.name = r.file.stem().string();
+                if (ip.takes.size() > 1) take.name += " pass " + std::to_string(k + 1);
+                const Id tk = t.create(std::move(take));
+                item.takes.push_back(tk);
+                info.takes.push_back(tk.str());
+                if (ip.takes[k].second) active = tk;  // the newest whole pass...
+            }
+            if (!active) active = item.takes.back();  // ...or the last one
+            item.activeTake = active;
+            const Id it = t.create(std::move(item));
+            info.track = r.track.str();
+            info.item = it.str();
+            info.take = active->str();
+            info.file = r.file.string();
+            info.seconds = end - start;
+            info.lostFrames = static_cast<std::int64_t>(r.overflowFrames);
+            out.push_back(std::move(info));
+        }
     }
     SUPPLE_TRY(commitTransaction(*txnId));
     return out;
@@ -586,6 +665,8 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
                          "/track", "give a track to put it on");
         t.startSample = side->startSample;
         t.sampleRate = side->sampleRate;
+        t.segments = side->segments;  // loop passes, when the recording ended normally
+        t.loop = {side->loopStart, side->loopEnd};
         takes.push_back(std::move(t));
     }
     for (RecordedTake& t : takes) {
@@ -716,7 +797,8 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         st = st ? w.flush() : st;
         w.abandon();
         st = st ? detail::writeSidecar(
-                      file, {Id{model::Kind::Track, 1}, static_cast<std::int64_t>(rate), rate})
+                      file,
+                      {Id{model::Kind::Track, 1}, static_cast<std::int64_t>(rate), rate, {}, 0, 0})
                 : st;
         assert(st && "fixture recording failed");
         (void)st;

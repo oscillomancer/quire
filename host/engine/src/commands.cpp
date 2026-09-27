@@ -130,6 +130,11 @@ struct SeekArgs {
     std::optional<double> seconds, beat;
     std::optional<std::int64_t> bar;
 };
+struct RangeArgs {
+    std::optional<bool> enabled;
+    std::optional<double> startSeconds, startBeat, endSeconds, endBeat;
+    std::optional<std::int64_t> startBar, endBar;
+};
 
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
@@ -158,6 +163,15 @@ schema::Schema<RecordedInfo> recordedSchema() {
         .field("file", &RecordedInfo::file, schema::string())
         .field("seconds", &RecordedInfo::seconds, schema::number())
         .field("lost_frames", &RecordedInfo::lostFrames, schema::integer())
+        .field("takes", &RecordedInfo::takes, schema::arrayOf(schema::string()))
+        .build();
+}
+
+schema::Schema<TransportRange> rangeSchema(const char* name) {
+    return schema::object<TransportRange>(name)
+        .field("enabled", &TransportRange::enabled, schema::boolean())
+        .field("start_seconds", &TransportRange::start, schema::number())
+        .field("end_seconds", &TransportRange::end, schema::number())
         .build();
 }
 
@@ -169,6 +183,8 @@ schema::Schema<TransportInfo> transportSchema() {
         .field("seconds", &TransportInfo::seconds, schema::number())
         .field("beat", &TransportInfo::beat, schema::number())
         .field("sample", &TransportInfo::sample, schema::integer())
+        .field("loop", &TransportInfo::loop, rangeSchema("loop"))
+        .field("punch", &TransportInfo::punch, rangeSchema("punch"))
         .field("recorded", &TransportInfo::recorded, schema::arrayOf(recorded))
         .build();
 }
@@ -698,7 +714,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                     {"recover.no_track", "the track it was recorded on is gone", "give track"}};
         c.examples = {{"Recover everything", obj("{}"),
                        obj(R"({"recovered": [{"track": "tr_1", "item": "it_1", "take": "tk_1",
-                              "file": "<any>", "seconds": 1.0, "lost_frames": 0}]})"),
+                              "file": "<any>", "seconds": 1.0, "lost_frames": 0,
+                              "takes": ["tk_1"]}]})"),
                        "recording_interrupted"}};
         c.run = [](const RecoverArgs& a, Context& ctx) -> Result<RecoverResult> {
             EngineApp& app = A(ctx);
@@ -2260,7 +2277,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.examples = {{"While the engine runs", obj("{}"),
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +
                            R"(, "recording": )" + (rec ? "true" : "false") +
-                           R"(, "seconds": "<any>", "beat": "<any>", "sample": "<any>"})"),
+                           R"(, "seconds": "<any>", "beat": "<any>", "sample": "<any>",)"
+                           R"( "loop": "<any>", "punch": "<any>"})"),
                        rec ? "engine_armed" : "engine_running"}};
         c.run = [act = std::string(action)](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport(act);
@@ -2285,7 +2303,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"transport.position", "not exactly one position", "give seconds, beat or bar"}};
         c.examples = {
             {"To bar 2 (120 BPM, 4/4)", obj(R"({"bar": 2})"),
-             obj(R"({"playing": false, "recording": false, "seconds": 2.0, "beat": 4.0, "sample": 96000})"),
+             obj(R"({"playing": false, "recording": false, "seconds": 2.0, "beat": 4.0, "sample": 96000,
+                    "loop": "<any>", "punch": "<any>"})"),
              "engine_running"}};
         c.run = [](const SeekArgs& a, Context& ctx) -> Result<TransportInfo> {
             EngineApp& app = A(ctx);
@@ -2315,10 +2334,84 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.errors = {{"engine.stopped", "the engine is not running", "engine.start first"}};
         c.examples = {
             {"Stopped at the start", obj("{}"),
-             obj(R"({"playing": false, "recording": false, "seconds": 0.0, "beat": 0.0, "sample": 0})"),
+             obj(R"({"playing": false, "recording": false, "seconds": 0.0, "beat": 0.0, "sample": 0,
+                    "loop": {"enabled": false, "start_seconds": 0.0, "end_seconds": 0.0},
+                    "punch": {"enabled": false, "start_seconds": 0.0, "end_seconds": 0.0}})"),
              "engine_running"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport("get");
+        };
+        registry.add(std::move(c));
+    }
+    for (const bool loop : {true, false}) {
+        Command<RangeArgs, TransportRange> c;
+        c.name = loop ? "transport.loop" : "transport.punch";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = loop ? "Set or toggle the loop range: playback reaching its end repeats it."
+                         : "Set or toggle the punch range: recordings keep only that range.";
+        c.description =
+            loop ? "start and end as seconds, beat or bar (start_bar 5, end_bar 9 = bars 5-8); "
+                   "a range turns the loop on unless enabled says otherwise; enabled alone "
+                   "toggles the current range. Recording while looping makes one take per pass "
+                   "on one item. Transport state: not an undo step, not saved in the project."
+                 : "start and end as seconds, beat or bar; a range turns punch on unless enabled "
+                   "says otherwise. The recording keeps running; the committed items cover only "
+                   "the punch range (the file keeps everything). Not an undo step.";
+        c.tags = {"transport", "recording"};
+        c.args = schema::object<RangeArgs>("range_args")
+                     .field("enabled", &RangeArgs::enabled, schema::boolean())
+                     .field("start_seconds", &RangeArgs::startSeconds, schema::number().min(0))
+                     .field("start_beat", &RangeArgs::startBeat, schema::number().min(0))
+                     .field("start_bar", &RangeArgs::startBar, schema::integer().min(1))
+                     .field("end_seconds", &RangeArgs::endSeconds, schema::number().min(0))
+                     .field("end_beat", &RangeArgs::endBeat, schema::number().min(0))
+                     .field("end_bar", &RangeArgs::endBar, schema::integer().min(1))
+                     .build();
+        c.result = rangeSchema(loop ? "loop" : "punch");
+        c.errors = {{"transport.range", "not one start and one end, or end not after start",
+                     "e.g. start_bar 5, end_bar 9"}};
+        c.examples = {{"Bars 2-3 (120 BPM, 4/4)", obj(R"({"start_bar": 2, "end_bar": 4})"),
+                       obj(R"({"enabled": true, "start_seconds": 2.0, "end_seconds": 6.0})"),
+                       "empty"}};
+        c.run = [loop](const RangeArgs& a, Context& ctx) -> Result<TransportRange> {
+            EngineApp& app = A(ctx);
+            TransportRange r = loop ? app.loop() : app.punch();
+            const int starts =
+                a.startSeconds.has_value() + a.startBeat.has_value() + a.startBar.has_value();
+            const int ends =
+                a.endSeconds.has_value() + a.endBeat.has_value() + a.endBar.has_value();
+            if (starts > 1 || ends > 1 || starts != ends)
+                return Error("transport.range", "give one start and one end (or neither)", "",
+                             "start_seconds|start_beat|start_bar and end_…");
+            if (starts == 1) {
+                const model::Session s = app.view();
+                auto at = [&](std::optional<double> sec, std::optional<double> beat,
+                              std::optional<std::int64_t> bar) {
+                    return sec ? *sec
+                               : s.timeMap->secondsAt(
+                                     beatsOf(s, beat,
+                                             bar ? std::optional<int>(static_cast<int>(*bar))
+                                                 : std::nullopt));
+                };
+                const double start = at(a.startSeconds, a.startBeat, a.startBar);
+                const double end = at(a.endSeconds, a.endBeat, a.endBar);
+                if (!(end > start))
+                    return Error("transport.range", "the end must come after the start", "/end");
+                r.start = start;
+                r.end = end;
+                r.enabled = a.enabled.value_or(true);
+            } else if (a.enabled) {
+                if (*a.enabled && !(r.end > r.start))
+                    return Error("transport.range", "there is no range to turn on", "",
+                                 "give start and end");
+                r.enabled = *a.enabled;
+            }
+            if (loop)
+                app.setLoop(r);
+            else
+                app.setPunch(r);
+            return r;
         };
         registry.add(std::move(c));
     }

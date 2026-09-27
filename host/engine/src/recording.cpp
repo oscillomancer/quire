@@ -20,6 +20,20 @@ Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info)
     v["track"] = info.track.str();
     v["start_sample"] = static_cast<long long>(info.startSample);
     v["sample_rate"] = info.sampleRate;
+    if (info.segments.size() > 1) {
+        json::Value segs = json::Value::array();
+        for (const RecordedSegment& sg : info.segments) {
+            json::Value row = json::Value::array();
+            row.push_back(static_cast<long long>(sg.fileFrame));
+            row.push_back(static_cast<long long>(sg.timeline));
+            segs.push_back(std::move(row));
+        }
+        v["segments"] = std::move(segs);
+        json::Value loop = json::Value::array();
+        loop.push_back(static_cast<long long>(info.loopStart));
+        loop.push_back(static_cast<long long>(info.loopEnd));
+        v["loop"] = std::move(loop);
+    }
     return writeFileAtomic(sidecarPath(wav), json::writeCanonical(v) + "\n");
 }
 
@@ -35,7 +49,21 @@ Result<RecordingInfo> readSidecar(const std::filesystem::path& wav) {
         track && track->isString() ? model::Id::parse(track->asString()) : std::nullopt;
     if (!id || !start || !start->isInt() || !rate || !rate->isNumber())
         return Error("record.sidecar", sidecarPath(wav).string() + " is not a recording sidecar");
-    return RecordingInfo{*id, start->asInt(), rate->asDouble()};
+    RecordingInfo info{*id, start->asInt(), rate->asDouble(), {}, 0, 0};
+    const json::Value* segs = v->find("segments");
+    const json::Value* loop = v->find("loop");
+    if (segs && segs->isArray() && loop && loop->isArray() && loop->size() == 2 &&
+        loop->at(0).isInt() && loop->at(1).isInt()) {
+        for (std::size_t i = 0; i < segs->size(); ++i) {
+            const json::Value& row = segs->at(i);
+            if (!row.isArray() || row.size() != 2 || !row.at(0).isInt() || !row.at(1).isInt())
+                return Error("record.sidecar", sidecarPath(wav).string() + ": bad segments");
+            info.segments.push_back({row.at(0).asInt(), row.at(1).asInt()});
+        }
+        info.loopStart = loop->at(0).asInt();
+        info.loopEnd = loop->at(1).asInt();
+    }
+    return info;
 }
 
 void FrameRing::init(std::uint32_t channels, std::size_t frames) {
@@ -108,7 +136,15 @@ void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::ui
         // What the performer heard at `pos` reaches us a round trip later.
         start_.store(pos - latency_, std::memory_order_relaxed);
         started_.store(true, std::memory_order_release);
+    } else if (pos != expected_) {  // a loop wrap: a new run on the timeline
+        const std::size_t n = segmentCount_.load(std::memory_order_relaxed);
+        if (n < kMaxSegments) {
+            segments_[n] = {captured_, pos};
+            segmentCount_.store(n + 1, std::memory_order_release);
+        }
     }
+    expected_ = pos + frames;
+    captured_ += frames;
     for (auto& t : tracks_) {
         const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames);
         if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
@@ -143,7 +179,7 @@ void Recorder::writeSidecars() {
     const std::int64_t start = start_.load(std::memory_order_relaxed);
     for (auto& t : tracks_) {
         // Without one the take is fine but a crash would leave it unplaced.
-        auto st = writeSidecar(t->target.file, {t->target.track, start, rate_});
+        auto st = writeSidecar(t->target.file, {t->target.track, start, rate_, {}, 0, 0});
         if (!st && sidecarError_) sidecarError_ = std::move(st);
     }
 }
@@ -164,12 +200,18 @@ void Recorder::writerLoop() {
     for (auto& t : tracks_) drain(*t, scratch);  // what arrived before the stop
 }
 
-std::vector<RecordedTake> Recorder::finish() {
+std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
     stop_.store(true, std::memory_order_release);
     if (writer_.joinable()) writer_.join();
     std::vector<RecordedTake> out;
     const std::int64_t start =
         started_.load(std::memory_order_acquire) ? start_.load(std::memory_order_relaxed) : 0;
+    // A run captured at output position P from file frame F was heard a
+    // round trip earlier: its first frame on the timeline is F + latency.
+    std::vector<RecordedSegment> segments = {{0, start}};
+    const std::size_t count = segmentCount_.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < count; ++i)
+        segments.push_back({segments_[i].fileFrame + latency_, segments_[i].timeline});
     for (auto& t : tracks_) {
         RecordedTake r;
         r.track = t->target.track;
@@ -177,8 +219,17 @@ std::vector<RecordedTake> Recorder::finish() {
         r.startSample = start;
         r.sampleRate = rate_;
         r.frames = static_cast<std::int64_t>(t->writer.frames());
+        for (const RecordedSegment& sg : segments)
+            if (sg.fileFrame < r.frames) r.segments.push_back(sg);
+        r.loop = {loop.start, loop.end};
         r.overflowFrames = t->overflow.load();
         if (auto st = t->writer.close(); !st && writeError_) writeError_ = std::move(st);
+        if (r.segments.size() > 1 && started_.load(std::memory_order_relaxed)) {
+            // Where each pass belongs, for recovery of an unsaved take.
+            RecordingInfo info{t->target.track, start, rate_, r.segments, loop.start, loop.end};
+            if (auto st = writeSidecar(t->target.file, info); !st && sidecarError_)
+                sidecarError_ = std::move(st);
+        }
         if (!writeError_)
             r.error = writeError_.error().toString();
         else if (!sidecarError_)
