@@ -1,11 +1,18 @@
 // The optimizer end to end with Orrery (docs/specs/optimizer.md §6): recover a
 // hidden patch from its render, and hit a descriptor profile.
+#include <dlfcn.h>
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <thread>
 
+#include "../src/optimize_loss.h"
+#include "../src/schema_params.h"
+#include "supple/audio/audio_file.h"
 #include "supple/sandbox/commands.h"
 
 using namespace supple;
@@ -15,10 +22,13 @@ namespace fs = std::filesystem;
 namespace {
 
 const fs::path kOrrery = ORRERY_CLAP_PATH;
+const fs::path kFixture = FIXTURE_CLAP_PATH;
+std::atomic<unsigned> gRootNumber{0};
 
 struct Root {
     fs::path path =
-        fs::temp_directory_path() / ("supple-sandbox-opt-" + std::to_string(::getpid()));
+        fs::temp_directory_path() / ("supple-sandbox-opt-" + std::to_string(::getpid()) + "-" +
+                                     std::to_string(gRootNumber.fetch_add(1)));
     Root() { fs::remove_all(path); }
     ~Root() { fs::remove_all(path); }
 };
@@ -42,7 +52,7 @@ struct Harness {
         registerCommands(registry);
         SessionOptions o;
         o.workdir = root.path;
-        o.pluginPath = {kOrrery};
+        o.pluginPath = {kOrrery, kFixture};
         auto s = Session::open(o);
         REQUIRE(s);
         host = std::make_unique<SandboxHost>(std::move(*s));
@@ -102,6 +112,17 @@ TEST_CASE("optimize recovers a hidden patch from its render") {
     const std::string best = result["render"].asString();
     json::Value cmp = h.call("compare", R"({"reference": "rd_1", "test": ")" + best + R"("})");
     CHECK(cmp["ltas_rms_db"].asDouble() < 1.5);
+    auto saved = h.host->session().findRender(best);
+    REQUIRE(saved);
+    CHECK((*saved)->tailSeconds > 0.0);
+    CHECK((*saved)->tailSeconds <= 0.3);
+    CHECK((*saved)->chain == std::vector<std::string>{"in_1"});
+    CHECK((*saved)->latency == 0);
+    json::Value again =
+        h.call("optimize.start", R"({"instance":"in_1",
+        "params":["filter1.cutoff"],"target":{"reference":")" +
+                                     best + R"("},"evaluations":10,"max_seconds":10})");
+    CHECK(h.waitDone(again["job"].asString())["status"].asString() == "done");
     // The merge patch applies as-is.
     json::Value merge = json::Value::object();
     merge["instance"] = "in_1";
@@ -133,4 +154,171 @@ TEST_CASE("optimize hits a descriptor profile; cancellation stops a job") {
     h.call("job.cancel", R"({"job": ")" + slow["job"].asString() + R"("})");
     json::Value status = h.call("job.status", R"({"job": ")" + slow["job"].asString() + R"("})");
     CHECK(status["status"].asString() == "cancelled");
+}
+
+TEST_CASE("curve metadata rejects invalid exponents without throwing") {
+    for (std::string_view curve :
+         {"pow:invalid", "pow:0", "pow:-2", "pow:inf", "bipolar:nan", "pow:2garbage"}) {
+        auto parsed = curveFromName(curve);
+        CHECK_FALSE(parsed);
+        if (!parsed) CHECK(parsed.error().code == "sandbox.param_curve");
+    }
+    auto good = curveFromName("pow:3");
+    REQUIRE(good);
+    CHECK(good->k == doctest::Approx(3.0));
+    Harness h;
+    h.call("plugin.load", R"({"plugin":"com.suppleaudio.test.bad-curve"})");
+    auto bad = h.d->execute({"optimize.start", j(R"({"instance":"in_1","params":["gain"],
+                                 "target":{"profile":{"schema":"supple.analysis-profile/1.0",
+                                 "targets":{"spectral.centroid_hz.median":{"target":1000,
+                                 "tolerance":100}}}}})"),
+                             kTest});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "sandbox.param_curve");
+    CHECK(bad.error().path.find("/params/0") != std::string::npos);
+}
+
+TEST_CASE("reference envelope loss squares each descriptor distance") {
+    analysis::Report ref, cand;
+    ref.envelope.emplace();
+    cand.envelope.emplace();
+    ref.envelope->attackMs = 100.0;
+    cand.envelope->attackMs = 160.0;
+    ref.envelope->decay20Ms = cand.envelope->decay20Ms = 200.0;
+    ref.envelope->releaseMs = cand.envelope->releaseMs = 300.0;
+    const auto loss = detail::referenceLoss(ref, cand);
+    CHECK(loss.terms.at("envelope.attack") == doctest::Approx(4.0));
+    CHECK(loss.terms.at("envelope.decay20") == doctest::Approx(0.0));
+    CHECK(loss.terms.at("envelope.release") == doctest::Approx(0.0));
+    CHECK(loss.total == doctest::Approx(4.0));
+}
+
+TEST_CASE("optimize.start returns promptly for a 30 second file reference") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    h.call("patch.set", kPatch);
+    audio::AudioData audio;
+    audio.sampleRate = 48000.0;
+    audio.channels = {std::vector<float>(30 * 48000, 0.0f), std::vector<float>(30 * 48000, 0.0f)};
+    const fs::path file = h.root.path / "long-reference.wav";
+    REQUIRE(audio::writeWav(file, audio, {}).ok());
+    const auto start = std::chrono::steady_clock::now();
+    auto started =
+        h.call("optimize.start", R"({"instance":"in_1",
+        "params":["filter1.cutoff"],"target":{"reference":")" +
+                                     file.string() + R"("},"evaluations":10,"max_seconds":10})");
+    const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    INFO(ms);
+    MESSAGE("30 s reference optimize.start latency: " << ms << " ms");
+    CHECK(ms < 100.0);
+    h.call("job.cancel", R"({"job": ")" + started["job"].asString() + R"("})");
+}
+
+TEST_CASE("invalid profiles and universally rejected patches fail jobs") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    h.call("patch.set", kPatch);
+    auto bad = h.call("optimize.start", R"({"instance":"in_1","params":["filter1.cutoff"],
+        "target":{"profile":{"schema":"wrong","targets":{}}},"evaluations":10})");
+    auto failure = h.waitDone(bad["job"].asString());
+    REQUIRE(failure["status"].asString() == "failed");
+    CHECK(failure["error"]["code"].asString() == "analysis.profile.schema");
+
+    Harness refusing;
+    refusing.call("plugin.load", R"({"plugin":"com.suppleaudio.test.reject-gain"})");
+    auto rejected = refusing.call("optimize.start", R"({"instance":"in_1","params":["gain"],
+        "target":{"profile":{"schema":"supple.analysis-profile/1.0",
+        "targets":{"spectral.centroid_hz.median":{"target":1000,"tolerance":100}}}},
+        "seconds":0.1,"tail_s":0,"evaluations":10})");
+    auto rejectedStatus = refusing.waitDone(rejected["job"].asString());
+    REQUIRE(rejectedStatus["status"].asString() == "failed");
+    CHECK(rejectedStatus["error"]["code"].asString() == "fixture.reject");
+}
+
+TEST_CASE("profile weights scale candidate loss") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    h.call("patch.set", kPatch);
+    auto runWeight = [&](int weight) {
+        const std::string args =
+            R"({"instance":"in_1","params":["filter1.cutoff"],
+            "target":{"profile":{"schema":"supple.analysis-profile/1.0","targets":{
+            "spectral.centroid_hz.median":{"target":1,"tolerance":1,"weight":)" +
+            std::to_string(weight) +
+            R"(},"spectral.flatness.median":{"target":0.5,"tolerance":0.1,"weight":1}}}},
+            "seconds":0.2,"tail_s":0,"evaluations":10,"seed":1})";
+        auto started = h.call("optimize.start", args);
+        auto done = h.waitDone(started["job"].asString());
+        INFO(json::writeCompact(done));
+        REQUIRE(done["status"].asString() == "done");
+        return done["result"]["loss"]["initial"].asDouble();
+    };
+    const double plain = runWeight(1);
+    const double heavy = runWeight(100);
+    CHECK(heavy > plain * 50.0);
+}
+
+TEST_CASE("worker-owned CLAP clone keeps main-thread lifecycle") {
+    void* library = dlopen(kFixture.c_str(), RTLD_NOW);
+    REQUIRE(library);
+    auto failures = reinterpret_cast<int (*)()>(dlsym(library, "supple_fixture_thread_failures"));
+    REQUIRE(failures);
+    const int before = failures();
+    {
+        Harness h;
+        h.call("plugin.load", R"({"plugin":"com.suppleaudio.test.threaded-gain"})");
+        auto started = h.call("optimize.start", R"({"instance":"in_1","params":["gain"],
+            "target":{"profile":{"schema":"supple.analysis-profile/1.0",
+            "targets":{"spectral.centroid_hz.median":{"target":1000,"tolerance":100}}}},
+            "seconds":0.1,"tail_s":0,"evaluations":10})");
+        auto done = h.waitDone(started["job"].asString());
+        INFO(json::writeCompact(done));
+        REQUIRE(done["status"].asString() == "done");
+    }
+    CHECK(failures() == before);
+    dlclose(library);
+}
+
+TEST_CASE("finished job threads are reaped before another starts") {
+    Harness h;
+    std::atomic<int> completed{0};
+    for (int i = 0; i < 120; ++i) {
+        h.host->session().startJob([&](std::stop_token) { completed.fetch_add(1); });
+        while (completed.load() <= i) std::this_thread::yield();
+        CHECK(h.host->session().jobThreadCountForTests() <= 2);
+    }
+    h.host->session().startJob([](std::stop_token) {});
+    CHECK(h.host->session().jobThreadCountForTests() <= 2);
+}
+
+TEST_CASE("job.cancel stops a generation after the current candidate") {
+    void* library = dlopen(kFixture.c_str(), RTLD_NOW);
+    REQUIRE(library);
+    auto starts = reinterpret_cast<int (*)()>(dlsym(library, "supple_fixture_patch_starts"));
+    REQUIRE(starts);
+    const int before = starts();
+    Harness h;
+    h.call("plugin.load", R"({"plugin":"com.suppleaudio.test.slow-gain"})");
+    auto started = h.call("optimize.start", R"({"instance":"in_1","params":["gain"],
+        "target":{"profile":{"schema":"supple.analysis-profile/1.0",
+        "targets":{"spectral.centroid_hz.median":{"target":1000,"tolerance":100}}}},
+        "seconds":0.1,"tail_s":0,"evaluations":100,"max_seconds":60})");
+    const auto readyBy = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (starts() == before && std::chrono::steady_clock::now() < readyBy)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(starts() > before);
+    const auto cancelledAt = std::chrono::steady_clock::now();
+    h.call("job.cancel", R"({"job": ")" + started["job"].asString() + R"("})");
+    while (h.host->session().activeJobThreadCountForTests() != 0 &&
+           std::chrono::steady_clock::now() - cancelledAt < std::chrono::seconds(2))
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const double elapsedMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cancelledAt)
+            .count();
+    INFO(elapsedMs);
+    CHECK(h.host->session().activeJobThreadCountForTests() == 0);
+    CHECK(elapsedMs < 500.0);
+    CHECK_FALSE(fs::exists(h.root.path / "renders" / (started["render"].asString() + ".wav")));
+    dlclose(library);
 }

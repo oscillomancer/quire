@@ -16,10 +16,12 @@
 #include <clap/clap.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
@@ -78,6 +80,67 @@ const clap_plugin_descriptor_t* gainDescriptor() {
     return &d;
 }
 
+const clap_plugin_descriptor_t* checkedGainDescriptor(bool reject) {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO,
+                                     nullptr};
+    static const clap_plugin_descriptor_t checked = {CLAP_VERSION_INIT,
+                                                     "com.suppleaudio.test.threaded-gain",
+                                                     "Thread Checked Gain",
+                                                     "Supple Audio",
+                                                     "",
+                                                     "",
+                                                     "",
+                                                     "0.1.0",
+                                                     "Thread contract fixture",
+                                                     features};
+    static const clap_plugin_descriptor_t refusing = {CLAP_VERSION_INIT,
+                                                      "com.suppleaudio.test.reject-gain",
+                                                      "Reject Gain",
+                                                      "Supple Audio",
+                                                      "",
+                                                      "",
+                                                      "",
+                                                      "0.1.0",
+                                                      "Patch refusal fixture",
+                                                      features};
+    return reject ? &refusing : &checked;
+}
+
+const clap_plugin_descriptor_t* slowGainDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO,
+                                     nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.slow-gain",
+                                               "Slow Gain",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Slow patch fixture",
+                                               features};
+    return &d;
+}
+
+const clap_plugin_descriptor_t* badCurveDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO,
+                                     nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.bad-curve",
+                                               "Bad Curve",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Invalid semantic curve fixture",
+                                               features};
+    return &d;
+}
+
+std::atomic<int> gThreadFailures{0};
+std::atomic<int> gPatchStarts{0};
+
 struct Gain {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
@@ -87,6 +150,10 @@ struct Gain {
     double gain = 1.0;      // audio thread
     float delay[2][64] = {};
     int delayPos = 0;
+    bool enforceThread = false;
+    bool rejectPatch = false;
+    bool slowPatch = false;
+    bool badCurve = false;
 
     void applyParam(clap_id id, double clapValue) {
         if (const auto* p = params::findById(kGainT, id)) {
@@ -109,6 +176,16 @@ struct Gain {
 };
 
 Gain* G(const clap_plugin_t* p) { return static_cast<Gain*>(p->plugin_data); }
+
+bool checkGainMain(const clap_plugin_t* p) {
+    if (!G(p)->enforceThread) return true;
+    const auto* h = G(p)->host;
+    const auto* check =
+        static_cast<const clap_host_thread_check_t*>(h->get_extension(h, CLAP_EXT_THREAD_CHECK));
+    const bool ok = check && check->is_main_thread(h);
+    if (!ok) gThreadFailures.fetch_add(1, std::memory_order_relaxed);
+    return ok;
+}
 
 uint32_t CLAP_ABI gainParamCount(const clap_plugin_t*) { return 2; }
 bool CLAP_ABI gainParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
@@ -192,7 +269,15 @@ bool CLAP_ABI gainStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
 }
 const clap_plugin_state_t kGainState = {gainStateSave, gainStateLoad};
 
-uint32_t CLAP_ABI gainPortCount(const clap_plugin_t*, bool) { return 1; }
+bool checkedGain(const clap_plugin_t* p) {
+    return !std::strcmp(p->desc->id, checkedGainDescriptor(false)->id) ||
+           !std::strcmp(p->desc->id, checkedGainDescriptor(true)->id) ||
+           !std::strcmp(p->desc->id, slowGainDescriptor()->id) ||
+           !std::strcmp(p->desc->id, badCurveDescriptor()->id);
+}
+uint32_t CLAP_ABI gainPortCount(const clap_plugin_t* p, bool input) {
+    return input && checkedGain(p) ? 0 : 1;
+}
 bool CLAP_ABI gainPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
                           clap_audio_port_info_t* info) {
     if (index != 0) return false;
@@ -206,6 +291,7 @@ bool CLAP_ABI gainPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
     return true;
 }
 const clap_plugin_audio_ports_t kGainPorts = {gainPortCount, gainPortGet};
+extern const clap_plugin_note_ports_t kSineNotes;
 
 // semantic extension
 bool writeString(const clap_ostream_t* os, const std::string& s) {
@@ -225,12 +311,13 @@ std::string errorsJson(const Error& e) {
     for (const auto& d : e.details) arr.push_back(one(d));
     return json::writeCompact(arr);
 }
-bool CLAP_ABI semSchema(const clap_plugin_t*, const clap_ostream_t* out) {
+bool CLAP_ABI semSchema(const clap_plugin_t* pl, const clap_ostream_t* out) {
     json::Value doc = json::Value::object();
     doc["schema"] = "supple.semantic-schema/1.0";
-    doc["plugin"]["id"] = gainDescriptor()->id;
+    doc["plugin"]["id"] = pl->desc->id;
     doc["patch_type"] = gainPatchType().schemaId();
     doc["params"] = *params::describeTable(kGainT).find("params");
+    if (G(pl)->badCurve) doc["params"]["gain"]["curve"] = "pow:invalid";
     doc["patch"] = gainPatchType().jsonSchema();
     return writeString(out, json::writeCompact(doc));
 }
@@ -242,6 +329,15 @@ bool CLAP_ABI semGetPatch(const clap_plugin_t* pl, uint32_t detail, const clap_o
 }
 bool CLAP_ABI semSetPatch(const clap_plugin_t* pl, uint32_t mode, const char* text, uint32_t size,
                           const clap_ostream_t* errors) {
+    if (!checkGainMain(pl)) return false;
+    if (G(pl)->slowPatch) {
+        gPatchStarts.fetch_add(1, std::memory_order_release);
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    }
+    if (G(pl)->rejectPatch) {
+        if (errors) writeString(errors, errorsJson(Error("fixture.reject", "patch rejected")));
+        return false;
+    }
     auto doc = json::parse(std::string_view(text, size));
     if (!doc) {
         if (errors) writeString(errors, errorsJson(doc.error()));
@@ -270,16 +366,18 @@ bool CLAP_ABI semDescribe(const clap_plugin_t* pl, uint32_t detail, const clap_o
 const clap_plugin_supple_semantic_params_t kGainSemantic = {
     sizeof(clap_plugin_supple_semantic_params_t), semSchema, semGetPatch, semSetPatch, semDescribe};
 
-const void* CLAP_ABI gainExt(const clap_plugin_t*, const char* id) {
+const void* CLAP_ABI gainExt(const clap_plugin_t* pl, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kGainParams;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kGainLatency;
     if (!std::strcmp(id, CLAP_EXT_STATE)) return &kGainState;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kGainPorts;
+    if (checkedGain(pl) && !std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS)) return &kGainSemantic;
     return nullptr;
 }
 
 bool CLAP_ABI gainActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) {
+    if (!checkGainMain(pl)) return false;
     auto* g = G(pl);
     g->activeLatency = g->latencyChoice ? 64 : 0;
     std::memset(g->delay, 0, sizeof(g->delay));
@@ -305,7 +403,7 @@ clap_process_status CLAP_ABI gainProcess(const clap_plugin_t* pl, const clap_pro
         }
         g->gain = Gain::dbToGain(g->gainDb);  // no smoothing: tests check sample-exact changes
         for (int c = 0; c < 2; ++c) {
-            float x = p->audio_inputs[0].data32[c][i];
+            float x = p->audio_inputs_count > 0 ? p->audio_inputs[0].data32[c][i] : 0.0f;
             if (g->activeLatency) {
                 float& slot = g->delay[c][g->delayPos];
                 const float delayed = slot;
@@ -524,6 +622,13 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_proces
 
 // --- shared lifecycle ------------------------------------------------------------------
 
+bool CLAP_ABI checkedGainInit(const clap_plugin_t* p) { return checkGainMain(p); }
+void CLAP_ABI checkedGainDeactivate(const clap_plugin_t* p) { (void)checkGainMain(p); }
+void CLAP_ABI checkedGainDestroy(const clap_plugin_t* p) {
+    (void)checkGainMain(p);
+    delete G(p);
+}
+
 bool CLAP_ABI initOk(const clap_plugin_t*) { return true; }
 void CLAP_ABI deactivateNop(const clap_plugin_t*) {}
 bool CLAP_ABI startOk(const clap_plugin_t*) { return true; }
@@ -550,17 +655,42 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 3; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 7; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0   ? gainDescriptor()
            : i == 1 ? sineDescriptor()
            : i == 2 ? edgeDescriptor()
+           : i == 3 ? checkedGainDescriptor(false)
+           : i == 4 ? checkedGainDescriptor(true)
+           : i == 5 ? slowGainDescriptor()
+           : i == 6 ? badCurveDescriptor()
                     : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
                                             const char* id) {
     if (!std::strcmp(id, gainDescriptor()->id))
         return make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt);
+    if (!std::strcmp(id, checkedGainDescriptor(false)->id) ||
+        !std::strcmp(id, checkedGainDescriptor(true)->id) ||
+        !std::strcmp(id, slowGainDescriptor()->id) || !std::strcmp(id, badCurveDescriptor()->id)) {
+        const bool reject = !std::strcmp(id, checkedGainDescriptor(true)->id);
+        const bool slow = !std::strcmp(id, slowGainDescriptor()->id);
+        const bool badCurve = !std::strcmp(id, badCurveDescriptor()->id);
+        const clap_plugin_t* p = make<Gain>(host,
+                                            badCurve ? badCurveDescriptor()
+                                            : slow   ? slowGainDescriptor()
+                                                     : checkedGainDescriptor(reject),
+                                            gainActivate, gainProcess, gainExt);
+        G(p)->enforceThread = true;
+        G(p)->rejectPatch = reject;
+        G(p)->slowPatch = slow;
+        G(p)->badCurve = badCurve;
+        auto* mutablePlugin = const_cast<clap_plugin_t*>(p);
+        mutablePlugin->init = checkedGainInit;
+        mutablePlugin->deactivate = checkedGainDeactivate;
+        mutablePlugin->destroy = checkedGainDestroy;
+        return p;
+    }
     if (!std::strcmp(id, sineDescriptor()->id)) {
         const clap_plugin_t* p =
             make<Sine>(host, sineDescriptor(), sineActivate, sineProcess, sineExt);
@@ -588,6 +718,13 @@ const void* CLAP_ABI entryFactory(const char* id) {
 }
 
 }  // namespace
+
+extern "C" CLAP_EXPORT int supple_fixture_thread_failures() {
+    return gThreadFailures.load(std::memory_order_relaxed);
+}
+extern "C" CLAP_EXPORT int supple_fixture_patch_starts() {
+    return gPatchStarts.load(std::memory_order_acquire);
+}
 
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {CLAP_VERSION_INIT, entryInit,
                                                                entryDeinit, entryFactory};

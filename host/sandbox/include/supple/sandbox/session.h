@@ -7,6 +7,7 @@
 // (not even on rollback), so an ID is never reused within a session.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -145,9 +146,14 @@ class Session {
     static Result<RenderResult> renderThrough(std::span<host::Instance* const> chain,
                                               const RenderInput& input,
                                               const SessionSettings& settings);
-    // A private copy of an instance (same plugin, same state) for background
-    // work; the caller owns it and may use it from one worker thread.
-    Result<std::unique_ptr<host::Instance>> cloneInstance(std::string_view id);
+    // Snapshot only the source state on the model thread. The worker creates,
+    // initializes, loads and destroys its own CLAP instance on one thread.
+    struct CloneState {
+        host::PluginInfo info;
+        host::HostIdentity identity;
+        std::vector<std::uint8_t> bytes;
+    };
+    Result<CloneState> snapshotInstance(std::string_view id);
     // Background renders: reserve an id and path on the model thread, write
     // the WAV and submit the record from a worker; the record joins the
     // session when the model thread next calls adoptBackgroundRenders().
@@ -169,6 +175,13 @@ class Session {
     // Runs `work` on its own thread; stopJobs() requests stop and joins all.
     void startJob(std::function<void(std::stop_token)> work);
     void stopJobs();
+    std::size_t jobThreadCountForTests() const { return jobs_.size(); }
+    std::size_t activeJobThreadCountForTests() const {
+        std::size_t active = 0;
+        for (const auto& job : jobs_)
+            if (!job.finished->load(std::memory_order_acquire)) ++active;
+        return active;
+    }
 
     // --- transactions ----------------------------------------------------------
     // One level (the bus wraps each edit or batch in one). Rollback restores
@@ -199,7 +212,11 @@ class Session {
     std::unique_ptr<Txn> txn_;
     std::mutex backgroundMutex_;
     std::vector<RenderRecord> backgroundRenders_;
-    std::vector<std::jthread> jobs_;
+    struct JobThread {
+        std::jthread thread;
+        std::shared_ptr<std::atomic<bool>> finished;
+    };
+    std::vector<JobThread> jobs_;
 };
 
 // Tick → sample at a constant tempo: round(tick · 60 · rate / (tempo · ppq)).

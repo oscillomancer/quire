@@ -182,3 +182,29 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
 - End-to-end test with Orrery: a hidden cutoff/resonance/env2-decay patch is
   recovered within 10 % (normalized) from a 1 s phrase in ≤ 300 evaluations;
   a centroid profile is hit within 5 %; cancellation stops a job.
+
+## Amendments (2026-09-26, review round 5)
+
+- `optimize.start` snapshots the source plugin's state and identity on the
+  model thread. The job worker creates, loads, activates, services, deactivates
+  and destroys its clone on that same worker thread; a thread-checking CLAP
+  fixture verifies the lifecycle.
+- Reference WAV loading and analysis run in the job worker. Read or analysis
+  errors fail the job with a structured error. A 30-second reference must not
+  make `optimize.start` take 100 ms or more in the dev build.
+- The worker checks `job.cancel` before every candidate, between rendering
+  and analysis, and before the final write. Job completion atomically guards
+  publication of the best render against cancellation; a cancelled job cannot
+  publish a render afterwards.
+- A profile is validated once at worker startup. Invalid profiles fail the
+  job before any candidate. If every candidate fails, the job fails with the
+  first structured cause rather than completing with infinite loss.
+- Profile target weights are carried in `TargetResult` and multiply each
+  squared optimizer term. Attack, decay20 and release each contribute a
+  separately named, squared reference term.
+- The best render record retains measured tail duration, latency, tail-cap
+  status, chain and plugin log, so it can serve as a later reference.
+- Starting a job joins and erases finished job threads on the model thread;
+  active threads stay owned by the session until completion or shutdown.
+- Semantic curve strings are parsed without exceptions. Unknown curves and
+  non-finite or non-positive exponents return structured parameter errors.

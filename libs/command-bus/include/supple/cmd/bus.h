@@ -189,6 +189,10 @@ class JobManager {
     Status progress(std::string_view id, double fraction, std::string message,
                     json::Value extra = json::Value::object());
     Status complete(std::string_view id, json::Value result);
+    // Runs publish under the job lock only if the job is still running, then
+    // makes the result visible. A concurrent cancel cannot publish afterwards.
+    Status completeWith(std::string_view id, json::Value result,
+                        const std::function<void()>& publish);
     Status fail(std::string_view id, Error error);
     Status cancel(std::string_view id);
     Result<json::Value> status(std::string_view id) const;

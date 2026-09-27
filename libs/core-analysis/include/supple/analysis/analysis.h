@@ -131,6 +131,7 @@ struct TargetResult {
     double value = 0.0;
     bool pass = false;
     double distance = 0.0;  // |x − target| / tolerance, or outside-range distance / range
+    double weight = 1.0;    // validated profile weight, used by optimizer loss
 };
 struct ProfileResult {
     std::vector<TargetResult> targets;

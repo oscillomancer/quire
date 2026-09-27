@@ -3,6 +3,7 @@
 // an analysis profile. Runs as a job on a worker thread that owns a clone of
 // the instance; the best candidate's render joins the session afterwards.
 #include "optimize_commands.h"
+#include "optimize_loss.h"
 
 #include "schema_params.h"
 
@@ -146,9 +147,10 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
                 "structure and stepped values are the agent's choice, not the optimizer's");
         Tuned t;
         t.key = key;
-        const SchemaParam sp = schemaParam(*e);
-        t.spec = sp.spec;
-        t.unit = sp.unitName;
+        auto sp = schemaParam(*e);
+        if (!sp) return std::move(sp).error().at(path);
+        t.spec = sp->spec;
+        t.unit = sp->unitName;
         const json::Value* cur = current->find(key);
         t.initial = cur && cur->find("value") && cur->find("value")->isNumber()
                         ? cur->find("value")->asDouble()
@@ -178,12 +180,10 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
     return out;
 }
 
-// --- loss (optimizer.md §3) -------------------------------------------------------------------
+}  // namespace
 
-struct Loss {
-    double total = std::numeric_limits<double>::infinity();
-    std::map<std::string, double> terms;  // contribution w·(d/scale)² per term
-};
+// --- loss (optimizer.md §3) -------------------------------------------------------------------
+namespace detail {
 
 void term(Loss& l, const std::string& name, double d, double weight, double scale) {
     if (!std::isfinite(d)) return;
@@ -224,20 +224,24 @@ Loss referenceLoss(const analysis::Report& ref, const analysis::Report& cand) {
              0.02);
     }
     if (ref.envelope && cand.envelope) {
-        std::vector<double> rel;
-        rel.push_back(std::fabs(cand.envelope->attackMs - ref.envelope->attackMs) /
-                      std::max(10.0, ref.envelope->attackMs));
+        term(l, "envelope.attack",
+             std::fabs(cand.envelope->attackMs - ref.envelope->attackMs) /
+                 std::max(10.0, ref.envelope->attackMs),
+             1.0, 0.3);
         if (ref.envelope->decay20Ms && cand.envelope->decay20Ms)
-            rel.push_back(std::fabs(*cand.envelope->decay20Ms - *ref.envelope->decay20Ms) /
-                          std::max(10.0, *ref.envelope->decay20Ms));
+            term(l, "envelope.decay20",
+                 std::fabs(*cand.envelope->decay20Ms - *ref.envelope->decay20Ms) /
+                     std::max(10.0, *ref.envelope->decay20Ms),
+                 1.0, 0.3);
         else if (ref.envelope->decay20Ms.has_value() != cand.envelope->decay20Ms.has_value())
-            rel.push_back(1.0);
+            term(l, "envelope.decay20", 1.0, 1.0, 0.3);
         if (ref.envelope->releaseMs && cand.envelope->releaseMs)
-            rel.push_back(std::fabs(*cand.envelope->releaseMs - *ref.envelope->releaseMs) /
-                          std::max(10.0, *ref.envelope->releaseMs));
-        double sum = 0.0;
-        for (double r : rel) sum += r;
-        term(l, "envelope", sum / static_cast<double>(rel.size()), 1.0, 0.3);
+            term(l, "envelope.release",
+                 std::fabs(*cand.envelope->releaseMs - *ref.envelope->releaseMs) /
+                     std::max(10.0, *ref.envelope->releaseMs),
+                 1.0, 0.3);
+        else if (ref.envelope->releaseMs.has_value() != cand.envelope->releaseMs.has_value())
+            term(l, "envelope.release", 1.0, 1.0, 0.3);
     }
     if (ref.harmonic && cand.harmonic && ref.harmonic->pitched && cand.harmonic->pitched) {
         double sq = 0.0;
@@ -257,6 +261,13 @@ Loss referenceLoss(const analysis::Report& ref, const analysis::Report& cand) {
         term(l, "stereo", std::fabs(cand.stereo->width - ref.stereo->width), 0.2, 0.1);
     return l;
 }
+
+}  // namespace detail
+
+namespace {
+using detail::Loss;
+using detail::referenceLoss;
+using detail::term;
 
 // Loudness-matches the candidate to `targetLufs` (a gain on the analysis
 // input only) and analyzes it.
@@ -360,31 +371,23 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         if (!a.target.isObject() || (!ref && !profile))
             return Error("optimize.target", "target needs a reference and/or a profile", "/target",
                          R"({"reference": "rd_1"} or {"profile": {...}})");
-        std::optional<analysis::Report> refReport;
-        std::optional<double> refLufs;
+        std::optional<std::filesystem::path> referenceFile;
+        std::optional<double> referenceNoteOff;
         if (ref) {
             if (!ref->isString())
                 return Error("optimize.target", "reference is a render id or a path",
                              "/target/reference");
-            std::filesystem::path file = ref->asString();
-            std::optional<double> noteOff;
+            referenceFile = ref->asString();
             if (ref->asString().rfind("rd_", 0) == 0) {
                 auto r = s.findRender(ref->asString());
                 if (!r) return std::move(r).error().at("/target/reference");
-                file = (*r)->path;
-                noteOff = (*r)->seconds - (*r)->tailSeconds;
+                referenceFile = (*r)->path;
+                referenceNoteOff = (*r)->seconds - (*r)->tailSeconds;
             }
-            auto audio = audio::readAudio(file);
-            if (!audio) return std::move(audio).error().at("/target/reference");
-            auto rep = analyzeMatched(*audio, std::nullopt, noteOff);
-            if (!rep) return std::move(rep).error().at("/target/reference");
-            refReport = std::move(*rep);
-            if (refReport->loudness && std::isfinite(refReport->loudness->integrated))
-                refLufs = refReport->loudness->integrated;
         }
         std::optional<json::Value> profileDoc;
         if (profile) {
-            // Validate once against an empty report shape by evaluating the reference (or later).
+            // Validate the document once in the worker before any candidate renders.
             profileDoc = *profile;
         }
         // Phrase.
@@ -400,8 +403,8 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         input.seconds = a.seconds;
         input.tailSeconds = a.tailS.value_or(1.0);
         // Worker resources.
-        auto clone = s.cloneInstance(a.instance);
-        if (!clone) return std::move(clone).error();
+        auto state = s.snapshotInstance(a.instance);
+        if (!state) return std::move(state).error();
         auto& jobs = ctx.service<cmd::JobManager>();
         const std::string job = jobs.create();
         RenderRecord best = s.reserveRender("optimize " + job);
@@ -413,8 +416,10 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         for (const auto& t : *tuned) out.params.push_back(t.key);
 
         struct Work {
-            std::shared_ptr<host::Instance> instance;
+            Session::CloneState state;
             std::vector<Tuned> tuned;
+            std::optional<std::filesystem::path> referenceFile;
+            std::optional<double> referenceNoteOff;
             std::optional<analysis::Report> refReport;
             std::optional<double> refLufs;
             std::optional<json::Value> profile;
@@ -425,43 +430,101 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             std::string job;
             cmd::JobManager* jobs;
             Session* session;
+            std::string sourceId;
         };
-        auto w = std::make_shared<Work>(Work{std::shared_ptr<host::Instance>(std::move(*clone)),
-                                             std::move(*tuned), std::move(refReport), refLufs,
-                                             std::move(profileDoc), std::move(input), s.settings(),
-                                             options, std::move(best), job, &jobs, &s});
+        auto w = std::make_shared<Work>(Work{std::move(*state),
+                                             std::move(*tuned),
+                                             std::move(referenceFile),
+                                             referenceNoteOff,
+                                             {},
+                                             {},
+                                             std::move(profileDoc),
+                                             std::move(input),
+                                             s.settings(),
+                                             options,
+                                             std::move(best),
+                                             job,
+                                             &jobs,
+                                             &s,
+                                             a.instance});
         s.startJob([w](std::stop_token stop) {
             Work& W = *w;
+            auto cancelled = [&] { return stop.stop_requested() || W.jobs->cancelled(W.job); };
+            if (cancelled()) return;
+            if (W.referenceFile) {
+                auto audio = audio::readAudio(*W.referenceFile);
+                if (!audio) {
+                    (void)W.jobs->fail(W.job, std::move(audio).error().at("/target/reference"));
+                    return;
+                }
+                if (cancelled()) return;
+                auto rep = analyzeMatched(*audio, std::nullopt, W.referenceNoteOff);
+                if (!rep) {
+                    (void)W.jobs->fail(W.job, std::move(rep).error().at("/target/reference"));
+                    return;
+                }
+                W.refReport = std::move(*rep);
+                if (W.refReport->loudness && std::isfinite(W.refReport->loudness->integrated))
+                    W.refLufs = W.refReport->loudness->integrated;
+            }
+            if (cancelled()) return;
+            if (W.profile) {
+                analysis::Report shape;
+                shape.spectral.emplace();
+                auto valid = analysis::evaluate(shape, *W.profile);
+                if (!valid) {
+                    (void)W.jobs->fail(W.job, std::move(valid).error().at("/target/profile"));
+                    return;
+                }
+            }
+            auto made = host::Instance::create(W.state.info, W.state.identity);
+            if (!made) {
+                (void)W.jobs->fail(W.job, std::move(made).error().at("/instance"));
+                return;
+            }
+            auto instance = std::move(*made);
+            auto loaded = instance->loadState(W.state.bytes);
+            if (!loaded) {
+                (void)W.jobs->fail(W.job, std::move(loaded).error().at("/instance"));
+                return;
+            }
             const auto noteOff =
                 W.input.seconds;  // explicit length, else the notes' end (unknown here)
-            auto candidate = [&](const opt::Vec& u, Loss* terms, audio::AudioData* keep) -> double {
+            std::optional<Error> firstError;
+            auto failed = [&](Error error) {
+                if (!firstError) firstError = std::move(error);
+                return kInf;
+            };
+            auto candidate = [&](const opt::Vec& u, Loss* terms, RenderResult* keep) -> double {
+                if (cancelled()) return kInf;
                 json::Value merge = json::Value::object();
                 json::Value& p = merge["params"];
                 p = json::Value::object();
                 for (std::size_t i = 0; i < W.tuned.size(); ++i)
                     p[W.tuned[i].key] = W.tuned[i].toPhysical(u[i]);
-                if (!W.instance->setPatch(json::writeCompact(merge), CLAP_SUPPLE_SET_MERGE))
-                    return kInf;
-                host::Instance* chain[1] = {W.instance.get()};
+                auto patched = instance->setPatch(json::writeCompact(merge), CLAP_SUPPLE_SET_MERGE);
+                if (!patched) return failed(std::move(patched).error());
+                host::Instance* chain[1] = {instance.get()};
                 auto r = Session::renderThrough(chain, W.input, W.settings);
-                if (!r) return kInf;
+                if (!r) return failed(std::move(r).error());
+                if (cancelled()) return kInf;
                 const double inputEnd =
                     (static_cast<double>(r->audio.frames()) - static_cast<double>(r->tailSamples)) /
                     W.settings.sampleRate;
                 auto rep = analyzeMatched(r->audio, W.refLufs,
                                           noteOff ? noteOff : std::optional<double>(inputEnd));
-                if (!rep) return kInf;
+                if (!rep) return failed(std::move(rep).error());
                 Loss l;
                 l.total = 0.0;
                 if (W.refReport) l = referenceLoss(*W.refReport, *rep);
                 if (W.profile) {
                     auto e = analysis::evaluate(*rep, *W.profile);
-                    if (!e) return kInf;
+                    if (!e) return failed(std::move(e).error().at("/target/profile"));
                     for (const auto& t : e->targets)
-                        term(l, "profile." + t.key, t.distance, 1.0, 1.0);
+                        term(l, "profile." + t.key, t.distance, t.weight, 1.0);
                 }
                 if (terms) *terms = l;
-                if (keep) *keep = std::move(r->audio);
+                if (keep) *keep = std::move(*r);
                 return std::isfinite(l.total) ? l.total : kInf;
             };
             opt::Vec x0;
@@ -469,7 +532,7 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             auto batch = [&](const std::vector<opt::Vec>& xs) {
                 std::vector<double> losses;
                 for (const auto& x : xs)
-                    losses.push_back(stop.stop_requested() ? kInf : candidate(x, nullptr, nullptr));
+                    losses.push_back(cancelled() ? kInf : candidate(x, nullptr, nullptr));
                 return losses;
             };
             const opt::Outcome o = opt::minimize(batch, x0, W.options, [&](const opt::Progress& p) {
@@ -480,13 +543,26 @@ void registerOptimizeCommands(cmd::Registry& registry) {
                     W.job,
                     std::min(1.0, static_cast<double>(p.evaluations) / W.options.maxEvaluations),
                     "generation " + std::to_string(p.generation), std::move(extra));
-                return !stop.stop_requested() && !W.jobs->cancelled(W.job);
+                return !cancelled();
             });
-            if (stop.stop_requested() || W.jobs->cancelled(W.job)) return;
+            if (cancelled()) return;
+            if (!std::isfinite(o.bestLoss) || o.best.empty()) {
+                (void)W.jobs->fail(W.job, firstError.value_or(Error(
+                                              "optimize.no_candidate", "every candidate failed", {},
+                                              "check the plugin patch and render settings")));
+                return;
+            }
             // The best candidate: loss terms, render, changes.
             Loss bestTerms;
-            audio::AudioData bestAudio;
-            const double bestLoss = candidate(o.best, &bestTerms, &bestAudio);
+            RenderResult bestRender;
+            const double bestLoss = candidate(o.best, &bestTerms, &bestRender);
+            if (cancelled()) return;
+            if (!std::isfinite(bestLoss)) {
+                (void)W.jobs->fail(W.job, firstError.value_or(Error(
+                                              "optimize.best_failed", "best candidate failed", {},
+                                              "check the plugin patch and render settings")));
+                return;
+            }
             json::Value result = json::Value::object();
             json::Value loss = json::Value::object();
             loss["initial"] = roundTo(o.initialLoss, 4);
@@ -512,24 +588,42 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             }
             result["patch"] = std::move(patch);
             result["changes"] = std::move(changes);
-            if (!bestAudio.channels.empty()) {
+            std::optional<RenderRecord> publishRecord;
+            if (!bestRender.audio.channels.empty()) {
                 RenderRecord rec = W.best;
-                rec.sampleRate = bestAudio.sampleRate;
-                rec.frames = static_cast<std::int64_t>(bestAudio.frames());
-                rec.seconds = bestAudio.seconds();
-                double peak = 0.0;
-                for (const auto& ch : bestAudio.channels)
-                    for (float v : ch) peak = std::max(peak, std::fabs(static_cast<double>(v)));
-                rec.peakDbfs = peak > 0.0 ? 20.0 * std::log10(peak) : -1000.0;
+                rec.sampleRate = bestRender.audio.sampleRate;
+                rec.frames = static_cast<std::int64_t>(bestRender.audio.frames());
+                rec.seconds = bestRender.audio.seconds();
+                rec.peakDbfs = bestRender.peakDbfs;
+                rec.latency = bestRender.latency;
+                rec.tailSeconds = static_cast<double>(bestRender.tailSamples) / rec.sampleRate;
+                rec.tailCapped = bestRender.tailCapped;
+                rec.chain = {W.sourceId};
+                rec.log = std::move(bestRender.log);
                 audio::WavOptions wav;
                 wav.format = audio::SampleFormat::Float32;
-                if (audio::writeWav(rec.path, bestAudio, wav)) {
-                    result["render"] = rec.id;
-                    W.session->submitRender(std::move(rec));
+                if (cancelled()) return;
+                auto written = audio::writeWav(rec.path, bestRender.audio, wav);
+                if (!written) {
+                    (void)W.jobs->fail(W.job, std::move(written).error().at("/render"));
+                    return;
                 }
+                if (cancelled()) {
+                    std::error_code ignored;
+                    std::filesystem::remove(rec.path, ignored);
+                    return;
+                }
+                result["render"] = rec.id;
+                publishRecord = std::move(rec);
             }
             result["applied"] = false;
-            (void)W.jobs->complete(W.job, std::move(result));
+            auto completed = W.jobs->completeWith(W.job, std::move(result), [&] {
+                if (publishRecord) W.session->submitRender(std::move(*publishRecord));
+            });
+            if (!completed && publishRecord) {
+                std::error_code ignored;
+                std::filesystem::remove(publishRecord->path, ignored);
+            }
         });
         return out;
     };

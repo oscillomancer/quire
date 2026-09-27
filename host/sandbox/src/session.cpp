@@ -447,8 +447,9 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
                 item["value"] = *values->find(key);  // flat patch: the patch value
             } else if (clap) {
                 // Structured patch: the physical value from the CLAP value.
-                const SchemaParam sp = schemaParam(*entry);
-                item["value"] = params::toJson(sp.spec, physicalFromClap(sp, *clap));
+                auto sp = schemaParam(*entry);
+                if (!sp) return std::move(sp).error().at("/keys/" + std::to_string(i));
+                item["value"] = params::toJson(sp->spec, physicalFromClap(*sp, *clap));
             }
             if (clap) {
                 auto t = in.paramText(pid, *clap);
@@ -916,16 +917,13 @@ void Session::rollback() {
             if (l->instance->active()) l->instance->deactivate();
 }
 
-Result<std::unique_ptr<host::Instance>> Session::cloneInstance(std::string_view id) {
+Result<Session::CloneState> Session::snapshotInstance(std::string_view id) {
     auto lr = loaded(id);
     if (!lr) return std::move(lr).error();
     Loaded& l = **lr;
     auto state = l.instance->saveState();
     if (!state) return std::move(state).error();
-    auto made = host::Instance::create(l.info, options_.identity);
-    if (!made) return std::move(made).error();
-    SUPPLE_TRY((*made)->loadState(*state));
-    return std::move(*made);
+    return CloneState{l.info, options_.identity, std::move(*state)};
 }
 
 RenderRecord Session::reserveRender(std::string name) {
@@ -954,14 +952,26 @@ void Session::adoptBackgroundRenders() {
 }
 
 void Session::startJob(std::function<void(std::stop_token)> work) {
-    // Finished threads are reaped here (their jthreads join immediately).
-    jobs_.emplace_back([w = std::move(work)](std::stop_token st) { w(st); });
+    for (auto it = jobs_.begin(); it != jobs_.end();) {
+        if (it->finished->load(std::memory_order_acquire)) {
+            if (it->thread.joinable()) it->thread.join();
+            it = jobs_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    auto finished = std::make_shared<std::atomic<bool>>(false);
+    jobs_.push_back(JobThread{std::jthread([w = std::move(work), finished](std::stop_token st) {
+                                  w(st);
+                                  finished->store(true, std::memory_order_release);
+                              }),
+                              std::move(finished)});
 }
 
 void Session::stopJobs() {
-    for (auto& t : jobs_) t.request_stop();
+    for (auto& t : jobs_) t.thread.request_stop();
     for (auto& t : jobs_)
-        if (t.joinable()) t.join();
+        if (t.thread.joinable()) t.thread.join();
     jobs_.clear();
 }
 
