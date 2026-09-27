@@ -2,7 +2,7 @@
 // Started by the host with its end of the control socket on fd 3 (or
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread
 // commands arrive in per-instance shared memory sent with Activate and run on
-// that instance's audio thread. Exits after the last Destroy or host loss.
+// that instance's audio thread. Exits when the host closes the control socket.
 #include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
@@ -327,7 +327,7 @@ struct Bridge {
                 unmap();
                 reply(Writer{});
                 instances.erase(it);
-                return !instances.empty();
+                return true;  // an idle pool-owned bridge must accept the next Create
         }
         return fail(Error("bridge.op", "unknown request"));
     }

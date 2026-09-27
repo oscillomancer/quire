@@ -102,11 +102,16 @@ syscalls per block for the data, not just the wake-up).
   acceptance test (a session plays on while an isolated plugin crashes; only
   its node goes silent); crash → `fx.failed` → `fx.restart` over the bus.
 - Shared bridge: each control frame carries an instance id. `Create` allocates
-  one id; `Destroy` removes just that instance, and the process exits after
-  the final destroy or host disconnect. Each instance has its own memfd and
+  one id; `Destroy` removes just that instance. The process stays ready for a
+  later `Create` even after its last `Destroy`, and exits when the host closes
+  the control socket. Each instance has its own memfd and
   bridge audio thread. `InstancePool` holds one `BridgeProcess` for all
   `shared_bridge` instances and creates a new process after a crash; dedicated
   instances continue to own independent processes. The shared process's
   failure state is observed by every member instance.
+- Shared mode has one synchronous control channel. A slow plugin callback or
+  control request stalls control calls for the other instances; a timeout
+  fails the whole shared process. Use `dedicated` for plugins whose slow
+  control callbacks need isolation from other effects.
 - Not yet: GUI embedding across processes, the pipelined mode, B6 overhead
   benchmark.
