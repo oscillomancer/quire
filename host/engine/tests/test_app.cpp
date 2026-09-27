@@ -90,6 +90,37 @@ TEST_CASE("an LLM builds a song over the bus: batch, render, undo, save and reop
           doctest::Approx(20 * std::log10(0.25 * 96 / 127 * std::sqrt(0.5)) - 6).epsilon(0.01));
     CHECK(fs::exists((*mix)["path"].asString()));
 
+    auto inlineMix = call("render.mix", R"({"name":"analyzed","analyze":"summary"})");
+    REQUIRE(inlineMix);
+    CHECK((*inlineMix)["analysis"]["schema"].asString() == "supple.analysis-report/1.0");
+    CHECK((*inlineMix)["analysis"]["summary"].isString());
+    auto byId = call("analyze.render", R"({"render":"rd_1"})");
+    REQUIRE(byId);
+    CHECK((*byId)["schema"].asString() == "supple.analysis-report/1.0");
+    auto byPath =
+        call("analyze.render", json::writeCompact(j(std::string("{\"render\":") +
+                                                    json::writeCompact((*mix)["path"]) + "}")));
+    REQUIRE(byPath);
+    CHECK((*byPath)["loudness"] == (*byId)["loudness"]);
+    REQUIRE(call("track.set", R"({"track":"tr_1","volume_db":-6})"));
+    auto trackPost = call("analyze.track", R"({"track":"tr_1","tap":"post_fader"})");
+    auto trackPre = call("analyze.track", R"({"track":"tr_1","tap":"pre_fader"})");
+    REQUIRE(trackPost);
+    REQUIRE(trackPre);
+    CHECK((*trackPost)["schema"].asString() == "supple.analysis-report/1.0");
+    CHECK((*trackPost)["loudness"]["integrated_lufs"].asDouble() <
+          (*trackPre)["loudness"]["integrated_lufs"].asDouble() - 5.5);
+    auto compared = call("analyze.compare", R"({"reference":"rd_1","test":"rd_1"})");
+    REQUIRE(compared);
+    CHECK((*compared)["notable"].size() == 0);
+    CHECK((*compared)["ltas_rms_db"].asDouble() == doctest::Approx(0));
+    auto masked = call("analyze.masking", R"({"masker_track":"tr_1","maskee_track":"tr_1"})");
+    REQUIRE(masked);
+    CHECK(masked->isObject());
+    auto unknown = call("analyze.render", R"({"render":"rd_999"})");
+    REQUIRE_FALSE(unknown);
+    CHECK(unknown.error().code == "engine.unknown_render");
+
     // An invalid step rolls back the whole batch.
     auto bad = call("batch", R"({"steps": [
         {"command": "track.add", "args": {"name": "Keys"}},
@@ -126,6 +157,36 @@ TEST_CASE("an LLM builds a song over the bus: batch, render, undo, save and reop
     REQUIRE(!errs);
     CHECK(errs.error().path == "/args/track");
     CHECK(errs.error().hint.find("tr_1") != std::string::npos);
+}
+
+TEST_CASE("track analysis excludes unrelated tracks and validates ranges") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string name, std::string_view args) {
+        return d.execute({std::move(name), j(args), kTest});
+    };
+    REQUIRE(call("track.add", R"({"name":"A"})"));
+    REQUIRE(call("fx.add", R"({"track":"tr_1","plugin":"Test Sine"})"));
+    REQUIRE(
+        call("item.add", R"({"track":"tr_1","bar":1,"notation":"voice a; 1: A2:q r:q A2:q r:q"})"));
+    auto before = call("analyze.track", R"({"track":"tr_1"})");
+    REQUIRE(before);
+    REQUIRE(call("track.add", R"({"name":"B"})"));
+    REQUIRE(call("fx.add", R"({"track":"tr_2","plugin":"Test Sine"})"));
+    REQUIRE(
+        call("item.add", R"({"track":"tr_2","bar":1,"notation":"voice b; 1: C4:q r:q C4:q r:q"})"));
+    auto after = call("analyze.track", R"({"track":"tr_1"})");
+    REQUIRE(after);
+    CHECK((*before)["loudness"] == (*after)["loudness"]);
+    auto masking = call("analyze.masking", R"({"masker_track":"tr_1","maskee_track":"tr_2"})");
+    REQUIRE(masking);
+    CHECK(masking->isObject());
+    auto empty = call("analyze.track", R"({"track":"tr_1","start_beat":2,"end_beat":1})");
+    REQUIRE_FALSE(empty);
+    CHECK(empty.error().code == "engine.range");
 }
 
 TEST_CASE("agent branches: parallel edits merge by replay; conflicts are reported") {

@@ -1,5 +1,152 @@
 [
   {
+    "name": "analyze_compare",
+    "title": "Compare two renders or track outputs by perceptual descriptors.",
+    "description": "Compare two renders or track outputs by perceptual descriptors.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "analyze_compare_args",
+      "properties": {
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "test": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["reference", "test"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "comparison",
+      "properties": {
+        "notable": {},
+        "ltas_rms_db": {
+          "type": "number"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["notable", "ltas_rms_db", "summary"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "analyze_masking",
+    "title": "Estimate masking between two tracks over the same range.",
+    "description": "Estimate masking between two tracks over the same range.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "analyze_masking_args",
+      "properties": {
+        "masker_track": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maskee_track": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        }
+      },
+      "required": ["masker_track", "maskee_track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "analyze_render",
+    "title": "Analyze a render id or audio path: loudness, spectrum, envelope and stereo.",
+    "description": "Analyze a render id or audio path: loudness, spectrum, envelope and stereo.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "analyze_render_args",
+      "properties": {
+        "render": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string",
+          "enum": ["summary", "standard", "full"],
+          "description": "summary: key scalars; standard: + percentiles and spectrum; full: + time series.",
+          "default": "summary"
+        }
+      },
+      "required": ["render"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "analyze_track",
+    "title": "Render one track's output offline and analyze it.",
+    "description": "Render one track's output offline and analyze it.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "analyze_track_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tap": {
+          "type": "string",
+          "enum": ["post_fader", "pre_fader", "pre_fx"],
+          "default": "post_fader"
+        },
+        "detail": {
+          "type": "string",
+          "enum": ["summary", "standard", "full"],
+          "description": "summary: key scalars; standard: + percentiles and spectrum; full: + time series.",
+          "default": "summary"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "batch",
     "title": "Run commands atomically.",
     "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",
@@ -1225,7 +1372,7 @@
   {
     "name": "render_mix",
     "title": "Render the mix offline to a float WAV (default: start to the last item's end).",
-    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). See describe for errors and examples.",
+    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "render_mix_args",
@@ -1246,6 +1393,10 @@
         "name": {
           "type": "string",
           "pattern": "^[A-Za-z0-9 _.+-]{1,64}$"
+        },
+        "analyze": {
+          "type": "string",
+          "enum": ["summary", "full"]
         }
       },
       "additionalProperties": false
@@ -1254,6 +1405,9 @@
       "type": "object",
       "title": "render_mix",
       "properties": {
+        "render": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },
@@ -1271,9 +1425,10 @@
           "items": {
             "type": "string"
           }
-        }
+        },
+        "analysis": {}
       },
-      "required": ["path", "seconds", "peak_dbfs", "output_latency"],
+      "required": ["render", "path", "seconds", "peak_dbfs", "output_latency"],
       "additionalProperties": false
     },
     "annotations": {

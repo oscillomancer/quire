@@ -15,7 +15,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `source` | string |  |  |  | A render id (rd_1) or an audio file path. |
-| `detail` | string |  |  | "summary" | summary: key scalars (≤ 400 tokens); standard: + percentiles, band shares, 1/3-octave spectrum; full: + time series. |
+| `detail` | string |  |  | "summary" | summary: key scalars; standard: + percentiles and spectrum; full: + time series. |
 | `note_off_s` | number |  | 0.0..3600.0 |  |  |
 
 ### Result

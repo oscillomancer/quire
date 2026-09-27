@@ -17,6 +17,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -79,6 +80,9 @@ struct OfflineSettings {
     // Threads rendering the graph; 0: every core but two. The output is
     // identical for any count.
     unsigned threads = 0;
+    // Select one track's output without its sends or master processing.
+    std::optional<model::Id> track;
+    model::Tap tap = model::Tap::PostFader;
 };
 
 struct OfflineResult {

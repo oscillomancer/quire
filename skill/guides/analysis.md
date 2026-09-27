@@ -1,6 +1,7 @@
 # Reading analysis reports
 
-`analyze` (or `render` with `"analyze": "summary"`) returns a
+`analyze.render {render}` or `analyze.track {track}` (or `render.mix` with
+`"analyze": "summary"`) returns a
 `supple.analysis-report/1.0`: numbers that stand in for your ears. This page
 says what each one measures, what normal values look like, and what moves it.
 Definitions are exact in `docs/specs/core-analysis.md`; the summary detail is
@@ -71,7 +72,7 @@ Multi-note phrases blur envelope numbers; measure envelopes on a single note.
 
 ## Comparing two renders
 
-`compare {reference, test}` lists the descriptors that changed notably
+`analyze.compare {reference, test}` lists the descriptors that changed notably
 (score ≥ 1 means beyond the usual threshold for that descriptor), the LTAS
 RMS difference in dB (< 1 dB: very close, > 3 dB: clearly different
 timbre), and the loudness difference it removed before comparing. Use it

@@ -1,6 +1,7 @@
 // Sandbox analysis commands (sandbox.md §4): analyze, compare, masking,
 // profile.evaluate — over renders (rd_<n>) or audio files.
 #include "analysis_commands.h"
+#include "../../analysis-commands/analysis_shared.h"
 
 #include "supple/analysis/analysis.h"
 #include "supple/audio/audio_file.h"
@@ -17,19 +18,8 @@ namespace {
 json::Value obj(std::string_view text) { return json::parse(text).value(); }
 Session& S(Context& ctx) { return ctx.service<Session>(); }
 
-struct Loaded {
-    audio::AudioData data;
-    std::vector<const float*> ptr;
-    std::optional<double> noteOff;  // renders: where the input ended
-    analysis::Signal signal() {
-        ptr.clear();
-        for (const auto& c : data.channels) ptr.push_back(c.data());
-        const auto layout = ptr.size() >= 2 ? analysis::Layout::Stereo : analysis::Layout::Mono;
-        return {std::span<const float* const>(ptr.data(), std::min<std::size_t>(ptr.size(), 2)),
-                data.channels.empty() ? 0 : static_cast<std::int64_t>(data.channels[0].size()),
-                data.sampleRate, layout};
-    }
-};
+using analysis_commands::DetailArg;
+using analysis_commands::Loaded;
 
 // "rd_<n>" names a render; anything else is a file path.
 Result<Loaded> load(Session& s, const std::string& ref, std::string_view path) {
@@ -52,21 +42,6 @@ Result<Loaded> load(Session& s, const std::string& ref, std::string_view path) {
     return l;
 }
 
-enum class DetailArg { Summary, Standard, Full };
-analysis::Detail toDetail(DetailArg d) {
-    return d == DetailArg::Full       ? analysis::Detail::Full
-           : d == DetailArg::Standard ? analysis::Detail::Standard
-                                      : analysis::Detail::Summary;
-}
-schema::Schema<DetailArg> detailSchema() {
-    return schema::enumeration<DetailArg>({{DetailArg::Summary, "summary"},
-                                           {DetailArg::Standard, "standard"},
-                                           {DetailArg::Full, "full"}})
-        .doc(
-            "summary: key scalars (≤ 400 tokens); standard: + percentiles, band shares, 1/3-octave "
-            "spectrum; full: + time series.");
-}
-
 struct AnalyzeArgs {
     std::string source;
     DetailArg detail = DetailArg::Summary;
@@ -79,11 +54,7 @@ struct AnalyzeResult {
 struct CompareArgs {
     std::string reference, test;
 };
-struct CompareResult {
-    json::Value notable;
-    double ltasRmsDb = 0.0;
-    std::string summary;
-};
+using analysis_commands::CompareResult;
 struct MaskingArgs {
     std::string masker, maskee;
 };
@@ -108,9 +79,7 @@ Result<json::Value> analyzeRender(Session& s, const std::string& render, analysi
     o.noteOffSeconds = l->noteOff;
     auto r = analysis::analyze(l->signal(), o);
     if (!r) return std::move(r).error();
-    json::Value v = analysis::toJson(*r, detail);
-    v["summary"] = analysis::summarize(*r);
-    return v;
+    return analysis_commands::reportJson(*r, detail);
 }
 
 void registerAnalysisCommands(cmd::Registry& registry) {
@@ -135,7 +104,7 @@ void registerAnalysisCommands(cmd::Registry& registry) {
         c.tags = {"analysis"};
         c.args = schema::object<AnalyzeArgs>("analyze_args")
                      .field("source", &AnalyzeArgs::source, sourceField())
-                     .field("detail", &AnalyzeArgs::detail, detailSchema())
+                     .field("detail", &AnalyzeArgs::detail, analysis_commands::detailSchema())
                      .defaultValue(DetailArg::Summary)
                      .field("note_off_s", &AnalyzeArgs::noteOffS, schema::number().range(0, 3600))
                      .build();
@@ -154,7 +123,8 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             o.noteOffSeconds = a.noteOffS ? a.noteOffS : l->noteOff;
             auto r = analysis::analyze(l->signal(), o);
             if (!r) return std::move(r).error();
-            return AnalyzeResult{analysis::toJson(*r, toDetail(a.detail)), analysis::summarize(*r)};
+            return AnalyzeResult{analysis::toJson(*r, analysis_commands::toDetail(a.detail)),
+                                 analysis::summarize(*r)};
         };
         registry.add(std::move(c));
     }
@@ -177,11 +147,7 @@ void registerAnalysisCommands(cmd::Registry& registry) {
                      .field("reference", &CompareArgs::reference, sourceField())
                      .field("test", &CompareArgs::test, sourceField())
                      .build();
-        c.result = schema::object<CompareResult>("comparison")
-                       .field("notable", &CompareResult::notable, schema::any())
-                       .field("ltas_rms_db", &CompareResult::ltasRmsDb, schema::number())
-                       .field("summary", &CompareResult::summary, schema::string())
-                       .build();
+        c.result = analysis_commands::compareSchema();
         c.examples = {{"A render against itself", obj(R"({"reference": "rd_1", "test": "rd_1"})"),
                        obj(R"({"notable": [], "ltas_rms_db": 0.0, "summary": "<any>"})"),
                        "synth_and_render"}};
@@ -197,14 +163,7 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             o.noteOffSeconds = test->noteOff;
             auto rb = analysis::analyze(test->signal(), o);
             if (!rb) return std::move(rb).error();
-            const analysis::Comparison cmp = analysis::compare(*ra, *rb);
-            json::Value j = analysis::toJson(cmp);
-            CompareResult out;
-            out.notable = *j.find("notable");
-            out.ltasRmsDb =
-                j.find("ltas_rms_db")->isNumber() ? j.find("ltas_rms_db")->asDouble() : 0.0;
-            out.summary = analysis::summarize(cmp);
-            return out;
+            return analysis_commands::compare(*ra, *rb);
         };
         registry.add(std::move(c));
     }
