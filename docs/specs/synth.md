@@ -501,6 +501,14 @@ real-time engine). The code is the reference; these notes explain the choices.
   parameter edits are host gestures. Outputs: stereo, or mono ((L+R)/2);
   32- and 64-bit hosts.
 
+**Performance (orrery-bench, release, 48 kHz / 256):** the §9 reference patch
+went from 18.0 % to 11.7 % of one core with bit-identical output: voices
+render stage by stage per tick segment (type decisions hoisted out of the
+sample loop), and the unison voices of a note render as a group whose filter
+recursions run interleaved (the ladder is latency-bound per voice). What is
+left: per-voice control ticks (~17 %), oscillators, drive. Next step toward 3 %:
+float lanes across unison voices (SIMD), shared per-note control work.
+
 **Performance (first measurement, 2026-09-26):** the §9 reference patch
 (8 notes × 3 unison, 2 va + sub, ladder, tape drive, 2 envs, 1 LFO, chorus +
 reverb, `normal`) costs ≈ 10.7 % of one core at 48 kHz / 256 frames (-O2),

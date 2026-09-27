@@ -264,6 +264,19 @@ struct Frame {
 
 // --- engine implementation ---------------------------------------------------------------------
 
+// The longest voice segment (a tick at high quality), and one voice's staged
+// buffers for it.
+constexpr std::size_t kSeg = static_cast<std::size_t>(kTick) * 4;
+struct StageBuf {
+    int channels = 1;
+    bool mono = true;
+    double in1[2][kSeg], in2[2][kSeg], direct[2][kSeg], b1[kSeg], b2[kSeg];
+    double co[kFilterCount][7][kSeg];
+    double dg[kSeg], db[kSeg], dm[kSeg], dc[kSeg], al[kSeg], ar[kSeg];
+    double y[2][kSeg], f1[kSeg], f2[kSeg], x2[kSeg];
+};
+constexpr int kGroupMax = 8;  // unison voices of one note rendered together
+
 struct Engine::Impl {
     double sr = 48000.0;
     std::uint32_t maxBlock = 0;
@@ -293,6 +306,7 @@ struct Engine::Impl {
     std::int64_t lastFrameTick = -1;
 
     std::vector<float> busL, busR, outL, outR;
+    std::array<StageBuf, kGroupMax> stages;  // staged voice buffers (one per group member)
     std::vector<float> combMemory;
     // One decimator pair per oversampling factor (1, 2, 4), all prepared up
     // front, so a quality change never reconfigures a running decimator.
@@ -718,8 +732,6 @@ struct Engine::Impl {
         return y * level;
     }
 
-    static constexpr std::size_t kSeg = static_cast<std::size_t>(kTick) * 4;  // high quality
-
     // One filter over a buffer, the type decided once per segment.
     void filterRun(Voice& v, int fi, std::size_t c, const double* x, double* y, std::uint32_t n,
                    const double* const* co) SUPPLE_RT {
@@ -730,7 +742,9 @@ struct Engine::Impl {
             case FilterType::Ladder: {
                 const bool db24 =
                     static_cast<Slope>(ramps[index(filter(fi), FilterF::slope)].to) == Slope::Db24;
-                v.ladder[u][c].block(x, y, n, g, k, drv, lvl, db24);
+                Ladder& f = v.ladder[u][c];
+                for (std::uint32_t s = 0; s < n; ++s)
+                    y[s] = f.next(x[s], g[s], k[s], drv[s], db24) * lvl[s];
                 break;
             }
             case FilterType::Svf: {
@@ -768,11 +782,10 @@ struct Engine::Impl {
     // filters, drive, amp — the same arithmetic per sample, in the same order,
     // as the per-sample path (bit-identical output), with every per-type and
     // per-structure decision made once per segment.
-    void renderVoiceStaged(Voice& v, std::size_t offset, std::uint32_t n) SUPPLE_RT {
+    // Stage 1 of the staged path: oscillators, mixer, and every per-sample
+    // coefficient (filters, drive, amp) from the Lerps.
+    void stagePre(Voice& v, std::uint32_t n, StageBuf& sb) SUPPLE_RT {
         const Program& P = *prog;
-        const bool hasF1 = P.st.filter[0].has_value(), hasF2 = P.st.filter[1].has_value();
-        const bool parallel = P.st.routing == FilterRouting::Parallel;
-        const auto driveCurve = static_cast<DriveCurve>(static_cast<int>(P.st.drive) - 1);
         const double wtLimit = wavetableLimit(sr * P.os);
         const bool sync1 = P.st.osc[0].has_value();
         bool mono = true;
@@ -788,7 +801,8 @@ struct Engine::Impl {
                 v.formant[fi][1] = v.formant[fi][0];
             }
         v.monoPath = mono;
-        const int channels = mono ? 1 : 2;
+        sb.mono = mono;
+        sb.channels = mono ? 1 : 2;
 
         // Oscillators.
         double out[kOscCount][kSeg];
@@ -876,7 +890,9 @@ struct Engine::Impl {
             v.prevOut[o] = P.st.osc[o] ? out[o][n - 1] : 0.0;
 
         // Mixer.
-        double in1[2][kSeg], in2[2][kSeg], direct[2][kSeg];
+        auto& in1 = sb.in1;
+        auto& in2 = sb.in2;
+        auto& direct = sb.direct;
         for (int c = 0; c < 2; ++c)
             for (std::uint32_t s = 0; s < n; ++s) in1[c][s] = in2[c][s] = direct[c][s] = 0.0;
         for (std::size_t o = 0; o < kOscCount; ++o) {
@@ -896,11 +912,10 @@ struct Engine::Impl {
                 if (to == OscTarget::Both) in2[0][s] += l, in2[1][s] += r;
             }
         }
-        double b1[kSeg], b2[kSeg];
-        for (std::uint32_t s = 0; s < n; ++s) b1[s] = v.bal1.next(), b2[s] = v.bal2.next();
+        for (std::uint32_t s = 0; s < n; ++s) sb.b1[s] = v.bal1.next(), sb.b2[s] = v.bal2.next();
 
         // Filters: coefficients as the Lerps give them, then each filter over the buffer.
-        double co[kFilterCount][7][kSeg];
+        auto& co = sb.co;
         for (std::size_t fi = 0; fi < kFilterCount; ++fi) {
             if (!P.st.filter[fi]) continue;
             for (std::uint32_t s = 0; s < n; ++s) {
@@ -910,61 +925,211 @@ struct Engine::Impl {
                 co[fi][6][s] = v.damping[fi].next();
             }
         }
-        const double* c1[7] = {co[0][0], co[0][1], co[0][2], co[0][3],
-                               co[0][4], co[0][5], co[0][6]};
-        const double* c2[7] = {co[1][0], co[1][1], co[1][2], co[1][3],
-                               co[1][4], co[1][5], co[1][6]};
-        double y[2][kSeg], f1[kSeg], f2[kSeg], x2[kSeg];
-        for (int ch = 0; ch < channels; ++ch) {
-            const auto c = static_cast<std::size_t>(ch);
-            if (hasF1)
-                filterRun(v, 0, c, in1[c], f1, n, c1);
-            else
-                std::copy_n(in1[c], n, f1);
-            if (parallel) {
-                if (hasF2)
-                    filterRun(v, 1, c, in2[c], f2, n, c2);
-                else
-                    std::copy_n(in2[c], n, f2);
+        if (P.st.drive != DriveType::Off)
+            for (std::uint32_t s = 0; s < n; ++s) {
+                sb.dg[s] = v.driveGain.next(), sb.db[s] = v.driveBias.next();
+                sb.dm[s] = v.driveMix.next(), sb.dc[s] = v.driveComp.next();
+            }
+        for (std::uint32_t s = 0; s < n; ++s) sb.al[s] = v.ampL.next(), sb.ar[s] = v.ampR.next();
+    }
+
+    // One filter over the buffers of `count` voices of one program, the
+    // recursions interleaved sample by sample so independent voices overlap.
+    void filterRunGroup(Voice* const* vs, StageBuf* const* bs, int count, int fi, std::size_t c,
+                        const double* const* x, double* const* y, std::uint32_t n) SUPPLE_RT {
+        if (count == 1) {
+            const double* co[7] = {bs[0]->co[fi][0], bs[0]->co[fi][1], bs[0]->co[fi][2],
+                                   bs[0]->co[fi][3], bs[0]->co[fi][4], bs[0]->co[fi][5],
+                                   bs[0]->co[fi][6]};
+            filterRun(*vs[0], fi, c, x[0], y[0], n, co);
+            return;
+        }
+        const auto u = static_cast<std::size_t>(fi);
+        switch (*prog->st.filter[u]) {
+            case FilterType::Ladder: {
+                const bool db24 =
+                    static_cast<Slope>(ramps[index(filter(fi), FilterF::slope)].to) == Slope::Db24;
                 for (std::uint32_t s = 0; s < n; ++s)
-                    y[c][s] = (f1[s] * b1[s] + f2[s] * b2[s]) + direct[c][s];
+                    for (int j = 0; j < count; ++j) {
+                        const auto& co = bs[j]->co[fi];
+                        y[j][s] =
+                            vs[j]->ladder[u][c].next(x[j][s], co[0][s], co[1][s], co[2][s], db24) *
+                            co[3][s];
+                    }
+                break;
+            }
+            case FilterType::Svf: {
+                const auto mode = static_cast<SvfMode>(ramps[index(filter(fi), FilterF::mode)].to);
+                for (std::uint32_t s = 0; s < n; ++s)
+                    for (int j = 0; j < count; ++j) {
+                        const auto& co = bs[j]->co[fi];
+                        const double d = co[2][s];
+                        const double in =
+                            d > 1.0001 ? dsp::fastTanh(x[j][s] * d) / std::sqrt(d) : x[j][s];
+                        y[j][s] = vs[j]->svf[u][c].next(in, co[0][s], co[1][s], mode) * co[3][s];
+                    }
+                break;
+            }
+            default:  // comb and formant: one voice at a time
+                for (int j = 0; j < count; ++j) {
+                    const double* co[7] = {bs[j]->co[fi][0], bs[j]->co[fi][1], bs[j]->co[fi][2],
+                                           bs[j]->co[fi][3], bs[j]->co[fi][4], bs[j]->co[fi][5],
+                                           bs[j]->co[fi][6]};
+                    filterRun(*vs[j], fi, c, x[j], y[j], n, co);
+                }
+                break;
+        }
+    }
+
+    // Stage 2: the filters (routing, balance, direct path) into StageBuf::y.
+    void stageFilters(Voice* const* vs, StageBuf* const* bs, int count, std::uint32_t n) SUPPLE_RT {
+        const Program& P = *prog;
+        const bool hasF1 = P.st.filter[0].has_value(), hasF2 = P.st.filter[1].has_value();
+        const bool parallel = P.st.routing == FilterRouting::Parallel;
+        for (std::size_t c = 0; c < 2; ++c) {
+            Voice* gv[kGroupMax];
+            StageBuf* gb[kGroupMax];
+            int m = 0;
+            for (int j = 0; j < count; ++j)
+                if (bs[j]->channels > static_cast<int>(c)) gv[m] = vs[j], gb[m] = bs[j], ++m;
+            if (m == 0) break;
+            const double* x[kGroupMax];
+            double* out[kGroupMax];
+            for (int j = 0; j < m; ++j) x[j] = gb[j]->in1[c], out[j] = gb[j]->f1;
+            if (hasF1)
+                filterRunGroup(gv, gb, m, 0, c, x, out, n);
+            else
+                for (int j = 0; j < m; ++j) std::copy_n(gb[j]->in1[c], n, gb[j]->f1);
+            if (parallel) {
+                for (int j = 0; j < m; ++j) x[j] = gb[j]->in2[c], out[j] = gb[j]->f2;
+                if (hasF2)
+                    filterRunGroup(gv, gb, m, 1, c, x, out, n);
+                else
+                    for (int j = 0; j < m; ++j) std::copy_n(gb[j]->in2[c], n, gb[j]->f2);
+                for (int j = 0; j < m; ++j) {
+                    StageBuf& b = *gb[j];
+                    for (std::uint32_t s = 0; s < n; ++s)
+                        b.y[c][s] = (b.f1[s] * b.b1[s] + b.f2[s] * b.b2[s]) + b.direct[c][s];
+                }
             } else {
-                for (std::uint32_t s = 0; s < n; ++s) x2[s] = in2[c][s] + f1[s];
+                for (int j = 0; j < m; ++j) {
+                    StageBuf& b = *gb[j];
+                    for (std::uint32_t s = 0; s < n; ++s) b.x2[s] = b.in2[c][s] + b.f1[s];
+                    x[j] = b.x2, out[j] = b.f2;
+                }
                 if (hasF2) {
-                    filterRun(v, 1, c, x2, f2, n, c2);
-                    for (std::uint32_t s = 0; s < n; ++s) y[c][s] = f2[s] + direct[c][s];
+                    filterRunGroup(gv, gb, m, 1, c, x, out, n);
+                    for (int j = 0; j < m; ++j) {
+                        StageBuf& b = *gb[j];
+                        for (std::uint32_t s = 0; s < n; ++s) b.y[c][s] = b.f2[s] + b.direct[c][s];
+                    }
                 } else {
-                    for (std::uint32_t s = 0; s < n; ++s) y[c][s] = x2[s] + direct[c][s];
+                    for (int j = 0; j < m; ++j) {
+                        StageBuf& b = *gb[j];
+                        for (std::uint32_t s = 0; s < n; ++s) b.y[c][s] = b.x2[s] + b.direct[c][s];
+                    }
                 }
             }
         }
+    }
 
-        // Drive.
-        if (P.st.drive != DriveType::Off) {
-            double dg[kSeg], db[kSeg], dm[kSeg], dc[kSeg];
-            for (std::uint32_t s = 0; s < n; ++s) {
-                dg[s] = v.driveGain.next(), db[s] = v.driveBias.next(), dm[s] = v.driveMix.next();
-                dc[s] = v.driveComp.next();
-            }
-            for (int ch = 0; ch < channels; ++ch) {
-                double* yc = y[ch];
+    // Stage 3: drive, then amp (and the steal fade) into the bus.
+    void stagePost(Voice& v, std::size_t offset, std::uint32_t n, StageBuf& sb) SUPPLE_RT {
+        const Program& P = *prog;
+        const auto driveCurve = static_cast<DriveCurve>(static_cast<int>(P.st.drive) - 1);
+        if (P.st.drive != DriveType::Off)
+            for (int ch = 0; ch < sb.channels; ++ch) {
+                double* yc = sb.y[ch];
                 for (std::uint32_t s = 0; s < n; ++s)
-                    yc[s] += (drive(yc[s], driveCurve, dg[s], db[s], dc[s]) - yc[s]) * dm[s];
+                    yc[s] +=
+                        (drive(yc[s], driveCurve, sb.dg[s], sb.db[s], sb.dc[s]) - yc[s]) * sb.dm[s];
             }
-        }
-        if (mono) std::copy_n(y[0], n, y[1]);
-
-        // Amp (and the steal fade) into the bus.
+        if (sb.mono) std::copy_n(sb.y[0], n, sb.y[1]);
         const bool fading = v.state == Voice::State::Fading;
         for (std::uint32_t s = 0; s < n; ++s) {
-            double gl = v.ampL.next(), gr = v.ampR.next();
+            double gl = sb.al[s], gr = sb.ar[s];
             if (fading) {
                 gl *= v.fade;
                 gr *= v.fade;
                 v.fade = std::max(0.0, v.fade - v.fadeStep);
             }
-            busL[offset + s] += static_cast<float>(y[0][s] * gl);
-            busR[offset + s] += static_cast<float>(y[1][s] * gr);
+            busL[offset + s] += static_cast<float>(sb.y[0][s] * gl);
+            busR[offset + s] += static_cast<float>(sb.y[1][s] * gr);
+        }
+    }
+
+    void renderVoiceStaged(Voice& v, std::size_t offset, std::uint32_t n) SUPPLE_RT {
+        StageBuf& sb = stages[0];
+        stagePre(v, n, sb);
+        Voice* vs[1] = {&v};
+        StageBuf* bs[1] = {&sb};
+        stageFilters(vs, bs, 1, n);
+        stagePost(v, offset, n, sb);
+    }
+
+    // The unison voices of one note, in lockstep (same start, so the same
+    // tick grid): each tick's segment is staged for all of them, and their
+    // filters run interleaved.
+    void renderGroupSegment(Voice* const* group, int count, std::int64_t a, std::int64_t b,
+                            std::int64_t blockStart) SUPPLE_RT {
+        const auto os = static_cast<std::uint32_t>(prog->os);
+        Voice* vs[kGroupMax];
+        StageBuf* bs[kGroupMax];
+        std::int64_t t = a;
+        while (t < b) {
+            const std::uint32_t tickPos = group[0]->tickPos;
+            int m = 0;
+            for (int j = 0; j < count; ++j) {
+                Voice& v = *group[j];
+                if (v.state == Voice::State::Free) continue;
+                if (tickPos == 0) {
+                    voiceTick(v, t);
+                    if (v.env[0].idle() && !v.fresh) {
+                        v.state = Voice::State::Free;
+                        continue;
+                    }
+                }
+                vs[m] = &v;
+                bs[m] = &stages[static_cast<std::size_t>(m)];
+                ++m;
+            }
+            const auto n =
+                static_cast<std::uint32_t>(std::min<std::int64_t>(b - t, kTick - tickPos));
+            for (int j = 0; j < count; ++j) group[j]->tickPos = (tickPos + n) % kTick;
+            if (m == 0) break;
+            for (int j = 0; j < m; ++j) stagePre(*vs[j], n * os, *bs[j]);
+            stageFilters(vs, bs, m, n * os);
+            for (int j = 0; j < m; ++j)
+                stagePost(*vs[j], static_cast<std::size_t>(t - blockStart) * os, n * os, *bs[j]);
+            t += n;
+        }
+    }
+
+    // Every sounding voice over [a, b): the unison voices of a note together
+    // when the program renders staged, the rest one by one.
+    void renderVoices(std::int64_t a, std::int64_t b, std::int64_t blockStart) SUPPLE_RT {
+        bool done[kVoicePool] = {};
+        for (std::size_t i = 0; i < voices.size(); ++i) {
+            Voice& v = voices[i];
+            if (v.state == Voice::State::Free || done[i]) continue;
+            if (prog->staged && v.state == Voice::State::Active) {
+                Voice* group[kGroupMax];
+                int count = 0;
+                for (std::size_t j = i; j < voices.size() && count < kGroupMax; ++j) {
+                    Voice& w = voices[j];
+                    if (!done[j] && w.state == Voice::State::Active && w.serial == v.serial &&
+                        w.tickPos == v.tickPos) {
+                        group[count++] = &w;
+                        done[j] = true;
+                    }
+                }
+                if (count > 1) {
+                    renderGroupSegment(group, count, a, b, blockStart);
+                    continue;
+                }
+            }
+            done[i] = true;
+            renderVoiceSegment(v, a, b, blockStart);
         }
     }
 
@@ -1672,8 +1837,7 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
         const auto len = static_cast<std::size_t>(b - a) * os;
         std::fill_n(m.busL.begin() + static_cast<std::ptrdiff_t>(off), len, 0.0f);
         std::fill_n(m.busR.begin() + static_cast<std::ptrdiff_t>(off), len, 0.0f);
-        for (Voice& v : m.voices)
-            if (v.state != Voice::State::Free) m.renderVoiceSegment(v, a, b, B);
+        m.renderVoices(a, b, B);
         // 3. Decimate to the base rate.
         const auto boff = static_cast<std::size_t>(a - B);
         const auto n = static_cast<std::uint32_t>(b - a);

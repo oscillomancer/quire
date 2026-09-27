@@ -83,40 +83,6 @@ class Ladder {
         return (db24 ? out4 : out2) * comp / std::max(1.0, drive * 0.5 + 0.5);
     }
 
-    // A block with per-sample coefficients: the coefficient algebra runs as a
-    // separate (vectorizable) pass, the recursion then only sees the state.
-    // Same arithmetic as next() except the feedback solve multiplies by a
-    // reciprocal (last-bit rounding differences).
-    void block(const double* x, double* y, std::uint32_t n, const double* g, const double* k,
-               const double* drive, const double* level, bool db24) SUPPLE_RT {
-        constexpr std::size_t kMax = 64;
-        double G[kMax], B[kMax], G4[kMax], den[kMax], scale[kMax];
-        for (std::uint32_t s = 0; s < n; ++s) {
-            G[s] = g[s] / (1.0 + g[s]);
-            B[s] = 1.0 / (1.0 + g[s]);
-            G4[s] = G[s] * G[s] * G[s] * G[s];
-            den[s] = 1.0 / (1.0 + k[s] * G4[s]);  // a reciprocal: no division in the recursion
-            scale[s] = (1.0 + 0.5 * k[s]) / std::max(1.0, drive[s] * 0.5 + 0.5);
-        }
-        for (std::uint32_t s = 0; s < n; ++s) {
-            const double Gs = G[s], Bs = B[s];
-            const double S =
-                Gs * Gs * Gs * Bs * s_[0] + Gs * Gs * Bs * s_[1] + Gs * Bs * s_[2] + Bs * s_[3];
-            const double y4 = (G4[s] * x[s] * drive[s] + S) * den[s];
-            double u = dsp::fastTanh(x[s] * drive[s] - k[s] * y4);
-            double out2 = 0.0, out4 = 0.0;
-            for (std::size_t i = 0; i < 4; ++i) {
-                const double v = (u - s_[i]) * Gs;
-                const double yy = v + s_[i];
-                s_[i] = yy + v;
-                u = yy;
-                if (i == 1) out2 = yy;
-                if (i == 3) out4 = yy;
-            }
-            y[s] = (db24 ? out4 : out2) * scale[s] * level[s];
-        }
-    }
-
   private:
     std::array<double, 4> s_{};
 };
