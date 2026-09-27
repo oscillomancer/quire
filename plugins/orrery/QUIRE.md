@@ -36,6 +36,12 @@ where listed below. `tools/ci/format.sh` leaves those files alone.
 - `host-smoke` drives `Voice Drift` as the plain (latency-free) parameter.
   `tools/clap_host_probe.cpp` no longer reads an output-meter parameter
   (Orrery has none; the editor gets telemetry from the bridge).
+- The fixed CLAP table includes fields for all possible slot types. Host writes
+  to inactive fields are ignored, so their reported values remain patch
+  defaults and survive a state round trip. Active wave choices are limited to
+  the oscillator type; unsupported choices resolve to that type's default.
+  Odd phaser stage counts resolve to the next even count. Empty step sequences
+  omit `values` from state, which the patch codec reads as the default.
 - The GUI library is compiled as C++20 (the core's headers need it) and links
   `supple::orrery-clap`.
 

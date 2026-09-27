@@ -1095,7 +1095,7 @@ Value encodeBody(const Body& b, patch::Detail detail) {
         writeFields(slot, b, step(s), detail);
         if (full || st.stepRetrigger[s] != Retrigger::Voice)
             slot["retrigger"] = kRetriggers[static_cast<int>(st.stepRetrigger[s])];
-        if (full || !st.stepValues[s].empty()) {
+        if (!st.stepValues[s].empty()) {
             Value values = Value::array();
             for (double v : st.stepValues[s]) values.push_back(v);
             slot["values"] = std::move(values);

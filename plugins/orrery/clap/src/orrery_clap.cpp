@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "orrery/engine.h"
@@ -104,6 +105,9 @@ struct Plugin final : EditorBridge {
     std::vector<float> scratchL, scratchR;  // 64-bit or mono hosts: render here, then convert
     bool mono = false;                      // the selected audio-ports config (inactive only)
     std::array<std::int16_t, 2600> indexOfId{};
+    std::array<std::atomic<int>, kOscCount> oscTypes;  // -1 for absent slots
+    std::unique_ptr<std::atomic<bool>[]> activeParams =
+        std::make_unique<std::atomic<bool>[]>(paramCount());
     bool active = false;
     std::atomic<bool> processing{false};
 
@@ -127,7 +131,53 @@ struct Plugin final : EditorBridge {
         const Patch init = model.type().defaults();
         model.structure = init.body.structure;
         model.meta = init.meta;
+        for (int o = 0; o < kOscCount; ++o)
+            oscTypes[o].store(
+                init.body.structure.osc[o] ? static_cast<int>(*init.body.structure.osc[o]) : -1);
+        for (std::size_t i = 0; i < paramCount(); ++i)
+            activeParams[i].store(orrery::paramActive(init.body.structure, i));
         store.assign(patch::FlatBody{init.body.values});
+    }
+
+    // A fixed CLAP table exposes the union of each slot's choices. Host
+    // automation can therefore send a wave the current oscillator type does
+    // not support. Keep the stored value in the patch codec's valid domain.
+    double patchValue(std::size_t index, double physical) const SUPPLE_RT {
+        const auto loc = locate(index);
+        double value = params::clampPhysical(orrery::table()[index], physical);
+        if (slotInfo(loc.slot).block == Block::Osc && loc.field == static_cast<int>(OscF::wave)) {
+            const int t = oscTypes[loc.slot - kOsc1].load(std::memory_order_relaxed);
+            if (t >= 0 && !waveApplies(static_cast<OscType>(t), static_cast<Wave>(value)))
+                value = static_cast<double>(defaultWave(static_cast<OscType>(t)));
+        }
+        if (loc.slot == kPhaser && loc.field == static_cast<int>(PhaserF::stages)) {
+            const int stages = static_cast<int>(value);
+            if (stages % 2 != 0) value = static_cast<double>(stages + 1);
+        }
+        return value;
+    }
+
+    bool setHostClap(clap_id id, double clapValue) SUPPLE_RT {
+        if (id >= indexOfId.size() || indexOfId[id] < 0) return false;
+        const auto index = static_cast<std::size_t>(indexOfId[id]);
+        const auto& spec = orrery::table()[index];
+        if (spec.flags & params::kReadonly) return false;
+        if (!activeParams[index].load(std::memory_order_relaxed)) return false;
+        store.set(index, patchValue(index, params::fromClap(spec, clapValue)));
+        return true;
+    }
+
+    bool applyHostEvents(const clap_input_events_t* in) SUPPLE_RT {
+        bool changed = false;
+        const std::uint32_t n = in ? in->size(in) : 0;
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const clap_event_header_t* h = in->get(in, i);
+            if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
+                continue;
+            const auto* e = reinterpret_cast<const clap_event_param_value_t*>(h);
+            changed = setHostClap(e->param_id, e->value) || changed;
+        }
+        return changed;
     }
 
     // CLAP events → engine events (audio thread, no allocation: capacity reserved).
@@ -157,7 +207,7 @@ struct Plugin final : EditorBridge {
                     const auto* pe = reinterpret_cast<const clap_event_param_value_t*>(h);
                     if (pe->param_id >= indexOfId.size() || indexOfId[pe->param_id] < 0) break;
                     const auto index = static_cast<std::size_t>(indexOfId[pe->param_id]);
-                    store.setClap(pe->param_id, pe->value);
+                    setHostClap(pe->param_id, pe->value);
                     e.type = Event::Type::Param;
                     e.index = static_cast<std::uint32_t>(index);
                     e.value = store.get(index);
@@ -282,8 +332,10 @@ struct Plugin final : EditorBridge {
     }
 
     void edit(std::size_t index, double physical) override {
-        if (index >= store.size() || (orrery::table()[index].flags & params::kReadonly)) return;
-        store.set(index, physical);  // clamps; the editor reads it back at once
+        if (index >= store.size() || (orrery::table()[index].flags & params::kReadonly) ||
+            !activeParams[index].load(std::memory_order_relaxed))
+            return;
+        store.set(index, patchValue(index, physical));  // editor reads it back at once
         const double v = store.get(index);
         const auto i = static_cast<std::uint16_t>(index);
         if (gestureQueued && gestureIndex == static_cast<std::int32_t>(index)) {
@@ -352,6 +404,11 @@ void Model::install(const Patch& p) {
     ++p_.structureRevision;
     meta = p.meta;
     structure = p.body.structure;
+    for (int o = 0; o < kOscCount; ++o)
+        p_.oscTypes[o].store(structure.osc[o] ? static_cast<int>(*structure.osc[o]) : -1,
+                             std::memory_order_relaxed);
+    for (std::size_t i = 0; i < paramCount(); ++i)
+        p_.activeParams[i].store(orrery::paramActive(structure, i), std::memory_order_relaxed);
     p_.store.assign(patch::FlatBody{p.body.values});
     if (p_.active) p_.engine.setPatch(p);
 }
@@ -393,7 +450,7 @@ const clap_plugin_params_t kParams = {
             // [main thread] the store already holds editor values; they and
             // the host's reach the engine with the next program.
             const bool edited = s->drainEdits(out, false);
-            if ((clapx::ClapParams::applyEvents(s->store, in) || edited) && s->active)
+            if ((s->applyHostEvents(in) || edited) && s->active)
                 s->engine.setPatch(s->model.current());
         }
     }};

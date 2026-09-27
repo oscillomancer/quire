@@ -5,12 +5,12 @@ add_subdirectory(orrery/clap)
 if(SUPPLE_BUILD_PLUGINS)
   include(ExternalProject)
   option(SUPPLE_PLUGIN_VST3 "Also build VST3 versions of the stock plugins" OFF)
-  # supple_add_plugin(<dir> <PREFIX>): builds plugins/<dir> (a template-derived
+  # supple_add_plugin(<dir> <PREFIX> <artifact>): builds plugins/<dir> (a template-derived
   # plugin, ADR-0011) as an isolated ExternalProject. PREFIX is the plugin's
   # CMake option prefix (the template's STARTER after renaming), so the
   # monorepo's settings map onto <PREFIX>_BUILD_GUI, <PREFIX>_VST3 and
   # <PREFIX>_RTSAN. The plugin's own ctest suite becomes plugin.<dir>.ctest.
-  function(supple_add_plugin dir prefix)
+  function(supple_add_plugin dir prefix artifact)
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${dir}")
     if(SUPPLE_SANITIZE STREQUAL "realtime")
       set(plugin_rtsan ON)
@@ -45,8 +45,15 @@ if(SUPPLE_BUILD_PLUGINS)
     if(SUPPLE_BUILD_TESTS)
       add_test(NAME plugin.${dir}.ctest
         COMMAND ${CMAKE_CTEST_COMMAND} --test-dir "${plugin_build}" --output-on-failure)
+      if(NOT SUPPLE_SANITIZE)
+        add_test(NAME plugin.${dir}.validator
+          COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
+                  "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
+        set_tests_properties(plugin.${dir}.validator PROPERTIES
+          LABELS slow SKIP_RETURN_CODE 77)
+      endif()
     endif()
   endfunction()
-  supple_add_plugin(probe-synth PROBESYNTH)
-  supple_add_plugin(orrery ORRERY)
+  supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
+  supple_add_plugin(orrery ORRERY Orrery)
 endif()
