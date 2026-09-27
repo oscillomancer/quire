@@ -66,6 +66,10 @@ cmake --workflow --preset dev
 tools/ci/run-all.sh          # every preset: dev, gcc, asan, ubsan, tsan, rtsan + license + format
 ```
 
+Phase 3 acceptance in REAPER (only when the plugin is installed in a CLAP path
+REAPER scans, e.g. ~/.clap; opens the audio device):
+`tools/reaper/load-test.sh <plugin display name>`.
+
 CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
 from the tsan preset: timing-heavy tests TSan makes impractically slow), `slow`
 (minutes-long end-to-end tests: run in dev, gcc and asan only). A test that
