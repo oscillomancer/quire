@@ -73,6 +73,25 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
+### 10. Listen to Orrery — listening check (15 minutes, when convenient)
+Orrery is playable: `Orrery.clap` (release build) is installed in `~/.clap`
+(with its LICENSE/NOTICES) and loads in REAPER with its editor. Two ways to
+listen:
+- **The ten starting recipes** from the agent guide
+  (`skill/guides/sound-design.md`), rendered through the sandbox's MCP server:
+  `renders/listening/orrery-recipes/01-warm-pad.wav` … `10-string-ensemble.wav`
+  (regenerate: `tools/listening/render_orrery_recipes.py`). Levels are not
+  normalized (−19 to −33 LUFS; the snare and pluck are quiet).
+- **In REAPER:** insert Orrery on an instrument track and play; the editor
+  adds modules (click the dashed tiles), changes types, and adds routes.
+What I'd like to know: which recipes sound bad or cheap and why (harsh top,
+thin, static, wrong envelope…), whether the wavetables (`bell`, `formant`,
+`organ`, `digital`) are worth keeping as designed, and anything in the editor
+that is confusing. Descriptor numbers say the recipes hit their targets; only
+you can say whether they sound good.
+*Meanwhile:* performance work continues (18 % → 11.7 % of a core for the
+reference patch so far; target 3 %).
+
 ## Resolved
 
 (none yet)
