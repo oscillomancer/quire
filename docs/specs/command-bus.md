@@ -346,3 +346,49 @@ Phase 2 demo committed to `docs/demos/`.
   every run.
 - A libFuzzer target exercises JSON invocations, including batches and step
   references. Its smoke corpus runs in CTest when `SUPPLE_BUILD_FUZZERS=ON`.
+
+## Implementation notes (2026-09-26, Task B)
+
+- `rpc::Server` owns Unix socket I/O and frames NDJSON up to 16 MiB. A caller
+  supplies `rpc::Post` to schedule requests onto its model thread; only that
+  thread executes `Dispatcher` commands and calls `Server::publish` from its
+  host event sink. The server uses bounded per-connection output queues,
+  reports dropped events, and assigns per-topic event sequence numbers. The
+  path helper uses `$XDG_RUNTIME_DIR/<slug>/<instance>.sock`; created product
+  directories and sockets have modes 0700 and 0600.
+- `rpc::Client` is synchronous and belongs on a thread other than the server's
+  model thread. `mcp::Server` uses the same MCP stdio handler over either a
+  local `Dispatcher` or this client, with the proxy discovering tool schemas
+  from `registry.list` and `registry.describe` over RPC.
+- The MCP handshake implementation supports `2025-06-18` and `2025-11-25`.
+  Requests for incompatible newer revisions fall back to `2025-11-25`.
+  `initialize` supplies client identity to `Origin`; the proxy updates its RPC
+  handshake with that identity before forwarding calls.
+- Both headless CLIs expose `--mcp`. `tests/integration/mcp_client.py` checks
+  initialize, tools/list, a successful tools/call and a structured command
+  error against each binary. `docs/demos/mcp-sandbox.txt` records that
+  exchange against the sandbox.
+
+## Implementation notes (2026-09-26, Task B round 4)
+
+- Both headless CLIs expose `serve` with optional `--instance` and `--socket`.
+  The default instance is `default`; `rpc::socketPath` places it below the
+  generated product slug in `$XDG_RUNTIME_DIR` (or `/tmp` when unset).
+  The main thread runs a pipe-woken model queue and handles SIGINT/SIGTERM.
+  The proxy accepts the same path options. Socket integration tests start
+  sandbox and engine children; the sandbox test loads the test instrument and
+  renders through the MCP proxy. Both tests terminate and wait for children.
+- A socket response can fill a 16 MiB frame. Larger responses and responses
+  that would exhaust the outbound queue produce `rpc.response_too_large`
+  (`-32000`) with a hint to narrow the query. Each peer has at most 16 posted
+  requests, 32 MiB of posted request frames and 32 MiB of unsent output;
+  the I/O thread removes `POLLIN` while full. Events retain the existing
+  drop-and-notify behavior.
+- Socket startup serializes the stale-path connect check and bind with an
+  instance lock file. A connected address reports `rpc.address_in_use`; only
+  refused or missing sockets are stale. Failed bind never unlinks the path,
+  and shutdown checks the socket's device and inode before unlinking.
+- MCP stdio framing retains no more than 16 MiB of one line. It discards the
+  rest of an oversized frame through newline (or EOF) and returns `-32600`.
+  RPC distinguishes invalid top-level JSON values (`-32600`, null id) from
+  malformed `params` (`-32602`, structured `rpc.invalid_params` data).

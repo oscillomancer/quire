@@ -6,9 +6,15 @@
 //       --save writes the project back afterwards. Prints the result JSON.
 //   <slug>-engine registry [--markdown | --mcp-tools]
 //       The engine's command registry, Markdown reference or MCP tool list.
-//   (--mcp and the control socket arrive with the MCP adapter, P2.6.)
+//   <slug>-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...
+//       Serve MCP over stdio against the in-process engine session.
+//   <slug>-engine serve [--project FILE] [--instance NAME] [--socket PATH]
+//       Serve the command bus on a Unix socket from the model thread.
+#include <supple/mcp/server.h>
+#include <supple/rpc/model_loop.h>
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -26,8 +32,10 @@ int usage() {
     std::fprintf(stderr,
                  "usage: %s-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] "
                  "[--plugin-path P]...\n"
-                 "       %s-engine registry [--markdown | --mcp-tools]\n",
-                 slug.c_str(), slug.c_str());
+                 "       %s-engine registry [--markdown | --mcp-tools]\n"
+                 "       %s-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...\n"
+                 "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n",
+                 slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str());
     return 2;
 }
 
@@ -70,6 +78,74 @@ int main(int argc, char** argv) {
     if (args.empty()) return usage();
     cmd::Registry registry;
     engine::registerEngineCommands(registry);
+    if (args[0] == "--mcp" || args[0] == "serve") {
+        const bool rpcMode = args[0] == "serve";
+        engine::AppOptions options;
+        options.identity.name = std::string(product::kName);
+        options.identity.vendor = std::string(product::kVendor);
+        options.identity.version = std::string(product::kVersion);
+        fs::path project;
+        std::string instance = "default";
+        fs::path socket;
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--project" && i + 1 < args.size())
+                project = fs::absolute(args[++i]);
+            else if (args[i] == "--workdir" && i + 1 < args.size())
+                options.workdir = args[++i];
+            else if (args[i] == "--plugin-path" && i + 1 < args.size())
+                options.pluginPath.emplace_back(args[++i]);
+            else if (rpcMode && args[i] == "--instance" && i + 1 < args.size())
+                instance = args[++i];
+            else if (rpcMode && args[i] == "--socket" && i + 1 < args.size())
+                socket = args[++i];
+            else
+                return usage();
+        }
+        if (options.workdir.empty())
+            options.workdir = project.empty() ? defaultWorkdir() : project.parent_path();
+        if (!options.pluginPath.empty())
+            for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
+        auto app = engine::EngineApp::create(options);
+        if (!app) {
+            std::fprintf(stderr, "%s\n", app.error().toString().c_str());
+            return 1;
+        }
+        if (!project.empty() && fs::exists(project)) {
+            auto status = (*app)->open(project);
+            if (!status) {
+                std::fprintf(stderr, "%s\n", status.error().toString().c_str());
+                return 1;
+            }
+        }
+        cmd::Dispatcher dispatcher(registry, **app);
+        if (rpcMode) {
+            rpc::ModelLoop loop;
+            rpc::Server* activeServer = nullptr;
+            rpc::Server server(registry, dispatcher, [&](auto task) {
+                loop.post([&, task = std::move(task)] {
+                    task();
+                    for (auto& [topic, payload] : (*app)->takeEvents())
+                        activeServer->publish(topic, payload);
+                });
+            });
+            activeServer = &server;
+            auto started = server.start(socket.empty() ? rpc::socketPath(instance) : socket);
+            if (!started) {
+                std::fprintf(stderr, "%s\n", started.error().toString().c_str());
+                return 1;
+            }
+            loop.run();
+            server.stop();
+            return 0;
+        }
+        mcp::Server server(registry, dispatcher);
+        auto status = server.serve(std::cin, std::cout);
+        if (!status) {
+            std::fprintf(stderr, "%s\n", status.error().toString().c_str());
+            return 1;
+        }
+        return 0;
+    }
     if (args[0] == "registry") {
         if (args.size() == 1)
             print(registry.exportJson());

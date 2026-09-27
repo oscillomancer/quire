@@ -19,7 +19,7 @@ endif()
 
 # The sandbox CLI: <slug>-sandbox (named from cmake/Product.cmake).
 add_executable(${PRODUCT_SLUG}-sandbox tools/sandbox_main.cpp)
-target_link_libraries(${PRODUCT_SLUG}-sandbox PRIVATE supple::sandbox supple::product-info)
+target_link_libraries(${PRODUCT_SLUG}-sandbox PRIVATE supple::sandbox supple::mcp supple::product-info)
 supple_target_defaults(${PRODUCT_SLUG}-sandbox)
 
 if(SUPPLE_BUILD_TESTS)
@@ -28,4 +28,16 @@ if(SUPPLE_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
             -DGENERATED=${PROJECT_SOURCE_DIR}/skill/generated
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_generated.cmake)
+endif()
+
+if(SUPPLE_BUILD_TESTS)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME sandbox.mcp-stdio
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> session_get)
+  add_test(NAME sandbox.mcp-proxy
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
+            $<TARGET_FILE:orrery-headless>)
+  add_dependencies(${PRODUCT_SLUG}-sandbox orrery-headless)
 endif()

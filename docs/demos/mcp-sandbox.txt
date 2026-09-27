@@ -1,0 +1,1264 @@
+request
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {},
+    "clientInfo": {
+      "name": "integration-client",
+      "version": "1.0"
+    }
+  }
+}
+
+response
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {
+      "tools": {}
+    },
+    "serverInfo": {
+      "name": "quire",
+      "version": "0.1.0"
+    }
+  }
+}
+
+request
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/initialized"
+}
+
+request
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}
+
+response
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "analyze",
+        "title": "Analyze a render or audio file: loudness, spectrum, pitch, envelope, stereo.",
+        "description": "Analyze a render or audio file: loudness, spectrum, pitch, envelope, stereo. source: rd_<n> or a file path. Report supple.analysis-report/1.0: loudness (LUFS, LRA, true peak), spectral (centroid, rolloff, flatness, tilt, named band levels relative to the total), harmonic (f0, note, harmonics in dB relative to the fundamental), envelope (attack, decay to -20 dB, release after note-off, onsets), stereo (width, correlation). note_off_s defaults to the end of a render's input. Envelope values (attack, decay, release) describe single notes: render one note to measure them. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "analyze_args",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "standard",
+                "full"
+              ],
+              "description": "summary: key scalars (≤ 400 tokens); standard: + percentiles, band shares, 1/3-octave spectrum; full: + time series.",
+              "default": "summary"
+            },
+            "note_off_s": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 3600.0
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "analysis",
+          "properties": {
+            "report": {},
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "report",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "batch",
+        "title": "Run commands atomically.",
+        "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object"
+                  },
+                  "as": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 256
+            }
+          },
+          "required": [
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "compare",
+        "title": "Compare two renders or files: notable descriptor changes and timbre distance.",
+        "description": "Compare two renders or files: notable descriptor changes and timbre distance. Notable changes use fixed thresholds (loudness 1 LU, centroid 10 %, band levels 1.5 dB, harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the 1/3-octave spectra after removing the level offset: a pure gain change reads 0. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "compare_args",
+          "properties": {
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "test": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            }
+          },
+          "required": [
+            "reference",
+            "test"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "comparison",
+          "properties": {
+            "notable": {},
+            "ltas_rms_db": {
+              "type": "number"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "notable",
+            "ltas_rms_db",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "masking",
+        "title": "Estimate where one sound masks another (critical bands).",
+        "description": "Estimate where one sound masks another (critical bands). masker (e.g. the kick) and maskee (e.g. the bass): renders or files at the same sample rate. Per Bark band: % of the maskee's active frames masked and by how much; the three worst bands. An estimate for corrective mixing, not a psychoacoustic model of record. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "masking_args",
+          "properties": {
+            "masker": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "maskee": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            }
+          },
+          "required": [
+            "masker",
+            "maskee"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "masking",
+          "properties": {
+            "result": {}
+          },
+          "required": [
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "param_get",
+        "title": "Read parameter values (physical value and display text).",
+        "description": "Read parameter values (physical value and display text). keys: semantic keys (e.g. \"filter.cutoff\"); omit for all. Third-party plugins: CLAP ids or names; values are CLAP values. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "param_get_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "instance"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "param_values",
+          "properties": {
+            "values": {}
+          },
+          "required": [
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "param_set",
+        "title": "Set parameters in physical units; returns the values as applied.",
+        "description": "Set parameters in physical units; returns the values as applied. values: {key: number | \"unit string\" | enum key | bool}, e.g. {\"filter.cutoff\": \"1.2 kHz\", \"filter.mode\": \"lowpass\"}. All values are validated first; nothing changes if any is invalid. Third-party plugins: CLAP id or name keys with CLAP values or {\"text\": \"...\"}. Use patch.merge to change several sections at once. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "param_set_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "values": {
+              "description": "Key -> value."
+            }
+          },
+          "required": [
+            "instance",
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "param_values",
+          "properties": {
+            "values": {}
+          },
+          "required": [
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true
+        }
+      },
+      {
+        "name": "patch_get",
+        "title": "Get an instance's patch document (changed values or all).",
+        "description": "Get an instance's patch document (changed values or all). detail changed (default): only values that differ from the defaults, still a complete patch. detail full: every value. Semantic plugins only. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "patch_get_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "changed",
+                "full"
+              ],
+              "default": "changed"
+            }
+          },
+          "required": [
+            "instance"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "patch",
+          "properties": {
+            "patch": {}
+          },
+          "required": [
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "patch_merge",
+        "title": "Merge a partial patch (RFC 7396) into an instance.",
+        "description": "Merge a partial patch (RFC 7396) into an instance. patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "patch_merge_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "patch": {}
+          },
+          "required": [
+            "instance",
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "patch_merge",
+          "properties": {
+            "changed": {},
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "changed",
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true
+        }
+      },
+      {
+        "name": "patch_set",
+        "title": "Replace an instance's whole patch; returns a description of the result.",
+        "description": "Replace an instance's whole patch; returns a description of the result. patch: a complete patch document (see plugin.describe detail full for its schema); missing values take their defaults. Validated fully before anything changes. For partial edits use patch.merge. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "patch_set_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "patch": {}
+          },
+          "required": [
+            "instance",
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "description",
+          "properties": {
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true
+        }
+      },
+      {
+        "name": "plugin_describe",
+        "title": "Describe a plugin instance: parameters, current values, patch format.",
+        "description": "Describe a plugin instance: parameters, current values, patch format. detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. Semantic plugins are programmed with param.set (physical units) or patch.merge. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "plugin_describe_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "default": "summary"
+            }
+          },
+          "required": [
+            "instance"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "plugin_description",
+          "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "params": {},
+            "patch_type": {
+              "type": "string"
+            },
+            "patch_schema": {},
+            "description": {
+              "type": "string"
+            },
+            "docs": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plugin",
+            "name",
+            "params",
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "plugin_list",
+        "title": "List the CLAP plugins the sandbox can load.",
+        "description": "List the CLAP plugins the sandbox can load. Scans the plugin path once (rescan: true to scan again). filter matches the id or name, case-insensitively. Load one with plugin.load. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "plugin_list_args",
+          "properties": {
+            "filter": {
+              "type": "string",
+              "description": "Text to match in the id or name."
+            },
+            "rescan": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "plugin_list",
+          "properties": {
+            "plugins": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "plugin",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "vendor": {
+                    "type": "string"
+                  },
+                  "instrument": {
+                    "type": "boolean"
+                  },
+                  "semantic": {
+                    "type": "boolean"
+                  },
+                  "features": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "vendor",
+                  "instrument",
+                  "semantic",
+                  "features"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "plugins"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "plugin_load",
+        "title": "Load a plugin into the chain and return its instance id.",
+        "description": "Load a plugin into the chain and return its instance id. plugin is an id from plugin.list or a .clap path. An instrument goes first in the chain, anything else last, unless position says otherwise (instruments must stay first). Then describe it with plugin.describe. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "plugin_load_args",
+          "properties": {
+            "plugin": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Plugin id or .clap path."
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 0.0,
+              "description": "Chain index (0 = first)."
+            }
+          },
+          "required": [
+            "plugin"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "plugin_load",
+          "properties": {
+            "instance": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "semantic": {
+              "type": "boolean"
+            },
+            "chain": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "instance",
+            "name",
+            "semantic",
+            "chain"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "plugin_remove",
+        "title": "Remove a plugin instance from the chain.",
+        "description": "Remove a plugin instance from the chain. Unloads the instance; its id is not reused. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "instance_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            }
+          },
+          "required": [
+            "instance"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "chain",
+          "properties": {
+            "chain": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "chain"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "preset_list",
+        "title": "List saved presets, optionally for one plugin id.",
+        "description": "List saved presets, optionally for one plugin id.  See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "preset_list_args",
+          "properties": {
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "preset_list",
+          "properties": {
+            "presets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "preset",
+                "properties": {
+                  "plugin": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "plugin",
+                  "name",
+                  "tags"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "presets"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "preset_load",
+        "title": "Load a named preset into an instance.",
+        "description": "Load a named preset into an instance. The preset must belong to the instance's plugin (see preset.list). See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "preset_load_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "instance",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "description",
+          "properties": {
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "preset_save",
+        "title": "Save an instance's current settings as a named preset.",
+        "description": "Save an instance's current settings as a named preset. Stores the patch (semantic plugins) or the plugin state. Overwrites a preset of the same name for the same plugin. Names: 1-64 of A-Z a-z 0-9 space _ . + -. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "preset_save_args",
+          "properties": {
+            "instance": {
+              "type": "string",
+              "pattern": "^in_[0-9]+$",
+              "description": "Instance id from plugin.load, e.g. \"in_1\"."
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notes": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "path",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "profile_evaluate",
+        "title": "Score a render against a target descriptor profile.",
+        "description": "Score a render against a target descriptor profile. profile: {\"schema\": \"supple.analysis-profile/1.0\", \"targets\": {\"<report key>\": {\"target\": x, \"tolerance\": t, \"weight\"?: w} | {\"min\"?: a, \"max\"?: b}}, \"ltas\"?: [31 relative dB]}. Keys are dotted report paths such as spectral.centroid_hz.median or harmonic.harmonics_db.3. Returns per-target pass and normalized distance, and a weighted loss (0 = on target). See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "profile_args",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A render id (rd_1) or an audio file path."
+            },
+            "profile": {}
+          },
+          "required": [
+            "source",
+            "profile"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "profile_result",
+          "properties": {
+            "result": {}
+          },
+          "required": [
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "render",
+        "title": "Render notes, a MIDI file or an audio file through the chain to a WAV.",
+        "description": "Render notes, a MIDI file or an audio file through the chain to a WAV. notation: a phrase in the notation (see the notation guide), e.g. \"voice lead; 1: C4:q E4:q G4:h | C5:w\". midi_file / audio_file: paths (audio at the session rate). bars/seconds override the length; the tail after it is rendered until silence (tail_s caps it). Returns the render id for analyze/compare and the WAV path. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "render_args",
+          "properties": {
+            "notation": {
+              "type": "string",
+              "description": "Notation text."
+            },
+            "midi_file": {
+              "type": "string"
+            },
+            "audio_file": {
+              "type": "string"
+            },
+            "bars": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "maximum": 1000.0
+            },
+            "seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "maximum": 600.0
+            },
+            "tempo": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 1.0,
+                  "maximum": 999.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*bpm)?\\s*$"
+                }
+              ],
+              "x-unit": "bpm",
+              "x-unit-strings": true,
+              "description": "Quantity strings are range-checked by the server. (bpm; accepts quantity strings)"
+            },
+            "tail_s": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 60.0
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "analyze": {
+              "type": "string",
+              "enum": [
+                "none",
+                "summary",
+                "standard",
+                "full"
+              ],
+              "description": "Also analyze the render (see the analyze command); summary is compact (≤ 400 tokens).",
+              "default": "none"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "render_result",
+          "properties": {
+            "render": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "seconds": {
+              "type": "number"
+            },
+            "peak_dbfs": {
+              "type": "number"
+            },
+            "tail_s": {
+              "type": "number"
+            },
+            "tail_capped": {
+              "type": "boolean"
+            },
+            "latency_samples": {
+              "type": "integer"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "log": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "analysis": {}
+          },
+          "required": [
+            "render",
+            "path",
+            "seconds",
+            "peak_dbfs",
+            "tail_s",
+            "tail_capped",
+            "latency_samples"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "session_get",
+        "title": "Show the session: settings, chain, instances and renders.",
+        "description": "Show the session: settings, chain, instances and renders.  See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "no_args",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "session",
+          "properties": {
+            "settings": {},
+            "chain": {},
+            "instances": {},
+            "renders": {}
+          },
+          "required": [
+            "settings",
+            "chain",
+            "instances",
+            "renders"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "session_reset",
+        "title": "Unload every plugin, delete renders and restore default settings.",
+        "description": "Unload every plugin, delete renders and restore default settings. Not undoable. Saved presets are kept. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "no_args",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "empty",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false
+        }
+      },
+      {
+        "name": "session_set",
+        "title": "Change session settings (rate, block size, tempo, meter, tail limit).",
+        "description": "Change session settings (rate, block size, tempo, meter, tail limit). Only the given fields change. A rate or block size change reactivates plugins at the next render. See describe for errors and examples.",
+        "inputSchema": {
+          "type": "object",
+          "title": "session_set_args",
+          "properties": {
+            "sample_rate": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 8000.0,
+                  "maximum": 384000.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+                }
+              ],
+              "x-unit": "Hz",
+              "x-unit-strings": true,
+              "description": "Quantity strings are range-checked by the server. (Hz; accepts quantity strings)"
+            },
+            "block_size": {
+              "type": "integer",
+              "minimum": 1.0,
+              "maximum": 8192.0
+            },
+            "tempo": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 1.0,
+                  "maximum": 999.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*bpm)?\\s*$"
+                }
+              ],
+              "x-unit": "bpm",
+              "x-unit-strings": true,
+              "description": "Quantity strings are range-checked by the server. (bpm; accepts quantity strings)"
+            },
+            "meter": {
+              "type": "string",
+              "pattern": "^[0-9]+/[0-9]+$"
+            },
+            "tail_limit_s": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 60.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "title": "settings",
+          "properties": {
+            "settings": {}
+          },
+          "required": [
+            "settings"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true
+        }
+      },
+      {
+        "name": "describe",
+        "title": "Describe commands",
+        "description": "Search or describe registered commands.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object"
+        }
+      },
+      {
+        "name": "exec",
+        "title": "Execute a command",
+        "description": "Run one command or an atomic batch.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object"
+            },
+            "batch": {
+              "type": "object"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object"
+        }
+      }
+    ]
+  }
+}
+
+request
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "session_get",
+    "arguments": {}
+  }
+}
+
+response
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"settings\":{\"sample_rate\":48000.0,\"block_size\":256,\"tempo\":120.0,\"meter\":\"4/4\",\"tail_limit_s\":5.0},\"chain\":[],\"instances\":{},\"renders\":{}}"
+      }
+    ],
+    "structuredContent": {
+      "settings": {
+        "sample_rate": 48000.0,
+        "block_size": 256,
+        "tempo": 120.0,
+        "meter": "4/4",
+        "tail_limit_s": 5.0
+      },
+      "chain": [],
+      "instances": {},
+      "renders": {}
+    }
+  }
+}
+
+request
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "session_get",
+    "arguments": {
+      "misspelled": 1
+    }
+  }
+}
+
+response
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "command.invalid_args at /args: invalid arguments for session.get Hint: fix the listed argument errors\n  - schema.unknown_member at /args/misspelled: unknown member \"misspelled\" Hint: valid members: "
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "code": "command.invalid_args",
+      "message": "invalid arguments for session.get",
+      "path": "/args",
+      "hint": "fix the listed argument errors",
+      "details": [
+        {
+          "code": "schema.unknown_member",
+          "message": "unknown member \"misspelled\"",
+          "path": "/args/misspelled",
+          "hint": "valid members: "
+        }
+      ]
+    }
+  }
+}
