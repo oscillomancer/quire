@@ -65,6 +65,10 @@ struct Program {
     std::array<std::array<bool, kOscCount>, kOscCount> delayed{};
     std::array<std::array<float, kMaxSteps>, kStepCount> steps{};
     const WavetableBank* tables = nullptr;  // generated when a wavetable oscillator exists
+    // Voices render stage by stage (oscillators, mixer, filters, drive, amp)
+    // unless an audio-rate route reads a later oscillator's previous sample or
+    // sync would read osc1 before it runs: those need the per-sample path.
+    bool staged = true;
 };
 
 std::unique_ptr<Program> compileProgram(const Patch& patch) {
@@ -150,6 +154,16 @@ std::unique_ptr<Program> compileProgram(const Patch& patch) {
         for (int m = 0; m < kOscCount; ++m)
             p->delayed[static_cast<std::size_t>(c)][static_cast<std::size_t>(m)] =
                 rank[static_cast<std::size_t>(m)] >= rank[static_cast<std::size_t>(c)];
+
+    for (int c = 0; c < kOscCount; ++c)
+        for (int m = 0; m < kOscCount; ++m) {
+            const auto uc = static_cast<std::size_t>(c), um = static_cast<std::size_t>(m);
+            if ((p->fm[uc][um] != 0.0 || p->am[uc][um] != 0.0) && p->delayed[uc][um])
+                p->staged = false;
+        }
+    if (p->order[0] != 0)
+        for (int o = 1; o < kOscCount; ++o)
+            if (p->st.osc[static_cast<std::size_t>(o)] == OscType::Va) p->staged = false;
 
     for (int s = 0; s < kStepCount; ++s) {
         const auto& v = p->st.stepValues[static_cast<std::size_t>(s)];
@@ -667,6 +681,15 @@ struct Engine::Impl {
         const auto u = static_cast<std::size_t>(fi);
         const auto c = static_cast<std::size_t>(ch);
         const double g = v.g[u].value, k = v.k[u].value, drive = v.drive[u].value;
+        return filterWith(v, fi, c, x, g, k, drive, v.delay[u].value, v.feedback[u].value,
+                          v.damping[u].value, v.level[u].value);
+    }
+
+    // One filter sample with explicit coefficients (the staged path passes
+    // the same per-sample values the Lerps would give).
+    double filterWith(Voice& v, int fi, std::size_t c, double x, double g, double k, double drive,
+                      double delay, double feedback, double damping, double level) SUPPLE_RT {
+        const auto u = static_cast<std::size_t>(fi);
         double y = x;
         switch (*prog->st.filter[u]) {
             case FilterType::Ladder: {
@@ -683,8 +706,8 @@ struct Engine::Impl {
             }
             case FilterType::Comb:
                 y = v.comb[u][c].next(
-                    drive > 1.0001 ? dsp::fastTanh(x * drive) / std::sqrt(drive) : x,
-                    v.delay[u].value, v.feedback[u].value * 0.99, v.damping[u].value);
+                    drive > 1.0001 ? dsp::fastTanh(x * drive) / std::sqrt(drive) : x, delay,
+                    feedback * 0.99, damping);
                 break;
             case FilterType::Formant:
                 y = v.formant[u][c].next(
@@ -692,11 +715,265 @@ struct Engine::Impl {
                     v.formantCoefs[u]);
                 break;
         }
-        return y * v.level[u].value;
+        return y * level;
+    }
+
+    static constexpr std::size_t kSeg = static_cast<std::size_t>(kTick) * 4;  // high quality
+
+    // One filter over a buffer, the type decided once per segment.
+    void filterRun(Voice& v, int fi, std::size_t c, const double* x, double* y, std::uint32_t n,
+                   const double* const* co) SUPPLE_RT {
+        const auto u = static_cast<std::size_t>(fi);
+        const double *g = co[0], *k = co[1], *drv = co[2], *lvl = co[3], *dly = co[4], *fb = co[5],
+                     *dmp = co[6];
+        switch (*prog->st.filter[u]) {
+            case FilterType::Ladder: {
+                const bool db24 =
+                    static_cast<Slope>(ramps[index(filter(fi), FilterF::slope)].to) == Slope::Db24;
+                v.ladder[u][c].block(x, y, n, g, k, drv, lvl, db24);
+                break;
+            }
+            case FilterType::Svf: {
+                const auto mode = static_cast<SvfMode>(ramps[index(filter(fi), FilterF::mode)].to);
+                Svf& f = v.svf[u][c];
+                for (std::uint32_t s = 0; s < n; ++s) {
+                    const double in =
+                        drv[s] > 1.0001 ? dsp::fastTanh(x[s] * drv[s]) / std::sqrt(drv[s]) : x[s];
+                    y[s] = f.next(in, g[s], k[s], mode) * lvl[s];
+                }
+                break;
+            }
+            case FilterType::Comb: {
+                Comb& f = v.comb[u][c];
+                for (std::uint32_t s = 0; s < n; ++s) {
+                    const double in =
+                        drv[s] > 1.0001 ? dsp::fastTanh(x[s] * drv[s]) / std::sqrt(drv[s]) : x[s];
+                    y[s] = f.next(in, dly[s], fb[s] * 0.99, dmp[s]) * lvl[s];
+                }
+                break;
+            }
+            case FilterType::Formant: {
+                Formant& f = v.formant[u][c];
+                for (std::uint32_t s = 0; s < n; ++s) {
+                    const double in =
+                        drv[s] > 1.0001 ? dsp::fastTanh(x[s] * drv[s]) / std::sqrt(drv[s]) : x[s];
+                    y[s] = f.next(in, v.formantCoefs[u]) * lvl[s];
+                }
+                break;
+            }
+        }
+    }
+
+    // Stage-by-stage rendering: oscillators (in processing order), mixer,
+    // filters, drive, amp — the same arithmetic per sample, in the same order,
+    // as the per-sample path (bit-identical output), with every per-type and
+    // per-structure decision made once per segment.
+    void renderVoiceStaged(Voice& v, std::size_t offset, std::uint32_t n) SUPPLE_RT {
+        const Program& P = *prog;
+        const bool hasF1 = P.st.filter[0].has_value(), hasF2 = P.st.filter[1].has_value();
+        const bool parallel = P.st.routing == FilterRouting::Parallel;
+        const auto driveCurve = static_cast<DriveCurve>(static_cast<int>(P.st.drive) - 1);
+        const double wtLimit = wavetableLimit(sr * P.os);
+        const bool sync1 = P.st.osc[0].has_value();
+        bool mono = true;
+        for (std::size_t o = 0; o < kOscCount; ++o)
+            if (P.st.osc[o] &&
+                (v.gainL[o].value != v.gainR[o].value || v.gainL[o].step != v.gainR[o].step))
+                mono = false;
+        if (!mono && v.monoPath)
+            for (std::size_t fi = 0; fi < kFilterCount; ++fi) {
+                v.svf[fi][1] = v.svf[fi][0];
+                v.ladder[fi][1] = v.ladder[fi][0];
+                v.comb[fi][1].copyState(v.comb[fi][0]);
+                v.formant[fi][1] = v.formant[fi][0];
+            }
+        v.monoPath = mono;
+        const int channels = mono ? 1 : 2;
+
+        // Oscillators.
+        double out[kOscCount][kSeg];
+        double wrap[kSeg];
+        for (int oi = 0; oi < kOscCount; ++oi) {
+            const int o = P.order[static_cast<std::size_t>(oi)];
+            const auto uo = static_cast<std::size_t>(o);
+            const auto& type = P.st.osc[uo];
+            if (!type) continue;
+            int fmN = 0, amN = 0;
+            std::array<std::size_t, kOscCount> fmM{}, amM{};
+            for (std::size_t m = 0; m < kOscCount; ++m) {
+                if (v.fmIndex[uo][m] != 0.0) fmM[static_cast<std::size_t>(fmN++)] = m;
+                if (P.am[uo][m] != 0.0) amM[static_cast<std::size_t>(amN++)] = m;
+            }
+            auto pmAt = [&](std::uint32_t s) {
+                double pm = 0.0;
+                for (int j = 0; j < fmN; ++j) {
+                    const std::size_t m = fmM[static_cast<std::size_t>(j)];
+                    pm += v.fmIndex[uo][m] * out[m][s];
+                }
+                return pm;
+            };
+            double* dst = out[uo];
+            switch (*type) {
+                case OscType::Va: {
+                    const auto wave = static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
+                    const bool sync = o != 0 && sync1 && ramps[index(osc(o), OscF::sync)].to > 0.5;
+                    for (std::uint32_t s = 0; s < n; ++s) {
+                        const double pm = pmAt(s);
+                        const double inc = v.inc[uo].next();
+                        dst[s] =
+                            v.va[uo].next(inc, wave, v.width[uo].next(), v.shape[uo].next(), pm);
+                        if (sync && wrap[s] > 0.0) v.va[uo].syncTo(wrap[s], inc);
+                    }
+                    break;
+                }
+                case OscType::Wavetable: {
+                    const Wavetable& table =
+                        P.tables->table(static_cast<Table>(ramps[index(osc(o), OscF::table)].to));
+                    for (std::uint32_t s = 0; s < n; ++s) {
+                        const double pm = pmAt(s);
+                        const double inc = v.inc[uo].next();
+                        dst[s] = v.wt[uo].next(inc, table, v.position[uo].next(), pm, wtLimit);
+                    }
+                    break;
+                }
+                case OscType::Fm: {
+                    const auto wave = static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
+                    for (std::uint32_t s = 0; s < n; ++s) {
+                        const double pm = pmAt(s);
+                        const double inc = v.inc[uo].next();
+                        dst[s] = v.fmo[uo].next(inc, wave, v.fb[uo].next(), pm);
+                    }
+                    break;
+                }
+                case OscType::Noise: {
+                    const auto color =
+                        static_cast<NoiseColor>(ramps[index(osc(o), OscF::color)].to);
+                    for (std::uint32_t s = 0; s < n; ++s) {
+                        (void)v.inc[uo].next();
+                        dst[s] = v.noise[uo].next(color);
+                    }
+                    break;
+                }
+                case OscType::Sub: {
+                    const auto wave = static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
+                    for (std::uint32_t s = 0; s < n; ++s) {
+                        const double pm = pmAt(s);
+                        const double inc = v.inc[uo].next();
+                        dst[s] = v.va[uo].next(inc, wave, 0.5, 0.0, pm);
+                    }
+                    break;
+                }
+            }
+            for (int j = 0; j < amN; ++j) {
+                const std::size_t m = amM[static_cast<std::size_t>(j)];
+                const double a = v.amDepth[uo][m];
+                for (std::uint32_t s = 0; s < n; ++s) dst[s] *= 1.0 - a + a * out[m][s];
+            }
+            if (o == 0)  // what sync reads: osc1's wrap after each of its samples
+                for (std::uint32_t s = 0; s < n; ++s) wrap[s] = v.va[0].wrapped();
+        }
+        for (std::size_t o = 0; o < kOscCount; ++o)
+            v.prevOut[o] = P.st.osc[o] ? out[o][n - 1] : 0.0;
+
+        // Mixer.
+        double in1[2][kSeg], in2[2][kSeg], direct[2][kSeg];
+        for (int c = 0; c < 2; ++c)
+            for (std::uint32_t s = 0; s < n; ++s) in1[c][s] = in2[c][s] = direct[c][s] = 0.0;
+        for (std::size_t o = 0; o < kOscCount; ++o) {
+            if (!P.st.osc[o]) continue;
+            const OscTarget to = P.st.to[o];
+            double* a = to == OscTarget::Filter2  ? in2[0]
+                        : to == OscTarget::Direct ? direct[0]
+                                                  : in1[0];
+            double* b = to == OscTarget::Filter2  ? in2[1]
+                        : to == OscTarget::Direct ? direct[1]
+                                                  : in1[1];
+            for (std::uint32_t s = 0; s < n; ++s) {
+                const double gl = v.gainL[o].next(), gr = v.gainR[o].next();
+                const double l = out[o][s] * gl, r = out[o][s] * gr;
+                if (to == OscTarget::None) continue;
+                a[s] += l, b[s] += r;
+                if (to == OscTarget::Both) in2[0][s] += l, in2[1][s] += r;
+            }
+        }
+        double b1[kSeg], b2[kSeg];
+        for (std::uint32_t s = 0; s < n; ++s) b1[s] = v.bal1.next(), b2[s] = v.bal2.next();
+
+        // Filters: coefficients as the Lerps give them, then each filter over the buffer.
+        double co[kFilterCount][7][kSeg];
+        for (std::size_t fi = 0; fi < kFilterCount; ++fi) {
+            if (!P.st.filter[fi]) continue;
+            for (std::uint32_t s = 0; s < n; ++s) {
+                co[fi][0][s] = v.g[fi].next(), co[fi][1][s] = v.k[fi].next();
+                co[fi][2][s] = v.drive[fi].next(), co[fi][3][s] = v.level[fi].next();
+                co[fi][4][s] = v.delay[fi].next(), co[fi][5][s] = v.feedback[fi].next();
+                co[fi][6][s] = v.damping[fi].next();
+            }
+        }
+        const double* c1[7] = {co[0][0], co[0][1], co[0][2], co[0][3],
+                               co[0][4], co[0][5], co[0][6]};
+        const double* c2[7] = {co[1][0], co[1][1], co[1][2], co[1][3],
+                               co[1][4], co[1][5], co[1][6]};
+        double y[2][kSeg], f1[kSeg], f2[kSeg], x2[kSeg];
+        for (int ch = 0; ch < channels; ++ch) {
+            const auto c = static_cast<std::size_t>(ch);
+            if (hasF1)
+                filterRun(v, 0, c, in1[c], f1, n, c1);
+            else
+                std::copy_n(in1[c], n, f1);
+            if (parallel) {
+                if (hasF2)
+                    filterRun(v, 1, c, in2[c], f2, n, c2);
+                else
+                    std::copy_n(in2[c], n, f2);
+                for (std::uint32_t s = 0; s < n; ++s)
+                    y[c][s] = (f1[s] * b1[s] + f2[s] * b2[s]) + direct[c][s];
+            } else {
+                for (std::uint32_t s = 0; s < n; ++s) x2[s] = in2[c][s] + f1[s];
+                if (hasF2) {
+                    filterRun(v, 1, c, x2, f2, n, c2);
+                    for (std::uint32_t s = 0; s < n; ++s) y[c][s] = f2[s] + direct[c][s];
+                } else {
+                    for (std::uint32_t s = 0; s < n; ++s) y[c][s] = x2[s] + direct[c][s];
+                }
+            }
+        }
+
+        // Drive.
+        if (P.st.drive != DriveType::Off) {
+            double dg[kSeg], db[kSeg], dm[kSeg], dc[kSeg];
+            for (std::uint32_t s = 0; s < n; ++s) {
+                dg[s] = v.driveGain.next(), db[s] = v.driveBias.next(), dm[s] = v.driveMix.next();
+                dc[s] = v.driveComp.next();
+            }
+            for (int ch = 0; ch < channels; ++ch) {
+                double* yc = y[ch];
+                for (std::uint32_t s = 0; s < n; ++s)
+                    yc[s] += (drive(yc[s], driveCurve, dg[s], db[s], dc[s]) - yc[s]) * dm[s];
+            }
+        }
+        if (mono) std::copy_n(y[0], n, y[1]);
+
+        // Amp (and the steal fade) into the bus.
+        const bool fading = v.state == Voice::State::Fading;
+        for (std::uint32_t s = 0; s < n; ++s) {
+            double gl = v.ampL.next(), gr = v.ampR.next();
+            if (fading) {
+                gl *= v.fade;
+                gr *= v.fade;
+                v.fade = std::max(0.0, v.fade - v.fadeStep);
+            }
+            busL[offset + s] += static_cast<float>(y[0][s] * gl);
+            busR[offset + s] += static_cast<float>(y[1][s] * gr);
+        }
     }
 
     // Renders n internal samples of voice v into the bus at `offset`.
     void renderVoice(Voice& v, std::size_t offset, std::uint32_t n) SUPPLE_RT {
+        if (prog->staged) {
+            renderVoiceStaged(v, offset, n);
+            return;
+        }
         const Program& P = *prog;
         const bool hasF1 = P.st.filter[0].has_value(), hasF2 = P.st.filter[1].has_value();
         const bool parallel = P.st.routing == FilterRouting::Parallel;

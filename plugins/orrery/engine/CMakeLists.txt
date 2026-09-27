@@ -11,3 +11,11 @@ supple_add_library(orrery-engine
 supple_add_tests(orrery-engine
   SOURCES tests/test_params.cpp tests/test_patch.cpp tests/test_engine.cpp tests/test_wavetables.cpp
   LABELS rt)
+
+# CPU benchmark (synth.md §9); meaningful in the release preset. A monorepo
+# developer tool: not built inside template-derived plugin projects.
+if(SUPPLE_BUILD_TESTS)
+  add_executable(orrery-bench bench/orrery_bench.cpp)
+  target_link_libraries(orrery-bench PRIVATE supple::orrery-engine)
+  supple_target_defaults(orrery-bench)
+endif()
