@@ -224,6 +224,37 @@ int main() {
             w2.run(p);
             EXPECT(w2.ends == 1);
         }
+
+        // A second press mid-drag (on a choice, which opens a menu) ends the
+        // drag: nothing moves under the menu and the gestures stay balanced.
+        Flush drained2;
+        drained2.run(p);
+        ed.layout();
+        const auto* knob = find(ed, Kind::Knob, static_cast<int>(idx("osc1.level")));
+        const auto* choice = find(ed, Kind::Choice, static_cast<int>(idx("osc1.wave")));
+        EXPECT(knob != nullptr && choice != nullptr);
+        if (knob && choice) {
+            ed.onPointerDown(knob->x + 5, knob->y + 20, 0, 0);
+            ed.onPointerMove(knob->x + 5, knob->y + 5, 0);
+            ed.onPointerDown(choice->x + choice->w * 0.5f, choice->y + choice->h * 0.5f, 1, 0);
+            EXPECT(ed.menuOpen());
+            EXPECT(!ed.dragging());
+            const double held = bridge.value(idx("osc1.level"));
+            ed.onPointerMove(knob->x + 5, knob->y - 60, 0);
+            EXPECT(bridge.value(idx("osc1.level")) == held);
+            ed.onPointerUp(knob->x + 5, knob->y - 60, 0, 0);
+            ed.onKeyCode(orrery::gui::key::kEscape, 0);
+            Flush m;
+            m.run(p);
+            EXPECT(m.begins == m.ends);
+        }
+        // The bridge closes an outstanding gesture when another begins.
+        bridge.beginEdit(idx("osc1.level"));
+        bridge.beginEdit(idx("osc1.fine"));
+        bridge.endEdit(idx("osc1.fine"));
+        Flush b2;
+        b2.run(p);
+        EXPECT(b2.begins == 2 && b2.ends == 2);
     }
     p->destroy(p);
     if (failures)

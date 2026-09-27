@@ -116,6 +116,7 @@ class Editor {
     void setParamNormalized(std::size_t index, double normal);
     void editOnce(std::size_t index, double physical);
     void closeWheelGesture();
+    void endDrag();  // closes a parameter drag's gesture
     void openChoiceMenu(const Hit& h);
     void openTypeMenu(const Hit& h);
     void openAddRouteMenu(float x, float y);

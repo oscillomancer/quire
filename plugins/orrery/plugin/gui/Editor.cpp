@@ -371,6 +371,7 @@ void Editor::closeWheelGesture() {
 
 void Editor::openMenu(float x, float y, std::string title, std::vector<std::string> items,
                       std::function<void(int)> pick) {
+    endDrag();  // a menu is modal: no parameter keeps moving under it
     menu_.open = true;
     menu_.x = x;
     menu_.y = y;
@@ -469,7 +470,14 @@ void Editor::openAddRouteMenu(float x, float y) {
 
 // --- input -----------------------------------------------------------------------------------
 
+void Editor::endDrag() {
+    if (drag_.kind == Drag::Param) host_.endEdit(static_cast<std::size_t>(drag_.target));
+    drag_ = {};
+    dirty_ = true;
+}
+
 bool Editor::onPointerDown(float x, float y, int button, uint32_t mods) {
+    endDrag();  // a second press mid-drag (another button) ends the drag first
     layout();
     if (menu_.open) {
         const Hit* h = hitAt(x, y);
@@ -643,11 +651,7 @@ void Editor::onPointerMove(float x, float y, uint32_t mods) {
     }
 }
 
-void Editor::onPointerUp(float, float, int, uint32_t) {
-    if (drag_.kind == Drag::Param) host_.endEdit(static_cast<std::size_t>(drag_.target));
-    drag_ = {};
-    dirty_ = true;
-}
+void Editor::onPointerUp(float, float, int, uint32_t) { endDrag(); }
 
 bool Editor::onWheel(float x, float y, float, float dy, uint32_t mods) {
     layout();

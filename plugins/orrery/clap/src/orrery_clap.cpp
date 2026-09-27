@@ -270,6 +270,10 @@ struct Plugin final : EditorBridge {
     std::uint64_t revision() const override { return structureRevision + store.generation(); }
 
     void beginEdit(std::size_t index) override {
+        // One gesture at a time: an outstanding one on another parameter ends
+        // first, so every begin the host sees gets its end.
+        if (gestureIndex >= 0 && gestureIndex != static_cast<std::int32_t>(index))
+            endEdit(static_cast<std::size_t>(gestureIndex));
         gestureIndex = static_cast<std::int32_t>(index);
         // A gesture starts only with room for its final value and end.
         gestureQueued = edits.free() >= 3 &&
