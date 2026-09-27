@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <thread>
 
 #include "../src/optimize_loss.h"
@@ -48,11 +49,12 @@ struct Harness {
     cmd::Registry registry;
     std::unique_ptr<SandboxHost> host;
     std::unique_ptr<cmd::Dispatcher> d;
-    Harness() {
+    explicit Harness(std::function<void(std::string_view)> referenceHook = {}) {
         registerCommands(registry);
         SessionOptions o;
         o.workdir = root.path;
         o.pluginPath = {kOrrery, kFixture};
+        o.referencePreparationHook = std::move(referenceHook);
         auto s = Session::open(o);
         REQUIRE(s);
         host = std::make_unique<SandboxHost>(std::move(*s));
@@ -193,14 +195,30 @@ TEST_CASE("reference envelope loss squares each descriptor distance") {
     CHECK(loss.total == doctest::Approx(4.0));
 }
 
-TEST_CASE("optimize.start returns promptly for a 30 second file reference") {
-    Harness h;
+TEST_CASE("reference read and analysis run on the job worker after optimize.start returns") {
+    const auto commandThread = std::this_thread::get_id();
+    std::atomic<bool> entered = false, release = false, analyzed = false;
+    std::thread::id readThread, analysisThread;
+    Harness h([&](std::string_view phase) {
+        if (phase == "before_read") {
+            readThread = std::this_thread::get_id();
+            entered.store(true, std::memory_order_release);
+            entered.notify_one();
+            // A regression to synchronous preparation must fail without deadlocking.
+            if (readThread != commandThread)
+                while (!release.load(std::memory_order_acquire)) release.wait(false);
+        } else if (phase == "after_analysis") {
+            analysisThread = std::this_thread::get_id();
+            analyzed.store(true, std::memory_order_release);
+            analyzed.notify_one();
+        }
+    });
     h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
     h.call("patch.set", kPatch);
     audio::AudioData audio;
     audio.sampleRate = 48000.0;
-    audio.channels = {std::vector<float>(30 * 48000, 0.0f), std::vector<float>(30 * 48000, 0.0f)};
-    const fs::path file = h.root.path / "long-reference.wav";
+    audio.channels = {std::vector<float>(48000, 0.0f), std::vector<float>(48000, 0.0f)};
+    const fs::path file = h.root.path / "reference.wav";
     REQUIRE(audio::writeWav(file, audio, {}).ok());
     const auto start = std::chrono::steady_clock::now();
     auto started =
@@ -210,8 +228,18 @@ TEST_CASE("optimize.start returns promptly for a 30 second file reference") {
     const double ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     INFO(ms);
-    MESSAGE("30 s reference optimize.start latency: " << ms << " ms");
-    CHECK(ms < 100.0);
+    MESSAGE("optimize.start latency (diagnostic only): " << ms << " ms");
+    entered.wait(false);
+    CHECK(readThread != commandThread);
+    CHECK_FALSE(analyzed.load(std::memory_order_acquire));
+    auto status = h.d->execute(
+        {"job.status", j(R"({"job": ")" + started["job"].asString() + R"("})"), kTest});
+    CHECK(status);
+    if (status) CHECK((*status)["status"].asString() == "running");
+    release.store(true, std::memory_order_release);
+    release.notify_one();
+    analyzed.wait(false);
+    CHECK(analysisThread == readThread);
     h.call("job.cancel", R"({"job": ")" + started["job"].asString() + R"("})");
 }
 

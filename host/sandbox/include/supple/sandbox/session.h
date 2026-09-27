@@ -45,6 +45,9 @@ struct SessionOptions {
     std::vector<std::filesystem::path> pluginPath;
     std::filesystem::path presetDir;  // empty = <workdir>/presets
     host::HostIdentity identity;
+    // Non-RT diagnostic hook for observing reference preparation in tests.
+    // Called on the job worker before the file read and after analysis.
+    std::function<void(std::string_view)> referencePreparationHook;
 };
 
 // What a render plays. At most one of `notes` / `audio` (neither: a silent

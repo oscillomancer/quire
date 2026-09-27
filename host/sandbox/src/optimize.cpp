@@ -452,6 +452,7 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             auto cancelled = [&] { return stop.stop_requested() || W.jobs->cancelled(W.job); };
             if (cancelled()) return;
             if (W.referenceFile) {
+                if (auto& hook = W.session->options().referencePreparationHook) hook("before_read");
                 auto audio = audio::readAudio(*W.referenceFile);
                 if (!audio) {
                     (void)W.jobs->fail(W.job, std::move(audio).error().at("/target/reference"));
@@ -459,6 +460,8 @@ void registerOptimizeCommands(cmd::Registry& registry) {
                 }
                 if (cancelled()) return;
                 auto rep = analyzeMatched(*audio, std::nullopt, W.referenceNoteOff);
+                if (auto& hook = W.session->options().referencePreparationHook)
+                    hook("after_analysis");
                 if (!rep) {
                     (void)W.jobs->fail(W.job, std::move(rep).error().at("/target/reference"));
                     return;
