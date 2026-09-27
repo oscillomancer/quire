@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
+#include <thread>
 
 #include <supple/engine/offline.h>
 
@@ -106,6 +108,41 @@ TEST_CASE("pan law gains") {
     CHECK(std::fabs(r) < 1e-12);
     std::tie(l, r) = panGains(0.0, 0.0);
     CHECK(l == doctest::Approx(1.0).epsilon(1e-6));
+}
+
+TEST_CASE("shared bridge accepts a new effect after its last instance is removed") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    model::EditTxn initial(model::Session::create(), 1);
+    const Id track = addTrack(initial, "Synth");
+    addFx(initial, track, kSine);
+    addNote(initial, track, 0.0, 1.0);
+    const model::Session base = commit(initial);
+    auto pool = makePool();
+    const auto dry = render(base, pool, 0.05);
+    REQUIRE(peak(dry.audio.channels[0]) > 0.1);
+
+    int sharedPid = -1;
+    for (int cycle = 0; cycle < 24; ++cycle) {
+        model::EditTxn edit(base, static_cast<std::uint64_t>(cycle + 2));
+        const Id fx = addFx(
+            edit, track, kGain,
+            json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":"-60 dB"}})")
+                .value());
+        edit.modify<model::FxInstance>(
+            fx, [](model::FxInstance& value) { value.isolation = model::Isolation::SharedBridge; });
+        const model::Session withFx = commit(edit);
+        const auto wet = render(withFx, pool, 0.05);
+        REQUIRE_MESSAGE(wet.warnings.empty(), (wet.warnings.empty() ? "" : wet.warnings.front()));
+        auto* instance = pool.find(fx);
+        REQUIRE(instance);
+        CHECK(instance->bridgePid() > 0);
+        if (sharedPid > 0) CHECK(instance->bridgePid() == sharedPid);
+        sharedPid = instance->bridgePid();
+        CHECK(peak(wet.audio.channels[0]) == 0.0);  // missing fx would pass dry audio through
+        pool.prune(base);  // destroys the last shared instance after this plan is retired
+        CHECK(pool.find(fx) == nullptr);
+        if (cycle % 2) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 TEST_CASE("an instrument track plays its MIDI item at the right samples" *

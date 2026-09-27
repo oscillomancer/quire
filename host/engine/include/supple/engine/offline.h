@@ -62,11 +62,12 @@ class InstancePool {
     struct Entry {
         std::unique_ptr<host::Instance> instance;
         std::string pluginId;
-        bool isolated = false;
+        model::Isolation isolation = model::Isolation::InProcess;
         std::string appliedState;  // canonical patch text or blob hash last applied
     };
     Resolver resolve_;
     host::HostIdentity identity_;
+    std::shared_ptr<host::BridgeProcess> sharedBridge_;
     std::map<model::Id, Entry> instances_;
     std::vector<std::pair<std::uint64_t, std::unique_ptr<host::Instance>>> retired_;
     std::uint64_t generation_ = 0;

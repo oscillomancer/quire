@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -375,6 +376,63 @@ TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     l.stopProcessing();
     CHECK_FALSE(r.failed());
     r.deactivate();
+}
+
+TEST_CASE("shared bridge routes two instances through one process and fails both on a crash") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto process = createBridgeProcess();
+    REQUIRE(process);
+    const auto gain = find("com.suppleaudio.test.gain");
+    const auto crash = find("com.suppleaudio.test.crash");
+    auto first = Instance::create(gain, {}, true, *process);
+    auto second = Instance::create(crash, {}, true, *process);
+    auto local = Instance::create(gain, {});
+    auto dedicated = Instance::create(gain, {}, true);
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(local);
+    REQUIRE(dedicated);
+    CHECK((*first)->bridgePid() > 0);
+    CHECK((*first)->bridgePid() == (*second)->bridgePid());
+    CHECK((*first)->bridgePid() != (*dedicated)->bridgePid());
+    auto transient = Instance::create(gain, {}, true, *process);
+    REQUIRE(transient);
+    CHECK((*transient)->bridgePid() == (*first)->bridgePid());
+    (*transient).reset();  // Destroy removes only this instance.
+    REQUIRE((*second)->paramValue(1));
+
+    for (Instance* instance : {first->get(), second->get(), local->get(), dedicated->get()}) {
+        REQUIRE(instance->activate(48000, 1, 256));
+        REQUIRE(instance->startProcessing());
+    }
+    Buffers a(256), b(256), l(256), d(256);
+    for (std::size_t i = 0; i < a.l.size(); ++i) {
+        const float sample = std::sin(0.02f * static_cast<float>(i));
+        a.l[i] = a.r[i] = b.l[i] = b.r[i] = l.l[i] = l.r[i] = d.l[i] = d.r[i] = sample;
+    }
+    REQUIRE((*first)->process(a.block(256)));
+    REQUIRE((*second)->process(b.block(256)));
+    REQUIRE((*local)->process(l.block(256)));
+    REQUIRE((*dedicated)->process(d.block(256)));
+    CHECK(a.ol == l.ol);
+    CHECK(a.orr == l.orr);
+    CHECK(b.ol == l.ol);  // the crash fixture passes audio through until triggered
+    CHECK(b.orr == l.orr);
+    CHECK(d.ol == l.ol);
+
+    REQUIRE((*second)->setParam(1, 1.0));
+    REQUIRE((*second)->process(b.block(256)));  // crash is isolated
+    CHECK((*first)->failed());
+    CHECK((*second)->failed());
+    CHECK_FALSE((*dedicated)->failed());
+    REQUIRE((*first)->process(a.block(256)));
+    CHECK(std::all_of(a.ol.begin(), a.ol.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE((*dedicated)->process(d.block(256)));
+    CHECK(d.ol == l.ol);
+    for (Instance* instance : {first->get(), second->get(), local->get(), dedicated->get()}) {
+        instance->stopProcessing();
+        instance->deactivate();
+    }
 }
 
 TEST_CASE("isolation: a crashing plugin fails its instance, not the host") {

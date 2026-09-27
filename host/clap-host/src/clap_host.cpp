@@ -462,10 +462,11 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> dirsOrFiles) {
 // ---------------------------------------------------------------------------
 
 Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
-                                                   const HostIdentity& identity, bool isolated) {
+                                                   const HostIdentity& identity, bool isolated,
+                                                   std::shared_ptr<BridgeProcess> bridge) {
     if (isolated) {
         RemotePorts ports;
-        auto remote = RemoteInstance::spawn(info, identity, ports);
+        auto remote = RemoteInstance::spawn(info, identity, ports, std::move(bridge));
         if (!remote) return std::move(remote).error();
         std::unique_ptr<Instance> self(new Instance());
         self->info_ = info;
@@ -639,6 +640,8 @@ bool Instance::reportsTail() const {
 }
 
 bool Instance::failed() const { return remote_ && remote_->failed(); }
+
+int Instance::bridgePid() const { return remote_ ? remote_->bridgePid() : -1; }
 
 std::string Instance::failure() const { return remote_ ? remote_->failure() : std::string(); }
 

@@ -3,7 +3,7 @@ supple_add_library(clap-host
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
 
-# The plugin bridge: hosts one isolated plugin instance (ADR-0013).
+# The plugin bridge: hosts dedicated or shared isolated plugin instances (ADR-0013).
 add_executable(${PRODUCT_SLUG}-bridge bridge/bridge_main.cpp)
 target_link_libraries(${PRODUCT_SLUG}-bridge PRIVATE supple::clap-host)
 supple_target_defaults(${PRODUCT_SLUG}-bridge)

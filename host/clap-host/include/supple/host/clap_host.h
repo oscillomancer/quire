@@ -116,17 +116,20 @@ struct OutputEvents {
 
 class Library;         // a loaded .clap binary (shared by its instances)
 class RemoteInstance;  // an instance in a bridge process
+class BridgeProcess;   // owns a bridge process and its control socket
 
 // The bridge executable for isolated instances (process-wide, set at startup).
 void setBridgeExecutable(std::filesystem::path path);
+Result<std::shared_ptr<BridgeProcess>> createBridgeProcess();
+bool bridgeProcessFailed(const std::shared_ptr<BridgeProcess>& process);
 
 class Instance {
   public:
-    // `isolated`: the plugin runs in a bridge process of its own (ADR-0013;
-    // setBridgeExecutable() must have been called). The API is the same.
+    // `isolated`: the plugin runs in a bridge process. Pass `bridge` to share
+    // one process with other isolated instances; otherwise one is spawned.
     static Result<std::unique_ptr<Instance>> create(const PluginInfo& info,
-                                                    const HostIdentity& host,
-                                                    bool isolated = false);
+                                                    const HostIdentity& host, bool isolated = false,
+                                                    std::shared_ptr<BridgeProcess> bridge = {});
     ~Instance();
     Instance(const Instance&) = delete;
     Instance& operator=(const Instance&) = delete;
@@ -149,6 +152,7 @@ class Instance {
     bool failed() const;
     std::string failure() const;
     bool isolated() const { return remote_ != nullptr; }
+    int bridgePid() const;  // -1 for in-process
 
     // --- ports (valid after create; a stereo configuration is selected when offered) ---
     std::uint32_t audioInputChannels() const { return inChannels_; }

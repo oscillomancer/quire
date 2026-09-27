@@ -1,8 +1,8 @@
-// <slug>-bridge: hosts one plugin instance for an isolated fx (ADR-0013).
+// <slug>-bridge: hosts isolated fx instances (ADR-0013).
 // Started by the host with its end of the control socket on fd 3 (or
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread
-// commands arrive in the shared memory sent with Activate and run on this
-// process's audio thread. Exits on Destroy or when the host goes away.
+// commands arrive in per-instance shared memory sent with Activate and run on
+// that instance's audio thread. Exits when the host closes the control socket.
 #include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -26,8 +27,7 @@ using namespace supple::host::bridge;
 
 namespace {
 
-struct Bridge {
-    int sock = kControlFd;
+struct BridgeInstance {
     std::unique_ptr<Instance> instance;
     void* map = nullptr;
     std::size_t mapSize = 0;
@@ -127,16 +127,23 @@ struct Bridge {
         map = nullptr;
         hdr = nullptr;
     }
+};
+
+struct Bridge {
+    int sock = kControlFd;
+    std::map<std::uint32_t, std::unique_ptr<BridgeInstance>> instances;
+    std::uint32_t nextId = 1;
+    std::uint32_t replyId = 0;
 
     // --- the control plane ---------------------------------------------------------------
 
     bool reply(const Writer& w) {
-        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Ok), w.bytes);
+        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Ok), replyId, w.bytes);
     }
     bool fail(const Error& e) {
         Writer w;
         w.error(e);
-        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Error), w.bytes);
+        return sendFrame(sock, static_cast<std::uint32_t>(Reply::Error), replyId, w.bytes);
     }
     template <class T>
     bool replyOr(const Result<T>& r, auto&& write) {
@@ -148,28 +155,52 @@ struct Bridge {
     bool replyStatus(const supple::Status& st) { return st ? reply(Writer{}) : fail(st.error()); }
 
     // Returns false to exit.
-    bool handle(Op op, Reader& r, int fd) {
-        if (op != Op::Create && !instance) return fail(Error("bridge.no_instance", "no instance"));
+    bool handle(Op op, std::uint32_t instanceId, Reader& r, int fd) {
+        replyId = instanceId;
+        if (op == Op::Create) {
+            if (instanceId != 0)
+                return fail(Error("bridge.instance", "Create requires instance id 0"));
+            PluginInfo info;
+            info.path = r.str();
+            info.id = r.str();
+            HostIdentity identity;
+            identity.name = r.str();
+            identity.vendor = r.str();
+            identity.url = r.str();
+            identity.version = r.str();
+            if (!r.ok()) return fail(Error("bridge.create", "malformed Create request"));
+            auto made = Instance::create(info, identity);
+            if (!made) return fail(made.error());
+            auto slot = std::make_unique<BridgeInstance>();
+            slot->instance = std::move(*made);
+            const std::uint32_t newId = nextId++;
+            Writer w;
+            w.u32(newId);
+            w.u32(slot->instance->audioInputChannels());
+            w.u32(slot->instance->audioOutputChannels());
+            w.u8(slot->instance->acceptsNotes() ? 1 : 0);
+            w.u8(slot->instance->info().semantic ? 1 : 0);
+            instances.emplace(newId, std::move(slot));
+            return reply(w);
+        }
+        auto it = instances.find(instanceId);
+        if (it == instances.end()) {
+            if (fd >= 0) ::close(fd);
+            return fail(Error("bridge.no_instance", "unknown instance id"));
+        }
+        BridgeInstance& slot = *it->second;
+        auto& instance = slot.instance;
+        auto& map = slot.map;
+        auto& mapSize = slot.mapSize;
+        auto& hdr = slot.hdr;
+        auto& layout = slot.layout;
+        auto& audio = slot.audio;
+        auto& lifecycle = slot.lifecycle;
+        auto stopAudio = [&] { slot.stopAudio(); };
+        auto unmap = [&] { slot.unmap(); };
         switch (op) {
-            case Op::Create: {
-                PluginInfo info;
-                info.path = r.str();
-                info.id = r.str();
-                HostIdentity id;
-                id.name = r.str();
-                id.vendor = r.str();
-                id.url = r.str();
-                id.version = r.str();
-                auto made = Instance::create(info, id);
-                if (!made) return fail(made.error());
-                instance = std::move(*made);
-                Writer w;
-                w.u32(instance->audioInputChannels());
-                w.u32(instance->audioOutputChannels());
-                w.u8(instance->acceptsNotes() ? 1 : 0);
-                w.u8(instance->info().semantic ? 1 : 0);
-                return reply(w);
-            }
+            case Op::Create:
+                break;
             case Op::Activate: {
                 const double rate = r.f64();
                 const std::uint32_t minFrames = r.u32(), maxFrames = r.u32(), size = r.u32();
@@ -196,7 +227,7 @@ struct Bridge {
                     return fail(st.error());
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
-                audio = std::thread([this, first] { audioLoop(first); });
+                audio = std::thread([&slot, first] { slot.audioLoop(first); });
                 return reply(Writer{});
             }
             case Op::Deactivate:
@@ -295,7 +326,8 @@ struct Bridge {
                 instance.reset();
                 unmap();
                 reply(Writer{});
-                return false;
+                instances.erase(it);
+                return true;  // an idle pool-owned bridge must accept the next Create
         }
         return fail(Error("bridge.op", "unknown request"));
     }
@@ -312,21 +344,27 @@ int main(int argc, char** argv) {
         pollfd p{b.sock, POLLIN, 0};
         const int ready = ::poll(&p, 1, 10);
         if (ready == 0) {  // idle: the plugin's own main-thread work (timers, callbacks)
-            if (b.instance) {
-                std::lock_guard lock(b.lifecycle);
-                (void)b.instance->serviceMainThread();
+            for (auto& [id, slot] : b.instances) {
+                (void)id;
+                std::lock_guard lock(slot->lifecycle);
+                (void)slot->instance->serviceMainThread();
             }
             continue;
         }
         std::uint32_t op = 0;
+        std::uint32_t id = 0;
         std::vector<std::uint8_t> payload;
         int fd = -1;
-        if (!recvFrame(b.sock, op, payload, &fd)) break;  // the host is gone
+        if (!recvFrame(b.sock, op, id, payload, &fd)) break;  // the host is gone
         Reader r(payload.data(), payload.size());
-        if (!b.handle(static_cast<Op>(op), r, fd)) break;
+        if (!b.handle(static_cast<Op>(op), id, r, fd)) break;
     }
-    b.stopAudio();
-    if (b.instance && b.instance->processing()) b.instance->stopProcessing();
-    b.instance.reset();
+    for (auto& [id, slot] : b.instances) {
+        (void)id;
+        slot->stopAudio();
+        if (slot->instance && slot->instance->processing()) slot->instance->stopProcessing();
+        slot->instance.reset();
+        slot->unmap();
+    }
     return 0;
 }

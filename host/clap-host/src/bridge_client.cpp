@@ -44,9 +44,7 @@ std::filesystem::path bridgeExecutable() {
 
 // --- lifetime -------------------------------------------------------------------------
 
-Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(const PluginInfo& info,
-                                                              const HostIdentity& identity,
-                                                              RemotePorts& ports) {
+Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     const std::filesystem::path exe = bridgeExecutable();
     if (exe.empty())
         return Error("host.bridge", "no plugin bridge is configured", {},
@@ -70,10 +68,28 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(const PluginInfo& 
         return Error("host.bridge",
                      "could not start the plugin bridge " + exeText + ": " + std::strerror(rc));
     }
-    std::unique_ptr<RemoteInstance> self(new RemoteInstance());
+    std::shared_ptr<BridgeProcess> self(new BridgeProcess());
     self->pid_ = pid;
     self->sock_ = sv[0];
     self->pidfd_ = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+    return self;
+}
+
+Result<std::shared_ptr<BridgeProcess>> createBridgeProcess() { return BridgeProcess::spawn(); }
+bool bridgeProcessFailed(const std::shared_ptr<BridgeProcess>& process) {
+    return process && (process->failed() || !process->alive());
+}
+
+Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
+    const PluginInfo& info, const HostIdentity& identity, RemotePorts& ports,
+    std::shared_ptr<BridgeProcess> process) {
+    if (!process) {
+        auto made = createBridgeProcess();
+        if (!made) return std::move(made).error();
+        process = std::move(*made);
+    }
+    std::unique_ptr<RemoteInstance> self(new RemoteInstance());
+    self->process_ = std::move(process);
     Writer w;
     w.str(info.path.string());
     w.str(info.id);
@@ -84,22 +100,25 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(const PluginInfo& 
     auto reply = self->call(Op::Create, w, -1, kCreateTimeoutMs);
     if (!reply) return std::move(reply).error();
     Reader r(reply->data(), reply->size());
+    self->instanceId_ = r.u32();
     ports.inChannels = r.u32();
     ports.outChannels = r.u32();
     ports.acceptsNotes = r.u8() != 0;
     ports.semantic = r.u8() != 0;
-    if (!r.ok()) return Error("host.bridge", "malformed reply from the plugin bridge");
+    if (!r.ok() || !self->instanceId_)
+        return Error("host.bridge", "malformed reply from the plugin bridge");
     return self;
 }
 
 RemoteInstance::~RemoteInstance() {
-    if (sock_ >= 0) {
-        if (!failed()) (void)call(Op::Destroy, Writer{}, -1, 2000);
-        ::close(sock_);
-    }
+    if (process_ && instanceId_ && !failed()) (void)call(Op::Destroy, Writer{}, -1, 2000);
     unmap();
+}
+
+BridgeProcess::~BridgeProcess() {
+    if (sock_ >= 0) ::close(sock_);
     if (pid_ > 0) {
-        // The bridge exits after Destroy; make sure, then reap it.
+        // The bridge exits after its final Destroy or when the socket closes.
         int status = 0;
         for (int i = 0; i < 200 && ::waitpid(pid_, &status, WNOHANG) == 0; ++i) ::usleep(10000);
         if (::waitpid(pid_, &status, WNOHANG) == 0) {
@@ -116,7 +135,7 @@ void RemoteInstance::unmap() {
     hdr_ = nullptr;
 }
 
-void RemoteInstance::killBridge() {
+void BridgeProcess::killBridge() {
     // Through the pidfd: never a recycled pid.
     if (pidfd_ >= 0)
         ::syscall(SYS_pidfd_send_signal, pidfd_, SIGKILL, nullptr, 0);
@@ -125,7 +144,7 @@ void RemoteInstance::killBridge() {
 }
 
 // Main thread: collects the exit status of a bridge that has died.
-void RemoteInstance::reap() {
+void BridgeProcess::reap() {
     if (pid_ <= 0) return;
     int st = 0;
     if (::waitpid(pid_, &st, WNOHANG) != pid_) return;
@@ -134,17 +153,18 @@ void RemoteInstance::reap() {
     if (!failed_.exchange(true) || failSignal_.load() == -1) failSignal_.store(why);
 }
 
-bool RemoteInstance::alive() const {
+bool BridgeProcess::alive() const {
+    if (pid_ <= 0) return false;
     if (pidfd_ < 0) return ::kill(pid_, 0) == 0;
     pollfd p{pidfd_, POLLIN, 0};
     return ::poll(&p, 1, 0) == 0;  // readable once the process has exited
 }
 
-void RemoteInstance::fail(int why) {
+void BridgeProcess::fail(int why) {
     if (!failed_.exchange(true)) failSignal_.store(why);
 }
 
-std::string RemoteInstance::failure() const {
+std::string BridgeProcess::failure() const {
     if (!failed()) return {};
     const int s = failSignal_.load();
     if (s == kHung) return "the plugin stopped responding and its bridge was killed";
@@ -152,18 +172,23 @@ std::string RemoteInstance::failure() const {
     return "the plugin bridge exited";
 }
 
+std::string RemoteInstance::failure() const { return process_->failure(); }
+
 // --- control plane --------------------------------------------------------------------
 
-Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, int fd,
-                                                       int timeoutMs) {
+Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t instance,
+                                                      const Writer& w, int fd, int timeoutMs) {
+    std::lock_guard lock(requests_);
     if (failed()) {
         reap();
         return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
     }
     std::uint32_t status = 0;
     std::vector<std::uint8_t> reply;
-    if (!sendFrame(sock_, static_cast<std::uint32_t>(op), w.bytes, fd) ||
-        !recvFrame(sock_, status, reply, nullptr, timeoutMs)) {
+    std::uint32_t returnedId = 0;
+    if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd) ||
+        !recvFrame(sock_, status, returnedId, reply, nullptr, timeoutMs) ||
+        returnedId != instance) {
         // Gone, or not answering: either way the instance is lost.
         if (alive()) {
             killBridge();
@@ -182,6 +207,11 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, i
         return r.error();
     }
     return reply;
+}
+
+Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, int fd,
+                                                       int timeoutMs) {
+    return process_->call(op, instanceId_, w, fd, timeoutMs);
 }
 
 Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
@@ -323,7 +353,7 @@ Status RemoteInstance::loadState(std::span<const std::uint8_t> bytes) {
 
 bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::string>& log) {
     if (failed()) {
-        reap();
+        process_->reap();
         return false;
     }
     auto reply = call(Op::Service, Writer{});
@@ -357,7 +387,7 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
 // --- data plane (audio thread) ----------------------------------------------------------
 
 bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
-    if (!hdr_ || failed_.load(std::memory_order_relaxed)) return false;
+    if (!hdr_ || process_->failed()) return false;
     // The sanctioned exception to the audio thread's no-syscall rule
     // (ADR-0013): waking the bridge and waiting for it, with a deadline.
     rt::ScopedSanctionedSyscall syscalls;
@@ -377,13 +407,13 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
         if (seen == req) return true;
         futexWait(hdr_->done, seen, 10);
         if (hdr_->done.load(std::memory_order_acquire) == req) return true;
-        if (!alive()) {
-            fail(-1);  // the signal is read when the main thread reaps it
+        if (!process_->alive()) {
+            process_->fail(-1);  // the signal is read when the main thread reaps it
             return false;
         }
         if (std::chrono::steady_clock::now() > deadline) {
-            killBridge();
-            fail(kHung);
+            process_->killBridge();
+            process_->fail(-2);
             return false;
         }
     }
@@ -404,7 +434,7 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
         for (std::uint32_t c = 0; c < b.outputChannels; ++c)
             std::fill_n(b.outputs[c], b.frames, 0.0f);
     };
-    if (!hdr_ || failed_.load(std::memory_order_relaxed)) {
+    if (!hdr_ || process_->failed()) {
         silence();  // a failed node is silent; the session plays on
         return true;
     }
