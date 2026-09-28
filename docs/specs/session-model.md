@@ -316,7 +316,7 @@ head instead of stacking.
 
 `branch.create {from: "main", name}`, `branch.list`, `branch.switch
 {name, mode: live|offline}` (live: engine reconciles to that head),
-`branch.diff {a, b}`, `branch.render_ab {a, b, range, ...}` (offline renders
+`branch.diff {a, b}`, `branch.render-ab {a, b, range, ...}` (offline renders
 of both + analysis comparison, returning two render ids for sample-aligned
 A/B playback), `branch.merge {from, into: "main"}`, `branch.delete`.
 
@@ -393,7 +393,7 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `transport.record`, `transport.seek {pos}`, `transport.loop {range}`,
   `transport.get` (q).
 - **render** (a): `render.mix`, `render.stems`, `render.regions` (matrix),
-  `render.items`, `render.dry_run` (q: resolved file list), `render.job.*`
+  `render.items`, `render.dry-run` (q: resolved file list), `render.job.*`
   (queue).
 - **analysis** (q): `analyze.render {render}`, `analyze.track {track, range}`
   (renders the track's output offline, then analyzes), `analyze.compare`,
@@ -410,7 +410,7 @@ REAPER's `$`-mini-language: `{project}`, `{track}`, `{track_number:02}`,
 `{item}`, `{take}`, `{start:beats|seconds|timecode}`, `{format}`,
 `{sample_rate}`, `{bit_depth}`, `{date:YYYY-MM-DD}`, `{time:HH-mm-ss}`,
 `{counter:03}`. Filters: `|lower`, `|upper`, `|replace(" ","_")`,
-`|max(8)`. `render.dry_run` returns the resolved list. Empty tokens drop an
+`|max(8)`. `render.dry-run` returns the resolved list. Empty tokens drop an
 adjacent separator (`-`, `_`, `.`, space), as REAPER does.
 
 ---

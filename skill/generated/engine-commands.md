@@ -527,6 +527,55 @@ Result:
 
 ```
 
+## `branch.render-ab@1`
+
+Render two branch heads over the same range and compare them.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `a` | string |  |  |  |  |
+| `b` | string |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+| `tail_s` | number |  | 0.0..600.0 |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Compare main with itself** (`song`)
+
+```json
+{
+  "a": "main",
+  "b": "main",
+  "end_beat": 1
+}
+
+```
+
+Result:
+
+```json
+{
+  "a": "<any>",
+  "b": "<any>",
+  "comparison": "<any>"
+}
+
+```
+
 ## `branch.switch@1`
 
 Make another branch current (edits, undo and playback follow it).
@@ -2005,6 +2054,54 @@ Result:
 
 ```
 
+## `job.get@1`
+
+Get a job's status and progress.
+
+Get a job's status and progress.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Get render job** (`job_running`)
+
+```json
+{
+  "job": "jb_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "jb_1",
+  "status": "running",
+  "progress": {
+    "fraction": 0.0,
+    "message": ""
+  }
+}
+
+```
+
 ## `job.list@1`
 
 List session jobs.
@@ -2662,6 +2759,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `author` | string |  |  |  |  |
 | `notes` | string |  |  |  |  |
 | `pan_law_db` | value | dB | -6.0..0.0 |  | Quantity strings are range-checked by the server. |
+| `render` | value |  |  |  |  |
 
 ### Result
 
@@ -2690,6 +2788,61 @@ Result:
 
 ```json
 {}
+
+```
+
+## `region.add@1`
+
+Add a named render region in beats.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "region_add_result",
+  "properties": {
+    "region": {
+      "type": "string"
+    }
+  },
+  "required": ["region"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**A verse** (`song`)
+
+```json
+{
+  "name": "Verse",
+  "start_beat": 0,
+  "end_beat": 4
+}
+
+```
+
+Result:
+
+```json
+{
+  "region": "rg_1"
+}
 
 ```
 
@@ -2833,6 +2986,66 @@ Result:
 
 ```
 
+## `render.dry-run@1`
+
+render.dry-run resolves and renders project audio files.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `branch` | string |  |  |  |  |
+| `pattern` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `mode` | string |  |  |  |  |
+| `tap` | string |  |  |  |  |
+| `format` | string |  |  |  |  |
+| `normalize` | value |  |  |  |  |
+| `operation` | string |  |  |  |  |
+| `tracks` | array |  |  |  |  |
+| `regions` | array |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+| `tail_s` | number |  | 0.0..600.0 |  |  |
+| `target` | number |  |  |  |  |
+| `limit_true_peak_db` | number |  |  |  |  |
+| `bit_depth` | integer |  | 16.0..32.0 |  |  |
+| `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
+| `channels` | integer |  | 1.0..2.0 |  |  |
+| `job` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Render project** (`song`)
+
+```json
+{
+  "end_beat": 1,
+  "pattern": "example-{counter:02}"
+}
+
+```
+
+Result:
+
+```json
+{
+  "files": "<any>"
+}
+
+```
+
 ## `render.mix@1`
 
 Render the mix offline to a float WAV (default: start to the last item's end).
@@ -2849,6 +3062,14 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..60.0 |  |  |
 | `name` | string |  |  |  |  |
+| `pattern` | string |  |  |  |  |
+| `branch` | string |  |  |  |  |
+| `format` | string |  |  |  |  |
+| `bit_depth` | integer |  | 16.0..32.0 |  |  |
+| `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
+| `channels` | integer |  | 1.0..2.0 |  |  |
+| `normalize` | value |  |  |  |  |
+| `job` | boolean |  |  | false |  |
 | `analyze` | string |  |  |  |  |
 
 ### Result
@@ -2879,9 +3100,14 @@ Kind: `action`. Exposure: `mcp-tool`.
         "type": "string"
       }
     },
-    "analysis": {}
+    "analysis": {},
+    "job": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
   },
-  "required": ["render", "path", "seconds", "peak_dbfs", "output_latency"],
   "additionalProperties": false
 }
 
@@ -2907,6 +3133,126 @@ Result:
   "seconds": "<any>",
   "peak_dbfs": "<any>",
   "output_latency": 0
+}
+
+```
+
+## `render.regions@1`
+
+render.regions resolves and renders project audio files.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `branch` | string |  |  |  |  |
+| `pattern` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `mode` | string |  |  |  |  |
+| `tap` | string |  |  |  |  |
+| `format` | string |  |  |  |  |
+| `normalize` | value |  |  |  |  |
+| `operation` | string |  |  |  |  |
+| `tracks` | array |  |  |  |  |
+| `regions` | array |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+| `tail_s` | number |  | 0.0..600.0 |  |  |
+| `target` | number |  |  |  |  |
+| `limit_true_peak_db` | number |  |  |  |  |
+| `bit_depth` | integer |  | 16.0..32.0 |  |  |
+| `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
+| `channels` | integer |  | 1.0..2.0 |  |  |
+| `job` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Render project** (`song_with_region`)
+
+```json
+{
+  "end_beat": 1,
+  "pattern": "example-{counter:02}"
+}
+
+```
+
+Result:
+
+```json
+{
+  "files": "<any>"
+}
+
+```
+
+## `render.stems@1`
+
+render.stems resolves and renders project audio files.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `branch` | string |  |  |  |  |
+| `pattern` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `mode` | string |  |  |  |  |
+| `tap` | string |  |  |  |  |
+| `format` | string |  |  |  |  |
+| `normalize` | value |  |  |  |  |
+| `operation` | string |  |  |  |  |
+| `tracks` | array |  |  |  |  |
+| `regions` | array |  |  |  |  |
+| `start_beat` | number |  | 0.0.. |  |  |
+| `end_beat` | number |  |  |  |  |
+| `tail_s` | number |  | 0.0..600.0 |  |  |
+| `target` | number |  |  |  |  |
+| `limit_true_peak_db` | number |  |  |  |  |
+| `bit_depth` | integer |  | 16.0..32.0 |  |  |
+| `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
+| `channels` | integer |  | 1.0..2.0 |  |  |
+| `job` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Render project** (`song`)
+
+```json
+{
+  "end_beat": 1,
+  "pattern": "example-{counter:02}"
+}
+
+```
+
+Result:
+
+```json
+{
+  "files": "<any>"
 }
 
 ```

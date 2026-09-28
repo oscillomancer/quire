@@ -336,7 +336,8 @@ Phase 2 demo committed to `docs/demos/`.
   worker and must stop/join workers before destroying the dispatcher. Job
   updates are thread-safe. Progress and completion events queue for the model
   thread, which calls `Dispatcher::flushJobEvents()` (also called after every
-  `execute`). `job.cancel` marks a job cancelled immediately and sets its
+  `execute`). `job.get` reads status and progress (`job.status` remains an
+  alias). `job.cancel` marks a job cancelled immediately and sets its
   cancellation flag for the worker. The most recent progress is retained even
   when progress events are throttled to 2 Hz.
 - `runExamples` calls `Host::setupFixture(dispatcher, fixture)` after creating

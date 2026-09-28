@@ -3,6 +3,7 @@
 #include <supple/base/result.h>
 #include <supple/json/json.h>
 #include <supple/schema/schema.h>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -186,6 +187,8 @@ class JobManager {
   public:
     std::string create();
     bool cancelled(std::string_view id) const;
+    std::shared_ptr<const std::atomic<bool>> cancellationFlag(std::string_view id) const;
+    std::shared_ptr<std::atomic<double>> progressFlag(std::string_view id) const;
     Status progress(std::string_view id, double fraction, std::string message,
                     json::Value extra = json::Value::object());
     Status complete(std::string_view id, json::Value result);
@@ -208,6 +211,8 @@ class JobManager {
         json::Value result;
         Error error;
         bool cancelRequested = false;
+        std::shared_ptr<std::atomic<bool>> cancelFlag = std::make_shared<std::atomic<bool>>(false);
+        std::shared_ptr<std::atomic<double>> fraction = std::make_shared<std::atomic<double>>(0.0);
         std::chrono::steady_clock::time_point lastProgressEvent{};
     };
     static json::Value snapshot(const Job& job);

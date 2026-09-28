@@ -292,6 +292,8 @@ const Schema<Project>& schemaOf<Project>() {
         dflt(b, d.panLawDb);
         b.field("seed", &Project::seed, schema::integerOf<std::uint64_t>());
         dflt(b, d.seed);
+        b.field("render", &Project::render, schema::any());
+        dflt(b, d.render);
         return b.build();
     }();
     return s;

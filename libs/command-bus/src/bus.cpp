@@ -354,6 +354,14 @@ Registry::Registry() {
         },
         {"Get job", json::Value::object(), json::Value::object(), "job_running"});
     addMeta(
+        "job.get", Kind::Query, Exposure::McpExec, "Get a job's status and progress.",
+        objectSchema({{"job", string}}, {"job"}), anyObject,
+        [](const json::Value& args) { return validateFields(args, {"job"}, {"job"}); },
+        [](const json::Value& args, Context& ctx) {
+            return ctx.service<JobManager>().status(stringField(args, "job"));
+        },
+        {"Get render job", json::Value::object(), json::Value::object(), "job_running"});
+    addMeta(
         "job.wait", Kind::Query, Exposure::McpExec, "Wait for a job.",
         objectSchema({{"job", string}, {"timeout_s", number}}, {"job"}), anyObject,
         [](const json::Value& args) -> Status {
@@ -405,7 +413,7 @@ Registry::Registry() {
     batchExample.args["steps"] = json::Value::array();
     batchExample.result["label"] = "";
     batchExample.result["results"] = json::Value::array();
-    for (auto name : {"job.status", "job.wait", "job.cancel"}) {
+    for (auto name : {"job.status", "job.get", "job.wait", "job.cancel"}) {
         auto& ex = commands_.at({name, 1}).examples.front();
         ex.args["job"] = "jb_1";
         ex.result["job"] = "jb_1";

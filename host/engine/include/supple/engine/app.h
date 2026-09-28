@@ -12,13 +12,16 @@
 // instances that make sound follow the model on the next plan (InstancePool).
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "supple/cmd/bus.h"
@@ -33,6 +36,7 @@ struct AppOptions {
     host::HostIdentity identity;
     std::filesystem::path workdir;             // renders are written to <workdir>/renders
     std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
+    std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
 };
 
 // The real-time engine as engine.status reports it.
@@ -130,9 +134,15 @@ class EngineApp : public cmd::Host {
 
     // --- rendering ---------------------------------------------------------------
     Result<OfflineResult> renderMix(const OfflineSettings& settings);
+    Result<OfflineResult> renderSession(const model::Session& session,
+                                        const OfflineSettings& settings);
     std::filesystem::path rendersDir() const { return options_.workdir / "renders"; }
     std::string rememberRender(const std::filesystem::path& path);
+    std::string reserveRenderId();
+    void publishRender(std::string id, const std::filesystem::path& path);
     Result<std::filesystem::path> renderPath(std::string_view reference) const;
+    void startJob(std::function<void(std::stop_token)> work);
+    void stopJobs() override;
 
     // --- real-time engine (optional) ------------------------------------------------
     Status startEngine(Backend& backend, const BackendConfig& config);
@@ -221,6 +231,13 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
     std::map<std::string, std::filesystem::path> renders_;
+    mutable std::mutex rendersMutex_;
+    std::uint64_t nextRender_ = 1;
+    struct JobThread {
+        std::jthread thread;
+        std::shared_ptr<std::atomic<bool>> finished;
+    };
+    std::vector<JobThread> jobs_;
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;

@@ -1,12 +1,14 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 
+#include <supple/analysis/analysis.h>
 #include <supple/audio/audio_file.h>
 #include <supple/engine/app.h>
 #include <supple/host/clap_host.h>
@@ -14,6 +16,7 @@
 
 #include "fake_jack.h"
 #include "history_sequence.h"
+#include "render_commands.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -836,4 +839,280 @@ TEST_CASE("a batch keeps text positions of nested errors (not pointer-prefixed)"
     REQUIRE_FALSE(step.details.empty());
     CHECK(step.details[0].path.front() != '/');  // "1:16": a position in the notation text
     CHECK(step.details[0].path.find("/steps") == std::string::npos);
+}
+
+TEST_CASE("render stems sum to the master-less mix, and regions match dry run") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_region");
+    auto call = [&](std::string name, std::string_view args) {
+        auto r = d.execute({std::move(name), j(args), kTest});
+        INFO((r ? std::string() : r.error().toString()));
+        REQUIRE(r);
+        return *r;
+    };
+    call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.sine"})");
+    call("track.add", R"({"name":"Lead"})");
+    call("item.add", R"({"track":"tr_2","bar":1,"notation":"voice lead; 1: E3:q r:q E3:q r:q"})");
+    call("fx.add", R"({"track":"tr_2","plugin":"com.suppleaudio.test.sine"})");
+    auto mix = call("render.mix", R"({"name":"sum","end_beat":4})");
+    auto plannedMix = call("render.dry-run", R"({"operation":"mix","name":"sum","end_beat":4})");
+    CHECK(plannedMix.find("files")->at(0).find("path")->asString() == mix.find("path")->asString());
+    auto stems = call("render.stems", R"({"end_beat":4,"pattern":"stem-{track_number:02}"})");
+    const auto& files = *stems.find("files");
+    REQUIRE(files.size() == 2);
+    auto whole = audio::readAudio(mix.find("path")->asString());
+    auto left = audio::readAudio(files.at(0).find("path")->asString());
+    auto right = audio::readAudio(files.at(1).find("path")->asString());
+    REQUIRE(whole);
+    REQUIRE(left);
+    REQUIRE(right);
+    REQUIRE(whole->frames() == left->frames());
+    REQUIRE(whole->frames() == right->frames());
+    for (std::size_t c = 0; c < whole->channelCount(); ++c)
+        for (std::size_t i = 0; i < whole->frames(); ++i)
+            CHECK(static_cast<double>(whole->channels[c][i]) ==
+                  doctest::Approx(static_cast<double>(left->channels[c][i]) +
+                                  static_cast<double>(right->channels[c][i]))
+                      .epsilon(1e-5));
+    auto through = call("render.stems", R"({"tracks":["tr_1"],"mode":"through_master",
+        "pattern":"through-{track}"})");
+    auto mastered = audio::readAudio(through.find("files")->at(0).find("path")->asString());
+    REQUIRE(mastered);
+    CHECK(mastered->channels == left->channels);
+    auto dry =
+        call("render.dry-run", R"({"regions":["rg_1"],"pattern":"region-{region_number:02}"})");
+    auto rendered =
+        call("render.regions", R"({"regions":["rg_1"],"pattern":"region-{region_number:02}"})");
+    CHECK(dry.find("files")->at(0).find("path")->asString() ==
+          rendered.find("files")->at(0).find("path")->asString());
+    auto regionAudio = audio::readAudio(rendered.find("files")->at(0).find("path")->asString());
+    REQUIRE(regionAudio);
+    CHECK(regionAudio->frames() == 96000);
+    call(
+        "project.set",
+        R"({"render":{"matrix":{"project":["master"],"rg_1":["tr_1","master"]},"pattern":"matrix-{region}-{track}-{counter:02}"}})");
+    auto matrix = call("render.regions", R"({})");
+    CHECK(matrix.find("files")->size() == 3);
+}
+
+TEST_CASE("branch render uses its own head and leaves the current branch alone") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    auto call = [&](std::string name, std::string_view args) {
+        auto r = d.execute({std::move(name), j(args), kTest});
+        INFO((r ? std::string() : r.error().toString()));
+        REQUIRE(r);
+        return *r;
+    };
+    call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.sine"})");
+    call("branch.create", R"({"name":"alternate","switch":true})");
+    call("track.set", R"({"track":"tr_1","volume_db":-12})");
+    call("branch.switch", R"({"name":"main"})");
+    auto other = call("render.mix", R"({"branch":"alternate","name":"other","end_beat":4})");
+    CHECK(app->versions().branch() == "main");
+    call("branch.switch", R"({"name":"alternate"})");
+    auto direct = call("render.mix", R"({"name":"direct","end_beat":4})");
+    auto a = audio::readAudio(other.find("path")->asString());
+    auto b = audio::readAudio(direct.find("path")->asString());
+    REQUIRE(a);
+    REQUIRE(b);
+    CHECK(a->channels == b->channels);
+    auto compared = call("branch.render-ab", R"({"a":"main","b":"alternate","end_beat":4})");
+    CHECK(compared.find("a")->isString());
+    CHECK(compared.find("b")->isString());
+}
+
+TEST_CASE("render job cancellation is observable before worker renders") {
+    Root root;
+    std::atomic<bool> entered{false}, release{false};
+    AppOptions options;
+    options.workdir = root.path;
+    options.pluginPath = {kFixture};
+    options.jobStartedHook = [&] {
+        entered.store(true);
+        entered.notify_one();
+        release.wait(false);
+    };
+    auto created = EngineApp::create(std::move(options));
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    auto started = d.execute({"render.mix", j(R"({"end_beat":4,"job":true})"), kTest});
+    REQUIRE(started);
+    entered.wait(false);
+    const auto id = started->find("job")->asString();
+    json::Value args = json::Value::object();
+    args["job"] = id;
+    auto cancelled = d.execute({"job.cancel", std::move(args), kTest});
+    release.store(true);
+    release.notify_one();
+    REQUIRE(cancelled);
+    CHECK(d.jobs().status(id)->find("status")->asString() == "cancelled");
+}
+
+TEST_CASE("stem render job publishes files and analysis summaries") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    auto started = d.execute(
+        {"render.stems", j(R"({"end_beat":4,"job":true,"pattern":"queued-{track}"})"), kTest});
+    REQUIRE(started);
+    const auto id = started->find("job")->asString();
+    json::Value args = json::Value::object();
+    args["job"] = id;
+    args["timeout_s"] = 30;
+    auto done = d.execute({"job.wait", args, kTest});
+    INFO((done ? std::string() : done.error().toString()));
+    REQUIRE(done);
+    CHECK(done->find("status")->asString() == "done");
+    const auto& file = done->find("result")->find("files")->at(0);
+    CHECK(fs::exists(file.find("path")->asString()));
+    CHECK(file.find("analysis") != nullptr);
+    json::Value get = json::Value::object();
+    get["job"] = id;
+    auto status = d.execute({"job.get", get, kTest});
+    REQUIRE(status);
+    CHECK(status->find("status")->asString() == "done");
+}
+
+TEST_CASE("offline render reports progress and honors cancellation between blocks") {
+    Root root;
+    auto app = makeApp(root.path);
+    OfflineSettings settings;
+    settings.endSeconds = 1.0;
+    settings.progressFlag = std::make_shared<std::atomic<double>>(0.0);
+    auto rendered = app->renderMix(settings);
+    REQUIRE(rendered);
+    CHECK(settings.progressFlag->load() == doctest::Approx(1.0));
+    auto cancel = std::make_shared<std::atomic<bool>>(true);
+    settings.cancelFlag = cancel;
+    auto stopped = app->renderMix(settings);
+    CHECK_FALSE(stopped);
+    if (!stopped) CHECK(stopped.error().code == "job.cancelled");
+}
+
+TEST_CASE("render patterns cover the closed tokens, filters, empty separators and escapes") {
+    RenderPatternContext c;
+    c.project = "Big Song";
+    c.track = "Lead Vocal";
+    c.folderPath = "Band/Vocals";
+    c.region = "Verse";
+    c.marker = "Start";
+    c.item = "it_1";
+    c.take = "Main";
+    c.trackNumber = 4;
+    c.regionNumber = 2;
+    c.counter = 7;
+    c.startBeats = 8;
+    c.startSeconds = 4;
+    c.sampleRate = 48000;
+    c.bitDepth = 24;
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"{project}", "Big Song"},
+        {"{track}", "Lead Vocal"},
+        {"{track_number:02}", "04"},
+        {"{folder_path}", "Band/Vocals"},
+        {"{region}", "Verse"},
+        {"{region_number:02}", "02"},
+        {"{marker}", "Start"},
+        {"{item}", "it_1"},
+        {"{take}", "Main"},
+        {"{start:beats}", "8"},
+        {"{start:seconds}", "4"},
+        {"{start:timecode}", "00-00-04"},
+        {"{format}", "wav"},
+        {"{sample_rate}", "48000"},
+        {"{bit_depth}", "24"},
+        {"{counter:03}", "007"},
+        {"{track|lower}", "lead vocal"},
+        {"{region|upper}", "VERSE"},
+        {"{track|replace(\" \",\"_\")}", "Lead_Vocal"},
+        {"{track|max(4)}", "Lead"},
+    };
+    for (const auto& [pattern, expected] : cases) {
+        auto out = expandRenderPattern(pattern, c);
+        INFO(pattern);
+        REQUIRE(out);
+        CHECK(*out == expected);
+    }
+    CHECK(expandRenderPattern("x-{marker}-y", RenderPatternContext{}).value() == "x-y");
+    CHECK_FALSE(expandRenderPattern("../escape", c));
+    CHECK_FALSE(expandRenderPattern("{unknown}", c));
+    CHECK_FALSE(expandRenderPattern("{track|bogus}", c));
+    CHECK(expandRenderPattern("{date:YYYY-MM-DD}", c)->size() == 10);
+    CHECK(expandRenderPattern("{time:HH-mm-ss}", c)->size() == 8);
+}
+
+TEST_CASE("render dry run rejects paths through symlinks outside renders") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    fs::create_directories(app->rendersDir());
+    fs::create_directory_symlink(root.path.parent_path(), app->rendersDir() / "escape");
+    auto result =
+        d.execute({"render.dry-run", j(R"({"end_beat":1,"pattern":"escape/out"})"), kTest});
+    CHECK_FALSE(result);
+    if (!result) CHECK(result.error().code == "render.path");
+}
+
+TEST_CASE("render mix honors normalization and PCM export settings") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_fx");
+    auto render = d.execute({"render.mix", j(R"({"name":"mastered","end_beat":4,
+        "sample_rate":44100,"channels":1,"bit_depth":16,
+        "normalize":{"mode":"lufs_i","target":-20,"limit_true_peak_db":-1}})"),
+                             kTest});
+    INFO((render ? std::string() : render.error().toString()));
+    REQUIRE(render);
+    auto audio = audio::readAudio(render->find("path")->asString());
+    REQUIRE(audio);
+    CHECK(audio->sampleRate == 44100);
+    CHECK(audio->channelCount() == 1);
+    const float* mono[] = {audio->channels[0].data()};
+    auto report = analysis::analyze({mono, static_cast<std::int64_t>(audio->frames()),
+                                     audio->sampleRate, analysis::Layout::Mono});
+    REQUIRE(report);
+    CHECK(report->loudness->integrated == doctest::Approx(-20).epsilon(0.04));
+    CHECK(report->loudness->truePeak <= -0.9);
+}
+
+TEST_CASE("true peak limiting keeps distant audio at the normalization gain") {
+    audio::AudioData original;
+    original.sampleRate = 48000;
+    original.channels.assign(1, std::vector<float>(96000));
+    for (std::size_t i = 0; i < original.frames(); ++i)
+        original.channels[0][i] = static_cast<float>(
+            0.05 * std::sin(2.0 * M_PI * 440.0 * static_cast<double>(i) / 48000.0));
+    original.channels[0][48000] = 1.0f;
+    auto unlimited = original, limited = original;
+    REQUIRE(normalizeRenderAudio(unlimited, "lufs_i", -20).ok());
+    REQUIRE(normalizeRenderAudio(limited, "lufs_i", -20, -1).ok());
+    const std::size_t far = 10000;
+    CHECK(std::fabs(static_cast<double>(limited.channels[0][far])) >=
+          0.8 * std::fabs(static_cast<double>(unlimited.channels[0][far])));
+    const float* channels[] = {limited.channels[0].data()};
+    auto report = analysis::analyze({channels, static_cast<std::int64_t>(limited.frames()),
+                                     limited.sampleRate, analysis::Layout::Mono});
+    REQUIRE(report);
+    CHECK(report->loudness->truePeak <= -0.95);
 }

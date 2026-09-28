@@ -196,13 +196,28 @@ using namespace detail;
 
 Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                     const OfflineSettings& opt) {
+    static_assert(std::atomic<double>::is_always_lock_free);
     if (!(opt.endSeconds > opt.startSeconds))
         return Error("engine.range", "the render range is empty", {}, "end must be after start");
     if (opt.blockSize < 1 || opt.blockSize > 8192)
         return Error("engine.block_size", "block size out of range", {}, "1 .. 8192");
     if (!(opt.tailSeconds >= 0 && opt.tailSeconds <= 600))
         return Error("engine.tail", "tail out of range", {}, "0 .. 600 s");
-    const Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
+    Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
+    if (opt.throughMaster) {
+        if (!s.tracks.contains(*opt.throughMaster) || *opt.throughMaster == model::kMaster)
+            return Error("track.unknown", "through-master stem track does not exist", "/track");
+        model::IdMap<model::Track>::Builder tracks(s.tracks);
+        for (const auto& entry : s.tracks) {
+            if (entry.id == model::kMaster || entry.id == *opt.throughMaster) continue;
+            if (entry.value->parent == model::kMaster) {
+                auto muted = std::make_shared<model::Track>(*entry.value);
+                muted->mute = true;
+                tracks.put(entry.id, entry.rev, std::move(muted));
+            }
+        }
+        selectedSession.tracks = tracks.build();
+    }
     auto compiled = detail::compile(selectedSession, pool, opt.startSeconds, opt.blockSize);
     if (!compiled) return std::move(compiled).error();
     Plan& p = *compiled;
@@ -220,6 +235,8 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         // An analysis tap is isolated from the session's current solo state.
         for (Node& node : p.nodes) node.soloSilenced = false;
     }
+    if (opt.throughMaster)
+        for (Node& node : p.nodes) node.soloSilenced = false;
     const auto outputLatency =
         opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
                   : p.outputLatency;
@@ -229,7 +246,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     const std::int64_t total = length + outputLatency;
     if (total > (std::int64_t(1) << 28)) return Error("engine.too_long", "render too long");
     std::vector<float> outL(static_cast<std::size_t>(total)), outR(static_cast<std::size_t>(total));
-    bool failed = false, startFailed = false;
+    bool failed = false, startFailed = false, cancelled = false;
 
     std::vector<host::Instance*> instances;
     for (Node& n : p.nodes)
@@ -245,6 +262,11 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         }
         if (!startFailed) {
             for (std::int64_t pos = 0; pos < total; pos += p.block) {
+                if (opt.stopToken.stop_requested() ||
+                    (opt.cancelFlag && opt.cancelFlag->load(std::memory_order_relaxed))) {
+                    cancelled = true;
+                    break;
+                }
                 const auto n =
                     static_cast<std::uint32_t>(std::min<std::int64_t>(p.block, total - pos));
                 if (!(workers.helpers() ? processBlockOn(workers, p, pos, n)
@@ -257,6 +279,11 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                                                       : selected->post;
                 std::copy_n(tap.l.begin(), n, outL.begin() + pos);
                 std::copy_n(tap.r.begin(), n, outR.begin() + pos);
+                if (opt.progressFlag)
+                    opt.progressFlag->store(opt.progressBase + opt.progressScale *
+                                                                   static_cast<double>(pos + n) /
+                                                                   static_cast<double>(total),
+                                            std::memory_order_relaxed);
             }
         }
         for (host::Instance* in : instances) in->stopProcessing();
@@ -269,6 +296,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
     if (startFailed) return Error("engine.start_failed", "a plugin refused to start processing");
+    if (cancelled) return Error("job.cancelled", "offline render cancelled");
     if (failed) return Error("engine.process_error", "a plugin reported a processing error");
     for (const Node& n : p.nodes) {
         std::string line = n.id.str() + " in=[";

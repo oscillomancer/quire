@@ -393,6 +393,44 @@
     }
   },
   {
+    "name": "branch_render-ab",
+    "title": "Render two branch heads over the same range and compare them.",
+    "description": "Render two branch heads over the same range and compare them.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_ab_args",
+      "properties": {
+        "a": {
+          "type": "string"
+        },
+        "b": {
+          "type": "string"
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tail_s": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 600.0
+        }
+      },
+      "required": ["a", "b"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "branch_switch",
     "title": "Make another branch current (edits, undo and playback follow it).",
     "description": "Make another branch current (edits, undo and playback follow it).  See describe for errors and examples.",
@@ -1825,7 +1863,8 @@
           "x-unit": "dB",
           "x-unit-strings": true,
           "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
-        }
+        },
+        "render": {}
       },
       "additionalProperties": false
     },
@@ -1839,6 +1878,137 @@
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true
+    }
+  },
+  {
+    "name": "region_add",
+    "title": "Add a named render region in beats.",
+    "description": "Add a named render region in beats.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "region_add_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        }
+      },
+      "required": ["name", "start_beat", "end_beat"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "region_add_result",
+      "properties": {
+        "region": {
+          "type": "string"
+        }
+      },
+      "required": ["region"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_dry-run",
+    "title": "render.dry-run resolves and renders project audio files.",
+    "description": "render.dry-run resolves and renders project audio files.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_args",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "tap": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "normalize": {},
+        "operation": {
+          "type": "string"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tail_s": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 600.0
+        },
+        "target": {
+          "type": "number"
+        },
+        "limit_true_peak_db": {
+          "type": "number"
+        },
+        "bit_depth": {
+          "type": "integer",
+          "minimum": 16.0,
+          "maximum": 32.0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 8000.0,
+          "maximum": 384000.0
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2.0
+        },
+        "job": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     }
   },
   {
@@ -1865,6 +2035,35 @@
         "name": {
           "type": "string",
           "pattern": "^[A-Za-z0-9 _.+-]{1,64}$"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "bit_depth": {
+          "type": "integer",
+          "minimum": 16.0,
+          "maximum": 32.0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 8000.0,
+          "maximum": 384000.0
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2.0
+        },
+        "normalize": {},
+        "job": {
+          "type": "boolean",
+          "default": false
         },
         "analyze": {
           "type": "string",
@@ -1898,11 +2097,196 @@
             "type": "string"
           }
         },
-        "analysis": {}
+        "analysis": {},
+        "job": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
       },
-      "required": ["render", "path", "seconds", "peak_dbfs", "output_latency"],
       "additionalProperties": false
     },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_regions",
+    "title": "render.regions resolves and renders project audio files.",
+    "description": "render.regions resolves and renders project audio files.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_args",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "tap": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "normalize": {},
+        "operation": {
+          "type": "string"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tail_s": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 600.0
+        },
+        "target": {
+          "type": "number"
+        },
+        "limit_true_peak_db": {
+          "type": "number"
+        },
+        "bit_depth": {
+          "type": "integer",
+          "minimum": 16.0,
+          "maximum": 32.0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 8000.0,
+          "maximum": 384000.0
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2.0
+        },
+        "job": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_stems",
+    "title": "render.stems resolves and renders project audio files.",
+    "description": "render.stems resolves and renders project audio files.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_args",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "tap": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "normalize": {},
+        "operation": {
+          "type": "string"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "start_beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end_beat": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "tail_s": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 600.0
+        },
+        "target": {
+          "type": "number"
+        },
+        "limit_true_peak_db": {
+          "type": "number"
+        },
+        "bit_depth": {
+          "type": "integer",
+          "minimum": 16.0,
+          "maximum": 32.0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 8000.0,
+          "maximum": 384000.0
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2.0
+        },
+        "job": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

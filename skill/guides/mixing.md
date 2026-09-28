@@ -26,6 +26,24 @@ masking.
 
 Group a change and its render in one `batch`: one undo step, atomic.
 
+## Exporting and comparing versions
+
+`render.stems {mode: "isolated", tap: "post_fader"}` writes each top-level
+track before master processing. Use `mode: "through_master"` to hear one stem
+at a time through the master chain. `render.regions` writes named regions; a
+project's `render.matrix` can select tracks or `"master"` for each region.
+`render.dry-run {operation: "regions"}` lists the files and lengths first.
+Patterns such as `{project}-{region_number:02}-{region|replace(" ","_")}`
+name the files; names that escape the renders directory are rejected.
+
+Use `branch.render-ab {a, b, end_beat}` to render and analyze two branch heads
+without switching the active branch. For a long export, pass `job: true` to
+`render.mix`, `render.stems`, or `render.regions`, then use `job.get {job}` or
+`job.wait {job}` for progress and `job.cancel {job}` to stop it. WAV export
+supports 16/24-bit PCM with seeded dither and 32-bit float. Set
+`normalize: {mode: "lufs_i", target: -14, limit_true_peak_db: -1}` on stem or
+region renders to measure the first pass and apply gain on the second.
+
 ## Targets that are safe defaults
 
 | goal | measure | target |
@@ -67,4 +85,3 @@ route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
-

@@ -39,6 +39,28 @@ TEST_CASE("float32 WAV round trip is bit-exact") {
     CHECK(back->channels == d.channels);
 }
 
+TEST_CASE("RF64 header carries 64-bit sizes without allocating a payload") {
+    constexpr std::uint64_t frames = (std::uint64_t{1} << 32) / 8 + 100;
+    auto h = wavHeader(frames, 2, 48000, SampleFormat::Float32);
+    REQUIRE(h);
+    REQUIRE(h->size() == 80);
+    CHECK(std::string(reinterpret_cast<const char*>(h->data()), 4) == "RF64");
+    CHECK(std::string(reinterpret_cast<const char*>(h->data() + 12), 4) == "ds64");
+    CHECK(std::string(reinterpret_cast<const char*>(h->data() + 72), 4) == "data");
+    auto get64 = [&](std::size_t at) {
+        std::uint64_t v = 0;
+        for (int i = 7; i >= 0; --i) v = (v << 8) | (*h)[at + i];
+        return v;
+    };
+    CHECK(get64(20) == frames * 8 + 72);
+    CHECK(get64(28) == frames * 8);
+    CHECK(get64(36) == frames);
+    auto small = wavHeader(10, 2, 48000, SampleFormat::Pcm16);
+    REQUIRE(small);
+    CHECK(small->size() == 44);
+    CHECK(std::string(reinterpret_cast<const char*>(small->data()), 4) == "RIFF");
+}
+
 TEST_CASE("PCM WAV round trips within quantization + dither, deterministic by seed") {
     auto d = tone(4800, 44100, 1);
     for (auto fmt : {SampleFormat::Pcm16, SampleFormat::Pcm24}) {

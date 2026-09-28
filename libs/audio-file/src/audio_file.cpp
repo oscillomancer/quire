@@ -2,6 +2,8 @@
 
 #include "supple/base/files.h"
 
+#include <fcntl.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -138,6 +140,55 @@ Result<AudioData> readAudio(const fs::path& path) {
     return r;
 }
 
+Result<std::vector<std::uint8_t>> wavHeader(std::uint64_t frames, std::uint32_t channels,
+                                            std::uint32_t sampleRate, SampleFormat sampleFormat) {
+    if (channels == 0 || channels > 64 || sampleRate == 0 || sampleRate > 768000)
+        return Error("audio.encode", "invalid WAV channel count or sample rate");
+    const std::uint32_t bytesPer = sampleFormat == SampleFormat::Pcm16   ? 2
+                                   : sampleFormat == SampleFormat::Pcm24 ? 3
+                                                                         : 4;
+    const std::uint64_t frameBytes = std::uint64_t(channels) * bytesPer;
+    if (frames > (UINT64_MAX - 80) / frameBytes)
+        return Error("audio.encode", "WAV size overflows 64 bits");
+    const std::uint64_t dataBytes = frames * frameBytes;
+    const bool rf64 = dataBytes > UINT32_MAX - 72;
+    std::vector<std::uint8_t> h(rf64 ? 80 : 44);
+    auto tag = [&](std::size_t at, const char* s) { std::memcpy(h.data() + at, s, 4); };
+    auto put16 = [&](std::size_t at, std::uint16_t x) {
+        for (int i = 0; i < 2; ++i) h[at + i] = static_cast<std::uint8_t>(x >> (8 * i));
+    };
+    auto put32 = [&](std::size_t at, std::uint32_t x) {
+        for (int i = 0; i < 4; ++i) h[at + i] = static_cast<std::uint8_t>(x >> (8 * i));
+    };
+    auto put64 = [&](std::size_t at, std::uint64_t x) {
+        for (int i = 0; i < 8; ++i) h[at + i] = static_cast<std::uint8_t>(x >> (8 * i));
+    };
+    tag(0, rf64 ? "RF64" : "RIFF");
+    put32(4, rf64 ? UINT32_MAX : static_cast<std::uint32_t>(dataBytes + 36));
+    tag(8, "WAVE");
+    std::size_t fmt = 12;
+    if (rf64) {
+        tag(12, "ds64");
+        put32(16, 28);
+        put64(20, dataBytes + 72);
+        put64(28, dataBytes);
+        put64(36, frames);
+        put32(44, 0);
+        fmt = 48;
+    }
+    tag(fmt, "fmt ");
+    put32(fmt + 4, 16);
+    put16(fmt + 8, sampleFormat == SampleFormat::Float32 ? 3 : 1);
+    put16(fmt + 10, static_cast<std::uint16_t>(channels));
+    put32(fmt + 12, sampleRate);
+    put32(fmt + 16, sampleRate * static_cast<std::uint32_t>(frameBytes));
+    put16(fmt + 20, static_cast<std::uint16_t>(frameBytes));
+    put16(fmt + 22, static_cast<std::uint16_t>(8 * bytesPer));
+    tag(fmt + 24, "data");
+    put32(fmt + 28, rf64 ? UINT32_MAX : static_cast<std::uint32_t>(dataBytes));
+    return h;
+}
+
 Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOptions& options) {
     const std::size_t channels = data.channelCount();
     const std::size_t frames = data.frames();
@@ -208,6 +259,74 @@ Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOpti
 }
 
 Status writeWav(const fs::path& path, const AudioData& data, const WavOptions& options) {
+    const std::size_t channels = data.channelCount();
+    const std::uint64_t bytesPer = options.format == SampleFormat::Pcm16   ? 2
+                                   : options.format == SampleFormat::Pcm24 ? 3
+                                                                           : 4;
+    if (channels && data.frames() > (UINT32_MAX - 72) / (channels * bytesPer)) {
+        if (!std::isfinite(data.sampleRate) || data.sampleRate < 1 || data.sampleRate > 768000)
+            return Error("audio.encode", "invalid sample rate", {}, "use 1 .. 768000 Hz");
+        for (const auto& channel : data.channels)
+            if (channel.size() != data.frames())
+                return Error("audio.encode", "channels have different lengths");
+        auto header =
+            wavHeader(data.frames(), static_cast<std::uint32_t>(channels),
+                      static_cast<std::uint32_t>(std::lround(data.sampleRate)), options.format);
+        if (!header) return std::move(header).error();
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+        if (ec) return Error("audio.write", "cannot create render directory");
+        std::string temporary = path.string() + ".tmp-XXXXXX";
+        const int fd = ::mkstemp(temporary.data());
+        if (fd < 0) return Error("audio.write", "cannot create temporary WAV file");
+        std::FILE* file = ::fdopen(fd, "wb");
+        if (!file) {
+            ::close(fd);
+            ::unlink(temporary.c_str());
+            return Error("audio.write", "cannot open temporary WAV file");
+        }
+        bool good = std::fwrite(header->data(), 1, header->size(), file) == header->size();
+        Rng rng(options.ditherSeed);
+        std::vector<std::uint8_t> block(4096 * channels * bytesPer);
+        for (std::size_t start = 0; good && start < data.frames(); start += 4096) {
+            const std::size_t count = std::min<std::size_t>(4096, data.frames() - start);
+            std::size_t w = 0;
+            for (std::size_t i = 0; i < count; ++i)
+                for (std::size_t c = 0; c < channels; ++c) {
+                    const float sample = data.channels[c][start + i];
+                    if (options.format == SampleFormat::Float32) {
+                        std::memcpy(block.data() + w, &sample, 4);
+                        w += 4;
+                    } else {
+                        const bool pcm16 = options.format == SampleFormat::Pcm16;
+                        const double scale = pcm16 ? 32768.0 : 8388608.0;
+                        double x = static_cast<double>(sample) * scale;
+                        if (options.dither) x += rng.uniform() - rng.uniform();
+                        if (std::isnan(x)) x = 0;
+                        const auto q = static_cast<std::int32_t>(
+                            std::clamp(std::floor(x + 0.5), pcm16 ? -32768.0 : -8388608.0,
+                                       pcm16 ? 32767.0 : 8388607.0));
+                        for (std::size_t b = 0; b < bytesPer; ++b)
+                            block[w++] = static_cast<std::uint8_t>(q >> (8 * b));
+                    }
+                }
+            good = std::fwrite(block.data(), 1, w, file) == w;
+        }
+        good = std::fflush(file) == 0 && good;
+        good = ::fsync(fd) == 0 && good;
+        good = std::fclose(file) == 0 && good;
+        if (good) good = ::rename(temporary.c_str(), path.c_str()) == 0;
+        if (!good) {
+            ::unlink(temporary.c_str());
+            return Error("audio.write", "could not write RF64 WAV");
+        }
+        const int parent = ::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (parent < 0) return Error("audio.write", "cannot sync render directory");
+        const bool synced = ::fsync(parent) == 0;
+        ::close(parent);
+        if (!synced) return Error("audio.write", "cannot sync render directory");
+        return okStatus();
+    }
     auto bytes = encodeWav(data, options);
     if (!bytes) return std::move(bytes).error();
     auto st = writeFileAtomic(path, *bytes);

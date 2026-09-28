@@ -2,7 +2,8 @@
 //
 // Reading: WAV (PCM 8/16/24/32, float 32/64, RF64/BW64), FLAC and MP3, detected
 // by content (not extension), decoded to planar float at the file's own rate.
-// Writing: WAV as 16/24-bit PCM with seeded TPDF dither, or 32-bit float.
+// Writing: RIFF WAV or RF64 beyond 4 GiB as 16/24-bit PCM with seeded TPDF
+// dither, or 32-bit float.
 // Writes are atomic (temporary file + rename, see writeFileAtomic). PCM
 // encoding maps NaN to 0 and clamps infinities to full scale; float32 stores
 // samples unchanged. A WAV whose data is shorter than its header declares
@@ -49,6 +50,11 @@ struct WavOptions {
     bool dither = true;            // TPDF dither for PCM formats
     std::uint64_t ditherSeed = 0;  // deterministic
 };
+
+// Builds a canonical RIFF or RF64 header for the given payload size. RF64
+// includes ds64 with the 64-bit sizes and sample count; no audio allocation.
+Result<std::vector<std::uint8_t>> wavHeader(std::uint64_t frames, std::uint32_t channels,
+                                            std::uint32_t sampleRate, SampleFormat format);
 
 Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOptions& options = {});
 Status writeWav(const std::filesystem::path& path, const AudioData& data,

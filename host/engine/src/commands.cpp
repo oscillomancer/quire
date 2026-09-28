@@ -7,6 +7,7 @@
 #include <set>
 
 #include "analysis_commands.h"
+#include "render_commands.h"
 #include "supple/audio/audio_file.h"
 #include "supple/engine/app.h"
 #include "supple/model/schemas.h"
@@ -108,6 +109,7 @@ struct RecoverResult {
 struct ProjectSetArgs {
     std::optional<std::string> name, title, author, notes;
     std::optional<double> panLawDb;
+    std::optional<json::Value> render;
 };
 struct PathArgs {
     std::optional<std::string> path;
@@ -504,16 +506,138 @@ enum class RenderAnalyze { Summary, Full };
 struct RenderMixArgs {
     std::optional<double> startBeat, endBeat, tailS;
     std::optional<std::string> name;
+    std::optional<std::string> pattern;
+    std::optional<std::string> branch;
     std::optional<RenderAnalyze> analyze;
+    std::optional<json::Value> normalize;
+    std::optional<std::int64_t> bitDepth, sampleRate, channels;
+    std::optional<std::string> format;
+    bool job = false;
 };
 struct RenderMixResult {
-    std::string render;
-    std::string path;
-    double seconds = 0, peakDbfs = 0;
-    std::int64_t outputLatency = 0;
+    std::optional<std::string> render, path;
+    std::optional<double> seconds, peakDbfs;
+    std::optional<std::int64_t> outputLatency;
     std::optional<std::vector<std::string>> warnings;
     std::optional<json::Value> analysis;
+    std::optional<std::string> job, status;
 };
+Status prepareMixAudio(audio::AudioData& data, audio::WavOptions& wav,
+                       const model::Project& project, const RenderMixArgs& args) {
+    const auto& defaults = project.render;
+    auto setting = [&](std::string_view key) -> const json::Value* {
+        return defaults.isObject() ? defaults.find(key) : nullptr;
+    };
+    const auto* format = setting("format");
+    const std::string container =
+        args.format.value_or(format && format->isString() ? format->asString()
+                             : format && format->isObject() && format->find("container") &&
+                                     format->find("container")->isString()
+                                 ? format->find("container")->asString()
+                                 : "wav");
+    if (container != "wav")
+        return Error("render.format", "only WAV encoding is available", "/format");
+    const auto* depthDefault =
+        format && format->isObject() ? format->find("bit_depth") : setting("bit_depth");
+    const int depth = static_cast<int>(args.bitDepth.value_or(
+        depthDefault && depthDefault->isNumber() ? depthDefault->asInt() : 32));
+    if (depth != 16 && depth != 24 && depth != 32)
+        return Error("render.format", "bit depth must be 16, 24, or 32", "/bit_depth");
+    wav.format = depth == 16   ? audio::SampleFormat::Pcm16
+                 : depth == 24 ? audio::SampleFormat::Pcm24
+                               : audio::SampleFormat::Float32;
+    wav.ditherSeed = project.seed;
+    if (format && format->isObject())
+        if (const auto* dither = format->find("dither"); dither && dither->isBool())
+            wav.dither = dither->asBool();
+    const auto* rateDefault = setting("sample_rate");
+    const double rate = args.sampleRate ? static_cast<double>(*args.sampleRate)
+                        : rateDefault && rateDefault->isNumber() ? rateDefault->asDouble()
+                                                                 : data.sampleRate;
+    if (!(rate >= 8000 && rate <= 384000))
+        return Error("render.sample_rate", "sample rate out of range", "/sample_rate");
+    if (rate != data.sampleRate) {
+        auto resampled = audio::resample(data, rate);
+        if (!resampled) return std::move(resampled).error();
+        data = std::move(*resampled);
+    }
+    const auto* channelsDefault = setting("channels");
+    const auto channels = args.channels.value_or(
+        channelsDefault && channelsDefault->isNumber() ? channelsDefault->asInt() : 2);
+    if (channels != 1 && channels != 2)
+        return Error("render.channels", "channels must be 1 or 2", "/channels");
+    if (channels == 1 && data.channelCount() == 2) {
+        for (std::size_t i = 0; i < data.frames(); ++i)
+            data.channels[0][i] =
+                static_cast<float>(0.5 * (static_cast<double>(data.channels[0][i]) +
+                                          static_cast<double>(data.channels[1][i])));
+        data.channels.resize(1);
+    }
+    const json::Value* norm = args.normalize ? &*args.normalize : setting("normalize");
+    std::string mode = "none";
+    double target = -14;
+    std::optional<double> limit;
+    if (norm) {
+        if (norm->isString())
+            mode = norm->asString();
+        else if (norm->isObject()) {
+            const auto* selected = norm->find("mode");
+            if (!selected || !selected->isString())
+                return Error("render.normalize", "normalize needs a mode", "/normalize/mode");
+            mode = selected->asString();
+            if (const auto* v = norm->find("target")) {
+                if (!v->isNumber())
+                    return Error("render.normalize", "target must be numeric", "/normalize/target");
+                target = v->asDouble();
+            }
+            if (const auto* v = norm->find("limit_true_peak_db")) {
+                if (!v->isNumber())
+                    return Error("render.normalize", "peak limit must be numeric",
+                                 "/normalize/limit_true_peak_db");
+                limit = v->asDouble();
+            }
+        } else
+            return Error("render.normalize", "normalize must be a mode or object", "/normalize");
+    }
+    return normalizeRenderAudio(data, mode, target, limit);
+}
+
+Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
+                         const RenderMixArgs& args) {
+    const auto& defaults = session.project->render;
+    const auto* projectPattern = defaults.isObject() ? defaults.find("pattern") : nullptr;
+    const std::string pattern = args.name.value_or(args.pattern.value_or(
+        projectPattern && projectPattern->isString() ? projectPattern->asString()
+                                                     : "mix-v" + std::to_string(session.version)));
+    RenderPatternContext context;
+    context.project = session.project->name.empty() ? "project" : session.project->name;
+    context.startBeats = args.startBeat.value_or(0);
+    context.startSeconds = session.timeMap->secondsAt(context.startBeats);
+    const auto* rateSetting = defaults.isObject() ? defaults.find("sample_rate") : nullptr;
+    const auto* formatSetting = defaults.isObject() ? defaults.find("format") : nullptr;
+    const auto* depthSetting = formatSetting && formatSetting->isObject()
+                                   ? formatSetting->find("bit_depth")
+                               : defaults.isObject() ? defaults.find("bit_depth")
+                                                     : nullptr;
+    context.sampleRate = static_cast<int>(
+        args.sampleRate.value_or(rateSetting && rateSetting->isNumber()
+                                     ? rateSetting->asInt()
+                                     : static_cast<std::int64_t>(session.project->sampleRate)));
+    context.bitDepth = static_cast<int>(args.bitDepth.value_or(
+        depthSetting && depthSetting->isNumber() ? depthSetting->asInt() : 32));
+    auto expanded = expandRenderPattern(pattern, context);
+    if (!expanded) return std::move(expanded).error();
+    const fs::path path = app.rendersDir() / (*expanded + ".wav");
+    std::error_code ec;
+    const auto root = fs::weakly_canonical(app.rendersDir(), ec);
+    if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
+    const auto parent = fs::weakly_canonical(path.parent_path(), ec);
+    if (ec) return Error("render.path", "cannot resolve render parent directory", "/pattern");
+    const auto relative = parent.lexically_relative(root);
+    if (relative.empty() || relative.is_absolute() || *relative.begin() == "..")
+        return Error("render.path", "render name escapes the renders directory", "/pattern");
+    return path;
+}
 struct HistoryResult {
     std::int64_t version = 0;
     std::string label;
@@ -586,6 +710,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("notes", &ProjectSetArgs::notes, schema::string())
                      .field("pan_law_db", &ProjectSetArgs::panLawDb,
                             schema::number().range(-6, 0).unit(units::Unit::dB))
+                     .field("render", &ProjectSetArgs::render, schema::any())
                      .build();
         c.result = emptySchema();
         c.examples = {{"Name it", obj(R"({"name": "Demo"})"), obj("{}"), "empty"}};
@@ -597,6 +722,39 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.author) p.author = *a.author;
             if (a.notes) p.notes = *a.notes;
             if (a.panLawDb) p.panLawDb = *a.panLawDb;
+            if (a.render) {
+                if (!a.render->isObject())
+                    return Error("render.settings", "render settings must be an object", "/render");
+                if (const auto* matrix = a.render->find("matrix")) {
+                    if (!matrix->isObject())
+                        return Error("render.matrix", "matrix must be an object", "/render/matrix");
+                    for (const auto& [key, row] : matrix->asObject()) {
+                        if (key != "project") {
+                            auto id = model::Id::parse(key);
+                            if (!id || !A(ctx).view().regions.contains(*id))
+                                return Error("render.matrix", "unknown matrix region " + key,
+                                             "/render/matrix", "use region.add first");
+                        }
+                        if (!row.isArray())
+                            return Error("render.matrix", "matrix row must be an array",
+                                         "/render/matrix");
+                        for (const auto& cell : row.asArray()) {
+                            if (!cell.isString())
+                                return Error("render.matrix",
+                                             "matrix cell must be a track id or master",
+                                             "/render/matrix");
+                            if (cell.asString() != "master") {
+                                auto id = model::Id::parse(cell.asString());
+                                if (!id || !A(ctx).view().tracks.contains(*id))
+                                    return Error("render.matrix",
+                                                 "unknown matrix track " + cell.asString(),
+                                                 "/render/matrix", "use track.list");
+                            }
+                        }
+                    }
+                }
+                p.render = *a.render;
+            }
             t.setProject(std::move(p));
             return Empty{};
         };
@@ -1675,6 +1833,16 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("name", &RenderMixArgs::name,
                             schema::string().pattern("^[A-Za-z0-9 _.+-]{1,64}$",
                                                      "a file-name-safe name"))
+                     .field("pattern", &RenderMixArgs::pattern, schema::string())
+                     .field("branch", &RenderMixArgs::branch, schema::string())
+                     .field("format", &RenderMixArgs::format, schema::string())
+                     .field("bit_depth", &RenderMixArgs::bitDepth, schema::integer().range(16, 32))
+                     .field("sample_rate", &RenderMixArgs::sampleRate,
+                            schema::integer().range(8000, 384000))
+                     .field("channels", &RenderMixArgs::channels, schema::integer().range(1, 2))
+                     .field("normalize", &RenderMixArgs::normalize, schema::any())
+                     .field("job", &RenderMixArgs::job, schema::boolean())
+                     .defaultValue(false)
                      .field("analyze", &RenderMixArgs::analyze,
                             schema::enumeration<RenderAnalyze>({{RenderAnalyze::Summary, "summary"},
                                                                 {RenderAnalyze::Full, "full"}}))
@@ -1688,6 +1856,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("output_latency", &RenderMixResult::outputLatency, schema::integer())
                 .field("warnings", &RenderMixResult::warnings, schema::arrayOf(schema::string()))
                 .field("analysis", &RenderMixResult::analysis, schema::any())
+                .field("job", &RenderMixResult::job, schema::string())
+                .field("status", &RenderMixResult::status, schema::string())
                 .build();
         c.examples = {
             {"Render", obj(R"({"name": "mix-v1"})"),
@@ -1695,7 +1865,14 @@ void registerEngineCommands(cmd::Registry& registry) {
              "song_with_fx"}};
         c.run = [](const RenderMixArgs& a, Context& ctx) -> Result<RenderMixResult> {
             EngineApp& app = A(ctx);
-            const model::Session s = app.view();
+            model::Session s = app.view();
+            if (a.branch) {
+                auto head = app.versions().head(*a.branch);
+                if (!head)
+                    return Error("branch.unknown", "unknown branch " + *a.branch, "/branch",
+                                 "use branch.list");
+                s = *head;
+            }
             double endBeat = a.endBeat.value_or(0.0);
             if (!a.endBeat)
                 for (const auto& e : s.items)
@@ -1705,12 +1882,76 @@ void registerEngineCommands(cmd::Registry& registry) {
             OfflineSettings o;
             o.startSeconds = s.timeMap->secondsAt(a.startBeat.value_or(0.0));
             o.endSeconds = s.timeMap->secondsAt(endBeat);
-            o.tailSeconds = a.tailS.value_or(0.0);
-            auto r = app.renderMix(o);
+            const auto* tailDefault =
+                s.project->render.isObject() ? s.project->render.find("tail_ms") : nullptr;
+            o.tailSeconds = a.tailS.value_or(
+                tailDefault && tailDefault->isNumber() ? tailDefault->asDouble() / 1000.0 : 0.0);
+            if (!app.projectPath().empty()) o.projectDir = app.projectPath().parent_path();
+            auto resolvedPath = mixPath(app, s, a);
+            if (!resolvedPath) return std::move(resolvedPath).error();
+            const fs::path path = *resolvedPath;
+            if (a.job) {
+                auto available = app.plugins();
+                if (!available) return std::move(available).error();
+                std::vector<host::PluginInfo> catalogue(available->begin(), available->end());
+                const auto identity = app.options().identity;
+                auto& jobs = ctx.service<cmd::JobManager>();
+                const std::string id = jobs.create();
+                const std::string renderId = app.reserveRenderId();
+                app.startJob([&app, &jobs, id, renderId, s = std::move(s), o, path, a,
+                              catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                    if (stop.stop_requested() || jobs.cancelled(id)) return;
+                    OfflineSettings settings = o;
+                    settings.cancelFlag = jobs.cancellationFlag(id);
+                    settings.progressFlag = jobs.progressFlag(id);
+                    settings.progressScale = 0.8;
+                    settings.stopToken = stop;
+                    auto r = renderSnapshot(s, settings, catalogue, identity);
+                    if (!r) {
+                        (void)jobs.fail(id, std::move(r).error());
+                        return;
+                    }
+                    audio::WavOptions wav;
+                    auto prepared = prepareMixAudio(r->audio, wav, *s.project, a);
+                    if (!prepared) {
+                        (void)jobs.fail(id, std::move(prepared).error());
+                        return;
+                    }
+                    if (stop.stop_requested() || jobs.cancelled(id)) return;
+                    auto written = audio::writeWav(path, r->audio, wav);
+                    if (!written) {
+                        (void)jobs.fail(id, std::move(written).error());
+                        return;
+                    }
+                    json::Value result = json::Value::object();
+                    result["path"] = path.string();
+                    result["seconds"] = r->audio.seconds();
+                    result["render"] = renderId;
+                    float peak = 0;
+                    for (const auto& channel : r->audio.channels)
+                        for (float sample : channel) peak = std::max(peak, std::fabs(sample));
+                    result["peak_dbfs"] =
+                        peak > 0 ? 20.0 * std::log10(static_cast<double>(peak)) : -1000.0;
+                    result["output_latency"] = static_cast<std::int64_t>(r->outputLatency);
+                    if (a.analyze) {
+                        auto report = analyzeAudio(r->audio, *a.analyze == RenderAnalyze::Full
+                                                                 ? analysis::Detail::Full
+                                                                 : analysis::Detail::Summary);
+                        if (report) result["analysis"] = std::move(*report);
+                    }
+                    (void)jobs.completeWith(id, std::move(result),
+                                            [&] { app.publishRender(renderId, path); });
+                });
+                RenderMixResult started;
+                started.job = id;
+                started.status = "running";
+                return started;
+            }
+            auto r = app.renderSession(s, o);
             if (!r) return std::move(r).error();
-            const std::string name = a.name.value_or("mix-v" + std::to_string(s.version));
-            const fs::path path = app.rendersDir() / (name + ".wav");
-            SUPPLE_TRY(audio::writeWav(path, r->audio));
+            audio::WavOptions wav;
+            SUPPLE_TRY(prepareMixAudio(r->audio, wav, *s.project, a));
+            SUPPLE_TRY(audio::writeWav(path, r->audio, wav));
             float peak = 0;
             for (const auto& ch : r->audio.channels)
                 for (float v : ch) peak = std::max(peak, std::fabs(v));
@@ -1734,6 +1975,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    registerRenderCommands(registry);
     registerEngineAnalysisCommands(registry);
     // ---------------------------------------------------------------- history
     auto historyResult = [] {

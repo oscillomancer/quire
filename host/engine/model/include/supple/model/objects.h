@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "supple/json/json.h"
 
 #include "supple/json/json.h"
 #include "supple/midi/midi.h"
@@ -34,6 +35,7 @@ struct Project {
     std::string mediaDir = "media";
     double panLawDb = -3.0;  // 0, -3, -4.5, -6
     std::uint64_t seed = 0;
+    json::Value render = json::Value::object();  // render.* defaults and matrix
 };
 
 struct TempoPointObj {
