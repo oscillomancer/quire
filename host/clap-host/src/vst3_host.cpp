@@ -278,10 +278,12 @@ std::uint32_t read32(std::span<const std::uint8_t> b, std::size_t at) {
 
 struct Vst3Instance::State {
     std::shared_ptr<VST3::Hosting::Module> module;
+    // Not reference counted (the SDK's HostApplication ignores addRef/release):
+    // owned here and declared before the plug-in objects, so it outlives them.
+    std::unique_ptr<HostContext> context;
     IPtr<vst::IComponent> component;
     FUnknownPtr<vst::IAudioProcessor> processor;
     IPtr<vst::IEditController> controller;
-    IPtr<HostContext> context;
     IPtr<Handler> handler = Steinberg::owned(new Handler);
     FUnknownPtr<vst::IConnectionPoint> componentPoint, controllerPoint;  // when connected
     std::vector<ParamInfo> parameters;
@@ -331,9 +333,9 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     std::unique_ptr<Vst3Instance> self(new Vst3Instance);
     auto& s = *self->state_;
     s.module = std::move(module);
-    s.context = Steinberg::owned(new HostContext(host.name));
+    s.context = std::make_unique<HostContext>(host.name);
     s.component = s.module->getFactory().createInstance<vst::IComponent>(*id);
-    if (!s.component || s.component->initialize(s.context) != kResultOk)
+    if (!s.component || s.component->initialize(s.context.get()) != kResultOk)
         return Error("host.create", "VST3 component could not initialize");
     s.processor = FUnknownPtr<vst::IAudioProcessor>(s.component);
     if (!s.processor) return Error("host.create", "VST3 class has no audio processor");
@@ -344,7 +346,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     s.separateController = static_cast<bool>(s.controller);
     if (!s.controller) s.controller = FUnknownPtr<vst::IEditController>(s.component);
     if (s.separateController) {
-        if (s.controller->initialize(s.context) != kResultOk)
+        if (s.controller->initialize(s.context.get()) != kResultOk)
             return Error("host.create", "VST3 controller could not initialize");
         // The SDK's host sequence: connect the two halves, then give the
         // controller the component's state (its parameter values).
