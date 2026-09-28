@@ -356,6 +356,16 @@ bool Engine::awaitRendered(std::int64_t frames, double timeoutSeconds) {
     }
 }
 
+bool Engine::awaitRendererHeld(double timeoutSeconds) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::duration<double>(timeoutSeconds);
+    while (!holdSeen_.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    return true;
+}
+
 void Engine::collectPlans() {
     // The oldest generation an executor may still be using.
     const std::uint64_t rendered = stoppedGen_.load(std::memory_order_acquire);
@@ -697,7 +707,9 @@ void Engine::rendererLoop(std::uint64_t seen) {
             reportedPlaying_.store(playing_);
         }
         const std::int64_t ahead = streamLocal_ - playedStream(seen);
-        bool room = playing_ && plan_ && !hold_.load() && ahead < aheadFrames_;
+        const bool held = hold_.load(std::memory_order_acquire);
+        if (held) holdSeen_.store(true, std::memory_order_release);
+        bool room = playing_ && plan_ && !held && ahead < aheadFrames_;
         if (room && plan_->split) {
             room = !plan_->frontier.empty();  // nothing to hand over: all is live
             for (const auto& r : plan_->frontierRings) room = room && r->slot() != nullptr;

@@ -1010,6 +1010,77 @@
     }
   },
   {
+    "name": "fx_move",
+    "title": "Move a plugin within a track chain or to another track.",
+    "description": "Move a plugin within a track chain or to another track.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_move_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
+        }
+      },
+      "required": ["fx", "index"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_param_get",
+    "title": "Read one saved plugin parameter by semantic key or numeric CLAP id.",
+    "description": "Read one saved plugin parameter by semantic key or numeric CLAP id.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_param_get_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "param": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["fx", "param"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_param_result",
+      "properties": {
+        "value": {}
+      },
+      "required": ["value"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_param_set",
     "title": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.",
     "description": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.  See describe for errors and examples.",
@@ -1046,6 +1117,41 @@
     }
   },
   {
+    "name": "fx_patch_get",
+    "title": "Read a semantic plugin's saved patch.",
+    "description": "Read a semantic plugin's saved patch.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_patch_get_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "changed_only": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_patch_result",
+      "properties": {
+        "patch": {}
+      },
+      "required": ["patch"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_patch_merge",
     "title": "Merge a partial patch into a plugin instance; returns the effective change.",
     "description": "Merge a partial patch into a plugin instance; returns the effective change. Semantic plugins only. Values in physical units: {\"params\": {\"gain\": \"-6 dB\"}}. See describe for errors and examples.",
@@ -1073,6 +1179,38 @@
         }
       },
       "required": ["changed", "description"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "fx_patch_set",
+    "title": "Replace a semantic plugin's complete patch.",
+    "description": "Replace a semantic plugin's complete patch.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_patch_set_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "patch": {}
+      },
+      "required": ["fx", "patch"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_patch_result",
+      "properties": {
+        "patch": {}
+      },
+      "required": ["patch"],
       "additionalProperties": false
     },
     "annotations": {
@@ -1384,6 +1522,43 @@
     }
   },
   {
+    "name": "item_duplicate",
+    "title": "Copy an item and its takes to a new beat position (default: immediately after).",
+    "description": "Copy an item and its takes to a new beat position (default: immediately after).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_duplicate_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "to": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "created_id",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "item_move",
     "title": "Move an item in time (position in beats or bar) and/or to another track.",
     "description": "Move an item in time (position in beats or bar) and/or to another track.  See describe for errors and examples.",
@@ -1455,6 +1630,279 @@
     }
   },
   {
+    "name": "item_set",
+    "title": "Set an item's position, length, playback, fades, name, or color.",
+    "description": "Set an item's position, length, playback, fades, name, or color. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_set_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "length": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "gain_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 24.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "fade_in": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "fade_out": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "item_split",
+    "title": "Split an audio or MIDI item at a beat, keeping take source positions aligned.",
+    "description": "Split an audio or MIDI item at a beat, keeping take source positions aligned.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_split_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "at": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "required": ["item", "at"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "item_split_result",
+      "properties": {
+        "left": {
+          "type": "string"
+        },
+        "right": {
+          "type": "string"
+        }
+      },
+      "required": ["left", "right"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "marker_add",
+    "title": "Add a named marker in beats.",
+    "description": "Add a named marker in beats.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "marker_add_args",
+      "properties": {
+        "pos": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "created_id",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "marker_list",
+    "title": "List rulers in this project.",
+    "description": "List rulers in this project.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "ruler_list",
+      "properties": {
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "ruler_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "color": {
+                "type": "string"
+              },
+              "pos": {
+                "type": "number"
+              },
+              "start": {
+                "type": "number"
+              },
+              "end": {
+                "type": "number"
+              }
+            },
+            "required": ["id", "name", "color"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["markers"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "marker_remove",
+    "title": "Remove a ruler.",
+    "description": "Remove a ruler.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "ruler_ref",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^mk_[0-9]+$"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "marker_set",
+    "title": "Edit a ruler's position, name, or color.",
+    "description": "Edit a ruler's position, name, or color.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "marker_set_args",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^mk_[0-9]+$"
+        },
+        "pos": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "midi_get",
     "title": "Read an item's MIDI as notation.",
     "description": "Read an item's MIDI as notation.  See describe for errors and examples.",
@@ -1517,6 +1965,110 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "plugin_list",
+    "title": "List scanned plugins; filter matches id, name, or vendor.",
+    "description": "List scanned plugins; filter matches id, name, or vendor.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "plugin_list_args",
+      "properties": {
+        "filter": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "plugin_list",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "plugin_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              },
+              "instrument": {
+                "type": "boolean"
+              },
+              "semantic": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "name", "vendor", "instrument", "semantic"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["plugins"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "plugin_scan",
+    "title": "Rescan configured plugin paths and return the available plugins.",
+    "description": "Rescan configured plugin paths and return the available plugins.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "plugin_list",
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "plugin_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              },
+              "instrument": {
+                "type": "boolean"
+              },
+              "semantic": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "name", "vendor", "instrument", "semantic"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["plugins"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
       "idempotentHint": false
     }
   },
@@ -1842,6 +2394,171 @@
     }
   },
   {
+    "name": "region_add",
+    "title": "Add a named region in beats.",
+    "description": "Add a named region in beats.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "region_add_args",
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "created_id",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "region_list",
+    "title": "List rulers in this project.",
+    "description": "List rulers in this project.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "ruler_list",
+      "properties": {
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "ruler_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "color": {
+                "type": "string"
+              },
+              "pos": {
+                "type": "number"
+              },
+              "start": {
+                "type": "number"
+              },
+              "end": {
+                "type": "number"
+              }
+            },
+            "required": ["id", "name", "color"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["regions"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "region_remove",
+    "title": "Remove a ruler.",
+    "description": "Remove a ruler.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "ruler_ref",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^rg_[0-9]+$"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "region_set",
+    "title": "Edit a ruler's position, name, or color.",
+    "description": "Edit a ruler's position, name, or color.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "region_set_args",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^rg_[0-9]+$"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "render_mix",
     "title": "Render the mix offline to a float WAV (default: start to the last item's end).",
     "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. See describe for errors and examples.",
@@ -1910,6 +2627,241 @@
     }
   },
   {
+    "name": "route_add",
+    "title": "Send one track to another track, bus, or the master.",
+    "description": "Send one track to another track, bus, or the master. The destination must not feed the source. Master accepts routes. Hardware and plugin sidechain routing are not supported yet. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "route_add_args",
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "tap": {
+          "type": "string",
+          "enum": ["post_fader", "pre_fader", "pre_fx"]
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "mute": {
+          "type": "boolean"
+        }
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "created_id",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "route_list",
+    "title": "List sends with endpoints and mixer settings.",
+    "description": "List sends with endpoints and mixer settings.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "route_list",
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "route_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "tap": {
+                "type": "string"
+              },
+              "volume_db": {
+                "type": "number"
+              },
+              "pan": {
+                "type": "number"
+              },
+              "mute": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "from", "to", "tap", "volume_db", "pan", "mute"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["routes"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "route_remove",
+    "title": "Remove a send.",
+    "description": "Remove a send.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "route_ref",
+      "properties": {
+        "route": {
+          "type": "string",
+          "pattern": "^sd_[0-9]+$"
+        }
+      },
+      "required": ["route"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "route_set",
+    "title": "Change a route's endpoints, tap, level, pan, or mute.",
+    "description": "Change a route's endpoints, tap, level, pan, or mute.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "route_set_args",
+      "properties": {
+        "route": {
+          "type": "string",
+          "pattern": "^sd_[0-9]+$"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "tap": {
+          "type": "string",
+          "enum": ["post_fader", "pre_fader", "pre_fx"]
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "mute": {
+          "type": "boolean"
+        }
+      },
+      "required": ["route"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "session_describe",
     "title": "Describe the whole session in compact text (tracks, items, fx, routes).",
     "description": "Describe the whole session in compact text (tracks, items, fx, routes). The quickest way to see where things are; use the IDs it shows with other commands. See describe for errors and examples.",
@@ -1934,6 +2886,208 @@
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false
+    }
+  },
+  {
+    "name": "take_activate",
+    "title": "Choose the take heard from an item.",
+    "description": "Choose the take heard from an item.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_activate_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$"
+        }
+      },
+      "required": ["item", "take"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "take_add",
+    "title": "Add a take to an item, optionally copied from another take of that item.",
+    "description": "Add a take to an item, optionally copied from another take of that item.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_add_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "created_id",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "take_list",
+    "title": "List the takes of an item and identify its active take.",
+    "description": "List the takes of an item and identify its active take.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_list_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "take_list",
+      "properties": {
+        "takes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "take_entry",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "gain_db": {
+                "type": "number"
+              },
+              "pan": {
+                "type": "number"
+              },
+              "start_offset": {
+                "type": "number"
+              }
+            },
+            "required": ["id", "name", "source", "active", "gain_db", "pan", "start_offset"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["takes"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "take_set",
+    "title": "Set take gain, pan, channel mode, name, or source offset.",
+    "description": "Set take gain, pan, channel mode, name, or source offset.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_set_args",
+      "properties": {
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$"
+        },
+        "gain_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 24.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "pan": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100.0,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+            }
+          ],
+          "x-unit": "%",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+        },
+        "channel_mode": {
+          "type": "string",
+          "enum": ["normal", "reverse_stereo", "mono_mix", "left", "right"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "start_offset": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "required": ["take"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
     }
   },
   {
@@ -1998,6 +3152,58 @@
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true
+    }
+  },
+  {
+    "name": "time_convert",
+    "title": "Convert a seconds, beat, or bar position to all three time domains.",
+    "description": "Convert a seconds, beat, or bar position to all three time domains.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "time_convert_args",
+      "properties": {
+        "seconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "beat": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "time_position",
+      "properties": {
+        "seconds": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "bar": {
+          "type": "integer"
+        },
+        "beat_in_bar": {
+          "type": "integer"
+        },
+        "fraction": {
+          "type": "number"
+        }
+      },
+      "required": ["seconds", "beat", "bar", "beat_in_bar", "fraction"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     }
   },
   {

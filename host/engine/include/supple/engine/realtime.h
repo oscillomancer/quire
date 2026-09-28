@@ -290,8 +290,13 @@ class Engine {
     Status startRecording(std::vector<RecordTarget> targets);
     Result<std::vector<RecordedTake>> stopRecording();
     bool recording() const { return recorderOwned_ != nullptr; }
-    // Tests: while held, the renderer renders nothing.
-    void holdRenderer(bool hold) { hold_.store(hold); }
+    // Tests: while held, the renderer renders nothing. Wait for its
+    // acknowledgement before driving a manual backend into an underrun.
+    void holdRenderer(bool hold) {
+        holdSeen_.store(false, std::memory_order_release);
+        hold_.store(hold, std::memory_order_release);
+    }
+    bool awaitRendererHeld(double timeoutSeconds = 10.0);
     const EngineOptions& options() const { return options_; }
 
     // Main thread, regularly: frees retired plans; once the newest plan is
@@ -392,7 +397,7 @@ class Engine {
     std::unique_ptr<detail::ChunkRing> ring_;
     std::unique_ptr<detail::Workers> workers_;
     std::thread renderer_;
-    std::atomic<bool> rendererQuit_{false}, hold_{false};
+    std::atomic<bool> rendererQuit_{false}, hold_{false}, holdSeen_{false};
     std::int64_t aheadFrames_ = 0;                 // render-ahead target
     std::atomic<std::uint64_t> epoch_{0};          // main thread: bumped by seek and pause
     std::atomic<std::uint64_t> epochDone_{0};      // renderer: the epoch it has relocated for

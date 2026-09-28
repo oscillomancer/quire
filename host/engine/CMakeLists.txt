@@ -3,7 +3,7 @@ add_subdirectory(model)
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/recording.cpp
           src/jack_backend.cpp
-          src/app.cpp src/commands.cpp src/analysis_commands.cpp
+          src/app.cpp src/commands.cpp src/extra_commands.cpp src/analysis_commands.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::notation supple::core-params supple::core-analysis
   PRIVATE_DEPS supple::product-info ${CMAKE_DL_LIBS})
@@ -18,6 +18,7 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_options(engine-fake-jack PRIVATE $<$<CXX_COMPILER_ID:Clang>:-fno-sanitize=function>)
 
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
+                   tests/test_commands.cpp
                    tests/test_jack.cpp tests/test_workers.cpp LABELS rt)
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)

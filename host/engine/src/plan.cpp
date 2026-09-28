@@ -101,7 +101,14 @@ std::vector<TimedEvent> trackEvents(const Session& s, Id track, double startSeco
                 if (k > 0 && n.start >= seq.length) continue;
                 const double b0 = static_cast<double>(n.start) / seq.ppq;
                 auto on = toSample(b0, offset);
-                if (!on || *on >= endSample) continue;
+                // A take can start in the middle of a note (for example after
+                // item.split). Retrigger the held note at the item's boundary.
+                if (!on) {
+                    if (static_cast<double>(n.start + n.length) / seq.ppq <= take->startOffset)
+                        continue;
+                    on = time::samplesAt(tm.secondsAt(startBeat + offset), rate) - origin;
+                }
+                if (*on >= endSample) continue;
                 auto off = toSample(static_cast<double>(n.start + n.length) / seq.ppq, offset);
                 const std::int64_t offS = std::max(*on + 1, off ? *off : *on + 1);
                 TimedEvent a;

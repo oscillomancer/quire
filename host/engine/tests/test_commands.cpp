@@ -1,0 +1,199 @@
+#include <doctest/doctest.h>
+
+#include <unistd.h>
+#include <cmath>
+#include <filesystem>
+
+#include <supple/audio/audio_file.h>
+#include <supple/engine/app.h>
+
+using namespace supple;
+using namespace supple::engine;
+namespace fs = std::filesystem;
+
+namespace {
+struct Workdir {
+    fs::path path =
+        fs::temp_directory_path() / ("supple-engine-commands-" + std::to_string(::getpid()));
+    Workdir() {
+        fs::remove_all(path);
+        fs::create_directories(path);
+    }
+    ~Workdir() { fs::remove_all(path); }
+};
+
+std::unique_ptr<EngineApp> makeApp(const fs::path& path) {
+    AppOptions options;
+    options.workdir = path;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto app = EngineApp::create(options);
+    REQUIRE(app);
+    return std::move(*app);
+}
+
+const cmd::Origin kOrigin{cmd::Origin::Type::Test, "commands", ""};
+json::Value j(std::string_view text) { return json::parse(text).value(); }
+json::Value run(cmd::Dispatcher& bus, std::string name, std::string_view args) {
+    auto result = bus.execute({std::move(name), j(args), kOrigin});
+    REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
+    return *result;
+}
+double peak(const fs::path& path) {
+    auto audio = audio::readAudio(path);
+    REQUIRE(audio);
+    double max = 0;
+    for (float x : audio->channels[0]) max = std::max(max, std::fabs(double(x)));
+    return max;
+}
+}  // namespace
+
+TEST_CASE("route sends through a gain bus, rejects cycles and replays in a branch merge") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Source"})");
+    run(bus, "track.add", R"({"name":"Bus"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "fx.add",
+        R"({"track":"tr_2","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-6}}})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const double direct =
+        peak(run(bus, "render.mix", R"({"name":"direct","end_beat":2})")["path"].asString());
+    run(bus, "route.add", R"({"from":"tr_1","to":"tr_2"})");
+    auto listed = run(bus, "route.list", "{}");
+    REQUIRE(listed["routes"].size() == 1);
+    CHECK(listed["routes"].at(0).find("id")->asString() == "sd_1");
+    const double sent =
+        peak(run(bus, "render.mix", R"({"name":"sent","end_beat":2})")["path"].asString());
+    CHECK(sent > direct * 1.2);
+    auto cycle = bus.execute({"route.add", j(R"({"from":"tr_2","to":"tr_1"})"), kOrigin});
+    REQUIRE_FALSE(cycle);
+    CHECK(cycle.error().code == "route.cycle");
+    auto self = bus.execute({"route.add", j(R"({"from":"tr_1","to":"tr_1"})"), kOrigin});
+    REQUIRE_FALSE(self);
+    CHECK(self.error().code == "route.cycle");
+
+    run(bus, "branch.create", R"({"name":"agent/test/route"})");
+    run(bus, "route.set", R"({"route":"sd_1","volume_db":-3})");
+    run(bus, "branch.switch", R"({"name":"main"})");
+    run(bus, "marker.add", R"({"pos":1,"name":"Check"})");
+    run(bus, "branch.merge", R"({"from":"agent/test/route"})");
+    CHECK(app->head().routes.find(*model::Id::parse("sd_1"))->volumeDb == -3);
+    CHECK(app->head().markers.size() == 1);
+}
+
+TEST_CASE("audio split is sample exact and take activation changes the render") {
+    Workdir dir;
+    audio::AudioData source;
+    source.sampleRate = 48000;
+    source.channels = {std::vector<float>(48000)};
+    for (std::size_t i = 0; i < source.frames(); ++i)
+        source.channels[0][i] =
+            static_cast<float>(0.25 * std::sin(2 * 3.141592653589793 * 440 * double(i) / 48000));
+    REQUIRE(audio::writeWav(dir.path / "source.wav", source).ok());
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Audio"})");
+    const std::string add = "{\"track\":\"tr_1\",\"audio_file\":" +
+                            json::writeCompact(json::Value((dir.path / "source.wav").string())) +
+                            "}";
+    run(bus, "item.add", add);
+    auto before = audio::readAudio(
+        run(bus, "render.mix", R"({"name":"before","end_beat":2})")["path"].asString());
+    REQUIRE(before);
+    run(bus, "item.split", R"({"item":"it_1","at":1})");
+    auto after = audio::readAudio(
+        run(bus, "render.mix", R"({"name":"after","end_beat":2})")["path"].asString());
+    REQUIRE(after);
+    REQUIRE(before->frames() == after->frames());
+    std::size_t mismatches = 0;
+    for (std::size_t i = 0; i < before->frames(); ++i)
+        if (before->channels[0][i] != after->channels[0][i]) ++mismatches;
+    CHECK(mismatches == 0);
+    CHECK(app->head().items.size() == 2);
+    CHECK(app->head().takes.size() == 2);
+    run(bus, "take.add", R"({"item":"it_1","from":"tk_1"})");
+    run(bus, "take.set", R"({"take":"tk_3","gain_db":-24})");
+    const double loud =
+        peak(run(bus, "render.mix", R"({"name":"loud","end_beat":1})")["path"].asString());
+    run(bus, "take.activate", R"({"item":"it_1","take":"tk_3"})");
+    const double quiet =
+        peak(run(bus, "render.mix", R"({"name":"quiet","end_beat":1})")["path"].asString());
+    CHECK(quiet < loud * 0.1);
+}
+
+TEST_CASE("FX order is audible and rulers survive save and reopen") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Tone"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "fx.add",
+        R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-12}}})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const double low =
+        peak(run(bus, "render.mix", R"({"name":"low","end_beat":2})")["path"].asString());
+    run(bus, "fx.move", R"({"fx":"fx_2","index":0})");
+    const double high =
+        peak(run(bus, "render.mix", R"({"name":"high","end_beat":2})")["path"].asString());
+    CHECK(high > low * 3.5);
+    run(bus, "marker.add", R"({"pos":4,"name":"Verse"})");
+    run(bus, "region.add", R"({"start":4,"end":8,"name":"Verse"})");
+    const std::string save =
+        "{\"path\":" + json::writeCompact(json::Value((dir.path / "project.json").string())) + "}";
+    run(bus, "project.save", save);
+    auto reopened = makeApp(dir.path / "reopened");
+    REQUIRE(reopened->open(dir.path / "project.json").ok());
+    CHECK(reopened->head().markers.find(*model::Id::parse("mk_1"))->name == "Verse");
+    CHECK(reopened->head().regions.find(*model::Id::parse("rg_1"))->end == 8);
+
+    run(bus, "branch.create", R"({"name":"agent/test/arrangement"})");
+    run(bus, "item.set", R"({"item":"it_1","gain_db":-3})");
+    run(bus, "region.set", R"({"id":"rg_1","end":10})");
+    run(bus, "fx.move", R"({"fx":"fx_2","index":1})");
+    run(bus, "branch.switch", R"({"name":"main"})");
+    run(bus, "marker.set", R"({"id":"mk_1","name":"Start"})");
+    run(bus, "branch.merge", R"({"from":"agent/test/arrangement"})");
+    CHECK(app->head().items.find(*model::Id::parse("it_1"))->gainDb == -3);
+    CHECK(app->head().regions.find(*model::Id::parse("rg_1"))->end == 10);
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_1"))->chain[1] ==
+          *model::Id::parse("fx_2"));
+    CHECK(app->head().markers.find(*model::Id::parse("mk_1"))->name == "Start");
+}
+
+TEST_CASE("MIDI split keeps held notes audible on both sides") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Tone"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:h r:h"})");
+    run(bus, "item.split", R"({"item":"it_1","at":1})");
+    const auto rendered = run(bus, "render.mix", R"({"name":"midi-split","end_beat":2})");
+    auto audio = audio::readAudio(rendered.find("path")->asString());
+    REQUIRE(audio);
+    double left = 0, right = 0;
+    for (std::size_t i = 10000; i < 20000; ++i)
+        left = std::max(left, std::fabs(double(audio->channels[0][i])));
+    for (std::size_t i = 30000; i < 40000; ++i)
+        right = std::max(right, std::fabs(double(audio->channels[0][i])));
+    CHECK(left > 0.05);
+    CHECK(right > 0.05);
+    const auto leftSource = app->head().takes.find(*model::Id::parse("tk_1"))->source;
+    const auto rightSource = app->head().takes.find(*model::Id::parse("tk_2"))->source;
+    REQUIRE(leftSource);
+    REQUIRE(rightSource);
+    CHECK(leftSource != rightSource);  // non-pooled MIDI stays independent
+    const std::string leftNotation = run(bus, "midi.get", R"({"item":"it_1"})")["text"].asString();
+    run(bus, "midi.write", R"({"item":"it_2","notation":"voice a; 1: r:w"})");
+    CHECK(run(bus, "midi.get", R"({"item":"it_1"})")["text"].asString() == leftNotation);
+    CHECK(app->head().takes.find(*model::Id::parse("tk_2"))->startOffset == 0);
+}
