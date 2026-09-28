@@ -2864,6 +2864,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "vendor": {
             "type": "string"
           },
+          "format": {
+            "type": "string",
+            "description": "clap or vst3"
+          },
           "instrument": {
             "type": "boolean"
           },
@@ -2871,7 +2875,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
         "additionalProperties": false
       }
     }
@@ -2937,6 +2941,10 @@ Kind: `action`. Exposure: `mcp-tool`.
           "vendor": {
             "type": "string"
           },
+          "format": {
+            "type": "string",
+            "description": "clap or vst3"
+          },
           "instrument": {
             "type": "boolean"
           },
@@ -2944,7 +2952,7 @@ Kind: `action`. Exposure: `mcp-tool`.
             "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
         "additionalProperties": false
       }
     }

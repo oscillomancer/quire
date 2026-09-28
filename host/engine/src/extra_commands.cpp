@@ -90,7 +90,7 @@ struct PluginArgs {
     std::optional<std::string> filter;
 };
 struct PluginEntry {
-    std::string id, name, vendor;
+    std::string id, name, vendor, format;
     bool instrument = false, semantic = false;
 };
 struct PluginList {
@@ -532,13 +532,15 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<PluginArgs>("plugin_list_args")
                      .field("filter", &PluginArgs::filter, schema::string())
                      .build();
-        auto entry = schema::object<PluginEntry>("plugin_entry")
-                         .field("id", &PluginEntry::id, schema::string())
-                         .field("name", &PluginEntry::name, schema::string())
-                         .field("vendor", &PluginEntry::vendor, schema::string())
-                         .field("instrument", &PluginEntry::instrument, schema::boolean())
-                         .field("semantic", &PluginEntry::semantic, schema::boolean())
-                         .build();
+        auto entry =
+            schema::object<PluginEntry>("plugin_entry")
+                .field("id", &PluginEntry::id, schema::string())
+                .field("name", &PluginEntry::name, schema::string())
+                .field("vendor", &PluginEntry::vendor, schema::string())
+                .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
+                .field("instrument", &PluginEntry::instrument, schema::boolean())
+                .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
                        .build();
@@ -553,7 +555,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                     p.name.find(*a.filter) == std::string::npos &&
                     p.vendor.find(*a.filter) == std::string::npos)
                     continue;
-                out.plugins.push_back({p.id, p.name, p.vendor, p.instrument, p.semantic});
+                out.plugins.push_back({p.id, p.name, p.vendor, p.format, p.instrument, p.semantic});
             }
             return out;
         };
@@ -567,13 +569,15 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.summary = "Rescan configured plugin paths and return the available plugins.";
         c.tags = {"plugin"};
         c.args = schema::object<cmd::NoArgs>("no_args").build();
-        auto entry = schema::object<PluginEntry>("plugin_entry")
-                         .field("id", &PluginEntry::id, schema::string())
-                         .field("name", &PluginEntry::name, schema::string())
-                         .field("vendor", &PluginEntry::vendor, schema::string())
-                         .field("instrument", &PluginEntry::instrument, schema::boolean())
-                         .field("semantic", &PluginEntry::semantic, schema::boolean())
-                         .build();
+        auto entry =
+            schema::object<PluginEntry>("plugin_entry")
+                .field("id", &PluginEntry::id, schema::string())
+                .field("name", &PluginEntry::name, schema::string())
+                .field("vendor", &PluginEntry::vendor, schema::string())
+                .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
+                .field("instrument", &PluginEntry::instrument, schema::boolean())
+                .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
                        .build();
@@ -583,7 +587,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!found) return std::move(found).error();
             PluginList out;
             for (const auto& p : *found)
-                out.plugins.push_back({p.id, p.name, p.vendor, p.instrument, p.semantic});
+                out.plugins.push_back({p.id, p.name, p.vendor, p.format, p.instrument, p.semantic});
             return out;
         };
         registry.add(std::move(c));

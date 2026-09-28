@@ -27,8 +27,8 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-inline constexpr std::uint32_t kVersion = 3;  // 3: Create carries the plugin format
-inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
+inline constexpr std::uint32_t kVersion = 3;         // 3: Create carries the plugin format
+inline constexpr int kControlFd = 3;                 // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
 inline constexpr std::uint32_t kMaxOutEvents = 1024;
