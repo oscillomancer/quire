@@ -838,6 +838,83 @@ TEST_CASE("a batch keeps text positions of nested errors (not pointer-prefixed)"
     CHECK(step.details[0].path.find("/steps") == std::string::npos);
 }
 
+TEST_CASE("recorded MIDI notes are clipped at punch and overdub item edges") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto result = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
+        return *result;
+    };
+    call("batch", R"({"steps":[
+        {"command":"track.add","args":{"name":"Keys"},"as":"k"},
+        {"command":"fx.add","args":{"track":"${k.track}","plugin":"com.suppleaudio.test.sine"}}]})");
+    const model::Id track{model::Kind::Track, 1};
+    RecordedTake r;
+    r.track = track;
+    r.isMidi = true;
+    r.sampleRate = 48000;
+    r.frames = 48000;
+    r.segments = {{0, 0}};
+    r.midi = {{9600, 0, {0x90, 72, 100}}, {38400, 0, {0x80, 72, 0}}};
+    app->setPunch({true, 0.4, 0.6});
+    REQUIRE(app->commitTakes({r}));
+    const auto& punched = app->head();
+    REQUIRE(punched.items.size() == 1);
+    const model::Item& item = *punched.items.begin()->value;
+    const midi::Sequence& seq =
+        punched.midi.find(*punched.takes.find(*item.activeTake)->source)->sequence;
+    REQUIRE(seq.notes.size() == 1);
+    CHECK(seq.notes[0].start == 0);
+    CHECK(seq.notes[0].length == 384);  // 0.2 seconds at 120 bpm and 960 PPQ
+    auto rendered = app->renderMix({.startSeconds = 0, .endSeconds = 0.8});
+    REQUIRE(rendered);
+    const auto& audio = rendered->audio.channels[0];
+    double during = 0, before = 0, after = 0;
+    for (std::size_t i = 0; i < audio.size(); ++i) {
+        const double v = std::fabs(double(audio[i]));
+        if (i < 19200)
+            before = std::max(before, v);
+        else if (i < 28800)
+            during = std::max(during, v);
+        else
+            after = std::max(after, v);
+    }
+    CHECK(before == 0.0);
+    CHECK(during > 0.1);
+    CHECK(after == 0.0);
+
+    auto overdub = makeApp(root.path / "overdub");
+    cmd::Dispatcher overdubBus(registry, *overdub);
+    auto setup = overdubBus.execute({"batch", j(R"({"steps":[
+        {"command":"track.add","args":{"name":"Keys"},"as":"k"},
+        {"command":"item.add","args":{"track":"${k.track}","bar":1,"notation":"voice v; 1: C4:w"}},
+        {"command":"track.set","args":{"track":"${k.track}","record_mode":"midi_overdub"}}]})"),
+                                     kTest});
+    REQUIRE_MESSAGE(setup, (setup ? std::string() : setup.error().toString()));
+    RecordedTake edge;
+    edge.track = track;
+    edge.isMidi = true;
+    edge.sampleRate = 48000;
+    edge.frames = 144000;
+    edge.segments = {{0, 0}};
+    edge.midi = {{91200, 0, {0x90, 74, 100}}, {105600, 0, {0x80, 74, 0}}};
+    REQUIRE(overdub->commitTakes({edge}));
+    const auto& merged = overdub->head();
+    REQUIRE(merged.items.size() == 1);
+    const model::Item& oldItem = *merged.items.begin()->value;
+    const midi::Sequence& notes =
+        merged.midi.find(*merged.takes.find(*oldItem.activeTake)->source)->sequence;
+    const auto clipped = std::find_if(notes.notes.begin(), notes.notes.end(),
+                                      [](const midi::Note& n) { return n.pitch == 74; });
+    REQUIRE(clipped != notes.notes.end());
+    CHECK(clipped->start == 3648);
+    CHECK(clipped->length == 192);
+}
+
 TEST_CASE("midi_overdub merges a performance into the item under it, as a new take") {
     Root root;
     cmd::Registry registry;

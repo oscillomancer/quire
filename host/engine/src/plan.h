@@ -236,8 +236,9 @@ struct Stage {
     // The wet level applied at the end of the last block (-1: none yet) and
     // a ramp toward the target (0 when bypassed): a bypass or wet change
     // crossfades over Plan::smoothFrames, the plugin running meanwhile.
-    float appliedWet = -1.0f, rampFromWet = 0.0f;
+    float appliedWet = -1.0f, rampFromWet = 0.0f, rampToWet = 0.0f;
     std::uint32_t wetRampLeft = 0;
+    bool preserveDryOnLocate = false;
     std::int64_t latency = 0;
     Delay dry;  // bypassed or partly-dry signal, delayed to match the stage
     Stereo out, dryBuf;
