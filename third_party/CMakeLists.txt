@@ -27,6 +27,17 @@ target_include_directories(tp-pocketfft SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_
 target_compile_definitions(tp-pocketfft INTERFACE POCKETFFT_NO_MULTITHREADING)
 add_library(supple::pocketfft ALIAS tp-pocketfft)
 
+# Signalsmith Stretch and its STFT/FFT layer Signalsmith Linear (both MIT):
+# offline, pitch-preserving time-stretch of media takes (engine.md §4). Header
+# only, FFT backends off (the platform headers are only reached through
+# SIGNALSMITH_USE_* definitions, which nobody sets).
+add_library(tp-signalsmith-stretch INTERFACE)
+target_include_directories(tp-signalsmith-stretch SYSTEM INTERFACE
+  ${CMAKE_CURRENT_SOURCE_DIR}/signalsmith-stretch/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/signalsmith-linear/include)
+target_compile_features(tp-signalsmith-stretch INTERFACE cxx_std_20)
+add_library(supple::signalsmith-stretch ALIAS tp-signalsmith-stretch)
+
 set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
 add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp
