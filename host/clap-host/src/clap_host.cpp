@@ -1,6 +1,7 @@
 #include "supple/host/clap_host.h"
 
 #include "bridge_client.h"
+#include "vst3_host.h"
 
 #include <dlfcn.h>
 
@@ -408,6 +409,7 @@ std::vector<fs::path> defaultSearchPath() {
     if (const char* home = std::getenv("HOME")) add(fs::path(home) / ".clap");
     add("/usr/lib/clap");
     add("/usr/local/lib/clap");
+    for (const auto& p : defaultVst3SearchPath()) add(p);
     return out;
 }
 
@@ -417,7 +419,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> dirsOrFiles) {
         std::error_code ec;
         if (fs::is_regular_file(root, ec)) {
             files.push_back(root);
-        } else if (fs::is_directory(root, ec)) {
+        } else if (fs::is_directory(root, ec) && root.extension() != ".vst3") {
             for (auto it = fs::recursive_directory_iterator(
                      root, fs::directory_options::skip_permission_denied, ec);
                  it != fs::recursive_directory_iterator(); it.increment(ec)) {
@@ -454,6 +456,10 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> dirsOrFiles) {
             out.push_back(std::move(info));
         }
     }
+    auto vst3 = scanVst3(dirsOrFiles);
+    if (vst3)
+        out.insert(out.end(), std::make_move_iterator(vst3->begin()),
+                   std::make_move_iterator(vst3->end()));
     return out;
 }
 
@@ -476,6 +482,19 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->acceptsNotes_ = ports.acceptsNotes;
         self->hostState_ = std::make_unique<HostState>();
         self->remote_ = std::move(*remote);
+        return self;
+    }
+    if (info.format == "vst3" || info.id.rfind("vst3:", 0) == 0) {
+        auto backing = Vst3Instance::create(info, identity);
+        if (!backing) return std::move(backing).error();
+        std::unique_ptr<Instance> self(new Instance());
+        self->info_ = info;
+        self->info_.format = "vst3";
+        self->info_.semantic = false;
+        self->inChannels_ = (*backing)->inputChannels();
+        self->outChannels_ = (*backing)->outputChannels();
+        self->acceptsNotes_ = (*backing)->acceptsNotes();
+        self->vst3_ = std::move(*backing);
         return self;
     }
     auto lib = Library::open(info.path);
@@ -569,6 +588,11 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
 }
 
 Instance::~Instance() {
+    if (vst3_) {
+        if (processing_) stopProcessing();
+        if (active_) deactivate();
+        return;
+    }
     if (remote_) {
         if (processing_) stopProcessing();
         if (active_) deactivate();
@@ -585,6 +609,13 @@ Instance::~Instance() {
 }
 
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
+    if (vst3_) {
+        SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames));
+        active_ = true;
+        sampleRate_ = sampleRate;
+        maxFrames_ = maxFrames;
+        return okStatus();
+    }
     if (remote_) {
         if (active_) return okStatus();
         SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_));
@@ -608,6 +639,13 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
 }
 
 void Instance::deactivate() {
+    if (vst3_) {
+        if (active_ && !processing_) {
+            vst3_->deactivate();
+            active_ = false;
+        }
+        return;
+    }
     if (remote_ && active_ && !processing_) {
         remote_->deactivate();
         active_ = false;
@@ -626,16 +664,19 @@ void Instance::deactivate() {
 }
 
 std::uint32_t Instance::latency() const {
+    if (vst3_) return vst3_->latency();
     if (remote_) return active_ ? remote_->latency() : 0;
     return active_ && extLatency_ ? extLatency_->get(plugin_) : 0;
 }
 
 std::uint32_t Instance::tail() const {
+    if (vst3_) return vst3_->tail();
     if (remote_) return remote_->tail();
     return extTail_ ? extTail_->get(plugin_) : 0;
 }
 
 bool Instance::reportsTail() const {
+    if (vst3_) return true;
     return remote_ ? remote_->reportsTail() : extTail_ != nullptr;
 }
 
@@ -646,6 +687,7 @@ int Instance::bridgePid() const { return remote_ ? remote_->bridgePid() : -1; }
 std::string Instance::failure() const { return remote_ ? remote_->failure() : std::string(); }
 
 std::vector<ParamInfo> Instance::params() const {
+    if (vst3_) return vst3_->params();
     if (remote_) return remote_->params();
     std::vector<ParamInfo> out;
     if (!extParams_) return out;
@@ -659,6 +701,7 @@ std::vector<ParamInfo> Instance::params() const {
 }
 
 Result<double> Instance::paramValue(std::uint32_t id) const {
+    if (vst3_) return vst3_->paramValue(id);
     if (remote_) return remote_->paramValue(id);
     double v = 0;
     if (!extParams_ || !extParams_->get_value(plugin_, id, &v))
@@ -667,6 +710,7 @@ Result<double> Instance::paramValue(std::uint32_t id) const {
 }
 
 Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) const {
+    if (vst3_) return vst3_->paramText(id, clapValue);
     if (remote_) return remote_->paramText(id, clapValue);
     char buf[256] = {};
     if (!extParams_ || !extParams_->value_to_text(plugin_, id, clapValue, buf, sizeof(buf)))
@@ -675,6 +719,7 @@ Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) cons
 }
 
 Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) const {
+    if (vst3_) return vst3_->paramFromText(id, text);
     if (remote_) return remote_->paramFromText(id, text);
     double v = 0;
     const std::string s(text);
@@ -686,6 +731,7 @@ Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) 
 }
 
 Status Instance::setParam(std::uint32_t id, double clapValue) {
+    if (vst3_) return vst3_->setParam(id, clapValue);
     if (remote_) return remote_->setParam(id, clapValue);
     if (!extParams_) return Error("host.param", "the plugin has no parameters");
     if (!active_) {
@@ -743,6 +789,10 @@ void drainParamQueue(Instance::HostState& h, std::size_t reserve) SUPPLE_RT {
 }  // namespace
 
 void Instance::flushParams() SUPPLE_RT {
+    if (vst3_) {
+        vst3_->flushParams();
+        return;
+    }
     if (remote_) {
         if (active_ && !processing_) remote_->flush();
         return;
@@ -760,6 +810,11 @@ void Instance::flushParams() SUPPLE_RT {
 }
 
 bool Instance::startProcessing() SUPPLE_RT {
+    if (vst3_) {
+        if (processing_) return true;
+        processing_ = active_ && vst3_->startProcessing();
+        return processing_;
+    }
     if (remote_) {
         if (processing_) return true;
         if (!active_) return false;
@@ -774,6 +829,11 @@ bool Instance::startProcessing() SUPPLE_RT {
 }
 
 void Instance::stopProcessing() SUPPLE_RT {
+    if (vst3_) {
+        if (processing_) vst3_->stopProcessing();
+        processing_ = false;
+        return;
+    }
     if (remote_) {
         if (processing_) remote_->stopProcessing();
         processing_ = false;
@@ -786,6 +846,10 @@ void Instance::stopProcessing() SUPPLE_RT {
 }
 
 void Instance::reset() SUPPLE_RT {
+    if (vst3_) {
+        vst3_->reset();
+        return;
+    }
     if (remote_) {
         if (active_) remote_->reset();
         return;
@@ -795,6 +859,7 @@ void Instance::reset() SUPPLE_RT {
 }
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
+    if (vst3_) return active_ && processing_ && vst3_->process(b, out);
     if (remote_) return active_ && processing_ && remote_->process(b, out);
     if (!active_ || !processing_) return false;
     AudioThreadScope scope;
@@ -961,6 +1026,7 @@ Result<std::string> Instance::describe(bool changedOnly) {
 }
 
 Result<std::vector<std::uint8_t>> Instance::saveState() {
+    if (vst3_) return vst3_->saveState();
     if (remote_) return remote_->saveState();
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
     ByteSink sink;
@@ -970,6 +1036,7 @@ Result<std::vector<std::uint8_t>> Instance::saveState() {
 }
 
 Status Instance::loadState(std::span<const std::uint8_t> bytes) {
+    if (vst3_) return vst3_->loadState(bytes);
     if (remote_) return remote_->loadState(bytes);
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
     ByteSource source{bytes};
@@ -980,11 +1047,13 @@ Status Instance::loadState(std::span<const std::uint8_t> bytes) {
 }
 
 bool Instance::needsAudioFlush() const {
+    if (vst3_) return false;
     if (remote_) return active_ && remote_->needsAudioFlush();
     return active_ && hostState_->flushRequested.load();
 }
 
 bool Instance::serviceMainThread() {
+    if (vst3_) return vst3_->serviceMainThread();
     if (remote_) return remote_->service(remoteNotes_, remoteLog_);
     HostState& h = *hostState_;
     bool did = false;
@@ -1024,6 +1093,7 @@ bool Instance::serviceMainThread() {
 }
 
 Instance::Notifications Instance::takeNotifications() {
+    if (vst3_) return vst3_->takeNotifications();
     if (remote_) return std::exchange(remoteNotes_, Notifications{});
     HostState& h = *hostState_;
     Notifications n;
@@ -1038,6 +1108,7 @@ Instance::Notifications Instance::takeNotifications() {
 }
 
 std::vector<std::string> Instance::takeLog() {
+    if (vst3_) return {};
     if (remote_) return std::exchange(remoteLog_, {});
     HostState& h = *hostState_;
     std::vector<std::string> out;

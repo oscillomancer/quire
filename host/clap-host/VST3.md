@@ -1,0 +1,32 @@
+# VST3 hosting notes
+
+ADR-0017 is the contract. The SDK subset is pinned at `v3.8.0_build_66`
+(`9fad9770f2ae8542ab1a548a68c1ad1ac690abe0`) under
+`third_party/vst3sdk-v3.8.0_build_66`. Its top-level and copied subdirectory
+licenses are MIT. The static `supple::vst3-host` target contains the module
+loader and ABI helpers; the in-tree test module also builds the SDK's small
+component/controller base classes.
+
+`host::scan` accepts `.vst3` bundles and scans `VST3_PATH`, `~/.vst3` and the
+system VST3 directories by default. It reads `Contents/Resources/moduleinfo.json`
+when available, then falls back to factory metadata. IDs are `vst3:` followed
+by the class's 32 hexadecimal digits. `PluginInfo::format` selects the VST3
+backing of `host::Instance`, and the bridge forwards that format unchanged.
+
+VST3 parameters cross the host API in plain values. The backing normalizes
+them for VST3 process queues. Input and output event/parameter arenas have
+fixed capacities and are allocated before processing. The SDK's
+`ParameterChanges` helper is deliberately not used on the audio thread: its
+point vectors grow during `addPoint`. `EventList` uses storage allocated at
+construction. The host still calls a plugin's `plainParamToNormalized` for
+sample offset automation and `normalizedParamToPlain` for output edits on the
+audio thread; these plugin supplied methods need a threading audit for each
+third-party module. A plugin that allocates or locks inside its own `process`
+or conversion methods cannot be made RT safe by the host.
+
+The test module exposes gain, a per-note sine instrument and latency change.
+Host tests cover metadata, parameter text, state, sample offset automation,
+notes, latency and isolated processing. The engine test checks a VST3 effect
+in a chain against the offline render. A VST3-specific crashing or hanging
+fixture is not included; the bridge's process-failure paths are exercised by
+the existing CLAP fixtures.

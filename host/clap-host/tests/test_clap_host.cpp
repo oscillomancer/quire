@@ -14,6 +14,7 @@ using namespace supple::host;
 namespace {
 
 const std::filesystem::path kFixture = FIXTURE_CLAP_PATH;
+const std::filesystem::path kVst3Fixture = FIXTURE_VST3_PATH;
 
 PluginInfo find(const std::string& id) {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
@@ -52,6 +53,99 @@ double gainClap(double db) {
 }
 
 }  // namespace
+
+TEST_CASE("VST3 fixture scans, processes, and restores state") {
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    REQUIRE(found->size() == 3);
+    CHECK((*found)[0].format == "vst3");
+    CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
+    CHECK((*found)[0].version == "2.0");
+    auto gain = std::find_if(found->begin(), found->end(),
+                             [](const PluginInfo& p) { return p.name == "Test VST3 Gain"; });
+    REQUIRE(gain != found->end());
+    auto made = Instance::create(*gain, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    REQUIRE(instance.params().size() == 1);
+    REQUIRE(instance.setParam(1, 0.25).ok());
+    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
+    auto text = instance.paramText(1, 0.25);
+    REQUIRE(text);
+    auto parsed = instance.paramFromText(1, *text);
+    REQUIRE(parsed);
+    CHECK(*parsed == doctest::Approx(0.25));
+    auto state = instance.saveState();
+    REQUIRE_MESSAGE(state, (state ? "" : state.error().message));
+    REQUIRE(instance.setParam(1, 0.75).ok());
+    REQUIRE(instance.loadState(*state).ok());
+    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
+    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.startProcessing());
+    Buffers buffer(64);
+    std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
+    std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
+    REQUIRE(instance.process(buffer.block(64)));
+    CHECK(static_cast<double>(buffer.ol[0]) == doctest::Approx(0.25));
+    Event automation{.kind = Event::Kind::Param, .time = 20, .paramId = 1, .value = 0.5};
+    REQUIRE(instance.process(buffer.block(64, std::span<const Event>(&automation, 1))));
+    CHECK(static_cast<double>(buffer.ol[19]) == doctest::Approx(0.25));
+    CHECK(static_cast<double>(buffer.ol[20]) == doctest::Approx(0.5));
+    instance.stopProcessing();
+    instance.deactivate();
+}
+
+TEST_CASE("VST3 fixture notes, latency, and bridge") {
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto named = [&](std::string_view name) {
+        return std::find_if(found->begin(), found->end(),
+                            [&](const PluginInfo& p) { return p.name == name; });
+    };
+    auto sine = named("Test VST3 Sine");
+    REQUIRE(sine != found->end());
+    CHECK(sine->instrument);
+    auto instrument = Instance::create(*sine, {});
+    REQUIRE(instrument);
+    REQUIRE((*instrument)->acceptsNotes());
+    REQUIRE((*instrument)->activate(48000, 1, 64).ok());
+    REQUIRE((*instrument)->startProcessing());
+    Buffers buf(64);
+    Event note{.kind = Event::Kind::NoteOn, .time = 10, .key = 69, .noteId = 7};
+    REQUIRE((*instrument)->process(buf.block(64, std::span<const Event>(&note, 1), false)));
+    CHECK(buf.ol[4] == 0);
+    CHECK(std::abs(buf.ol[14]) > 0.01f);
+    (*instrument)->stopProcessing();
+    (*instrument)->deactivate();
+
+    auto latency = named("Test VST3 Latency");
+    REQUIRE(latency != found->end());
+    auto delay = Instance::create(*latency, {});
+    REQUIRE(delay);
+    REQUIRE((*delay)->activate(48000, 1, 64).ok());
+    CHECK((*delay)->latency() == 0);
+    REQUIRE((*delay)->setParam(1, 1).ok());
+    CHECK((*delay)->serviceMainThread());
+    CHECK((*delay)->takeNotifications().latencyChanged);
+    CHECK((*delay)->latency() == 64);
+    (*delay)->deactivate();
+
+    auto gain = named("Test VST3 Gain");
+    REQUIRE(gain != found->end());
+    setBridgeExecutable(BRIDGE_PATH);
+    auto bridged = Instance::create(*gain, {}, true);
+    REQUIRE_MESSAGE(bridged, (bridged ? "" : bridged.error().message));
+    CHECK((*bridged)->raw() == nullptr);
+    REQUIRE((*bridged)->setParam(1, 0.2).ok());
+    REQUIRE((*bridged)->activate(48000, 1, 64).ok());
+    REQUIRE((*bridged)->startProcessing());
+    std::fill(buf.l.begin(), buf.l.end(), 1.0f);
+    std::fill(buf.r.begin(), buf.r.end(), 1.0f);
+    REQUIRE((*bridged)->process(buf.block(64)));
+    CHECK(static_cast<double>(buf.ol[0]) == doctest::Approx(0.2));
+    (*bridged)->stopProcessing();
+    (*bridged)->deactivate();
+}
 
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
