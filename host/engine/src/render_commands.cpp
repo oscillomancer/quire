@@ -459,88 +459,12 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
                             : app.renderSession(task.session, settings);
         if (!rendered) return std::move(rendered).error();
         auto& audio = rendered->audio;
-        const json::Value& defaults = task.session.project->render;
-        auto setting = [&](std::string_view key) -> const json::Value* {
-            return defaults.isObject() ? defaults.find(key) : nullptr;
-        };
-        const auto* sampleRate = setting("sample_rate");
-        const double targetRate = args.sampleRate ? static_cast<double>(*args.sampleRate)
-                                  : sampleRate && sampleRate->isNumber() ? sampleRate->asDouble()
-                                                                         : audio.sampleRate;
-        if (!(targetRate >= 8000 && targetRate <= 384000))
-            return Error("render.sample_rate", "sample rate out of range", "/sample_rate");
-        if (targetRate != audio.sampleRate) {
-            auto converted = audio::resample(audio, targetRate);
-            if (!converted) return std::move(converted).error();
-            audio = std::move(*converted);
-        }
-        const auto* channelDefault = setting("channels");
-        const int channels = static_cast<int>(args.channels.value_or(
-            channelDefault && channelDefault->isNumber() ? channelDefault->asInt() : 2));
-        if (channels != 1 && channels != 2)
-            return Error("render.channels", "channels must be 1 or 2", "/channels");
-        if (channels == 1 && audio.channelCount() == 2) {
-            for (std::size_t n = 0; n < audio.frames(); ++n)
-                audio.channels[0][n] =
-                    static_cast<float>(0.5 * (static_cast<double>(audio.channels[0][n]) +
-                                              static_cast<double>(audio.channels[1][n])));
-            audio.channels.resize(1);
-        }
-        const json::Value* norm = args.normalize ? &*args.normalize : setting("normalize");
-        std::string normMode = "none";
-        double normTarget = args.target.value_or(-14.0);
-        std::optional<double> limit = args.limitTruePeakDb;
-        if (norm) {
-            if (norm->isString())
-                normMode = norm->asString();
-            else if (norm->isObject()) {
-                const auto* mode = norm->find("mode");
-                if (!mode || !mode->isString())
-                    return Error("render.normalize", "normalize needs a mode", "/normalize/mode");
-                normMode = mode->asString();
-                if (const auto* target = norm->find("target")) {
-                    if (!target->isNumber())
-                        return Error("render.normalize", "target must be a number",
-                                     "/normalize/target");
-                    normTarget = target->asDouble();
-                }
-                if (const auto* peak = norm->find("limit_true_peak_db")) {
-                    if (!peak->isNumber())
-                        return Error("render.normalize", "peak limit must be a number",
-                                     "/normalize/limit_true_peak_db");
-                    limit = peak->asDouble();
-                }
-            } else
-                return Error("render.normalize", "normalize must be a mode or object",
-                             "/normalize");
-        }
-        SUPPLE_TRY(normalizeRenderAudio(audio, normMode, normTarget, limit));
-        audio::WavOptions wav;
-        const auto* formatDefault = setting("format");
-        const std::string formatName = args.format.value_or(
-            formatDefault && formatDefault->isString() ? formatDefault->asString()
-            : formatDefault && formatDefault->isObject() && formatDefault->find("container") &&
-                    formatDefault->find("container")->isString()
-                ? formatDefault->find("container")->asString()
-                : "wav");
-        if (formatName != "wav")
-            return Error("render.format", "only WAV encoding is available", "/format");
-        const json::Value* depthDefault = formatDefault && formatDefault->isObject()
-                                              ? formatDefault->find("bit_depth")
-                                              : setting("bit_depth");
-        const int depth = static_cast<int>(args.bitDepth.value_or(
-            depthDefault && depthDefault->isNumber() ? depthDefault->asInt() : 32));
-        if (depth != 16 && depth != 24 && depth != 32)
-            return Error("render.format", "bit_depth must be 16, 24, or 32", "/bit_depth");
-        wav.format = depth == 16   ? audio::SampleFormat::Pcm16
-                     : depth == 24 ? audio::SampleFormat::Pcm24
-                                   : audio::SampleFormat::Float32;
-        wav.ditherSeed = task.session.project->seed;
-        if (formatDefault && formatDefault->isObject())
-            if (const auto* dither = formatDefault->find("dither"); dither && dither->isBool())
-                wav.dither = dither->asBool();
+        RenderOutputArgs output{args.format,   args.normalize,  args.target,  args.limitTruePeakDb,
+                                args.bitDepth, args.sampleRate, args.channels};
+        auto wav = finishRenderAudio(audio, *task.session.project, output);
+        if (!wav) return std::move(wav).error();
         if (jobs && jobs->cancelled(job)) return Error("job.cancelled", "render cancelled");
-        SUPPLE_TRY(audio::writeWav(task.path, audio, wav));
+        SUPPLE_TRY(audio::writeWav(task.path, audio, *wav));
         json::Value entry = json::Value::object();
         entry["path"] = task.path.string();
         entry["render"] = app.rememberRender(task.path);
@@ -566,15 +490,30 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
 schema::Schema<Args> argsSchema() {
     return schema::object<Args>("render_args")
         .field("branch", &Args::branch, schema::string())
-        .field("pattern", &Args::pattern, schema::string())
-        .field("name", &Args::name, schema::string())
-        .field("mode", &Args::mode, schema::string())
-        .field("tap", &Args::tap, schema::string())
-        .field("format", &Args::format, schema::string())
-        .field("normalize", &Args::normalize, schema::any())
-        .field("operation", &Args::operation, schema::string())
-        .field("tracks", &Args::tracks, schema::arrayOf(schema::string()))
-        .field("regions", &Args::regions, schema::arrayOf(schema::string()))
+        .field("pattern", &Args::pattern,
+               schema::string().doc("File name pattern (session-model §7.3), e.g. "
+                                    "\"{project}-{track_number:02}-{track|lower}\""))
+        .field("name", &Args::name, schema::string().doc("A fixed file name instead of a pattern"))
+        .field("mode", &Args::mode,
+               schema::string().doc("Stems: isolated (default; the track alone, no master "
+                                    "processing) or through_master (the others muted)"))
+        .field("tap", &Args::tap,
+               schema::string().doc("Stems: post_fader (default), pre_fader or pre_fx"))
+        .field("format", &Args::format, schema::string().doc("wav (FLAC is not available)"))
+        .field("normalize", &Args::normalize,
+               schema::any().doc("none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or "
+                                 "{mode, target, limit_true_peak_db}"))
+        .field("operation", &Args::operation,
+               schema::string().doc("Dry run: mix, stems or regions (default from the other "
+                                    "arguments)"))
+        .field("tracks", &Args::tracks,
+               schema::arrayOf(schema::string())
+                   .doc("Stems: track ids (default: every "
+                        "top-level track)"))
+        .field("regions", &Args::regions,
+               schema::arrayOf(schema::string())
+                   .doc("Regions: region ids (default: all, with "
+                        "the project render matrix)"))
         .field("start_beat", &Args::startBeat, schema::number().min(0))
         .field("end_beat", &Args::endBeat, schema::number().exclusiveMin(0))
         .field("tail_s", &Args::tailS, schema::number().range(0, 600))
@@ -699,6 +638,90 @@ Status normalizeRenderAudio(audio::AudioData& data, std::string_view mode, doubl
     return okStatus();
 }
 
+Result<audio::WavOptions> finishRenderAudio(audio::AudioData& audio, const model::Project& project,
+                                            const RenderOutputArgs& a) {
+    const json::Value& defaults = project.render;
+    auto setting = [&](std::string_view key) -> const json::Value* {
+        return defaults.isObject() ? defaults.find(key) : nullptr;
+    };
+    const auto* sampleRate = setting("sample_rate");
+    const double targetRate = a.sampleRate ? static_cast<double>(*a.sampleRate)
+                              : sampleRate && sampleRate->isNumber() ? sampleRate->asDouble()
+                                                                     : audio.sampleRate;
+    if (!(targetRate >= 8000 && targetRate <= 384000))
+        return Error("render.sample_rate", "sample rate out of range", "/sample_rate");
+    if (targetRate != audio.sampleRate) {
+        auto converted = audio::resample(audio, targetRate);
+        if (!converted) return std::move(converted).error();
+        audio = std::move(*converted);
+    }
+    const auto* channelDefault = setting("channels");
+    const int channels = static_cast<int>(a.channels.value_or(
+        channelDefault && channelDefault->isNumber() ? channelDefault->asInt() : 2));
+    if (channels != 1 && channels != 2)
+        return Error("render.channels", "channels must be 1 or 2", "/channels");
+    if (channels == 1 && audio.channelCount() == 2) {
+        for (std::size_t n = 0; n < audio.frames(); ++n)
+            audio.channels[0][n] =
+                static_cast<float>(0.5 * (static_cast<double>(audio.channels[0][n]) +
+                                          static_cast<double>(audio.channels[1][n])));
+        audio.channels.resize(1);
+    }
+    const json::Value* norm = a.normalize ? &*a.normalize : setting("normalize");
+    std::string normMode = "none";
+    double normTarget = a.target.value_or(-14.0);
+    std::optional<double> limit = a.limitTruePeakDb;
+    if (norm) {
+        if (norm->isString())
+            normMode = norm->asString();
+        else if (norm->isObject()) {
+            const auto* mode = norm->find("mode");
+            if (!mode || !mode->isString())
+                return Error("render.normalize", "normalize needs a mode", "/normalize/mode");
+            normMode = mode->asString();
+            if (const auto* target = norm->find("target")) {
+                if (!target->isNumber())
+                    return Error("render.normalize", "target must be a number",
+                                 "/normalize/target");
+                normTarget = target->asDouble();
+            }
+            if (const auto* peak = norm->find("limit_true_peak_db")) {
+                if (!peak->isNumber())
+                    return Error("render.normalize", "peak limit must be a number",
+                                 "/normalize/limit_true_peak_db");
+                limit = peak->asDouble();
+            }
+        } else
+            return Error("render.normalize", "normalize must be a mode or object", "/normalize");
+    }
+    SUPPLE_TRY(normalizeRenderAudio(audio, normMode, normTarget, limit));
+    audio::WavOptions wav;
+    const auto* formatDefault = setting("format");
+    const std::string formatName = a.format.value_or(
+        formatDefault && formatDefault->isString() ? formatDefault->asString()
+        : formatDefault && formatDefault->isObject() && formatDefault->find("container") &&
+                formatDefault->find("container")->isString()
+            ? formatDefault->find("container")->asString()
+            : "wav");
+    if (formatName != "wav")
+        return Error("render.format", "only WAV encoding is available", "/format");
+    const json::Value* depthDefault = formatDefault && formatDefault->isObject()
+                                          ? formatDefault->find("bit_depth")
+                                          : setting("bit_depth");
+    const int depth = static_cast<int>(
+        a.bitDepth.value_or(depthDefault && depthDefault->isNumber() ? depthDefault->asInt() : 32));
+    if (depth != 16 && depth != 24 && depth != 32)
+        return Error("render.format", "bit_depth must be 16, 24, or 32", "/bit_depth");
+    wav.format = depth == 16   ? audio::SampleFormat::Pcm16
+                 : depth == 24 ? audio::SampleFormat::Pcm24
+                               : audio::SampleFormat::Float32;
+    wav.ditherSeed = project.seed;
+    if (formatDefault && formatDefault->isObject())
+        if (const auto* dither = formatDefault->find("dither"); dither && dither->isBool())
+            wav.dither = dither->asBool();
+    return wav;
+}
+
 Result<std::string> expandRenderPattern(std::string_view pattern,
                                         const RenderPatternContext& context) {
     return expand(pattern, context);
@@ -710,7 +733,15 @@ void registerRenderCommands(cmd::Registry& registry) {
         c.name = name;
         c.kind = std::string_view(name) == "render.dry-run" ? Kind::Query : Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = std::string(name) + " resolves and renders project audio files.";
+        const std::string_view which(name);
+        c.summary = which == "render.stems" ? "Render each selected track to its own file (stems)."
+                    : which == "render.regions"
+                        ? "Render each region (or the render matrix's tracks per region) to files."
+                        : "List the files a render would write, with lengths, without rendering.";
+        c.description =
+            "Files go to the renders directory, named by pattern. job: true runs the render as a "
+            "job (job.get for progress, job.cancel to stop); results carry a render id and an "
+            "analysis summary per file.";
         c.tags = {"render"};
         c.args = argsSchema();
         c.result = schema::any();

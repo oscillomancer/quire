@@ -531,82 +531,16 @@ struct RenderMixResult {
 };
 Status prepareMixAudio(audio::AudioData& data, audio::WavOptions& wav,
                        const model::Project& project, const RenderMixArgs& args) {
-    const auto& defaults = project.render;
-    auto setting = [&](std::string_view key) -> const json::Value* {
-        return defaults.isObject() ? defaults.find(key) : nullptr;
-    };
-    const auto* format = setting("format");
-    const std::string container =
-        args.format.value_or(format && format->isString() ? format->asString()
-                             : format && format->isObject() && format->find("container") &&
-                                     format->find("container")->isString()
-                                 ? format->find("container")->asString()
-                                 : "wav");
-    if (container != "wav")
-        return Error("render.format", "only WAV encoding is available", "/format");
-    const auto* depthDefault =
-        format && format->isObject() ? format->find("bit_depth") : setting("bit_depth");
-    const int depth = static_cast<int>(args.bitDepth.value_or(
-        depthDefault && depthDefault->isNumber() ? depthDefault->asInt() : 32));
-    if (depth != 16 && depth != 24 && depth != 32)
-        return Error("render.format", "bit depth must be 16, 24, or 32", "/bit_depth");
-    wav.format = depth == 16   ? audio::SampleFormat::Pcm16
-                 : depth == 24 ? audio::SampleFormat::Pcm24
-                               : audio::SampleFormat::Float32;
-    wav.ditherSeed = project.seed;
-    if (format && format->isObject())
-        if (const auto* dither = format->find("dither"); dither && dither->isBool())
-            wav.dither = dither->asBool();
-    const auto* rateDefault = setting("sample_rate");
-    const double rate = args.sampleRate ? static_cast<double>(*args.sampleRate)
-                        : rateDefault && rateDefault->isNumber() ? rateDefault->asDouble()
-                                                                 : data.sampleRate;
-    if (!(rate >= 8000 && rate <= 384000))
-        return Error("render.sample_rate", "sample rate out of range", "/sample_rate");
-    if (rate != data.sampleRate) {
-        auto resampled = audio::resample(data, rate);
-        if (!resampled) return std::move(resampled).error();
-        data = std::move(*resampled);
-    }
-    const auto* channelsDefault = setting("channels");
-    const auto channels = args.channels.value_or(
-        channelsDefault && channelsDefault->isNumber() ? channelsDefault->asInt() : 2);
-    if (channels != 1 && channels != 2)
-        return Error("render.channels", "channels must be 1 or 2", "/channels");
-    if (channels == 1 && data.channelCount() == 2) {
-        for (std::size_t i = 0; i < data.frames(); ++i)
-            data.channels[0][i] =
-                static_cast<float>(0.5 * (static_cast<double>(data.channels[0][i]) +
-                                          static_cast<double>(data.channels[1][i])));
-        data.channels.resize(1);
-    }
-    const json::Value* norm = args.normalize ? &*args.normalize : setting("normalize");
-    std::string mode = "none";
-    double target = -14;
-    std::optional<double> limit;
-    if (norm) {
-        if (norm->isString())
-            mode = norm->asString();
-        else if (norm->isObject()) {
-            const auto* selected = norm->find("mode");
-            if (!selected || !selected->isString())
-                return Error("render.normalize", "normalize needs a mode", "/normalize/mode");
-            mode = selected->asString();
-            if (const auto* v = norm->find("target")) {
-                if (!v->isNumber())
-                    return Error("render.normalize", "target must be numeric", "/normalize/target");
-                target = v->asDouble();
-            }
-            if (const auto* v = norm->find("limit_true_peak_db")) {
-                if (!v->isNumber())
-                    return Error("render.normalize", "peak limit must be numeric",
-                                 "/normalize/limit_true_peak_db");
-                limit = v->asDouble();
-            }
-        } else
-            return Error("render.normalize", "normalize must be a mode or object", "/normalize");
-    }
-    return normalizeRenderAudio(data, mode, target, limit);
+    RenderOutputArgs output;
+    output.format = args.format;
+    output.normalize = args.normalize;
+    output.bitDepth = args.bitDepth;
+    output.sampleRate = args.sampleRate;
+    output.channels = args.channels;
+    auto finished = finishRenderAudio(data, project, output);
+    if (!finished) return std::move(finished).error();
+    wav = *finished;
+    return okStatus();
 }
 
 Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,

@@ -3902,9 +3902,9 @@ Result:
 
 ## `render.dry-run@1`
 
-render.dry-run resolves and renders project audio files.
+List the files a render would write, with lengths, without rendering.
 
-
+Files go to the renders directory, named by pattern. job: true runs the render as a job (job.get for progress, job.cancel to stop); results carry a render id and an analysis summary per file.
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -3913,15 +3913,15 @@ Kind: `query`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `branch` | string |  |  |  |  |
-| `pattern` | string |  |  |  |  |
-| `name` | string |  |  |  |  |
-| `mode` | string |  |  |  |  |
-| `tap` | string |  |  |  |  |
-| `format` | string |  |  |  |  |
-| `normalize` | value |  |  |  |  |
-| `operation` | string |  |  |  |  |
-| `tracks` | array |  |  |  |  |
-| `regions` | array |  |  |  |  |
+| `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
+| `name` | string |  |  |  | A fixed file name instead of a pattern |
+| `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
+| `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
+| `format` | string |  |  |  | wav (FLAC is not available) |
+| `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
+| `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
+| `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
+| `regions` | array |  |  |  | Regions: region ids (default: all, with the project render matrix) |
 | `start_beat` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..600.0 |  |  |
@@ -4053,9 +4053,9 @@ Result:
 
 ## `render.regions@1`
 
-render.regions resolves and renders project audio files.
+Render each region (or the render matrix's tracks per region) to files.
 
-
+Files go to the renders directory, named by pattern. job: true runs the render as a job (job.get for progress, job.cancel to stop); results carry a render id and an analysis summary per file.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -4064,15 +4064,15 @@ Kind: `action`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `branch` | string |  |  |  |  |
-| `pattern` | string |  |  |  |  |
-| `name` | string |  |  |  |  |
-| `mode` | string |  |  |  |  |
-| `tap` | string |  |  |  |  |
-| `format` | string |  |  |  |  |
-| `normalize` | value |  |  |  |  |
-| `operation` | string |  |  |  |  |
-| `tracks` | array |  |  |  |  |
-| `regions` | array |  |  |  |  |
+| `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
+| `name` | string |  |  |  | A fixed file name instead of a pattern |
+| `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
+| `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
+| `format` | string |  |  |  | wav (FLAC is not available) |
+| `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
+| `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
+| `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
+| `regions` | array |  |  |  | Regions: region ids (default: all, with the project render matrix) |
 | `start_beat` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..600.0 |  |  |
@@ -4113,9 +4113,9 @@ Result:
 
 ## `render.stems@1`
 
-render.stems resolves and renders project audio files.
+Render each selected track to its own file (stems).
 
-
+Files go to the renders directory, named by pattern. job: true runs the render as a job (job.get for progress, job.cancel to stop); results carry a render id and an analysis summary per file.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -4124,15 +4124,15 @@ Kind: `action`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `branch` | string |  |  |  |  |
-| `pattern` | string |  |  |  |  |
-| `name` | string |  |  |  |  |
-| `mode` | string |  |  |  |  |
-| `tap` | string |  |  |  |  |
-| `format` | string |  |  |  |  |
-| `normalize` | value |  |  |  |  |
-| `operation` | string |  |  |  |  |
-| `tracks` | array |  |  |  |  |
-| `regions` | array |  |  |  |  |
+| `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
+| `name` | string |  |  |  | A fixed file name instead of a pattern |
+| `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
+| `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
+| `format` | string |  |  |  | wav (FLAC is not available) |
+| `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
+| `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
+| `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
+| `regions` | array |  |  |  | Regions: region ids (default: all, with the project render matrix) |
 | `start_beat` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..600.0 |  |  |
