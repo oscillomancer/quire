@@ -1,5 +1,5 @@
-// CLAP hosting (spec: docs/specs/sandbox.md §1). Shared by the Phase 2
-// sandbox and the Phase 4 engine.
+// CLAP and VST3 hosting (docs/specs/sandbox.md §1, ADR-0017). Shared by the
+// sandbox and engine.
 //
 // Threading follows CLAP: an Instance is created, configured, activated,
 // saved/loaded and destroyed on the thread that created it (its main
@@ -30,15 +30,17 @@ namespace supple::host {
 
 struct PluginInfo {
     std::string id, name, vendor, version, description;
+    // CLAP by default; VST3 class ids use vst3:<32 hex digits>.
+    std::string format = "clap";
     std::filesystem::path path;
     std::vector<std::string> features;
     bool instrument = false;  // declares the "instrument" feature
     bool semantic = false;    // implements com.suppleaudio.semantic-params/1
 };
 
-// Scans files or directories (recursively) for .clap binaries.
+// Scans files or directories (recursively) for .clap binaries and .vst3 bundles.
 Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);
-// $CLAP_PATH, ~/.clap, /usr/lib/clap, /usr/local/lib/clap (existing ones only).
+// CLAP and VST3 standard search paths, plus CLAP_PATH/VST3_PATH (existing only).
 std::vector<std::filesystem::path> defaultSearchPath();
 
 struct HostIdentity {
@@ -52,7 +54,7 @@ struct ParamInfo {
     std::uint32_t id;
     std::string name, module;
     double min, max, def;
-    std::uint32_t flags;  // CLAP_PARAM_IS_*
+    std::uint32_t flags;  // CLAP_PARAM_IS_*; VST3 flags map to the same bits
 };
 
 // --- events ----------------------------------------------------------------------
@@ -67,7 +69,7 @@ struct Event {
     double velocity = 1.0;  // 0..1
     // params
     std::uint32_t paramId = 0;
-    double value = 0.0;  // CLAP value
+    double value = 0.0;  // CLAP value or VST3 plain value
     // MIDI 1.0
     std::uint8_t midi[3] = {0, 0, 0};
 };
@@ -116,6 +118,7 @@ struct OutputEvents {
 
 class Library;         // a loaded .clap binary (shared by its instances)
 class RemoteInstance;  // an instance in a bridge process
+class Vst3Instance;    // local VST3 backing
 
 // The bridge executable for isolated instances (process-wide, set at startup).
 void setBridgeExecutable(std::filesystem::path path);
@@ -158,11 +161,11 @@ class Instance {
     // --- standard parameters (main thread) ---
     std::vector<ParamInfo> params() const;
     Result<double> paramValue(std::uint32_t id) const;
-    Result<std::string> paramText(std::uint32_t id, double clapValue) const;
+    Result<std::string> paramText(std::uint32_t id, double hostValue) const;
     Result<double> paramFromText(std::uint32_t id, std::string_view text) const;
     // Queues a value change for the next processed block; when not processing,
     // applies it at once through params.flush.
-    Status setParam(std::uint32_t id, double clapValue);
+    Status setParam(std::uint32_t id, double hostValue);
 
     // --- semantic view (only when info().semantic) ---
     Result<json::Value> semanticSchema();
@@ -239,6 +242,7 @@ class Instance {
     std::uint32_t maxFrames_ = 0;
     double sampleRate_ = 0.0;
     std::unique_ptr<RemoteInstance> remote_;
+    std::unique_ptr<Vst3Instance> vst3_;
     std::atomic<const void*> owner_{nullptr};
     Notifications remoteNotes_;
     std::vector<std::string> remoteLog_;

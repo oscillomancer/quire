@@ -155,6 +155,7 @@ struct Bridge {
                 PluginInfo info;
                 info.path = r.str();
                 info.id = r.str();
+                info.format = r.str();
                 HostIdentity id;
                 id.name = r.str();
                 id.vendor = r.str();

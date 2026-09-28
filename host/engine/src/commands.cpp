@@ -1397,7 +1397,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             auto info = app.findPlugin(a.plugin);
             if (!info) return std::move(info).error().at("/plugin");
             model::FxInstance fx;
-            fx.plugin = {"clap", info->id, info->name, info->vendor, info->version};
+            fx.plugin = {info->format, info->id, info->name, info->vendor, info->version};
             if (a.patch) {
                 auto merged = app.mergedPatch(fx, *a.patch, false);
                 if (!merged) {

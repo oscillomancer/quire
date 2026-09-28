@@ -104,6 +104,17 @@
       "commit": "1e4243990741f5b0da73bc0f25c85ae0e31b8766",
       "purpose": "Metal renderer for plugin editors on macOS only (fetched by the template CMake on Apple); never built on Linux",
       "linkage": "static (macOS plugins only)"
+    },
+    {
+      "name": "vst3sdk",
+      "dir": "vst3sdk-v3.8.0_build_66",
+      "license": "MIT",
+      "license_file": "vst3sdk-v3.8.0_build_66/LICENSE.txt",
+      "version": "v3.8.0_build_66",
+      "source": "https://github.com/steinbergmedia/vst3sdk",
+      "commit": "9fad9770f2ae8542ab1a548a68c1ad1ac690abe0",
+      "purpose": "VST3 hosting ABI, module loader, parameter and event helpers",
+      "linkage": "static"
     }
   ],
   "system_libraries": [

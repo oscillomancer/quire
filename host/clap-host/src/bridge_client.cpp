@@ -77,6 +77,7 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(const PluginInfo& 
     Writer w;
     w.str(info.path.string());
     w.str(info.id);
+    w.str(info.format);
     w.str(identity.name);
     w.str(identity.vendor);
     w.str(identity.url);

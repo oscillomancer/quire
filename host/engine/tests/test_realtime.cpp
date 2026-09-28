@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -21,10 +22,22 @@ using model::kMaster;
 namespace {
 
 const std::filesystem::path kFixture = FIXTURE_CLAP_PATH;
+const std::filesystem::path kVst3Fixture = FIXTURE_VST3_PATH;
 
 InstancePool makePool() {
     return InstancePool([](const model::PluginRef& ref) -> Result<host::PluginInfo> {
         auto list = host::scan(std::span<const std::filesystem::path>(&kFixture, 1));
+        if (!list) return std::move(list).error();
+        for (auto& p : *list)
+            if (p.id == ref.id) return p;
+        return Error("engine.plugin_missing", "plugin " + ref.id + " not found");
+    });
+}
+
+InstancePool makeVstPool() {
+    return InstancePool([](const model::PluginRef& ref) -> Result<host::PluginInfo> {
+        const std::array paths{kFixture, kVst3Fixture};
+        auto list = host::scan(paths);
         if (!list) return std::move(list).error();
         for (auto& p : *list)
             if (p.id == ref.id) return p;
@@ -158,6 +171,34 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
             CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
             CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
         }
+}
+
+TEST_CASE("VST3 effect in chain: real-time output equals offline" * doctest::description("rt")) {
+    auto found = host::scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    const auto it = std::find_if(found->begin(), found->end(), [](const host::PluginInfo& p) {
+        return p.name == "Test VST3 Gain";
+    });
+    REQUIRE(it != found->end());
+    const model::Session session = synthSession(-3.0, it->id.c_str());
+    auto offlinePool = makeVstPool();
+    auto offline = renderOffline(session, offlinePool, {.startSeconds = 0, .endSeconds = 2.0});
+    REQUIRE_MESSAGE(offline, (offline ? "" : offline.error().toString()));
+    auto rtPool = makeVstPool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+    Engine engine(rtPool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(session).ok());
+    engine.play();
+    backend.run((48000 * 2 + 4096) / 128);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    const auto latency = engine.outputLatency();
+    CHECK(maxDiff(backend.capture().channels[0], latency, offline->audio.channels[0], 96000) ==
+          0.0);
+    CHECK(maxDiff(backend.capture().channels[1], latency, offline->audio.channels[1], 96000) ==
+          0.0);
 }
 
 TEST_CASE(

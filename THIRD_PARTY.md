@@ -18,6 +18,7 @@ need an approved `HUMAN_REVIEW.md` entry. Dynamically linked OS libraries
 | doctest | MIT | 2.5.3 / `2d0a935` | Unit-test framework; tests only, never shipped | tests |
 | dr_libs | Unlicense OR MIT-0 | dr_wav 0.14.5 / `fa931f3` | WAV read/write; FLAC and MP3 decode | static (header) |
 | pocketfft | BSD-3-Clause | cpp branch / `c90e55b` | FFT for offline analysis and analyzer displays | headers |
+| vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, module loader, event and parameter helpers | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |
 | pugl | ISC (a few build files 0BSD OR ISC) | 0.5.7 / `b763714` (template pin) | Plugin editor windowing (template GUI stack) | static, plugins only |
 | nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer, fetched by the template CMake on Apple; not vendored, never built on Linux | static, macOS plugins only |
@@ -32,8 +33,8 @@ Nate's plugin template already ships) are permitted for bundling; see
 ADR-0003.
 
 Template-derived stock plugins build offline against the vendored clap,
-clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK (MIT as of
-3.8.0) is not vendored yet; VST3 builds are opt-in. Plugin fonts (Inter, IBM
+clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subset
+is vendored for the host; stock-plugin VST3 builds remain opt-in. Plugin fonts (Inter, IBM
 Plex; OFL-1.1) travel with each plugin copy with their license files.
 
 Development tool (not linked, bundled, or used at runtime):

@@ -21,8 +21,9 @@ if(SUPPLE_BUILD_TESTS)
                    tests/test_jack.cpp tests/test_workers.cpp LABELS rt)
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
-  add_dependencies(engine.tests clap-host-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)
+  add_dependencies(engine.tests clap-host-fixtures clap-host-vst3-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
+                             FIXTURE_VST3_PATH="${CMAKE_BINARY_DIR}/host/clap-host/test-vst3.vst3"
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})

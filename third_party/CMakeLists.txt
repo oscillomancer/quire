@@ -26,3 +26,26 @@ add_library(tp-pocketfft INTERFACE)
 target_include_directories(tp-pocketfft SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/pocketfft/include)
 target_compile_definitions(tp-pocketfft INTERFACE POCKETFFT_NO_MULTITHREADING)
 add_library(supple::pocketfft ALIAS tp-pocketfft)
+
+set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
+add_library(tp-vst3-host STATIC
+  ${_vst3}/pluginterfaces/base/coreiids.cpp
+  ${_vst3}/pluginterfaces/base/funknown.cpp
+  ${_vst3}/pluginterfaces/base/ustring.cpp
+  ${_vst3}/public.sdk/source/common/commonstringconvert.cpp
+  ${_vst3}/public.sdk/source/vst/vstinitiids.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/module.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/module_linux.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/eventlist.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/hostclasses.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+  ${_vst3}/public.sdk/source/vst/hosting/parameterchanges.cpp
+  ${_vst3}/public.sdk/source/vst/utility/stringconvert.cpp)
+target_include_directories(tp-vst3-host SYSTEM PUBLIC ${_vst3})
+target_compile_features(tp-vst3-host PUBLIC cxx_std_20)
+set_target_properties(tp-vst3-host PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(_supple_sanitize_flags)
+  target_compile_options(tp-vst3-host PRIVATE ${_supple_sanitize_flags})
+endif()
+target_link_libraries(tp-vst3-host PUBLIC ${CMAKE_DL_LIBS})
+add_library(supple::vst3-host ALIAS tp-vst3-host)
