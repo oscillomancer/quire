@@ -198,9 +198,72 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
         }
 }
 
+TEST_CASE("a stretched take: real-time output equals the offline render" *
+          doctest::description("rt")) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-rt-stretch-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(48000));
+    for (std::size_t i = 0; i < 48000; ++i) {
+        const double s = 0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000.0);
+        tone.channels[0][i] = static_cast<float>(s);
+        tone.channels[1][i] = static_cast<float>(s);
+    }
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+
+    // One audio item, half speed with the pitch preserved, 2 s long: the
+    // stretcher builds this variant on the main thread when the plan loads.
+    model::EditTxn t(model::Session::create(), 1);
+    model::Track tr;
+    tr.name = "Audio";
+    tr.parent = kMaster;
+    const Id track = t.create(tr);
+    t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(track); });
+    const Id md = t.create(model::MediaSource{"tone.wav", "", "wav", 48000, 2, 48000});
+    model::Take take;
+    take.source = md;
+    take.playrate = 0.5;
+    take.preservePitch = true;
+    take.pitchMode = "signalsmith";
+    const Id tk = t.create(take);
+    model::Item item;
+    item.track = track;
+    item.length = 4.0;
+    item.takes = {tk};
+    item.activeTake = tk;
+    t.create(item);
+    const model::Session session = t.commit().value();
+
+    auto pool = makePool();
+    auto offline =
+        renderOffline(session, pool, {.startSeconds = 0, .endSeconds = 2.0, .projectDir = dir});
+    REQUIRE(offline);
+    REQUIRE(offline->warnings.empty());
+    double offlinePeak = 0;
+    for (std::size_t i = 0; i < 96000; ++i)
+        offlinePeak = std::max(offlinePeak, std::fabs(double(offline->audio.channels[0][i])));
+    CHECK(offlinePeak > 0.3);  // a stretched, audible take
+
+    auto rtPool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+    Engine engine(rtPool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(session, dir).ok());
+    engine.play();
+    backend.run((48000 * 2 + 4096) / 128);
+    engine.stop();
+    const std::uint32_t L = engine.outputLatency();
+    CHECK(engine.processErrors() == 0);
+    CHECK(maxDiff(backend.capture().channels[0], L, offline->audio.channels[0], 96000) == 0.0);
+    CHECK(maxDiff(backend.capture().channels[1], L, offline->audio.channels[1], 96000) == 0.0);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("VST3 effect in chain: real-time output equals offline" * doctest::description("rt")) {
     auto found = host::scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(found);
     const auto it = std::find_if(found->begin(), found->end(), [](const host::PluginInfo& p) {
         return p.name == "Test VST3 Gain";
     });

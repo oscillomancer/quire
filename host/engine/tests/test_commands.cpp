@@ -124,6 +124,24 @@ TEST_CASE("audio split is sample exact and take activation changes the render") 
     const double quiet =
         peak(run(bus, "render.mix", R"({"name":"quiet","end_beat":1})")["path"].asString());
     CHECK(quiet < loud * 0.1);
+
+    // take.set: the rate and pitch fields round-trip, and an unknown pitch
+    // mode is rejected with the valid choices.
+    run(bus, "take.set",
+        R"({"take":"tk_1","playrate":2,"preserve_pitch":false,"pitch":-3,"pitch_mode":"resample"})");
+    auto takes = run(bus, "take.list", R"({"item":"it_1"})");
+    REQUIRE(takes["takes"].size() == 2);
+    CHECK(takes["takes"].at(0).find("playrate")->asDouble() == 2.0);
+    CHECK_FALSE(takes["takes"].at(0).find("preserve_pitch")->asBool());
+    CHECK(takes["takes"].at(0).find("pitch")->asDouble() == -3.0);
+    CHECK(takes["takes"].at(0).find("pitch_mode")->asString() == "resample");
+    CHECK(takes["takes"].at(1).find("playrate")->asDouble() == 1.0);
+    auto bad =
+        bus.execute({"take.set", j(R"({"take":"tk_1","pitch_mode":"phase-vocoder"})"), kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "command.invalid_args");
+    REQUIRE(bad.error().details.size() == 1);
+    CHECK(bad.error().details[0].hint.find("signalsmith") != std::string::npos);
 }
 
 TEST_CASE("FX order is audible and rulers survive save and reopen") {

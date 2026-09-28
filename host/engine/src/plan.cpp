@@ -560,15 +560,30 @@ Status prepare(Plan& p, const Session& s) {
                 const auto inMedia = p.projectDir / s.project->mediaDir / path;
                 path = std::filesystem::exists(inMedia) ? inMedia : p.projectDir / path;
             }
-            auto data = p.media->get(path, p.rate);  // resampled to the plan's rate
+            // The take's playback variant (session-model §1.5): resample
+            // (varispeed, the pitch follows the rate) or a pitch-preserving
+            // stretch. Built and kept once per combination (engine.md §4).
+            MediaVariant variant;
+            variant.playrate = take->playrate > 0.0 ? take->playrate : 1.0;
+            variant.pitch = take->pitch;
+            variant.preservePitch = take->preservePitch;
+            variant.pitchMode = take->pitchMode;
+            auto data = p.media->get(path, p.rate, variant);
             if (!data) {
                 p.warnings.push_back(e.id.str() + ": " + data.error().message + " (media " +
-                                     take->source->str() + " is offline)");
+                                     take->source->str() + ")");
                 continue;
             }
-            if (take->playrate != 1.0)
-                p.warnings.push_back(e.id.str() + ": playrate " + std::to_string(take->playrate) +
-                                     " is rendered at 1.0 (time stretching is not available yet)");
+            // A resample cannot shift the pitch on its own; the stretch mode
+            // can (the pitch follows the rate instead without one).
+            if (!variant.stretch() && take->preservePitch && take->pitch != 0.0)
+                p.warnings.push_back(e.id.str() + ": pitch " + std::to_string(take->pitch) +
+                                     " st needs pitch_mode \"signalsmith\"; it is ignored and "
+                                     "the take is resampled");
+            if (!take->stretchMarkers.empty())
+                p.warnings.push_back(e.id.str() +
+                                     ": stretch_markers are not applied yet; the "
+                                     "take plays at its playrate");
             const ItemSpan span = itemSpan(s, it, tr);
             const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
             Clip c;
@@ -576,7 +591,10 @@ Status prepare(Plan& p, const Session& s) {
             c.start = time::samplesAt(span.startSec, p.rate) - origin + n.latIn;
             c.length =
                 time::samplesAt(span.endSec, p.rate) - time::samplesAt(span.startSec, p.rate);
-            c.offset = time::samplesAt(take->startOffset, p.rate);
+            // The item's source offset is in source seconds; the variant is
+            // read one frame per timeline sample, so `speed()` source seconds
+            // pass per timeline second.
+            c.offset = time::samplesAt(take->startOffset, p.rate / variant.speed());
             c.loop = it.loop;
             c.mode = take->channelMode;
             const double g =

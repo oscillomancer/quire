@@ -88,6 +88,14 @@ std::size_t firstNonZero(const std::vector<float>& v) {
     return v.size();
 }
 
+// The frequency of a tone, from its zero crossings in [from, to).
+double frequency(const std::vector<float>& v, std::size_t from, std::size_t to) {
+    int crossings = 0;
+    for (std::size_t i = from + 1; i < std::min(to, v.size()); ++i)
+        if ((v[i - 1] < 0.0f) != (v[i] < 0.0f)) ++crossings;
+    return crossings * 48000.0 / (2.0 * static_cast<double>(to - from));
+}
+
 OfflineResult render(const model::Session& s, InstancePool& pool, double seconds, double tail = 0) {
     auto r =
         renderOffline(s, pool, {.startSeconds = 0.0, .endSeconds = seconds, .tailSeconds = tail});
@@ -425,6 +433,114 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
         renderOffline(slow, pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir});
     REQUIRE(again);  // a fresh cache resamples to the same samples
     CHECK(again->audio.channels == r3->audio.channels);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-media-stretch-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(48000));
+    for (std::size_t i = 0; i < 48000; ++i) {
+        const double s = 0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000.0);
+        tone.channels[0][i] = static_cast<float>(s);
+        tone.channels[1][i] = static_cast<float>(s);
+    }
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    audio::AudioData longTone = tone;  // 4 s, for the variant size guard
+    longTone.channels.assign(2, std::vector<float>(4 * 48000));
+    REQUIRE(audio::writeWav(dir / "media" / "long.wav", longTone).ok());
+
+    auto pool = makePool();
+    MediaCache media;
+    // An item of `beats` (0.5 s each at 120 BPM) starting at 0.5 s.
+    auto build = [&](const char* file, double playrate, bool preservePitch, double pitch,
+                     const char* mode, double beats, std::uint64_t rev = 1) {
+        model::EditTxn t(model::Session::create(), rev);
+        const Id tr = addTrack(t, "Audio");
+        const Id md = t.create(model::MediaSource{file, "", "wav", 48000, 2, 48000});
+        model::Take take;
+        take.source = md;
+        take.playrate = playrate;
+        take.preservePitch = preservePitch;
+        take.pitch = pitch;
+        take.pitchMode = mode;
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = tr;
+        item.position = 1.0;
+        item.length = beats;
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
+        return commit(t);
+    };
+    auto renderTake = [&](const model::Session& s, double seconds, MediaCache* cache = nullptr) {
+        auto r = renderOffline(s, pool,
+                               {.startSeconds = 0.0,
+                                .endSeconds = seconds,
+                                .projectDir = dir,
+                                .media = cache ? cache : &media});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return std::move(*r);
+    };
+    constexpr double kTone = 0.5 * kCentre;
+
+    // Varispeed: 2x halves the take's source time — its 1 s source fills a
+    // 0.5 s item — and doubles the pitch. The old "time stretching is not
+    // available yet" warning is gone.
+    {
+        auto r = renderTake(build("tone.wav", 2.0, false, 0.0, "resample", 1.0), 1.5);
+        CHECK(r.warnings.empty());
+        const auto& L = r.audio.channels[0];
+        CHECK(peak(L, 0, 24000) == 0.0);
+        CHECK(peak(L, 48000) == 0.0);
+        CHECK(peak(L, 24000, 48000) == doctest::Approx(kTone).epsilon(0.02));
+        CHECK(frequency(L, 27000, 45000) == doctest::Approx(880.0).epsilon(0.03));
+        CHECK(media.size() == 1);
+    }
+    // Stretch: half the rate keeps the pitch and doubles the take's duration,
+    // so 0.5 s of source fills the 1 s item.
+    {
+        auto r = renderTake(build("tone.wav", 0.5, true, 0.0, "signalsmith", 2.0), 2.0);
+        CHECK(r.warnings.empty());
+        const auto& L = r.audio.channels[0];
+        CHECK(peak(L, 0, 24000) == 0.0);
+        CHECK(peak(L, 72000) == 0.0);
+        CHECK(peak(L, 24000, 72000) > 0.9 * kTone);
+        CHECK(frequency(L, 34000, 69000) == doctest::Approx(440.0).epsilon(0.03));
+        CHECK(media.size() == 2);
+    }
+    // A pitch offset the resample cannot honour: warned, and the pitch stays.
+    {
+        auto r = renderTake(build("tone.wav", 1.0, true, 12.0, "resample", 1.0), 1.5);
+        REQUIRE(r.warnings.size() == 1);
+        CHECK(r.warnings[0].find("pitch_mode") != std::string::npos);
+        CHECK(frequency(r.audio.channels[0], 27000, 45000) == doctest::Approx(440.0).epsilon(0.03));
+    }
+    // Without preserve_pitch the same offset is a further speed factor.
+    {
+        auto r = renderTake(build("tone.wav", 1.0, false, 12.0, "resample", 1.0), 1.5);
+        CHECK(r.warnings.empty());
+        CHECK(frequency(r.audio.channels[0], 27000, 45000) == doctest::Approx(880.0).epsilon(0.03));
+    }
+    // The stretched samples are the same in a cache that has to build them.
+    {
+        MediaCache fresh;
+        auto a = renderTake(build("tone.wav", 0.5, true, 0.0, "signalsmith", 2.0), 2.0);
+        auto b = renderTake(build("tone.wav", 0.5, true, 0.0, "signalsmith", 2.0), 2.0, &fresh);
+        CHECK(a.audio.channels == b.audio.channels);
+    }
+    // A variant that would need an unreasonable amount of memory is refused,
+    // not allocated (4 s at 1/100 speed and two octaves down).
+    {
+        auto r = renderTake(build("long.wav", 0.01, false, -48.0, "resample", 1.0), 1.5);
+        REQUIRE(r.warnings.size() == 1);
+        CHECK(r.warnings[0].find("memory") != std::string::npos);
+        CHECK(peak(r.audio.channels[0]) == 0.0);
+    }
     std::filesystem::remove_all(dir);
 }
 

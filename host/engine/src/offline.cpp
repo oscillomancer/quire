@@ -1,6 +1,7 @@
 #include "supple/engine/offline.h"
 
 #include "plan.h"
+#include "stretch.h"
 
 #include <algorithm>
 #include <cmath>
@@ -174,17 +175,44 @@ host::Instance* InstancePool::find(Id id) const {
 
 // --- media -----------------------------------------------------------------------------
 
+namespace {
+// One variant's samples can never be heard past the render limit, so refuse
+// to build (and keep) a variant larger than that.
+constexpr std::size_t kMaxVariantFrames = std::size_t{1} << 28;
+}  // namespace
+
 Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::filesystem::path& path,
-                                                                double rate) {
-    const std::string key = path.lexically_normal().string() + "@" + json::formatDouble(rate);
+                                                                double rate,
+                                                                const MediaVariant& variant) {
+    // Keyed by the plan rate, not the rate the variant ends up at: the same
+    // take in the same plan must land on the same entry.
+    const bool stretch = variant.stretch();
+    const std::string key = path.lexically_normal().string() + "@" + json::formatDouble(rate) +
+                            (stretch ? "|s" : "|r") + "|" + json::formatDouble(variant.playrate) +
+                            "|" + json::formatDouble(variant.preservePitch ? 0.0 : variant.pitch);
     auto it = entries_.find(key);
     if (it != entries_.end()) return it->second;
     auto data = audio::readAudio(path);
     if (!data) return std::move(data).error();
-    if (rate > 0 && data->sampleRate != rate) {
-        auto resampled = audio::resample(*data, rate);
+    // A rate of 0 keeps the file's own rate; the variant still applies.
+    const double planRate = rate > 0 ? rate : data->sampleRate;
+    const double targetRate = stretch ? planRate : planRate / variant.speed();
+    const double frames = static_cast<double>(data->frames()) * (targetRate / data->sampleRate) /
+                          (stretch ? variant.playrate : 1.0);
+    if (!(frames <= static_cast<double>(kMaxVariantFrames)))
+        return Error("engine.media_too_long",
+                     "playing this media this slowly would need an unreasonable amount of memory",
+                     {}, "a playrate closer to 1");
+    if (targetRate > 0 && data->sampleRate != targetRate) {
+        auto resampled = audio::resample(*data, targetRate);
         if (!resampled) return std::move(resampled).error();
         data = std::move(*resampled);
+    }
+    // Resampled first, so the stretch runs at the plan's rate.
+    if (stretch) {
+        auto stretched = stretchAudio(*data, variant.playrate, variant.pitch);
+        if (!stretched) return std::move(stretched).error();
+        data = std::move(*stretched);
     }
     auto shared = std::make_shared<const audio::AudioData>(std::move(*data));
     entries_.emplace(key, shared);
