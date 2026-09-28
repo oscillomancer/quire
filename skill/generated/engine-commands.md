@@ -4345,7 +4345,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `channel_mode` | string |  |  |  |  |
 | `name` | string |  |  |  |  |
-| `start_offset` | number |  | 0.0.. |  |  |
+| `start_offset` | number |  |  |  | Source position at the item start; negative for a late first pass. |
 
 ### Result
 

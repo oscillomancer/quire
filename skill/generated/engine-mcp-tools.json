@@ -3072,7 +3072,7 @@
         },
         "start_offset": {
           "type": "number",
-          "minimum": 0.0
+          "description": "Source position at the item start; negative for a late first pass."
         }
       },
       "required": ["take"],
