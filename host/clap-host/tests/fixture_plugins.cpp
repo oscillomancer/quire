@@ -622,6 +622,63 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_proces
     return CLAP_PROCESS_CONTINUE;
 }
 
+// --- key mix (sidechain fixture, ADR-0018) --------------------------------------------------
+// Inputs: main (stereo), key (stereo), an extra mono port; outputs: main and
+// an auxiliary pair. out = main + key, exactly, so a key's alignment shows in
+// the output. A host that does not give every declared port a buffer gets
+// CLAP_PROCESS_ERROR.
+
+const clap_plugin_descriptor_t* keyMixDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.keymix",
+                                               "Test Key Mix",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Main plus sidechain key (sidechain tests)",
+                                               features};
+    return &d;
+}
+struct KeyMix {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+};
+uint32_t CLAP_ABI keyMixPortCount(const clap_plugin_t*, bool input) { return input ? 3 : 2; }
+bool CLAP_ABI keyMixPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
+                            clap_audio_port_info_t* info) {
+    if (index >= (isInput ? 3u : 2u)) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->id = index;
+    const char* names[2][3] = {{"Out", "Aux Out", ""}, {"In", "Key", "Extra"}};
+    std::snprintf(info->name, sizeof(info->name), "%s", names[isInput ? 1 : 0][index]);
+    info->flags = index == 0 ? CLAP_AUDIO_PORT_IS_MAIN : 0;
+    info->channel_count = isInput && index == 2 ? 1 : 2;
+    info->port_type = info->channel_count == 2 ? CLAP_PORT_STEREO : CLAP_PORT_MONO;
+    info->in_place_pair = CLAP_INVALID_ID;
+    return true;
+}
+const clap_plugin_audio_ports_t kKeyMixPorts = {keyMixPortCount, keyMixPortGet};
+const void* CLAP_ABI keyMixExt(const clap_plugin_t*, const char* id) {
+    return !std::strcmp(id, CLAP_EXT_AUDIO_PORTS) ? &kKeyMixPorts : nullptr;
+}
+bool CLAP_ABI keyMixActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
+clap_process_status CLAP_ABI keyMixProcess(const clap_plugin_t*, const clap_process_t* p) {
+    if (p->audio_inputs_count != 3 || p->audio_outputs_count != 2 ||
+        p->audio_inputs[0].channel_count != 2 || p->audio_inputs[1].channel_count != 2 ||
+        p->audio_inputs[2].channel_count != 1 || p->audio_outputs[1].channel_count != 2)
+        return CLAP_PROCESS_ERROR;
+    for (uint32_t c = 0; c < 2; ++c)
+        for (uint32_t i = 0; i < p->frames_count; ++i) {
+            p->audio_outputs[0].data32[c][i] =
+                p->audio_inputs[0].data32[c][i] + p->audio_inputs[1].data32[c][i];
+            p->audio_outputs[1].data32[c][i] = 0.0f;
+        }
+    return CLAP_PROCESS_CONTINUE;
+}
+
 // --- crash (the isolation fixture) -------------------------------------------------------
 // An effect that passes audio through until its Mode parameter says otherwise:
 // 1 crashes the process in process() (SIGSEGV), 2 hangs it there.
@@ -739,7 +796,7 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 8; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 9; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0   ? gainDescriptor()
            : i == 1 ? sineDescriptor()
@@ -749,6 +806,7 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
            : i == 5 ? checkedGainDescriptor(true)
            : i == 6 ? slowGainDescriptor()
            : i == 7 ? badCurveDescriptor()
+           : i == 8 ? keyMixDescriptor()
                     : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
@@ -794,6 +852,8 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
     }
     if (!std::strcmp(id, crashDescriptor()->id))
         return make<Crash>(host, crashDescriptor(), crashActivate, crashProcess, crashExt);
+    if (!std::strcmp(id, keyMixDescriptor()->id))
+        return make<KeyMix>(host, keyMixDescriptor(), keyMixActivate, keyMixProcess, keyMixExt);
     return nullptr;
 }
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};

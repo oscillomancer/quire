@@ -91,6 +91,9 @@ struct ProcessBlock {
     std::uint32_t inputChannels = 0;
     float* const* outputs = nullptr;  // main output channels
     std::uint32_t outputChannels = 0;
+    // The key (ADR-0018): the plug-in's sidechain input; null = silence.
+    const float* const* sidechain = nullptr;
+    std::uint32_t sidechainChannels = 0;
     std::uint32_t frames = 0;
     std::span<const Event> events;         // sorted by time
     const Transport* transport = nullptr;  // null: no transport info
@@ -161,6 +164,13 @@ class Instance {
     std::uint32_t audioInputChannels() const { return inChannels_; }
     std::uint32_t audioOutputChannels() const { return outChannels_; }
     bool acceptsNotes() const { return acceptsNotes_; }
+    // The sidechain (key) input: a CLAP plug-in's first non-main input port, a
+    // VST3's first auxiliary input bus; 0 when it has none (ADR-0018).
+    std::uint32_t sidechainChannels() const { return keyChannels_; }
+    // Whether a key is connected. VST3 plug-ins see it as their auxiliary bus
+    // being active (some then key from it); set before activate().
+    Status setSidechainActive(bool on);
+    bool sidechainActive() const { return keyActive_; }
 
     // --- standard parameters (main thread) ---
     std::vector<ParamInfo> params() const;
@@ -239,8 +249,8 @@ class Instance {
     const clap_plugin_tail_t* extTail_ = nullptr;
     const clap_plugin_timer_support_t* extTimer_ = nullptr;
     const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
-    std::uint32_t inChannels_ = 0, outChannels_ = 0;
-    bool acceptsNotes_ = false;
+    std::uint32_t inChannels_ = 0, outChannels_ = 0, keyChannels_ = 0;
+    bool acceptsNotes_ = false, keyActive_ = false;
     bool active_ = false;
     std::atomic<bool> processing_{false};  // written on the audio thread
     std::uint32_t maxFrames_ = 0;

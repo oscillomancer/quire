@@ -52,8 +52,12 @@ struct BridgeInstance {
         auto* outEvents = reinterpret_cast<OutputEvent*>(base + layout.outEvents);
         auto* inAudio = reinterpret_cast<float*>(base + layout.inAudio);
         auto* outAudio = reinterpret_cast<float*>(base + layout.outAudio);
+        auto* keyAudio = reinterpret_cast<float*>(base + layout.keyAudio);
         const float* in[kMaxChannels];
+        const float* key[kMaxChannels];
         float* out[kMaxChannels];
+        for (std::uint32_t c = 0; c < layout.keyChannels; ++c)
+            key[c] = keyAudio + static_cast<std::size_t>(c) * layout.maxFrames;
         for (std::uint32_t c = 0; c < layout.inChannels; ++c)
             in[c] = inAudio + static_cast<std::size_t>(c) * layout.maxFrames;
         for (std::uint32_t c = 0; c < layout.outChannels; ++c)
@@ -73,6 +77,10 @@ struct BridgeInstance {
                     b.inputChannels = layout.inChannels;
                     b.outputs = out;
                     b.outputChannels = layout.outChannels;
+                    if (hdr->hasKey && layout.keyChannels) {
+                        b.sidechain = key;
+                        b.sidechainChannels = layout.keyChannels;
+                    }
                     b.frames = std::min(hdr->frames, layout.maxFrames);
                     b.events =
                         std::span<const Event>(events, std::min(hdr->eventCount, kMaxEvents));
@@ -181,6 +189,7 @@ struct Bridge {
             w.u32(slot->instance->audioOutputChannels());
             w.u8(slot->instance->acceptsNotes() ? 1 : 0);
             w.u8(slot->instance->info().semantic ? 1 : 0);
+            w.u32(slot->instance->sidechainChannels());
             instances.emplace(newId, std::move(slot));
             return reply(w);
         }
@@ -216,12 +225,15 @@ struct Bridge {
                 }
                 mapSize = size;
                 hdr = static_cast<Header*>(map);
-                layout = Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels);
+                layout =
+                    Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels, hdr->keyChannels);
                 if (hdr->magic != kMagic || hdr->version != kVersion || layout.size > size ||
-                    hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels) {
+                    hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels ||
+                    hdr->keyChannels > kMaxChannels) {
                     unmap();
                     return fail(Error("bridge.activate", "shared memory layout mismatch"));
                 }
+                (void)instance->setSidechainActive(hdr->keyActive != 0);
                 auto st = instance->activate(rate, minFrames, maxFrames);
                 if (!st) {
                     unmap();

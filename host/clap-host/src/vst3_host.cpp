@@ -295,6 +295,10 @@ struct Vst3Instance::State {
     std::vector<vst::AudioBusBuffers> inBuses, outBuses;
     std::vector<std::vector<float>> auxStorage;
     std::vector<float*> auxPointers;
+    std::vector<float**> silentIn;  // each auxiliary input bus's silent channels
+    int keyBus = -1;                // the first auxiliary input bus (the key), ADR-0018
+    bool keyActive = false;
+    std::vector<float*> keyPointers;  // the block's key, padded with silence
     bool notes = false, active = false;
     bool separateController = false;
     std::array<std::array<vst::ParamID, 130>, 16> midiParams{};
@@ -386,6 +390,9 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
             vst::BusInfo bus{};
             const bool ok = s.component->getBusInfo(vst::kAudio, dir, b, bus) == kResultOk;
             channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
+            if (ok && dir == vst::kInput && b > 0 && bus.busType == vst::kAux && s.keyBus < 0 &&
+                bus.channelCount > 0)
+                s.keyBus = b;
         }
     }
     s.inputs = s.inBusChannels.empty() ? 0 : std::min<std::uint32_t>(s.inBusChannels[0], 2);
@@ -417,8 +424,12 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
 std::uint32_t Vst3Instance::inputChannels() const { return state_->inputs; }
 std::uint32_t Vst3Instance::outputChannels() const { return state_->outputs; }
 bool Vst3Instance::acceptsNotes() const { return state_->notes; }
+std::uint32_t Vst3Instance::sidechainChannels() const {
+    const auto& s = *state_;
+    return s.keyBus < 0 ? 0 : s.inBusChannels[static_cast<std::size_t>(s.keyBus)];
+}
 
-Status Vst3Instance::activate(double rate, std::uint32_t maxFrames) {
+Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidechainActive) {
     auto& s = *state_;
     if (s.active) return okStatus();
     // One arrangement per bus: the main buses stereo or mono, auxiliary buses
@@ -471,6 +482,15 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames) {
                 s.auxPointers.push_back(s.auxStorage.back().data());
             }
         }
+    s.silentIn.assign(s.inBuses.size(), nullptr);
+    for (std::size_t b = 1; b < s.inBuses.size(); ++b)
+        s.silentIn[b] = s.inBuses[b].channelBuffers32;
+    // The key bus only while a route feeds it: some plug-ins take an active
+    // auxiliary bus as "key from it" and would otherwise key from silence.
+    s.keyActive = sidechainActive && s.keyBus >= 0;
+    if (s.keyBus >= 0) s.component->activateBus(vst::kAudio, vst::kInput, s.keyBus, s.keyActive);
+    s.keyPointers.assign(s.keyBus >= 0 ? s.inBusChannels[static_cast<std::size_t>(s.keyBus)] : 0,
+                         nullptr);
     if (s.notes) s.component->activateBus(vst::kEvent, vst::kInput, 0, true);
     vst::ProcessSetup setup{vst::kRealtime, vst::kSample32,
                             static_cast<Steinberg::int32>(maxFrames), rate};
@@ -656,8 +676,18 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
         s.outBuses[0].numChannels = static_cast<Steinberg::int32>(block.outputChannels);
         s.outBuses[0].channelBuffers32 = const_cast<float**>(block.outputs);
     }
-    for (std::size_t b = 1; b < s.inBuses.size(); ++b)  // silent sidechains
+    for (std::size_t b = 1; b < s.inBuses.size(); ++b) {  // silent auxiliary inputs
+        s.inBuses[b].channelBuffers32 = s.silentIn[b];
         s.inBuses[b].silenceFlags = ~0ull;
+    }
+    if (s.keyActive && block.sidechain && block.sidechainChannels > 0) {
+        auto& key = s.inBuses[static_cast<std::size_t>(s.keyBus)];
+        for (std::size_t c = 0; c < s.keyPointers.size(); ++c)
+            s.keyPointers[c] = c < block.sidechainChannels ? const_cast<float*>(block.sidechain[c])
+                                                           : key.channelBuffers32[c];
+        key.channelBuffers32 = s.keyPointers.data();
+        key.silenceFlags = 0;
+    }
     vst::ProcessContext context{};
     context.sampleRate = s.rate;
     if (block.transport) {

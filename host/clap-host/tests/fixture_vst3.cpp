@@ -126,7 +126,10 @@ class Fixture final : public SingleComponentEffect {
                 output[i] =
                     kind_ == Sine
                         ? static_cast<float>(sample)
-                        : input[i] * static_cast<float>(kind_ == Delay ? 1.0 : value_.load());
+                        : input[i] * static_cast<float>(kind_ == Delay ? 1.0 : value_.load()) +
+                              (kind_ == Sidechain && data.inputs[1].silenceFlags == 0
+                                   ? data.inputs[1].channelBuffers32[channel][i]
+                                   : 0.0f);
             }
         }
         return kResultOk;

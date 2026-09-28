@@ -17,7 +17,7 @@
 namespace supple::host {
 
 struct RemotePorts {
-    std::uint32_t inChannels = 0, outChannels = 0;
+    std::uint32_t inChannels = 0, outChannels = 0, keyChannels = 0;
     bool acceptsNotes = false, semantic = false;
 };
 
@@ -55,7 +55,8 @@ class RemoteInstance {
 
     // main thread
     Status activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
-                    std::uint32_t inChannels, std::uint32_t outChannels);
+                    std::uint32_t inChannels, std::uint32_t outChannels,
+                    std::uint32_t keyChannels = 0, bool keyActive = false);
     void deactivate();
     std::vector<ParamInfo> params();
     Result<double> paramValue(std::uint32_t id);

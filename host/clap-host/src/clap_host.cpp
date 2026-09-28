@@ -152,6 +152,18 @@ struct Instance::HostState {
     clap_output_events_t outEvents{};
     clap_event_transport_t transport{};
     bool preferMidiNotes = false;
+
+    // Every declared audio port (ADR-0018), in declaration order: the main
+    // ports carry the block's audio, the key port its sidechain, the rest
+    // silence (inputs) or scratch (outputs). Pointer arrays and spare
+    // channels are allocated at activation; empty = no audio-ports extension.
+    std::vector<std::uint32_t> inPorts, outPorts;  // channel counts
+    int mainIn = -1, keyIn = -1, mainOut = -1;
+    std::vector<clap_audio_buffer_t> inBuffers, outBuffers;
+    std::vector<std::vector<float>> spare;       // zeroed or scratch channels
+    std::vector<float*> pointers;                // per port, per channel
+    std::vector<std::size_t> inFirst, outFirst;  // each port's first pointer
+    std::vector<std::size_t> inSpare, outSpare;  // each port's first spare channel
 };
 
 struct HostCallbacks {
@@ -479,6 +491,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->info_.semantic = ports.semantic;
         self->inChannels_ = ports.inChannels;
         self->outChannels_ = ports.outChannels;
+        self->keyChannels_ = ports.keyChannels;
         self->acceptsNotes_ = ports.acceptsNotes;
         self->hostState_ = std::make_unique<HostState>();
         self->remote_ = std::move(*remote);
@@ -493,6 +506,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->info_.semantic = false;
         self->inChannels_ = (*backing)->inputChannels();
         self->outChannels_ = (*backing)->outputChannels();
+        self->keyChannels_ = (*backing)->sidechainChannels();
         self->acceptsNotes_ = (*backing)->acceptsNotes();
         self->vst3_ = std::move(*backing);
         return self;
@@ -574,6 +588,26 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         };
         self->inChannels_ = mainChannels(true);
         self->outChannels_ = mainChannels(false);
+        // Every port, and which is the key: the first input that is not the main one.
+        for (bool input : {true, false}) {
+            auto& list = input ? h.inPorts : h.outPorts;
+            int& main = input ? h.mainIn : h.mainOut;
+            const uint32_t n = std::min<uint32_t>(ports->count(self->plugin_, input), 16);
+            for (uint32_t i = 0; i < n; ++i) {
+                clap_audio_port_info_t p{};
+                const bool ok = ports->get(self->plugin_, i, input, &p);
+                list.push_back(ok ? std::min<uint32_t>(p.channel_count, 64) : 0);
+                if (ok && main < 0 && (p.flags & CLAP_AUDIO_PORT_IS_MAIN))
+                    main = static_cast<int>(i);
+            }
+            if (main < 0 && !list.empty()) main = 0;
+        }
+        for (std::size_t i = 0; i < h.inPorts.size(); ++i)
+            if (static_cast<int>(i) != h.mainIn && h.inPorts[i] > 0) {
+                h.keyIn = static_cast<int>(i);
+                self->keyChannels_ = h.inPorts[i];
+                break;
+            }
     }
     if (auto* notes = static_cast<const clap_plugin_note_ports_t*>(ext(CLAP_EXT_NOTE_PORTS))) {
         if (notes->count(self->plugin_, true) > 0) {
@@ -608,9 +642,16 @@ Instance::~Instance() {
     plugin_ = nullptr;
 }
 
+Status Instance::setSidechainActive(bool on) {
+    if (active_)
+        return Error("host.sidechain", "the key can change only while the plug-in is inactive");
+    keyActive_ = on && keyChannels_ > 0;
+    return okStatus();
+}
+
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
     if (vst3_) {
-        SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames));
+        SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames, keyActive_));
         active_ = true;
         sampleRate_ = sampleRate;
         maxFrames_ = maxFrames;
@@ -618,7 +659,8 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
     }
     if (remote_) {
         if (active_) return okStatus();
-        SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_));
+        SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_,
+                                     keyChannels_, keyActive_));
         remote_->refreshLatency();
         active_ = true;
         sampleRate_ = sampleRate;
@@ -627,6 +669,27 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
     }
     if (active_) return okStatus();
     hostState_->events.assign(kMaxInputEvents, ClapEvent{});
+    {
+        HostState& h = *hostState_;
+        h.inBuffers.assign(h.inPorts.size(), clap_audio_buffer_t{});
+        h.outBuffers.assign(h.outPorts.size(), clap_audio_buffer_t{});
+        std::size_t channels = 0;
+        for (auto c : h.inPorts) channels += c;
+        for (auto c : h.outPorts) channels += c;
+        h.spare.assign(channels, std::vector<float>(maxFrames, 0.0f));
+        h.pointers.assign(channels, nullptr);
+        h.inFirst.clear();
+        h.outFirst.clear();
+        std::size_t at = 0;
+        for (auto c : h.inPorts) {
+            h.inFirst.push_back(at);
+            at += c;
+        }
+        for (auto c : h.outPorts) {
+            h.outFirst.push_back(at);
+            at += c;
+        }
+    }
     if (!plugin_->activate(plugin_, sampleRate, minFrames, maxFrames))
         return Error("host.activate",
                      "\"" + info_.id + "\" refused to activate at " +
@@ -927,6 +990,46 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
     in.channel_count = b.inputChannels;
     outBuf.data32 = const_cast<float**>(b.outputs);
     outBuf.channel_count = b.outputChannels;
+    // Declared ports: each gets a full pointer array (block channels where the
+    // block has them, else the spare channels: zeroed inputs, scratch outputs).
+    const bool allPorts = !h.inPorts.empty() || !h.outPorts.empty();
+    if (allPorts) {
+        for (std::size_t i = 0; i < h.inPorts.size(); ++i) {
+            const float* const* src = nullptr;
+            std::uint32_t have = 0;
+            if (static_cast<int>(i) == h.mainIn) {
+                src = b.inputs;
+                have = b.inputChannels;
+            } else if (static_cast<int>(i) == h.keyIn) {
+                src = b.sidechain;
+                have = b.sidechainChannels;
+            }
+            std::uint64_t constant = 0;
+            float** ptrs = h.pointers.data() + h.inFirst[i];
+            for (std::uint32_t c = 0; c < h.inPorts[i]; ++c) {
+                if (src && c < have) {
+                    ptrs[c] = const_cast<float*>(src[c]);
+                } else {
+                    ptrs[c] = h.spare[h.inFirst[i] + c].data();
+                    constant |= std::uint64_t{1} << (c & 63);
+                }
+            }
+            h.inBuffers[i] = {};
+            h.inBuffers[i].data32 = ptrs;
+            h.inBuffers[i].channel_count = h.inPorts[i];
+            h.inBuffers[i].constant_mask = constant;
+        }
+        for (std::size_t i = 0; i < h.outPorts.size(); ++i) {
+            const bool main = static_cast<int>(i) == h.mainOut;
+            float** ptrs = h.pointers.data() + h.outFirst[i];
+            for (std::uint32_t c = 0; c < h.outPorts[i]; ++c)
+                ptrs[c] =
+                    main && c < b.outputChannels ? b.outputs[c] : h.spare[h.outFirst[i] + c].data();
+            h.outBuffers[i] = {};
+            h.outBuffers[i].data32 = ptrs;
+            h.outBuffers[i].channel_count = h.outPorts[i];
+        }
+    }
 
     clap_process_t p{};
     p.steady_time = b.steadyTime;
@@ -962,10 +1065,17 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
         }
         p.transport = &tr;
     }
-    p.audio_inputs = b.inputChannels ? &in : nullptr;
-    p.audio_inputs_count = b.inputChannels ? 1 : 0;
-    p.audio_outputs = b.outputChannels ? &outBuf : nullptr;
-    p.audio_outputs_count = b.outputChannels ? 1 : 0;
+    if (allPorts) {
+        p.audio_inputs = h.inBuffers.empty() ? nullptr : h.inBuffers.data();
+        p.audio_inputs_count = static_cast<uint32_t>(h.inBuffers.size());
+        p.audio_outputs = h.outBuffers.empty() ? nullptr : h.outBuffers.data();
+        p.audio_outputs_count = static_cast<uint32_t>(h.outBuffers.size());
+    } else {  // no audio-ports extension: one stereo pair each way
+        p.audio_inputs = b.inputChannels ? &in : nullptr;
+        p.audio_inputs_count = b.inputChannels ? 1 : 0;
+        p.audio_outputs = b.outputChannels ? &outBuf : nullptr;
+        p.audio_outputs_count = b.outputChannels ? 1 : 0;
+    }
     p.in_events = &h.inEvents;
     p.out_events = &h.outEvents;
     h.outSink = out;

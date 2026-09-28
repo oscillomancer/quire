@@ -27,8 +27,8 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-inline constexpr std::uint32_t kVersion = 3;         // 3: Create carries the plugin format
-inline constexpr int kControlFd = 3;                 // the bridge's end of the socketpair
+inline constexpr std::uint32_t kVersion = 4;  // 3: Create carries the format; 4: the key (ADR-0018)
+inline constexpr int kControlFd = 3;          // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
 inline constexpr std::uint32_t kMaxOutEvents = 1024;
@@ -166,6 +166,7 @@ enum class Cmd : std::uint32_t { Process = 1, StartProcessing, StopProcessing, R
 struct Header {
     std::uint32_t magic, version;
     std::uint32_t maxFrames, inChannels, outChannels;
+    std::uint32_t keyChannels, keyActive;            // the sidechain input (ADR-0018)
     alignas(64) std::atomic<std::uint32_t> request;  // bumped by the host (futex word)
     alignas(64) std::atomic<std::uint32_t> done;     // = request when finished (futex word)
     alignas(64) std::uint32_t cmd;
@@ -173,6 +174,7 @@ struct Header {
     std::int64_t steadyTime;
     std::uint32_t result;  // 1: ok
     std::uint32_t hasTransport;
+    std::uint32_t hasKey;  // this block carries a key (else the plug-in gets silence)
     Transport transport;
     std::uint32_t eventCount;
     std::uint32_t outEventCount, outEventsDropped;
@@ -182,15 +184,16 @@ static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 
 // Offsets of the arenas and buffers in the region.
 struct Layout {
-    std::size_t events, outEvents, inAudio, outAudio, size;
-    std::uint32_t maxFrames, inChannels, outChannels;
-    Layout(std::uint32_t frames, std::uint32_t in, std::uint32_t out)
-        : maxFrames(frames), inChannels(in), outChannels(out) {
+    std::size_t events, outEvents, inAudio, keyAudio, outAudio, size;
+    std::uint32_t maxFrames, inChannels, outChannels, keyChannels;
+    Layout(std::uint32_t frames, std::uint32_t in, std::uint32_t out, std::uint32_t key = 0)
+        : maxFrames(frames), inChannels(in), outChannels(out), keyChannels(key) {
         auto align = [](std::size_t n) { return (n + 63) & ~std::size_t{63}; };
         events = align(sizeof(Header));
         outEvents = align(events + sizeof(Event) * kMaxEvents);
         inAudio = align(outEvents + sizeof(OutputEvent) * kMaxOutEvents);
-        outAudio = align(inAudio + sizeof(float) * in * frames);
+        keyAudio = align(inAudio + sizeof(float) * in * frames);
+        outAudio = align(keyAudio + sizeof(float) * key * frames);
         size = align(outAudio + sizeof(float) * out * frames);
     }
 };

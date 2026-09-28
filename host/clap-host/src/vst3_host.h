@@ -13,7 +13,8 @@ class Vst3Instance {
     std::uint32_t inputChannels() const;
     std::uint32_t outputChannels() const;
     bool acceptsNotes() const;
-    Status activate(double rate, std::uint32_t maxFrames);
+    std::uint32_t sidechainChannels() const;  // the first auxiliary input bus (ADR-0018)
+    Status activate(double rate, std::uint32_t maxFrames, bool sidechainActive);
     void deactivate();
     std::uint32_t latency() const;
     std::uint32_t tail() const;

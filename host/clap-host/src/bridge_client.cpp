@@ -106,6 +106,7 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     ports.outChannels = r.u32();
     ports.acceptsNotes = r.u8() != 0;
     ports.semantic = r.u8() != 0;
+    ports.keyChannels = r.u32();
     if (!r.ok() || !self->instanceId_)
         return Error("host.bridge", "malformed reply from the plugin bridge");
     return self;
@@ -216,9 +217,11 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, i
 }
 
 Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
-                                std::uint32_t in, std::uint32_t out) {
+                                std::uint32_t in, std::uint32_t out, std::uint32_t key,
+                                bool keyActive) {
     unmap();
-    layout_ = Layout(maxFrames, std::min(in, kMaxChannels), std::min(out, kMaxChannels));
+    layout_ = Layout(maxFrames, std::min(in, kMaxChannels), std::min(out, kMaxChannels),
+                     std::min(key, kMaxChannels));
     const int fd = ::memfd_create("supple-bridge", MFD_CLOEXEC);
     if (fd < 0) return Error("host.bridge", "memfd_create failed");
     if (::ftruncate(fd, static_cast<off_t>(layout_.size)) != 0) {
@@ -237,6 +240,8 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
     hdr_->maxFrames = maxFrames;
     hdr_->inChannels = layout_.inChannels;
     hdr_->outChannels = layout_.outChannels;
+    hdr_->keyChannels = layout_.keyChannels;
+    hdr_->keyActive = keyActive ? 1 : 0;
     seq_ = 0;
     Writer w;
     w.f64(rate);
@@ -449,6 +454,16 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
         else
             std::fill_n(dst, frames, 0.0f);
     }
+    auto* keyAudio = reinterpret_cast<float*>(base + layout_.keyAudio);
+    hdr_->hasKey = b.sidechain && b.sidechainChannels > 0 && layout_.keyChannels > 0 ? 1 : 0;
+    if (hdr_->hasKey)
+        for (std::uint32_t c = 0; c < layout_.keyChannels; ++c) {
+            float* dst = keyAudio + static_cast<std::size_t>(c) * layout_.maxFrames;
+            if (c < b.sidechainChannels)
+                std::copy_n(b.sidechain[c], frames, dst);
+            else
+                std::fill_n(dst, frames, 0.0f);
+        }
     auto* events = reinterpret_cast<Event*>(base + layout_.events);
     const auto n = static_cast<std::uint32_t>(std::min<std::size_t>(b.events.size(), kMaxEvents));
     std::copy_n(b.events.begin(), n, events);

@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -176,7 +177,7 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 8);
+    REQUIRE(list->size() == 9);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -600,4 +601,64 @@ TEST_CASE("isolation: a missing bridge is a clean error") {
     REQUIRE_FALSE(inst);
     CHECK(inst.error().code.rfind("host.bridge", 0) == 0);
     setBridgeExecutable(BRIDGE_PATH);
+}
+
+TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolated (ADR-0018)") {
+    // Every declared port gets a buffer (the key-mix fixture errors otherwise);
+    // the key sums into the output; without a key the plug-in hears silence.
+    auto check = [](Instance& inst, bool keyActive) {
+        REQUIRE(inst.sidechainChannels() == 2);
+        REQUIRE(inst.setSidechainActive(keyActive).ok());
+        REQUIRE(inst.activate(48000, 1, 64).ok());
+        REQUIRE(inst.startProcessing());
+        Buffers buffer(64);
+        std::fill(buffer.l.begin(), buffer.l.end(), 0.25f);
+        std::fill(buffer.r.begin(), buffer.r.end(), 0.25f);
+        std::vector<float> kl(64, 0.5f), kr(64, -0.5f);
+        const float* key[2] = {kl.data(), kr.data()};
+        ProcessBlock b = buffer.block(64);
+        b.sidechain = key;
+        b.sidechainChannels = 2;
+        REQUIRE(inst.process(b));
+        const double withKeyL = static_cast<double>(buffer.ol[7]),
+                     withKeyR = static_cast<double>(buffer.orr[7]);
+        REQUIRE(inst.process(buffer.block(64)));  // no key: silence
+        const double withoutL = static_cast<double>(buffer.ol[7]);
+        inst.stopProcessing();
+        inst.deactivate();
+        return std::array<double, 3>{withKeyL, withKeyR, withoutL};
+    };
+    auto clap = scan(std::span<const std::filesystem::path>(&kFixture, 1));
+    REQUIRE(clap);
+    const auto keyMix = std::find_if(clap->begin(), clap->end(), [](const PluginInfo& p) {
+        return p.id == "com.suppleaudio.test.keymix";
+    });
+    REQUIRE(keyMix != clap->end());
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(*keyMix, {}, isolated);
+        REQUIRE(made);
+        const auto r = check(**made, true);
+        CHECK(r[0] == doctest::Approx(0.75));
+        CHECK(r[1] == doctest::Approx(-0.25));
+        CHECK(r[2] == doctest::Approx(0.25));
+    }
+    auto vst3 = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(vst3);
+    const auto sidechain = std::find_if(vst3->begin(), vst3->end(), [](const PluginInfo& p) {
+        return p.name == "Test VST3 Sidechain Gain";
+    });
+    REQUIRE(sidechain != vst3->end());
+    for (bool isolated : {false, true})
+        for (bool active : {true, false}) {
+            CAPTURE(isolated);
+            CAPTURE(active);
+            auto made = Instance::create(*sidechain, {}, isolated);
+            REQUIRE(made);
+            REQUIRE((*made)->setParam(1, 1.0).ok());
+            const auto r = check(**made, active);
+            // An inactive key bus hears nothing, as when no route feeds it.
+            CHECK(r[0] == doctest::Approx(active ? 0.75 : 0.25));
+            CHECK(r[2] == doctest::Approx(0.25));
+        }
 }
