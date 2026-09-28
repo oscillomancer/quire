@@ -907,8 +907,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         // last applied, the plugin running until the ramp is done.
         const auto target = static_cast<float>(st.bypass ? 0.0 : st.instrument ? 1.0 : st.wet);
         if (st.appliedWet < 0.0f) st.appliedWet = target;  // new here: no ramp
-        if (target != st.appliedWet && st.wetRampLeft == 0) {
+        if (st.wetRampLeft ? target != st.rampToWet : target != st.appliedWet) {
             st.rampFromWet = st.appliedWet;
+            st.rampToWet = target;
             st.wetRampLeft = p.smoothFrames;
         }
         if (st.bypass && st.wetRampLeft == 0) {  // bypassed and faded out
@@ -947,8 +948,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                 float wet = target;
                 if (st.wetRampLeft > 0) {
                     const float t = 1.0f - static_cast<float>(st.wetRampLeft) / span;
-                    wet = st.rampFromWet + (target - st.rampFromWet) * t;
+                    wet = st.rampFromWet + (st.rampToWet - st.rampFromWet) * t;
                     --st.wetRampLeft;
+                    if (st.wetRampLeft == 0) wet = st.rampToWet;
                 }
                 const float dryGain = st.instrument ? 1.0f : 1.0f - wet;
                 node.sum.l[i] = st.out.l[i] * wet + st.dryBuf.l[i] * dryGain;
@@ -1072,12 +1074,12 @@ void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
-        n.held.fill(0);  // a relocation resets the plugins: nothing is held
-        n.releaseHeld = false;
+        if (!n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
             a->cursor = 0;
         for (Stage& st : n.chain) {
-            st.dry.clear();
+            if (!st.preserveDryOnLocate) st.dry.clear();
+            st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
                 ln.lastSent = std::numeric_limits<double>::quiet_NaN();
@@ -1104,12 +1106,12 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
-        n.held.fill(0);
-        n.releaseHeld = false;
+        if (!n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
             a->cursor = 0;
         for (Stage& st : n.chain) {
-            st.dry.clear();
+            if (!st.preserveDryOnLocate) st.dry.clear();
+            st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
                 ln.lastSent = std::numeric_limits<double>::quiet_NaN();  // resend at once
@@ -1153,7 +1155,10 @@ void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT {
         for (Node& n : to.nodes) {
             if (n.id != old.id) continue;
             if (liveOnly && !n.live) break;
-            if (n.midiIn) {
+            const bool sameRoute = n.midiIn && n.midiIn->ports == old.midiIn->ports &&
+                                   n.midiIn->fromChannel == old.midiIn->fromChannel &&
+                                   n.midiIn->toChannel == old.midiIn->toChannel;
+            if (sameRoute) {
                 n.liveHeld = old.liveHeld;  // still live: its note-offs will come
             } else {
                 for (std::size_t k = 0; k < n.held.size(); ++k)
@@ -1169,7 +1174,7 @@ void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT {
 void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
     for (Node& n : to.nodes) {
         if (liveClass >= 0 && n.live != (liveClass == 1)) continue;
-        for (const Node& old : from.nodes) {  // (plans are small; a swap is rare)
+        for (Node& old : from.nodes) {  // (plans are small; a swap is rare)
             if (old.id != n.id) continue;
             // Only what this executor processed (the other one writes the rest).
             if (liveClass >= 0 && old.live != (liveClass == 1)) break;
@@ -1179,11 +1184,18 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
             n.rampTo = old.rampTo;
             n.rampLeft = old.rampLeft;
             for (Stage& st : n.chain)
-                for (const Stage& os : old.chain)
+                for (Stage& os : old.chain)
                     if (st.instance && os.instance == st.instance) {
                         st.appliedWet = os.appliedWet;
                         st.rampFromWet = os.rampFromWet;
+                        st.rampToWet = os.rampToWet;
                         st.wetRampLeft = os.wetRampLeft;
+                        if (st.dry.length == os.dry.length) {
+                            std::swap(st.dry.buf[0], os.dry.buf[0]);
+                            std::swap(st.dry.buf[1], os.dry.buf[1]);
+                            st.dry.pos = os.dry.pos;
+                            st.preserveDryOnLocate = true;
+                        }
                         break;
                     }
             break;

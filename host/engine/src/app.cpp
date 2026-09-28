@@ -501,10 +501,12 @@ void appendRecorded(midi::Sequence& seq, const RecordedTake& r, std::size_t run,
         if (it == open.end()) return;
         const auto [on, velocity] = it->second;
         open.erase(it);
-        if (on < from || on >= to) return;  // outside the item
+        const auto first = std::max(on, from);
+        const auto last = std::min(at, to);
+        if (last <= first) return;
         midi::Note n;
-        n.start = tick(on);
-        n.length = std::max<std::int64_t>(1, tick(std::min(at, to)) - n.start);
+        n.start = tick(first);
+        n.length = std::max<std::int64_t>(1, tick(last) - n.start);
         n.channel = static_cast<std::uint8_t>(key.first);
         n.pitch = static_cast<std::uint8_t>(key.second);
         n.velocity = static_cast<std::uint8_t>(velocity);

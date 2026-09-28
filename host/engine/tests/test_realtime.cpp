@@ -1329,6 +1329,45 @@ TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
     }
 }
 
+TEST_CASE("a monitored MIDI route change releases held notes" * doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}})
+        for (int change = 0; change < 3; ++change) {
+            INFO("anticipative " << options.anticipative << ", change " << change);
+            auto pool = makePool();
+            MediaCache media;
+            DummyBackend backend(keyboard({{500, 0x90, 60, 100}, {18000, 0x80, 60, 0}}, 30720));
+            Engine engine(pool, media, options);
+            REQUIRE(
+                engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
+                    .ok());
+            const model::Session s = keyboardSession();
+            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.awaitPlan());
+            backend.run(40);  // the key is down at the edit
+            model::EditTxn t(s, 2);
+            for (const auto& e : s.routes)
+                if (e.value->from.midiDevice)
+                    t.modify<model::Route>(e.id, [&](model::Route& route) {
+                        if (change == 1) route.from.midiDevice = "pads";
+                        if (change == 2) route.midi->fromChannel = 2;
+                    });
+            REQUIRE(engine.load(t.commit().value()).ok());
+            REQUIRE(engine.awaitPlan());
+            backend.run(80);
+            engine.stop();
+            const auto& audio = backend.capture().channels[0];
+            auto peak = [&](std::size_t from, std::size_t to) {
+                double p = 0;
+                for (std::size_t i = from; i < to; ++i)
+                    p = std::max(p, std::fabs(double(audio[i])));
+                return p;
+            };
+            CHECK(peak(2000, 10000) > 0.1);
+            if (change == 0) CHECK(peak(12000, 17000) > 0.1);  // unchanged route carries
+            CHECK(peak(21000, 30000) == 0.0);  // the old device's off is filtered after edits
+        }
+}
+
 TEST_CASE("a mute while playing fades over 10 ms instead of clicking" *
           doctest::description("rt")) {
     auto pool = makePool();
@@ -1359,6 +1398,67 @@ TEST_CASE("a mute while playing fades over 10 ms instead of clicking" *
     for (std::size_t i = 2400; i < 3200; ++i)
         jump = std::max(jump, std::fabs(double(L[i]) - double(L[i - 1])));
     CHECK(jump < 0.02);
+}
+
+TEST_CASE("wet and bypass edits retarget an active ramp without a step" *
+          doctest::description("rt")) {
+    for (const bool bypass : {false, true}) {
+        INFO("bypass " << bypass);
+        model::Session s = synthSession(0.0, "com.suppleaudio.test.gain");
+        Id effect;
+        {
+            model::EditTxn t(s, 2);
+            for (const auto& e : s.fx)
+                if (e.value->plugin.id == "com.suppleaudio.test.gain") {
+                    effect = e.id;
+                    t.modify<model::FxInstance>(e.id, [](model::FxInstance& f) {
+                        f.patch =
+                            json::parse(
+                                R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":-12,"latency":"short"}})")
+                                .value();
+                    });
+                }
+            s = t.commit().value();
+        }
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
+        Engine engine(pool, media, kInCallback);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        backend.run(10);
+        auto edit = [&](bool turnOff, std::uint64_t version) {
+            model::EditTxn t(s, version);
+            t.modify<model::FxInstance>(effect, [&](model::FxInstance& f) {
+                if (bypass)
+                    f.bypass = turnOff;
+                else
+                    f.wet = turnOff ? 0.0 : 100.0;
+            });
+            s = t.commit().value();
+            REQUIRE(engine.load(s).ok());
+        };
+        edit(true, 3);
+        backend.run(1);  // 256 samples into the 480-sample ramp
+        edit(false, 4);
+        backend.run(12);
+        engine.stop();
+        const auto& audio = backend.capture().channels[0];
+        double step = 0, baselineStep = 0;
+        for (std::size_t i = 2000; i < 2500; ++i)
+            baselineStep =
+                std::max(baselineStep, std::fabs(double(audio[i]) - double(audio[i - 1])));
+        for (std::size_t i = 2700; i < 2900; ++i)
+            step = std::max(step, std::fabs(double(audio[i]) - double(audio[i - 1])));
+        CHECK(step < baselineStep + 0.005);
+        double early = 0, final = 0;
+        for (std::size_t i = 2000; i < 2500; ++i)
+            early = std::max(early, std::fabs(double(audio[i])));
+        for (std::size_t i = 3800; i < 4300; ++i)
+            final = std::max(final, std::fabs(double(audio[i])));
+        CHECK(final == doctest::Approx(early).epsilon(0.02));
+    }
 }
 
 TEST_CASE("a long, dense MIDI performance records without overflow (the writer drains)" *
