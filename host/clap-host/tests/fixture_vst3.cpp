@@ -1,5 +1,8 @@
-// Original MIT test module for the VST3 host. Three classes exercise the
-// effect, note and latency paths without any external installed plug-in.
+// Original MIT test module for the VST3 host. Four classes exercise the
+// effect, note, latency and sidechain paths without any external installed
+// plug-in. The sidechain gain behaves like strict real plug-ins: it refuses
+// a bus layout that leaves out its sidechain, outputs silence unless given
+// every bus, and answers setProcessing with kNotImplemented.
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -19,25 +22,35 @@ namespace {
 const FUID kGainId(0x11000101, 0x22000202, 0x33000303, 0x44000404);
 const FUID kSineId(0x11000102, 0x22000202, 0x33000303, 0x44000404);
 const FUID kDelayId(0x11000103, 0x22000202, 0x33000303, 0x44000404);
+const FUID kSidechainId(0x11000104, 0x22000202, 0x33000303, 0x44000404);
 constexpr double kTau = 6.28318530717958647692;
 
 class Fixture final : public SingleComponentEffect {
   public:
-    enum Kind { Gain, Sine, Delay };
+    enum Kind { Gain, Sine, Delay, Sidechain };
     explicit Fixture(Kind kind) : kind_(kind), value_(kind == Delay ? 0.0 : 0.5) {}
     tresult PLUGIN_API initialize(FUnknown* context) override {
         if (SingleComponentEffect::initialize(context) != kResultOk) return kResultFalse;
         if (kind_ != Sine) addAudioInput(STR16("Input"), SpeakerArr::kStereo);
+        if (kind_ == Sidechain)
+            addAudioInput(STR16("Sidechain"), SpeakerArr::kStereo, BusTypes::kAux, 0);
         addAudioOutput(STR16("Output"), SpeakerArr::kStereo);
         if (kind_ == Sine) addEventInput(STR16("Notes"));
-        parameters.addParameter(kind_ == Gain    ? STR16("Gain")
-                                : kind_ == Delay ? STR16("Latency")
-                                                 : STR16("Level"),
+        parameters.addParameter(kind_ == Gain || kind_ == Sidechain ? STR16("Gain")
+                                : kind_ == Delay                    ? STR16("Latency")
+                                                                    : STR16("Level"),
                                 nullptr, kind_ == Delay ? 1 : 0, kind_ == Delay ? 0 : 0.5,
                                 ParameterInfo::kCanAutomate, 1);
         return kResultOk;
     }
-    tresult PLUGIN_API setProcessing(TBool) override { return kResultOk; }
+    tresult PLUGIN_API setProcessing(TBool) override {
+        return kind_ == Sidechain ? kNotImplemented : kResultOk;
+    }
+    tresult PLUGIN_API setBusArrangements(SpeakerArrangement* inputs, int32 numIns,
+                                          SpeakerArrangement* outputs, int32 numOuts) override {
+        if (kind_ == Sidechain && (numIns != 2 || numOuts != 1)) return kResultFalse;
+        return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
+    }
     tresult PLUGIN_API setState(IBStream* stream) override {
         int32 n = 0;
         double value = 0;
@@ -65,6 +78,11 @@ class Fixture final : public SingleComponentEffect {
         return kind_ == Delay && value_ >= 0.5 ? 64 : 0;
     }
     tresult PLUGIN_API process(ProcessData& data) override {
+        if (kind_ == Sidechain && data.numInputs != 2) {
+            for (int32 c = 0; c < data.outputs[0].numChannels; ++c)
+                std::fill_n(data.outputs[0].channelBuffers32[c], data.numSamples, 0.0f);
+            return kResultOk;
+        }
         auto* queue = data.inputParameterChanges && data.inputParameterChanges->getParameterCount()
                           ? data.inputParameterChanges->getParameterData(0)
                           : nullptr;
@@ -108,7 +126,7 @@ class Fixture final : public SingleComponentEffect {
                 output[i] =
                     kind_ == Sine
                         ? static_cast<float>(sample)
-                        : input[i] * static_cast<float>(kind_ == Gain ? value_.load() : 1.0);
+                        : input[i] * static_cast<float>(kind_ == Delay ? 1.0 : value_.load());
             }
         }
         return kResultOk;
@@ -129,19 +147,21 @@ class Factory final
         *info = PFactoryInfo("Supple Audio", "https://supple.audio", "dev@supple.audio", 0);
         return kResultOk;
     }
-    int32 PLUGIN_API countClasses() override { return 3; }
+    int32 PLUGIN_API countClasses() override { return 4; }
     tresult PLUGIN_API getClassInfo(int32 index, PClassInfo* info) override {
-        if (!info || index < 0 || index >= 3) return kInvalidArgument;
-        const FUID ids[] = {kGainId, kSineId, kDelayId};
-        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency"};
+        if (!info || index < 0 || index >= 4) return kInvalidArgument;
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
+        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency",
+                               "Test VST3 Sidechain Gain"};
         *info =
             PClassInfo(ids[index], PClassInfo::kManyInstances, kVstAudioEffectClass, names[index]);
         return kResultOk;
     }
     tresult PLUGIN_API getClassInfo2(int32 index, PClassInfo2* info) override {
-        if (!info || index < 0 || index >= 3) return kInvalidArgument;
-        const FUID ids[] = {kGainId, kSineId, kDelayId};
-        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency"};
+        if (!info || index < 0 || index >= 4) return kInvalidArgument;
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
+        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency",
+                               "Test VST3 Sidechain Gain"};
         *info = PClassInfo2(ids[index], PClassInfo::kManyInstances, kVstAudioEffectClass,
                             names[index], 0, index == 1 ? "Instrument" : "Fx", "Supple Audio",
                             "1.0", kVstVersionString);
@@ -150,8 +170,8 @@ class Factory final
     tresult PLUGIN_API createInstance(FIDString cid, FIDString iid, void** obj) override {
         if (!obj) return kInvalidArgument;
         *obj = nullptr;
-        const FUID ids[] = {kGainId, kSineId, kDelayId};
-        for (int i = 0; i < 3; ++i) {
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
+        for (int i = 0; i < 4; ++i) {
             if (std::memcmp(cid, ids[i], 16) != 0) continue;
             auto* plugin = new Fixture(static_cast<Fixture::Kind>(i));
             const auto result = plugin->queryInterface(iid, obj);

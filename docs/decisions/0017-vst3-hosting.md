@@ -92,3 +92,32 @@ exists for hosting direction); a separate `Instance` subclass hierarchy
 (every call site would have to know the format; the forwarding backing is
 already the pattern); vendoring the whole SDK (tens of MB of samples and
 VSTGUI we do not need).
+
+## Implementation notes (2026-09-28)
+
+- The SDK subset is `third_party/vst3sdk-v3.8.0_build_66` (`9fad977`, MIT,
+  every file checked); `tp-vst3-host` builds the module loader, event list,
+  host classes and string helpers. `host/clap-host/VST3.md` has details.
+- Parameter changes use preallocated bounded queues (`FixedChanges`), not the
+  SDK's `ParameterChanges` (its point vectors grow on the audio thread).
+  rtsan is clean for the in-tree module; a plug-in's own `process` and value
+  conversions are its responsibility.
+- Modules are never unloaded (a strong, deliberately leaked cache): two
+  locally built plug-ins exported the same GNU-unique `fmt` symbols, and
+  unloading one after the scan crashed the process at exit.
+- Host sequence as the SDK's: a host context (`IHostApplication` with our
+  name and `IMessage` creation) for `initialize`; a separate controller is
+  connected to its component (`IConnectionPoint`) and gets the component
+  state; every audio bus gets an arrangement and buffers (main buses carry
+  the track, auxiliary ones silence or scratch), since strict plug-ins
+  refuse a partial layout and output silence; `setProcessing` answering
+  `kNotImplemented` counts as started.
+- Non-semantic plug-ins (VST3 and plain CLAP): `fx.describe {full}` lists
+  their plain parameters (id, name, range, default, saved value; `filter`,
+  at most 512 with `params_total`); `plugin.list` reports the format.
+- Checked against the locally installed VST3s (thirteen classes including
+  sfizz and plug-ins with sidechain buses and eight outputs): all scan,
+  instantiate, list parameters and render audio through the engine.
+- Not yet: a persisted scan cache (each start loads every bundle without a
+  `moduleinfo.json`), out-of-process scanning, editors (Phase 5), a
+  VST3-specific crashing fixture (isolation is shared with CLAP).

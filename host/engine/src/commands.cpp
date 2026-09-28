@@ -3,6 +3,7 @@
 // edit through the open EditTxn (edits) or read the view (queries), return
 // IDs and the few fields an agent needs next.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 
@@ -495,11 +496,14 @@ struct MergeResult {
 struct FxDescribeArgs {
     std::string fx;
     bool full = false;
+    std::optional<std::string> filter;
 };
 struct FxDescription {
     std::string plugin, name, description;
     std::optional<json::Value> params, patch;
+    std::optional<std::int64_t> paramsTotal;
 };
+constexpr std::size_t kMaxListedParams = 512;
 
 // --- render / history ------------------------------------------------------------------------
 
@@ -1644,14 +1648,22 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("fx", &FxDescribeArgs::fx, idArg("fx", "Plugin instance"))
                      .field("full", &FxDescribeArgs::full, schema::boolean())
                      .defaultValue(false)
+                     .field("filter", &FxDescribeArgs::filter,
+                            schema::string().doc(
+                                "Plain parameters only: list those whose name contains this "
+                                "text (case-insensitive)."))
                      .build();
-        c.result = schema::object<FxDescription>("fx_description")
-                       .field("plugin", &FxDescription::plugin, schema::string())
-                       .field("name", &FxDescription::name, schema::string())
-                       .field("description", &FxDescription::description, schema::string())
-                       .field("params", &FxDescription::params, schema::any())
-                       .field("patch", &FxDescription::patch, schema::any())
-                       .build();
+        c.result =
+            schema::object<FxDescription>("fx_description")
+                .field("plugin", &FxDescription::plugin, schema::string())
+                .field("name", &FxDescription::name, schema::string())
+                .field("description", &FxDescription::description, schema::string())
+                .field("params", &FxDescription::params, schema::any())
+                .field("patch", &FxDescription::patch, schema::any())
+                .field("params_total", &FxDescription::paramsTotal,
+                       schema::integer().doc("Plain parameters matching; at most " +
+                                             std::to_string(kMaxListedParams) + " are listed."))
+                .build();
         c.examples = {
             {"Describe", obj(R"({"fx": "fx_2"})"),
              obj(R"({"plugin": "com.suppleaudio.test.gain", "name": "<any>", "description": "<any>"})"),
@@ -1672,6 +1684,38 @@ void registerEngineCommands(cmd::Registry& registry) {
                 auto schema = app.fxSchema(fx);
                 if (schema && schema->isObject() && schema->find("params"))
                     r.params = *schema->find("params");
+                else if (auto list = app.fxParams(fx)) {
+                    // Not semantic (a plain CLAP or a VST3): its parameters as the
+                    // plugin declares them, for fx.param.set by id or name.
+                    auto lower = [](std::string t) {
+                        for (char& ch : t)
+                            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                        return t;
+                    };
+                    const std::string filter = lower(a.filter.value_or(""));
+                    json::Value ps = json::Value::array();
+                    std::int64_t total = 0;
+                    for (const host::ParamInfo& p : *list) {
+                        if (p.flags & CLAP_PARAM_IS_HIDDEN) continue;
+                        if (!filter.empty() && lower(p.name).find(filter) == std::string::npos)
+                            continue;
+                        if (static_cast<std::size_t>(total++) >= kMaxListedParams) continue;
+                        json::Value e = json::Value::object();
+                        e["id"] = static_cast<double>(p.id);
+                        e["name"] = p.name;
+                        e["min"] = p.min;
+                        e["max"] = p.max;
+                        e["default"] = p.def;
+                        if (auto saved = fx.params.find(p.id); saved != fx.params.end())
+                            e["value"] = saved->second;
+                        if (p.flags & (CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_ENUM))
+                            e["stepped"] = true;
+                        if (p.flags & CLAP_PARAM_IS_READONLY) e["read_only"] = true;
+                        ps.push_back(std::move(e));
+                    }
+                    r.params = std::move(ps);
+                    r.paramsTotal = total;
+                }
                 if (fx.patch) r.patch = *fx.patch;
             }
             return r;

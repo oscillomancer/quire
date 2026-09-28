@@ -197,3 +197,33 @@ TEST_CASE("MIDI split keeps held notes audible on both sides") {
     CHECK(run(bus, "midi.get", R"({"item":"it_1"})")["text"].asString() == leftNotation);
     CHECK(app->head().takes.find(*model::Id::parse("tk_2"))->startOffset == 0);
 }
+
+TEST_CASE("a VST3 is listed with its format and describes its plain parameters") {
+    Workdir dir;
+    AppOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {FIXTURE_VST3_PATH};
+    auto created = EngineApp::create(options);
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    json::Value listed = run(bus, "plugin.list", R"({"filter":"Sidechain"})");
+    REQUIRE(listed["plugins"].asArray().size() == 1);
+    json::Value plugin = listed["plugins"].asArray()[0];
+    CHECK(plugin["format"].asString() == "vst3");
+    run(bus, "track.add", R"({"name":"Fx"})");
+    const std::string args = R"({"track":"tr_1","plugin":")" + plugin["id"].asString() + R"("})";
+    json::Value added = run(bus, "fx.add", args);
+    const std::string fx = added["fx"].asString();
+    json::Value full = run(bus, "fx.describe", R"({"fx":")" + fx + R"(","full":true})");
+    REQUIRE(full["params"].isArray());
+    REQUIRE(full["params"].asArray().size() == 1);
+    CHECK(full["params"].asArray()[0]["name"].asString() == "Gain");
+    CHECK(full["params_total"].asDouble() == 1);
+    json::Value none =
+        run(bus, "fx.describe", R"({"fx":")" + fx + R"(","full":true,"filter":"cutoff"})");
+    CHECK(none["params"].asArray().empty());
+    CHECK(none["params_total"].asDouble() == 0);
+}

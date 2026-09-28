@@ -1300,6 +1300,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `fx` | string |  |  |  | Plugin instance id, e.g. "fx_1". |
 | `full` | boolean |  |  | false |  |
+| `filter` | string |  |  |  | Plain parameters only: list those whose name contains this text (case-insensitive). |
 
 ### Result
 
@@ -1318,7 +1319,11 @@ Kind: `query`. Exposure: `mcp-tool`.
       "type": "string"
     },
     "params": {},
-    "patch": {}
+    "patch": {},
+    "params_total": {
+      "type": "integer",
+      "description": "Plain parameters matching; at most 512 are listed."
+    }
   },
   "required": ["plugin", "name", "description"],
   "additionalProperties": false

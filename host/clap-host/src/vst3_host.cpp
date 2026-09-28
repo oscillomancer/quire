@@ -285,7 +285,14 @@ struct Vst3Instance::State {
     IPtr<Handler> handler = Steinberg::owned(new Handler);
     FUnknownPtr<vst::IConnectionPoint> componentPoint, controllerPoint;  // when connected
     std::vector<ParamInfo> parameters;
-    std::uint32_t inputs = 0, outputs = 0;
+    std::uint32_t inputs = 0, outputs = 0;  // channels of the main buses
+    // Every audio bus gets buffers (the VST3 contract): the main buses carry
+    // the track's audio, auxiliary ones (sidechains, extra outputs) silence
+    // and scratch space, preallocated in activate().
+    std::vector<std::uint32_t> inBusChannels, outBusChannels;
+    std::vector<vst::AudioBusBuffers> inBuses, outBuses;
+    std::vector<std::vector<float>> auxStorage;
+    std::vector<float*> auxPointers;
     bool notes = false, active = false;
     bool separateController = false;
     std::array<std::array<vst::ParamID, 130>, 16> midiParams{};
@@ -370,16 +377,17 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
                 }
         }
     }
-    if (s.component->getBusCount(vst::kAudio, vst::kInput) > 0) {
-        vst::BusInfo bus{};
-        if (s.component->getBusInfo(vst::kAudio, vst::kInput, 0, bus) == kResultOk)
-            s.inputs = static_cast<std::uint32_t>(bus.channelCount);
+    for (auto [dir, channels] :
+         {std::pair{vst::kInput, &s.inBusChannels}, std::pair{vst::kOutput, &s.outBusChannels}}) {
+        const auto count = s.component->getBusCount(vst::kAudio, dir);
+        for (Steinberg::int32 b = 0; b < count; ++b) {
+            vst::BusInfo bus{};
+            const bool ok = s.component->getBusInfo(vst::kAudio, dir, b, bus) == kResultOk;
+            channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
+        }
     }
-    if (s.component->getBusCount(vst::kAudio, vst::kOutput) > 0) {
-        vst::BusInfo bus{};
-        if (s.component->getBusInfo(vst::kAudio, vst::kOutput, 0, bus) == kResultOk)
-            s.outputs = static_cast<std::uint32_t>(bus.channelCount);
-    }
+    s.inputs = s.inBusChannels.empty() ? 0 : std::min<std::uint32_t>(s.inBusChannels[0], 2);
+    s.outputs = s.outBusChannels.empty() ? 0 : std::min<std::uint32_t>(s.outBusChannels[0], 2);
     s.notes = s.component->getBusCount(vst::kEvent, vst::kInput) > 0;
     if (s.controller) {
         const auto count = s.controller->getParameterCount();
@@ -411,14 +419,56 @@ bool Vst3Instance::acceptsNotes() const { return state_->notes; }
 Status Vst3Instance::activate(double rate, std::uint32_t maxFrames) {
     auto& s = *state_;
     if (s.active) return okStatus();
-    vst::SpeakerArrangement input =
-        s.inputs == 2 ? vst::SpeakerArr::kStereo : vst::SpeakerArr::kMono;
-    vst::SpeakerArrangement output =
-        s.outputs == 2 ? vst::SpeakerArr::kStereo : vst::SpeakerArr::kMono;
-    s.processor->setBusArrangements(s.inputs ? &input : nullptr, s.inputs ? 1 : 0,
-                                    s.outputs ? &output : nullptr, s.outputs ? 1 : 0);
+    // One arrangement per bus: the main buses stereo or mono, auxiliary buses
+    // as the plugin has them (a partial list is refused, and the plugin then
+    // outputs silence). Only the main buses are activated.
+    auto arrangements = [&](vst::BusDirection dir, const std::vector<std::uint32_t>& channels,
+                            std::uint32_t main) {
+        std::vector<vst::SpeakerArrangement> out;
+        for (std::size_t b = 0; b < channels.size(); ++b) {
+            vst::SpeakerArrangement a =
+                channels[b] >= 2 ? vst::SpeakerArr::kStereo : vst::SpeakerArr::kMono;
+            if (b == 0)
+                a = main == 2 ? vst::SpeakerArr::kStereo : vst::SpeakerArr::kMono;
+            else
+                s.processor->getBusArrangement(dir, static_cast<Steinberg::int32>(b), a);
+            out.push_back(a);
+        }
+        return out;
+    };
+    auto ins = arrangements(vst::kInput, s.inBusChannels, s.inputs);
+    auto outs = arrangements(vst::kOutput, s.outBusChannels, s.outputs);
+    s.processor->setBusArrangements(ins.data(), static_cast<Steinberg::int32>(ins.size()),
+                                    outs.data(), static_cast<Steinberg::int32>(outs.size()));
+    // What the plugin settled on (it may adapt a refused layout).
+    for (auto [dir, channels] :
+         {std::pair{vst::kInput, &s.inBusChannels}, std::pair{vst::kOutput, &s.outBusChannels}})
+        for (std::size_t b = 0; b < channels->size(); ++b) {
+            vst::SpeakerArrangement a = 0;
+            if (s.processor->getBusArrangement(dir, static_cast<Steinberg::int32>(b), a) ==
+                kResultOk)
+                (*channels)[b] = static_cast<std::uint32_t>(vst::SpeakerArr::getChannelCount(a));
+        }
     if (s.inputs) s.component->activateBus(vst::kAudio, vst::kInput, 0, true);
     if (s.outputs) s.component->activateBus(vst::kAudio, vst::kOutput, 0, true);
+    s.inBuses.assign(s.inBusChannels.size(), {});
+    s.outBuses.assign(s.outBusChannels.size(), {});
+    s.auxStorage.clear();
+    s.auxPointers.clear();
+    std::size_t auxChannels = 0;
+    for (auto* channels : {&s.inBusChannels, &s.outBusChannels})
+        for (std::size_t b = 1; b < channels->size(); ++b) auxChannels += (*channels)[b];
+    s.auxPointers.reserve(auxChannels);
+    for (auto [channels, buses] :
+         {std::pair{&s.inBusChannels, &s.inBuses}, std::pair{&s.outBusChannels, &s.outBuses}})
+        for (std::size_t b = 1; b < channels->size(); ++b) {
+            (*buses)[b].numChannels = static_cast<Steinberg::int32>((*channels)[b]);
+            (*buses)[b].channelBuffers32 = s.auxPointers.data() + s.auxPointers.size();
+            for (std::uint32_t c = 0; c < (*channels)[b]; ++c) {
+                s.auxStorage.emplace_back(maxFrames, 0.0f);
+                s.auxPointers.push_back(s.auxStorage.back().data());
+            }
+        }
     if (s.notes) s.component->activateBus(vst::kEvent, vst::kInput, 0, true);
     vst::ProcessSetup setup{vst::kRealtime, vst::kSample32,
                             static_cast<Steinberg::int32>(maxFrames), rate};
@@ -525,7 +575,9 @@ Status Vst3Instance::loadState(std::span<const std::uint8_t> bytes) {
 }
 
 bool Vst3Instance::startProcessing() SUPPLE_RT {
-    return state_->processor->setProcessing(true) == kResultOk;
+    // kNotImplemented means "nothing to do" (the SDK documents it as OK; sfizz returns it).
+    const auto result = state_->processor->setProcessing(true);
+    return result == kResultOk || result == Steinberg::kNotImplemented;
 }
 void Vst3Instance::stopProcessing() SUPPLE_RT { state_->processor->setProcessing(false); }
 void Vst3Instance::reset() SUPPLE_RT {}
@@ -593,11 +645,17 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
                          0};
         if (s.inputEvents.addEvent(e) != kResultOk) s.dropped.fetch_add(1);
     }
-    vst::AudioBusBuffers input{}, output{};
-    input.numChannels = static_cast<Steinberg::int32>(block.inputChannels);
-    input.channelBuffers32 = const_cast<float**>(block.inputs);
-    output.numChannels = static_cast<Steinberg::int32>(block.outputChannels);
-    output.channelBuffers32 = const_cast<float**>(block.outputs);
+    if (!s.inBuses.empty()) {
+        s.inBuses[0].numChannels = static_cast<Steinberg::int32>(block.inputChannels);
+        s.inBuses[0].channelBuffers32 = const_cast<float**>(block.inputs);
+        s.inBuses[0].silenceFlags = 0;
+    }
+    if (!s.outBuses.empty()) {
+        s.outBuses[0].numChannels = static_cast<Steinberg::int32>(block.outputChannels);
+        s.outBuses[0].channelBuffers32 = const_cast<float**>(block.outputs);
+    }
+    for (std::size_t b = 1; b < s.inBuses.size(); ++b)  // silent sidechains
+        s.inBuses[b].silenceFlags = ~0ull;
     vst::ProcessContext context{};
     context.sampleRate = s.rate;
     if (block.transport) {
@@ -621,10 +679,10 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
     vst::ProcessData data;
     data.processMode = vst::kRealtime;
     data.numSamples = static_cast<Steinberg::int32>(block.frames);
-    data.numInputs = s.inputs ? 1 : 0;
-    data.numOutputs = s.outputs ? 1 : 0;
-    data.inputs = s.inputs ? &input : nullptr;
-    data.outputs = s.outputs ? &output : nullptr;
+    data.numInputs = static_cast<Steinberg::int32>(s.inBuses.size());
+    data.numOutputs = static_cast<Steinberg::int32>(s.outBuses.size());
+    data.inputs = s.inBuses.empty() ? nullptr : s.inBuses.data();
+    data.outputs = s.outBuses.empty() ? nullptr : s.outBuses.data();
     data.inputParameterChanges = &s.inputChanges;
     data.outputParameterChanges = &s.outputChanges;
     data.inputEvents = &s.inputEvents;

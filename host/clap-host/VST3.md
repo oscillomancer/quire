@@ -24,7 +24,15 @@ audio thread; these plugin supplied methods need a threading audit for each
 third-party module. A plugin that allocates or locks inside its own `process`
 or conversion methods cannot be made RT safe by the host.
 
-The test module exposes gain, a per-note sine instrument and latency change.
+Modules are opened once and never unloaded (see ADR-0017's notes). Plug-ins
+get a host context for `initialize`; separate controllers are connected to
+their components and given the component state; every audio bus is declared
+and gets buffers (auxiliary buses silence or scratch space, allocated in
+`activate`).
+
+The test module exposes gain, a per-note sine instrument, latency change and
+a strict sidechain gain (refuses a partial bus layout, answers setProcessing
+with kNotImplemented).
 Host tests cover metadata, parameter text, state, sample offset automation,
 notes, latency and isolated processing. The engine test checks a VST3 effect
 in a chain against the offline render. A VST3-specific crashing or hanging

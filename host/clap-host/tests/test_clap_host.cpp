@@ -57,7 +57,7 @@ double gainClap(double db) {
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
-    REQUIRE(found->size() == 3);
+    REQUIRE(found->size() == 4);
     CHECK((*found)[0].format == "vst3");
     CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
     CHECK((*found)[0].version == "2.0");
@@ -91,6 +91,32 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     REQUIRE(instance.process(buffer.block(64, std::span<const Event>(&automation, 1))));
     CHECK(static_cast<double>(buffer.ol[19]) == doctest::Approx(0.25));
     CHECK(static_cast<double>(buffer.ol[20]) == doctest::Approx(0.5));
+    instance.stopProcessing();
+    instance.deactivate();
+}
+
+TEST_CASE("VST3 plug-ins with a sidechain bus get every bus; kNotImplemented starts processing") {
+    // A partial bus layout is refused by strict plug-ins, which then output
+    // silence; setProcessing may answer kNotImplemented (sfizz does).
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto sidechain = std::find_if(found->begin(), found->end(), [](const PluginInfo& p) {
+        return p.name == "Test VST3 Sidechain Gain";
+    });
+    REQUIRE(sidechain != found->end());
+    auto made = Instance::create(*sidechain, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    CHECK(instance.audioInputChannels() == 2);
+    REQUIRE(instance.setParam(1, 0.5).ok());
+    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.startProcessing());
+    Buffers buffer(64);
+    std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
+    std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
+    REQUIRE(instance.process(buffer.block(64)));
+    CHECK(static_cast<double>(buffer.ol[10]) == doctest::Approx(0.5));
+    CHECK(static_cast<double>(buffer.orr[10]) == doctest::Approx(0.5));
     instance.stopProcessing();
     instance.deactivate();
 }
