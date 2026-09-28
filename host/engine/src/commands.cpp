@@ -15,6 +15,8 @@
 
 namespace supple::engine {
 
+void registerExtraCommands(cmd::Registry& registry);
+
 using cmd::Command;
 using cmd::Context;
 using cmd::Kind;
@@ -550,6 +552,7 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 }  // namespace
 
 void registerEngineCommands(cmd::Registry& registry) {
+    registerExtraCommands(registry);
     // ---------------------------------------------------------------- project.get
     {
         Command<NoArgs, ProjectInfo> c;
@@ -1254,7 +1257,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                     for (Id f : take->chain) t.remove<model::FxInstance>(f);
                     if (take->source && take->source->kind == model::Kind::Midi) {
                         const model::MidiSource* m = s.midi.find(*take->source);
-                        if (m && !m->pooled) t.remove<model::MidiSource>(*take->source);
+                        bool shared = false;
+                        for (const auto& other : s.takes)
+                            if (other.id != tk && other.value->source == take->source) {
+                                shared = true;
+                                break;
+                            }
+                        if (m && !m->pooled && !shared) t.remove<model::MidiSource>(*take->source);
                     }
                 }
                 t.remove<model::Take>(tk);
@@ -1335,7 +1344,11 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!compiled) return std::move(compiled).error();
             const model::MidiSource* old = s.midi.find(*take->source);
             compiled->first.pooled = old && old->pooled;
-            app.txn().put<model::MidiSource>(*take->source, std::move(compiled->first));
+            model::EditTxn& txn = app.txn();
+            txn.put<model::MidiSource>(*take->source, std::move(compiled->first));
+            if (!old || !old->pooled)
+                txn.modify<model::Take>(*it.activeTake,
+                                        [](model::Take& tk) { tk.startOffset = 0; });
             return Empty{};
         };
         registry.add(std::move(c));

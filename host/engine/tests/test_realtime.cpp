@@ -522,6 +522,7 @@ TEST_CASE("anticipative: a renderer that falls behind counts misses and plays si
     engine.play();
     runAhead(engine, backend, 4, 256);
     engine.holdRenderer(true);
+    REQUIRE(engine.awaitRendererHeld());
     backend.run(100);  // 25600 frames: more than was rendered ahead
     CHECK(engine.anticipationMisses() > 0);
     double tail = 0;
@@ -782,6 +783,7 @@ TEST_CASE("recording through a playback dropout keeps the take on the timeline" 
     engine.play();
     runAhead(engine, backend, 20, 384);
     engine.holdRenderer(true);
+    REQUIRE(engine.awaitRendererHeld());
     backend.run(80);  // 30720 frames: more than was rendered ahead
     engine.holdRenderer(false);
     runAhead(engine, backend, 20, 384);

@@ -1348,6 +1348,104 @@ Result:
 
 ```
 
+## `fx.move@1`
+
+Move a plugin within a track chain or to another track.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `track` | string |  |  |  |  |
+| `index` | integer |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Move a gain first** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "index": 0
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `fx.param.get@1`
+
+Read one saved plugin parameter by semantic key or numeric CLAP id.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `param` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_param_result",
+  "properties": {
+    "value": {}
+  },
+  "required": ["value"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Read gain** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "param": "gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "value": "<any>"
+}
+
+```
+
 ## `fx.param.set@1`
 
 Set plugin parameters by key in physical units: {"cutoff": "800 Hz"}.
@@ -1401,6 +1499,56 @@ Result:
 {
   "changed": "<any>",
   "description": "<any>"
+}
+
+```
+
+## `fx.patch.get@1`
+
+Read a semantic plugin's saved patch.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `changed_only` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_patch_result",
+  "properties": {
+    "patch": {}
+  },
+  "required": ["patch"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Read gain** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "patch": "<any>"
 }
 
 ```
@@ -1460,6 +1608,62 @@ Result:
 {
   "changed": "<any>",
   "description": "<any>"
+}
+
+```
+
+## `fx.patch.set@1`
+
+Replace a semantic plugin's complete patch.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `patch` | value |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_patch_result",
+  "properties": {
+    "patch": {}
+  },
+  "required": ["patch"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Replace gain** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "patch": {
+    "schema": "supple.test-gain-patch/1.0",
+    "params": {
+      "gain": -6
+    }
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "patch": "<any>"
 }
 
 ```
@@ -1865,6 +2069,58 @@ Result:
 
 ```
 
+## `item.duplicate@1`
+
+Copy an item and its takes to a new beat position (default: immediately after).
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `to` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "created_id",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Repeat** (`song_with_item`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "it_2"
+}
+
+```
+
 ## `item.move@1`
 
 Move an item in time (position in beats or bar) and/or to another track.
@@ -1954,6 +2210,118 @@ Result:
 
 ```json
 {}
+
+```
+
+## `item.set@1`
+
+Set an item's position, length, playback, fades, name, or color.
+
+Positions and lengths are in beats; fades are in seconds. Name is the active take's name.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `position` | number |  | 0.0.. |  |  |
+| `bar` | integer |  | 1.0.. |  |  |
+| `length` | number |  | 0.0.. |  |  |
+| `mute` | boolean |  |  |  |  |
+| `loop` | boolean |  |  |  |  |
+| `gain_db` | value | dB | -150.0..24.0 |  | Quantity strings are range-checked by the server. |
+| `fade_in` | number |  | 0.0.. |  |  |
+| `fade_out` | number |  | 0.0.. |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Lower an item** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "gain_db": "-3 dB"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `item.split@1`
+
+Split an audio or MIDI item at a beat, keeping take source positions aligned.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `at` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "item_split_result",
+  "properties": {
+    "left": {
+      "type": "string"
+    },
+    "right": {
+      "type": "string"
+    }
+  },
+  "required": ["left", "right"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Split halfway** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "at": 2
+}
+
+```
+
+Result:
+
+```json
+{
+  "left": "it_1",
+  "right": "it_2"
+}
 
 ```
 
@@ -2143,6 +2511,226 @@ Result:
 
 ```
 
+## `marker.add@1`
+
+Add a named marker in beats.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `pos` | number |  | 0.0.. |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "created_id",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Add** (`empty`)
+
+```json
+{
+  "pos": 4,
+  "name": "Verse"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "mk_1"
+}
+
+```
+
+## `marker.list@1`
+
+List rulers in this project.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "ruler_list",
+  "properties": {
+    "markers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "ruler_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "pos": {
+            "type": "number"
+          },
+          "start": {
+            "type": "number"
+          },
+          "end": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "name", "color"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["markers"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List empty** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "markers": []
+}
+
+```
+
+## `marker.remove@1`
+
+Remove a ruler.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Remove** (`song_with_marker`)
+
+```json
+{
+  "id": "mk_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `marker.set@1`
+
+Edit a ruler's position, name, or color.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | string |  |  |  |  |
+| `pos` | number |  | 0.0.. |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Rename** (`song_with_marker`)
+
+```json
+{
+  "id": "mk_1",
+  "name": "Bridge"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `midi.get@1`
 
 Read an item's MIDI as notation.
@@ -2237,6 +2825,151 @@ Result:
 
 ```json
 {}
+
+```
+
+## `plugin.list@1`
+
+List scanned plugins; filter matches id, name, or vendor.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `filter` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "plugin_list",
+  "properties": {
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "plugin_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "instrument": {
+            "type": "boolean"
+          },
+          "semantic": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "name", "vendor", "instrument", "semantic"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["plugins"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Find a test synth** (`empty`)
+
+```json
+{
+  "filter": "test.sine"
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugins": "<any>"
+}
+
+```
+
+## `plugin.scan@1`
+
+Rescan configured plugin paths and return the available plugins.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "plugin_list",
+  "properties": {
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "plugin_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "instrument": {
+            "type": "boolean"
+          },
+          "semantic": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "name", "vendor", "instrument", "semantic"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["plugins"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Scan** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "plugins": "<any>"
+}
 
 ```
 
@@ -2693,6 +3426,229 @@ Result:
 
 ```
 
+## `region.add@1`
+
+Add a named region in beats.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `start` | number |  | 0.0.. |  |  |
+| `end` | number |  | 0.0.. |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "created_id",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Add** (`empty`)
+
+```json
+{
+  "start": 0,
+  "end": 4,
+  "name": "Verse"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "rg_1"
+}
+
+```
+
+## `region.list@1`
+
+List rulers in this project.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "ruler_list",
+  "properties": {
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "ruler_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "pos": {
+            "type": "number"
+          },
+          "start": {
+            "type": "number"
+          },
+          "end": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "name", "color"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["regions"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List empty** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "regions": []
+}
+
+```
+
+## `region.remove@1`
+
+Remove a ruler.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Remove** (`song_with_region`)
+
+```json
+{
+  "id": "rg_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `region.set@1`
+
+Edit a ruler's position, name, or color.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | string |  |  |  |  |
+| `start` | number |  | 0.0.. |  |  |
+| `end` | number |  | 0.0.. |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Rename** (`song_with_region`)
+
+```json
+{
+  "id": "rg_1",
+  "name": "Bridge"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `registry.describe@1`
 
 Describe a command.
@@ -2911,6 +3867,240 @@ Result:
 
 ```
 
+## `route.add@1`
+
+Send one track to another track, bus, or the master.
+
+The destination must not feed the source. Master accepts routes. Hardware and plugin sidechain routing are not supported yet.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `from` | string |  |  |  |  |
+| `to` | string |  |  |  |  |
+| `tap` | string |  |  |  |  |
+| `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
+| `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
+| `mute` | boolean |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "created_id",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `route.cycle`: the send would feed back Hint: choose another destination
+
+### Examples
+
+**Send a track to the master** (`song`)
+
+```json
+{
+  "from": "tr_1",
+  "to": "tr_0",
+  "volume_db": "-6 dB"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "sd_1"
+}
+
+```
+
+## `route.list@1`
+
+List sends with endpoints and mixer settings.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "route_list",
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "route_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "tap": {
+            "type": "string"
+          },
+          "volume_db": {
+            "type": "number"
+          },
+          "pan": {
+            "type": "number"
+          },
+          "mute": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "from", "to", "tap", "volume_db", "pan", "mute"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["routes"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**No sends yet** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "routes": []
+}
+
+```
+
+## `route.remove@1`
+
+Remove a send.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `route` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Remove** (`song_with_route`)
+
+```json
+{
+  "route": "sd_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `route.set@1`
+
+Change a route's endpoints, tap, level, pan, or mute.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `route` | string |  |  |  |  |
+| `from` | string |  |  |  |  |
+| `to` | string |  |  |  |  |
+| `tap` | string |  |  |  |  |
+| `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
+| `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
+| `mute` | boolean |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Mute a route** (`song_with_route`)
+
+```json
+{
+  "route": "sd_1",
+  "mute": true
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `session.describe@1`
 
 Describe the whole session in compact text (tracks, items, fx, routes).
@@ -2956,6 +4146,235 @@ Result:
 {
   "text": "<any>"
 }
+
+```
+
+## `take.activate@1`
+
+Choose the take heard from an item.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `take` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Activate** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "take": "tk_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `take.add@1`
+
+Add a take to an item, optionally copied from another take of that item.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `from` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "created_id",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Copy a take** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "from": "tk_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "tk_2"
+}
+
+```
+
+## `take.list@1`
+
+List the takes of an item and identify its active take.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "take_list",
+  "properties": {
+    "takes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "take_entry",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "gain_db": {
+            "type": "number"
+          },
+          "pan": {
+            "type": "number"
+          },
+          "start_offset": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "name", "source", "active", "gain_db", "pan", "start_offset"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["takes"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List** (`song_with_item`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "takes": "<any>"
+}
+
+```
+
+## `take.set@1`
+
+Set take gain, pan, channel mode, name, or source offset.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `gain_db` | value | dB | -150.0..24.0 |  | Quantity strings are range-checked by the server. |
+| `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
+| `channel_mode` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `start_offset` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Lower a take** (`song_with_item`)
+
+```json
+{
+  "take": "tk_1",
+  "gain_db": "-3 dB"
+}
+
+```
+
+Result:
+
+```json
+{}
 
 ```
 
@@ -3016,6 +4435,75 @@ Result:
 ```json
 {
   "count": 2
+}
+
+```
+
+## `time.convert@1`
+
+Convert a seconds, beat, or bar position to all three time domains.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `seconds` | number |  | 0.0.. |  |  |
+| `beat` | number |  | 0.0.. |  |  |
+| `bar` | integer |  | 1.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "time_position",
+  "properties": {
+    "seconds": {
+      "type": "number"
+    },
+    "beat": {
+      "type": "number"
+    },
+    "bar": {
+      "type": "integer"
+    },
+    "beat_in_bar": {
+      "type": "integer"
+    },
+    "fraction": {
+      "type": "number"
+    }
+  },
+  "required": ["seconds", "beat", "bar", "beat_in_bar", "fraction"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Bar two** (`empty`)
+
+```json
+{
+  "bar": 2
+}
+
+```
+
+Result:
+
+```json
+{
+  "seconds": 2,
+  "beat": 4,
+  "bar": 2,
+  "beat_in_bar": 1,
+  "fraction": 0
 }
 
 ```

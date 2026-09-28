@@ -1031,6 +1031,18 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
+    if (fixture == "song_with_route") {
+        run("route.add", R"({"from":"tr_1","to":"tr_0"})");
+        return;
+    }
+    if (fixture == "song_with_marker") {
+        run("marker.add", R"({"pos":4,"name":"Verse"})");
+        return;
+    }
+    if (fixture == "song_with_region") {
+        run("region.add", R"({"start":0,"end":4,"name":"Verse"})");
+        return;
+    }
     if (fixture == "branch_ahead") {  // an agent branch one edit ahead of main, main current
         run("branch.create", R"({"name": "agent/claude/darker"})");
         run("track.set", R"({"track": "tr_1", "volume_db": -3})");

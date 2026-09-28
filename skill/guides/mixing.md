@@ -26,6 +26,12 @@ masking.
 
 Group a change and its render in one `batch`: one undo step, atomic.
 
+## Sends and buses
+
+Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. Hardware endpoints, channel maps, and plugin sidechain inputs are not available through these commands yet.
+
+Use `plugin.list` to find an FX id, `plugin.scan` to refresh the catalogue, `fx.move` to reorder a chain, `fx.patch.get/set` for a semantic patch, and `fx.param.get` for one value. For arrangement edits, `item.set/split/duplicate` and `take.list/add/set/activate` change clips and takes; `marker.*` and `region.*` label the timeline, while `time.convert` maps seconds, beats, and bars.
+
 ## Targets that are safe defaults
 
 | goal | measure | target |
@@ -67,4 +73,3 @@ route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
-
