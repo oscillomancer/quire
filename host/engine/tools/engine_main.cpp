@@ -224,14 +224,20 @@ int main(int argc, char** argv) {
             }
         }
         cmd::Dispatcher dispatcher(registry, **app);
+        // The service tick: engine housekeeping (plans, failures, device
+        // restart, autosave) every 100 ms, also while no command arrives.
+        const auto interval = std::chrono::milliseconds(100);
+        rpc::Server* activeServer = nullptr;
+        auto publishEvents = [&] {
+            for (auto& [topic, payload] : (*app)->takeEvents())
+                activeServer->publish(topic, payload);
+        };
         if (rpcMode) {
             rpc::ModelLoop loop;
-            rpc::Server* activeServer = nullptr;
             rpc::Server server(registry, dispatcher, [&](auto task) {
                 loop.post([&, task = std::move(task)] {
                     task();
-                    for (auto& [topic, payload] : (*app)->takeEvents())
-                        activeServer->publish(topic, payload);
+                    publishEvents();
                 });
             });
             activeServer = &server;
@@ -240,12 +246,24 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "%s\n", started.error().toString().c_str());
                 return 1;
             }
+            auto tick = loop.every(interval, [&] {
+                (*app)->tick();
+                publishEvents();
+            });
             loop.run();
+            tick.cancel();
             server.stop();
             return 0;
         }
         mcp::Server server(registry, dispatcher);
-        auto status = server.serve(std::cin, std::cout);
+        // The tick drains the app's events: MCP has no event channel, so they
+        // would only pile up.
+        auto status = server.serve(::fileno(stdin), std::cout,
+                                   mcp::Tick{[&] {
+                                                 (*app)->tick();
+                                                 (*app)->takeEvents();
+                                             },
+                                             interval});
         if (!status) {
             std::fprintf(stderr, "%s\n", status.error().toString().c_str());
             return 1;

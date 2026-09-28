@@ -178,6 +178,9 @@ class Session {
     // Runs `work` on its own thread; stopJobs() requests stop and joins all.
     void startJob(std::function<void(std::stop_token)> work);
     void stopJobs();
+    // The model thread's periodic service: adopts finished background renders
+    // and drops finished job threads.
+    void tick();
     std::size_t jobThreadCountForTests() const { return jobs_.size(); }
     std::size_t activeJobThreadCountForTests() const {
         std::size_t active = 0;

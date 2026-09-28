@@ -9,6 +9,7 @@
 #include <thread>
 
 #include <supple/audio/audio_file.h>
+#include <supple/base/files.h>
 #include <supple/engine/app.h>
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
@@ -1323,4 +1324,127 @@ TEST_CASE("true peak limiting keeps distant audio at the normalization gain") {
                                      limited.sampleRate, analysis::Layout::Mono});
     REQUIRE(report);
     CHECK(report->loudness->truePeak <= -0.95);
+}
+
+TEST_CASE("the tick autosaves the project, rotates five, and open reports a newer one") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    app->setFixedClock(1'000'000);
+    call("project.set", R"({"name": "Autosaved"})");
+    const fs::path project =
+        call("project.save", R"({"path": "autosave-project.json"})")["path"].asString();
+    REQUIRE(fs::exists(project));
+    // The project file is older than the autosaves written below (mtime
+    // granularity must not decide the report).
+    const auto now = fs::file_time_type::clock::now();
+    fs::last_write_time(project, now - std::chrono::seconds(60));
+
+    // 60 s with no change: nothing is written.
+    app->setFixedClock(1'060'000);
+    app->tick();
+    CHECK_FALSE(fs::exists(app->autosaveDir()));
+
+    // A change plus an interval: one autosave, then six more (rotating to five).
+    for (int i = 0; i < 6; ++i) {
+        call("project.set", std::string(R"({"name": "Take )") + std::to_string(i) + "\"}");
+        app->setFixedClock(1'120'000 + static_cast<std::uint64_t>(i) * 60'000);
+        app->tick();
+    }
+    std::vector<std::string> names;
+    for (const auto& entry : fs::directory_iterator(app->autosaveDir()))
+        names.push_back(entry.path().filename().string());
+    std::sort(names.begin(), names.end());
+    CHECK(names == std::vector<std::string>{"autosave-2.json", "autosave-3.json", "autosave-4.json",
+                                            "autosave-5.json", "autosave-6.json"});
+    // The newest autosave is a valid project file with the last name.
+    auto text = readTextFile(app->autosaveDir() / "autosave-6.json");
+    REQUIRE(text);
+    auto parsed = model::parseProject(*text);
+    REQUIRE_MESSAGE(parsed, (parsed ? std::string() : parsed.error().toString()));
+    CHECK(parsed->project->name == "Take 5");
+
+    // A fresh app opening the file is told a newer autosave exists, and does
+    // not load it: the head is still what was saved.
+    auto other = makeApp(root.path / "fresh");
+    cmd::Dispatcher d2(registry, *other);
+    auto opened =
+        d2.execute({"project.open", j(R"({"path": ")" + project.string() + R"("})"), kTest});
+    REQUIRE_MESSAGE(opened, (opened ? std::string() : opened.error().toString()));
+    CHECK((*opened)["autosave_available"].asBool());
+    CHECK(other->head().project->name == "Autosaved");
+}
+
+TEST_CASE("the tick restarts the engine after a device change, then gives up and reports") {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    AppOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {kFixture};
+    o.jackLibrary = FakeJack::kPath;
+    auto created = EngineApp::create(o);
+    REQUIRE(created);
+    auto app = std::move(*created);
+    app->setFixedClock(1'000'000);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("batch", R"({"steps": [
+        {"command": "track.add", "args": {"name": "Bass"}, "as": "bass"},
+        {"command": "item.add", "args": {"track": "${bass.track}", "bar": 1,
+                                         "notation": "voice bass; 1: A2:w | D3:w"}}]})");
+    app->takeEvents();
+    call("engine.start", R"({"backend": "jack", "block": 256})");
+    call("transport.seek", R"({"seconds": 1.0})");
+
+    // The device changes rate: the tick stops the engine, announces it, and
+    // starts it again at the new rate, stopped, at the same position.
+    fake.setRate(44100);
+    app->tick();
+    bool announced = false;
+    for (auto& [topic, payload] : app->takeEvents())
+        if (topic == "engine.restarting") {
+            announced = true;
+            CHECK(payload.find("reason")->asString().find("rate") != std::string::npos);
+        }
+    CHECK(announced);
+    CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
+    app->tick();  // the retry fires at once (backoff starts at zero)
+    auto status = call("engine.status", "{}");
+    REQUIRE(status["running"].asBool());
+    CHECK(status["sample_rate"].asDouble() == 44100.0);
+    auto t = call("transport.get", "{}");
+    CHECK_FALSE(t["playing"].asBool());
+    CHECK(t["seconds"].asDouble() == doctest::Approx(1.0).epsilon(0.2));
+
+    // The server goes away and no reopen succeeds: after 30 s the tick gives
+    // up and reports engine.error.
+    fake.shutdown();
+    app->tick();
+    fake.failOpen(1);
+    app->setFixedClock(1'031'000);
+    app->tick();
+    bool reported = false;
+    for (auto& [topic, payload] : app->takeEvents())
+        if (topic == "engine.error" && payload.isObject()) reported = true;
+    CHECK(reported);
+    CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
+    app->tick();  // it stays given up, it does not retry forever
+    app->setFixedClock(1'100'000);
+    app->tick();
+    CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
+    fake.reset();
 }

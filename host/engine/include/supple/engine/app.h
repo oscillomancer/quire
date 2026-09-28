@@ -189,6 +189,19 @@ class EngineApp : public cmd::Host {
     const TransportRange& loop() const { return loop_; }
     const TransportRange& punch() const { return punch_; }
 
+    // --- periodic service (the servers' tick, every 100 ms on the model thread) ------
+    // Frees retired plans, emits fx.failed (so subscribers see failures without
+    // asking), restarts the engine after a device change, and autosaves the
+    // project when its head changed and an autosave interval has passed.
+    void tick();
+
+    // Where autosaves go, next to the project file (<file>-data); empty when
+    // the project has no file yet.
+    std::filesystem::path autosaveDir() const;
+    // The newest autosave of the project file `project` that is newer than the
+    // file itself, or empty. project.open reports it instead of loading it.
+    std::filesystem::path newerAutosave(const std::filesystem::path& project) const;
+
     // --- cmd::Host ------------------------------------------------------------------
     cmd::Context makeContext(const cmd::Origin& origin) override;
     Result<std::uint64_t> beginTransaction(const cmd::Origin& origin,
@@ -221,6 +234,15 @@ class EngineApp : public cmd::Host {
     Result<host::Instance*> scratch(const model::FxInstance& fx);
     bool inRecordDir(const std::filesystem::path& file) const;
     void headChanged();  // reload the real-time engine
+    void haltEngine();   // tears the engine down (stopEngine also cancels a restart)
+    // The device changed under the running engine: stop it and remember to
+    // start it again (same backend kind, block and options).
+    void beginRestart(std::string reason, double seconds);
+    // Tries a pending restart now (with backoff until 30 s have passed).
+    void retryRestart();
+    // Writes one autosave (rotating: the newest 5 stay) and marks the head
+    // saved. Errors are emitted as engine.error.
+    void autosave();
 
     AppOptions options_;
     std::unique_ptr<model::VersionStore> versions_;
@@ -250,6 +272,25 @@ class EngineApp : public cmd::Host {
     std::vector<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
     std::uint64_t fixedClock_ = 0;
+
+    // The engine's start recipe, kept to restart it after a device change.
+    std::string engineKind_;  // "jack"/"dummy" when the app owns the backend
+    std::uint32_t engineBlock_ = 0;
+    bool engineAnticipative_ = true;
+    Backend* restartBackend_ = nullptr;  // a caller-supplied backend (not owned)
+    BackendConfig restartConfig_{};
+    EngineOptions restartOptions_{};
+    bool restarting_ = false;
+    std::string restartReason_;
+    double restartSeconds_ = 0.0;       // the transport position to restore
+    std::uint64_t restartUntil_ = 0;    // give up (engine.error) at this clock
+    std::uint64_t restartRetryAt_ = 0;  // the next attempt
+    std::uint64_t restartBackoff_ = 0;  // ms, doubling to 4 s
+
+    // Autosave: the head version last written and when.
+    bool autosaveMarked_ = false;
+    std::uint64_t autosaveMs_ = 0;
+    std::uint64_t autosaveVersion_ = 0;
 };
 
 // Registers the engine's command catalogue (session-model §7): project.*,

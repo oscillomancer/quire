@@ -71,7 +71,8 @@ struct ProjectInfo {
     double sampleRate = 0, tempo = 0;
     std::string meter;
     std::int64_t version = 0;
-    std::int64_t recoverable = 0;  // recordings project.recover can bring back
+    std::int64_t recoverable = 0;    // recordings project.recover can bring back
+    bool autosaveAvailable = false;  // a newer autosave exists (not loaded)
 };
 
 schema::Schema<ProjectInfo> projectInfoSchema() {
@@ -84,19 +85,22 @@ schema::Schema<ProjectInfo> projectInfoSchema() {
         .field("meter", &ProjectInfo::meter, schema::string())
         .field("version", &ProjectInfo::version, schema::integer())
         .field("recoverable", &ProjectInfo::recoverable, schema::integer())
+        .field("autosave_available", &ProjectInfo::autosaveAvailable, schema::boolean())
         .build();
 }
 
 ProjectInfo projectInfo(EngineApp& app, const model::Session& s) {
     const auto m = s.timeMap->meterAt(1);
+    const fs::path project = app.projectPath();
     return ProjectInfo{s.project->name,
-                       app.projectPath().string(),
+                       project.string(),
                        app.versions().branch(),
                        s.project->sampleRate,
                        s.timeMap->bpmAt(0),
                        std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
                        static_cast<std::int64_t>(s.version),
-                       static_cast<std::int64_t>(app.recoverable().size())};
+                       static_cast<std::int64_t>(app.recoverable().size()),
+                       !app.newerAutosave(project).empty()};
 }
 
 struct RecoverableList {
@@ -625,11 +629,13 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.tags = {"project"};
         c.args = schema::object<NoArgs>("no_args").build();
         c.description =
-            "recoverable: recordings a crash left out of the project (project.recoverable).";
+            "recoverable: recordings a crash left out of the project (project.recoverable). "
+            "autosave_available: a newer autosave exists next to the file; open it as a project "
+            "if you want it (nothing is loaded silently).";
         c.result = projectInfoSchema();
         c.examples = {
             {"A new project", obj("{}"),
-             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0, "recoverable": 0})"),
+             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0, "recoverable": 0, "autosave_available": false})"),
              "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
@@ -743,13 +749,14 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .build();
         c.description =
             "recoverable > 0: recordings a crash left out of the project; project.recoverable "
-            "lists them and project.recover puts them back.";
+            "lists them and project.recover puts them back. autosave_available: a newer autosave "
+            "exists next to the file (it is not loaded silently).";
         c.result = projectInfoSchema();
         c.errors = {{"file.open", "the file cannot be read", "check the path"},
                     {"schema.invalid", "the file has problems", "details list each with its path"}};
         c.examples = {
             {"Open", obj(R"({"path": "example-project.json"})"),
-             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>", "recoverable": 0})"),
+             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>", "recoverable": 0, "autosave_available": false})"),
              "saved"}};
         c.run = [](const PathArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);

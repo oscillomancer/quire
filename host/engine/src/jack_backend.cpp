@@ -402,7 +402,11 @@ BackendStatus JackBackend::status() const {
         impl_->api->portGetLatencyRange(impl_->inPorts[0], 0 /* capture */, &range);
         inputLatency = range.max;
     }
-    return {s.period, s.xruns, s.outputLatency, inputLatency, s.rateChanged || s.serverGone};
+    const std::string_view reason = s.serverGone    ? "the audio server went away"
+                                    : s.rateChanged ? "the device's rate changed"
+                                                    : std::string_view{};
+    return {s.period, s.xruns, s.outputLatency, inputLatency, s.rateChanged || s.serverGone,
+            reason};
 }
 
 std::span<const MidiInputEvent> JackBackend::midiInput() const {

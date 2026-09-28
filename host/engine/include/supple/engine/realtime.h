@@ -130,6 +130,7 @@ struct BackendStatus {
     std::uint32_t outputLatency = 0;  // frames from the backend's outputs to the device
     std::uint32_t inputLatency = 0;   // frames from the device to the backend's inputs
     bool restartNeeded = false;       // the device's rate changed or it went away
+    std::string_view restartReason;   // why, for engine.restarting (may be empty)
 };
 
 // An audio device driver. The callback runs on the backend's audio thread.
@@ -149,7 +150,7 @@ class Backend {
     // True when callbacks run on a thread of the backend's own (a device);
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
-    virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false}; }
+    virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false, {}}; }
     // MIDI (ADR-0016). Inside the callback only: this cycle's device events,
     // sorted by frame (at most kMaxMidiInputEvents; more are dropped).
     virtual std::span<const MidiInputEvent> midiInput() const { return {}; }
