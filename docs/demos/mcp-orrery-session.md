@@ -1143,7 +1143,7 @@ that exactly duplicates structuredContent is shown once.
       "progress": {
         "best_loss": 0.2505,
         "evaluations": 17,
-        "fraction": 0.85,
+        "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {
@@ -2633,7 +2633,7 @@ that exactly duplicates structuredContent is shown once.
       "progress": {
         "best_loss": 0.2505,
         "evaluations": 17,
-        "fraction": 0.85,
+        "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {

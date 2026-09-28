@@ -13,10 +13,10 @@
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
 
+#include <supple/analysis/analysis.h>
+#include <atomic>
 #include "fake_jack.h"
 #include "history_sequence.h"
-#include <atomic>
-#include <supple/analysis/analysis.h>
 #include "render_commands.h"
 
 using namespace supple;
