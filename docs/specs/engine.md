@@ -190,7 +190,8 @@ preset's engine tests (with the dummy backend).
   silence); normalization (loudness via core-analysis, then gain, then
   optional true-peak limiter — deterministic, two-pass); dither (seeded
   TPDF); formats WAV (PCM/float, RF64 beyond 4 GiB) and FLAC (libFLAC,
-  BSD-3, vendored when needed); file naming per session-model §7.3; a job
+  BSD-3, vendored when needed — not yet: `render.*` writes WAV only); file
+  naming per session-model §7.3; a job
   queue; results reported as files + analysis summaries.
 
 ## 4. Media, recording, device handling
