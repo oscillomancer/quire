@@ -106,6 +106,17 @@
       "linkage": "static (macOS plugins only)"
     },
     {
+      "name": "lua",
+      "dir": "lua-5.4.9",
+      "license": "MIT",
+      "license_file": "lua-5.4.9/LICENSE",
+      "version": "5.4.9",
+      "source": "https://www.lua.org/ftp/lua-5.4.9.tar.gz",
+      "sha256": "2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6",
+      "purpose": "Embedded scripting language (ADR-0006): libs/lua-bus runs user scripts on the model thread. Upstream src/ is unmodified; only the core and the sandbox libraries are compiled (io, os, debug and package are never built).",
+      "linkage": "static"
+    },
+    {
       "name": "vst3sdk",
       "dir": "vst3sdk-v3.8.0_build_66",
       "license": "MIT",

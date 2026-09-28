@@ -1,0 +1,911 @@
+---@meta
+-- Quire 0.1.0 scripting reference, generated from the command registry.
+-- Do not edit: `<slug>-engine registry --lua` writes it, tools/gen/update-generated.sh regenerates it.
+-- The `q` table of a script (libs/lua-bus, ADR-0006): every command is a
+-- function, `q.run(name, args)` reaches any of them by name, `q.batch(label, body)`
+-- is one transaction, and `q.on(topic, handler)` subscribes to bus events.
+
+---@type Quire
+q = nil
+
+---@class Quire.analyze_compare_args
+---@field reference string
+---@field test string
+
+---@class Quire.analyze_compare_result
+---@field notable any
+---@field ltas_rms_db number
+---@field summary string
+
+---@class Quire.analyze_masking_args
+---@field masker_track string
+---@field maskee_track string
+---@field start_beat? number
+---@field end_beat? number
+
+---@class Quire.analyze_render_args
+---@field render string
+---@field detail? "summary"|"standard"|"full" summary: key scalars; standard: + percentiles and spectrum; full: + time series. (default: "summary")
+
+---@class Quire.analyze_track_args
+---@field track string
+---@field start_beat? number
+---@field end_beat? number
+---@field tap? "post_fader"|"pre_fader"|"pre_fx" (default: "post_fader")
+---@field detail? "summary"|"standard"|"full" summary: key scalars; standard: + percentiles and spectrum; full: + time series. (default: "summary")
+
+---@class Quire.branch_create_args
+---@field name string
+---@field from? string
+---@field switch? boolean (default: true)
+
+---@class Quire.branch_create_result
+---@field name string
+
+---@class Quire.branch_delete_args
+---@field name string
+
+---@class Quire.branch_diff_args
+---@field a string
+---@field b string
+
+---@class Quire.branch_diff_result
+---@field changes table[]
+
+---@class Quire.branch_list_result
+---@field branches string[]
+---@field current string
+
+---@class Quire.branch_merge_args
+---@field from string
+---@field into? string
+
+---@class Quire.branch_merge_result
+---@field fast_forward boolean
+---@field up_to_date boolean
+---@field version integer
+---@field remapped any
+
+---@class Quire.branch_render_ab_args
+---@field a string
+---@field b string
+---@field start_beat? number
+---@field end_beat? number
+---@field tail_s? number
+
+---@class Quire.branch_switch_args
+---@field name string
+
+---@class Quire.branch_switch_result
+---@field name string
+
+---@class Quire.engine_start_args
+---@field backend? "jack"|"dummy"
+---@field block? integer
+---@field anticipative? boolean
+
+---@class Quire.engine_start_result
+---@field running boolean
+---@field backend string
+---@field sample_rate number
+---@field block integer
+---@field period integer
+---@field plan_latency integer
+---@field device_latency integer
+---@field xruns integer
+---@field cycles integer
+---@field process_errors integer
+---@field restart_needed boolean
+---@field anticipative boolean
+---@field anticipation_misses integer
+---@field failed_fx string[]
+
+---@class Quire.engine_status_result
+---@field running boolean
+---@field backend string
+---@field sample_rate number
+---@field block integer
+---@field period integer
+---@field plan_latency integer
+---@field device_latency integer
+---@field xruns integer
+---@field cycles integer
+---@field process_errors integer
+---@field restart_needed boolean
+---@field anticipative boolean
+---@field anticipation_misses integer
+---@field failed_fx string[]
+
+---@class Quire.env_add_args
+---@field track? string Track id, e.g. "tr_1".
+---@field fx? string Plugin instance id, e.g. "fx_1".
+---@field route? string Route id, e.g. "sd_1".
+---@field param string
+---@field points? table[]
+
+---@class Quire.env_add_result
+---@field env string
+---@field points integer
+
+---@class Quire.env_list_args
+---@field object? string
+
+---@class Quire.env_list_result
+---@field envelopes table[]
+
+---@class Quire.env_points_set_args
+---@field env string Envelope id, e.g. "en_1".
+---@field points table[]
+---@field from_beat? number
+---@field to_beat? number
+
+---@class Quire.env_points_set_result
+---@field points integer
+
+---@class Quire.env_remove_args
+---@field env string Envelope id, e.g. "en_1".
+
+---@class Quire.env_set_args
+---@field env string Envelope id, e.g. "en_1".
+---@field active? boolean
+---@field mode? "trim"|"read"|"touch"|"latch"|"latch_preview"|"write"
+
+---@class Quire.fx_add_args
+---@field track string Track id, e.g. "tr_1".
+---@field plugin string
+---@field index? integer
+---@field patch? any
+
+---@class Quire.fx_add_result
+---@field fx string
+---@field name string
+---@field semantic boolean
+---@field chain string[]
+
+---@class Quire.fx_describe_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+---@field full? boolean (default: false)
+---@field filter? string Plain parameters only: list those whose name contains this text (case-insensitive).
+
+---@class Quire.fx_describe_result
+---@field plugin string
+---@field name string
+---@field description string
+---@field params? any
+---@field patch? any
+---@field params_total? integer Plain parameters matching; at most 512 are listed.
+
+---@class Quire.fx_move_args
+---@field fx string
+---@field track? string
+---@field index integer
+
+---@class Quire.fx_param_get_args
+---@field fx string
+---@field param string
+
+---@class Quire.fx_param_get_result
+---@field value any
+
+---@class Quire.fx_param_set_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+---@field values any
+
+---@class Quire.fx_param_set_result
+---@field changed any
+---@field description string
+
+---@class Quire.fx_patch_get_args
+---@field fx string
+---@field changed_only? boolean (default: false)
+
+---@class Quire.fx_patch_get_result
+---@field patch any
+
+---@class Quire.fx_patch_merge_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+---@field patch any
+
+---@class Quire.fx_patch_merge_result
+---@field changed any
+---@field description string
+
+---@class Quire.fx_patch_set_args
+---@field fx string
+---@field patch any
+
+---@class Quire.fx_patch_set_result
+---@field patch any
+
+---@class Quire.fx_remove_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+
+---@class Quire.fx_restart_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+
+---@class Quire.fx_set_args
+---@field fx string Plugin instance id, e.g. "fx_1".
+---@field bypass? boolean
+---@field offline? boolean
+---@field wet? number|string Quantity strings are range-checked by the server.
+---@field label? string
+---@field isolation? "inherit"|"in_process"|"shared_bridge"|"dedicated"
+
+---@class Quire.history_list_result
+---@field versions table[]
+---@field can_undo boolean
+---@field can_redo boolean
+
+---@class Quire.history_redo_result
+---@field version integer
+---@field label string
+
+---@class Quire.history_undo_result
+---@field version integer
+---@field label string
+
+---@class Quire.item_add_args
+---@field track string Track id, e.g. "tr_1".
+---@field position? number Beats.
+---@field bar? integer Start at this bar (1-based).
+---@field length? number Beats.
+---@field notation? string
+---@field audio_file? string
+---@field name? string
+
+---@class Quire.item_add_result
+---@field item string
+---@field take string
+---@field source? string
+---@field position number
+---@field length number
+---@field warnings? string[]
+
+---@class Quire.item_duplicate_args
+---@field item string
+---@field to? number
+
+---@class Quire.item_duplicate_result
+---@field id string
+
+---@class Quire.item_move_args
+---@field item string Item id, e.g. "it_1".
+---@field position? number
+---@field bar? integer
+---@field track? string Track id, e.g. "tr_1".
+
+---@class Quire.item_remove_args
+---@field item string Item id, e.g. "it_1".
+
+---@class Quire.item_set_args
+---@field item string
+---@field position? number
+---@field bar? integer
+---@field length? number
+---@field mute? boolean
+---@field loop? boolean
+---@field gain_db? number|string Quantity strings are range-checked by the server.
+---@field fade_in? number
+---@field fade_out? number
+---@field name? string
+---@field color? string
+
+---@class Quire.item_split_args
+---@field item string
+---@field at number
+
+---@class Quire.item_split_result
+---@field left string
+---@field right string
+
+---@class Quire.job_cancel_args
+---@field job string
+
+---@class Quire.job_get_args
+---@field job string
+
+---@class Quire.job_status_args
+---@field job string
+
+---@class Quire.job_wait_args
+---@field job string
+---@field timeout_s? number
+
+---@class Quire.marker_add_args
+---@field pos? number
+---@field name? string
+---@field color? string
+
+---@class Quire.marker_add_result
+---@field id string
+
+---@class Quire.marker_list_result
+---@field markers table[]
+
+---@class Quire.marker_remove_args
+---@field id string
+
+---@class Quire.marker_set_args
+---@field id string
+---@field pos? number
+---@field name? string
+---@field color? string
+
+---@class Quire.midi_get_args
+---@field item string Item id, e.g. "it_1".
+
+---@class Quire.midi_get_result
+---@field text string
+
+---@class Quire.midi_write_args
+---@field item string Item id, e.g. "it_1".
+---@field notation string
+
+---@class Quire.plugin_list_args
+---@field filter? string
+
+---@class Quire.plugin_list_result
+---@field plugins table[]
+
+---@class Quire.plugin_scan_result
+---@field plugins table[]
+
+---@class Quire.project_get_result
+---@field name string
+---@field path string
+---@field branch string
+---@field sample_rate number
+---@field tempo number
+---@field meter string
+---@field version integer
+---@field recoverable integer
+
+---@class Quire.project_open_args
+---@field path? string
+
+---@class Quire.project_open_result
+---@field name string
+---@field path string
+---@field branch string
+---@field sample_rate number
+---@field tempo number
+---@field meter string
+---@field version integer
+---@field recoverable integer
+
+---@class Quire.project_recover_args
+---@field files? string[]
+---@field track? string Track id, e.g. "tr_1".
+
+---@class Quire.project_recover_result
+---@field recovered table[]
+
+---@class Quire.project_recoverable_result
+---@field recordings table[]
+
+---@class Quire.project_save_args
+---@field path? string
+
+---@class Quire.project_save_result
+---@field path string
+
+---@class Quire.project_set_args
+---@field name? string
+---@field title? string
+---@field author? string
+---@field notes? string
+---@field pan_law_db? number|string Quantity strings are range-checked by the server.
+---@field render? any
+
+---@class Quire.region_add_args
+---@field start? number
+---@field end? number
+---@field name? string
+---@field color? string
+
+---@class Quire.region_add_result
+---@field id string
+
+---@class Quire.region_list_result
+---@field regions table[]
+
+---@class Quire.region_remove_args
+---@field id string
+
+---@class Quire.region_set_args
+---@field id string
+---@field start? number
+---@field end? number
+---@field name? string
+---@field color? string
+
+---@class Quire.registry_describe_args
+---@field command string
+
+---@class Quire.registry_list_args
+---@field tag? string
+---@field kind? string
+---@field text? string
+
+---@class Quire.render_dry_run_args
+---@field branch? string
+---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
+---@field name? string A fixed file name instead of a pattern
+---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
+---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
+---@field format? string wav (FLAC is not available)
+---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
+---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
+---@field tracks? string[] Stems: track ids (default: every top-level track)
+---@field regions? string[] Regions: region ids (default: all, with the project render matrix)
+---@field start_beat? number
+---@field end_beat? number
+---@field tail_s? number
+---@field target? number
+---@field limit_true_peak_db? number
+---@field bit_depth? integer
+---@field sample_rate? integer
+---@field channels? integer
+---@field job? boolean (default: false)
+
+---@class Quire.render_mix_args
+---@field start_beat? number
+---@field end_beat? number
+---@field tail_s? number
+---@field name? string
+---@field pattern? string
+---@field branch? string
+---@field format? string
+---@field bit_depth? integer
+---@field sample_rate? integer
+---@field channels? integer
+---@field normalize? any
+---@field job? boolean (default: false)
+---@field analyze? "summary"|"full"
+
+---@class Quire.render_mix_result
+---@field render? string
+---@field path? string
+---@field seconds? number
+---@field peak_dbfs? number
+---@field output_latency? integer
+---@field warnings? string[]
+---@field analysis? any
+---@field job? string
+---@field status? string
+
+---@class Quire.render_regions_args
+---@field branch? string
+---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
+---@field name? string A fixed file name instead of a pattern
+---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
+---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
+---@field format? string wav (FLAC is not available)
+---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
+---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
+---@field tracks? string[] Stems: track ids (default: every top-level track)
+---@field regions? string[] Regions: region ids (default: all, with the project render matrix)
+---@field start_beat? number
+---@field end_beat? number
+---@field tail_s? number
+---@field target? number
+---@field limit_true_peak_db? number
+---@field bit_depth? integer
+---@field sample_rate? integer
+---@field channels? integer
+---@field job? boolean (default: false)
+
+---@class Quire.render_stems_args
+---@field branch? string
+---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
+---@field name? string A fixed file name instead of a pattern
+---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
+---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
+---@field format? string wav (FLAC is not available)
+---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
+---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
+---@field tracks? string[] Stems: track ids (default: every top-level track)
+---@field regions? string[] Regions: region ids (default: all, with the project render matrix)
+---@field start_beat? number
+---@field end_beat? number
+---@field tail_s? number
+---@field target? number
+---@field limit_true_peak_db? number
+---@field bit_depth? integer
+---@field sample_rate? integer
+---@field channels? integer
+---@field job? boolean (default: false)
+
+---@class Quire.route_add_args
+---@field from string
+---@field to string
+---@field tap? "post_fader"|"pre_fader"|"pre_fx"
+---@field volume_db? number|string Quantity strings are range-checked by the server.
+---@field pan? number|string Quantity strings are range-checked by the server.
+---@field mute? boolean
+
+---@class Quire.route_add_result
+---@field id string
+
+---@class Quire.route_list_result
+---@field routes table[]
+
+---@class Quire.route_remove_args
+---@field route string
+
+---@class Quire.route_set_args
+---@field route string
+---@field from? string
+---@field to? string
+---@field tap? "post_fader"|"pre_fader"|"pre_fx"
+---@field volume_db? number|string Quantity strings are range-checked by the server.
+---@field pan? number|string Quantity strings are range-checked by the server.
+---@field mute? boolean
+
+---@class Quire.script_run_args
+---@field code string The Lua source. It may return a value: what it returns is converted to JSON (tables with string keys are objects, sequences are arrays).
+---@field name? string The script's name: its commands are recorded as `lua:<name>` and its state (globals, subscriptions) is kept between runs of the same name. Defaults to the caller's client name.
+---@field budget_ms? number Instruction budget of this run; the script is stopped with `script.budget` when it runs out. Time spent inside a command does not count.
+---@field args? any Converted to the global table `args`.
+
+---@class Quire.script_run_result
+---@field result any What the script returned (null if it returned nothing).
+---@field log string[] What the script printed.
+---@field script string The name it ran under.
+---@field instructions integer Lua instructions the run executed.
+
+---@class Quire.session_describe_result
+---@field text string
+
+---@class Quire.take_activate_args
+---@field item string
+---@field take string
+
+---@class Quire.take_add_args
+---@field item string
+---@field from? string
+
+---@class Quire.take_add_result
+---@field id string
+
+---@class Quire.take_list_args
+---@field item string
+
+---@class Quire.take_list_result
+---@field takes table[]
+
+---@class Quire.take_set_args
+---@field take string
+---@field gain_db? number|string Quantity strings are range-checked by the server.
+---@field pan? number|string Quantity strings are range-checked by the server.
+---@field channel_mode? "normal"|"reverse_stereo"|"mono_mix"|"left"|"right"
+---@field name? string
+---@field start_offset? number Source position at the item start; negative for a late first pass.
+
+---@class Quire.tempo_set_args
+---@field points table[]
+
+---@class Quire.tempo_set_result
+---@field count integer
+
+---@class Quire.time_convert_args
+---@field seconds? number
+---@field beat? number
+---@field bar? integer
+
+---@class Quire.time_convert_result
+---@field seconds number
+---@field beat number
+---@field bar integer
+---@field beat_in_bar integer
+---@field fraction number
+
+---@class Quire.timesig_set_args
+---@field bar integer
+---@field meter string
+
+---@class Quire.track_add_args
+---@field name? string
+---@field parent? string Parent track id, e.g. "tr_1".
+---@field index? integer
+---@field channels? integer
+
+---@class Quire.track_add_result
+---@field track string
+
+---@class Quire.track_list_result
+---@field tracks table[]
+
+---@class Quire.track_remove_args
+---@field track string Track id, e.g. "tr_1".
+
+---@class Quire.track_set_args
+---@field track string Track id, e.g. "tr_1".
+---@field name? string
+---@field color? string
+---@field notes? string
+---@field volume_db? number|string Quantity strings are range-checked by the server.
+---@field pan? number|string Quantity strings are range-checked by the server.
+---@field width? number|string Quantity strings are range-checked by the server.
+---@field mute? boolean
+---@field phase_invert? boolean
+---@field solo? string
+---@field armed? boolean
+---@field record_input? integer[]
+---@field record_midi? string
+---@field midi_channel? integer
+---@field record_mode? "input"|"midi_overdub"|"midi_replace"
+---@field monitor? "off"|"on"|"auto"
+
+---@class Quire.transport_get_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.transport_loop_args
+---@field enabled? boolean
+---@field start_seconds? number
+---@field start_beat? number
+---@field start_bar? integer
+---@field end_seconds? number
+---@field end_beat? number
+---@field end_bar? integer
+
+---@class Quire.transport_loop_result
+---@field enabled boolean
+---@field start_seconds number
+---@field end_seconds number
+
+---@class Quire.transport_pause_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.transport_play_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.transport_punch_args
+---@field enabled? boolean
+---@field start_seconds? number
+---@field start_beat? number
+---@field start_bar? integer
+---@field end_seconds? number
+---@field end_beat? number
+---@field end_bar? integer
+
+---@class Quire.transport_punch_result
+---@field enabled boolean
+---@field start_seconds number
+---@field end_seconds number
+
+---@class Quire.transport_record_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.transport_seek_args
+---@field seconds? number
+---@field beat? number
+---@field bar? integer
+
+---@class Quire.transport_seek_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.transport_stop_result
+---@field playing boolean
+---@field recording boolean
+---@field seconds number
+---@field beat number
+---@field sample integer
+---@field loop table
+---@field punch table
+---@field recorded? table[]
+
+---@class Quire.analyze
+---@field compare fun(args: Quire.analyze_compare_args): Quire.analyze_compare_result Compare two renders or track outputs by perceptual descriptors.
+---@field masking fun(args: Quire.analyze_masking_args): table Estimate masking between two tracks over the same range.
+---@field render fun(args: Quire.analyze_render_args): table Analyze a render id or audio path: loudness, spectrum, envelope and stereo.
+---@field track fun(args: Quire.analyze_track_args): table Render one track's output offline and analyze it.
+
+---@class Quire.branch
+---@field create fun(args: Quire.branch_create_args): Quire.branch_create_result Start a branch from a branch's head (default: the current one) and switch to it.
+---@field delete fun(args: Quire.branch_delete_args): table Delete a branch (not main, not the current one).
+---@field diff fun(args: Quire.branch_diff_args): Quire.branch_diff_result What differs between two branch heads: objects added, removed, changed (fields).
+---@field list fun(): Quire.branch_list_result List branches and the current one.
+---@field merge fun(args: Quire.branch_merge_args): Quire.branch_merge_result Merge a branch into another (default: main) by replaying its edits.
+---@field ["render-ab"] fun(args: Quire.branch_render_ab_args): table Render two branch heads over the same range and compare them.
+---@field switch fun(args: Quire.branch_switch_args): Quire.branch_switch_result Make another branch current (edits, undo and playback follow it).
+
+---@class Quire.engine
+---@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start real-time playback on the audio device (jack) or without one (dummy).
+---@field status fun(): Quire.engine_status_result Real-time engine state: backend, rate, block, device period, latency, xruns.
+---@field stop fun(): table Stop real-time playback and release the audio device.
+
+---@class Quire.env
+---@field add fun(args: Quire.env_add_args): Quire.env_add_result Automate a parameter: a track's or route's mixer control, or a plugin's.
+---@field list fun(args?: Quire.env_list_args): Quire.env_list_result List envelopes (optionally of one track, route or plugin).
+---@field remove fun(args: Quire.env_remove_args): table Remove an envelope (the parameter returns to its set value).
+---@field set fun(args: Quire.env_set_args): table Set an envelope's options: active (heard), mode (read, touch, latch, write).
+
+---@class Quire.env.points
+---@field set fun(args: Quire.env_points_set_args): Quire.env_points_set_result Replace an envelope's points (all of them, or those in a beat range).
+
+---@class Quire.fx
+---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's FX chain and return its id.
+---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe a plugin instance in words; full adds its parameters and patch.
+---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
+---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
+---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).
+---@field set fun(args: Quire.fx_set_args): table Set instance options: bypass, offline, wet (%), label, isolation.
+
+---@class Quire.fx.param
+---@field get fun(args: Quire.fx_param_get_args): Quire.fx_param_get_result Read one saved plugin parameter by semantic key or numeric CLAP id.
+---@field set fun(args: Quire.fx_param_set_args): Quire.fx_param_set_result Set plugin parameters by key in physical units: {"cutoff": "800 Hz"}.
+
+---@class Quire.fx.patch
+---@field get fun(args: Quire.fx_patch_get_args): Quire.fx_patch_get_result Read a semantic plugin's saved patch.
+---@field merge fun(args: Quire.fx_patch_merge_args): Quire.fx_patch_merge_result Merge a partial patch into a plugin instance; returns the effective change.
+---@field set fun(args: Quire.fx_patch_set_args): Quire.fx_patch_set_result Replace a semantic plugin's complete patch.
+
+---@class Quire.history
+---@field list fun(): Quire.history_list_result List the current branch's recent versions (newest first).
+---@field redo fun(): Quire.history_redo_result Redo the last undone change.
+---@field undo fun(): Quire.history_undo_result Undo the last change on the current branch.
+
+---@class Quire.item
+---@field add fun(args: Quire.item_add_args): Quire.item_add_result Add an item on a track: MIDI written in notation, or an audio file.
+---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
+---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
+---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
+---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, or color.
+---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an audio or MIDI item at a beat, keeping take source positions aligned.
+
+---@class Quire.job
+---@field cancel fun(args: Quire.job_cancel_args): table Cancel a job.
+---@field get fun(args: Quire.job_get_args): table Get a job's status and progress.
+---@field list fun(): table List session jobs.
+---@field status fun(args: Quire.job_status_args): table Get a job's status.
+---@field wait fun(args: Quire.job_wait_args): table Wait for a job.
+
+---@class Quire.marker
+---@field add fun(args?: Quire.marker_add_args): Quire.marker_add_result Add a named marker in beats.
+---@field list fun(): Quire.marker_list_result List rulers in this project.
+---@field remove fun(args: Quire.marker_remove_args): table Remove a ruler.
+---@field set fun(args: Quire.marker_set_args): table Edit a ruler's position, name, or color.
+
+---@class Quire.midi
+---@field get fun(args: Quire.midi_get_args): Quire.midi_get_result Read an item's MIDI as notation.
+---@field write fun(args: Quire.midi_write_args): table Replace an item's MIDI with notation (the item keeps its position and length).
+
+---@class Quire.plugin
+---@field list fun(args?: Quire.plugin_list_args): Quire.plugin_list_result List scanned plugins; filter matches id, name, or vendor.
+---@field scan fun(): Quire.plugin_scan_result Rescan configured plugin paths and return the available plugins.
+
+---@class Quire.project
+---@field get fun(): Quire.project_get_result Show the project: name, rate, tempo, meter, file, version and branch.
+---@field open fun(args?: Quire.project_open_args): Quire.project_open_result Open a project file (replaces the current project and its history).
+---@field recover fun(args?: Quire.project_recover_args): Quire.project_recover_result Put recordings a crash left out back into the project (one undo step).
+---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.
+---@field save fun(args?: Quire.project_save_args): Quire.project_save_result Save the project (canonical JSON) to its file or a new path.
+---@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, pan law).
+
+---@class Quire.region
+---@field add fun(args?: Quire.region_add_args): Quire.region_add_result Add a named region in beats.
+---@field list fun(): Quire.region_list_result List rulers in this project.
+---@field remove fun(args: Quire.region_remove_args): table Remove a ruler.
+---@field set fun(args: Quire.region_set_args): table Edit a ruler's position, name, or color.
+
+---@class Quire.registry
+---@field describe fun(args: Quire.registry_describe_args): table Describe a command.
+---@field list fun(args?: Quire.registry_list_args): table List available commands.
+
+---@class Quire.render
+---@field ["dry-run"] fun(args?: Quire.render_dry_run_args): table List the files a render would write, with lengths, without rendering.
+---@field mix fun(args?: Quire.render_mix_args): Quire.render_mix_result Render the mix offline to a float WAV (default: start to the last item's end).
+---@field regions fun(args?: Quire.render_regions_args): table Render each region (or the render matrix's tracks per region) to files.
+---@field stems fun(args?: Quire.render_stems_args): table Render each selected track to its own file (stems).
+
+---@class Quire.route
+---@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, or the master.
+---@field list fun(): Quire.route_list_result List sends with endpoints and mixer settings.
+---@field remove fun(args: Quire.route_remove_args): table Remove a send.
+---@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, or mute.
+
+---@class Quire.script
+---@field run fun(args: Quire.script_run_args): Quire.script_run_result Run a Lua script on the command bus.
+
+---@class Quire.session
+---@field describe fun(): Quire.session_describe_result Describe the whole session in compact text (tracks, items, fx, routes).
+
+---@class Quire.take
+---@field activate fun(args: Quire.take_activate_args): table Choose the take heard from an item.
+---@field add fun(args: Quire.take_add_args): Quire.take_add_result Add a take to an item, optionally copied from another take of that item.
+---@field list fun(args: Quire.take_list_args): Quire.take_list_result List the takes of an item and identify its active take.
+---@field set fun(args: Quire.take_set_args): table Set take gain, pan, channel mode, name, or source offset.
+
+---@class Quire.tempo
+---@field set fun(args: Quire.tempo_set_args): Quire.tempo_set_result Replace the tempo map: points {beat, bpm, ramp?}; the first must be at beat 0.
+
+---@class Quire.time
+---@field convert fun(args?: Quire.time_convert_args): Quire.time_convert_result Convert a seconds, beat, or bar position to all three time domains.
+
+---@class Quire.timesig
+---@field set fun(args: Quire.timesig_set_args): table Set the meter from a bar on, e.g. {"bar": 9, "meter": "3/4"}.
+
+---@class Quire.track
+---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a track (under the master, or inside a folder track) and return its id.
+---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
+---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
+---@field set fun(args: Quire.track_set_args): table Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
+
+---@class Quire.transport
+---@field get fun(): Quire.transport_get_result The play position and whether it is playing.
+---@field loop fun(args?: Quire.transport_loop_args): Quire.transport_loop_result Set or toggle the loop range: playback reaching its end repeats it.
+---@field pause fun(): Quire.transport_pause_result Pause playback where it is (ends a recording).
+---@field play fun(): Quire.transport_play_result Start playback from the current position.
+---@field punch fun(args?: Quire.transport_punch_args): Quire.transport_punch_result Set or toggle the punch range: recordings keep only that range.
+---@field record fun(): Quire.transport_record_result Play and record every armed track's input.
+---@field seek fun(args?: Quire.transport_seek_args): Quire.transport_seek_result Move the play position (one of seconds, beat or bar).
+---@field stop fun(): Quire.transport_stop_result Stop playback and return to where it started (ends a recording).
+
+---@class Quire
+---@field analyze Quire.analyze Commands named analyze.*
+---@field branch Quire.branch Commands named branch.*
+---@field engine Quire.engine Commands named engine.*
+---@field env Quire.env Commands named env.*
+---@field fx Quire.fx Commands named fx.*
+---@field history Quire.history Commands named history.*
+---@field item Quire.item Commands named item.*
+---@field job Quire.job Commands named job.*
+---@field marker Quire.marker Commands named marker.*
+---@field midi Quire.midi Commands named midi.*
+---@field plugin Quire.plugin Commands named plugin.*
+---@field project Quire.project Commands named project.*
+---@field region Quire.region Commands named region.*
+---@field registry Quire.registry Commands named registry.*
+---@field render Quire.render Commands named render.*
+---@field route Quire.route Commands named route.*
+---@field script Quire.script Commands named script.*
+---@field session Quire.session Commands named session.*
+---@field take Quire.take Commands named take.*
+---@field tempo Quire.tempo Commands named tempo.*
+---@field time Quire.time Commands named time.*
+---@field timesig Quire.timesig Commands named timesig.*
+---@field track Quire.track Commands named track.*
+---@field transport Quire.transport Commands named transport.*
+---@field run fun(name: string, args?: table): any Run any registered command by name, e.g. the ones whose names are not Lua identifiers.
+---@field batch fun(label: string, body: fun()) Run the calls inside body as one transaction: one undo step, rolled back when one of them fails.
+---@field on fun(topic: string, handler: fun(payload: table, topic: string), filter?: table): integer Subscribe to bus events; returns a handle for q.off.
+---@field off fun(handle: integer) Drop a subscription.
+---@field log fun(...) Print a line to the script's log (the same as print).
+---@field null any The JSON null: Lua tables cannot hold nil.
+---@field name string The name this script runs under (its origin is `lua:<name>`).

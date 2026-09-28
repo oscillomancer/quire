@@ -3,7 +3,8 @@
 if(NOT DEFINED PREFIX)
   set(PREFIX sandbox)
 endif()
-foreach(pair "--markdown;${PREFIX}-commands.md" "--mcp-tools;${PREFIX}-mcp-tools.json")
+foreach(pair "--markdown;${PREFIX}-commands.md" "--mcp-tools;${PREFIX}-mcp-tools.json"
+             "--lua;${PREFIX}.lua")
   list(GET pair 0 flag)
   list(GET pair 1 file)
   execute_process(COMMAND ${TOOL} registry ${flag} OUTPUT_VARIABLE out RESULT_VARIABLE rc)

@@ -57,6 +57,7 @@ for free, and guarantees that anything a human can do an agent can do.
 | audio | `libs/audio-file`, `libs/core-dsp` | file I/O, resampling; shared DSP blocks | — |
 | perception | `libs/core-analysis` | loudness (BS.1770/R128), spectral, harmonic, envelope, stereo, comparison, masking; compact reports | `specs/core-analysis.md` |
 | control | `libs/command-bus`, `libs/control-protocol`, `mcp/` | registry and dispatch; JSON-RPC over Unix socket; MCP adapter | ADR-0007, `specs/command-bus.md` |
+| scripting | `libs/lua-bus` (vendored PUC Lua 5.4) | sandboxed Lua scripts on the bus: generated bindings, `q.batch` transactions, `q.on` subscriptions; `script.run` | ADR-0006 |
 | hosting | `host/clap-host` | CLAP hosting incl. the semantic-params extension | `specs/semantic-params-extension.md` |
 | sandbox | `host/sandbox` | Phase 2 headless plugin sandbox (library + CLI + MCP) | `specs/sandbox.md` |
 | engine | `host/engine`, `host/isolation` | Phase 4 headless DAW engine, plugin bridge processes | ADR-0004, ADR-0008 |

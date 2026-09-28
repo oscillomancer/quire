@@ -4,8 +4,9 @@
 //       One invocation {"command": ..., "args": {...}} or {"batch": {...}}
 //       against the project (a new one when --project is absent or missing);
 //       --save writes the project back afterwards. Prints the result JSON.
-//   <slug>-engine registry [--markdown | --mcp-tools]
-//       The engine's command registry, Markdown reference or MCP tool list.
+//   <slug>-engine registry [--markdown | --mcp-tools | --lua]
+//       The engine's command registry, Markdown reference, MCP tool list or
+//       the LuaLS annotations of the scripting bindings.
 //   <slug>-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...
 //       Serve MCP over stdio against the in-process engine session.
 //   <slug>-engine serve [--project FILE] [--instance NAME] [--socket PATH]
@@ -39,7 +40,7 @@ int usage() {
     std::fprintf(stderr,
                  "usage: %s-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] "
                  "[--plugin-path P]...\n"
-                 "       %s-engine registry [--markdown | --mcp-tools]\n"
+                 "       %s-engine registry [--markdown | --mcp-tools | --lua]\n"
                  "       %s-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...\n"
                  "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n"
                  "       %s-engine play FILE [--bar N] [--seconds S] [--block N] "
@@ -140,6 +141,7 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
         return 1;
     }
     cmd::Dispatcher dispatcher(registry, **app);
+    (*app)->attachCommands(dispatcher);
     auto run = [&](const char* command, json::Value a) {
         return dispatcher.execute({command, std::move(a), {cmd::Origin::Type::Rpc, "cli", ""}});
     };
@@ -224,6 +226,7 @@ int main(int argc, char** argv) {
             }
         }
         cmd::Dispatcher dispatcher(registry, **app);
+        (*app)->attachCommands(dispatcher);
         if (rpcMode) {
             rpc::ModelLoop loop;
             rpc::Server* activeServer = nullptr;
@@ -260,7 +263,10 @@ int main(int argc, char** argv) {
             std::fwrite(md.data(), 1, md.size(), stdout);
         } else if (args[1] == "--mcp-tools")
             print(cmd::mcpToolList(registry));
-        else
+        else if (args[1] == "--lua") {
+            const std::string stubs = cmd::luaStubs(registry);
+            std::fwrite(stubs.data(), 1, stubs.size(), stdout);
+        } else
             return usage();
         return 0;
     }
@@ -305,6 +311,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     cmd::Dispatcher dispatcher(registry, **app);
+    (*app)->attachCommands(dispatcher);
     cmd::Invocation inv;
     inv.origin = {cmd::Origin::Type::Rpc, "cli", ""};
     if (const json::Value* batch = parsed->find("batch")) {

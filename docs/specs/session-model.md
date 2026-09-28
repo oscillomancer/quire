@@ -400,6 +400,11 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `analyze.masking {masker_track, maskee_track, range}`.
 - **history/branches**: `history.undo`, `history.redo`, `history.list` (q),
   `branch.*` (§6.3).
+- **scripting**: `script.run {code, name?, budget_ms?, args?}` (a) — Lua on the
+  model thread in a sandbox (ADR-0006, `libs/lua-bus`), its calls recorded
+  under `lua:<name>`; `q.batch` inside is one transaction and `q.on` subscribes
+  to the events below. Not transactional itself: undo its edits with
+  `history.undo`.
 - **meta**: `batch`, `registry.*`.
 
 ### 7.3 Render file-name patterns

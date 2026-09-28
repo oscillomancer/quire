@@ -8,10 +8,12 @@ tool=build/dev/host/sandbox/${slug}-sandbox
 cmake --build --preset dev --target "${slug}-sandbox" >/dev/null
 "$tool" registry --markdown > skill/generated/sandbox-commands.md
 "$tool" registry --mcp-tools > skill/generated/sandbox-mcp-tools.json
+"$tool" registry --lua > skill/generated/sandbox.lua
 engine=build/dev/host/engine/${slug}-engine
 cmake --build --preset dev --target "${slug}-engine" >/dev/null
 "$engine" registry --markdown > skill/generated/engine-commands.md
 "$engine" registry --mcp-tools > skill/generated/engine-mcp-tools.json
+"$engine" registry --lua > skill/generated/engine.lua
 cmake --build --preset dev --target notation-ref >/dev/null
 build/dev/libs/notation/notation-ref > skill/generated/notation-reference.md
-echo "updated skill/generated/{sandbox,engine}-{commands.md,mcp-tools.json} and notation-reference.md"
+echo "updated skill/generated/{sandbox,engine}-{commands.md,mcp-tools.json,lua} and notation-reference.md"

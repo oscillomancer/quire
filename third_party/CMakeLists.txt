@@ -27,6 +27,28 @@ target_include_directories(tp-pocketfft SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_
 target_compile_definitions(tp-pocketfft INTERFACE POCKETFFT_NO_MULTITHREADING)
 add_library(supple::pocketfft ALIAS tp-pocketfft)
 
+# PUC Lua 5.4 (MIT) — the embedded scripting language (ADR-0006). Only the
+# core and the libraries our sandbox opens are compiled: io, os, debug and
+# package are not built at all, so a script cannot reach them (libs/lua-bus).
+# Warnings are never enabled for third-party targets (see the file header).
+set(_lua ${CMAKE_CURRENT_SOURCE_DIR}/lua-5.4.9/src)
+add_library(tp-lua STATIC
+  ${_lua}/lapi.c ${_lua}/lcode.c ${_lua}/lctype.c ${_lua}/ldebug.c ${_lua}/ldo.c
+  ${_lua}/ldump.c ${_lua}/lfunc.c ${_lua}/lgc.c ${_lua}/llex.c ${_lua}/lmem.c
+  ${_lua}/lobject.c ${_lua}/lopcodes.c ${_lua}/lparser.c ${_lua}/lstate.c
+  ${_lua}/lstring.c ${_lua}/ltable.c ${_lua}/ltm.c ${_lua}/lundump.c ${_lua}/lvm.c
+  ${_lua}/lzio.c
+  ${_lua}/lauxlib.c ${_lua}/lbaselib.c ${_lua}/lcorolib.c ${_lua}/lmathlib.c
+  ${_lua}/lstrlib.c ${_lua}/ltablib.c ${_lua}/lutf8lib.c)
+target_include_directories(tp-lua SYSTEM PUBLIC ${_lua})
+target_compile_features(tp-lua PUBLIC cxx_std_20)
+set_target_properties(tp-lua PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(_supple_sanitize_flags)
+  target_compile_options(tp-lua PRIVATE ${_supple_sanitize_flags})
+endif()
+target_link_libraries(tp-lua PUBLIC ${CMAKE_DL_LIBS})
+add_library(supple::lua ALIAS tp-lua)
+
 set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
 add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp

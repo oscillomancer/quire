@@ -4,7 +4,7 @@
 //       One invocation {"command": "...", "args": {...}} or a batch
 //       {"batch": {"label": ..., "steps": [...]}} against a fresh session;
 //       prints the result (or the error) as JSON. Exit 0 = ok, 1 = error.
-//   <slug>-sandbox registry [--markdown | --mcp-tools]
+//   <slug>-sandbox registry [--markdown | --mcp-tools | --lua]
 //       The command registry document, the Markdown reference, or the MCP
 //       tool list (generator output; drift-tested against skill/generated/).
 //   <slug>-sandbox --mcp [--workdir DIR] [--plugin-path P]...
@@ -34,7 +34,7 @@ namespace {
 int usage() {
     std::fprintf(stderr,
                  "usage: %.*s-sandbox exec '<json>' [--workdir DIR] [--plugin-path P]...\n"
-                 "       %.*s-sandbox registry [--markdown | --mcp-tools]\n"
+                 "       %.*s-sandbox registry [--markdown | --mcp-tools | --lua]\n"
                  "       %.*s-sandbox --mcp [--workdir DIR] [--plugin-path P]...\n"
                  "       %.*s-sandbox serve [--workdir DIR] [--plugin-path P]... "
                  "[--instance NAME] [--socket PATH]\n",
@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
         }
         sandbox::SandboxHost host(std::move(*session), options.workdir / "commands.ndjson");
         cmd::Dispatcher dispatcher(registry, host);
+        host.attachCommands(dispatcher);
         if (rpcMode) {
             rpc::ModelLoop loop;
             rpc::Server* activeServer = nullptr;
@@ -155,6 +156,9 @@ int main(int argc, char** argv) {
             std::fwrite(md.data(), 1, md.size(), stdout);
         } else if (args[1] == "--mcp-tools") {
             print(cmd::mcpToolList(registry));
+        } else if (args[1] == "--lua") {
+            const std::string stubs = cmd::luaStubs(registry);
+            std::fwrite(stubs.data(), 1, stubs.size(), stdout);
         } else {
             return usage();
         }
@@ -195,6 +199,7 @@ int main(int argc, char** argv) {
         const fs::path log = options.workdir / "commands.ndjson";
         sandbox::SandboxHost host(std::move(*session), log);
         cmd::Dispatcher dispatcher(registry, host);
+        host.attachCommands(dispatcher);
         cmd::Invocation inv;
         inv.origin = {cmd::Origin::Type::Rpc, "cli", ""};
         if (const json::Value* batch = parsed->find("batch")) {

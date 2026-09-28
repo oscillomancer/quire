@@ -19,6 +19,7 @@ need an approved `HUMAN_REVIEW.md` entry. Dynamically linked OS libraries
 | dr_libs | Unlicense OR MIT-0 | dr_wav 0.14.5 / `fa931f3` | WAV read/write; FLAC and MP3 decode | static (header) |
 | pocketfft | BSD-3-Clause | cpp branch / `c90e55b` | FFT for offline analysis and analyzer displays | headers |
 | vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, module loader, event and parameter helpers | static |
+| lua | MIT | 5.4.9 (lua.org tarball, sha256 `2335b6c5…`; upstream `src/` unmodified) | The embedded scripting language behind `libs/lua-bus` and the `script.run` command (ADR-0006); built as a static library with only the core and sandbox libraries compiled | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |
 | pugl | ISC (a few build files 0BSD OR ISC) | 0.5.7 / `b763714` (template pin) | Plugin editor windowing (template GUI stack) | static, plugins only |
 | nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer, fetched by the template CMake on Apple; not vendored, never built on Linux | static, macOS plugins only |

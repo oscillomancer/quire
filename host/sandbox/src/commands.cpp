@@ -330,6 +330,7 @@ Result<RenderInput> renderInput(Session& s, const RenderArgs& a,
 
 void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
     const std::string I = ex.instrument, F = ex.effect;
+    lua::registerScriptCommands(registry);
 
     // plugin.list
     {
@@ -955,16 +956,24 @@ SandboxHost::SandboxHost(std::unique_ptr<Session> session, fs::path commandLog,
                          ExamplePlugins examples)
     : session_(std::move(session)),
       commandLog_(std::move(commandLog)),
-      examples_(std::move(examples)) {}
+      examples_(std::move(examples)) {
+    scripts_ = std::make_unique<lua::Runtime>();  // commands attach later
+}
 
 std::vector<std::pair<std::string, json::Value>> SandboxHost::takeEvents() {
     return std::exchange(events_, {});
+}
+
+void SandboxHost::attachCommands(cmd::Dispatcher& dispatcher) {
+    if (!scripts_) scripts_ = std::make_unique<lua::Runtime>();
+    scripts_->setCommands(dispatcher.registry(), dispatcher);
 }
 
 cmd::Context SandboxHost::makeContext(const cmd::Origin& origin) {
     session_->adoptBackgroundRenders();  // e.g. an optimizer's best candidate
     cmd::Context ctx(origin);
     ctx.provide<Session>(*session_);
+    if (scripts_) ctx.provide<lua::Runtime>(*scripts_);
     return ctx;
 }
 
@@ -1017,7 +1026,13 @@ void SandboxHost::log(const cmd::LogRecord& record) {
 }
 
 void SandboxHost::emit(std::string_view topic, json::Value payload) {
+    // Scripts see the event once the emitting command has finished.
+    if (scripts_) scripts_->event(topic, payload);
     events_.emplace_back(std::string(topic), std::move(payload));
+}
+
+void SandboxHost::commandFinished() {
+    if (scripts_) scripts_->deliver();
 }
 
 bool SandboxHost::actionTransactional(std::string_view command) const {
