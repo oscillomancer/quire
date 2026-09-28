@@ -334,18 +334,25 @@ struct Checker {
         for (const auto& e : s.routes) {
             const Route& r = *e.value;
             auto endOk = [&](const RouteEnd& x, const char* field, bool from) {
-                const int n = (x.track ? 1 : 0) + (x.hwChannels ? 1 : 0) + (x.midiDevice ? 1 : 0);
+                const int n = (x.track ? 1 : 0) + (x.hwChannels ? 1 : 0) + (x.midiDevice ? 1 : 0) +
+                              (x.fx ? 1 : 0);
                 if (n != 1)
                     fail(at("routes", e.id, field),
-                         "exactly one of track, hw_channels, midi_device");
+                         "exactly one of track, fx, hw_channels, midi_device");
                 if (!from && x.midiDevice)
                     fail(at("routes", e.id, field), "a route cannot send to a MIDI input");
+                if (from && x.fx)
+                    fail(at("routes", e.id, field), "a route cannot come from a plug-in's key");
                 if (x.track && !s.tracks.contains(*x.track))
                     fail(at("routes", e.id, field), "track " + x.track->str() + " does not exist");
+                if (x.fx && !trackOfFx(s, *x.fx))
+                    fail(at("routes", e.id, field),
+                         x.fx->str() + " is not in a track's FX chain (a key route needs one)");
             };
             endOk(r.from, "from", true);
             endOk(r.to, "to", false);
-            if (r.from.track && r.to.track) edges[*r.from.track].push_back(*r.to.track);
+            const std::optional<Id> target = r.to.fx ? trackOfFx(s, *r.to.fx) : r.to.track;
+            if (r.from.track && target) edges[*r.from.track].push_back(*target);
         }
         // Cycle detection (iterative DFS with colours).
         std::map<Id, int> colour;
@@ -470,6 +477,13 @@ std::vector<ObjectDiff> diff(const Session& a, const Session& b) {
     diffMap(a.routes, b.routes, out);
     diffMap(a.envelopes, b.envelopes, out);
     return out;
+}
+
+std::optional<Id> trackOfFx(const Session& s, Id fx) {
+    for (const auto& e : s.tracks)
+        if (std::find(e.value->chain.begin(), e.value->chain.end(), fx) != e.value->chain.end())
+            return e.id;
+    return std::nullopt;
 }
 
 }  // namespace supple::model

@@ -227,3 +227,54 @@ TEST_CASE("a VST3 is listed with its format and describes its plain parameters")
     CHECK(none["params"].asArray().empty());
     CHECK(none["params_total"].asDouble() == 0);
 }
+
+TEST_CASE("key routes over the bus: route.add {fx}, validation, listing, removal (ADR-0018)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Kick"})");
+    run(bus, "track.add", R"({"name":"Bass"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","bar":1,"notation":"voice k; 1: A4:w"})");
+    json::Value added =
+        run(bus, "fx.add", R"({"track":"tr_2","plugin":"com.suppleaudio.test.keymix"})");
+    const std::string keyMix = added["fx"].asString();
+    added = run(bus, "fx.add", R"({"track":"tr_2","plugin":"com.suppleaudio.test.gain"})");
+    const std::string gain = added["fx"].asString();
+    json::Value described = run(bus, "fx.describe", R"({"fx":")" + keyMix + R"("})");
+    CHECK(described["sidechain_channels"].asInt() == 2);
+    auto noKey =
+        bus.execute({"route.add", j(R"({"from":"tr_1","fx":")" + gain + R"("})"), kOrigin});
+    REQUIRE_FALSE(noKey);
+    CHECK(noKey.error().code == "route.no_sidechain");
+    auto wrongTrack = bus.execute(
+        {"route.add", j(R"({"from":"tr_1","to":"tr_1","fx":")" + keyMix + R"("})"), kOrigin});
+    REQUIRE_FALSE(wrongTrack);
+    CHECK(wrongTrack.error().code == "route.endpoint");
+    json::Value made =
+        run(bus, "route.add", R"({"from":"tr_1","fx":")" + keyMix + R"(","tap":"pre_fader"})");
+    const std::string route = made["id"].asString();
+    json::Value listed = run(bus, "route.list", "{}");
+    REQUIRE(listed["routes"].asArray().size() == 1);
+    json::Value first = listed["routes"].asArray()[0];
+    CHECK(first["fx"].asString() == keyMix);
+    CHECK(first["to"].asString() == "tr_2");
+    // A key from Bass into a plug-in on Kick would close a loop.
+    added = run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.keymix"})");
+    const std::string kickKey = added["fx"].asString();
+    auto cycle =
+        bus.execute({"route.add", j(R"({"from":"tr_2","fx":")" + kickKey + R"("})"), kOrigin});
+    REQUIRE_FALSE(cycle);
+    CHECK(cycle.error().code == "route.cycle");
+    // Audible: the keyed track now carries the kick.
+    json::Value keyed = run(bus, "render.mix", R"({"end_beat":2})");
+    run(bus, "route.set", R"({"route":")" + route + R"(","mute":true})");
+    json::Value unkeyed = run(bus, "render.mix", R"({"end_beat":2})");
+    CHECK(peak(keyed["path"].asString()) > peak(unkeyed["path"].asString()) * 1.3);
+    // Removing the keyed plug-in removes its key route.
+    run(bus, "fx.remove", R"({"fx":")" + keyMix + R"("})");
+    json::Value after = run(bus, "route.list", "{}");
+    CHECK(after["routes"].asArray().empty());
+}

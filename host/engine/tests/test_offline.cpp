@@ -609,3 +609,96 @@ TEST_CASE("plugins see the transport loop (CLAP loop flags)") {
     const LoopRange off{48000, 96000, false};
     CHECK_FALSE(detail::transportAt(plan, 60000, &off).loopActive);
 }
+
+TEST_CASE("a key route feeds a plug-in's sidechain, aligned with its stage (ADR-0018)") {
+    // A plays a sine into the master; B has no audio of its own and a key mix
+    // (out = main + key) keyed from A before its fader. With every track at the
+    // centre, B's output is A's pre-fader signal through the route's and B's pan
+    // law: mix(with key) - mix(without) == A's output * kCentre, sample for
+    // sample — any misalignment of the key would break it. Latency in A's chain,
+    // before the key mix, or both, must not.
+    constexpr const char* kKeyMix = "com.suppleaudio.test.keymix";
+    const json::Value latent =
+        json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+            .value();
+    for (int layout = 0; layout < 4; ++layout) {
+        CAPTURE(layout);
+        auto pool = makePool();
+        model::EditTxn t(model::Session::create(), 1);
+        const Id a = addTrack(t, "A");
+        const Id b = addTrack(t, "B");
+        addFx(t, a, kSine);
+        if (layout & 1) addFx(t, a, kGain, latent);  // latency at the source
+        if (layout & 2) addFx(t, b, kGain, latent);  // latency before the keyed stage
+        const Id keyMix = addFx(t, b, kKeyMix);
+        addNote(t, a, 0.0, 1.0, 69);
+        const model::Session plain = commit(t);
+        model::EditTxn t2(plain, 2);
+        model::Route route;
+        route.from.track = a;
+        route.to.fx = keyMix;
+        route.tap = model::Tap::PreFader;
+        const Id rt = t2.create(route);
+        const model::Session keyed = commit(t2);
+        const auto dry = render(plain, pool, 0.5);
+        const auto wet = render(keyed, pool, 0.5);
+        REQUIRE(dry.audio.frames() == wet.audio.frames());
+        double worst = 0, energy = 0;
+        for (std::size_t i = 0; i < dry.audio.frames(); ++i) {
+            const double d = static_cast<double>(dry.audio.channels[0][i]);
+            const double w = static_cast<double>(wet.audio.channels[0][i]);
+            worst = std::max(worst, std::fabs((w - d) - d * kCentre));
+            energy += d * d;
+        }
+        CHECK(energy > 1.0);
+        CHECK(worst < 1e-5);
+
+        // Solo B: A is not heard, but still keys B.
+        model::EditTxn t3(keyed, 3);
+        t3.modify<model::Track>(b, [](model::Track& x) { x.solo = model::Solo::On; });
+        const auto soloed = render(commit(t3), pool, 0.5);
+        worst = 0;
+        for (std::size_t i = 0; i < dry.audio.frames(); ++i)
+            worst =
+                std::max(worst, std::fabs(static_cast<double>(soloed.audio.channels[0][i]) -
+                                          static_cast<double>(dry.audio.channels[0][i]) * kCentre));
+        CHECK(worst < 1e-5);
+
+        // A muted: a pre-fader key still feeds; a muted route does not.
+        model::EditTxn t4(keyed, 3);
+        t4.modify<model::Track>(a, [](model::Track& x) { x.mute = true; });
+        const auto mutedSource = render(commit(t4), pool, 0.5);
+        CHECK(peak(mutedSource.audio.channels[0]) ==
+              doctest::Approx(peak(dry.audio.channels[0]) * kCentre).epsilon(1e-4));
+        model::EditTxn t5(keyed, 3);
+        t5.modify<model::Route>(rt, [](model::Route& r) { r.mute = true; });
+        const auto mutedRoute = render(commit(t5), pool, 0.5);
+        CHECK(peak(mutedRoute.audio.channels[0]) ==
+              doctest::Approx(peak(dry.audio.channels[0])).epsilon(1e-6));
+    }
+}
+
+TEST_CASE("key routes: a plug-in without a sidechain is warned about; cycles are invalid") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create(), 1);
+    const Id a = addTrack(t, "A");
+    const Id b = addTrack(t, "B");
+    addFx(t, a, kSine);
+    const Id gain = addFx(t, b, kGain);  // no sidechain port
+    const Id aGain = addFx(t, a, kGain);
+    model::Route route;
+    route.from.track = a;
+    route.to.fx = gain;
+    t.create(route);
+    const auto s = commit(t);
+    const auto r = render(s, pool, 0.1);
+    REQUIRE_FALSE(r.warnings.empty());
+    CHECK(r.warnings.back().find("no sidechain input") != std::string::npos);
+    // B keying A's gain while A keys B's: a cycle.
+    model::EditTxn t2(s, 2);
+    model::Route back;
+    back.from.track = b;
+    back.to.fx = aGain;
+    t2.create(back);
+    CHECK_FALSE(t2.commit());
+}

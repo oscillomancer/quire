@@ -1642,3 +1642,73 @@ TEST_CASE("a transport write in progress never stalls the audio callback" *
         engine.stop();
     }
 }
+
+TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live (ADR-0018)" *
+          doctest::description("rt")) {
+    // synthSession's track (a sine and a 64-sample latent gain) keys a key mix
+    // on a second track. Monitoring that track makes it live: the key then
+    // crosses from the renderer to the callback through a frontier ring.
+    for (const bool monitored : {false, true})
+        for (const EngineOptions& options :
+             {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}}) {
+            INFO("monitored " << monitored << ", anticipative " << options.anticipative
+                              << ", workers " << options.workers);
+            model::Session s = synthSession(-3.0, "com.suppleaudio.test.gain");
+            {
+                model::EditTxn t(s, 2);
+                Id source;
+                for (const auto& e : s.tracks)
+                    if (e.id != kMaster) source = e.id;
+                model::Track tr;
+                tr.name = "Keyed";
+                tr.parent = kMaster;
+                const Id keyed = t.create(tr);
+                t.modify<model::Track>(kMaster,
+                                       [&](model::Track& m) { m.children.push_back(keyed); });
+                model::FxInstance fx;
+                fx.plugin.id = "com.suppleaudio.test.keymix";
+                const Id f = t.create(fx);
+                t.modify<model::Track>(keyed, [&](model::Track& x) { x.chain.push_back(f); });
+                model::Route key;
+                key.from.track = source;
+                key.to.fx = f;
+                t.create(key);
+                s = t.commit().value();
+            }
+            if (monitored) s = monitoring(s);  // the last track: the keyed one
+            auto pool = makePool();
+            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+            auto rtPool = makePool();
+            MediaCache media;
+            DummyBackend backend(
+                {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+            Engine engine(rtPool, media, options);
+            REQUIRE(
+                engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
+            REQUIRE(engine.load(s).ok());
+            if (options.anticipative) REQUIRE(engine.awaitPlan());
+            engine.play();
+            if (options.anticipative && !monitored)
+                runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+            else if (options.anticipative) {
+                engine.awaitTransport();
+                for (int i = 0; i < (48000 * 2 + 4096) / 128; i += 16) {
+                    REQUIRE(engine.awaitRendered(4096));
+                    backend.run(16);
+                }
+            } else {
+                backend.run((48000 * 2 + 4096) / 128);
+            }
+            engine.stop();
+            CHECK(engine.processErrors() == 0);
+            const std::uint32_t L = engine.outputLatency();
+            const auto& cap = backend.capture();
+            CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+            CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
+            double energy = 0;
+            for (std::size_t i = 0; i < 96000; ++i)
+                energy += static_cast<double>(offline.audio.channels[0][i]) *
+                          static_cast<double>(offline.audio.channels[0][i]);
+            CHECK(energy > 1.0);
+        }
+}

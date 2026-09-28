@@ -1369,6 +1369,10 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "params": {},
     "patch": {},
+    "sidechain_channels": {
+      "type": "integer",
+      "description": "The plug-in's key input: route.add {fx} feeds it"
+    },
     "params_total": {
       "type": "integer",
       "description": "Plain parameters matching; at most 512 are listed."
@@ -4173,9 +4177,9 @@ Result:
 
 ## `route.add@1`
 
-Send one track to another track, bus, or the master.
+Send one track to another track, bus, the master, or a plug-in's key.
 
-The destination must not feed the source. Master accepts routes. Hardware and plugin sidechain routing are not supported yet.
+The destination must not feed the source. Master accepts routes. With fx instead of to, the send feeds that plug-in's sidechain (key) input — e.g. a kick keying a compressor on the bass; it is delay-compensated, and soloing the keyed track does not stop the key. Hardware routing is not supported yet.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -4185,6 +4189,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `from` | string |  |  |  |  |
 | `to` | string |  |  |  |  |
+| `fx` | string |  |  |  | Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out |
 | `tap` | string |  |  |  |  |
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
@@ -4210,6 +4215,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 ### Errors
 
 - `route.cycle`: the send would feed back Hint: choose another destination
+- `route.no_sidechain`: the plug-in has no key input Hint: pick another plug-in
 
 ### Examples
 
@@ -4220,6 +4226,26 @@ Kind: `edit`. Exposure: `mcp-tool`.
   "from": "tr_1",
   "to": "tr_0",
   "volume_db": "-6 dB"
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "sd_1"
+}
+
+```
+
+**Key a plug-in from a track, before its fader** (`song_with_keymix`)
+
+```json
+{
+  "from": "tr_1",
+  "fx": "fx_1",
+  "tap": "pre_fader"
 }
 
 ```
@@ -4268,6 +4294,9 @@ Kind: `query`. Exposure: `mcp-tool`.
           "to": {
             "type": "string"
           },
+          "fx": {
+            "type": "string"
+          },
           "tap": {
             "type": "string"
           },
@@ -4281,7 +4310,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "boolean"
           }
         },
-        "required": ["id", "from", "to", "tap", "volume_db", "pan", "mute"],
+        "required": ["id", "from", "to", "fx", "tap", "volume_db", "pan", "mute"],
         "additionalProperties": false
       }
     }
@@ -4369,6 +4398,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `route` | string |  |  |  |  |
 | `from` | string |  |  |  |  |
 | `to` | string |  |  |  |  |
+| `fx` | string |  |  |  | Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out |
 | `tap` | string |  |  |  |  |
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |

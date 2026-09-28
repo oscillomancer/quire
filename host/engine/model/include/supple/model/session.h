@@ -204,6 +204,9 @@ class EditTxn {
 // at bar 1. Errors: code "model.invariant" with a path like "/tracks/tr_3".
 Status checkInvariants(const Session& s);
 
+// The track whose FX chain holds `fx` (not input chains or take FX), if any.
+std::optional<Id> trackOfFx(const Session& s, Id fx);
+
 // Object-level differences, deterministic order (kind, then ID). `fields`
 // lists the changed top-level fields of updated objects (JSON member names).
 struct ObjectDiff {

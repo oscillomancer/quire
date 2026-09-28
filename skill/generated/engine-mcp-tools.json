@@ -1041,6 +1041,10 @@
         },
         "params": {},
         "patch": {},
+        "sidechain_channels": {
+          "type": "integer",
+          "description": "The plug-in's key input: route.add {fx} feeds it"
+        },
         "params_total": {
           "type": "integer",
           "description": "Plain parameters matching; at most 512 are listed."
@@ -3017,8 +3021,8 @@
   },
   {
     "name": "route_add",
-    "title": "Send one track to another track, bus, or the master.",
-    "description": "Send one track to another track, bus, or the master. The destination must not feed the source. Master accepts routes. Hardware and plugin sidechain routing are not supported yet. See describe for errors and examples.",
+    "title": "Send one track to another track, bus, the master, or a plug-in's key.",
+    "description": "Send one track to another track, bus, the master, or a plug-in's key. The destination must not feed the source. Master accepts routes. With fx instead of to, the send feeds that plug-in's sidechain (key) input — e.g. a kick keying a compressor on the bass; it is delay-compensated, and soloing the keyed track does not stop the key. Hardware routing is not supported yet. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "route_add_args",
@@ -3030,6 +3034,11 @@
         "to": {
           "type": "string",
           "pattern": "^tr_[0-9]+$"
+        },
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out"
         },
         "tap": {
           "type": "string",
@@ -3071,7 +3080,7 @@
           "type": "boolean"
         }
       },
-      "required": ["from", "to"],
+      "required": ["from"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -3120,6 +3129,9 @@
               "to": {
                 "type": "string"
               },
+              "fx": {
+                "type": "string"
+              },
               "tap": {
                 "type": "string"
               },
@@ -3133,7 +3145,7 @@
                 "type": "boolean"
               }
             },
-            "required": ["id", "from", "to", "tap", "volume_db", "pan", "mute"],
+            "required": ["id", "from", "to", "fx", "tap", "volume_db", "pan", "mute"],
             "additionalProperties": false
           }
         }
@@ -3194,6 +3206,11 @@
         "to": {
           "type": "string",
           "pattern": "^tr_[0-9]+$"
+        },
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$",
+          "description": "Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out"
         },
         "tap": {
           "type": "string",

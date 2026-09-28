@@ -111,6 +111,7 @@ class EngineApp : public cmd::Host {
     Result<json::Value> fxSchema(const model::FxInstance& fx);
     // The plugin's CLAP parameters (from a scratch instance).
     Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
+    Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input
     // fx's patch after applying `patch` (a merge patch, or a complete patch
     // when `replace`), validated by the plugin; the complete canonical patch.
     Result<json::Value> mergedPatch(const model::FxInstance& fx, const json::Value& patch,

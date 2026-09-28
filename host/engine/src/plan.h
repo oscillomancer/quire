@@ -197,6 +197,9 @@ struct ChunkRing {
 struct Edge {
     std::size_t from = 0;     // node index
     std::optional<Id> route;  // empty for parent sends
+    // A key route (ADR-0018): the destination chain stage whose sidechain
+    // input this feeds (-1: the node's input sum).
+    int stage = -1;
     model::Tap tap = model::Tap::PostFader;
     double gainL = 1.0, gainR = 1.0;
     double volumeDb = 0.0, pan = 0.0;
@@ -242,6 +245,10 @@ struct Stage {
     std::int64_t latency = 0;
     Delay dry;  // bypassed or partly-dry signal, delayed to match the stage
     Stereo out, dryBuf;
+    // The key (ADR-0018): key edges sum here before the stage runs.
+    bool keyed = false;
+    std::uint32_t keyChannels = 0;  // the plug-in's (1: the key is mixed to mono)
+    Stereo key;
     std::vector<host::Event> blockEvents;
     std::vector<host::OutputEvent> outStorage;
     host::OutputEvents outEvents;
@@ -283,6 +290,12 @@ struct Node {
     double volumeDb = 0.0, pan = 0.0, panLawDb = -3.0;
     bool mute = false, master = false;
     bool soloSilenced = false;  // another track is soloed and this one is not on its path
+    // Solo acts on what the node sends (its edges, not its keys: ADR-0018):
+    // this block's gain, ramped from the one last applied (carried across swaps).
+    std::vector<float> soloGain;
+    float soloApplied = 1.0f;
+    bool soloValid = false;  // soloApplied is set (a new plan's first block starts at its target)
+    bool soloUnity = true;   // the gain is 1 for the whole block
     // Input monitoring (ADR-0014): the device inputs this track hears (0-based;
     // one = mono to both sides), and whether it is live (monitors, or is fed
     // by a node that does).

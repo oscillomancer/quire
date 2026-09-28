@@ -229,6 +229,25 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     auto first = build();
     if (!first) return std::move(first).error();
     std::unique_ptr<detail::Plan> plan = std::move(*first);
+    {
+        // A key connected or disconnected is part of a VST3's activation (its
+        // auxiliary bus), which a processing instance cannot change: it gets a
+        // fresh one (ADR-0018). CLAP plug-ins hear the key or silence as is.
+        bool keyChanged = false;
+        for (const detail::Node& n : plan->nodes)
+            for (const detail::Stage& st : n.chain)
+                if (st.instance && st.instance->processing() && st.instance->sidechainChannels() &&
+                    st.instance->info().format == "vst3" &&
+                    st.instance->sidechainActive() != st.keyed) {
+                    plugins_.restart(st.fx);
+                    keyChanged = true;
+                }
+        if (keyChanged) {
+            auto again = build();
+            if (!again) return std::move(again).error();
+            plan = std::move(*again);
+        }
+    }
     // ADR-0014: a plugin the callback plays live that the renderer now takes
     // over (monitoring off) could only be rendered ahead once the callback
     // lets go at the hand-over point — until then the renderer would pass it
@@ -799,10 +818,16 @@ void Engine::rendererLoop(std::uint64_t seen) {
         const bool ok =
             detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
         if (!ok) processErrors_.fetch_add(1);
-        auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
+        auto fill = [&](detail::Chunk* c, const detail::Stereo& from,
+                        const detail::Node* solo = nullptr) {
             if (ok) {
                 std::copy_n(from.l.begin(), n, c->l.begin());
                 std::copy_n(from.r.begin(), n, c->r.begin());
+                if (solo && !solo->soloUnity)  // a send carries its source's solo gain
+                    for (std::uint32_t i = 0; i < n; ++i) {
+                        c->l[i] *= solo->soloGain[i];
+                        c->r[i] *= solo->soloGain[i];
+                    }
             } else {
                 std::fill(c->l.begin(), c->l.end(), 0.0f);
                 std::fill(c->r.begin(), c->r.end(), 0.0f);
@@ -816,9 +841,11 @@ void Engine::rendererLoop(std::uint64_t seen) {
             for (std::size_t j = 0; j < plan_->frontier.size(); ++j) {
                 const detail::Edge& e = plan_->edges[plan_->frontier[j]];
                 const detail::Node& src = plan_->nodes[e.from];
-                fill(plan_->frontierRings[j]->slot(), e.tap == model::Tap::PreFx      ? src.preFx
-                                                      : e.tap == model::Tap::PreFader ? src.preFader
-                                                                                      : src.post);
+                fill(plan_->frontierRings[j]->slot(),
+                     e.tap == model::Tap::PreFx      ? src.preFx
+                     : e.tap == model::Tap::PreFader ? src.preFader
+                                                     : src.post,
+                     e.stage < 0 ? &src : nullptr);
                 plan_->frontierRings[j]->publish();
             }
         } else {

@@ -175,6 +175,7 @@ enum class Tap : std::uint8_t { PostFader, PreFader, PreFx };
 
 struct RouteEnd {
     std::optional<Id> track;
+    std::optional<Id> fx;  // to only: a plug-in's sidechain input (key), ADR-0018
     std::optional<std::vector<int>> hwChannels;  // hw_input (from) / hw_output (to), 1-based
     std::optional<std::string> midiDevice;       // midi_input (from only)
 };

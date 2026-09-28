@@ -42,14 +42,15 @@ auto idResultSchema() {
 }
 
 struct RouteArgs {
-    std::string from, to;
+    std::string from;
+    std::optional<std::string> to, fx;
     std::optional<model::Tap> tap;
     std::optional<double> volumeDb, pan;
     std::optional<bool> mute;
 };
 struct RouteSetArgs {
     std::string route;
-    std::optional<std::string> from, to;
+    std::optional<std::string> from, to, fx;
     std::optional<model::Tap> tap;
     std::optional<double> volumeDb, pan;
     std::optional<bool> mute;
@@ -58,7 +59,7 @@ struct RouteRef {
     std::string route;
 };
 struct RouteEntry {
-    std::string id, from, to, tap;
+    std::string id, from, to, fx, tap;
     double volumeDb = 0, pan = 0;
     bool mute = false;
 };
@@ -183,6 +184,9 @@ schema::Schema<T> routeArgsSchema(const char* name) {
     if constexpr (std::is_same_v<T, RouteSetArgs>) b.field("route", &T::route, idSchema("sd"));
     b.field("from", &T::from, idSchema("tr"));
     b.field("to", &T::to, idSchema("tr"));
+    b.field("fx", &T::fx,
+            idSchema("fx").doc("Feed this plug-in's sidechain (key) input instead of a track's "
+                               "input; `to` may be left out"));
     b.field("tap", &T::tap, tapSchema());
     b.field("volume_db", &T::volumeDb,
             schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB));
@@ -197,9 +201,12 @@ std::optional<std::vector<Id>> routeCycle(const model::Session& s, Id from, Id t
     std::map<Id, std::vector<Id>> edges;
     for (const auto& e : s.tracks)
         if (e.value->parent && e.value->parentSend.enabled) edges[e.id].push_back(*e.value->parent);
-    for (const auto& e : s.routes)
-        if (e.id != ignored && e.value->from.track && e.value->to.track)
-            edges[*e.value->from.track].push_back(*e.value->to.track);
+    for (const auto& e : s.routes) {
+        if (e.id == ignored || !e.value->from.track) continue;
+        const auto target =
+            e.value->to.fx ? model::trackOfFx(s, *e.value->to.fx) : e.value->to.track;
+        if (target) edges[*e.value->from.track].push_back(*target);
+    }
     std::set<Id> seen;
     std::vector<Id> path{to};
     std::function<bool(Id)> walk = [&](Id cur) {
@@ -217,7 +224,7 @@ std::optional<std::vector<Id>> routeCycle(const model::Session& s, Id from, Id t
     return path;
 }
 
-Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s,
+Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, EngineApp& app,
                                 const model::Route* old = nullptr, std::optional<Id> ignored = {}) {
     model::Route r = old ? *old : model::Route{};
     if (!a.from.empty()) {
@@ -226,16 +233,34 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s,
         r.from = model::RouteEnd{};
         r.from.track = *from;
     }
-    if (!a.to.empty()) {
-        auto to = require<model::Track>(s, a.to, "/to");
+    if (a.fx) {  // a key route (ADR-0018)
+        auto fx = require<model::FxInstance>(s, *a.fx, "/fx");
+        if (!fx) return std::move(fx).error();
+        const auto owner = model::trackOfFx(s, *fx);
+        if (!owner)
+            return Error("route.fx", *a.fx + " is not in a track's FX chain", "/fx",
+                         "key routes feed plug-ins in track chains (not take or input FX)");
+        if (a.to && *a.to != owner->str())
+            return Error("route.endpoint", *a.fx + " is on " + owner->str() + ", not " + *a.to,
+                         "/to", "leave out `to` or give " + owner->str());
+        auto channels = app.fxSidechainChannels(*s.fx.find(*fx));
+        if (!channels) return std::move(channels).error().at("/fx");
+        if (*channels == 0)
+            return Error("route.no_sidechain", *a.fx + " has no sidechain input", "/fx",
+                         "choose a plug-in with a key input (fx.describe shows `sidechain`)");
+        r.to = model::RouteEnd{};
+        r.to.fx = *fx;
+    } else if (a.to) {
+        auto to = require<model::Track>(s, *a.to, "/to");
         if (!to) return std::move(to).error();
         r.to = model::RouteEnd{};
         r.to.track = *to;
     }
-    if (!r.from.track || !r.to.track)
-        return Error("route.endpoint", "both track endpoints are required", "",
-                     "give from and to track ids");
-    if (auto cycle = routeCycle(s, *r.from.track, *r.to.track, ignored)) {
+    const std::optional<Id> target = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
+    if (!r.from.track || !target)
+        return Error("route.endpoint", "a source track and a destination are required", "",
+                     "give from and to (a track) or fx (a plug-in's key)");
+    if (auto cycle = routeCycle(s, *r.from.track, *target, ignored)) {
         std::string names;
         for (Id id : *cycle) names += (names.empty() ? "" : " -> ") + id.str();
         return Error("route.cycle", "route creates a cycle: " + names, "/to",
@@ -291,19 +316,25 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "route.add";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Send one track to another track, bus, or the master.";
+        c.summary = "Send one track to another track, bus, the master, or a plug-in's key.";
         c.description =
-            "The destination must not feed the source. Master accepts routes. Hardware and plugin "
-            "sidechain routing are not supported yet.";
+            "The destination must not feed the source. Master accepts routes. With fx instead of "
+            "to, the send feeds that plug-in's sidechain (key) input — e.g. a kick keying a "
+            "compressor on the bass; it is delay-compensated, and soloing the keyed track does not "
+            "stop the key. Hardware routing is not supported yet.";
         c.tags = {"route", "mix"};
         c.args = routeArgsSchema<RouteArgs>("route_add_args");
         c.result = idResultSchema();
-        c.errors = {{"route.cycle", "the send would feed back", "choose another destination"}};
-        c.examples = {{"Send a track to the master",
-                       j(R"({"from":"tr_1","to":"tr_0","volume_db":"-6 dB"})"),
-                       j(R"({"id":"sd_1"})"), "song"}};
+        c.errors = {{"route.cycle", "the send would feed back", "choose another destination"},
+                    {"route.no_sidechain", "the plug-in has no key input", "pick another plug-in"}};
+        c.examples = {
+            {"Send a track to the master", j(R"({"from":"tr_1","to":"tr_0","volume_db":"-6 dB"})"),
+             j(R"({"id":"sd_1"})"), "song"},
+            {"Key a plug-in from a track, before its fader",
+             j(R"({"from":"tr_1","fx":"fx_1","tap":"pre_fader"})"), j(R"({"id":"sd_1"})"),
+             "song_with_keymix"}};
         c.run = [](const RouteArgs& a, Context& ctx) -> Result<IdResult> {
-            auto r = buildRoute(a, app(ctx).view());
+            auto r = buildRoute(a, app(ctx).view(), app(ctx));
             if (!r) return std::move(r).error();
             return IdResult{app(ctx).txn().create(std::move(*r)).str()};
         };
@@ -324,9 +355,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             const auto s = app(ctx).view();
             auto id = require<model::Route>(s, a.route, "/route");
             if (!id) return std::move(id).error();
-            RouteArgs edits{
-                a.from.value_or(""), a.to.value_or(""), a.tap, a.volumeDb, a.pan, a.mute};
-            auto r = buildRoute(edits, s, s.routes.find(*id), *id);
+            RouteArgs edits{a.from.value_or(""), a.to, a.fx, a.tap, a.volumeDb, a.pan, a.mute};
+            auto r = buildRoute(edits, s, app(ctx), s.routes.find(*id), *id);
             if (!r) return std::move(r).error();
             app(ctx).txn().put<model::Route>(*id, std::move(*r));
             return Empty{};
@@ -373,6 +403,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                          .field("id", &RouteEntry::id, schema::string())
                          .field("from", &RouteEntry::from, schema::string())
                          .field("to", &RouteEntry::to, schema::string())
+                         .field("fx", &RouteEntry::fx, schema::string())
                          .field("tap", &RouteEntry::tap, schema::string())
                          .field("volume_db", &RouteEntry::volumeDb, schema::number())
                          .field("pan", &RouteEntry::pan, schema::number())
@@ -384,10 +415,12 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.examples = {{"No sends yet", j("{}"), j(R"({"routes":[]})"), "empty"}};
         c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<RouteList> {
             RouteList out;
-            for (const auto& e : app(ctx).view().routes) {
+            const auto view = app(ctx).view();
+            for (const auto& e : view.routes) {
                 const auto& r = *e.value;
+                const auto target = r.to.fx ? model::trackOfFx(view, *r.to.fx) : r.to.track;
                 out.routes.push_back({e.id.str(), r.from.track ? r.from.track->str() : "",
-                                      r.to.track ? r.to.track->str() : "",
+                                      target ? target->str() : "", r.to.fx ? r.to.fx->str() : "",
                                       r.tap == model::Tap::PostFader  ? "post_fader"
                                       : r.tap == model::Tap::PreFader ? "pre_fader"
                                                                       : "pre_fx",

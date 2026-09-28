@@ -131,6 +131,12 @@ Result<std::vector<host::ParamInfo>> EngineApp::fxParams(const model::FxInstance
     return (*in)->params();
 }
 
+Result<std::uint32_t> EngineApp::fxSidechainChannels(const model::FxInstance& fx) {
+    auto in = scratch(fx);
+    if (!in) return std::move(in).error();
+    return (*in)->sidechainChannels();
+}
+
 Result<json::Value> EngineApp::mergedPatch(const model::FxInstance& fx, const json::Value& patch,
                                            bool replace) {
     auto inr = scratch(fx);
@@ -1074,6 +1080,11 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
+    if (fixture == "song_with_keymix") {  // + tr_2 "Keyed" with fx_1, a key mix (ADR-0018)
+        run("track.add", R"({"name": "Keyed"})");
+        run("fx.add", R"({"track": "tr_2", "plugin": "com.suppleaudio.test.keymix"})");
+        return;
+    }
     if (fixture == "song_with_route") {
         run("route.add", R"({"from":"tr_1","to":"tr_0"})");
         return;

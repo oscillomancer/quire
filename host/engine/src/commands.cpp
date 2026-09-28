@@ -504,6 +504,7 @@ struct FxDescription {
     std::string plugin, name, description;
     std::optional<json::Value> params, patch;
     std::optional<std::int64_t> paramsTotal;
+    std::optional<std::int64_t> sidechainChannels;  // a key input (ADR-0018)
 };
 constexpr std::size_t kMaxListedParams = 512;
 
@@ -1030,7 +1031,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             gone.insert(id);
             for (const auto& e : s.routes)
                 if ((e.value->from.track && *e.value->from.track == id) ||
-                    (e.value->to.track && *e.value->to.track == id)) {
+                    (e.value->to.track && *e.value->to.track == id) ||
+                    (e.value->to.fx && std::count(tr.chain.begin(), tr.chain.end(),
+                                                  *e.value->to.fx))) {  // keys into its plug-ins
                     gone.insert(e.id);
                     t.remove<model::Route>(e.id);
                 }
@@ -1573,8 +1576,14 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (const auto& e : s.takes)
                 if (std::count(e.value->chain.begin(), e.value->chain.end(), *id))
                     t.modify<model::Take>(e.id, [&](model::Take& tk) { drop(tk.chain); });
+            std::set<Id> gone{*id};
+            for (const auto& e : s.routes)  // key routes into it (ADR-0018)
+                if (e.value->to.fx && *e.value->to.fx == *id) {
+                    gone.insert(e.id);
+                    t.remove<model::Route>(e.id);
+                }
             for (const auto& e : s.envelopes)
-                if (e.value->target.object == *id) t.remove<model::Envelope>(e.id);
+                if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
             t.remove<model::FxInstance>(*id);
             return Empty{};
         };
@@ -1752,6 +1761,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("description", &FxDescription::description, schema::string())
                 .field("params", &FxDescription::params, schema::any())
                 .field("patch", &FxDescription::patch, schema::any())
+                .field("sidechain_channels", &FxDescription::sidechainChannels,
+                       schema::integer().doc("The plug-in's key input: route.add {fx} feeds it"))
                 .field("params_total", &FxDescription::paramsTotal,
                        schema::integer().doc("Plain parameters matching; at most " +
                                              std::to_string(kMaxListedParams) + " are listed."))
@@ -1772,6 +1783,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             auto d = app.describeFx(fx, !a.full);
             if (!d) return std::move(d).error();
             r.description = *d;
+            if (auto key = app.fxSidechainChannels(fx); key && *key > 0) r.sidechainChannels = *key;
             if (a.full) {
                 auto schema = app.fxSchema(fx);
                 if (schema && schema->isObject() && schema->find("params"))

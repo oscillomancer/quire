@@ -605,6 +605,7 @@ const Schema<Route>& schemaOf<Route>() {
         auto end =
             schema::object<RouteEnd>("route_end")
                 .field("track", &RouteEnd::track, idSchema())
+                .field("fx", &RouteEnd::fx, idSchema())
                 .field("hw_channels", &RouteEnd::hwChannels, schema::arrayOf(intS().range(1, 1024)))
                 .field("midi_device", &RouteEnd::midiDevice, str())
                 .build();

@@ -188,9 +188,11 @@ Result<std::vector<Id>> topoOrder(const Session& s) {
     };
     for (const auto& e : s.tracks)
         if (e.value->parent && e.value->parentSend.enabled) link(e.id, *e.value->parent);
-    for (const auto& e : s.routes)
-        if (e.value->from.track && e.value->to.track && !e.value->mute)
-            link(*e.value->from.track, *e.value->to.track);
+    for (const auto& e : s.routes) {
+        const model::Route& r = *e.value;
+        const std::optional<Id> to = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
+        if (r.from.track && to && !r.mute) link(*r.from.track, *to);
+    }
     std::set<Id> ready;
     for (const auto& [id, d] : indeg)
         if (d == 0) ready.insert(id);
@@ -332,10 +334,23 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     }
     for (const auto& e : s.routes) {
         const model::Route& r = *e.value;
-        if (!r.from.track || !r.to.track || r.mute) continue;
+        const std::optional<Id> toTrack = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
+        if (!r.from.track || !toTrack || r.mute) continue;
         Edge ed;
         ed.from = index.at(*r.from.track);
         ed.route = e.id;
+        if (r.to.fx) {  // a key route: into that stage's sidechain input (ADR-0018)
+            const model::Track& owner = *s.tracks.find(*toTrack);
+            ed.stage = static_cast<int>(
+                std::find(owner.chain.begin(), owner.chain.end(), *r.to.fx) - owner.chain.begin());
+            Stage& st = p.nodes[index.at(*toTrack)].chain[static_cast<std::size_t>(ed.stage)];
+            if (!st.instance || st.instance->sidechainChannels() == 0) {
+                p.warnings.push_back(e.id.str() + ": " + r.to.fx->str() +
+                                     " has no sidechain input; the key route is ignored");
+                continue;
+            }
+            st.keyed = true;
+        }
         ed.tap = r.tap;
         ed.volumeDb = r.volumeDb;
         ed.pan = r.pan;
@@ -345,7 +360,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         ed.gainR = g * pr;
         ed.mono = r.mono;
         ed.invert = r.phaseInvert;
-        pending.push_back({ed.from, index.at(*r.to.track), std::move(ed), 1 + e.id.n});
+        pending.push_back({ed.from, index.at(*toTrack), std::move(ed), 1 + e.id.n});
     }
     std::sort(pending.begin(), pending.end(), [](const Pending& a, const Pending& b) {
         return a.to != b.to ? a.to < b.to : a.from != b.from ? a.from < b.from : a.key < b.key;
@@ -490,9 +505,19 @@ Status prepare(Plan& p, const Session& s) {
             if (st.instance) {
                 host::Instance& in = *st.instance;
                 in.serviceMainThread();
-                if (in.active() && (in.sampleRate() != p.rate || in.maxFrames() < block))
+                // A key connected or not is part of the activation (a VST3's
+                // auxiliary bus); an instance still processing keeps its own
+                // (Engine::load replaces it, ADR-0018).
+                const bool keyChanged =
+                    in.sidechainActive() != (st.keyed && in.sidechainChannels());
+                if (in.active() && (in.sampleRate() != p.rate || in.maxFrames() < block ||
+                                    (keyChanged && !in.processing())))
                     in.deactivate();
-                if (!in.active()) SUPPLE_TRY(in.activate(p.rate, 1, p.block));
+                if (!in.active()) {
+                    SUPPLE_TRY(in.setSidechainActive(st.keyed));
+                    SUPPLE_TRY(in.activate(p.rate, 1, p.block));
+                }
+                st.keyChannels = std::min<std::uint32_t>(in.sidechainChannels(), 2);
                 st.latency = in.latency();
                 st.instrument = in.audioInputChannels() == 0;
                 if (n.noteTarget < 0 && in.acceptsNotes()) n.noteTarget = stageIndex;
@@ -503,6 +528,7 @@ Status prepare(Plan& p, const Session& s) {
             st.dry.init(st.latency);
             st.out.init(block);
             st.dryBuf.init(block);
+            st.key.init(st.keyed ? block : 0);
             st.outStorage.resize(256);
             st.outEvents.storage = st.outStorage;
             n.latChain += st.latency;
@@ -513,17 +539,26 @@ Status prepare(Plan& p, const Session& s) {
         n.preFader.init(block);
         n.post.init(block);
     }
-    // Latency compensation, in topological order.
+    // Latency compensation, in topological order. A key lines up with its
+    // stage's input: the node's input latency plus the stages before it.
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         Node& n = p.nodes[i];
+        std::vector<std::int64_t> before(n.chain.size() + 1, 0);
+        for (std::size_t k = 0; k < n.chain.size(); ++k)
+            before[k + 1] = before[k] + n.chain[k].latency;
+        auto at = [&](const Edge& ed) {
+            return ed.stage < 0 ? std::int64_t{0} : before[static_cast<std::size_t>(ed.stage)];
+        };
         n.latIn = 0;
         for (std::size_t e : n.in)
-            n.latIn = std::max(n.latIn, latTap(p.nodes[p.edges[e].from], p.edges[e].tap));
+            n.latIn = std::max(n.latIn,
+                               latTap(p.nodes[p.edges[e].from], p.edges[e].tap) - at(p.edges[e]));
         for (std::size_t e : n.in) {
             Edge& ed = p.edges[e];
-            ed.delay.init(n.latIn - latTap(p.nodes[ed.from], ed.tap));
+            ed.delay.init(n.latIn + at(ed) - latTap(p.nodes[ed.from], ed.tap));
             ed.tmp.init(block);
         }
+        n.soloGain.assign(block, 1.0f);
     }
     const Node& master = p.nodes.back();
     p.outputLatency = master.latIn + master.latChain;
@@ -690,42 +725,56 @@ host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange*
     return t;
 }
 
+namespace {
+// Adds one edge into `into`: its source's tap (with the source's solo gain
+// unless it is a key, ADR-0018), compensation-delayed, with the edge's gains
+// and automation.
+void addEdge(Plan& p, Edge& e, double panLawDb, Stereo& into, std::int64_t pos,
+             std::uint32_t n) SUPPLE_RT {
+    const Node& src = p.nodes[e.from];
+    const bool viaRing = p.split && e.frontier;  // the renderer applied the solo gain
+    const Stereo& tap = viaRing                         ? e.frontierBuf
+                        : e.tap == model::Tap::PreFx    ? src.preFx
+                        : e.tap == model::Tap::PreFader ? src.preFader
+                                                        : src.post;
+    e.tmp.copyFrom(tap, n);
+    if (e.stage < 0 && !viaRing && !src.soloUnity)
+        for (std::uint32_t i = 0; i < n; ++i) {
+            e.tmp.l[i] *= src.soloGain[i];
+            e.tmp.r[i] *= src.soloGain[i];
+        }
+    e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
+    const bool automated = e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
+    const double sign = e.invert ? -1.0 : 1.0;
+    float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        if (automated) {
+            const std::int64_t at = pos + i;
+            const double g =
+                (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
+                    ? 0.0
+                    : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
+            const auto [pl, pr] =
+                panGains((e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, panLawDb);
+            gl = static_cast<float>(sign * g * pl);
+            gr = static_cast<float>(sign * g * pr);
+        }
+        float l = e.tmp.l[i], r = e.tmp.r[i];
+        if (e.mono) l = r = 0.5f * (l + r);
+        into.l[i] += l * gl;
+        into.r[i] += r * gr;
+    }
+}
+}  // namespace
+
 // One block of every node, in order. Returns false on a plugin error.
 bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                  const host::Transport& transport, const void* self) SUPPLE_RT {
     Node& node = p.nodes[index];
     // 1. Sum the inputs (fixed order), each through its compensation delay.
     node.sum.clear(n);
-    for (std::size_t ei : node.in) {
-        Edge& e = p.edges[ei];
-        const Node& src = p.nodes[e.from];
-        const Stereo& tap = p.split && e.frontier           ? e.frontierBuf
-                            : e.tap == model::Tap::PreFx    ? src.preFx
-                            : e.tap == model::Tap::PreFader ? src.preFader
-                                                            : src.post;
-        e.tmp.copyFrom(tap, n);
-        e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
-        const bool automated = e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
-        const double sign = e.invert ? -1.0 : 1.0;
-        float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
-        for (std::uint32_t i = 0; i < n; ++i) {
-            if (automated) {
-                const std::int64_t at = pos + i;
-                const double g =
-                    (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
-                        ? 0.0
-                        : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
-                const auto [pl, pr] = panGains(
-                    (e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, node.panLawDb);
-                gl = static_cast<float>(sign * g * pl);
-                gr = static_cast<float>(sign * g * pr);
-            }
-            float l = e.tmp.l[i], r = e.tmp.r[i];
-            if (e.mono) l = r = 0.5f * (l + r);
-            node.sum.l[i] += l * gl;
-            node.sum.r[i] += r * gr;
-        }
-    }
+    for (std::size_t ei : node.in)
+        if (p.edges[ei].stage < 0) addEdge(p, p.edges[ei], node.panLawDb, node.sum, pos, n);
     // Monitored device input enters with the inputs (spec §1.1).
     if (!node.monitorInputs.empty() && p.deviceIn) {
         const auto channel = [&](std::size_t k) -> const float* {
@@ -903,6 +952,18 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     }
     // 3. The FX chain, in place on `sum`.
     for (Stage& st : node.chain) {
+        // Its key first, every block (the key edges' delay lines and
+        // automation keep time even while the stage is bypassed).
+        if (st.keyed) {
+            const int stageIndex = static_cast<int>(&st - node.chain.data());
+            st.key.clear(n);
+            for (std::size_t ei : node.in)
+                if (p.edges[ei].stage == stageIndex)
+                    addEdge(p, p.edges[ei], node.panLawDb, st.key, pos, n);
+            if (st.keyChannels == 1)
+                for (std::uint32_t i = 0; i < n; ++i)
+                    st.key.l[i] = 0.5f * (st.key.l[i] + st.key.r[i]);
+        }
         // A stage whose plugin is not processing (start_processing failed)
         // passes audio through, delay-compensated, like a bypass.
         if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self)) {
@@ -931,6 +992,11 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         b.inputChannels = st.instrument ? 0 : 2;
         b.outputs = out;
         b.outputChannels = 2;
+        const float* key[2] = {st.key.l.data(), st.key.r.data()};
+        if (st.keyed) {
+            b.sidechain = key;
+            b.sidechainChannels = st.keyChannels;
+        }
         b.frames = n;
         b.events = st.blockEvents;
         b.transport = &transport;
@@ -970,7 +1036,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // 4. Width, volume, pan, mute (and solo). A changed static value ramps
     // from the one last applied (carried across plan swaps).
     float w = static_cast<float>(node.width);
-    const bool silent = node.mute || node.soloSilenced;
+    const bool silent = node.mute;  // solo acts on the edges (below)
     float gl = silent ? 0.0f : static_cast<float>(node.volume * node.panL);
     float gr = silent ? 0.0f : static_cast<float>(node.volume * node.panR);
     const bool automated = node.automated();
@@ -1015,7 +1081,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                     std::tie(pl, pr) = panGains(pan, node.panLawDb);
                 }
             }
-            const double g = muted || node.soloSilenced ? 0.0 : dbToGain(db);
+            const double g = muted ? 0.0 : dbToGain(db);
             gl = static_cast<float>(g * pl);
             gr = static_cast<float>(g * pr);
             if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
@@ -1027,9 +1093,22 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     }
     node.applied = {gl, gr, w};
     node.mixValid = true;
-    if (node.soloSilenced) {  // processed (plugin state continues) but not heard
-        node.preFx.clear(n);  // (the pre-fader taps switch at once; the post ramps)
-        node.preFader.clear(n);
+    // 5. Solo: a silenced node is processed (plugin state continues) but what
+    // it sends fades out over smoothFrames — every tap, except into keys.
+    const float soloTarget = node.soloSilenced ? 0.0f : 1.0f;
+    if (!node.soloValid) {
+        node.soloApplied = soloTarget;
+        node.soloValid = true;
+    }
+    node.soloUnity = soloTarget == 1.0f && node.soloApplied == 1.0f;
+    if (!node.soloUnity) {
+        const float step = 1.0f / static_cast<float>(std::max<std::uint32_t>(p.smoothFrames, 1));
+        float g = node.soloApplied;
+        for (std::uint32_t i = 0; i < n; ++i) {
+            g = g < soloTarget ? std::min(soloTarget, g + step) : std::max(soloTarget, g - step);
+            node.soloGain[i] = g;
+        }
+        node.soloApplied = g;
     }
     return true;
 }
@@ -1190,6 +1269,8 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
             n.rampFrom = old.rampFrom;
             n.rampTo = old.rampTo;
             n.rampLeft = old.rampLeft;
+            n.soloApplied = old.soloApplied;
+            n.soloValid = old.soloValid;
             for (Stage& st : n.chain)
                 for (Stage& os : old.chain)
                     if (st.instance && os.instance == st.instance) {
