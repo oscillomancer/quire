@@ -99,6 +99,46 @@
         }
       ]
     },
+    "job.get@1": {
+      "name": "job.get",
+      "version": 1,
+      "kind": "query",
+      "exposure": "mcp-exec",
+      "summary": "Get a job's status and progress.",
+      "description": "Get a job's status and progress.",
+      "tags": [],
+      "args": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string"
+          }
+        },
+        "required": ["job"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object"
+      },
+      "errors": [],
+      "examples": [
+        {
+          "title": "Get render job",
+          "args": {
+            "job": "jb_1"
+          },
+          "result": {
+            "job": "jb_1",
+            "status": "running",
+            "progress": {
+              "fraction": 0.0,
+              "message": ""
+            }
+          },
+          "fixture": "job_running"
+        }
+      ]
+    },
     "job.list@1": {
       "name": "job.list",
       "version": 1,

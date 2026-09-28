@@ -40,6 +40,7 @@ std::string originText(const cmd::Origin& o) {
 EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {}
 
 EngineApp::~EngineApp() {
+    stopJobs();
     stopEngine();
     scratch_.clear();
 }
@@ -261,23 +262,42 @@ model::MergeOutcome EngineApp::mergeBranch(const cmd::Registry& registry, std::s
 
 Result<OfflineResult> EngineApp::renderMix(const OfflineSettings& settings) {
     OfflineSettings s = settings;
-    if (s.projectDir.empty() && !projectPath_.empty()) s.projectDir = projectPath_.parent_path();
     if (!s.media) s.media = &media_;
+    return renderSession(view(), s);
+}
+
+Result<OfflineResult> EngineApp::renderSession(const model::Session& session,
+                                               const OfflineSettings& settings) {
+    OfflineSettings s = settings;
+    if (s.projectDir.empty() && !projectPath_.empty()) s.projectDir = projectPath_.parent_path();
+    MediaCache localMedia;
+    if (!s.media) s.media = &localMedia;
     // Offline renders use their own plugin instances (engine.md §3): playback
     // is never disturbed and state is deterministic.
     InstancePool offlinePool([this](const model::PluginRef& ref) { return findPlugin(ref.id); },
                              options_.identity);
-    return renderOffline(view(), offlinePool, s);  // inside a batch: with the earlier steps
+    return renderOffline(session, offlinePool, s);
 }
 
 std::string EngineApp::rememberRender(const fs::path& path) {
-    const std::string id = "rd_" + std::to_string(renders_.size() + 1);
-    renders_[id] = path;
+    const std::string id = reserveRenderId();
+    publishRender(id, path);
     return id;
+}
+
+std::string EngineApp::reserveRenderId() {
+    std::lock_guard lock(rendersMutex_);
+    return "rd_" + std::to_string(nextRender_++);
+}
+
+void EngineApp::publishRender(std::string id, const fs::path& path) {
+    std::lock_guard lock(rendersMutex_);
+    renders_[std::move(id)] = path;
 }
 
 Result<fs::path> EngineApp::renderPath(std::string_view reference) const {
     if (reference.starts_with("rd_")) {
+        std::lock_guard lock(rendersMutex_);
         auto it = renders_.find(std::string(reference));
         if (it == renders_.end())
             return Error("engine.unknown_render", "no such render " + std::string(reference), {},
@@ -285,6 +305,28 @@ Result<fs::path> EngineApp::renderPath(std::string_view reference) const {
         return it->second;
     }
     return resolve(fs::path(reference));
+}
+
+void EngineApp::startJob(std::function<void(std::stop_token)> work) {
+    for (auto it = jobs_.begin(); it != jobs_.end();) {
+        if (it->finished->load(std::memory_order_acquire))
+            it = jobs_.erase(it);
+        else
+            ++it;
+    }
+    auto finished = std::make_shared<std::atomic<bool>>(false);
+    jobs_.push_back({std::jthread([hook = options_.jobStartedHook, work = std::move(work),
+                                   finished](std::stop_token stop) {
+                         if (hook) hook();
+                         work(stop);
+                         finished->store(true, std::memory_order_release);
+                     }),
+                     finished});
+}
+
+void EngineApp::stopJobs() {
+    for (auto& job : jobs_) job.thread.request_stop();
+    jobs_.clear();  // jthread joins before the command bus destroys JobManager
 }
 
 // --- real-time engine -----------------------------------------------------------------------
@@ -958,7 +1000,8 @@ std::vector<std::pair<std::string, json::Value>> EngineApp::takeEvents() {
 }
 
 bool EngineApp::actionTransactional(std::string_view command) const {
-    return command == "render.mix";  // writes a file, changes no state
+    return command == "render.mix" || command == "render.stems" || command == "render.regions" ||
+           command == "branch.render-ab";
 }
 
 std::uint64_t EngineApp::clockMs() const {
@@ -1039,10 +1082,6 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         run("marker.add", R"({"pos":4,"name":"Verse"})");
         return;
     }
-    if (fixture == "song_with_region") {
-        run("region.add", R"({"start":0,"end":4,"name":"Verse"})");
-        return;
-    }
     if (fixture == "branch_ahead") {  // an agent branch one edit ahead of main, main current
         run("branch.create", R"({"name": "agent/claude/darker"})");
         run("track.set", R"({"track": "tr_1", "volume_db": -3})");
@@ -1057,6 +1096,10 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     run("item.add",
         R"({"track": "tr_1", "bar": 1, "notation": "voice bass; 1: C2:q r:q C2:q r:q"})");
     if (fixture == "song_with_item") return;
+    if (fixture == "song_with_region") {
+        run("region.add", R"({"start":0,"end":4,"name":"Verse"})");
+        return;
+    }
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})");
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain"})");
     if (fixture == "song_with_env")  // + en_1: fx_2 gain, two points

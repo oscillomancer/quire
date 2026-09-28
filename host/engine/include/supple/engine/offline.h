@@ -12,12 +12,14 @@
 // Deterministic: fixed summation order, one audio thread, fixed block size.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -102,7 +104,13 @@ struct OfflineSettings {
     unsigned threads = 0;
     // Select one track's output without its sends or master processing.
     std::optional<model::Id> track;
+    // Render this track through the master while silencing other top-level tracks.
+    std::optional<model::Id> throughMaster;
     model::Tap tap = model::Tap::PostFader;
+    std::shared_ptr<const std::atomic<bool>> cancelFlag;  // checked between offline blocks
+    std::shared_ptr<std::atomic<double>> progressFlag;
+    double progressBase = 0.0, progressScale = 1.0;
+    std::stop_token stopToken;
 };
 
 struct OfflineResult {

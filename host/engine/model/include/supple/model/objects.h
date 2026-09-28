@@ -34,6 +34,7 @@ struct Project {
     std::string mediaDir = "media";
     double panLawDb = -3.0;  // 0, -3, -4.5, -6
     std::uint64_t seed = 0;
+    json::Value render = json::Value::object();  // render.* defaults and matrix
 };
 
 struct TempoPointObj {

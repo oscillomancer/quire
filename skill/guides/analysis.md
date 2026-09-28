@@ -77,3 +77,8 @@ Multi-note phrases blur envelope numbers; measure envelopes on a single note.
 RMS difference in dB (< 1 dB: very close, > 3 dB: clearly different
 timbre), and the loudness difference it removed before comparing. Use it
 after every change: it tells you exactly what your change did.
+
+`branch.render-ab {a, b, end_beat}` renders two branch heads over the same
+range and returns their render ids with a comparison summary. It does not
+switch the active branch. For an exported stem or region, the render result
+includes a summary report alongside the file path and render id.

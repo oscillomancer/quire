@@ -214,6 +214,54 @@ Result:
 
 ```
 
+## `job.get@1`
+
+Get a job's status and progress.
+
+Get a job's status and progress.
+
+Kind: `query`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object"
+}
+
+```
+
+### Examples
+
+**Get render job** (`job_running`)
+
+```json
+{
+  "job": "jb_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "jb_1",
+  "status": "running",
+  "progress": {
+    "fraction": 0.0,
+    "message": ""
+  }
+}
+
+```
+
 ## `job.list@1`
 
 List session jobs.

@@ -32,6 +32,24 @@ Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"
 
 Use `plugin.list` to find an FX id, `plugin.scan` to refresh the catalogue, `fx.move` to reorder a chain, `fx.patch.get/set` for a semantic patch, and `fx.param.get` for one value. For arrangement edits, `item.set/split/duplicate` and `take.list/add/set/activate` change clips and takes; `marker.*` and `region.*` label the timeline, while `time.convert` maps seconds, beats, and bars.
 
+## Exporting and comparing versions
+
+`render.stems {mode: "isolated", tap: "post_fader"}` writes each top-level
+track before master processing. Use `mode: "through_master"` to hear one stem
+at a time through the master chain. `render.regions` writes named regions; a
+project's `render.matrix` can select tracks or `"master"` for each region.
+`render.dry-run {operation: "regions"}` lists the files and lengths first.
+Patterns such as `{project}-{region_number:02}-{region|replace(" ","_")}`
+name the files; names that escape the renders directory are rejected.
+
+Use `branch.render-ab {a, b, end_beat}` to render and analyze two branch heads
+without switching the active branch. For a long export, pass `job: true` to
+`render.mix`, `render.stems`, or `render.regions`, then use `job.get {job}` or
+`job.wait {job}` for progress and `job.cancel {job}` to stop it. WAV export
+supports 16/24-bit PCM with seeded dither and 32-bit float. Set
+`normalize: {mode: "lufs_i", target: -14, limit_true_peak_db: -1}` on stem or
+region renders to measure the first pass and apply gain on the second.
+
 ## Targets that are safe defaults
 
 | goal | measure | target |

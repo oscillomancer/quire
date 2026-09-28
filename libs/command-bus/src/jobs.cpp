@@ -24,6 +24,7 @@ json::Value JobManager::snapshot(const Job& job) {
     value["job"] = job.id;
     value["status"] = job.status;
     value["progress"] = job.progress;
+    value["progress"]["fraction"] = job.fraction->load(std::memory_order_relaxed);
     if (job.status == "done") value["result"] = job.result;
     if (job.status == "failed") value["error"] = errorJson(job.error);
     return value;
@@ -45,6 +46,16 @@ bool JobManager::cancelled(std::string_view id) const {
     auto it = jobs_.find(std::string(id));
     return it == jobs_.end() || it->second.cancelRequested;
 }
+std::shared_ptr<const std::atomic<bool>> JobManager::cancellationFlag(std::string_view id) const {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    return it == jobs_.end() ? nullptr : it->second.cancelFlag;
+}
+std::shared_ptr<std::atomic<double>> JobManager::progressFlag(std::string_view id) const {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(std::string(id));
+    return it == jobs_.end() ? nullptr : it->second.fraction;
+}
 Status JobManager::progress(std::string_view id, double fraction, std::string message,
                             json::Value extra) {
     std::lock_guard lock(mutex_);
@@ -56,6 +67,7 @@ Status JobManager::progress(std::string_view id, double fraction, std::string me
         return Error("job.progress", "fraction must be between 0 and 1", "/fraction");
     job.progress = extra.isObject() ? std::move(extra) : json::Value::object();
     job.progress["fraction"] = fraction;
+    job.fraction->store(fraction, std::memory_order_relaxed);
     job.progress["message"] = std::move(message);
     auto now = std::chrono::steady_clock::now();
     if (job.lastProgressEvent.time_since_epoch().count() == 0 ||
@@ -87,6 +99,8 @@ Status JobManager::completeWith(std::string_view id, json::Value result,
         }
     }
     it->second.status = "done";
+    it->second.fraction->store(1.0, std::memory_order_relaxed);
+    it->second.progress["fraction"] = 1.0;
     it->second.result = std::move(result);
     events_.emplace_back("job.done", snapshot(it->second));
     cv_.notify_all();
@@ -112,6 +126,7 @@ Status JobManager::cancel(std::string_view id) {
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     if (it->second.status == "running") {
         it->second.cancelRequested = true;
+        it->second.cancelFlag->store(true, std::memory_order_release);
         it->second.status = "cancelled";
         events_.emplace_back("job.done", snapshot(it->second));
         cv_.notify_all();
