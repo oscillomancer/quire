@@ -61,11 +61,11 @@ reports committed in docs.
 | P3.2 | synth DSP modules (VA/wavetable/FM/noise/sub osc; ladder/SVF/comb/formant filters; envs, LFOs, step mods; mod matrix; drive; post-FX; poly/unison/glide/MPE) | **core done** (orchestrator, 3663fe4): `plugins/orrery/engine` — 230-param table, patch codec (whole-patch validation, merge, describe, JSON Schema), real-time engine (bit-identical across block sizes, seeded, wait-free program swap), all module types except real wavetables (sine placeholder), FX rack, IIR half-band decimation; 37 tests. CLAP core + headless module in progress. Open: wavetables, ADAA drive, per-stage ladder saturation, noise tilt, aliasing measurements, performance (10.7 % vs the 3 % target for the reference patch) |
 | P3.3 | parameter optimizer (CMA-ES, multi-descriptor loss) as a sandbox tool | **done** (orchestrator, aa53962): `libs/optimize` CMA-ES; sandbox `optimize.start` job (reference and profile targets, trajectory term, "auto" parameter selection); end-to-end test recovers a hidden Orrery patch within 10 %. Review round 5 fixes (clone lifecycle on one thread, reference analysis off the model thread, prompt cancel, profile validation/weights, envelope terms, render metadata, thread reaping) → analysis (brief analysis-3) |
 | P3.4 | synth evaluation suite (descriptive + reference-matching tasks) and listening queue | draft `specs/eval-harness.md`; model/budget choice queued (HUMAN_REVIEW #8) |
-| P3.5 | EQ | planned |
-| P3.6 | dynamics (comp/limiter with sidechain, gate/expander, transient shaper) | planned |
+| P3.5 | EQ | in progress (Facet [`eq`], Codex `contour`; `docs/specs/effects.md` §2) |
+| P3.6 | dynamics (comp/limiter with sidechain, gate/expander, transient shaper) | compressor/limiter in progress (Ballast [`comp`], Codex `press`; effects.md §3); gate, transient shaper planned |
 | P3.7 | saturation family with oversampling | planned |
 | P3.8 | delay (tempo-synced) and algorithmic reverb | planned |
-| P3.9 | utility + live analyzer publishing core-analysis data | planned |
+| P3.9 | utility + live analyzer publishing core-analysis data | **utility done** (Plumb [`utility`], Codex `trim`, reviewed by the orchestrator; `docs/specs/effects.md` §4): gain/balance/width/channel modes/swap/polarity, bass mono as an LR4 high-pass on the side only (zero latency, exact mono sum), DC block, mute; bit-exact at defaults, block-size invariant, readonly level/correlation meters, compact editor. Analyzer (Gauge) in progress. Open: REAPER load check |
 | P3.10 | clap-validator built in user space; per-plugin REAPER load test | planned |
 | P3.11 | optional REAPER bridge (ReaScript + socket/MCP adapter) | planned |
 
