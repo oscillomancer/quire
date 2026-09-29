@@ -13,6 +13,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -75,15 +76,42 @@ class InstancePool {
     std::uint64_t generation_ = 0;
 };
 
-// Decoded audio media, keyed by resolved path (main thread). Reused across
-// renders; the engine's disk-backed, resampling media cache replaces it.
+// How a take's audio is played back (session-model §1.5). `rate` is the rate
+// the clip reads the variant at, one frame per timeline sample:
+//  * varispeed — `pitch_mode: "resample"` or `preserve_pitch: false` — the
+//    source is resampled to `rate / speed()`, so reading it at `rate` plays
+//    it `speed()` times faster and the pitch follows the rate;
+//  * stretch — `preserve_pitch` with the `"signalsmith"` mode — the source is
+//    stretched (duration / playrate) and transposed by `pitch` semitones with
+//    the pitch preserved, deterministically.
+// An item with nothing to apply (playrate 1, no pitch) is the plain
+// resample, and a `pitch` offset that a resample cannot honour is ignored
+// (the compiler warns).
+struct MediaVariant {
+    double playrate = 1.0;      // 0.01 .. 100
+    double pitch = 0.0;         // semitones
+    bool preservePitch = true;  // ask for a stretch (needs a stretch mode)
+    std::string pitchMode = "signalsmith";
+
+    bool stretch() const {
+        return preservePitch && pitchMode == "signalsmith" && (playrate != 1.0 || pitch != 0.0);
+    }
+    // Source seconds played per timeline second.
+    double speed() const { return playrate * (preservePitch ? 1.0 : std::pow(2.0, pitch / 12.0)); }
+};
+
+// Decoded audio media, keyed by resolved path and variant (main thread).
+// Reused across renders; the engine's disk-backed, resampling media cache
+// replaces it.
 class MediaCache {
   public:
     // Decoded audio at `rate` (resampled once, then kept; 0: the file's own
-    // rate). The resampler is deterministic, so every cache gives the same
-    // samples (offline ≡ real time).
+    // rate), with `variant` applied (a variant that asks for nothing is the
+    // plain resample). The resampler and the stretch are deterministic, so
+    // every cache gives the same samples (offline ≡ real time).
     Result<std::shared_ptr<const audio::AudioData>> get(const std::filesystem::path& path,
-                                                        double rate = 0);
+                                                        double rate = 0,
+                                                        const MediaVariant& variant = {});
     std::size_t size() const { return entries_.size(); }
 
   private:

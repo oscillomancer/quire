@@ -123,7 +123,7 @@ struct Take {
     double playrate = 1.0;
     bool preservePitch = true;
     double pitch = 0.0;  // semitones
-    std::string pitchMode = "resample";
+    std::string pitchMode = "signalsmith";
     double gainDb = 0.0, pan = 0.0;
     bool phaseInvert = false;
     ChannelMode channelMode = ChannelMode::Normal;

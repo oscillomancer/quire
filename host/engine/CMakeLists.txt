@@ -2,11 +2,13 @@ add_subdirectory(model)
 
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/recording.cpp
+          src/stretch.cpp
           src/jack_backend.cpp
           src/app.cpp src/commands.cpp src/extra_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::notation supple::core-params supple::core-analysis supple::core-dsp
+       supple::signalsmith-stretch
   PRIVATE_DEPS supple::product-info ${CMAKE_DL_LIBS})
 
 if(SUPPLE_BUILD_TESTS)

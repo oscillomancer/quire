@@ -59,6 +59,32 @@
       "linkage": "headers"
     },
     {
+      "name": "signalsmith-linear",
+      "dir": "signalsmith-linear",
+      "license": "MIT",
+      "license_file": "signalsmith-linear/LICENSE.txt",
+      "version": "0.6.4",
+      "source": "https://github.com/Signalsmith-Audio/linear",
+      "commit": "de55e6a50ffcf6f8f43f649692d94691c7025151",
+      "sha256": "2cb10d84b96c626255ab46c4aa4c80f64ae532be487063cff6a08903c1445a56",
+      "purpose": "Signalsmith Linear: STFT/FFT layer the stretch is built on (the 1.4.0 release's pinned dependency). Header only; FFT backends (Accelerate/IPP/PFFFT/XSIMD/CMSIS) off",
+      "linkage": "headers",
+      "notes": "sha256 is the upstream release tarball; the vendored files are verbatim except that upstream tests/ are not vendored"
+    },
+    {
+      "name": "signalsmith-stretch",
+      "dir": "signalsmith-stretch",
+      "license": "MIT",
+      "license_file": "signalsmith-stretch/LICENSE.txt",
+      "version": "1.4.0",
+      "source": "https://github.com/Signalsmith-Audio/signalsmith-stretch",
+      "commit": "a670068d9aeb64913331d5cc29337b19a457a7df",
+      "sha256": "077235709ecf2a358545e3ca7bdf32859f70f5c9afb4493e078bd753c9aff284",
+      "purpose": "Pitch-preserving offline time-stretch for media takes (take.playrate/preserve_pitch/pitch, engine.md \u00a74). Header only",
+      "linkage": "headers",
+      "notes": "sha256 is the upstream release tarball; the vendored files are verbatim except that upstream cmd/, web/ and tests/ are not vendored"
+    },
+    {
       "name": "nanovg",
       "dir": "nanovg",
       "license": "Zlib",

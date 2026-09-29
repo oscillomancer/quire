@@ -4629,9 +4629,55 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "start_offset": {
             "type": "number"
+          },
+          "playrate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:x|×))?\\s*$"
+              }
+            ],
+            "x-unit": "x",
+            "x-unit-strings": true,
+            "description": "Quantity strings are range-checked by the server."
+          },
+          "preserve_pitch": {
+            "type": "boolean"
+          },
+          "pitch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:st|semi|semitones))?\\s*$"
+              }
+            ],
+            "x-unit": "st",
+            "x-unit-strings": true,
+            "description": "Quantity strings are range-checked by the server."
+          },
+          "pitch_mode": {
+            "type": "string"
           }
         },
-        "required": ["id", "name", "source", "active", "gain_db", "pan", "start_offset"],
+        "required": [
+          "id",
+          "name",
+          "source",
+          "active",
+          "gain_db",
+          "pan",
+          "start_offset",
+          "playrate",
+          "preserve_pitch",
+          "pitch",
+          "pitch_mode"
+        ],
         "additionalProperties": false
       }
     }
@@ -4664,7 +4710,7 @@ Result:
 
 ## `take.set@1`
 
-Set take gain, pan, channel mode, name, or source offset.
+Set take gain, pan, channel mode, name, source offset, or playrate and pitch.
 
 
 
@@ -4680,6 +4726,10 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `channel_mode` | string |  |  |  |  |
 | `name` | string |  |  |  |  |
 | `start_offset` | number |  |  |  | Source position at the item start; negative for a late first pass. |
+| `playrate` | value | x | 0.01..100.0 |  | Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server. |
+| `preserve_pitch` | boolean |  |  |  | Keep the source's pitch when the playrate changes (the default). With pitch_mode "resample" the pitch follows the speed. |
+| `pitch` | value | st | -48.0..48.0 |  | Pitch offset in semitones. Stretched when the pitch is preserved, otherwise a further speed factor of 2^(pitch/12). Quantity strings are range-checked by the server. |
+| `pitch_mode` | string |  |  |  | Time-stretch algorithm: "signalsmith" (pitch-preserving, the default) or "resample" (varispeed). |
 
 ### Result
 
@@ -4701,6 +4751,58 @@ Kind: `edit`. Exposure: `mcp-tool`.
 {
   "take": "tk_1",
   "gain_db": "-3 dB"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Twice as fast, pitch and all** (`song_with_item`)
+
+```json
+{
+  "take": "tk_1",
+  "playrate": 2,
+  "preserve_pitch": false
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Half speed, pitch kept** (`song_with_item`)
+
+```json
+{
+  "take": "tk_1",
+  "playrate": 0.5
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**An octave up, same tempo** (`song_with_item`)
+
+```json
+{
+  "take": "tk_1",
+  "pitch": 12
 }
 
 ```

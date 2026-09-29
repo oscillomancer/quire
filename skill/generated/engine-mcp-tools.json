@@ -3409,9 +3409,55 @@
               },
               "start_offset": {
                 "type": "number"
+              },
+              "playrate": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:x|×))?\\s*$"
+                  }
+                ],
+                "x-unit": "x",
+                "x-unit-strings": true,
+                "description": "Quantity strings are range-checked by the server."
+              },
+              "preserve_pitch": {
+                "type": "boolean"
+              },
+              "pitch": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:st|semi|semitones))?\\s*$"
+                  }
+                ],
+                "x-unit": "st",
+                "x-unit-strings": true,
+                "description": "Quantity strings are range-checked by the server."
+              },
+              "pitch_mode": {
+                "type": "string"
               }
             },
-            "required": ["id", "name", "source", "active", "gain_db", "pan", "start_offset"],
+            "required": [
+              "id",
+              "name",
+              "source",
+              "active",
+              "gain_db",
+              "pan",
+              "start_offset",
+              "playrate",
+              "preserve_pitch",
+              "pitch",
+              "pitch_mode"
+            ],
             "additionalProperties": false
           }
         }
@@ -3427,8 +3473,8 @@
   },
   {
     "name": "take_set",
-    "title": "Set take gain, pan, channel mode, name, or source offset.",
-    "description": "Set take gain, pan, channel mode, name, or source offset.  See describe for errors and examples.",
+    "title": "Set take gain, pan, channel mode, name, source offset, or playrate and pitch.",
+    "description": "Set take gain, pan, channel mode, name, source offset, or playrate and pitch.  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "take_set_args",
@@ -3479,6 +3525,47 @@
         "start_offset": {
           "type": "number",
           "description": "Source position at the item start; negative for a late first pass."
+        },
+        "playrate": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 100.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:x|×))?\\s*$"
+            }
+          ],
+          "x-unit": "x",
+          "x-unit-strings": true,
+          "description": "Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server. (x; accepts quantity strings)"
+        },
+        "preserve_pitch": {
+          "type": "boolean",
+          "description": "Keep the source's pitch when the playrate changes (the default). With pitch_mode \"resample\" the pitch follows the speed."
+        },
+        "pitch": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -48.0,
+              "maximum": 48.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:st|semi|semitones))?\\s*$"
+            }
+          ],
+          "x-unit": "st",
+          "x-unit-strings": true,
+          "description": "Pitch offset in semitones. Stretched when the pitch is preserved, otherwise a further speed factor of 2^(pitch/12). Quantity strings are range-checked by the server. (st; accepts quantity strings)"
+        },
+        "pitch_mode": {
+          "type": "string",
+          "enum": ["resample", "signalsmith"],
+          "description": "Time-stretch algorithm: \"signalsmith\" (pitch-preserving, the default) or \"resample\" (varispeed)."
         }
       },
       "required": ["take"],

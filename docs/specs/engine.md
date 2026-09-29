@@ -410,9 +410,17 @@ granted, and CPU governor (read-only facts).
   at another rate plays (previously refused). The cache is in memory and the
   resampling is synchronous at plan compile — the disk-backed, content-hashed
   cache and background decode above are still to come.
+- **Take playrate and pitch:** a take's playback variant is built once per
+  (file, plan rate, variant) in the same cache: varispeed resamples to
+  `rate / speed` (`pitch_mode: "resample"` or `preserve_pitch: false`), the
+  default `"signalsmith"` mode stretches with Signalsmith Stretch (MIT,
+  seeded, so deterministic) and transposes by `pitch`. The stretch runs at
+  plan compile on the main thread (~0.3 s per source second in a debug
+  build); it moves to the background decode with the disk cache.
+  `stretch_markers` are not applied yet (the compiler warns).
 - **Not yet:** live multiprocessing,
   one shared process for `shared_bridge`,
   automatic restart after device changes, MIDI output ports, automation recording
-  (write/touch/latch), stems and render jobs, stretching/playrate of audio items,
+  (write/touch/latch),
   crossfades for structural changes (inserting/removing plugins), B1 proper (preliminary:
   docs/benchmarks/b1-preliminary.md).

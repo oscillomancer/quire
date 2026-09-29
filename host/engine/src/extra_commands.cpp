@@ -154,14 +154,18 @@ struct TakeAddArgs {
 };
 struct TakeSetArgs {
     std::string take;
-    std::optional<double> gainDb, pan, startOffset;
+    std::optional<double> gainDb, pan, startOffset, playrate, pitch;
     std::optional<model::ChannelMode> channelMode;
-    std::optional<std::string> name;
+    std::optional<std::string> name, pitchMode;
+    std::optional<bool> preservePitch;
 };
 struct TakeEntry {
     std::string id, name, source;
     bool active = false;
     double gainDb = 0, pan = 0, startOffset = 0;
+    double playrate = 1, pitch = 0;
+    bool preservePitch = true;
+    std::string pitchMode;
 };
 struct TakeList {
     std::vector<TakeEntry> takes;
@@ -1033,7 +1037,7 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "take.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set take gain, pan, channel mode, name, or source offset.";
+        c.summary = "Set take gain, pan, channel mode, name, source offset, or playrate and pitch.";
         c.tags = {"take"};
         c.args =
             schema::object<TakeSetArgs>("take_set_args")
@@ -1053,10 +1057,38 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("start_offset", &TakeSetArgs::startOffset,
                        schema::number().doc(
                            "Source position at the item start; negative for a late first pass."))
+                .field("playrate", &TakeSetArgs::playrate,
+                       schema::number()
+                           .range(0.01, 100)
+                           .unit(units::Unit::x)
+                           .doc("Playback speed: 2 plays the source twice as fast. Its length in "
+                                "seconds is the item's, so the take runs out sooner or loops."))
+                .field("preserve_pitch", &TakeSetArgs::preservePitch,
+                       schema::boolean().doc(
+                           "Keep the source's pitch when the playrate changes (the default). "
+                           "With pitch_mode \"resample\" the pitch follows the speed."))
+                .field("pitch", &TakeSetArgs::pitch,
+                       schema::number()
+                           .range(-48, 48)
+                           .unit(units::Unit::st)
+                           .doc("Pitch offset in semitones. Stretched when the pitch is preserved, "
+                                "otherwise a further speed factor of 2^(pitch/12)."))
+                .field("pitch_mode", &TakeSetArgs::pitchMode,
+                       schema::enumeration<std::string>(
+                           {{"resample", "resample"}, {"signalsmith", "signalsmith"}})
+                           .doc("Time-stretch algorithm: \"signalsmith\" (pitch-preserving, "
+                                "the default) or \"resample\" (varispeed)."))
                 .build();
         c.result = emptySchema();
         c.examples = {
-            {"Lower a take", j(R"({"take":"tk_1","gain_db":"-3 dB"})"), j("{}"), "song_with_item"}};
+            {"Lower a take", j(R"({"take":"tk_1","gain_db":"-3 dB"})"), j("{}"), "song_with_item"},
+            {"Twice as fast, pitch and all",
+             j(R"({"take":"tk_1","playrate":2,"preserve_pitch":false})"), j("{}"),
+             "song_with_item"},
+            {"Half speed, pitch kept", j(R"({"take":"tk_1","playrate":0.5})"), j("{}"),
+             "song_with_item"},
+            {"An octave up, same tempo", j(R"({"take":"tk_1","pitch":12})"), j("{}"),
+             "song_with_item"}};
         c.run = [](const TakeSetArgs& a, Context& ctx) -> Result<Empty> {
             auto id = require<model::Take>(app(ctx).view(), a.take, "/take");
             if (!id) return std::move(id).error();
@@ -1066,6 +1098,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (a.channelMode) tk.channelMode = *a.channelMode;
                 if (a.name) tk.name = *a.name;
                 if (a.startOffset) tk.startOffset = *a.startOffset;
+                if (a.playrate) tk.playrate = *a.playrate;
+                if (a.preservePitch) tk.preservePitch = *a.preservePitch;
+                if (a.pitch) tk.pitch = *a.pitch;
+                if (a.pitchMode) tk.pitchMode = *a.pitchMode;
             });
             return Empty{};
         };
@@ -1081,15 +1117,20 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<ItemQuery>("take_list_args")
                      .field("item", &ItemQuery::item, idSchema("it"))
                      .build();
-        auto entry = schema::object<TakeEntry>("take_entry")
-                         .field("id", &TakeEntry::id, schema::string())
-                         .field("name", &TakeEntry::name, schema::string())
-                         .field("source", &TakeEntry::source, schema::string())
-                         .field("active", &TakeEntry::active, schema::boolean())
-                         .field("gain_db", &TakeEntry::gainDb, schema::number())
-                         .field("pan", &TakeEntry::pan, schema::number())
-                         .field("start_offset", &TakeEntry::startOffset, schema::number())
-                         .build();
+        auto entry =
+            schema::object<TakeEntry>("take_entry")
+                .field("id", &TakeEntry::id, schema::string())
+                .field("name", &TakeEntry::name, schema::string())
+                .field("source", &TakeEntry::source, schema::string())
+                .field("active", &TakeEntry::active, schema::boolean())
+                .field("gain_db", &TakeEntry::gainDb, schema::number())
+                .field("pan", &TakeEntry::pan, schema::number())
+                .field("start_offset", &TakeEntry::startOffset, schema::number())
+                .field("playrate", &TakeEntry::playrate, schema::number().unit(units::Unit::x))
+                .field("preserve_pitch", &TakeEntry::preservePitch, schema::boolean())
+                .field("pitch", &TakeEntry::pitch, schema::number().unit(units::Unit::st))
+                .field("pitch_mode", &TakeEntry::pitchMode, schema::string())
+                .build();
         c.result = schema::object<TakeList>("take_list")
                        .field("takes", &TakeList::takes, schema::arrayOf(entry))
                        .build();
@@ -1106,7 +1147,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (!found) return std::move(found).error();
                 const auto& tk = **found;
                 out.takes.push_back({takeId.str(), tk.name, tk.source ? tk.source->str() : "",
-                                     it.activeTake == takeId, tk.gainDb, tk.pan, tk.startOffset});
+                                     it.activeTake == takeId, tk.gainDb, tk.pan, tk.startOffset,
+                                     tk.playrate, tk.pitch, tk.preservePitch, tk.pitchMode});
             }
             return out;
         };
