@@ -172,6 +172,28 @@ side only — zero latency, the mid untouched so the mono sum is exact;
 automatable; amended 2026-09-29, `docs/specs/effects.md` §4), `dc_block`
 bool, `mute` bool.
 
+Implementation decisions (2026-09-29):
+- `gain` uses a finite −120 dB endpoint with `kOffAtMin`: that endpoint
+  means exact silence and displays −inf; all other values are finite dB.
+  +6 dB means 10^(6/20), approximately 1.9953; exact doubling is
+  20·log10(2), approximately 6.0206 dB.
+- `mono_below` has a linear Hz host curve because its range includes zero.
+- Pan is linear balance: L × (1 − max(0, pan/100)),
+  R × (1 + min(0, pan/100)); centre leaves both at unity.
+- Channel selection sees the swapped input. `mid` and `side` send
+  (L+R)/2 or (L−R)/2 respectively to both outputs.
+- DC blocking is a 5 Hz one-pole high-pass. Gain, balance, width and the
+  crossover use finite 20 ms ramps; routing, polarity, DC enable,
+  crossover enable and mute use 10 ms ramps. Restored values snap before
+  the first processed sample. Gain ramps in amplitude to reach exact zero.
+- An LR4 high-pass at 150 Hz attenuates 50 Hz by approximately 38.3 dB,
+  rather than the implementation plan's 40 dB. Tests use the exact
+  prewarped digital LR4 response (±0.02 dB), and require < 0.1 dB loss
+  at 1 kHz. The filter operates only on S and has zero reported latency.
+- Append-only readonly parameters `input_level` and `output_level`
+  (dBFS, −120..40), and `correlation` (−1..1, silence = 0), publish
+  once per 50 ms. Correlation is the normalized output cross-product.
+
 ## 9. Analyzer — "Gauge" [`analyzer`]
 
 Passes audio unchanged (bit-exact; tested). Publishes live analysis:

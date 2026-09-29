@@ -93,3 +93,5 @@ route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
+
+Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
