@@ -125,10 +125,11 @@ void Editor::render(NVGcontext* vg) {
         formatCompact(g.id, v, value, sizeof(value));
         if (g.id == kGain || g.id == kPan || g.id == kMonoBelow) {
             knob(vg, g.x, g.y, g.r, static_cast<float>(toNormalised(*p, v)), p->name.data(), value,
-                 "", false, hover_ == static_cast<int>(g.id));
+                 un::unitName(p->unit).data(), false, hover_ == static_cast<int>(g.id));
         } else if (g.id == kWidth) {
             label(vg, p->name.data(), 242, 65, 11, rgb(col::dust));
-            label(vg, value, 410, 65, 11, rgb(col::accent), Align::Right);
+            const auto widthText = pa::format(*p, v);
+            label(vg, widthText.c_str(), 410, 65, 11, rgb(col::accent), Align::Right);
             hairline(vg, 242, 86, 414, 86, rgb(col::edgeHi));
             const float x = 242 + 172 * static_cast<float>(toNormalised(*p, v));
             nvgBeginPath(vg);
