@@ -545,6 +545,7 @@ void EngineApp::autosave() {
     const fs::path file = dir / ("autosave-" + std::to_string(next) + ".json");
     if (auto st = writeFileAtomic(file, model::serializeProject(head())); !st) {
         emit("engine.error", json::Value(st.error().toString()));
+        autosaveMs_ = clockMs();  // try again after an interval, not every tick
         return;
     }
     existing.push_back({next, file});

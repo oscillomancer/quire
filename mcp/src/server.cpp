@@ -278,9 +278,12 @@ struct StreamByter : Byter {
     std::istream& input_;
 };
 
+// Buffered: a multi-megabyte request costs a few reads, not a poll and a read
+// per byte.
 struct FdByter : Byter {
     explicit FdByter(int fd) : fd_(fd) {}
     int wait(int timeoutMs) override {
+        if (pos_ < end_) return 1;
         pollfd descriptor{fd_, POLLIN, 0};
         const int ready = ::poll(&descriptor, 1, timeoutMs);
         if (ready < 0) return errno == EINTR ? 0 : -1;
@@ -288,10 +291,19 @@ struct FdByter : Byter {
         return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) ? 1 : -1;
     }
     int get() override {
-        char byte = 0;
-        return ::read(fd_, &byte, 1) == 1 ? static_cast<unsigned char>(byte) : -1;
+        if (pos_ == end_) {
+            ssize_t n;
+            do n = ::read(fd_, buffer_, sizeof(buffer_));
+            while (n < 0 && errno == EINTR);
+            if (n <= 0) return -1;
+            pos_ = 0;
+            end_ = static_cast<std::size_t>(n);
+        }
+        return static_cast<unsigned char>(buffer_[pos_++]);
     }
     int fd_;
+    char buffer_[65536];
+    std::size_t pos_ = 0, end_ = 0;
 };
 
 // Frames newline-delimited requests; `tick` runs whenever no request is

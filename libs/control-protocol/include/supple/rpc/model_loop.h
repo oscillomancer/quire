@@ -10,8 +10,14 @@ namespace supple::rpc {
 namespace detail {
 // The wake pipe a timer signals to interrupt the loop's wait (shared so a
 // timer can outlive a cancel from another thread without holding the loop).
+// The pipe is closed with the last holder (the loop, or a timer cancelling
+// from another thread while the loop goes away), never under a notify.
 struct Wake {
     int readFd = -1, writeFd = -1;
+    Wake() = default;
+    Wake(const Wake&) = delete;
+    Wake& operator=(const Wake&) = delete;
+    ~Wake();
     void notify() const;
 };
 struct TimerState {

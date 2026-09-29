@@ -27,6 +27,11 @@ void onSignal(int) {
 }
 }  // namespace
 
+detail::Wake::~Wake() {
+    if (readFd >= 0) ::close(readFd);
+    if (writeFd >= 0) ::close(writeFd);
+}
+
 void detail::Wake::notify() const {
     if (writeFd < 0) return;
     char byte = 1;
@@ -131,14 +136,12 @@ ModelLoop::~ModelLoop() {
     signalFd.store(-1, std::memory_order_relaxed);
     ::sigaction(SIGINT, &impl_->oldInt, nullptr);
     ::sigaction(SIGTERM, &impl_->oldTerm, nullptr);
-    // Timers keep their handles (they see the wake go away and stop signalling).
+    // Timers keep their handles (they see the wake go away and stop signalling);
+    // the pipe closes with the last reference to it.
     {
         std::lock_guard lock(impl_->mutex);
         impl_->timers.clear();
     }
-    ::close(impl_->wake->readFd);
-    ::close(impl_->wake->writeFd);
-    impl_->wake->readFd = impl_->wake->writeFd = -1;
     delete impl_;
 }
 
