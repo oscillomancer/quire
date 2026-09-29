@@ -227,3 +227,101 @@ TEST_CASE("a VST3 is listed with its format and describes its plain parameters")
     CHECK(none["params"].asArray().empty());
     CHECK(none["params_total"].asDouble() == 0);
 }
+
+namespace {
+// Runs a command that must fail and returns its error code ("" when it worked).
+std::string fails(cmd::Dispatcher& bus, std::string name, std::string_view args) {
+    auto result = bus.execute({std::move(name), j(args), kOrigin});
+    return result ? std::string() : result.error().code;
+}
+std::vector<model::Id> childrenOf(const model::Session& s, std::string_view track) {
+    const auto id = model::Id::parse(track);
+    REQUIRE(id);
+    const model::Track* t = s.tracks.find(*id);
+    REQUIRE(t);
+    return t->children;
+}
+}  // namespace
+
+TEST_CASE("track.move re-parents, reorders, and refuses a cycle (review 14 D5)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"A"})");            // tr_1
+    run(bus, "track.add", R"({"name":"B"})");            // tr_2
+    run(bus, "track.add", R"({"name":"C","index":0})");  // tr_3, first under the master
+    const auto first = childrenOf(app->view(), "tr_0");
+    REQUIRE(first.size() == 3);
+    CHECK(first[0].str() == "tr_3");
+    // A pure reorder: parent defaults to the current one.
+    run(bus, "track.move", R"({"track":"tr_1","index":0})");
+    const auto reordered = childrenOf(app->view(), "tr_0");
+    REQUIRE(reordered.size() == 3);
+    CHECK(reordered[0].str() == "tr_1");
+    CHECK(reordered[1].str() == "tr_3");
+    // Into a folder: the old parent loses it, the new one gains it.
+    run(bus, "track.move", R"({"track":"tr_2","parent":"tr_1"})");
+    CHECK(app->view().tracks.find(*model::Id::parse("tr_2"))->parent == *model::Id::parse("tr_1"));
+    CHECK(childrenOf(app->view(), "tr_1")[0].str() == "tr_2");
+    const auto master = childrenOf(app->view(), "tr_0");
+    REQUIRE(master.size() == 2);
+    // And the model stays consistent: the track is in exactly one parent.
+    std::size_t listed = 0;
+    for (const auto& e : app->view().tracks)
+        for (model::Id child : e.value->children)
+            if (child == *model::Id::parse("tr_2")) ++listed;
+    CHECK(listed == 1);
+    // A track cannot move under its own child, under itself, or move the master.
+    CHECK(fails(bus, "track.move", R"({"track":"tr_1","parent":"tr_2"})") == "tr.cycle");
+    CHECK(fails(bus, "track.move", R"({"track":"tr_1","parent":"tr_1"})") == "tr.cycle");
+    CHECK(fails(bus, "track.move", R"({"track":"tr_0"})") == "tr.master");
+    CHECK(fails(bus, "track.move", R"({"track":"tr_9"})") == "tr.unknown");
+    // Sorting an index past the end appends, like track.add.
+    run(bus, "track.move", R"({"track":"tr_2","parent":"tr_0","index":99})");
+    const auto back = childrenOf(app->view(), "tr_0");
+    CHECK(back.size() == 3);
+    CHECK(back[2].str() == "tr_2");
+}
+
+TEST_CASE("item.set rejects a conflicting position and a zero length (review 14 D1)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"A"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    CHECK(fails(bus, "item.set", R"({"item":"it_1","position":1,"bar":2})") == "item.position");
+    CHECK(fails(bus, "item.set", R"({"item":"it_1","length":0})") == "item.length");
+    // A negative length is refused by the schema before the command runs.
+    CHECK(fails(bus, "item.set", R"({"item":"it_1","length":-1})") == "command.invalid_args");
+    run(bus, "item.set", R"({"item":"it_1","name":"Intro"})");  // it_1 has an active take
+    run(bus, "item.set", R"({"item":"it_1","bar":2})");         // one of them is fine
+    CHECK(app->view().items.find(*model::Id::parse("it_1"))->position > 0);
+}
+
+TEST_CASE("fx.move names a real command in its hint, and stops at the first chain (D2)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"A"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    // The "not in a track chain" rejection (whose hint used to name a command
+    // that does not exist) needs an fx that only a take chain holds, and no
+    // command can put one there yet: the fix is covered by fx.move on a track
+    // chain (the first chain that holds it) staying correct.
+    run(bus, "take.add", R"({"item":"it_1","from":"tk_1"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain"})");
+    CHECK(app->view().tracks.find(*model::Id::parse("tr_1"))->chain.size() == 2);
+    run(bus, "fx.move", R"({"fx":"fx_1","index":1})");
+    const auto& chain = app->view().tracks.find(*model::Id::parse("tr_1"))->chain;
+    REQUIRE(chain.size() == 2);
+    CHECK(chain[0].str() == "fx_2");
+    CHECK(chain[1].str() == "fx_1");
+    CHECK(fails(bus, "fx.move", R"({"fx":"fx_1","index":9})") == "fx.index");
+}

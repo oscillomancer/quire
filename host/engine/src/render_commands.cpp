@@ -339,9 +339,15 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         std::error_code ec;
         const auto root = fs::weakly_canonical(app.rendersDir(), ec);
         if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
-        const auto parent = fs::weakly_canonical(task.path.parent_path(), ec);
-        if (ec) return Error("render.path", "cannot resolve render parent directory", "/pattern");
-        const auto relative = parent.lexically_relative(root);
+        // The final path, not only its parent: an entry that already exists at
+        // this name (a symlink pointing out of the renders directory) resolves
+        // to its target here, so the check cannot be walked out of. The write
+        // itself is a temp file plus an atomic rename (audio::writeWav,
+        // writeFileAtomic), which replaces such an entry rather than following
+        // it, and a temp name is never a directory.
+        const auto resolved = fs::weakly_canonical(task.path, ec);
+        if (ec) return Error("render.path", "cannot resolve the render path", "/pattern");
+        const auto relative = resolved.lexically_relative(root);
         if (relative.empty() || *relative.begin() == ".." || relative.is_absolute())
             return Error("render.path", "render name escapes the renders directory", "/pattern");
         task.label = *name;

@@ -411,11 +411,6 @@ struct TrackSetArgs {
     std::optional<model::RecordMode> recordMode;
     std::optional<model::Monitor> monitor;
 };
-struct TrackMoveArgs {
-    std::string track;
-    std::optional<std::string> parent;
-    std::int64_t index = 0;
-};
 struct TrackEntry {
     std::string id, name, parent;
     std::int64_t depth = 0;
@@ -572,9 +567,12 @@ Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
     std::error_code ec;
     const auto root = fs::weakly_canonical(app.rendersDir(), ec);
     if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
-    const auto parent = fs::weakly_canonical(path.parent_path(), ec);
-    if (ec) return Error("render.path", "cannot resolve render parent directory", "/pattern");
-    const auto relative = parent.lexically_relative(root);
+    // The final path, not only its parent (see render_commands.cpp): an entry
+    // that already exists at this name resolves to its target, so a symlink
+    // out of the renders directory is refused rather than written through.
+    const auto resolved = fs::weakly_canonical(path, ec);
+    if (ec) return Error("render.path", "cannot resolve the render path", "/pattern");
+    const auto relative = resolved.lexically_relative(root);
     if (relative.empty() || relative.is_absolute() || *relative.begin() == "..")
         return Error("render.path", "render name escapes the renders directory", "/pattern");
     return path;

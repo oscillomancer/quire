@@ -334,6 +334,12 @@ class Engine {
     };
     Pulled pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT;
     static constexpr std::int64_t kNothingPlayed = INT64_MIN;
+    // Bounded transport reads. The audio thread gives up quickly (the writer's
+    // window is a handful of atomic stores) and keeps what it has; the
+    // renderer — its plugins' audio thread — uses the same bound rather than
+    // waiting on the main thread, and relocates on a later pass.
+    static constexpr int kAudioTransportTries = 4;
+    static constexpr int kRendererTransportTries = 64;
     void rendererLoop(std::uint64_t firstEpoch);
     std::uint64_t relocate(std::uint64_t previous);  // returns the epoch it relocated for
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
@@ -341,7 +347,9 @@ class Engine {
     std::int64_t playedStream(std::uint64_t epoch) const;
     // The epoch with its seek target and loop, read under xportSeq_: the
     // audio thread gives up after `tries` (a write in progress) and keeps
-    // what it has for another cycle; transportSnapshot() waits the writer out.
+    // what it has for another cycle; the renderer relocates with the same
+    // bound (relocate()); only the main thread's transportSnapshot() waits
+    // the writer out, and only there is that safe.
     struct TransportSnapshot {
         std::uint64_t epoch = 0;
         std::uint64_t seekSeq = 0;
@@ -382,7 +390,12 @@ class Engine {
     std::atomic<std::int64_t> seekSample_{0};
     std::atomic<std::uint64_t> seekSeq_{0};
     std::atomic<bool> shutdownRequested_{false};
-    std::uint64_t seekSeen_ = 0;  // audio thread
+    std::uint64_t seekSeen_ = 0;
+    // seekSeen_/xportSeen_ are plain, and for that reason the in-callback
+    // transport path below runs in one mode only: the audio thread's cycle()
+    // when the engine is not anticipative, the renderer via relocate() when it
+    // is (cycle() returns before that path whenever ring_ is set). If a future
+    // change lets both run in one engine, these two become atomics.
     // Plans carry a generation; the audio thread stores it here after adopt()
     // has stopped the instances the plan dropped. service() prunes only then.
     std::uint64_t publishedGen_ = 0;
@@ -431,7 +444,7 @@ class Engine {
     std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     LoopRange loopC_;                           // audio thread: the loop it plays
-    std::uint64_t xportSeen_ = ~0ull;           // audio thread (in-callback mode)
+    std::uint64_t xportSeen_ = ~0ull;           // as seekSeen_: one executor at a time
     std::atomic<std::uint64_t> misses_{0};
 
     // The callback's share when anticipative: its plan and the live instances

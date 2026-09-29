@@ -3751,6 +3751,42 @@
     }
   },
   {
+    "name": "track_move",
+    "title": "Move a track under another track or reorder it among its siblings.",
+    "description": "Move a track under another track or reorder it among its siblings. parent defaults to the track's current parent (a pure reorder); index defaults to the end of the destination's children. A track cannot move under itself or one of its own descendants. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_move_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "track_remove",
     "title": "Remove a track with its items, fx, routes and envelopes (not a folder).",
     "description": "Remove a track with its items, fx, routes and envelopes (not a folder).  See describe for errors and examples.",

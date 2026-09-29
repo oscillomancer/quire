@@ -5001,6 +5001,57 @@ Result:
 
 ```
 
+## `track.move@1`
+
+Move a track under another track or reorder it among its siblings.
+
+parent defaults to the track's current parent (a pure reorder); index defaults to the end of the destination's children. A track cannot move under itself or one of its own descendants.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `parent` | string |  |  |  |  |
+| `index` | integer |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `tr.cycle`: the destination is inside the track Hint: choose another parent
+
+### Examples
+
+**Move a track to the master** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "parent": "tr_0"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `track.remove@1`
 
 Remove a track with its items, fx, routes and envelopes (not a folder).

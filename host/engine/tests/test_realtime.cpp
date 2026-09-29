@@ -14,6 +14,7 @@
 #include <supple/host/clap_host.h>
 
 #include "fake_jack.h"
+#include "plan.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -224,6 +225,105 @@ TEST_CASE("VST3 effect in chain: real-time output equals offline" * doctest::des
           0.0);
     CHECK(maxDiff(backend.capture().channels[1], latency, offline->audio.channels[1], 96000) ==
           0.0);
+}
+
+TEST_CASE("an automated VST3 parameter renders real time = offline" * doctest::description("rt")) {
+    // The plug-in's parameter is automated in the plain domain every command
+    // uses; the engine converts the lane into the normalized domain at compile
+    // time (Instance::paramsNormalized), so the audio thread sends normalized
+    // values and never calls the edit controller (the host fixture test asserts
+    // that count is zero). This fixture's two domains coincide, so the check
+    // that matters here is that the automation is applied and that both paths
+    // agree to the sample.
+    auto found = host::scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    const auto it = std::find_if(found->begin(), found->end(), [](const host::PluginInfo& p) {
+        return p.name == "Test VST3 Gain";
+    });
+    REQUIRE(it != found->end());
+    model::Session session = synthSession(0.0, it->id.c_str());
+    Id gainFx;
+    bool placed = false;
+    for (const auto& e : session.fx)
+        if (e.value->plugin.id == it->id) {
+            gainFx = e.id;
+            placed = true;
+        }
+    REQUIRE(placed);
+    {
+        model::EditTxn t(session, 2);
+        model::Envelope env;
+        env.target = {gainFx, "Gain"};  // the fixture declares one parameter, "Gain"
+        env.points = {{0.0, 0.9, model::PointShape::Linear, 0.0},
+                      {2.0, 0.1, model::PointShape::Linear, 0.0}};
+        t.create(env);
+        session = t.commit().value();
+    }
+    auto offlinePool = makeVstPool();
+    auto offline = renderOffline(session, offlinePool, {.startSeconds = 0, .endSeconds = 2.0});
+    REQUIRE_MESSAGE(offline, (offline ? "" : offline.error().toString()));
+    CHECK(offline->warnings.empty());
+    auto rtPool = makeVstPool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+    Engine engine(rtPool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(session).ok());
+    engine.play();
+    backend.run((48000 * 2 + 4096) / 128);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    const auto latency = engine.outputLatency();
+    CHECK(maxDiff(backend.capture().channels[0], latency, offline->audio.channels[0], 96000) ==
+          0.0);
+    // And the envelope is what was rendered: 0.9 at the start (the lane holds
+    // the last point after beat 2), 0.1 from beat 2 on.
+    const auto& audio = offline->audio.channels[0];
+    auto peak = [&](std::size_t from, std::size_t to) {
+        double m = 0;
+        for (std::size_t i = from; i < to && i < audio.size(); ++i)
+            m = std::max(m, std::fabs(double(audio[i])));
+        return m;
+    };
+    const double early = peak(4800, 9600), late = peak(72000, 76800);
+    REQUIRE(early > 0.01);
+    CHECK(late / early == doctest::Approx(0.1 / 0.9).epsilon(0.05));
+}
+
+TEST_CASE("a stage that leaves processing mid-ramp does not replay the ramp" *
+          doctest::description("rt")) {
+    // Review-14 A4. While a stage is not processed (it belongs to the other
+    // executor) its applied wet level is dropped; the ramp in flight must be
+    // dropped with it, or the block where it comes back applies the old ramp's
+    // start (a step up to nearly full wet).
+    model::Session s = synthSession(0.0, "com.suppleaudio.test.gain");
+    auto pool = makePool();
+    auto compiled = detail::compile(s, pool, 0.0, 256, 48000);
+    REQUIRE(compiled);
+    detail::Plan p = std::move(*compiled);
+    REQUIRE(detail::prepare(p, s).ok());
+    REQUIRE(p.nodes.size() >= 2);
+    detail::Stage* stage = nullptr;
+    for (detail::Stage& st : p.nodes[0].chain)
+        if (st.instance && st.instance->info().id == "com.suppleaudio.test.gain") stage = &st;
+    REQUIRE(stage != nullptr);
+    REQUIRE(stage->instance->startProcessing());
+    host::Transport transport;
+    const void* other = &transport;  // an executor that does not own the instance
+    stage->instance->setOwner(&p.nodes[0]);
+    // A bypass ramp in flight: from 1.0 (wet) toward 0.0, 480 frames long.
+    stage->wet = 0.0;
+    stage->appliedWet = 1.0f;
+    stage->rampFromWet = 1.0f;
+    stage->rampToWet = 0.0f;
+    stage->wetRampLeft = 480;
+    REQUIRE(detail::processNode(p, 0, 0, 256, transport, other));  // not ours: pass through
+    CHECK(static_cast<double>(stage->appliedWet) < 0.0);
+    CHECK(stage->wetRampLeft == 0);  // the ramp went with the applied value
+    stage->instance->setOwner(nullptr);
+    REQUIRE(detail::processNode(p, 0, 0, 256, transport, nullptr));         // ours again
+    CHECK(static_cast<double>(stage->appliedWet) == doctest::Approx(0.0));  // the new target
+    stage->instance->stopProcessing();
 }
 
 TEST_CASE(
