@@ -9,7 +9,7 @@ namespace supple::utility::gui {
 
 constexpr float kDesignW = 520.0f;
 constexpr float kDesignH = 300.0f;
-constexpr float kHeaderH = 48.0f;
+constexpr float kHeaderH = 58.0f;
 constexpr float kMeterTop = 98.0f;
 constexpr float kMeterH = 214.0f;
 constexpr float kControlsTop = 350.0f;

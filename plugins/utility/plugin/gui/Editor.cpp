@@ -36,6 +36,52 @@ constexpr ControlGeom kControls[] = {{kGain, 62, 106, 25},         {kPan, 160, 1
                                      {kSwap, 463, 134, 18},        {kInvertLeft, 262, 218, 18},
                                      {kInvertRight, 334, 218, 18}, {kDcBlock, 410, 218, 18},
                                      {kMute, 477, 218, 18},        {kMonoBelow, 75, 220, 22}};
+// The compact panel keeps data below the dial, outside the pointer's entire sweep.
+void utilityKnob(NVGcontext* vg, const ControlGeom& g, const ParamDef& p, double value, bool hot) {
+    const float t = static_cast<float>(toNormalised(p, value));
+    const float angle = kKnobA0 + (kKnobA1 - kKnobA0) * t;
+    const float origin = g.id == kPan ? (kKnobA0 + kKnobA1) * 0.5f : kKnobA0;
+    nvgBeginPath(vg);
+    nvgCircle(vg, g.x, g.y + 3, g.r + 9);
+    nvgFillPaint(vg, nvgRadialGradient(vg, g.x, g.y + 3, g.r - 7, g.r + 9, rgba(col::ink, 0.78f),
+                                       rgba(col::ink, 0)));
+    nvgFill(vg);
+    nvgBeginPath(vg);
+    nvgArc(vg, g.x, g.y, g.r, kKnobA0, kKnobA1, NVG_CW);
+    nvgStrokeColor(vg, rgb(col::knobWell));
+    nvgStrokeWidth(vg, 5);
+    nvgLineCap(vg, NVG_ROUND);
+    nvgStroke(vg);
+    nvgStrokeColor(vg, rgba(col::edgeHi, 0.3f));
+    nvgStrokeWidth(vg, 1);
+    nvgStroke(vg);
+    if (std::abs(angle - origin) > 0.001f) {
+        nvgBeginPath(vg);
+        nvgArc(vg, g.x, g.y, g.r, std::min(angle, origin), std::max(angle, origin), NVG_CW);
+        glowStroke(vg, rgb(col::accent), hot ? 3.2f : 2.8f, 2);
+    }
+    nvgBeginPath(vg);
+    nvgCircle(vg, g.x, g.y, g.r - 5);
+    nvgFillPaint(vg, nvgLinearGradient(vg, g.x, g.y - g.r, g.x, g.y + g.r, rgb(col::knobTop),
+                                       rgb(col::knobBot)));
+    nvgFill(vg);
+    nvgStrokeColor(vg, rgba(col::knobRim, hot ? 1.0f : 0.75f));
+    nvgStrokeWidth(vg, 1);
+    nvgStroke(vg);
+    const float px = g.x + std::cos(angle) * (g.r - 11);
+    const float py = g.y + std::sin(angle) * (g.r - 11);
+    nvgBeginPath(vg);
+    nvgCircle(vg, px, py, 3.8f);
+    nvgFillColor(vg, rgba(col::well, 0.85f));
+    nvgFill(vg);
+    nvgBeginPath(vg);
+    nvgCircle(vg, px, py, hot ? 2.8f : 2.45f);
+    nvgFillColor(vg, rgb(col::bone));
+    nvgFill(vg);
+    label(vg, p.name.data(), g.x, g.y + g.r + 13, 10.5f, rgb(col::dust), Align::Center, true);
+    const auto text = pa::format(p, value);
+    num(vg, text.c_str(), g.x, g.y + g.r + 26, 10, rgb(col::bone), Align::Center);
+}
 }  // namespace
 
 bool Editor::attach(NVGcontext* vg) {
@@ -115,21 +161,21 @@ void Editor::render(NVGcontext* vg) {
     nvgFillColor(vg, rgb(col::panel));
     nvgFill(vg);
     hairline(vg, 0, kHeaderH, kDesignW, kHeaderH, rgb(col::edgeHi));
-    label(vg, "Supple Audio", 30, 20, 10, rgb(col::dust));
-    label(vg, kDisplayName, 20, 33, 22, rgb(col::bone));
-    label(vg, "STEREO UTILITY", 500, 30, 10, rgb(col::dust), Align::Right);
+    label(vg, "Supple Audio", 20, 18, 10, rgb(col::dust));
+    label(vg, kDisplayName, 20, 40, 22, rgb(col::bone));
+    label(vg, "STEREO UTILITY", 500, 36, 10, rgb(col::dust), Align::Right);
     for (const auto& g : kControls) {
         const auto* p = findParam(g.id);
         const double v = host_.paramValue(g.id);
         char value[48];
         formatCompact(g.id, v, value, sizeof(value));
         if (g.id == kGain || g.id == kPan || g.id == kMonoBelow) {
-            knob(vg, g.x, g.y, g.r, static_cast<float>(toNormalised(*p, v)), p->name.data(), value,
-                 un::unitName(p->unit).data(), false, hover_ == static_cast<int>(g.id));
+            utilityKnob(vg, g, *p, v,
+                        hover_ == static_cast<int>(g.id) || dragId_ == static_cast<int>(g.id));
         } else if (g.id == kWidth) {
-            label(vg, p->name.data(), 242, 65, 11, rgb(col::dust));
+            label(vg, p->name.data(), 242, 70, 11, rgb(col::dust));
             const auto widthText = pa::format(*p, v);
-            label(vg, widthText.c_str(), 410, 65, 11, rgb(col::accent), Align::Right);
+            label(vg, widthText.c_str(), 410, 70, 11, rgb(col::accent), Align::Right);
             hairline(vg, 242, 86, 414, 86, rgb(col::edgeHi));
             const float x = 242 + 172 * static_cast<float>(toNormalised(*p, v));
             nvgBeginPath(vg);

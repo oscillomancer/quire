@@ -23,7 +23,9 @@ Product changes:
 - Compact 520 × 300 editor with gain/pan knobs, width slider, channel selector,
   switches, bass-mono control and telemetry. It reuses the template editor's
   balanced drag, keyboard, wheel and focus-loss gesture handling and Orrery's
-  palette. Preview scenarios: default, wide.
+  palette. Values sit below the dials; pan uses a centre-origin bipolar arc.
+  Header branding and title have separate lines. Preview scenarios: default,
+  wide, pan-left, pan-right.
 - All copied C++ uses the vendor namespace `supple::utility`. The window,
   renderer, widgets, rings, entry and probes otherwise keep template code.
   Frame adds correlation; host_contract carries Orrery's accepted off-at-min

@@ -90,6 +90,10 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[4], "wide") == 0) {
             host.setParam(kWidth, 150);
             host.setParam(kMonoBelow, 120);
+        } else if (std::strcmp(argv[4], "pan-left") == 0) {
+            host.setParam(kPan, -50);
+        } else if (std::strcmp(argv[4], "pan-right") == 0) {
+            host.setParam(kPan, 50);
         } else if (std::strcmp(argv[4], "default") != 0)
             return 4;
     }
