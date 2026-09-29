@@ -28,7 +28,9 @@ Group a change and its render in one `batch`: one undo step, atomic.
 
 ## Sends and buses
 
-Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. Hardware endpoints, channel maps, and plugin sidechain inputs are not available through these commands yet.
+Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. Hardware endpoints and channel maps are not available through these commands yet.
+
+To sidechain, route into the plugin's key: `route.add {"from":"tr_kick","fx":"fx_3","tap":"post_fader"}` (fx_3 is the compressor on the bass track; `fx.describe` shows `sidechain_channels` when a plugin has a key input, otherwise the route fails with `route.no_sidechain`). The key is delay-compensated, follows the source's mute at a post-fader tap, and keeps sounding when another track is soloed.
 
 Use `plugin.list` to find an FX id, `plugin.scan` to refresh the catalogue, `fx.move` to reorder a chain, `fx.patch.get/set` for a semantic patch, and `fx.param.get` for one value. For arrangement edits, `item.set/split/duplicate` and `take.list/add/set/activate` change clips and takes; `marker.*` and `region.*` label the timeline, while `time.convert` maps seconds, beats, and bars.
 

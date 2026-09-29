@@ -63,7 +63,7 @@ as "send the kick to the bass compressor's key".
    (`to` may be omitted; if given it must hold the instance); `route.list`
    and `route.set` show and change `fx`. Errors: `route.no_sidechain` (the
    plug-in has no key input), `route.cycle`. `fx.describe` reports
-   `sidechain: {channels}` when the plug-in has a key.
+   `sidechain_channels` when the plug-in has a key.
 
 ## Consequences
 
@@ -80,3 +80,28 @@ answer, but a rewrite of every buffer path for the one case users ask for
 most, and a harder model for an LLM to use. Always activating the VST3 key
 bus: simpler, but some plug-ins then key from silence and stop working as
 plain compressors.
+
+## Implementation notes (2026-09-29)
+
+- **Solo moved onto the edges.** Solo used to silence a node's taps; a
+  key from a soloed-out track then went silent, contradicting decision 4.
+  A solo-silenced node now keeps its output and fades what it *sends*
+  (every edge except keys) over the 10 ms smoothing ramp; the gain is
+  carried across plan swaps like the mix ramps. Mixes are unchanged.
+  Isolated stems read the track's own output and so no longer follow the
+  project's solo state (they did before, by accident of the tap).
+- **Frontier keys.** The renderer applies the solo gain when it fills a
+  frontier ring; the callback does not apply it again.
+- **Key restarts.** `Engine::load` compares each VST3 instance's key
+  activation with the new plan's; a change stops the instance on the audio
+  thread and a fresh one is activated with the new flag. CLAP instances
+  keep running (the key port always gets a buffer).
+- **Delay compensation** is tested sample-exactly for four latency layouts
+  (latency before and after the keyed stage, on the key source, on both),
+  in the offline renderer and in both real-time executors (live monitoring
+  included).
+- **Route edits.** Removing a track or an FX instance removes the key
+  routes that end there; a key route whose plug-in no longer has a key
+  input (e.g. after a class change) stays in the project and the plan
+  ignores it with a warning.
+

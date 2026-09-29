@@ -20,3 +20,10 @@ Format: Status · Context · Decision · Consequences · Alternatives considered
 | [0009](0009-text-formats.md) | Text formats: canonical JSON, versioning, merge patch | Accepted |
 | [0010](0010-semantic-parameters.md) | Semantic parameters and value domains | Accepted |
 | [0011](0011-stock-plugins-from-template.md) | Stock plugins built from the template | Accepted |
+| [0012](0012-anticipative-processing.md) | Anticipative processing and the worker pool | Accepted |
+| [0013](0013-plugin-isolation.md) | Plugin process isolation | Accepted |
+| [0014](0014-recording-and-live-nodes.md) | Recording, input monitoring and the live region | Accepted |
+| [0015](0015-loop-and-punch.md) | Transport loop, punch, and loop recording into takes | Accepted |
+| [0016](0016-midi-input.md) | MIDI input — monitoring and recording | Accepted |
+| [0017](0017-vst3-hosting.md) | VST3 hosting | Accepted |
+| [0018](0018-sidechain-inputs.md) | Sidechain inputs | Accepted |
