@@ -45,6 +45,10 @@ class Context {
         services_[std::type_index(typeid(S))] = {&service, !std::is_const_v<S>};
     }
     template <class S>
+    bool has() const {
+        return services_.contains(std::type_index(typeid(S)));
+    }
+    template <class S>
     S& service() const {
         auto it = services_.find(std::type_index(typeid(S)));
         assert(it != services_.end());
@@ -235,6 +239,12 @@ class Host {
     virtual void rollbackTransaction(std::uint64_t) = 0;
     virtual void log(const LogRecord&) = 0;
     virtual void emit(std::string_view topic, json::Value payload) = 0;
+    // Called on the model thread when a top-level command has finished (its
+    // transaction committed or rolled back, its job events flushed) and, in a
+    // script, after each command the script ran. Hosts that mirror bus events
+    // to in-process subscribers (Lua `q.on`) hand them over here, so a
+    // subscriber sees an event after the command that emitted it.
+    virtual void commandFinished() {}
     virtual bool actionTransactional(std::string_view) const { return false; }
     // Called after a command ran successfully inside the current transaction
     // (before it commits), with the resolved arguments — hosts that replay
@@ -256,6 +266,16 @@ class Dispatcher {
     Dispatcher(const Dispatcher&) = delete;
     Dispatcher& operator=(const Dispatcher&) = delete;
     Result<json::Value> execute(const Invocation& invocation);
+    // Runs `body` inside one host transaction: every command `body` executes
+    // through this dispatcher joins it (no nested transaction, and an Action
+    // that is not transaction-safe is refused like a batch step), so the whole
+    // body is one undo step and every invocation is recorded in order. An
+    // error anywhere rolls the transaction back and passes through unchanged.
+    // Called inside an open transaction it joins that one (the Lua `q.batch`
+    // inside a script's own transaction).
+    Result<json::Value> transact(std::string_view label, const Origin& origin,
+                                 const std::function<Result<json::Value>()>& body);
+    const Registry& registry() const { return registry_; }
     JobManager& jobs() { return jobs_; }
     void flushJobEvents();
 
@@ -266,11 +286,16 @@ class Dispatcher {
     Host& host_;
     JobManager jobs_;
     std::uint64_t sequence_ = 0;
+    int transactionDepth_ = 0;  // > 0: commands join the open transact() transaction
 };
 
 using FixtureFactory = std::function<std::unique_ptr<Host>(std::string_view)>;
 Status runExamples(const Registry&, const FixtureFactory&);
 json::Value mcpToolList(const Registry&);
 std::string markdownReference(const Registry&);
+// LuaLS annotations of the generated bindings (ADR-0006): the `q` table a
+// script sees — one class per command's arguments and result, one per command
+// namespace, and the root. The script language itself is `libs/lua-bus`.
+std::string luaStubs(const Registry&);
 
 }  // namespace supple::cmd

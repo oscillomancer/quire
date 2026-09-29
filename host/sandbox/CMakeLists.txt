@@ -1,10 +1,12 @@
 supple_add_library(sandbox
   SOURCES src/render.cpp src/session.cpp src/commands.cpp src/analysis_commands.cpp src/optimize.cpp
   DEPS supple::clap-host supple::audio-file supple::core-json supple::midi
-       supple::notation supple::command-bus supple::semantic-params-abi supple::core-analysis supple::optimize supple::core-params)
+       supple::notation supple::command-bus supple::lua-bus supple::semantic-params-abi
+       supple::core-analysis supple::optimize supple::core-params)
 
 if(SUPPLE_BUILD_TESTS)
-  supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp LABELS rt)
+  supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp
+                   tests/test_scripts.cpp LABELS rt)
   add_dependencies(sandbox.tests clap-host-fixtures)
   target_compile_definitions(sandbox.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
   # The optimizer end to end with the real synth (slow-ish; single-threaded).
@@ -37,6 +39,9 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME sandbox.mcp-stdio
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> session_get)
+  add_test(NAME sandbox.mcp-script
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_script.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> sandbox)
   add_test(NAME sandbox.mcp-proxy
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>

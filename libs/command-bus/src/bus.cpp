@@ -493,12 +493,33 @@ Dispatcher::~Dispatcher() { host_.stopJobs(); }
 Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     auto result = dispatch(invocation, false);
     flushJobEvents();
+    host_.commandFinished();
     return result;
 }
 void Dispatcher::flushJobEvents() {
     for (auto& [topic, payload] : jobs_.drainEvents()) host_.emit(topic, std::move(payload));
 }
+Result<json::Value> Dispatcher::transact(std::string_view label, const Origin& origin,
+                                         const std::function<Result<json::Value>()>& body) {
+    if (transactionDepth_ > 0) return body();  // join the transaction already open
+    auto transaction = host_.beginTransaction(origin, label);
+    if (!transaction) return transaction.error();
+    ++transactionDepth_;
+    auto result = body();
+    --transactionDepth_;
+    if (!result) {
+        host_.rollbackTransaction(*transaction);
+        return result;
+    }
+    auto committed = host_.commitTransaction(*transaction);
+    if (!committed) {
+        host_.rollbackTransaction(*transaction);
+        return committed.error();
+    }
+    return result;
+}
 Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBatch, bool) {
+    inBatch = inBatch || transactionDepth_ > 0;
     const auto start = std::chrono::steady_clock::now();
     auto parsed = parseCommand(invocation.command);
     auto name = parsed ? parsed->first : invocation.command;
@@ -805,5 +826,231 @@ schema::Schema<Ref> refSchema() {
 Result<std::string> resolveRef(Context& context, std::string_view kind, const Ref& ref) {
     if (ref.value.isString()) return ref.value.asString();
     return context.service<RefResolver>().resolve(kind, ref);
+}
+
+namespace {
+// ---------------------------------------------------------------- LuaLS stubs
+// The annotations the script bindings (libs/lua-bus) have: `q` and its
+// namespaces, one class per command's arguments and result. Everything here is
+// generated from the same JSON Schema an agent sees through `describe`, so it
+// cannot drift from the bus.
+std::string luaIdentifier(std::string_view name) {
+    std::string out;
+    for (char ch : name) out += (ch == '.' || ch == '-') ? '_' : ch;
+    return out;
+}
+// A dotted table key becomes ["quoted"] when it is not a Lua identifier.
+std::string luaFieldName(std::string_view name) {
+    bool plain = !name.empty() && !(name.front() >= '0' && name.front() <= '9');
+    for (char ch : name)
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+              ch == '_'))
+            plain = false;
+    return plain ? std::string(name) : "[\"" + std::string(name) + "\"]";
+}
+std::string oneLine(std::string_view text) {
+    std::string out;
+    bool space = false;
+    for (char ch : text) {
+        const bool blank = ch == '\n' || ch == '\r' || ch == '\t' || ch == ' ';
+        if (blank) {
+            space = !out.empty();
+            continue;
+        }
+        if (space) out += ' ';
+        space = false;
+        out += ch;
+    }
+    return out;
+}
+std::string quoteLua(std::string_view text) {
+    std::string out = "\"";
+    for (char ch : text) {
+        if (ch == '"' || ch == '\\') out += '\\';
+        out += ch;
+    }
+    out += '"';
+    return out;
+}
+// JSON Schema → a LuaLS type expression. Nested objects collapse to `table`:
+// naming every anonymous sub-object is not worth the noise.
+std::string luaType(const json::Value& schema) {
+    if (!schema.isObject()) return "any";
+    if (const auto* ref = schema.find("$ref"); ref && ref->isString()) {
+        if (const auto* defs = schema.find("$defs"); defs && defs->isObject())
+            if (const auto* target = defs->find(ref->asString()); target) return luaType(*target);
+        return "any";
+    }
+    if (const auto* choices = schema.find("enum");
+        choices && choices->isArray() && choices->size()) {
+        std::string out;
+        for (const auto& choice : choices->asArray()) {
+            if (!out.empty()) out += "|";
+            out += choice.isString() ? quoteLua(choice.asString()) : "string";
+        }
+        return out;
+    }
+    if (const auto* variants = schema.find("oneOf"); variants && variants->isArray()) {
+        bool allObjects = true;
+        for (const auto& alternative : variants->asArray()) {
+            const auto* type = alternative.find("type");
+            if (!type || !type->isString() || type->asString() != "object") allObjects = false;
+        }
+        return allObjects ? "table" : "string|table";
+    }
+    if (schema.find("anyOf")) return "number|string";  // a number or a quantity string
+    const auto* type = schema.find("type");
+    if (!type) return "any";
+    if (type->isArray()) {
+        std::string out;
+        for (const auto& alternative : type->asArray()) {
+            if (!alternative.isString()) continue;
+            if (!out.empty()) out += "|";
+            out += alternative.asString();
+        }
+        return out.empty() ? "any" : out;
+    }
+    if (!type->isString()) return "any";
+    const std::string& name = type->asString();
+    if (name == "array") {
+        const auto* items = schema.find("items");
+        return (items ? luaType(*items) : std::string("any")) + "[]";
+    }
+    if (name == "object") {
+        if (const auto* extra = schema.find("additionalProperties"); extra && extra->isObject())
+            return "table<string, " + luaType(*extra) + ">";
+        return "table";
+    }
+    if (name == "integer" || name == "number" || name == "string" || name == "boolean") return name;
+    return "any";
+}
+bool hasProperties(const json::Value& schema) {
+    const auto* properties = schema.find("properties");
+    return properties && properties->isObject() && properties->size() > 0;
+}
+std::string fieldDoc(const json::Value& schema) {
+    std::string doc;
+    if (const auto* description = schema.find("description");
+        description && description->isString())
+        doc = oneLine(description->asString());
+    if (const auto* fallback = schema.find("default"))
+        doc += (doc.empty() ? "" : " ") + std::string("(default: ") +
+               json::writeCompact(*fallback) + ")";
+    return doc;
+}
+// One class per object schema: the arguments or the result of a command.
+std::string luaClass(const std::string& name, const json::Value& schema) {
+    std::string out = "---@class " + name + "\n";
+    const auto* required = schema.find("required");
+    auto isRequired = [&](const std::string& field) {
+        if (!required || !required->isArray()) return false;
+        for (const auto& item : required->asArray())
+            if (item.isString() && item.asString() == field) return true;
+        return false;
+    };
+    if (const auto* properties = schema.find("properties"); properties && properties->isObject())
+        for (const auto& field : properties->asObject()) {
+            out += "---@field " + luaFieldName(field.key) + (isRequired(field.key) ? " " : "? ") +
+                   luaType(field.value);
+            const std::string doc = fieldDoc(field.value);
+            if (!doc.empty()) out += " " + doc;
+            out += "\n";
+        }
+    return out;
+}
+// The `fun(...): R` signature of one command.
+std::string luaSignature(const CommandInfo& info) {
+    std::string args;
+    if (hasProperties(info.argsSchema)) {
+        bool anyRequired = false;
+        if (const auto* required = info.argsSchema.find("required");
+            required && required->isArray())
+            anyRequired = required->size() > 0;
+        args = "args" + std::string(anyRequired ? ": " : "?: ") + "Quire." +
+               luaIdentifier(info.name) + "_args";
+    } else if (const auto* properties = info.argsSchema.find("properties");
+               properties && properties->isObject() && properties->size() > 0) {
+        args = "args?: table";
+    }
+    const std::string result = hasProperties(info.resultSchema)
+                                   ? "Quire." + luaIdentifier(info.name) + "_result"
+                                   : "table";
+    return "fun(" + args + "): " + result;
+}
+}  // namespace
+
+std::string luaStubs(const Registry& registry) {
+    std::string text = "---@meta\n";
+    text += "-- " + std::string(product::kName) + " " + std::string(product::kVersion) +
+            " scripting reference, generated from the command registry.\n";
+    text +=
+        "-- Do not edit: `<slug>-engine registry --lua` writes it, "
+        "tools/gen/update-generated.sh regenerates it.\n";
+    text += "-- The `q` table of a script (libs/lua-bus, ADR-0006): every command is a\n";
+    text +=
+        "-- function, `q.run(name, args)` reaches any of them by name, "
+        "`q.batch(label, body)`\n";
+    text += "-- is one transaction, and `q.on(topic, handler)` subscribes to bus events.\n\n";
+    text += "---@type Quire\nq = nil\n\n";
+
+    // Arguments and results first, in registry order (name, then version).
+    for (auto* info : registry.all()) {
+        if (info->name == "batch") continue;              // q.batch is the transaction
+        if (registry.find(info->name) != info) continue;  // only the newest version
+        if (hasProperties(info->argsSchema))
+            text +=
+                luaClass("Quire." + luaIdentifier(info->name) + "_args", info->argsSchema) + "\n";
+        if (hasProperties(info->resultSchema))
+            text += luaClass("Quire." + luaIdentifier(info->name) + "_result", info->resultSchema) +
+                    "\n";
+    }
+
+    // One class per namespace of the bindings: q.fx.param.set is a field of
+    // Quire.fx.param. The names come from the command names, so a namespace
+    // and a command of the same name would collide (none does today).
+    std::map<std::string, std::vector<const CommandInfo*>> namespaces;
+    std::vector<const CommandInfo*> roots;
+    for (auto* info : registry.all()) {
+        if (info->name == "batch") continue;
+        if (registry.find(info->name) != info) continue;
+        const auto dot = info->name.rfind('.');
+        if (dot == std::string::npos)
+            roots.push_back(info);
+        else
+            namespaces[info->name.substr(0, dot)].push_back(info);
+    }
+    for (const auto& [path, commands] : namespaces) {
+        text += "---@class Quire." + path + "\n";
+        for (const auto* info : commands)
+            text += "---@field " + luaFieldName(info->name.substr(info->name.rfind('.') + 1)) +
+                    " " + luaSignature(*info) + " " + oneLine(info->summary) + "\n";
+        text += "\n";
+    }
+
+    text += "---@class Quire\n";
+    for (const auto& [path, commands] : namespaces) {
+        (void)commands;
+        const auto dot = path.find('.');
+        if (dot != std::string::npos) continue;  // only the top level is a field of q
+        text += "---@field " + luaFieldName(path) + " Quire." + path + " Commands named " + path +
+                ".*\n";
+    }
+    for (const auto* info : roots)
+        text += "---@field " + luaFieldName(info->name) + " " + luaSignature(*info) + " " +
+                oneLine(info->summary) + "\n";
+    text +=
+        "---@field run fun(name: string, args?: table): any Run any registered command by "
+        "name, e.g. the ones whose names are not Lua identifiers.\n";
+    text +=
+        "---@field batch fun(label: string, body: fun()) Run the calls inside body as one "
+        "transaction: one undo step, rolled back when one of them fails.\n";
+    text +=
+        "---@field on fun(topic: string, handler: fun(payload: table, topic: string), "
+        "filter?: table): integer Subscribe to bus events; returns a handle for q.off.\n";
+    text += "---@field off fun(handle: integer) Drop a subscription.\n";
+    text += "---@field log fun(...) Print a line to the script's log (the same as print).\n";
+    text += "---@field null any The JSON null: Lua tables cannot hold nil.\n";
+    text += "---@field name string The name this script runs under (its origin is `lua:<name>`).\n";
+    return text;
 }
 }  // namespace supple::cmd

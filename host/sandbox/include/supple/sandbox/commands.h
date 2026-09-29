@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "supple/cmd/bus.h"
+#include "supple/lua/runtime.h"
 #include "supple/sandbox/session.h"
 
 namespace supple::sandbox {
@@ -36,6 +37,10 @@ class SandboxHost : public cmd::Host {
                 ExamplePlugins examples = {});
 
     Session& session() { return *session_; }
+    // The Lua runtime scripts run in (ADR-0006): attach the dispatcher once it
+    // exists, then script.run works and scripts receive bus events.
+    void attachCommands(cmd::Dispatcher& dispatcher);
+    lua::Runtime* scripting() { return scripts_.get(); }
     const std::vector<cmd::LogRecord>& records() const { return records_; }
     std::vector<std::pair<std::string, json::Value>> takeEvents();
     // The servers' periodic service (every 100 ms on the model thread).
@@ -50,6 +55,7 @@ class SandboxHost : public cmd::Host {
     void rollbackTransaction(std::uint64_t) override;
     void log(const cmd::LogRecord&) override;
     void emit(std::string_view topic, json::Value payload) override;
+    void commandFinished() override;
     bool actionTransactional(std::string_view command) const override;
     std::uint64_t clockMs() const override;
     void setupFixture(cmd::Dispatcher&, std::string_view fixture) override;
@@ -60,6 +66,7 @@ class SandboxHost : public cmd::Host {
     ExamplePlugins examples_;
     std::vector<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
+    std::unique_ptr<lua::Runtime> scripts_;
     std::uint64_t nextTxn_ = 1, openTxn_ = 0;
     std::uint64_t fixedClock_ = 0;
 };

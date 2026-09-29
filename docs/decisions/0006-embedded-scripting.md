@@ -30,6 +30,25 @@ scripting is a separate, JIT-compiled language: Phase 7, its own ADR.)
 - Generated LuaLS (`---@class`/`---@param`) annotation files give editor
   autocomplete and type checking outside the DAW.
 
+## Implementation (Phase 4, 2026-09-28)
+
+- The language is vendored as **5.4.9** (lua.org tarball, MIT) under
+  `third_party/lua-5.4.9` and built as a static library with only the core and
+  the sandbox's libraries: `io`, `os`, `debug` and `package` are never compiled
+  in, so a script cannot reach them by any route. `dofile`/`loadfile` are
+  removed from the base library too (there is no whitelisted script-library
+  path yet).
+- The bindings live in `libs/lua-bus` (`supple::lua`): `Script` runs source
+  against a `cmd::Dispatcher`, `Runtime` keeps one named state per script
+  (globals and subscriptions persist) and delivers the bus's events to the
+  `q.on` handlers after the command that emitted them. `script.run` is on the
+  bus in both the engine and the sandbox.
+- `libs/command-bus` hosts the generators (`markdownReference`,
+  `mcpToolList`, `luaStubs`); the LuaLS annotations are committed as
+  `skill/generated/{engine,sandbox}.lua` behind a drift test.
+- `q.batch` uses `cmd::Dispatcher::transact`, which wraps a run of commands in
+  one host transaction — the same one-undo-step guarantee as the bus's `batch`.
+
 ## Consequences
 
 Scripts are thin: all validation happens in the bus with the same actionable

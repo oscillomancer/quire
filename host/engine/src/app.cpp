@@ -39,7 +39,12 @@ std::string originText(const cmd::Origin& o) {
 }
 }  // namespace
 
-EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {}
+EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {
+    // The scripting runtime exists from the start (its commands are attached
+    // later, when the dispatcher does); a script that only computes runs either
+    // way, and the registry's examples exercise exactly that.
+    scripts_ = std::make_unique<lua::Runtime>();
+}
 
 EngineApp::~EngineApp() {
     stopJobs();
@@ -444,6 +449,13 @@ void EngineApp::tick() {
     } else if (restarting_) {
         retryRestart();
     }
+    maybeAutosave();
+    // What the tick emitted (fx.failed, engine.restarting, …) reaches scripts
+    // now, not after some later command.
+    if (scripts_) scripts_->deliver();
+}
+
+void EngineApp::maybeAutosave() {
     if (projectPath_.empty()) return;
     const std::uint64_t now = clockMs();
     if (!autosaveMarked_) {
@@ -1130,9 +1142,15 @@ void EngineApp::headChanged() {
 
 // --- cmd::Host ------------------------------------------------------------------------------
 
+void EngineApp::attachCommands(cmd::Dispatcher& dispatcher) {
+    if (!scripts_) scripts_ = std::make_unique<lua::Runtime>();
+    scripts_->setCommands(dispatcher.registry(), dispatcher);
+}
+
 cmd::Context EngineApp::makeContext(const cmd::Origin& origin) {
     cmd::Context ctx(origin);
     ctx.provide<EngineApp>(*this);
+    if (scripts_) ctx.provide<lua::Runtime>(*scripts_);
     return ctx;
 }
 
@@ -1171,7 +1189,14 @@ void EngineApp::rollbackTransaction(std::uint64_t id) {
 void EngineApp::log(const cmd::LogRecord& record) { records_.push_back(record); }
 
 void EngineApp::emit(std::string_view topic, json::Value payload) {
+    // Scripts see the event once the emitting command has finished
+    // (commandFinished), like the clients on the control socket.
+    if (scripts_) scripts_->event(topic, payload);
     events_.emplace_back(std::string(topic), std::move(payload));
+}
+
+void EngineApp::commandFinished() {
+    if (scripts_) scripts_->deliver();
 }
 
 std::vector<std::pair<std::string, json::Value>> EngineApp::takeEvents() {

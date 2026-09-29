@@ -27,6 +27,7 @@
 #include "supple/cmd/bus.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
+#include "supple/lua/runtime.h"
 #include "supple/model/versions.h"
 
 namespace supple::engine {
@@ -203,6 +204,13 @@ class EngineApp : public cmd::Host {
     // file itself, or empty. project.open reports it instead of loading it.
     std::filesystem::path newerAutosave(const std::filesystem::path& project) const;
 
+    // --- scripting ------------------------------------------------------------------
+    // The Lua runtime scripts run in (ADR-0006). Attach the command dispatcher
+    // once it exists: scripts then reach the bus and receive its events after
+    // the command that emitted them. Null before that; script.run says so.
+    void attachCommands(cmd::Dispatcher& dispatcher);
+    lua::Runtime* scripting() { return scripts_.get(); }
+
     // --- cmd::Host ------------------------------------------------------------------
     cmd::Context makeContext(const cmd::Origin& origin) override;
     Result<std::uint64_t> beginTransaction(const cmd::Origin& origin,
@@ -211,6 +219,7 @@ class EngineApp : public cmd::Host {
     void rollbackTransaction(std::uint64_t id) override;
     void log(const cmd::LogRecord& record) override;
     void emit(std::string_view topic, json::Value payload) override;
+    void commandFinished() override;
     bool actionTransactional(std::string_view command) const override;
     std::uint64_t clockMs() const override;
     void invoked(std::string_view command, int version, const json::Value& args,
@@ -244,6 +253,7 @@ class EngineApp : public cmd::Host {
     // Writes one autosave (rotating: the newest 5 stay) and marks the head
     // saved. Errors are emitted as engine.error.
     void autosave();
+    void maybeAutosave();  // autosave() when the head changed and an interval passed
 
     AppOptions options_;
     std::unique_ptr<model::VersionStore> versions_;
@@ -270,6 +280,7 @@ class EngineApp : public cmd::Host {
     std::vector<std::filesystem::path> recordingFiles_;  // while recording
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;
+    std::unique_ptr<lua::Runtime> scripts_;
     std::vector<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
     std::uint64_t fixedClock_ = 0;

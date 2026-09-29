@@ -9,6 +9,9 @@ edited by hand:
   (`<slug>-sandbox registry --mcp-tools`).
 - `engine-commands.md`, `engine-mcp-tools.json` — the same for the headless
   DAW (`<slug>-engine registry …`).
+- `engine.lua`, `sandbox.lua` — LuaLS annotations of the scripting bindings
+  (`<slug>-engine registry --lua`): the `q` table of a script, generated from
+  the same schemas (`guides/lua.md`).
 
 Regenerate with `tools/gen/update-generated.sh`.
 - `plugins/<plugin>.md` — from each stock plugin's semantic schema.

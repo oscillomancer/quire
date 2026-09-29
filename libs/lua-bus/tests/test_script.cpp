@@ -1,0 +1,439 @@
+// The scripting sandbox, the generated bindings and the JSON ⇄ Lua round trip
+// (ADR-0006). Model thread; no audio.
+#include <doctest/doctest.h>
+
+#include <chrono>
+#include <memory>
+#include <string>
+
+#include "supple/lua/script.h"
+#include "toy_host.h"
+
+using namespace supple;
+using namespace supple::lua;
+using supple::lua::tests::ToyHost;
+using supple::lua::tests::toyRegistry;
+
+namespace {
+
+json::Value obj(std::string_view text) { return json::parse(text).value(); }
+
+// A registry, a host, a dispatcher and one script, wired the way a host does.
+struct Scene {
+    cmd::Registry registry;
+    ToyHost host;
+    cmd::Dispatcher dispatcher;
+    Script script;
+
+    explicit Scene(ScriptOptions options = {}, bool withScripts = false)
+        : registry(toyRegistry(withScripts)),
+          dispatcher(registry, host),
+          script(&registry, &dispatcher, std::move(options)) {}
+
+    Result<ScriptResult> run(std::string_view source, double budgetMs = -1.0) {
+        return script.run(source, budgetMs);
+    }
+    Result<ScriptResult> runWith(std::string_view source, const json::Value& args) {
+        return script.run(source, -1.0, args);
+    }
+};
+
+// Every required member of toy.echo, as a Lua literal.
+constexpr const char* kEcho = R"({text = "t", n = 3, freq = 2, flag = false, mode = "off", )"
+                              R"(ints = {1}, points = {}, gains = {}, point = {x = 0}, )"
+                              R"(anything = false, move = {kind = "point", x = 0}, ref = "tr_1"})";
+
+}  // namespace
+
+TEST_CASE("the sandbox has the five libraries and nothing else") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local absent = {}
+        for _, name in ipairs({"io", "os", "debug", "package", "require", "dofile", "loadfile"}) do
+            absent[name] = _G[name] == nil
+        end
+        return {
+            absent = absent,
+            libs = {
+                string = type(string.rep) == "function",
+                table = type(table.concat) == "function",
+                math = type(math.floor) == "function",
+                utf8 = type(utf8.len) == "function",
+                coroutine = type(coroutine.create) == "function",
+            },
+            bindings = {add = type(q.toy.add) == "function", run = type(q.run) == "function",
+                        batch = type(q.batch) == "function", on = type(q.on) == "function",
+                        null = q.null ~= nil},
+            name = q.name,
+        }
+    )");
+    REQUIRE(out);
+    for (const auto& member : out->result["absent"].asObject())
+        CHECK_MESSAGE(member.value.asBool(), "_G." << member.key << " must be absent");
+    for (const auto& member : out->result["libs"].asObject()) CHECK(member.value.asBool());
+    for (const auto& member : out->result["bindings"].asObject()) CHECK(member.value.asBool());
+    CHECK(out->result["name"] == "");
+}
+
+TEST_CASE("print and q.log go to the script's log") {
+    Scene scene;
+    auto out = scene.run("print('hello', 42)\nq.log('bye')\nprint({})");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 3);
+    CHECK(out->log[0] == "hello\t42");
+    CHECK(out->log[1] == "bye");
+    CHECK(out->log[2].rfind("table: 0x", 0) == 0);  // luaL_tolstring names the table
+    CHECK(scene.script.log().size() == 3);          // the log outlives the run
+}
+
+TEST_CASE("the instruction budget stops a runaway script") {
+    Scene scene;
+    const auto started = std::chrono::steady_clock::now();
+    auto out = scene.run("while true do end", 50.0);
+    const auto spent =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+            .count();
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.budget");
+    CHECK(spent < 3000.0);  // it really stopped, and far sooner than "eventually"
+    CHECK(out.error().hint.find("budget_ms") != std::string::npos);
+}
+
+TEST_CASE("the memory cap stops a script that allocates too much") {
+    ScriptOptions options;
+    options.memoryLimitBytes = 192 * 1024;
+    Scene scene(options);
+    auto out =
+        scene.run("local t = {} for i = 1, 1000000 do t[i] = 'xxxxxxxxxxxx' end return #t", 8000.0);
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.memory");
+    CHECK(out.error().message.find("memory") != std::string::npos);
+}
+
+TEST_CASE("every schema kind survives the round trip through Lua") {
+    Scene scene;
+    auto out = scene.run(std::string("return q.toy.echo{") + R"(
+        text = "hello", n = 7, freq = "2 kHz", flag = true, mode = "fast",
+        ints = {1, 2, 3},
+        points = {{x = 1, label = "a"}, {x = 2}},
+        gains = {a = 0.5, b = -3},
+        point = {x = 9, label = "nine"},
+        note = "note",
+        anything = {nested = {1, 2}, empty = {}},
+        move = {kind = "point", x = 4, label = "m"},
+        ref = {name = "toy"}
+    })");
+    REQUIRE(out);
+    const auto expected = obj(R"({
+        "text": "hello", "n": 7, "freq": 2000.0, "flag": true, "mode": "fast",
+        "ints": [1, 2, 3],
+        "points": [{"x": 1, "label": "a"}, {"x": 2}],
+        "gains": {"a": 0.5, "b": -3.0},
+        "point": {"x": 9, "label": "nine"},
+        "note": "note",
+        "anything": {"nested": [1, 2], "empty": {}},
+        "move": {"kind": "point", "x": 4, "label": "m"},
+        "ref": {"name": "toy"}
+    })");
+    // operator== is JSON equality (member order and Int/Double spelling do not
+    // matter); the types themselves are checked by the next test case.
+    CHECK(out->result == expected);
+    CHECK(out->result["n"].isInt());
+    CHECK(out->result["freq"].isDouble());
+    CHECK(out->result["ref"].isObject());
+}
+
+TEST_CASE("integers stay integers and doubles stay doubles") {
+    Scene scene;
+    auto out = scene.run(std::string("local r = q.toy.echo") + kEcho + R"(
+        local m = q.toy.echo({text = "t", n = 3, freq = "1.5 kHz", flag = false, mode = "off",
+            ints = {1, 2}, points = {}, gains = {a = 2.0}, point = {x = 1},
+            anything = false, move = {kind = "point", x = 0}, ref = "tr_1"})
+        return {
+            n_integer = math.type(r.n) == "integer",
+            freq_float = math.type(r.freq) == "float",
+            ints_integer = math.type(r.ints[1]) == "integer",
+            text_string = type(r.text) == "string",
+            mode_string = type(r.mode) == "string",
+            flag_bool = type(r.flag) == "boolean",
+            unit_parsed = m.freq == 1500.0,
+            empty_array = #r.points == 0,
+            map_value_float = math.type(m.gains.a) == "float",
+        }
+    )");
+    REQUIRE(out);
+    for (const auto& member : out->result.asObject())
+        CHECK_MESSAGE(member.value.asBool(), "check " << member.key);
+}
+
+TEST_CASE("an empty table is an array only where the schema says so") {
+    Scene scene;
+    // `ints` is an array in the schema: {} must become [] and survive the
+    // typed decode; `anything` is untyped: {} stays an object.
+    auto out = scene.run(std::string("return q.toy.echo") +
+                         R"({text = "t", n = 0, freq = 1, flag = false, mode = "off",
+                             ints = {}, points = {}, gains = {}, point = {x = 0},
+                             anything = {}, move = {kind = "point", x = 0}, ref = "tr_1"})");
+    REQUIRE(out);
+    // The bus saw integers where the schema says array and an object where
+    // nothing does: the log record holds exactly the JSON the script produced.
+    REQUIRE(!scene.host.records.empty());
+    const json::Value& sent = scene.host.records.back().args;
+    REQUIRE(sent.find("ints"));
+    CHECK(sent.find("ints")->isArray());
+    CHECK(sent.find("ints")->size() == 0);
+    REQUIRE(sent.find("points"));
+    CHECK(sent.find("points")->isArray());
+    REQUIRE(sent.find("anything"));
+    CHECK(sent.find("anything")->isObject());
+    // The echo's result schema encodes its empty vectors as arrays too, but a
+    // returned empty table carries no type: it reads back as an object.
+    CHECK(out->result["ints"].isObject());
+}
+
+TEST_CASE("command errors are tables that pcall can catch") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local ok, err = pcall(q.toy.fail, {value = 4})
+        return {ok = ok, kind = type(err), code = err.code, path = err.path,
+                hint = err.hint, details = type(err.details),
+                message = err.message}
+    )");
+    REQUIRE(out);
+    CHECK(out->result["ok"] == false);
+    CHECK(out->result["kind"] == "table");
+    CHECK(out->result["code"] == "toy.busy");
+    CHECK(out->result["path"] == "/args/value");
+    CHECK(out->result["hint"] == "use 0 .. 9, not 4");
+    CHECK(out->result["details"] == "table");
+    CHECK(out->result["message"] == "the toy is busy");
+}
+
+TEST_CASE("an uncaught command error keeps its code, path and hint") {
+    Scene scene;
+    auto out = scene.run("q.toy.fail{value = 4}");
+    REQUIRE(!out);
+    CHECK(out.error().code == "toy.busy");
+    CHECK(out.error().path == "/args/value");
+    CHECK(out.error().hint == "use 0 .. 9, not 4");
+}
+
+TEST_CASE("unknown commands and wrong argument types are the bus's own errors") {
+    Scene scene;
+    auto unknown = scene.run(R"(q.run("toy.nope", {}))");
+    REQUIRE(!unknown);
+    CHECK(unknown.error().code == "command.unknown");
+    CHECK(unknown.error().message == "unknown command \"toy.nope\"");
+    CHECK(!unknown.error().hint.empty());  // "use registry.list" or a suggestion
+
+    auto typed = scene.run(R"(q.toy.add{value = "three"})");
+    REQUIRE(!typed);
+    CHECK(typed.error().code == "command.invalid_args");
+    REQUIRE(!typed.error().details.empty());
+    CHECK(typed.error().details.front().path.rfind("/args", 0) == 0);
+
+    // A sequence where the schema wants an object: the members are passed
+    // through as their decimal names, so the bus names the field that is
+    // missing instead of refusing the table outright.
+    auto shape = scene.run(R"(q.toy.add{"three"})");
+    REQUIRE(!shape);
+    CHECK(shape.error().code == "command.invalid_args");
+    CHECK(shape.error().details.front().hint.find("value") != std::string::npos);
+}
+
+TEST_CASE("a table in an array position must be a sequence") {
+    Scene scene;
+    auto out = scene.run(std::string("q.toy.echo") + R"({text = "t", n = 0, freq = 1,
+        flag = false, mode = "off", ints = {a = 1}, points = {}, gains = {}, point = {x = 0},
+        anything = false, move = {kind = "point", x = 0}, ref = "tr_1"})");
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.table");
+    CHECK(out.error().path == "/args/ints");
+}
+
+TEST_CASE("a value with no JSON form is refused") {
+    Scene scene;
+    auto out = scene.run(R"(q.toy.add{value = function() end})");
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.value");
+    CHECK(out.error().path == "/args/value");
+}
+
+TEST_CASE("q.batch is one transaction, and it rolls back on an error") {
+    Scene scene;
+    auto ok = scene.run(R"(
+        q.toy.add{value = 2}
+        q.batch("two steps", function()
+            q.toy.add{value = 5}
+            q.toy.add{value = 3}
+        end)
+        return q.toy.get()
+    )");
+    REQUIRE(ok);
+    CHECK(ok->result["count"] == 10);
+    CHECK(scene.host.begins == 2);
+    CHECK(scene.host.commits == 2);
+    CHECK(scene.host.rollbacks == 0);
+    CHECK(scene.host.toy.count == 10);
+
+    auto bad = scene.run(R"(
+        q.batch("fails halfway", function()
+            q.toy.add{value = 7}
+            q.toy.fail{value = 1}
+        end)
+        return q.toy.get()
+    )");
+    REQUIRE(!bad);
+    CHECK(bad.error().code == "toy.busy");
+    CHECK(scene.host.begins == 3);
+    CHECK(scene.host.commits == 2);
+    CHECK(scene.host.rollbacks == 1);
+    CHECK(scene.host.toy.count == 10);  // the +7 was rolled back
+}
+
+TEST_CASE("a nested q.batch joins the transaction it is inside") {
+    Scene scene;
+    auto out = scene.run(R"(
+        q.batch("outer", function()
+            q.toy.add{value = 1}
+            q.batch("inner", function()
+                q.toy.add{value = 2}
+            end)
+        end)
+        return q.toy.get()
+    )");
+    REQUIRE(out);
+    CHECK(out->result["count"] == 3);
+    CHECK(scene.host.begins == 1);
+    CHECK(scene.host.commits == 1);
+}
+
+TEST_CASE("a batch error inside pcall is re-raised as a table") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local ok, err = pcall(function()
+            q.batch("fails", function() q.toy.fail{value = 1} end)
+        end)
+        return {ok = ok, kind = err and type(err) or "none", code = err and err.code or "none"}
+    )");
+    REQUIRE(out);
+    CHECK(out->result["ok"] == false);
+    CHECK(out->result["kind"] == "table");
+    CHECK(out->result["code"] == "toy.busy");
+}
+
+TEST_CASE("the script's commands carry the lua origin") {
+    Scene scene;
+    ScriptOptions named;
+    named.name = "tidier";
+    Scene other(named);
+    REQUIRE(other.run("q.toy.add{value = 1}"));
+    CHECK(other.host.toy.origin == "lua:tidier");
+    REQUIRE(!other.host.records.empty());
+    CHECK(other.host.records.front().origin.type == cmd::Origin::Type::Lua);
+    CHECK(other.host.records.front().origin.client == "tidier");
+}
+
+TEST_CASE("args becomes a global table and the state survives between runs") {
+    Scene scene;
+    auto first = scene.runWith("counter = (args.start or 0) + 1\nreturn {counter = counter}",
+                               obj(R"({"start": 40})"));
+    REQUIRE(first);
+    CHECK(first->result["counter"] == 41);
+    auto second = scene.run("counter = counter + 1\nreturn {counter = counter}");
+    REQUIRE(second);
+    CHECK(second->result["counter"] == 42);
+}
+
+TEST_CASE("a syntax error names the line") {
+    Scene scene;
+    auto out = scene.run("local x = 1\nreturn x +");
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.syntax");
+    REQUIRE(out.error().loc.has_value());
+    CHECK(out.error().loc->line == 2);
+    CHECK(out.error().message.rfind("script:", 0) == 0);
+}
+
+TEST_CASE("a Lua error that is not a command error keeps its traceback") {
+    Scene scene;
+    auto out = scene.run("local function boom() error('exploded') end\nboom()");
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.error");
+    CHECK(out.error().message.find("exploded") != std::string::npos);
+    CHECK(out.error().message.find("traceback") != std::string::npos);
+}
+
+TEST_CASE("subscriptions fire once per event, filter, and can be removed") {
+    Scene scene;
+    auto setup = scene.run(R"(
+        seen = {}
+        filtered = 0
+        handle = q.on("session.changed", function(payload, topic)
+            seen[#seen + 1] = topic .. ":" .. tostring(payload.version)
+        end)
+        q.on("session.changed", function() filtered = filtered + 1 end, {version = 99})
+        return {handle = handle}
+    )");
+    REQUIRE(setup);
+    CHECK(scene.script.subscriptionCount() == 2);
+
+    json::Value payload = obj(R"({"version": 7})");
+    scene.script.publish("session.changed", payload);
+    scene.script.publish("session.changed", payload);
+    scene.script.publish("other.topic", payload);  // no subscriber
+    auto out = scene.run("return {seen = seen, filtered = filtered}");
+    REQUIRE(out);
+    CHECK(out->result["seen"].size() == 2);
+    CHECK(out->result["seen"].at(0) == "session.changed:7");
+    CHECK(out->result["seen"].at(1) == "session.changed:7");
+    CHECK(out->result["filtered"] == 0);
+
+    scene.script.publish("session.changed", obj(R"({"version": 99})"));
+    auto filtered = scene.run("return {filtered = filtered}");
+    REQUIRE(filtered);
+    CHECK(filtered->result["filtered"] == 1);
+
+    REQUIRE(scene.run("q.off(handle)\nreturn {n = #seen}"));
+    CHECK(scene.script.subscriptionCount() == 1);
+    scene.script.publish("session.changed", payload);
+    auto after = scene.run("return {n = #seen}");
+    REQUIRE(after);
+    CHECK(after->result["n"] == 3);  // the v99 event had reached the handler too
+}
+
+TEST_CASE("a wildcard subscription sees every topic") {
+    Scene scene;
+    REQUIRE(scene.run(R"(topics = {}
+        q.on("*", function(_, topic) topics[#topics + 1] = topic end))"));
+    scene.script.publish("fx.failed", obj(R"({"fx": "fx_1"})"));
+    scene.script.publish("session.changed", obj(R"({"version": 2})"));
+    auto out = scene.run("return {topics = topics}");
+    REQUIRE(out);
+    CHECK(out->result["topics"].size() == 2);
+    CHECK(out->result["topics"].at(0) == "fx.failed");
+}
+
+TEST_CASE("a handler may run commands, and its failure is logged") {
+    Scene scene;
+    REQUIRE(scene.run(R"(q.on("toy.bang", function() q.toy.add{value = 3} end))"));
+    scene.script.publish("toy.bang", obj("{}"));
+    CHECK(scene.host.toy.count == 3);
+
+    REQUIRE(scene.run(R"(q.on("toy.boom", function() error("handler exploded") end))"));
+    scene.script.publish("toy.boom", obj("{}"));
+    const auto log = scene.script.log();
+    REQUIRE(!log.empty());
+    CHECK(log.back().find("handler for toy.boom failed") != std::string::npos);
+    CHECK(log.back().find("exploded") != std::string::npos);
+}
+
+TEST_CASE("a script created without a registry or dispatcher can still compute") {
+    Script bare(nullptr, nullptr);
+    auto out = bare.run("return {sum = 2 + 2}");
+    REQUIRE_MESSAGE(out, out.error().toString());
+    CHECK(out->result["sum"] == 4);
+    auto call = bare.run("return q.toy.get()");
+    REQUIRE_MESSAGE(!call, call.error().toString());
+    CHECK(call.error().code == "script.error");  // q.toy is nil: the bindings are not there
+}

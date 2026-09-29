@@ -618,6 +618,7 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 
 void registerEngineCommands(cmd::Registry& registry) {
     registerExtraCommands(registry);
+    lua::registerScriptCommands(registry);
     // ---------------------------------------------------------------- project.get
     {
         Command<NoArgs, ProjectInfo> c;
