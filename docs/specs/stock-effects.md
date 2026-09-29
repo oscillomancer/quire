@@ -2,6 +2,9 @@
 
 **Status:** Draft for review (2026-09-26). Each plugin's section is frozen
 when its implementation starts.
+Implementation of §1, §2, §8 and §9 started 2026-09-29 (plan and
+implementation notes: `docs/specs/effects.md`); those sections are frozen
+except for the decisions recorded there.
 **Common rules:** ADR-0010 (semantic params, value domains), ADR-0011
 (template instantiation), `docs/specs/core-params.md`, `core-patch.md`,
 `semantic-params-extension.md`.
@@ -164,8 +167,10 @@ octave band against the parameters (within 10 %) and echo density.
 Keys: `gain` dB −inf..+24 (0), `pan` % −100..100 (0), `width` % 0..200 (100),
 `invert_left`, `invert_right` bool, `swap` bool, `channels` enum `stereo`,
 `left_to_both`, `right_to_both`, `mid`, `side` (`stereo`), `mono_below` Hz
-0..500 (0 = off; bass-mono crossover, linear-phase Linkwitz–Riley pair with
-fixed latency when enabled — stepped), `dc_block` bool, `mute` bool.
+0..500 (0 = off; bass mono: a 4th-order Linkwitz–Riley high-pass on the
+side only — zero latency, the mid untouched so the mono sum is exact;
+automatable; amended 2026-09-29, `docs/specs/effects.md` §4), `dc_block`
+bool, `mute` bool.
 
 ## 9. Analyzer — "Gauge" [`analyzer`]
 
