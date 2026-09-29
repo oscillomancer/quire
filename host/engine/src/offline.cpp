@@ -185,11 +185,14 @@ Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::files
                                                                 double rate,
                                                                 const MediaVariant& variant) {
     // Keyed by the plan rate, not the rate the variant ends up at: the same
-    // take in the same plan must land on the same entry.
+    // take in the same plan must land on the same entry. The pitch is part of
+    // the key wherever it changes the samples (a stretch's transposition, a
+    // varispeed's speed factor).
     const bool stretch = variant.stretch();
+    const bool pitched = stretch || !variant.preservePitch;
     const std::string key = path.lexically_normal().string() + "@" + json::formatDouble(rate) +
                             (stretch ? "|s" : "|r") + "|" + json::formatDouble(variant.playrate) +
-                            "|" + json::formatDouble(variant.preservePitch ? 0.0 : variant.pitch);
+                            "|" + json::formatDouble(pitched ? variant.pitch : 0.0);
     auto it = entries_.find(key);
     if (it != entries_.end()) return it->second;
     auto data = audio::readAudio(path);

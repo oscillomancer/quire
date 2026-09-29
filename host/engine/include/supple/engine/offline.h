@@ -91,7 +91,7 @@ struct MediaVariant {
     double playrate = 1.0;      // 0.01 .. 100
     double pitch = 0.0;         // semitones
     bool preservePitch = true;  // ask for a stretch (needs a stretch mode)
-    std::string pitchMode = "resample";
+    std::string pitchMode = "signalsmith";
 
     bool stretch() const {
         return preservePitch && pitchMode == "signalsmith" && (playrate != 1.0 || pitch != 0.0);

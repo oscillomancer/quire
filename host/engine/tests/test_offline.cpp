@@ -513,6 +513,13 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
         CHECK(frequency(L, 34000, 69000) == doctest::Approx(440.0).epsilon(0.03));
         CHECK(media.size() == 2);
     }
+    // The same stretch an octave up is another variant, not the cached one.
+    {
+        auto r = renderTake(build("tone.wav", 0.5, true, 12.0, "signalsmith", 2.0), 2.0);
+        CHECK(r.warnings.empty());
+        CHECK(frequency(r.audio.channels[0], 34000, 69000) == doctest::Approx(880.0).epsilon(0.03));
+        CHECK(media.size() == 3);
+    }
     // A pitch offset the resample cannot honour: warned, and the pitch stays.
     {
         auto r = renderTake(build("tone.wav", 1.0, true, 12.0, "resample", 1.0), 1.5);

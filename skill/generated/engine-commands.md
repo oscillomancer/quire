@@ -4697,9 +4697,9 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  |  |
 | `start_offset` | number |  |  |  | Source position at the item start; negative for a late first pass. |
 | `playrate` | value | x | 0.01..100.0 |  | Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server. |
-| `preserve_pitch` | boolean |  |  |  | Keep the source's pitch when the playrate changes. Needs pitch_mode "signalsmith"; with "resample" the pitch follows the speed. |
+| `preserve_pitch` | boolean |  |  |  | Keep the source's pitch when the playrate changes (the default). With pitch_mode "resample" the pitch follows the speed. |
 | `pitch` | value | st | -48.0..48.0 |  | Pitch offset in semitones. Stretched when the pitch is preserved, otherwise a further speed factor of 2^(pitch/12). Quantity strings are range-checked by the server. |
-| `pitch_mode` | string |  |  |  | Time-stretch algorithm: "resample" (varispeed) or "signalsmith" (pitch-preserving). |
+| `pitch_mode` | string |  |  |  | Time-stretch algorithm: "signalsmith" (pitch-preserving, the default) or "resample" (varispeed). |
 
 ### Result
 
@@ -4755,9 +4755,7 @@ Result:
 ```json
 {
   "take": "tk_1",
-  "playrate": 0.5,
-  "preserve_pitch": true,
-  "pitch_mode": "signalsmith"
+  "playrate": 0.5
 }
 
 ```
@@ -4774,8 +4772,6 @@ Result:
 ```json
 {
   "take": "tk_1",
-  "preserve_pitch": true,
-  "pitch_mode": "signalsmith",
   "pitch": 12
 }
 

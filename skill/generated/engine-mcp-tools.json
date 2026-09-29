@@ -3527,7 +3527,7 @@
         },
         "preserve_pitch": {
           "type": "boolean",
-          "description": "Keep the source's pitch when the playrate changes. Needs pitch_mode \"signalsmith\"; with \"resample\" the pitch follows the speed."
+          "description": "Keep the source's pitch when the playrate changes (the default). With pitch_mode \"resample\" the pitch follows the speed."
         },
         "pitch": {
           "anyOf": [
@@ -3548,7 +3548,7 @@
         "pitch_mode": {
           "type": "string",
           "enum": ["resample", "signalsmith"],
-          "description": "Time-stretch algorithm: \"resample\" (varispeed) or \"signalsmith\" (pitch-preserving)."
+          "description": "Time-stretch algorithm: \"signalsmith\" (pitch-preserving, the default) or \"resample\" (varispeed)."
         }
       },
       "required": ["take"],

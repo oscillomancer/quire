@@ -911,9 +911,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                                 "seconds is the item's, so the take runs out sooner or loops."))
                 .field("preserve_pitch", &TakeSetArgs::preservePitch,
                        schema::boolean().doc(
-                           "Keep the source's pitch when the playrate changes. Needs "
-                           "pitch_mode \"signalsmith\"; with \"resample\" the pitch follows the "
-                           "speed."))
+                           "Keep the source's pitch when the playrate changes (the default). "
+                           "With pitch_mode \"resample\" the pitch follows the speed."))
                 .field("pitch", &TakeSetArgs::pitch,
                        schema::number()
                            .range(-48, 48)
@@ -923,8 +922,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("pitch_mode", &TakeSetArgs::pitchMode,
                        schema::enumeration<std::string>(
                            {{"resample", "resample"}, {"signalsmith", "signalsmith"}})
-                           .doc("Time-stretch algorithm: \"resample\" (varispeed) or "
-                                "\"signalsmith\" (pitch-preserving)."))
+                           .doc("Time-stretch algorithm: \"signalsmith\" (pitch-preserving, "
+                                "the default) or \"resample\" (varispeed)."))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -932,12 +931,10 @@ void registerExtraCommands(cmd::Registry& registry) {
             {"Twice as fast, pitch and all",
              j(R"({"take":"tk_1","playrate":2,"preserve_pitch":false})"), j("{}"),
              "song_with_item"},
-            {"Half speed, pitch kept",
-             j(R"({"take":"tk_1","playrate":0.5,"preserve_pitch":true,"pitch_mode":"signalsmith"})"),
-             j("{}"), "song_with_item"},
-            {"An octave up, same tempo",
-             j(R"({"take":"tk_1","preserve_pitch":true,"pitch_mode":"signalsmith","pitch":12})"),
-             j("{}"), "song_with_item"}};
+            {"Half speed, pitch kept", j(R"({"take":"tk_1","playrate":0.5})"), j("{}"),
+             "song_with_item"},
+            {"An octave up, same tempo", j(R"({"take":"tk_1","pitch":12})"), j("{}"),
+             "song_with_item"}};
         c.run = [](const TakeSetArgs& a, Context& ctx) -> Result<Empty> {
             auto id = require<model::Take>(app(ctx).view(), a.take, "/take");
             if (!id) return std::move(id).error();
