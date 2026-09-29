@@ -173,6 +173,7 @@ q = nil
 ---@field description string
 ---@field params? any
 ---@field patch? any
+---@field sidechain_channels? integer The plug-in's key input: route.add {fx} feeds it
 ---@field params_total? integer Plain parameters matching; at most 512 are listed.
 
 ---@class Quire.fx_move_args
@@ -359,6 +360,7 @@ q = nil
 ---@field meter string
 ---@field version integer
 ---@field recoverable integer
+---@field autosave_available boolean
 
 ---@class Quire.project_open_args
 ---@field path? string
@@ -372,6 +374,7 @@ q = nil
 ---@field meter string
 ---@field version integer
 ---@field recoverable integer
+---@field autosave_available boolean
 
 ---@class Quire.project_recover_args
 ---@field files? string[]
@@ -518,7 +521,8 @@ q = nil
 
 ---@class Quire.route_add_args
 ---@field from string
----@field to string
+---@field to? string
+---@field fx? string Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx"
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? number|string Quantity strings are range-checked by the server.
@@ -537,6 +541,7 @@ q = nil
 ---@field route string
 ---@field from? string
 ---@field to? string
+---@field fx? string Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx"
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? number|string Quantity strings are range-checked by the server.
@@ -581,6 +586,10 @@ q = nil
 ---@field channel_mode? "normal"|"reverse_stereo"|"mono_mix"|"left"|"right"
 ---@field name? string
 ---@field start_offset? number Source position at the item start; negative for a late first pass.
+---@field playrate? number|string Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server.
+---@field preserve_pitch? boolean Keep the source's pitch when the playrate changes (the default). With pitch_mode "resample" the pitch follows the speed.
+---@field pitch? number|string Pitch offset in semitones. Stretched when the pitch is preserved, otherwise a further speed factor of 2^(pitch/12). Quantity strings are range-checked by the server.
+---@field pitch_mode? "resample"|"signalsmith" Time-stretch algorithm: "signalsmith" (pitch-preserving, the default) or "resample" (varispeed).
 
 ---@class Quire.tempo_set_args
 ---@field points table[]
@@ -615,6 +624,11 @@ q = nil
 
 ---@class Quire.track_list_result
 ---@field tracks table[]
+
+---@class Quire.track_move_args
+---@field track string
+---@field parent? string
+---@field index? integer
 
 ---@class Quire.track_remove_args
 ---@field track string Track id, e.g. "tr_1".
@@ -835,7 +849,7 @@ q = nil
 ---@field stems fun(args?: Quire.render_stems_args): table Render each selected track to its own file (stems).
 
 ---@class Quire.route
----@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, or the master.
+---@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, the master, or a plug-in's key.
 ---@field list fun(): Quire.route_list_result List sends with endpoints and mixer settings.
 ---@field remove fun(args: Quire.route_remove_args): table Remove a send.
 ---@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, or mute.
@@ -850,7 +864,7 @@ q = nil
 ---@field activate fun(args: Quire.take_activate_args): table Choose the take heard from an item.
 ---@field add fun(args: Quire.take_add_args): Quire.take_add_result Add a take to an item, optionally copied from another take of that item.
 ---@field list fun(args: Quire.take_list_args): Quire.take_list_result List the takes of an item and identify its active take.
----@field set fun(args: Quire.take_set_args): table Set take gain, pan, channel mode, name, or source offset.
+---@field set fun(args: Quire.take_set_args): table Set take gain, pan, channel mode, name, source offset, or playrate and pitch.
 
 ---@class Quire.tempo
 ---@field set fun(args: Quire.tempo_set_args): Quire.tempo_set_result Replace the tempo map: points {beat, bpm, ramp?}; the first must be at beat 0.
@@ -864,6 +878,7 @@ q = nil
 ---@class Quire.track
 ---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a track (under the master, or inside a folder track) and return its id.
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
+---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
 
