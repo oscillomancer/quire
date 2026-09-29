@@ -171,6 +171,17 @@ class Instance {
     // applies it at once through params.flush.
     Status setParam(std::uint32_t id, double hostValue);
 
+    // A VST3 has two parameter domains: the plain value it declares (min..max,
+    // what ParamInfo and every command carries) and the normalized 0..1 value
+    // its processor is given with its events. paramsNormalized() says which
+    // domain `Event::Param` values must be in for this instance; CLAP has no
+    // such split (the host value is the event value). The two conversions are
+    // main-thread calls — an edit controller is not the processor, and the host
+    // never calls it from the audio thread.
+    bool paramsNormalized() const;
+    Result<double> normalizedParam(std::uint32_t id, double plain) const;
+    Result<double> plainParam(std::uint32_t id, double normalized) const;
+
     // --- semantic view (only when info().semantic) ---
     Result<json::Value> semanticSchema();
     Result<std::string> getPatch(bool changedOnly);

@@ -62,6 +62,9 @@ class RemoteInstance {
     Result<std::string> paramText(std::uint32_t id, double value);
     Result<double> paramFromText(std::uint32_t id, std::string_view text);
     Status setParam(std::uint32_t id, double value);
+    // The two parameter domains a VST3 has (identity in the bridge for CLAP).
+    Result<double> normalizedParam(std::uint32_t id, double plain);
+    Result<double> plainParam(std::uint32_t id, double normalized);
     void refreshLatency();
     std::uint32_t latency() const { return latency_; }
     std::uint32_t tail() const { return tail_; }

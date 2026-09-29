@@ -43,7 +43,7 @@ constexpr std::size_t kMaxEvents = 2048;
 constexpr std::size_t kMaxParams = 256;
 struct Change {
     std::uint32_t id;
-    double value;
+    double value;  // normalized: setParam() converts on the main thread
 };
 
 // The SDK's ParameterChanges grows vectors during addPoint. These bounded
@@ -295,6 +295,14 @@ struct Vst3Instance::State {
     std::vector<vst::AudioBusBuffers> inBuses, outBuses;
     std::vector<std::vector<float>> auxStorage;
     std::vector<float*> auxPointers;
+    // Main bus 0's channel pointers for one block (the host's channels, then
+    // silence/scratch), so the bus never reaches past the host's array.
+    std::vector<float*> mainIn, mainOut;
+    std::vector<float> padIn, padOut;
+    // Notes delivered and not yet ended, per channel and key: a reset() ends
+    // them at the next process() (a VST3 has no reset of its own).
+    std::array<bool, 16 * 128> sounding{};
+    bool releaseAll = false;
     bool notes = false, active = false;
     bool separateController = false;
     std::array<std::array<vst::ParamID, 130>, 16> midiParams{};
@@ -453,6 +461,17 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames) {
         }
     if (s.inputs) s.component->activateBus(vst::kAudio, vst::kInput, 0, true);
     if (s.outputs) s.component->activateBus(vst::kAudio, vst::kOutput, 0, true);
+    // The main buses are reported (and declared to the plug-in) as the plug-in
+    // settled on them, not as they were offered: a plug-in that adapted the
+    // layout is served its own width, and the engine's stereo check refuses a
+    // plan whose main bus is not what the host's buffers provide, instead of
+    // handing it a layout it did not ask for.
+    s.inputs = s.inBusChannels.empty() ? 0 : s.inBusChannels[0];
+    s.outputs = s.outBusChannels.empty() ? 0 : s.outBusChannels[0];
+    s.mainIn.assign(std::max<std::uint32_t>(s.inputs, 1), nullptr);
+    s.mainOut.assign(std::max<std::uint32_t>(s.outputs, 1), nullptr);
+    s.padIn.assign(maxFrames, 0.0f);
+    s.padOut.assign(maxFrames, 0.0f);
     s.inBuses.assign(s.inBusChannels.size(), {});
     s.outBuses.assign(s.outBusChannels.size(), {});
     s.auxStorage.clear();
@@ -520,6 +539,14 @@ Result<double> Vst3Instance::paramFromText(std::uint32_t id, std::string_view te
         return Error("host.param_text", "VST3 could not read parameter text");
     return state_->controller->normalizedParamToPlain(id, normalized);
 }
+Result<double> Vst3Instance::normalizedParam(std::uint32_t id, double plain) const {
+    if (!state_->controller) return Error("host.param", "VST3 has no controller");
+    return state_->controller->plainParamToNormalized(id, plain);
+}
+Result<double> Vst3Instance::plainParam(std::uint32_t id, double normalized) const {
+    if (!state_->controller) return Error("host.param", "VST3 has no controller");
+    return state_->controller->normalizedParamToPlain(id, normalized);
+}
 Status Vst3Instance::setParam(std::uint32_t id, double plain) {
     auto& s = *state_;
     const auto found = std::find_if(s.parameters.begin(), s.parameters.end(),
@@ -528,9 +555,10 @@ Status Vst3Instance::setParam(std::uint32_t id, double plain) {
         return Error("host.param", "no parameter with id " + std::to_string(id));
     if (!std::isfinite(plain) || plain < found->min || plain > found->max)
         return Error("host.param", "parameter value is outside its range");
+    // The conversion is a controller call: main thread, here, not in process().
     const double normalized = s.controller->plainParamToNormalized(id, plain);
     s.controller->setParamNormalized(id, normalized);
-    if (!s.changes.push({id, plain}))
+    if (!s.changes.push({id, normalized}))
         return Error("host.param_queue", "too many queued parameter changes");
     return okStatus();
 }
@@ -582,7 +610,11 @@ bool Vst3Instance::startProcessing() SUPPLE_RT {
     return result == kResultOk || result == Steinberg::kNotImplemented;
 }
 void Vst3Instance::stopProcessing() SUPPLE_RT { state_->processor->setProcessing(false); }
-void Vst3Instance::reset() SUPPLE_RT {}
+void Vst3Instance::reset() SUPPLE_RT {
+    // A VST3 has no reset: the notes the host delivered and did not end are
+    // remembered, and the next process() prepends their note-offs.
+    state_->releaseAll = true;
+}
 void Vst3Instance::flushParams() SUPPLE_RT {}
 
 bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_RT {
@@ -602,15 +634,42 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
         if (q->addPoint(static_cast<Steinberg::int32>(time), value, index) != kResultOk)
             s.dropped.fetch_add(1);
     };
-    auto addParam = [&](std::uint32_t id, double plain, std::uint32_t time) {
-        if (s.controller) addNormalized(id, s.controller->plainParamToNormalized(id, plain), time);
-    };
+    // Everything here is already normalized: setParam() converted on the main
+    // thread and the engine's param events arrive normalized for a VST3 (its
+    // automation lanes compile into the normalized domain, Instance::
+    // paramsNormalized()). No edit-controller call happens on this thread: the
+    // controller is not the processor, is not real-time safe, and the host
+    // calls it from the main thread only.
     Change change{};
-    while (s.changes.pop(change)) addParam(change.id, change.value, 0);
+    while (s.changes.pop(change)) addNormalized(change.id, change.value, 0);
+    // Reset: end every note the host delivered and did not end, ahead of this
+    // block's own events (the list stays sorted by sample offset).
+    if (s.releaseAll) {
+        s.releaseAll = false;
+        for (std::uint32_t at = 0; at < s.sounding.size(); ++at) {
+            if (!s.sounding[at]) continue;
+            if (s.inputEvents.getEventCount() >= static_cast<Steinberg::int32>(kMaxEvents)) {
+                s.releaseAll = true;  // the rest goes out in the next block
+                break;
+            }
+            vst::Event off{};
+            off.busIndex = 0;
+            off.sampleOffset = 0;
+            off.type = vst::Event::kNoteOffEvent;
+            off.noteOff = {static_cast<Steinberg::int16>(at / 128),
+                           static_cast<Steinberg::int16>(at % 128), 0.0f, -1, 0};
+            if (s.inputEvents.addEvent(off) != kResultOk) {
+                s.dropped.fetch_add(1);
+                s.releaseAll = true;
+                break;
+            }
+            s.sounding[at] = false;
+        }
+    }
     for (const auto& event : block.events) {
         const auto time = std::min(event.time, block.frames ? block.frames - 1 : 0u);
         if (event.kind == Event::Kind::Param) {
-            addParam(event.paramId, event.value, time);
+            addNormalized(event.paramId, event.value, time);
             continue;
         }
         if (event.kind == Event::Kind::Midi) {
@@ -635,6 +694,9 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
             continue;
         }
         vst::Event e{};
+        // The first event input bus (the one create() found and activate()
+        // enabled); a plug-in that listens for notes on another event bus is
+        // not addressed.
         e.busIndex = 0;
         e.sampleOffset = static_cast<Steinberg::int32>(time);
         e.type = event.kind == Event::Kind::NoteOn ? vst::Event::kNoteOnEvent
@@ -645,16 +707,31 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
         else
             e.noteOff = {event.channel, event.key, static_cast<float>(event.velocity), event.noteId,
                          0};
-        if (s.inputEvents.addEvent(e) != kResultOk) s.dropped.fetch_add(1);
+        if (s.inputEvents.addEvent(e) != kResultOk) {
+            s.dropped.fetch_add(1);
+        } else if (event.channel >= 0 && event.channel < 16 && event.key >= 0 && event.key < 128) {
+            // Remembered for reset(): a VST3 has no all-notes-off of its own.
+            s.sounding[static_cast<std::size_t>(event.channel) * 128 +
+                       static_cast<std::size_t>(event.key)] = e.type == vst::Event::kNoteOnEvent;
+        }
     }
+    // Main bus 0: the host's channels, then silence (input) or scratch (output)
+    // up to the width the plug-in settled on, so the bus never reaches past the
+    // host's channel array.
     if (!s.inBuses.empty()) {
-        s.inBuses[0].numChannels = static_cast<Steinberg::int32>(block.inputChannels);
-        s.inBuses[0].channelBuffers32 = const_cast<float**>(block.inputs);
+        const std::uint32_t have = std::min(block.inputChannels, s.inputs);
+        for (std::uint32_t c = 0; c < have; ++c) s.mainIn[c] = const_cast<float*>(block.inputs[c]);
+        for (std::uint32_t c = have; c < s.inputs; ++c) s.mainIn[c] = s.padIn.data();
+        s.inBuses[0].numChannels = static_cast<Steinberg::int32>(s.inputs);
+        s.inBuses[0].channelBuffers32 = s.mainIn.data();
         s.inBuses[0].silenceFlags = 0;
     }
     if (!s.outBuses.empty()) {
-        s.outBuses[0].numChannels = static_cast<Steinberg::int32>(block.outputChannels);
-        s.outBuses[0].channelBuffers32 = const_cast<float**>(block.outputs);
+        const std::uint32_t have = std::min(block.outputChannels, s.outputs);
+        for (std::uint32_t c = 0; c < have; ++c) s.mainOut[c] = block.outputs[c];
+        for (std::uint32_t c = have; c < s.outputs; ++c) s.mainOut[c] = s.padOut.data();
+        s.outBuses[0].numChannels = static_cast<Steinberg::int32>(s.outputs);
+        s.outBuses[0].channelBuffers32 = s.mainOut.data();
     }
     for (std::size_t b = 1; b < s.inBuses.size(); ++b)  // silent sidechains
         s.inBuses[b].silenceFlags = ~0ull;
@@ -691,6 +768,11 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
     data.outputEvents = &s.outputEvents;
     data.processContext = &context;
     const bool ok = s.processor->process(data) == kResultOk;
+    // A plug-in that settled on a narrower output bus than the host passes
+    // writes only its own channels: the host clears the rest, so a persistent
+    // buffer cannot repeat the previous block.
+    for (std::uint32_t c = std::min(block.outputChannels, s.outputs); c < block.outputChannels; ++c)
+        std::fill_n(block.outputs[c], block.frames, 0.0f);
     if (out) {
         for (Steinberg::int32 i = 0; i < s.outputChanges.getParameterCount(); ++i) {
             auto* q = s.outputChanges.getParameterData(i);
@@ -702,12 +784,12 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
                     ++out->dropped;
                     continue;
                 }
-                out->storage[out->count++] = {
-                    OutputEvent::Kind::ParamValue, static_cast<std::uint32_t>(offset),
-                    q->getParameterId(),
-                    s.controller ? s.controller->normalizedParamToPlain(q->getParameterId(), value)
-                                 : value,
-                    -1};
+                // The normalized value, as the plug-in reported it: a
+                // main-thread consumer converts with Instance::plainParam()
+                // when paramsNormalized() (nothing consumes these yet).
+                out->storage[out->count++] = {OutputEvent::Kind::ParamValue,
+                                              static_cast<std::uint32_t>(offset),
+                                              q->getParameterId(), value, -1};
             }
         }
     }

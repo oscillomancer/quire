@@ -268,6 +268,16 @@ struct Bridge {
                 const std::uint32_t id = r.u32();
                 return replyStatus(instance->setParam(id, r.f64()));
             }
+            case Op::NormalizedParam: {
+                const std::uint32_t id = r.u32();
+                return replyOr(instance->normalizedParam(id, r.f64()),
+                               [](Writer& w, double v) { w.f64(v); });
+            }
+            case Op::PlainParam: {
+                const std::uint32_t id = r.u32();
+                return replyOr(instance->plainParam(id, r.f64()),
+                               [](Writer& w, double v) { w.f64(v); });
+            }
             case Op::Latency: {
                 Writer w;
                 w.u32(instance->latency());

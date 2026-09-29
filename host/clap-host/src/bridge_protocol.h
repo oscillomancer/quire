@@ -54,6 +54,11 @@ enum class Op : std::uint32_t {
     LoadState,
     Service,  // serviceMainThread → didWork, notifications, log lines, needsAudioFlush
     Destroy,
+    // The two parameter domains a VST3 has (identity for CLAP): main-thread
+    // conversions for a host that holds a value in the other domain. Appended
+    // so the numbers of the ops above do not change.
+    NormalizedParam,  // id, plain → normalized
+    PlainParam,       // id, normalized → plain
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };
