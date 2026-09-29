@@ -62,7 +62,7 @@ for free, and guarantees that anything a human can do an agent can do.
 | sandbox | `host/sandbox` | Phase 2 headless plugin sandbox (library + CLI + MCP) | `specs/sandbox.md` |
 | engine | `host/engine`, `host/isolation` | Phase 4 headless DAW engine, plugin bridge processes | ADR-0004, ADR-0008 |
 | plugins | `plugins/*` | template-derived stock plugins + shared extension code | ADR-0011 |
-| app | `daw/gui`, `daw/agent-panel`, `daw/lua` | Phase 5 GUI, agent panel, Lua | ADR-0005, ADR-0006 |
+| app | `daw/gui`, `daw/agent-panel` | Phase 5 GUI, agent panel (scripting is `libs/lua-bus`) | ADR-0005, ADR-0006 |
 | agents | `skill/` | bundled LLM skill: generated reference + guides | Phase 6 |
 
 Dependency direction is strictly downward in that table: libs never depend on

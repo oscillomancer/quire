@@ -102,19 +102,20 @@ Acceptance (build prompt Phase 4), as of 2026-09-27:
 | P4.15 | render system (engine.md §3, session-model §7) | **done** (json-8, finished by the orchestrator): render.stems (isolated or through the master; tap), render.regions and the project render matrix, render.dry-run, render.mix/stems/regions of another branch's head, branch.render-ab (two renders + analyze.compare), file-name patterns (§7.3, closed token set, filters, empty-token separator dropping, no escape from the renders directory), two-pass normalization (LUFS I/S/M, peak, true peak, RMS; optional true-peak limiter), WAV PCM 16/24 with seeded dither or float, RF64 beyond 4 GiB, render jobs (job: true; progress, cancel), per-file analysis summaries. Open: FLAC (no permissive encoder vendored) |
 | P4.16 | VST3 hosting (ADR-0017) | **done** (probe-5, finished by the orchestrator): SDK hosting subset v3.8.0 (MIT) vendored, a VST3 backing inside host::Instance (bounded preallocated parameter/event queues, IMidiMapping, ProcessContext with the loop, state blob, latency), .vst3 scanning, isolation through the bridge. Checked against thirteen installed VST3 classes (sidechain buses, sfizz): all scan, list parameters and render. Open: persisted scan cache / out-of-process scanning, editors (Phase 5) |
 | P4.17 | sidechain inputs (ADR-0018) | **done** (orchestrator, this session): a route can end at a plug-in's key (`route.add {from, fx}`), summed per stage and delay-compensated against the stage's input; CLAP process calls carry every declared port (key, silence or scratch), VST3's first auxiliary input bus is the key (activated only while keyed; a change restarts the instance), the bridge carries the key (protocol 4); solo fades what a node sends except keys; RT ≡ offline in both executors, live monitoring included. Open: take-FX keys, multichannel tracks and pin maps |
+| P4.18 | Lua scripting on the command bus (ADR-0006) | **done** (lua-1, Hermes; reviewed by the orchestrator): vendored PUC Lua 5.4.9 (MIT) built as C++ (errors unwind as exceptions; TSan covers the scripts), `libs/lua-bus` — sandbox without io/os/debug/package, bindings generated from the registry (`q.track.add{…}`, `q.run`), `q.batch` as one undo step, `q.on/q.off` subscriptions (delivered after the emitting command, and by the service tick), instruction budget and memory cap; `script.run` in the engine and the sandbox; generated LuaLS stubs (`skill/generated/*.lua`, drift-tested; LuaLS itself not run here); `skill/guides/lua.md`. Open: script library path and hot reload (Phase 7); scripts run on the model thread |
+| P4.19 | take playrate, pitch and time stretching (session-model §1.5) | **done** (stretch-1, Hermes; reviewed by the orchestrator, who fixed the variant cache key and made the pitch-preserving mode the default): Signalsmith Stretch 1.4 (MIT, seeded, deterministic) and varispeed resampling as media-cache variants; `take.set {playrate, preserve_pitch, pitch, pitch_mode}`; RT ≡ offline. Open: `stretch_markers`; the stretch runs at plan compile (moves to the background decode with the disk cache) |
+| P4.20 | the model-thread service tick (engine.md §6) | **done** (json-9, Hermes; reviewed by the orchestrator: buffered MCP stdin, timer teardown, autosave back-off): `ModelLoop::every` timers and an MCP pump that ticks while idle; every 100 ms plans are freed, `fx.failed` is emitted unasked, a device change restarts the engine (`engine.restarting`, back-off, `engine.error` after 30 s; position and loop kept), autosave to `<file>-data/autosave-<n>.json` (newest 5; `autosave_available` on open) |
+| — | review round 14 (transport seqlock, VST3, commands) | **fixed** (reviewer, Hermes, on the orchestrator's decisions): the renderer's transport read is bounded; a VST3's controller is never called on the audio thread (plain automation lanes compile into the normalized domain; `Instance::paramsNormalized/normalizedParam/plainParam`, bridged); settled VST3 bus widths, reset() ends sounding notes; render path symlink check; `track.move`; checked ids; item.set conflicts |
 
-## Team (Codex workers via Herdr)
+## Team (Hermes workers via Herdr)
 
-Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). A 5 h
-Codex window lasts ~50 min of four busy workers; weekly 84 % left (resets
-Oct 3). Codex takes well-specified implementation and every review; the
-orchestrator does the design and most new subsystems.
+Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Codex is
+retired for now; four Hermes workers (DeepSeek, API-billed) take
+well-specified implementation and reviews, one worktree each; the
+orchestrator designs, reviews every branch and integrates.
 
-- **json** (Sol) — P2.5/P2.6 round-4 fixes on p2-rpc (brief json-4).
-- **probe** (Sol) — P2.3 stage 2 done (7534fb5); round-4 fixes (v1 state seed, stepped-value migration), then merge.
-- **analysis** (Sol) — analysis-2 finishing on p1-analysis-2; next analysis-3 (optimizer review fixes).
-- **scout** (Sol) — reviews: round 3 (Orrery, engine RT, VersionStore: 15 findings, fixed in d1df00e), round 4 (p2-rpc, p2-probe-2), round 5 (optimizer + round-3 audit: 11 findings; 5 and 11 fixed by the orchestrator: backend final-callback shutdown, drive-off message).
-- **notation**, **reaper** (Sol) — idle.
+- **stretch**, **lua**, **tick** — delivered P4.19, P4.18, P4.20; idle.
+- **reviewer** — review round 14 and its fixes; idle.
 
 Test labels: `slow` (dev/gcc/asan only), `tsan-skip` (AGENTS.md). Local CI
 is ~25 min per full run and grows with the optimizer/analysis suites.
