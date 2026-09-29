@@ -1,5 +1,6 @@
 add_subdirectory(common)
 add_subdirectory(orrery/engine)
+add_subdirectory(utility/engine)
 add_subdirectory(orrery/clap)
 
 if(SUPPLE_BUILD_PLUGINS)
@@ -56,4 +57,6 @@ if(SUPPLE_BUILD_PLUGINS)
   endfunction()
   supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
+  include(utility/Product.cmake)
+  supple_add_plugin(utility UTILITY ${UTILITY_DISPLAY_NAME})
 endif()

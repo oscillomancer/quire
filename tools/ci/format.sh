@@ -9,11 +9,25 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
   | grep -v '^plugins/probe-synth/' \
+  | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.
 files+=(
+  plugins/utility/engine/include/utility/params.h
+  plugins/utility/engine/include/utility/processor.h
+  plugins/utility/engine/src/params.cpp
+  plugins/utility/engine/src/processor.cpp
+  plugins/utility/engine/tests/test_utility.cpp
+  plugins/utility/plugin/src/UtilityParams.h
+  plugins/utility/plugin/src/utility_clap.cpp
+  plugins/utility/plugin/gui/Editor.cpp
+  plugins/utility/plugin/gui/Editor.h
+  plugins/utility/plugin/gui/Theme.h
+  plugins/utility/test/semantic_rt.cpp
+  plugins/utility/test/editor_input.cpp
+  plugins/utility/tools/gui_preview.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

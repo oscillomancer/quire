@@ -54,3 +54,5 @@ their undo history and can be reviewed.
 Files under `generated/` are produced from the code and always match the
 installed version. If a guide and a generated reference disagree, the
 generated reference is right.
+
+- [Utility: Plumb](guides/utility.md) — gain, balance, width, polarity and bass mono.
