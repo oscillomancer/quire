@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
+#include <string_view>
 #include <thread>
 
 #include "supple/audio/audio_file.h"
@@ -177,6 +179,7 @@ Result<std::string> EngineApp::describeFx(const model::FxInstance& fx, bool chan
 void EngineApp::newProject(model::Project project) {
     versions_ = std::make_unique<model::VersionStore>(model::Session::create(std::move(project)));
     projectPath_.clear();
+    autosaveMarked_ = false;  // no file yet: nothing to autosave next to
     headChanged();
 }
 
@@ -188,6 +191,9 @@ Status EngineApp::save(const fs::path& where) {
     const fs::path path = resolve(where);
     SUPPLE_TRY(writeFileAtomic(path, model::serializeProject(head())));
     projectPath_ = path;
+    autosaveMarked_ = true;  // the file itself is the newest copy
+    autosaveMs_ = clockMs();
+    autosaveVersion_ = head().version;
     return okStatus();
 }
 
@@ -199,6 +205,9 @@ Status EngineApp::open(const fs::path& where) {
     if (!s) return std::move(s).error();
     versions_ = std::make_unique<model::VersionStore>(std::move(*s));
     projectPath_ = path;
+    autosaveMarked_ = true;
+    autosaveMs_ = clockMs();
+    autosaveVersion_ = head().version;
     headChanged();
     return okStatus();
 }
@@ -351,6 +360,10 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
         return st;
     }
     backend_ = &backend;
+    restartBackend_ = &backend;  // a caller-supplied backend: reuse it
+    restartConfig_ = engine_->config();
+    restartOptions_ = options;
+    restarting_ = false;
     playStart_ = 0.0;
     if (loop_.enabled || loop_.end > loop_.start)
         engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
@@ -379,11 +392,20 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
                      "jack or dummy");
     }
     auto st = startEngine(*ownedBackend_, config, EngineOptions{.anticipative = anticipative});
-    if (!st) stopEngine();  // e.g. the project's rate is not the device's
+    if (!st) {
+        haltEngine();  // e.g. the project's rate is not the device's
+        return st;
+    }
+    // The app owns this backend: a restart recreates it (the instance may be
+    // dead with the device).
+    engineKind_ = std::string(backend);
+    engineBlock_ = block;
+    engineAnticipative_ = anticipative;
+    restartBackend_ = nullptr;
     return st;
 }
 
-void EngineApp::stopEngine() {
+void EngineApp::haltEngine() {
     if (engine_) {
         engine_->stop();
         engine_->service();
@@ -392,6 +414,157 @@ void EngineApp::stopEngine() {
     }
     backend_ = nullptr;
     ownedBackend_.reset();
+}
+
+void EngineApp::stopEngine() {
+    restarting_ = false;  // an explicit stop cancels a pending restart
+    haltEngine();
+}
+
+// --- the periodic service tick ------------------------------------------------------------
+
+namespace {
+constexpr std::uint64_t kAutosaveIntervalMs = 60'000;
+constexpr int kAutosaveKeep = 5;
+constexpr std::uint64_t kRestartGiveUpMs = 30'000;
+}  // namespace
+
+void EngineApp::tick() {
+    if (engine_) {
+        engine_->service();
+        // Failures reach subscribers without a client asking.
+        checkFailures();
+        if (backend_) {
+            const BackendStatus b = backend_->status();
+            if (b.restartNeeded)
+                beginRestart(b.restartReason.empty() ? std::string("the device changed")
+                                                     : std::string(b.restartReason),
+                             engine_->transport().seconds);
+        }
+    } else if (restarting_) {
+        retryRestart();
+    }
+    if (projectPath_.empty()) return;
+    const std::uint64_t now = clockMs();
+    if (!autosaveMarked_) {
+        autosaveMarked_ = true;
+        autosaveMs_ = now;
+        autosaveVersion_ = head().version;
+        return;
+    }
+    // Autosave when the head changed and an interval passed since the last one.
+    if (head().version == autosaveVersion_ || now < autosaveMs_ + kAutosaveIntervalMs) return;
+    autosave();
+}
+
+void EngineApp::beginRestart(std::string reason, double seconds) {
+    restartReason_ = std::move(reason);
+    restartSeconds_ = seconds;
+    restartBackoff_ = 0;
+    restartUntil_ = clockMs() + kRestartGiveUpMs;
+    restartRetryAt_ = clockMs();
+    json::Value ev = json::Value::object();
+    ev["reason"] = restartReason_;
+    emit("engine.restarting", std::move(ev));
+    // Playback stays stopped; the position and the loop are restored.
+    haltEngine();
+    restarting_ = true;
+}
+
+void EngineApp::retryRestart() {
+    const std::uint64_t now = clockMs();
+    if (now < restartRetryAt_) return;
+    Status st = okStatus();
+    if (!engineKind_.empty())
+        st = startEngine(engineKind_, engineBlock_, engineAnticipative_);
+    else if (restartBackend_)
+        st = startEngine(*restartBackend_, restartConfig_, restartOptions_);
+    else
+        st = Error("engine.restart", "there is no backend to restart");
+    if (st) {
+        restarting_ = false;
+        if (engine_) {
+            engine_->seek(restartSeconds_);  // the transport position is restored
+            engine_->awaitTransport();       // ... before the tick returns
+        }
+        return;
+    }
+    if (now >= restartUntil_) {
+        restarting_ = false;
+        json::Value ev = json::Value::object();
+        ev["reason"] = restartReason_;
+        ev["error"] = st.error().toString();
+        emit("engine.error", std::move(ev));
+        return;
+    }
+    restartBackoff_ =
+        restartBackoff_ == 0 ? 250 : std::min<std::uint64_t>(restartBackoff_ * 2, 4000);
+    restartRetryAt_ = now + restartBackoff_;
+}
+
+fs::path EngineApp::autosaveDir() const {
+    if (projectPath_.empty()) return {};
+    return projectPath_.parent_path() / (projectPath_.filename().string() + "-data");
+}
+
+fs::path EngineApp::newerAutosave(const fs::path& project) const {
+    if (project.empty()) return {};
+    std::error_code ec;
+    const fs::path dir = project.parent_path() / (project.filename().string() + "-data");
+    if (!fs::is_directory(dir, ec)) return {};
+    const auto written = fs::last_write_time(project, ec);
+    if (ec) return {};
+    fs::path best;
+    fs::file_time_type bestTime{};
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const fs::path& candidate = it->path();
+        const std::string name = candidate.filename().string();
+        if (!std::string_view(name).starts_with("autosave-") || candidate.extension() != ".json")
+            continue;
+        if (!fs::is_regular_file(candidate, ec)) continue;
+        const auto time = fs::last_write_time(candidate, ec);
+        if (ec) break;
+        if (time > written && (best.empty() || time > bestTime)) {
+            best = candidate;
+            bestTime = time;
+        }
+    }
+    return best;
+}
+
+void EngineApp::autosave() {
+    const fs::path dir = autosaveDir();
+    if (dir.empty()) return;
+    // Rotate: the next free index, then the oldest files over the keep count go.
+    int next = 1;
+    std::vector<std::pair<int, fs::path>> existing;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (!std::string_view(name).starts_with("autosave-") || it->path().extension() != ".json")
+            continue;
+        const int n = std::atoi(name.c_str() + 9);
+        if (n < 1) continue;
+        next = std::max(next, n + 1);
+        existing.push_back({n, it->path()});
+    }
+    const fs::path file = dir / ("autosave-" + std::to_string(next) + ".json");
+    if (auto st = writeFileAtomic(file, model::serializeProject(head())); !st) {
+        emit("engine.error", json::Value(st.error().toString()));
+        autosaveMs_ = clockMs();  // try again after an interval, not every tick
+        return;
+    }
+    existing.push_back({next, file});
+    std::sort(existing.begin(), existing.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    while (static_cast<int>(existing.size()) > kAutosaveKeep) {
+        std::error_code ignored;
+        fs::remove(existing.front().second, ignored);
+        existing.erase(existing.begin());
+    }
+    autosaveVersion_ = head().version;
+    autosaveMs_ = clockMs();
+    autosaveMarked_ = true;
 }
 
 void EngineApp::checkFailures() {

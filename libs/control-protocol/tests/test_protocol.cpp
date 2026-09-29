@@ -1,14 +1,18 @@
 #include <doctest/doctest.h>
 #include <poll.h>
 #include <supple/product.h>
+#include <supple/rpc/model_loop.h>
 #include <supple/rpc/protocol.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstring>
 #include <deque>
 #include <future>
@@ -380,7 +384,15 @@ TEST_CASE("large pipelined frames stop at the per-peer posted byte limit") {
         if (posted >= 3) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // The model thread is held, so the I/O thread must eventually post. Wait
+    // for it (bounded) rather than assuming how long a 10 MiB frame takes to
+    // read and parse on this machine.
+    for (int i = 0; i < 750 && posted < 1; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::lock_guard lock(queue.mutex);
+        posted = queue.tasks.size();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));  // backpressure settles
     {
         std::lock_guard lock(queue.mutex);
         CHECK(queue.tasks.size() >= 1);
@@ -391,4 +403,67 @@ TEST_CASE("large pipelined frames stop at the per-peer posted byte limit") {
     CHECK(sentAll);
     ::close(fd);
     server.stop();
+}
+
+// The service timers run on the model thread between posted tasks, without a
+// busy wait (the loop's poll gets the nearest deadline as its timeout).
+TEST_CASE("model-loop timers run on the model thread in order and stop on cancel") {
+    rpc::ModelLoop loop;
+    std::atomic<int> fast{0}, slow{0};
+    std::atomic<bool> wrongThread{false};
+    std::atomic<bool> taskRan{false};
+    std::mutex mutex;
+    std::vector<std::string> order;
+    std::thread::id model;
+    auto record = [&](const char* what) {
+        std::lock_guard lock(mutex);
+        order.emplace_back(what);
+    };
+    auto onModelThread = [&] {
+        if (std::this_thread::get_id() != model) wrongThread = true;
+    };
+    auto fastTimer = loop.every(std::chrono::milliseconds(10), [&] {
+        onModelThread();
+        ++fast;
+        record("timer-10");
+    });
+    auto slowTimer = loop.every(std::chrono::milliseconds(30), [&] {
+        onModelThread();
+        ++slow;
+        record("timer-30");
+    });
+    std::thread runner([&] {
+        model = std::this_thread::get_id();
+        loop.run();
+    });
+    loop.post([&] {  // a posted task shares the thread, between the timers
+        onModelThread();
+        record("task");
+        taskRan = true;
+    });
+    auto waitFor = [&](auto predicate, int milliseconds = 3000) {
+        for (int waited = 0; waited < milliseconds && !predicate(); waited += 5)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return predicate();
+    };
+    REQUIRE(waitFor([&] { return fast >= 4 && slow >= 2 && taskRan.load(); }));
+    CHECK_FALSE(wrongThread.load());
+    {
+        std::lock_guard lock(mutex);
+        CHECK(order.front() == "task");  // posted immediately; the first timer is due later
+        const auto firstFast = std::find(order.begin(), order.end(), "timer-10");
+        const auto firstSlow = std::find(order.begin(), order.end(), "timer-30");
+        CHECK(firstFast < firstSlow);
+    }
+    fastTimer.cancel();
+    const int fastAtCancel = fast.load();
+    const int slowBefore = slow.load();
+    REQUIRE(waitFor([&] { return slow >= slowBefore + 3; }));
+    CHECK(fast.load() <= fastAtCancel + 1);  // at most one already collected
+    CHECK_FALSE(fastTimer.active());
+    slowTimer.cancel();
+    CHECK_FALSE(slowTimer.active());
+    ::raise(SIGTERM);  // the loop's wait is bounded but ends on a signal
+    runner.join();
+    CHECK(slow.load() <= slowBefore + 4);  // cancelled: no further ticks
 }

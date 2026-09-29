@@ -294,6 +294,12 @@ Saves are atomic (write temp, fsync, rename). Autosave every 60 s to
 `<name>.<slug>-data/autosave-<n>.json` (keep 5). History is persisted only
 on request (ADR-0008 clarification).
 
+The engine app writes the autosaves from its service tick (engine.md §6),
+only when the head changed since the last one and 60 s have passed, and
+`<n>` counts up from the highest present. `project.open` of a file that has
+a newer autosave next to it reports `autosave_available` and loads nothing
+from it; opening the autosave file itself is how it comes back.
+
 ## 6. Versions, undo, branches
 
 ### 6.1 Version store

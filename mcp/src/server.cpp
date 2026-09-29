@@ -1,6 +1,9 @@
+#include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
+#include <unistd.h>
 #include <algorithm>
+#include <cerrno>
 #include <string>
 
 namespace supple::mcp {
@@ -255,41 +258,104 @@ std::optional<json::Value> Server::handle(const json::Value& request) {
     }
     return error(*id, -32601, "Method not found");
 }
-Status Server::serve(std::istream& input, std::ostream& output) {
+namespace {
+
+// The byte source the framing loop waits on: a stream (tests, in-process) or an
+// fd it can poll with the tick's deadline.
+struct Byter {
+    virtual ~Byter() = default;
+    virtual int wait(int timeoutMs) = 0;  // >0 ready, 0 not ready (yet), <0 end
+    virtual int get() = 0;                // the byte, or <0 at the end
+};
+
+struct StreamByter : Byter {
+    explicit StreamByter(std::istream& input) : input_(input) {}
+    int wait(int) override {
+        if (input_.rdbuf()->in_avail() > 0) return 1;
+        return input_.peek() == std::char_traits<char>::eof() ? -1 : 1;
+    }
+    int get() override { return input_.get(); }
+    std::istream& input_;
+};
+
+// Buffered: a multi-megabyte request costs a few reads, not a poll and a read
+// per byte.
+struct FdByter : Byter {
+    explicit FdByter(int fd) : fd_(fd) {}
+    int wait(int timeoutMs) override {
+        if (pos_ < end_) return 1;
+        pollfd descriptor{fd_, POLLIN, 0};
+        const int ready = ::poll(&descriptor, 1, timeoutMs);
+        if (ready < 0) return errno == EINTR ? 0 : -1;
+        if (ready == 0) return 0;
+        return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) ? 1 : -1;
+    }
+    int get() override {
+        if (pos_ == end_) {
+            ssize_t n;
+            do n = ::read(fd_, buffer_, sizeof(buffer_));
+            while (n < 0 && errno == EINTR);
+            if (n <= 0) return -1;
+            pos_ = 0;
+            end_ = static_cast<std::size_t>(n);
+        }
+        return static_cast<unsigned char>(buffer_[pos_++]);
+    }
+    int fd_;
+    char buffer_[65536];
+    std::size_t pos_ = 0, end_ = 0;
+};
+
+// Frames newline-delimited requests; `tick` runs whenever no request is
+// waiting (never in the middle of one) so a service tick keeps running while
+// the server waits for input.
+Status pump(Server& server, Byter& byter, std::ostream& output, const Tick& tick) {
+    const bool periodic = tick.fn != nullptr;
     std::string frame;
     bool overflow = false;
-    auto* source = input.rdbuf();
+    auto last = std::chrono::steady_clock::now();
+    auto runTick = [&] {
+        tick.fn();
+        last = std::chrono::steady_clock::now();
+    };
     while (true) {
-        auto next = source->sbumpc();
-        if (next == std::char_traits<char>::eof()) break;
-        if (next == '\n') {
-            if (overflow) {
-                output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
-                output.flush();
-                if (!output) return Error("mcp.write", "failed to write stdio response");
-                frame.clear();
-                overflow = false;
-                continue;
-            }
-            auto parsed = json::parse(frame);
-            auto reply = parsed ? handle(*parsed)
-                                : std::optional<json::Value>(error(nullptr, -32700, "Parse error"));
-            if (reply) {
-                output << json::writeCompact(*reply) << '\n';
-                output.flush();
-                if (!output) return Error("mcp.write", "failed to write stdio response");
-            }
-            frame.clear();
+        const int ready = byter.wait(periodic ? static_cast<int>(tick.interval.count()) : -1);
+        if (ready < 0) break;
+        if (ready == 0) {
+            runTick();
             continue;
         }
-        if (!overflow) {
-            if (frame.size() < rpc::kMaxMessageBytes)
-                frame.push_back(static_cast<char>(next));
-            else {
-                frame.clear();
-                overflow = true;
+        const int next = byter.get();
+        if (next < 0) break;
+        if (next != '\n') {
+            if (!overflow) {
+                if (frame.size() < rpc::kMaxMessageBytes)
+                    frame.push_back(static_cast<char>(next));
+                else {
+                    frame.clear();
+                    overflow = true;
+                }
             }
+            if (periodic && std::chrono::steady_clock::now() - last >= tick.interval) runTick();
+            continue;
         }
+        if (overflow) {
+            output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
+            output.flush();
+            if (!output) return Error("mcp.write", "failed to write stdio response");
+            frame.clear();
+            overflow = false;
+            continue;
+        }
+        auto parsed = json::parse(frame);
+        auto reply = parsed ? server.handle(*parsed)
+                            : std::optional<json::Value>(error(nullptr, -32700, "Parse error"));
+        if (reply) {
+            output << json::writeCompact(*reply) << '\n';
+            output.flush();
+            if (!output) return Error("mcp.write", "failed to write stdio response");
+        }
+        frame.clear();
     }
     if (overflow) {
         output << json::writeCompact(error(nullptr, -32600, "Message too large")) << '\n';
@@ -297,5 +363,17 @@ Status Server::serve(std::istream& input, std::ostream& output) {
         if (!output) return Error("mcp.write", "failed to write stdio response");
     }
     return {};
+}
+
+}  // namespace
+
+Status Server::serve(std::istream& input, std::ostream& output, Tick tick) {
+    StreamByter byter(input);
+    return pump(*this, byter, output, tick);
+}
+
+Status Server::serve(int fd, std::ostream& output, Tick tick) {
+    FdByter byter(fd);
+    return pump(*this, byter, output, tick);
 }
 }  // namespace supple::mcp

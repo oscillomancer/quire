@@ -257,6 +257,18 @@ Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 `meters` (rate-limited, subscribe per track), `fx.failed`,
 `record.progress`.
 
+The servers drive a **service tick** on the model thread every 100 ms
+(`EngineApp::tick()`; `ModelLoop::every` on the socket server, a poll
+deadline in the stdio MCP loop), so the app's periodic work happens with no
+client asking: retired plans are freed and `fx.failed` is emitted (that is
+why subscribers see failures on their own), the project is autosaved when
+its head changed (session-model §5.3), and a device change restarts the
+engine — `engine.restarting {reason}` when the running backend reports
+`restart_needed`, then `engine.stop`/`engine.start` with the same backend
+kind, block and options, retried with backoff for up to 30 s and finally
+reported as `engine.error {reason, error}`. The transport position and the
+loop are restored; playback stays stopped.
+
 ## 7. Benchmarks (acceptance, `docs/benchmarks/`)
 
 - **B1 capacity:** generated session: N tracks, each an Orrery instance
@@ -337,8 +349,9 @@ granted, and CPU governor (read-only facts).
   is gone or no cycle comes within 2 s, the client is deactivated and closed
   and the engine stops its plugins on the main thread. Xruns (server
   callback), rate changes and server shutdown are atomics read by
-  `engine.status` (`restart_needed`); automatic restart is not implemented
-  yet. Tests use a stand-in libjack (`tests/fake_jack.cpp`) that drives the
+  `engine.status` (`restart_needed`); the model thread's service tick (§6)
+  restarts the engine after a device change. Tests use a stand-in libjack
+  (`tests/fake_jack.cpp`) that drives the
   process callback from its own thread and injects period/rate changes,
   xruns, stalls and shutdown; the real server is used only by
   `SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='real JACK*'` (2 s of silence
@@ -420,7 +433,7 @@ granted, and CPU governor (read-only facts).
   `stretch_markers` are not applied yet (the compiler warns).
 - **Not yet:** live multiprocessing,
   one shared process for `shared_bridge`,
-  automatic restart after device changes, MIDI output ports, automation recording
+  MIDI output ports, automation recording
   (write/touch/latch),
   crossfades for structural changes (inserting/removing plugins), B1 proper (preliminary:
   docs/benchmarks/b1-preliminary.md).

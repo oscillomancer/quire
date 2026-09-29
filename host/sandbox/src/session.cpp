@@ -975,4 +975,17 @@ void Session::stopJobs() {
     jobs_.clear();
 }
 
+void Session::tick() {
+    adoptBackgroundRenders();
+    // Finished job threads are joined and dropped (startJob also prunes).
+    for (auto it = jobs_.begin(); it != jobs_.end();) {
+        if (it->finished->load(std::memory_order_acquire)) {
+            if (it->thread.joinable()) it->thread.join();
+            it = jobs_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 }  // namespace supple::sandbox

@@ -1,8 +1,12 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <filesystem>
+#include <mutex>
+#include <thread>
 
 #include <supple/base/files.h>
 #include <supple/sandbox/session.h>
@@ -364,4 +368,38 @@ TEST_CASE("sequence events: tick timing, offs before controls before ons, zero-l
     CHECK(ev[7].event.channel == 9);
     CHECK(ticksToSamples(1, 960, 120.0, 48000.0) == 25);  // 25.0 exactly
     CHECK(ticksToSamples(7, 960, 97.0, 44100.0) == 199);  // 198.9…
+}
+
+TEST_CASE("the session tick adopts background work and drops finished job threads") {
+    TempDir dir("tick");
+    auto s = openSession(dir);
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool running = false, finish = false;
+    s->startJob([&](std::stop_token) {
+        {
+            std::lock_guard lock(mutex);
+            running = true;
+            cv.notify_all();
+        }
+        std::unique_lock lock(mutex);
+        cv.wait(lock, [&] { return finish; });
+    });
+    {
+        std::unique_lock lock(mutex);
+        cv.wait(lock, [&] { return running; });
+    }
+    CHECK(s->jobThreadCountForTests() == 1);
+    s->tick();  // still running: it stays
+    CHECK(s->jobThreadCountForTests() == 1);
+    {
+        std::lock_guard lock(mutex);
+        finish = true;
+    }
+    cv.notify_all();
+    for (int i = 0; i < 200 && s->activeJobThreadCountForTests() > 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    REQUIRE(s->activeJobThreadCountForTests() == 0);
+    s->tick();
+    CHECK(s->jobThreadCountForTests() == 0);
 }

@@ -38,6 +38,8 @@ class SandboxHost : public cmd::Host {
     Session& session() { return *session_; }
     const std::vector<cmd::LogRecord>& records() const { return records_; }
     std::vector<std::pair<std::string, json::Value>> takeEvents();
+    // The servers' periodic service (every 100 ms on the model thread).
+    void tick() { session_->tick(); }
     // Tests: a fixed clock for deterministic logs.
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 

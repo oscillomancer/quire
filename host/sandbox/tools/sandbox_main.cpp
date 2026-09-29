@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
         }
         sandbox::SandboxHost host(std::move(*session), options.workdir / "commands.ndjson");
         cmd::Dispatcher dispatcher(registry, host);
+        const auto interval = std::chrono::milliseconds(100);
         if (rpcMode) {
             rpc::ModelLoop loop;
             rpc::Server* activeServer = nullptr;
@@ -134,12 +135,25 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "%s\n", started.error().toString().c_str());
                 return 1;
             }
+            // The service tick: adopt finished background renders and clean up.
+            auto tick = loop.every(interval, [&] {
+                host.tick();
+                for (auto& [topic, payload] : host.takeEvents())
+                    activeServer->publish(topic, payload);
+            });
             loop.run();
+            tick.cancel();
             server.stop();
             return 0;
         }
         mcp::Server server(registry, dispatcher);
-        auto status = server.serve(std::cin, std::cout);
+        // The tick drains the host's events: MCP has no event channel.
+        auto status = server.serve(::fileno(stdin), std::cout,
+                                   mcp::Tick{[&] {
+                                                 host.tick();
+                                                 host.takeEvents();
+                                             },
+                                             interval});
         if (!status) {
             std::fprintf(stderr, "%s\n", status.error().toString().c_str());
             return 1;

@@ -2,6 +2,8 @@
 #include <supple/mcp/server.h>
 #include <supple/product.h>
 #include <unistd.h>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -198,4 +200,37 @@ TEST_CASE("MCP stdio caps an unterminated oversized frame") {
     REQUIRE(reply);
     CHECK(reply->find("error")->find("code")->asInt() == -32600);
     CHECK(reply->find("id")->isNull());
+}
+
+// The stdio reader polls with the tick's deadline: a service tick keeps
+// running while the server waits, and a request is still answered at once.
+TEST_CASE("the stdio loop runs the service tick while it waits for a request") {
+    auto commands = registry();
+    Host host;
+    cmd::Dispatcher dispatcher(commands, host);
+    mcp::Server server(commands, dispatcher);
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+    std::atomic<int> ticks{0};
+    std::ostringstream output;
+    Status served;
+    std::thread runner([&] {
+        served = server.serve(fds[0], output,
+                              mcp::Tick{[&] { ++ticks; }, std::chrono::milliseconds(10)});
+    });
+    for (int i = 0; i < 400 && ticks.load() < 3; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK(ticks.load() >= 3);  // it waited, ticking, instead of blocking
+    const std::string initialize =
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"tick-test"}}})"
+        "\n";
+    CHECK(::write(fds[1], initialize.data(), initialize.size()) ==
+          static_cast<ssize_t>(initialize.size()));
+    ::close(fds[1]);  // end of input: the loop answers what it read, then ends
+    runner.join();
+    CHECK(served);
+    const std::string text = output.str();
+    CHECK(text.find("\"protocolVersion\"") != std::string::npos);
+    CHECK(text.find("\"id\":1") != std::string::npos);
+    ::close(fds[0]);
 }

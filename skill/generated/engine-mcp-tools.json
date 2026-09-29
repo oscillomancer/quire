@@ -2133,7 +2133,7 @@
   {
     "name": "project_get",
     "title": "Show the project: name, rate, tempo, meter, file, version and branch.",
-    "description": "Show the project: name, rate, tempo, meter, file, version and branch. recoverable: recordings a crash left out of the project (project.recoverable). See describe for errors and examples.",
+    "description": "Show the project: name, rate, tempo, meter, file, version and branch. recoverable: recordings a crash left out of the project (project.recoverable). autosave_available: a newer autosave exists next to the file; open it as a project if you want it (nothing is loaded silently). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -2167,6 +2167,9 @@
         },
         "recoverable": {
           "type": "integer"
+        },
+        "autosave_available": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2177,7 +2180,8 @@
         "tempo",
         "meter",
         "version",
-        "recoverable"
+        "recoverable",
+        "autosave_available"
       ],
       "additionalProperties": false
     },
@@ -2190,7 +2194,7 @@
   {
     "name": "project_open",
     "title": "Open a project file (replaces the current project and its history).",
-    "description": "Open a project file (replaces the current project and its history). recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back. See describe for errors and examples.",
+    "description": "Open a project file (replaces the current project and its history). recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back. autosave_available: a newer autosave exists next to the file (it is not loaded silently). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "path_args",
@@ -2228,6 +2232,9 @@
         },
         "recoverable": {
           "type": "integer"
+        },
+        "autosave_available": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2238,7 +2245,8 @@
         "tempo",
         "meter",
         "version",
-        "recoverable"
+        "recoverable",
+        "autosave_available"
       ],
       "additionalProperties": false
     },

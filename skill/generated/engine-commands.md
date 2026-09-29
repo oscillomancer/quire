@@ -3091,7 +3091,7 @@ Result:
 
 Show the project: name, rate, tempo, meter, file, version and branch.
 
-recoverable: recordings a crash left out of the project (project.recoverable).
+recoverable: recordings a crash left out of the project (project.recoverable). autosave_available: a newer autosave exists next to the file; open it as a project if you want it (nothing is loaded silently).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -3130,9 +3130,22 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "recoverable": {
       "type": "integer"
+    },
+    "autosave_available": {
+      "type": "boolean"
     }
   },
-  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version", "recoverable"],
+  "required": [
+    "name",
+    "path",
+    "branch",
+    "sample_rate",
+    "tempo",
+    "meter",
+    "version",
+    "recoverable",
+    "autosave_available"
+  ],
   "additionalProperties": false
 }
 
@@ -3158,7 +3171,8 @@ Result:
   "tempo": 120.0,
   "meter": "4/4",
   "version": 0,
-  "recoverable": 0
+  "recoverable": 0,
+  "autosave_available": false
 }
 
 ```
@@ -3167,7 +3181,7 @@ Result:
 
 Open a project file (replaces the current project and its history).
 
-recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back.
+recoverable > 0: recordings a crash left out of the project; project.recoverable lists them and project.recover puts them back. autosave_available: a newer autosave exists next to the file (it is not loaded silently).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -3207,9 +3221,22 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "recoverable": {
       "type": "integer"
+    },
+    "autosave_available": {
+      "type": "boolean"
     }
   },
-  "required": ["name", "path", "branch", "sample_rate", "tempo", "meter", "version", "recoverable"],
+  "required": [
+    "name",
+    "path",
+    "branch",
+    "sample_rate",
+    "tempo",
+    "meter",
+    "version",
+    "recoverable",
+    "autosave_available"
+  ],
   "additionalProperties": false
 }
 
@@ -3242,7 +3269,8 @@ Result:
   "tempo": "<any>",
   "meter": "<any>",
   "version": "<any>",
-  "recoverable": 0
+  "recoverable": 0,
+  "autosave_available": false
 }
 
 ```
