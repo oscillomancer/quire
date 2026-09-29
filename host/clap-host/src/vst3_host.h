@@ -23,6 +23,10 @@ class Vst3Instance {
     Result<std::string> paramText(std::uint32_t id, double plain) const;
     Result<double> paramFromText(std::uint32_t id, std::string_view text) const;
     Status setParam(std::uint32_t id, double plain);
+    // Main-thread domain conversions (plain <-> normalized), for callers that
+    // hold values in the other domain than the events need.
+    Result<double> normalizedParam(std::uint32_t id, double plain) const;
+    Result<double> plainParam(std::uint32_t id, double normalized) const;
     Result<std::vector<std::uint8_t>> saveState();
     Status loadState(std::span<const std::uint8_t> bytes);
     bool startProcessing() SUPPLE_RT;

@@ -222,6 +222,19 @@ struct ResolvedLane {
     }
 };
 
+// A plain lane whose instance takes normalized parameter values (VST3): the
+// envelope points move into the plugin's normalized domain, so the events the
+// audio thread sends need no conversion there. An edit controller is called
+// here, on the compile (main) thread, never on the audio thread.
+bool toNormalizedDomain(host::Instance& in, ParamLane& lane) {
+    for (auto& pt : lane.curve.points) {
+        auto n = in.normalizedParam(lane.clapId, pt.value);
+        if (!n) return false;
+        pt.value = *n;
+    }
+    return true;
+}
+
 Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
                                std::map<host::Instance*, json::Value>& schemas) {
     ResolvedLane r;
@@ -458,6 +471,18 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                     lane->lane.curve = a;
                     for (auto& pt : lane->lane.curve.points)
                         pt.value = lane->toLaneDomain(pt.value);
+                    // A VST3 processor is given normalized parameter values, so
+                    // a plain lane for such an instance interpolates in that
+                    // domain (a semantic lane already interpolates in its own
+                    // normalized domain). The conversion is a controller call:
+                    // here, on the compile thread, never on the audio thread.
+                    if (!lane->lane.spec && st.instance->paramsNormalized() &&
+                        !toNormalizedDomain(*st.instance, lane->lane)) {
+                        p.warnings.push_back(e.id.str() + ": " + o.str() + " " + param +
+                                             " cannot be automated by this plugin");
+                        placed = true;
+                        continue;
+                    }
                     st.lanes.push_back(std::move(lane->lane));
                     placed = true;
                 }
@@ -969,6 +994,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self)) {
             st.dry.process(node.sum.l.data(), node.sum.r.data(), n);  // compensated bypass
             st.appliedWet = -1.0f;
+            st.wetRampLeft = 0;  // no ramp to carry: `appliedWet` holds nothing
             continue;
         }
         // The wet level to reach (0 bypassed); a change ramps from the level

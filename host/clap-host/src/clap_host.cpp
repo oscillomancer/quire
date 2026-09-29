@@ -652,6 +652,11 @@ Status Instance::setSidechainActive(bool on) {
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
     if (vst3_) {
         SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames, keyActive_));
+        // What the plug-in settled on (a bus it adapted): the engine sizes its
+        // channels from this and refuses a plan it cannot serve.
+        inChannels_ = vst3_->inputChannels();
+        outChannels_ = vst3_->outputChannels();
+        keyChannels_ = vst3_->sidechainChannels();
         active_ = true;
         sampleRate_ = sampleRate;
         maxFrames_ = maxFrames;
@@ -791,6 +796,20 @@ Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) 
                      "the plugin could not read \"" + s + "\" for parameter " + std::to_string(id),
                      {}, "use the plugin's own value text (param.get shows it)");
     return v;
+}
+
+bool Instance::paramsNormalized() const { return info_.format == "vst3"; }
+
+Result<double> Instance::normalizedParam(std::uint32_t id, double plain) const {
+    if (vst3_) return vst3_->normalizedParam(id, plain);
+    if (remote_) return remote_->normalizedParam(id, plain);
+    return plain;  // CLAP: the host value is the value the plug-in is given
+}
+
+Result<double> Instance::plainParam(std::uint32_t id, double normalized) const {
+    if (vst3_) return vst3_->plainParam(id, normalized);
+    if (remote_) return remote_->plainParam(id, normalized);
+    return normalized;
 }
 
 Status Instance::setParam(std::uint32_t id, double clapValue) {

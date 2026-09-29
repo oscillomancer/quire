@@ -1,8 +1,11 @@
 #include <doctest/doctest.h>
 
+#include <dlfcn.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 #include <supple/clap/semantic_params.h>
@@ -52,6 +55,21 @@ double gainClap(double db) {
     // The fixture uses ADR-0010 normalization: linear curve over -60..12 dB.
     return (db + 60.0) / 72.0;
 }
+
+// The fixture module's controller-call watch (it is dlopen'd by the host and
+// by this test). Returns null when the module is not built (VST3 disabled).
+struct ControllerWatch {
+    int (*count)() = nullptr;
+    void (*reset)() = nullptr;
+    explicit ControllerWatch(const std::filesystem::path& module) {
+        if (void* handle = ::dlopen(module.c_str(), RTLD_NOW)) {
+            count = reinterpret_cast<int (*)()>(::dlsym(handle, "fixtureOffThreadControllerCalls"));
+            reset = reinterpret_cast<void (*)()>(
+                ::dlsym(handle, "fixtureResetOffThreadControllerCalls"));
+        }
+    }
+    bool ok() const { return count && reset; }
+};
 
 }  // namespace
 
@@ -172,6 +190,79 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     CHECK(static_cast<double>(buf.ol[0]) == doctest::Approx(0.2));
     (*bridged)->stopProcessing();
     (*bridged)->deactivate();
+}
+
+TEST_CASE("a VST3's edit controller is reached from the main thread only") {
+    // A VST3 parameter has two domains: the plain value the commands use and
+    // the normalized value the processor is given with its events. The engine
+    // converts before the audio thread (paramsNormalized() tells it to), and
+    // the conversions themselves are UI-thread calls per the SDK — this counts
+    // any that run on another thread while the plug-in is processing.
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    const auto gain = std::find_if(found->begin(), found->end(),
+                                   [](const PluginInfo& p) { return p.name == "Test VST3 Gain"; });
+    REQUIRE(gain != found->end());
+    const ControllerWatch watch(std::filesystem::path(FIXTURE_VST3_MODULE));
+    REQUIRE(watch.ok());
+    watch.reset();
+    auto made = Instance::create(*gain, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    CHECK(instance.paramsNormalized());  // and the engine converts for it
+    CHECK(*instance.normalizedParam(1, 0.25) == doctest::Approx(0.25));
+    CHECK(*instance.plainParam(1, 0.75) == doctest::Approx(0.75));
+    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.startProcessing());
+    Buffers buffer(64);
+    std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
+    std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
+    REQUIRE(instance.setParam(1, 0.25).ok());  // converted here, not on the audio thread
+    Event automation{.kind = Event::Kind::Param, .time = 10, .paramId = 1, .value = 0.75};
+    REQUIRE(instance.process(buffer.block(64, std::span<const Event>(&automation, 1))));
+    CHECK(static_cast<double>(buffer.ol[9]) == doctest::Approx(0.25));   // queued first
+    CHECK(static_cast<double>(buffer.ol[10]) == doctest::Approx(0.75));  // then the lane
+    CHECK(watch.count() == 0);
+    // The watch itself: a second thread in the controller while processing is
+    // what it counts (calling the controller concurrently is the caller's bug).
+    std::thread other([&] { (void)instance.paramValue(1); });
+    other.join();
+    CHECK(watch.count() >= 1);
+    instance.stopProcessing();
+    instance.deactivate();
+    // CLAP has a single domain: the conversions are the identity there.
+    auto clapGain = find("com.suppleaudio.test.gain");
+    auto plain = Instance::create(clapGain, {});
+    REQUIRE(plain);
+    CHECK_FALSE((*plain)->paramsNormalized());
+    CHECK(*(*plain)->normalizedParam(1, 0.4) == doctest::Approx(0.4));
+    CHECK(*(*plain)->plainParam(1, 0.4) == doctest::Approx(0.4));
+}
+
+TEST_CASE("a VST3 reset ends the notes the host delivered") {
+    // A VST3 has no reset of its own: the host remembers the notes it sent and
+    // releases them at the next process (the engine relies on that for "no
+    // hanging notes" when an instance leaves an executor).
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    const auto sine = std::find_if(found->begin(), found->end(),
+                                   [](const PluginInfo& p) { return p.name == "Test VST3 Sine"; });
+    REQUIRE(sine != found->end());
+    auto made = Instance::create(*sine, {});
+    REQUIRE(made);
+    auto& instrument = **made;
+    REQUIRE(instrument.activate(48000, 1, 64).ok());
+    REQUIRE(instrument.startProcessing());
+    Buffers buffer(64);
+    Event note{.kind = Event::Kind::NoteOn, .time = 0, .key = 69, .noteId = 3};
+    REQUIRE(instrument.process(buffer.block(64, std::span<const Event>(&note, 1), false)));
+    CHECK(std::abs(buffer.ol[32]) > 0.01f);  // the voice is sounding
+    instrument.reset();
+    buffer = Buffers(64);
+    REQUIRE(instrument.process(buffer.block(64, {}, false)));
+    CHECK(buffer.ol[32] == 0.0f);  // the reset note-off ended it
+    instrument.stopProcessing();
+    instrument.deactivate();
 }
 
 TEST_CASE("scan finds the fixtures with their capabilities") {

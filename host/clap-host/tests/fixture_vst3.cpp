@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <thread>
 
 #include "pluginterfaces/base/funknownimpl.h"
 #include "pluginterfaces/base/ibstream.h"
@@ -25,12 +26,19 @@ const FUID kDelayId(0x11000103, 0x22000202, 0x33000303, 0x44000404);
 const FUID kSidechainId(0x11000104, 0x22000202, 0x33000303, 0x44000404);
 constexpr double kTau = 6.28318530717958647692;
 
+// The host must call the edit controller on the thread that initialized the
+// plug-in (the SDK marks the parameter conversions [UI-thread & Connected]) and
+// never from the audio thread while processing. This counts the violations so a
+// test can assert there are none.
+std::atomic<int> gControllerCallsOffThread{0};
+
 class Fixture final : public SingleComponentEffect {
   public:
     enum Kind { Gain, Sine, Delay, Sidechain };
     explicit Fixture(Kind kind) : kind_(kind), value_(kind == Delay ? 0.0 : 0.5) {}
     tresult PLUGIN_API initialize(FUnknown* context) override {
         if (SingleComponentEffect::initialize(context) != kResultOk) return kResultFalse;
+        owner_ = std::this_thread::get_id();
         if (kind_ != Sine) addAudioInput(STR16("Input"), SpeakerArr::kStereo);
         if (kind_ == Sidechain)
             addAudioInput(STR16("Sidechain"), SpeakerArr::kStereo, BusTypes::kAux, 0);
@@ -43,8 +51,19 @@ class Fixture final : public SingleComponentEffect {
                                 ParameterInfo::kCanAutomate, 1);
         return kResultOk;
     }
-    tresult PLUGIN_API setProcessing(TBool) override {
+    tresult PLUGIN_API setProcessing(TBool state) override {
+        processing_.store(state != 0, std::memory_order_relaxed);
         return kind_ == Sidechain ? kNotImplemented : kResultOk;
+    }
+    // Watched conversions: a call from another thread while processing is a
+    // host bug (the count is read by the test).
+    ParamValue PLUGIN_API normalizedParamToPlain(ParamID id, ParamValue value) override {
+        watchControllerCall();
+        return EditControllerEx1::normalizedParamToPlain(id, value);
+    }
+    ParamValue PLUGIN_API plainParamToNormalized(ParamID id, ParamValue value) override {
+        watchControllerCall();
+        return EditControllerEx1::plainParamToNormalized(id, value);
     }
     tresult PLUGIN_API setBusArrangements(SpeakerArrangement* inputs, int32 numIns,
                                           SpeakerArrangement* outputs, int32 numOuts) override {
@@ -136,8 +155,14 @@ class Fixture final : public SingleComponentEffect {
     }
     OBJ_METHODS(Fixture, SingleComponentEffect)
   private:
+    void watchControllerCall() {
+        if (processing_.load(std::memory_order_relaxed) && std::this_thread::get_id() != owner_)
+            gControllerCallsOffThread.fetch_add(1, std::memory_order_relaxed);
+    }
     Kind kind_;
     std::atomic<double> value_;
+    std::atomic<bool> processing_{false};
+    std::thread::id owner_{};
     std::array<bool, 128> voices_{};
     std::array<double, 128> phase_{};
 };
@@ -185,6 +210,10 @@ class Factory final
     }
 };
 }  // namespace
+
+// The controller-call watch, for the host tests (the module is dlopen'd).
+extern "C" int fixtureOffThreadControllerCalls() { return gControllerCallsOffThread.load(); }
+extern "C" void fixtureResetOffThreadControllerCalls() { gControllerCallsOffThread.store(0); }
 
 extern "C" bool ModuleEntry(void*) { return true; }
 extern "C" bool ModuleExit() { return true; }

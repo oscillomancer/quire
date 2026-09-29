@@ -566,8 +566,9 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
     }
     TransportSnapshot xport;
     std::uint64_t xportSeq = 0;
-    const bool xportNew = xportSeq_.load(std::memory_order_acquire) != xportSeen_ &&
-                          readTransport(xport, 4, &xportSeq);  // else: next cycle
+    const bool xportNew =
+        xportSeq_.load(std::memory_order_acquire) != xportSeen_ &&
+        readTransport(xport, kAudioTransportTries, &xportSeq);  // else: next cycle
     if (xportNew && xport.seekSeq != seekSeen_) {
         seekSeen_ = xport.seekSeq;
         pos_ = xport.seekSample;
@@ -725,8 +726,13 @@ Result<std::vector<RecordedTake>> Engine::stopRecording() {
 
 std::uint64_t Engine::relocate(std::uint64_t previous) {
     // The newest epoch with its own seek and loop (never a loop or seek of a
-    // later epoch paired with this one).
-    const TransportSnapshot t = transportSnapshot();
+    // later epoch paired with this one). Bounded like the callback's read: the
+    // renderer is its plugins' audio thread, so it never waits for the main
+    // thread to finish a write. A write in progress leaves this pass without
+    // relocating (the epoch still differs from `seen`, so the loop tries again
+    // after its nap).
+    TransportSnapshot t;
+    if (!readTransport(t, kRendererTransportTries)) return previous;
     const std::uint64_t epoch = t.epoch;
     if (t.seekSeq != seekSeen_) {
         seekSeen_ = t.seekSeq;
@@ -735,6 +741,14 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
         // Paused: resume where the listener is. Once the callback has seen
         // the new epoch it plays nothing older, so its position is final. (A
         // manual backend's callback runs only when its caller says.)
+        //
+        // This takes rtPos_ only while rtPosEpoch_ is still `previous`, which
+        // holds because rtPosEpoch_ is written where the callback *plays*
+        // frames (pullAhead, liveRender) and the callback cannot hold a chunk
+        // of the new epoch before this relocation produced one: there is one
+        // chunk producer and the epoch flush in pullAhead. If that ever
+        // changes, the fallback (epochStartLocal_, the renderer's epoch start)
+        // would jump playback back by up to the render-ahead span.
         if (backend_->ownsThread()) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
             while (rtEpochSeen_.load(std::memory_order_acquire) < epoch && !rendererQuit_.load() &&
@@ -898,7 +912,8 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
                                std::uint32_t frames) SUPPLE_RT {
     TransportSnapshot xport;
     if (epoch_.load(std::memory_order_acquire) != rtEpoch_ &&
-        readTransport(xport, 4)) {  // else: the main thread is writing, try next cycle
+        readTransport(xport,
+                      kAudioTransportTries)) {  // else: the main thread is writing, next cycle
         rtEpoch_ = xport.epoch;
         rtPrimed_ = false;
         liveReady_ = false;

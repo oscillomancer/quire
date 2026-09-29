@@ -317,6 +317,24 @@ Status RemoteInstance::setParam(std::uint32_t id, double value) {
     return okStatus();
 }
 
+Result<double> RemoteInstance::normalizedParam(std::uint32_t id, double plain) {
+    Writer w;
+    w.u32(id);
+    w.f64(plain);
+    auto reply = call(Op::NormalizedParam, w);
+    if (!reply) return std::move(reply).error();
+    return Reader(reply->data(), reply->size()).f64();
+}
+
+Result<double> RemoteInstance::plainParam(std::uint32_t id, double normalized) {
+    Writer w;
+    w.u32(id);
+    w.f64(normalized);
+    auto reply = call(Op::PlainParam, w);
+    if (!reply) return std::move(reply).error();
+    return Reader(reply->data(), reply->size()).f64();
+}
+
 void RemoteInstance::refreshLatency() {
     auto reply = call(Op::Latency, Writer{});
     if (!reply) return;

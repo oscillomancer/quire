@@ -44,14 +44,25 @@ The VST3 SDK is MIT-licensed from 3.8.0 (ADR-0003, "re-verify at use").
    - Parameters: `ParamInfo` in plain values (`normalizedParamToPlain` of 0,
      1 and the default; `stepCount` → stepped/enum), text via
      `getParamStringByValue`/`getParamValueByString`; `setParam(id, plain)`
-     queues a normalized change in the next block's `IParameterChanges` at
-     offset 0; parameter automation from the engine arrives as param events
-     with sample offsets and becomes points of the same queue. Read-only,
-     hidden and bypass flags map to ours.
+     converts and queues a normalized change in the next block's
+     `IParameterChanges` at offset 0; parameter automation from the engine
+     arrives as param events with sample offsets and becomes points of the
+     same queue. Read-only, hidden and bypass flags map to ours. A VST3 has
+     two parameter domains — the plain value every command uses and the
+     normalized value the processor is given with its events — so
+     `Instance::paramsNormalized()` is true for it, `Instance::normalizedParam`
+     / `plainParam` convert between them (main thread) and the engine's
+     automation compile moves a plain lane's envelope points into the
+     normalized domain, so `Event::Param` values are normalized for a VST3
+     and no conversion happens on the audio thread (ADR-0010's semantic lanes
+     already interpolate in their normalized domain).
    - Notes: CLAP-style note events become `NoteOnEvent`/`NoteOffEvent`
      (note ids kept); raw MIDI CC/pitch bend/aftertouch map through
      `IMidiMapping` to parameters (a VST3 has no raw MIDI input), unmapped
-     ones are dropped.
+     ones are dropped. Notes the host delivered are remembered, because a
+     VST3 cannot be asked to end them: `reset()` marks them and the next
+     `process()` sends their note-offs first (the engine's "no hanging notes"
+     calls depend on it).
    - Transport → `ProcessContext` (tempo, time signature, project time in
      samples and quarters, bar position, playing/looping flags and loop
      range from ADR-0015).
@@ -62,10 +73,14 @@ The VST3 SDK is MIT-licensed from 3.8.0 (ADR-0003, "re-verify at use").
      (kLatencyChanged)`; tail: `getTailSamples()` (`kInfiniteTail` →
      UINT32_MAX).
    - Threading: component/controller creation, `setActive`, state and
-     parameter queries on the main thread; `setProcessing(true/false)` and
-     `process()` on the audio thread (our start/stop processing), which
-     matches the SDK's guidance; `IComponentHandler` edits (plugin GUIs,
-     later) are queued to the main thread like CLAP output events.
+     parameter queries and the two domain conversions on the main thread;
+     `setProcessing(true/false)` and `process()` on the audio thread (our
+     start/stop processing), which matches the SDK's guidance. The audio
+     thread never calls the edit controller. `IComponentHandler` edits and the
+     restart flags other than `kLatencyChanged` are *not* handled yet and wait
+     for editors (Phase 5): `performEdit` currently drops the value, so a
+     plug-in that reports its own parameter changes does not update the
+     session, and `kIoChanged`/`kReloadComponent` are ignored.
 5. **No semantic view**: VST3 plugins have no semantic extension
    (`info().semantic` false). The LLM-facing commands work through plain
    parameters and their text conversion, exactly as for non-semantic CLAPs.
@@ -100,8 +115,17 @@ VSTGUI we do not need).
   host classes and string helpers. `host/clap-host/VST3.md` has details.
 - Parameter changes use preallocated bounded queues (`FixedChanges`), not the
   SDK's `ParameterChanges` (its point vectors grow on the audio thread).
-  rtsan is clean for the in-tree module; a plug-in's own `process` and value
-  conversions are its responsibility.
+  rtsan is clean for the in-tree module; the plug-in's own `process` is its
+  responsibility, but the host no longer calls the edit controller from the
+  audio thread: `setParam` converts on the main thread and the engine's
+  automation lanes are compiled into the normalized domain, so the events the
+  processor receives need no conversion.
+- Buses: a plug-in that adapts the layout offered in `setBusArrangements`
+  (`kIoChanged` is not handled, so this happens once, at activate) is reported
+  and served its own width: `inputChannels()`/`outputChannels()` follow what it
+  settled on, the main buses are declared with that width and padded (silence
+  in, scratch out) so the bus never reaches past the host's channel array, and
+  the host clears any output channel the plug-in does not write.
 - Modules are never unloaded (a strong, deliberately leaked cache): two
   locally built plug-ins exported the same GNU-unique `fmt` symbols, and
   unloading one after the scan crashed the process at exit.
@@ -120,4 +144,8 @@ VSTGUI we do not need).
   instantiate, list parameters and render audio through the engine.
 - Not yet: a persisted scan cache (each start loads every bundle without a
   `moduleinfo.json`), out-of-process scanning, editors (Phase 5), a
-  VST3-specific crashing fixture (isolation is shared with CLAP).
+  VST3-specific crashing fixture (isolation is shared with CLAP), component
+  handler edits and the other restart flags (they need an editor to matter; a
+  plug-in's own `performEdit` is dropped, see the Threading bullet), and a
+  consumer for `OutputEvents` (the VST3 backing reports normalized values; a
+  main-thread consumer converts with `Instance::plainParam`).

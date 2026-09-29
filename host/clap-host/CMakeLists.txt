@@ -48,5 +48,6 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(clap-host-vst3-fixtures PRIVATE DEVELOPMENT=1)
   add_dependencies(clap-host.tests clap-host-vst3-fixtures)
   target_compile_definitions(clap-host.tests PRIVATE
-    FIXTURE_VST3_PATH="${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3")
+    FIXTURE_VST3_PATH="${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3"
+    FIXTURE_VST3_MODULE="$<TARGET_FILE:clap-host-vst3-fixtures>")
 endif()

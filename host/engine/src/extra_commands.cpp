@@ -30,6 +30,18 @@ auto idSchema(const char* prefix) {
     return schema::string().pattern(std::string("^") + prefix + "_[0-9]+$", "object id");
 }
 
+// A model entry the session itself refers to (an item's takes, a take's chain):
+// an id the model hands back must resolve, and a dangling one is a structured
+// error rather than a crash.
+template <class T>
+Result<const T*> dangling(const model::Session& s, Id id, std::string path) {
+    const T* found = model::Traits<T>::map(s).find(id);
+    if (found) return found;
+    return Error(std::string(model::prefix(model::Traits<T>::kind)) + ".unknown",
+                 id.str() + " is missing from the model", std::move(path),
+                 "the session refers to it; reload the project or fix the file");
+}
+
 struct Empty {};
 auto emptySchema() { return schema::object<Empty>("empty").build(); }
 struct IdResult {
@@ -57,6 +69,11 @@ struct RouteSetArgs {
 };
 struct RouteRef {
     std::string route;
+};
+struct TrackMoveArgs {
+    std::string track;
+    std::optional<std::string> parent;
+    std::optional<std::int64_t> index;
 };
 struct RouteEntry {
     std::string id, from, to, fx, tap;
@@ -222,6 +239,23 @@ std::optional<std::vector<Id>> routeCycle(const model::Session& s, Id from, Id t
     if (!walk(to)) return {};
     path.push_back(to);
     return path;
+}
+
+// Is `track` a descendant of `ancestor` in the folder nesting (children lists)?
+// Moving a track under one of its own descendants would make the tree cyclic.
+bool nestedUnder(const model::Session& s, Id ancestor, Id track) {
+    std::vector<Id> stack{track};
+    std::set<Id> seen;
+    while (!stack.empty()) {
+        const Id cur = stack.back();
+        stack.pop_back();
+        if (!seen.insert(cur).second) continue;
+        if (cur == ancestor) return true;
+        const model::Track* found = s.tracks.find(cur);
+        if (!found) continue;
+        for (Id child : found->children) stack.push_back(child);
+    }
+    return false;
 }
 
 Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, EngineApp& app,
@@ -427,6 +461,72 @@ void registerExtraCommands(cmd::Registry& registry) {
                                       r.volumeDb, r.pan, r.mute});
             }
             return out;
+        };
+        registry.add(std::move(c));
+    }
+
+    {
+        Command<TrackMoveArgs, Empty> c;
+        c.name = "track.move";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Move a track under another track or reorder it among its siblings.";
+        c.description =
+            "parent defaults to the track's current parent (a pure reorder); index defaults to "
+            "the end of the destination's children. A track cannot move under itself or one of "
+            "its own descendants.";
+        c.tags = {"track"};
+        c.args = schema::object<TrackMoveArgs>("track_move_args")
+                     .field("track", &TrackMoveArgs::track, idSchema("tr"))
+                     .field("parent", &TrackMoveArgs::parent, idSchema("tr"))
+                     .field("index", &TrackMoveArgs::index, schema::integer().min(0))
+                     .build();
+        c.result = emptySchema();
+        c.errors = {{"tr.cycle", "the destination is inside the track", "choose another parent"}};
+        c.examples = {{"Move a track to the master", j(R"({"track":"tr_1","parent":"tr_0"})"),
+                       j("{}"), "song"}};
+        c.run = [](const TrackMoveArgs& a, Context& ctx) -> Result<Empty> {
+            const auto s = app(ctx).view();
+            auto id = require<model::Track>(s, a.track, "/track");
+            if (!id) return std::move(id).error();
+            if (*id == model::kMaster)
+                return Error("tr.master", "the master track cannot be moved", "/track");
+            const model::Track& track = *s.tracks.find(*id);
+            const Id from = track.parent.value_or(model::kMaster);
+            Id target = from;
+            if (a.parent) {
+                auto parent = require<model::Track>(s, *a.parent, "/parent");
+                if (!parent) return std::move(parent).error();
+                target = *parent;
+            }
+            if (target == *id)
+                return Error("tr.cycle", "a track cannot be moved under itself", "/parent",
+                             "choose another parent");
+            if (target != model::kMaster && nestedUnder(s, *id, target))
+                return Error("tr.cycle", "a track cannot be moved under one of its own children",
+                             "/parent", "choose a track outside it");
+            // The send graph: a folder send or a route that already reaches the
+            // track would close a feedback loop (the same check route.add uses).
+            if (target != from)
+                if (auto cycle = routeCycle(s, *id, target)) {
+                    std::string names;
+                    for (Id at : *cycle) names += (names.empty() ? "" : " -> ") + at.str();
+                    return Error("tr.cycle", "the move creates a cycle: " + names, "/parent",
+                                 "choose a destination that does not feed this track");
+                }
+            model::EditTxn& t = app(ctx).txn();
+            t.modify<model::Track>(from, [&](model::Track& p) {
+                p.children.erase(std::remove(p.children.begin(), p.children.end(), *id),
+                                 p.children.end());
+            });
+            t.modify<model::Track>(target, [&](model::Track& p) {
+                const auto at = a.index ? std::min<std::size_t>(static_cast<std::size_t>(*a.index),
+                                                                p.children.size())
+                                        : p.children.size();
+                p.children.insert(p.children.begin() + static_cast<std::ptrdiff_t>(at), *id);
+            });
+            t.modify<model::Track>(*id, [&](model::Track& tr) { tr.parent = target; });
+            return Empty{};
         };
         registry.add(std::move(c));
     }
@@ -694,6 +794,12 @@ void registerExtraCommands(cmd::Registry& registry) {
             const auto& original = *s.items.find(*id);
             if (original.locked)
                 return Error("item.locked", "item is locked", "/item", "unlock the item first");
+            if (a.position && a.bar)
+                return Error("item.position", "give position or bar, not both", "/position",
+                             "remove one of them");
+            if (a.length && !(*a.length > 0))
+                return Error("item.length", "length must be greater than 0", "/length",
+                             "give a positive length, or remove the item");
             model::Item it = original;
             if (a.position) it.position = *a.position;
             if (a.bar) it.position = s.timeMap->beatOfBar(static_cast<int>(*a.bar));
@@ -737,11 +843,16 @@ void registerExtraCommands(cmd::Registry& registry) {
             copy.takes.clear();
             auto& txn = app(ctx).txn();
             for (Id oldId : s.items.find(*id)->takes) {
-                model::Take tk = *s.takes.find(oldId);
+                auto old = dangling<model::Take>(s, oldId, "/item");
+                if (!old) return std::move(old).error();
+                model::Take tk = **old;
                 unpoolCopiedSource(tk, s, txn);
                 tk.chain.clear();
-                for (Id fx : s.takes.find(oldId)->chain)
-                    tk.chain.push_back(txn.create(*s.fx.find(fx)));
+                for (Id fx : (*old)->chain) {
+                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
+                    if (!chained) return std::move(chained).error();
+                    tk.chain.push_back(txn.create(**chained));
+                }
                 Id fresh = txn.create(std::move(tk));
                 copy.takes.push_back(fresh);
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
@@ -816,15 +927,20 @@ void registerExtraCommands(cmd::Registry& registry) {
             right.takes.clear();
             auto& txn = app(ctx).txn();
             for (Id oldTake : old.takes) {
-                model::Take tk = *s.takes.find(oldTake);
+                auto source = dangling<model::Take>(s, oldTake, "/item");
+                if (!source) return std::move(source).error();
+                model::Take tk = **source;
                 const double delta = tk.source && tk.source->kind == model::Kind::Midi
                                          ? (a.at - startBeat) * tk.playrate
                                          : splitSec - startSec;
                 tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
                 tk.chain.clear();
-                for (Id fx : s.takes.find(oldTake)->chain)
-                    tk.chain.push_back(txn.create(*s.fx.find(fx)));
+                for (Id fx : (*source)->chain) {
+                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
+                    if (!chained) return std::move(chained).error();
+                    tk.chain.push_back(txn.create(**chained));
+                }
                 Id fresh = txn.create(std::move(tk));
                 right.takes.push_back(fresh);
                 if (old.activeTake == oldTake) right.activeTake = fresh;
@@ -861,11 +977,16 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (std::find(takes.begin(), takes.end(), *source) == takes.end())
                     return Error("take.not_in_item", *a.from + " does not belong to " + a.item,
                                  "/from");
-                copy = *s.takes.find(*source);
+                auto takeSource = dangling<model::Take>(s, *source, "/from");
+                if (!takeSource) return std::move(takeSource).error();
+                copy = **takeSource;
                 unpoolCopiedSource(copy, s, app(ctx).txn());
                 copy.chain.clear();
-                for (Id fx : s.takes.find(*source)->chain)
-                    copy.chain.push_back(app(ctx).txn().create(*s.fx.find(fx)));
+                for (Id fx : (*takeSource)->chain) {
+                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
+                    if (!chained) return std::move(chained).error();
+                    copy.chain.push_back(app(ctx).txn().create(**chained));
+                }
             }
             auto& txn = app(ctx).txn();
             Id fresh = txn.create(std::move(copy));
@@ -981,7 +1102,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             TakeList out;
             const auto& it = *s.items.find(*id);
             for (Id takeId : it.takes) {
-                const auto& tk = *s.takes.find(takeId);
+                auto found = dangling<model::Take>(s, takeId, "/item");
+                if (!found) return std::move(found).error();
+                const auto& tk = **found;
                 out.takes.push_back({takeId.str(), tk.name, tk.source ? tk.source->str() : "",
                                      it.activeTake == takeId, tk.gainDb, tk.pan, tk.startOffset});
             }
@@ -1009,22 +1132,35 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::FxInstance>(s, a.fx, "/fx");
             if (!id) return std::move(id).error();
             std::optional<Id> source;
-            for (const auto& e : s.tracks)
-                if (std::find(e.value->chain.begin(), e.value->chain.end(), *id) !=
+            // The first chain that holds it: a track owns its FX, so a second
+            // match would be a broken model, not a second place to remove from.
+            for (const auto& e : s.tracks) {
+                if (std::find(e.value->chain.begin(), e.value->chain.end(), *id) ==
                     e.value->chain.end())
-                    source = e.id;
+                    continue;
+                source = e.id;
+                break;
+            }
             if (!source)
                 return Error("fx.chain", "this plugin is not in a track chain", "/fx",
-                             "move track FX with fx.move; take FX require a take-chain command");
+                             "fx.move reorders track chains only; take chains are not "
+                             "editable yet");
             Id target = *source;
             if (a.track) {
                 auto tr = require<model::Track>(s, *a.track, "/track");
                 if (!tr) return std::move(tr).error();
                 target = *tr;
             }
-            auto chain = s.tracks.find(*source)->chain;
+            auto sourceChain = dangling<model::Track>(s, *source, "/fx");
+            if (!sourceChain) return std::move(sourceChain).error();
+            auto chain = (*sourceChain)->chain;
             chain.erase(std::remove(chain.begin(), chain.end(), *id), chain.end());
-            auto targetChain = target == *source ? chain : s.tracks.find(target)->chain;
+            std::vector<Id> targetChain = chain;
+            if (target != *source) {
+                auto destination = dangling<model::Track>(s, target, "/track");
+                if (!destination) return std::move(destination).error();
+                targetChain = (*destination)->chain;
+            }
             if (static_cast<std::size_t>(a.index) > targetChain.size())
                 return Error("fx.index", "index is past the end of the destination chain", "/index",
                              "use an index from 0 to " + std::to_string(targetChain.size()));
@@ -1130,11 +1266,10 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             const auto& fx = *s.fx.find(*id);
             auto effective = app(ctx).mergedPatch(fx, json::Value::object(), false);
-            if (effective) {
-                const auto* params = effective->find("params");
-                if (params && params->isObject())
-                    if (const auto* value = params->find(a.param)) return FxParamResult{*value};
-            }
+            if (!effective) return std::move(effective).error();  // a broken patch is the cause
+            const auto* params = effective->find("params");
+            if (params && params->isObject())
+                if (const auto* value = params->find(a.param)) return FxParamResult{*value};
             for (const auto& [key, value] : fx.params)
                 if (std::to_string(key) == a.param) return FxParamResult{json::Value(value)};
             return Error("fx.param", "no saved parameter " + a.param, "/param",
