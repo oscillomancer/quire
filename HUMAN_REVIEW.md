@@ -94,6 +94,25 @@ you can say whether they sound good.
 *Meanwhile:* performance work continues (18 % → 11.7 % of a core for the
 reference patch so far; target 3 %).
 
+### 11. B1 at a 64-frame period — scheduling (10 minutes of your machine)
+The Phase 4 acceptance benchmark needs the audio device at 64 frames. Quire
+asks for it per client (`PIPEWIRE_LATENCY`), which changes the whole
+PipeWire graph's quantum while the benchmark runs (your other audio apps
+too); nothing is written to any config and it ends with the process. I will
+run it only when you say it is a good time (and with the stock EQ and
+compressor, which are being built now).
+*Meanwhile:* preliminary numbers are in `docs/benchmarks/b1-preliminary.md`.
+
+### 12. Template-built plugins export fmt's GNU-unique symbols — FYI
+Starter.vst3 and Vellum.vst3 (both from the template) export fmt's
+`STB_GNU_UNIQUE` symbols (e.g. `fmt::…::format_facet<std::locale>::id`).
+Loaded into one process, the second binds to the first's copies; unloading
+the first then leaves dangling references (Quire's VST3 scan crashed at exit
+until it stopped unloading modules, which is how it works now). A fix in the
+template would be hidden visibility for everything but the entry points (a
+linker version script, or `-fvisibility=hidden` on the dependencies). I have
+not touched the template or your plug-ins; say if you want a patch proposed.
+
 ## Resolved
 
 (none yet)
