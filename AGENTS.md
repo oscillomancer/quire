@@ -77,9 +77,7 @@ device, 2 s of silence) only on request:
 `SUPPLE_AUDIO_DEVICE_TEST=1 build/dev/host/engine/engine.tests -tc='real JACK*'`.
 
 CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
-from the tsan preset: timing-heavy tests TSan makes impractically slow, and
-anything that runs the embedded Lua state — ThreadSanitizer cannot follow
-Lua's longjmp error handling), `slow`
+from the tsan preset: timing-heavy tests TSan makes impractically slow), `slow`
 (minutes-long end-to-end tests: run in dev, gcc and asan only). A test that
 depends on wall-clock time must not decide pass/fail by it.
 

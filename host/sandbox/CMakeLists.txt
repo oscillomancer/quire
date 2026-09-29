@@ -5,17 +5,9 @@ supple_add_library(sandbox
        supple::core-analysis supple::optimize supple::core-params)
 
 if(SUPPLE_BUILD_TESTS)
-  supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp LABELS rt)
+  supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp
+                   tests/test_scripts.cpp LABELS rt)
   add_dependencies(sandbox.tests clap-host-fixtures)
-  # script.run lives in its own binary (see host/engine/CMakeLists.txt).
-  add_executable(sandbox-script.tests tests/test_scripts.cpp)
-  target_link_libraries(sandbox-script.tests PRIVATE supple::sandbox supple::doctest-main)
-  supple_target_defaults(sandbox-script.tests)
-  target_compile_definitions(sandbox-script.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
-  add_dependencies(sandbox-script.tests clap-host-fixtures)
-  add_test(NAME sandbox-script.tests COMMAND sandbox-script.tests)
-  set_tests_properties(sandbox-script.tests PROPERTIES LABELS "sandbox;rt;tsan-skip" ENVIRONMENT
-                       "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")
   target_compile_definitions(sandbox.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
   # The optimizer end to end with the real synth (slow-ish; single-threaded).
   add_executable(sandbox-optimize.tests tests/test_optimize.cpp)
@@ -50,7 +42,6 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME sandbox.mcp-script
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_script.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> sandbox)
-  set_tests_properties(sandbox.mcp-script PROPERTIES LABELS "sandbox;tsan-skip")
   add_test(NAME sandbox.mcp-proxy
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>

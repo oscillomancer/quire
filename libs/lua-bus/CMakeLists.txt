@@ -5,8 +5,5 @@ supple_add_library(lua-bus
   DEPS supple::command-bus supple::core-schema supple::lua)
 
 if(SUPPLE_BUILD_TESTS)
-  # tsan-skip: ThreadSanitizer's longjmp interceptor cannot follow Lua's
-  # setjmp/longjmp error handling ("can't find longjmp buf"), which every
-  # pcall path here uses. asan/ubsan cover this library.
-  supple_add_tests(lua-bus SOURCES tests/test_script.cpp tests/test_runtime.cpp LABELS tsan-skip)
+  supple_add_tests(lua-bus SOURCES tests/test_script.cpp tests/test_runtime.cpp)
 endif()

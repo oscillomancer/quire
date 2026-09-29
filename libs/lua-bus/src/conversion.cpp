@@ -1,6 +1,9 @@
 #include "conversion.h"
 
-#include <lua.hpp>
+// Lua is built as C++ (third_party/CMakeLists.txt): no extern "C".
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
 
 #include <cstdint>
 #include <string>

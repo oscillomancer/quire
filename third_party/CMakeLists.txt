@@ -40,6 +40,13 @@ add_library(tp-lua STATIC
   ${_lua}/lzio.c
   ${_lua}/lauxlib.c ${_lua}/lbaselib.c ${_lua}/lcorolib.c ${_lua}/lmathlib.c
   ${_lua}/lstrlib.c ${_lua}/ltablib.c ${_lua}/lutf8lib.c)
+# Compiled as C++, so a Lua error is a C++ exception rather than a longjmp:
+# it unwinds the C++ frames between the raise and the pcall (bindings,
+# conversions) with their destructors, and ThreadSanitizer can follow it.
+# Consumers include lua.h/lauxlib.h/lualib.h directly, never lua.hpp (its
+# extern "C" would not match the C++ symbols).
+get_target_property(_lua_sources tp-lua SOURCES)
+set_source_files_properties(${_lua_sources} PROPERTIES LANGUAGE CXX)
 target_include_directories(tp-lua SYSTEM PUBLIC ${_lua})
 target_compile_features(tp-lua PUBLIC cxx_std_20)
 set_target_properties(tp-lua PROPERTIES POSITION_INDEPENDENT_CODE ON)
