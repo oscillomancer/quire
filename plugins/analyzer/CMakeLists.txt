@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
+if (NOT SUPPLE_ROOT)
+    get_filename_component(SUPPLE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+endif()
 
 # This must be set before project(): project() creates the cache entry, and a
 # later non-FORCE assignment leaves it empty. macOS 11 is the first release that
@@ -25,7 +28,7 @@ endif()
 
 
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (UNIX AND NOT APPLE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -36,6 +39,7 @@ option(ANALYZER_BUILD_TOOLS "Build tests and integration probes" ON)
 option(ANALYZER_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(ANALYZER_STRICT_WARNINGS "Enable warnings on analyzer-owned code" ON)
 option(ANALYZER_SANITIZERS "Enable AddressSanitizer and UBSan on analyzer-owned code" OFF)
+option(ANALYZER_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
 
 function(analyzer_target_defaults target)
     if (ANALYZER_STRICT_WARNINGS)
@@ -56,20 +60,57 @@ function(analyzer_target_defaults target)
             -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
     endif()
+    if (SUPPLE_SANITIZE STREQUAL "thread")
+        target_compile_options(${target} PRIVATE -fsanitize=thread)
+        target_link_options(${target} PRIVATE -fsanitize=thread)
+    endif()
+    if (SUPPLE_SANITIZE STREQUAL "address")
+        target_compile_options(${target} PRIVATE -fsanitize=address)
+        target_link_options(${target} PRIVATE -fsanitize=address)
+    elseif (SUPPLE_SANITIZE STREQUAL "undefined")
+        target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-sanitize-recover=undefined)
+        target_link_options(${target} PRIVATE -fsanitize=undefined)
+    endif()
 endfunction()
 
+include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
+supple_plugin_add_monorepo_libraries()
+
+set(SUPPLE_BUILD_TESTS OFF)
+add_subdirectory(${SUPPLE_ROOT}/libs/core-analysis ${CMAKE_BINARY_DIR}/supple/core-analysis)
+add_subdirectory(engine ${CMAKE_BINARY_DIR}/supple/analyzer-engine)
+set(SUPPLE_BUILD_TESTS ON)
 add_library(analyzer-dsp INTERFACE)
-target_include_directories(analyzer-dsp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/dsp/include)
+target_link_libraries(analyzer-dsp INTERFACE supple::analyzer-engine)
 
 if (ANALYZER_BUILD_TOOLS)
     enable_testing()
-    add_executable(analyzer-cli tools/analyzer_cli.cpp)
-    target_link_libraries(analyzer-cli PRIVATE analyzer-dsp)
-    analyzer_target_defaults(analyzer-cli)
     add_executable(analyzer-test test/test_core.cpp)
     target_link_libraries(analyzer-test PRIVATE analyzer-dsp)
     analyzer_target_defaults(analyzer-test)
+    if (ANALYZER_RTSAN)
+        target_compile_options(analyzer-test PRIVATE -fsanitize=realtime)
+        target_link_options(analyzer-test PRIVATE -fsanitize=realtime)
+    endif()
     add_test(NAME core COMMAND analyzer-test)
+    if (UNIX AND NOT APPLE)
+        find_package(Threads REQUIRED)
+        add_executable(analyzer-semantic-rt test/semantic_rt.cpp)
+        target_link_libraries(analyzer-semantic-rt PRIVATE
+            supple::plugin-support analyzer-dsp Threads::Threads ${CMAKE_DL_LIBS})
+        analyzer_target_defaults(analyzer-semantic-rt)
+        if (ANALYZER_RTSAN)
+            target_compile_options(analyzer-semantic-rt PRIVATE -fsanitize=realtime)
+            target_link_options(analyzer-semantic-rt PRIVATE -fsanitize=realtime)
+        endif()
+        add_test(NAME semantic-rt COMMAND analyzer-semantic-rt
+            ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap)
+    endif()
+
+    if (SUPPLE_SEMANTIC_CONFORMANCE)
+        add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
+            ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap com.suppleaudio.analyzer)
+    endif()
 endif()
 
 function(analyzer_add_gui_preview)
@@ -87,7 +128,12 @@ if (ANALYZER_BUILD_PLUGIN)
     include(FetchContent)
     # Patch validation needs Git even when dependency sources are overridden.
     find_package(Git REQUIRED)
-    set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES ON CACHE BOOL "" FORCE)
+    set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL "" FORCE)
+    set(CLAP_SDK_ROOT "${SUPPLE_ROOT}/third_party/clap" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_CLAP-WRAPPER "${SUPPLE_ROOT}/third_party/clap-wrapper" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_PUGL "${SUPPLE_ROOT}/third_party/pugl" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_NANOVG "${SUPPLE_ROOT}/third_party/nanovg" CACHE PATH "" FORCE)
     set(CLAP_WRAPPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(clap-wrapper
         GIT_REPOSITORY https://github.com/free-audio/clap-wrapper.git
@@ -95,55 +141,15 @@ if (ANALYZER_BUILD_PLUGIN)
         GIT_SHALLOW OFF)
     FetchContent_MakeAvailable(clap-wrapper)
 
-    # clap-wrapper 0.16.0 keeps only the final VST3 automation point in each
-    # parameter queue. Apply the small upstreamable fix after population; the
-    # reverse check makes repeated configure runs idempotent.
-    set(analyzer_wrapper_vst3_patch ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-all-points.patch)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply --check ${analyzer_wrapper_vst3_patch}
-        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-        RESULT_VARIABLE wrapper_patch_applicable
-        OUTPUT_QUIET ERROR_QUIET)
-    if (wrapper_patch_applicable EQUAL 0)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply ${analyzer_wrapper_vst3_patch}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            COMMAND_ERROR_IS_FATAL ANY)
-    else()
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${analyzer_wrapper_vst3_patch}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            RESULT_VARIABLE wrapper_patch_present
-            OUTPUT_QUIET ERROR_QUIET)
-        if (NOT wrapper_patch_present EQUAL 0)
-            message(FATAL_ERROR "clap-wrapper VST3 automation patch no longer applies")
-        endif()
-    endif()
-
-    # register_timer() clamps every request to 30ms upstream, capping a VST3
-    # editor at 33fps however fast it asked to run. The AUv2 path returns false
-    # instead and falls through to the plugin's own timer at the full 60Hz,
-    # which is why an AU looks smoother than the VST3 of the same build.
-    set(analyzer_wrapper_vst3_patch_timer ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-timer-floor.patch)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply --check ${analyzer_wrapper_vst3_patch_timer}
-        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-        RESULT_VARIABLE wrapper_timer_applicable
-        OUTPUT_QUIET ERROR_QUIET)
-    if (wrapper_timer_applicable EQUAL 0)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply ${analyzer_wrapper_vst3_patch_timer}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            COMMAND_ERROR_IS_FATAL ANY)
-    else()
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${analyzer_wrapper_vst3_patch_timer}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            RESULT_VARIABLE wrapper_timer_present
-            OUTPUT_QUIET ERROR_QUIET)
-        if (NOT wrapper_timer_present EQUAL 0)
-            message(FATAL_ERROR "clap-wrapper VST3 timer floor patch no longer applies")
-        endif()
+    # The vendored wrapper carries both template VST3 patches. Never mutate it.
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-all-points.patch
+        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE points_present)
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-timer-floor.patch
+        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE timer_present)
+    if (NOT points_present EQUAL 0 OR NOT timer_present EQUAL 0)
+        message(FATAL_ERROR "Vendored clap-wrapper lacks template VST3 patches")
     endif()
 
     if (ANALYZER_BUILD_TOOLS)
@@ -158,7 +164,11 @@ if (ANALYZER_BUILD_PLUGIN)
     endif()
 
     add_library(analyzer-impl STATIC plugin/src/analyzer_clap.cpp)
-    target_link_libraries(analyzer-impl PUBLIC clap clap-wrapper-extensions analyzer-dsp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(analyzer-impl PUBLIC clap clap-wrapper-extensions analyzer-dsp supple::plugin-support Threads::Threads)
+    if (ANALYZER_RTSAN)
+        target_compile_options(analyzer-impl PRIVATE -fsanitize=realtime)
+    endif()
     analyzer_target_defaults(analyzer-impl)
 
     if (ANALYZER_BUILD_GUI)
@@ -168,7 +178,7 @@ if (ANALYZER_BUILD_PLUGIN)
         if (ANALYZER_BUILD_TOOLS)
             analyzer_add_gui_preview()
             add_executable(analyzer-editor-test test/editor_input.cpp)
-            target_link_libraries(analyzer-editor-test PRIVATE
+            target_link_libraries(analyzer-editor-test PRIVATE supple::plugin-support
                 $<IF:$<TARGET_EXISTS:analyzer-gui-gl>,analyzer-gui-gl,analyzer-gui>)
             target_include_directories(analyzer-editor-test PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
@@ -181,7 +191,7 @@ if (ANALYZER_BUILD_PLUGIN)
                 target_link_libraries(analyzer-linux-host-probe PRIVATE clap X11::X11 ${CMAKE_DL_LIBS} Threads::Threads)
             endif()
             add_executable(analyzer-clap-probe tools/clap_host_probe.cpp)
-            target_link_libraries(analyzer-clap-probe PRIVATE clap)
+            target_link_libraries(analyzer-clap-probe PRIVATE clap analyzer-dsp)
             target_include_directories(analyzer-clap-probe PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
             if (APPLE)
@@ -200,19 +210,26 @@ if (ANALYZER_BUILD_PLUGIN)
     if (ANALYZER_BUILD_TOOLS)
         add_executable(analyzer-host-smoke test/host_smoke.cpp)
         target_link_libraries(analyzer-host-smoke PRIVATE clap)
+        if (ANALYZER_RTSAN)
+            target_link_options(analyzer-host-smoke PRIVATE -fsanitize=realtime)
+        endif()
         target_compile_definitions(analyzer-host-smoke PRIVATE
             HOST_SMOKE_PLUGIN_ID="com.suppleaudio.analyzer"
-            HOST_SMOKE_PLAIN_PARAM="Input Gain")
+            HOST_SMOKE_PLAIN_PARAM="Hold")
         analyzer_target_defaults(analyzer-host-smoke)
         add_test(NAME host-smoke
                  COMMAND analyzer-host-smoke
-                         ${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.clap)
+                         ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap)
         add_test(NAME host-smoke-mono
                  COMMAND analyzer-host-smoke
-                         ${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.clap --mono)
+                         ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap --mono)
     endif()
 
-    set(ANALYZER_FORMATS CLAP VST3)
+    option(ANALYZER_VST3 "Build VST3 format" OFF)
+    set(ANALYZER_FORMATS CLAP)
+    if (ANALYZER_VST3)
+        list(APPEND ANALYZER_FORMATS VST3)
+    endif()
     if (APPLE)
         list(APPEND ANALYZER_FORMATS AUV2)
     endif()
@@ -228,11 +245,19 @@ if (ANALYZER_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${ANALYZER_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/analyzer_assets
+        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QAna"
         AUV2_INSTRUMENT_TYPE "aufx")
+    if (TARGET analyzer-plugin_clap)
+        analyzer_target_defaults(analyzer-plugin_clap)
+    endif()
+    if (ANALYZER_RTSAN AND TARGET analyzer-plugin_clap)
+        target_link_options(analyzer-plugin_clap PRIVATE -fsanitize=realtime)
+    elseif (SUPPLE_SANITIZE STREQUAL "thread" AND TARGET analyzer-plugin_clap)
+        target_link_options(analyzer-plugin_clap PRIVATE -fsanitize=thread)
+    endif()
 
     # The license and attribution have to travel with the binary. Files sitting
     # in the repository do nothing for someone who is handed only a bundle, and
@@ -264,11 +289,11 @@ if (ANALYZER_BUILD_PLUGIN)
                 add_dependencies(analyzer-notices ${target})
                 add_custom_command(TARGET analyzer-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/analyzer_assets/${bundle}/Contents/Resources"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_notices}"
-                        "${CMAKE_BINARY_DIR}/analyzer_assets/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_license}"
-                        "${CMAKE_BINARY_DIR}/analyzer_assets/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -278,9 +303,9 @@ if (ANALYZER_BUILD_PLUGIN)
         # it is the release archive that has to carry it.
         add_custom_command(TARGET analyzer-notices POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_notices}"
-                "${CMAKE_BINARY_DIR}/analyzer_assets/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_license}"
-                "${CMAKE_BINARY_DIR}/analyzer_assets/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -293,24 +318,24 @@ if (ANALYZER_BUILD_PLUGIN)
         add_custom_target(analyzer-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/analyzer-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component/Contents/Info.plist"
+                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component/Contents/Resources"
+                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_notices}"
-                "${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component/Contents/Resources/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_license}"
-                "${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component/Contents/Resources/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component"
+                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component"
             DEPENDS analyzer-plugin_auv2
             COMMENT "Preparing and ad-hoc signing Analyzer.component"
             VERBATIM)
         if (ANALYZER_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/analyzer_assets/Analyzer.component
+                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/Analyzer.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -350,7 +375,7 @@ if (ANALYZER_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/analyzer_assets/${bundle}"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()

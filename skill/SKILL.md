@@ -49,6 +49,7 @@ their undo history and can be reviewed.
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | `generated/plugins/<plugin>.md` |
+| Live loudness, spectrum and stereo monitoring (Gauge/analyzer) | `guides/analyzer.md` |
 | What the analysis numbers mean | `guides/analysis.md` |
 
 Files under `generated/` are produced from the code and always match the

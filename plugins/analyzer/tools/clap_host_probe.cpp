@@ -408,7 +408,7 @@ int main(int argc, char** argv) {
 #endif
 
     double outputLevel = -120.0;
-    if (params) params->get_value(g.plugin, analyzer::kOutputMeter, &outputLevel);
+    if (params) params->get_value(g.plugin, analyzer::kTruePeak, &outputLevel);
 
 #if defined(__APPLE__)
     // Grab what the editor actually put on screen inside the host's window.

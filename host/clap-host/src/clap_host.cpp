@@ -555,8 +555,8 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
     self->extTimer_ = static_cast<const clap_plugin_timer_support_t*>(ext(CLAP_EXT_TIMER_SUPPORT));
     self->extSemantic_ = static_cast<const clap_plugin_supple_semantic_params_t*>(
         ext(CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));
-    if (self->extSemantic_ &&
-        self->extSemantic_->struct_size < sizeof(clap_plugin_supple_semantic_params_t))
+    if (self->extSemantic_ && self->extSemantic_->struct_size <
+                                  offsetof(clap_plugin_supple_semantic_params_t, get_telemetry))
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
 

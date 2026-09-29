@@ -171,7 +171,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 add_library(analyzer-nanovg STATIC ${nanovg_SOURCE_DIR}/src/nanovg.c)
-target_include_directories(analyzer-nanovg PUBLIC ${nanovg_SOURCE_DIR}/src)
+target_include_directories(analyzer-nanovg SYSTEM PUBLIC ${nanovg_SOURCE_DIR}/src)
 set_target_properties(analyzer-nanovg PROPERTIES C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
 # NanoVG bundles stb_truetype/stb_image, which are noisy under our warning level
 # and are not ours to fix.
@@ -261,7 +261,7 @@ function(analyzer_gui_target name useMetal)
     target_include_directories(${name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(${name} PUBLIC analyzer-nanovg analyzer-dsp)
     set_target_properties(${name} PROPERTIES
-        CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
 analyzer_gui_target(analyzer-gui ${ANALYZER_METAL})

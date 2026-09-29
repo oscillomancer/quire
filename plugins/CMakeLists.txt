@@ -1,4 +1,5 @@
 add_subdirectory(common)
+add_subdirectory(analyzer/engine)
 add_subdirectory(orrery/engine)
 add_subdirectory(orrery/clap)
 
@@ -56,4 +57,5 @@ if(SUPPLE_BUILD_PLUGINS)
   endfunction()
   supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
+  supple_add_plugin(analyzer ANALYZER Analyzer)
 endif()

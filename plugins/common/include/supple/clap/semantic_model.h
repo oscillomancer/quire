@@ -65,7 +65,8 @@ class SemanticAdapter {
                const clap_ostream_t* e) { return R(p)->setPatch(m, j, n, e); },
             [](const clap_plugin_t* p, uint32_t d, const clap_ostream_t* o) {
                 return R(p)->describe(d, o);
-            }};
+            },
+            nullptr};
         return &ext;
     }
 

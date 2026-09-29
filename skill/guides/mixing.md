@@ -6,6 +6,8 @@ development; until they ship, this guide covers what the engine does today —
 levels, panning, muting/soloing, rendering, and measuring loudness and
 masking.
 
+For live monitoring at a point in an FX chain, see [the analyzer guide](analyzer.md).
+
 ## The loop
 
 1. `session.describe` — tracks, their chains, levels and routing in one read.

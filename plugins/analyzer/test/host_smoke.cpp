@@ -133,6 +133,33 @@ void setParamEvent(clap_id id, double value) {
 #  error "HOST_SMOKE_PLAIN_PARAM must be defined by the build"
 #endif
 
+// The shared gain-effect render helper assumes a continuous non-unity gain.
+// An analyzer has only stepped measurement controls and must remain identity.
+template<class T>
+bool analyzerPassthrough(const clap_plugin_factory_t* factory, const char* id,
+                         uint32_t channels, double rate, bool inPlace) {
+    host_contract::RenderInstance instance(factory, id);
+    const auto* p = instance.plug;
+    if (!p || !host_contract::selectLayout(p, channels) || !p->activate(p,rate,1,4096)) return false;
+    instance.active = true;
+    if (!p->start_processing(p)) return false;
+    instance.processing = true;
+    std::vector<T> l(4096),r(4096),a(4096),b(4096);
+    T* input[]{l.data(),r.data()},*output[]{inPlace?l.data():a.data(),inPlace?r.data():b.data()};
+    clap_audio_buffer_t ib{},ob{}; ib.channel_count=ob.channel_count=channels;
+    if constexpr(std::is_same_v<T,float>){ib.data32=input;ob.data32=output;}
+    else{ib.data64=input;ob.data64=output;}
+    host_contract::InputEvents events;
+    clap_process_t proc{};proc.audio_inputs=&ib;proc.audio_inputs_count=1;proc.audio_outputs=&ob;proc.audio_outputs_count=1;proc.in_events=&events.input;proc.out_events=&events.output;
+    for(int n : {1,7,64,4096}) {
+        for(int i=0;i<n;++i){l[static_cast<size_t>(i)]=static_cast<T>(.21*std::sin(i*.13));r[static_cast<size_t>(i)]=static_cast<T>(.13*std::sin(i*.17+.3));}
+        const auto expectedL=l,expectedR=r;
+        proc.frames_count=static_cast<uint32_t>(n);
+        if(p->process(p,&proc)==CLAP_PROCESS_ERROR || std::memcmp(expectedL.data(),output[0],static_cast<size_t>(n)*sizeof(T)) || (channels==2 && std::memcmp(expectedR.data(),output[1],static_cast<size_t>(n)*sizeof(T)))) return false;
+    }
+    return true;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "usage: host_smoke <path to Product.clap> [--mono]\n");
@@ -237,8 +264,12 @@ int main(int argc, char** argv) {
 
     host_contract::ports(plug, channels, check);
     host_contract::parameterText(plug, check);
-    host_contract::processing(fac, desc->id, HOST_SMOKE_PLAIN_PARAM, channels,
-                              48000.0, isInstrument, check);
+    bool transparent=true;
+    for(double rate : {44100.,48000.,88200.,96000.,192000.})
+        for(bool inplace : {false,true})
+            transparent = analyzerPassthrough<float>(fac,desc->id,channels,rate,inplace) &&
+                          analyzerPassthrough<double>(fac,desc->id,channels,rate,inplace) && transparent;
+    check(transparent,"float/double mono/stereo in-place and separate output are bit-exact across rates and blocks");
 
     const uint32_t block = 512;
     check(plug->activate(plug, 48000.0, 32, block), "activate at 48 kHz");

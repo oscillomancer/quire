@@ -6,12 +6,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include "analyzer/processor.h"
 
 namespace analyzer::gui {
 
 struct Frame {
-    float inputPeakDb = -120.0f;
-    float outputPeakDb = -120.0f;
+    supple::analyzer::Frame analysis{};
 };
 
 template <typename T, int CapacityPow2>
@@ -51,8 +51,7 @@ class Ring {
         return kCapacity - (w - r);
     }
     bool pending() const {
-        return read_.load(std::memory_order_relaxed) !=
-               write_.load(std::memory_order_acquire);
+        return read_.load(std::memory_order_relaxed) != write_.load(std::memory_order_acquire);
     }
 
   private:

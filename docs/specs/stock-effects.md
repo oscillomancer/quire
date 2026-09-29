@@ -185,6 +185,34 @@ seconds (`window` param: 3 s, 10 s, 30 s, since reset) so the DAW and agents
 can read live measurements of any point in the graph. Keys: `window` enum,
 `reset` (momentary bool), `hold` bool.
 
+### Implementation decisions (2026-09-29)
+
+- `window` choices are `s3` (default), `s10`, `s30`, `since_reset`; changing
+  it clears history. Hold freezes measurement time and excludes new audio;
+  reset is a momentary trigger, returns to false, and clears even while held.
+- Scalar keys: `integrated`, `short_term`, `momentary` (LUFS −120..40),
+  `lra` (LU 0..120), `true_peak` (dBTP −120..40), `correlation` (−1..1),
+  `width` (percent 0..100), `balance` (dB −120..120, right/left power ratio),
+  `centroid` (Hz 0..20000). All readonly; unavailable loudness/peak = −120,
+  LRA = 0, silence correlation = 1. Width is side/(mid+side) energy × 100.
+- Measurements run on a joined consumer worker, never the audio callback.
+  The preallocated SPSC queue holds at least two seconds; it drops new
+  packets under overload and restarts history after a gap. Output stays
+  bit-exact even for nonfinite samples; only measurement copies are sanitized.
+- Rolling loudness/stereo/peaks use a sample-counted 100 ms grid. Integrated
+  and LRA retain complete 400 ms/3 s blocks wholly inside the selected horizon;
+  since-reset uses bounded histograms (LRA resolution 0.01 LU). True peak
+  reuses core-analysis's 4× at ≤48 kHz, 2× at ≤96 kHz, 1× above policy.
+- Spectrum is the mid signal's 31 ISO third-octave bands (20 Hz–20 kHz),
+  Hann FFT (~43 ms) on the 100 ms grid, smoothed in power with a 300 ms
+  time constant. The current spectral centroid uses that same power spectrum.
+  This is a live spectrum rather than a full-window offline LTAS.
+- Telemetry JSON contains only measured descriptors, follows the existing
+  analysis-report field names and adds `live: {window, hold, dropped_frames}`.
+  Current M/S are single-element series; spectrum is `spectral.ltas_db`.
+  Silence/unavailable values use finite meter floors. Generic-host scalar
+  events are no more frequent than 50 ms; GUI frames exist only when visible.
+
 ## 10. Order of work and acceptance
 
 After Orrery reaches its evaluation milestone: EQ → compressor/limiter →

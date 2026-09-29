@@ -12,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#include "Gui.h"
 #include "AnalyzerParams.h"
+#include "Gui.h"
 #include "Telemetry.h"
 
 extern "C" void analyzerReadPixels(int w, int h, unsigned char* rgb);
@@ -23,44 +23,58 @@ using namespace analyzer;
 using namespace analyzer::gui;
 
 namespace {
-constexpr double kRate = 250.0;
-
+constexpr double kRate = 20.0;
 class PreviewHost : public EditorHost {
   public:
-    PreviewHost() {
-        for (const auto& p : kParams) values_[p.id] = p.def;
-        values_[kInputGain] = 3.0;
+    explicit PreviewHost(bool music) : music_(music) {
+        processor_.prepare(48000, 256, 2);
+        processor_.setParam(kWindow, 3);
     }
     double paramValue(uint32_t id) const override { return values_[id]; }
     void beginEdit(uint32_t) override {}
     void setParam(uint32_t id, double value) override {
-        if (const ParamDef* p = findParam(id); p && !p->readonly)
-            values_[id] = std::clamp(value, p->min, p->max);
+        values_[id] = value;
+        processor_.setParam(id, value);
     }
     void endEdit(uint32_t) override {}
     TelemetryRing& telemetry() override { return ring_; }
     int latencySamples() const override { return 0; }
-    double sampleRate() const override { return 48000.0; }
-
-    void advance(int frames) {
-        for (int i = 0; i < frames; ++i) {
-            time_ += 1.0 / kRate;
-            const double beat = time_ * 2.0;
-            const double phase = beat - std::floor(beat);
-            const double transient = std::exp(-phase * 18.0);
-            const double bed = -18.0 + 3.0 * std::sin(time_ * 0.7);
-            Frame f;
-            f.inputPeakDb = static_cast<float>(bed + transient * 17.0);
-            f.outputPeakDb = static_cast<float>(f.inputPeakDb + values_[kInputGain] +
-                                                 values_[kOutputGain]);
-            ring_.push(f);
+    double sampleRate() const override { return 48000; }
+    void advance(int observations) {
+        for (int step = 0; step < observations; ++step) {
+            for (int done = 0; done < 2400;) {
+                const int count = std::min(256, 2400 - done);
+                float l[256]{}, r[256]{};
+                for (int i = 0; i < count; ++i) {
+                    const double t = static_cast<double>(sample_++) / 48000;
+                    if (music_) {
+                        const double pulse = std::exp(-std::fmod(t, .5) * 18);
+                        l[i] =
+                            static_cast<float>((.11 + .05 * std::sin(t)) *
+                                                   (std::sin(6.283185307179586 * 220 * t) +
+                                                    .4 * std::sin(6.283185307179586 * 880 * t)) +
+                                               .16 * pulse * std::sin(6.283185307179586 * 65 * t));
+                        r[i] = static_cast<float>(.8 * l[i] +
+                                                  .03 * std::sin(6.283185307179586 * 330 * t));
+                    }
+                }
+                float* io[]{l, r};
+                processor_.process(io, count);
+                processor_.drain();
+                done += count;
+            }
+            supple::analyzer::Frame f;
+            processor_.readFrame(f);
+            ring_.push({f});
         }
     }
 
   private:
-    double values_[kNumParams]{};
+    bool music_ = false;
+    uint64_t sample_ = 0;
+    Values values_ = defaults();
     TelemetryRing ring_;
-    double time_ = 0.0;
+    supple::analyzer::Processor processor_;
 };
 
 struct Capture {
@@ -86,12 +100,13 @@ int main(int argc, char** argv) {
     const char* output = argc > 2 ? argv[2] : "analyzer-gui.ppm";
     const int scale = argc > 3 ? std::atoi(argv[3]) : 1;
     if (scale != 1 && scale != 2) return 4;
-    PreviewHost host;
+    const char* scenario = argc > 4 ? argv[4] : "idle";
+    if (std::strcmp(scenario, "idle") && std::strcmp(scenario, "music")) return 4;
+    PreviewHost host(std::strcmp(scenario, "music") == 0);
     Gui gui(host, true);
     Capture cap;
     gui.setFrameCallback(&capture, &cap);
-    gui.setSize(static_cast<uint32_t>(kDesignW * scale),
-                static_cast<uint32_t>(kDesignH * scale));
+    gui.setSize(static_cast<uint32_t>(kDesignW * scale), static_cast<uint32_t>(kDesignH * scale));
     if (!gui.create() || !gui.setParent(0) || !gui.show()) return 1;
     // Let the X11 view realize before feeding it telemetry. Otherwise the
     // 256-slot queue fills while the map/expose travels through the server,
@@ -101,17 +116,11 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (!cap.frameSeen) return 2;
-    const int observations = static_cast<int>(kHistorySeconds * kRate) + 100 +
-                             std::max(0, frames) * 4;
+    const int observations = static_cast<int>(kHistorySeconds * kRate) + 100 + std::max(0, frames);
     for (int i = 0; i < observations; i += 4) {
         host.advance(std::min(4, observations - i));
         gui.tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    if (argc > 4) {
-        if (std::strcmp(argv[4], "bypass-on") == 0) gui.previewClick(620, 382);
-        else if (std::strcmp(argv[4], "bypass-hover") != 0) return 4;
-        gui.previewMove(620, 382);
     }
     cap.want = true;
     gui.previewRepaint();
