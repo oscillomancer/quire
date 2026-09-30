@@ -366,7 +366,12 @@ bool CLAP_ABI semDescribe(const clap_plugin_t* pl, uint32_t detail, const clap_o
                                                           : patch::Detail::Full));
 }
 const clap_plugin_supple_semantic_params_t kGainSemantic = {
-    sizeof(clap_plugin_supple_semantic_params_t), semSchema, semGetPatch, semSetPatch, semDescribe};
+    offsetof(clap_plugin_supple_semantic_params_t, get_telemetry),
+    semSchema,
+    semGetPatch,
+    semSetPatch,
+    semDescribe,
+    nullptr};
 
 const void* CLAP_ABI gainExt(const clap_plugin_t* pl, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kGainParams;

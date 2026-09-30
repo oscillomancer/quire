@@ -57,6 +57,10 @@ typedef struct clap_plugin_supple_semantic_params {
      * (UTF-8 plain text, <= 600 characters for DETAIL_CHANGED). */
     bool(CLAP_ABI* describe)(const clap_plugin_t* plugin, uint32_t detail,
                              const clap_ostream_t* out);
+    /* [main-thread] Optional live supple.analysis-report/1.0 JSON. Hosts check
+     * struct_size through this member AND this pointer before calling it.
+     * NULL means no telemetry; false means unavailable or stream failure. */
+    bool(CLAP_ABI* get_telemetry)(const clap_plugin_t* plugin, const clap_ostream_t* out);
 } clap_plugin_supple_semantic_params_t;
 
 enum {

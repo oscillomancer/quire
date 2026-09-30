@@ -59,6 +59,10 @@ typedef struct clap_plugin_supple_semantic_params {
     /* [main-thread] Writes a compact prose description of the current patch
      * (UTF-8 plain text, ≤ 600 characters for DETAIL_CHANGED). */
     bool(CLAP_ABI *describe)(const clap_plugin_t *plugin, uint32_t detail, const clap_ostream_t *out);
+    /* [main-thread] Optional compact live supple.analysis-report/1.0 JSON.
+     * NULL for plugins without telemetry; false when unavailable or the stream
+     * fails. Check struct_size through this member and its pointer first. */
+    bool(CLAP_ABI *get_telemetry)(const clap_plugin_t *plugin, const clap_ostream_t *out);
 } clap_plugin_supple_semantic_params_t;
 ```
 
@@ -100,6 +104,16 @@ empty array.
 Hosts read `struct_size` and must not call members beyond it. Plugins set it
 to `sizeof(clap_plugin_supple_semantic_params_t)` of the header they were
 built with. New members are only ever appended.
+
+The optional `get_telemetry` member was appended for the analyzer (2026-09-29).
+To call it, require `struct_size >= offsetof(type, get_telemetry) +
+sizeof(extension->get_telemetry)` and a non-null pointer. Original members
+remain usable when `struct_size >= offsetof(type, get_telemetry)`; hosts must
+not require the new full struct size just to call the old members. Existing
+plugins expose a null callback. A telemetry report does not change patch state.
+Gauge reports the existing analysis-report source/loudness/spectral/stereo
+fields it measures, single-point current M/S series, the 31-band live spectrum,
+and additive `live` window/hold/dropped-frame metadata. See stock-effects §9.
 
 ## 5. Threading, real-time safety, parameter sync
 

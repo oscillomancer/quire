@@ -29,7 +29,8 @@ double LoudnessMeter::loudness(double energy) {
 int LoudnessMeter::bin(double lu) {
     return std::clamp(static_cast<int>(std::floor((lu + 120) * 100 + 0.5)), 0, kBins - 1);
 }
-void LoudnessMeter::prepare(double sampleRate, Layout layout, Mode mode, double maxSeconds) {
+void LoudnessMeter::prepare(double sampleRate, Layout layout, Mode mode, double maxSeconds,
+                            double windowSeconds) {
     channels_ = channels(layout);
     mode_ = mode;
     hop_ = static_cast<int>(std::llround(sampleRate * 0.1));
@@ -53,6 +54,12 @@ void LoudnessMeter::prepare(double sampleRate, Layout layout, Mode mode, double 
         highpass_[static_cast<std::size_t>(c)].set(dsp::kHighpass(sampleRate));
         oversamplers_[static_cast<std::size_t>(c)].prepare(factor_);
     }
+    rolling_ = windowSeconds > 0;
+    const auto hops = static_cast<std::size_t>(std::max(30.0, std::round(windowSeconds * 10)));
+    rollingBlocks_.resize(rolling_ ? hops - 3 : 0);
+    rollingShort_.resize(rolling_ ? hops - 29 : 0);
+    rollingPeaks_.resize(rolling_ ? hops : 0);
+    rollingSamplePeaks_.resize(rolling_ ? hops : 0);
     reset();
 }
 void LoudnessMeter::reset() SUPPLE_RT {
@@ -64,7 +71,10 @@ void LoudnessMeter::reset() SUPPLE_RT {
     shortHist_.fill(0);
     blockEnergyHist_.fill(0);
     shortEnergyHist_.fill(0);
-    blockCount_ = shortCount_ = 0;
+    blockCount_ = shortCount_ = blockHead_ = shortHead_ = peakHead_ = 0;
+    for (auto* v : {&rollingBlocks_, &rollingShort_, &rollingPeaks_, &rollingSamplePeaks_})
+        std::fill(v->begin(), v->end(), 0.0);
+    hopPeak_ = hopSamplePeak_ = 0;
     samples_ = 0;
     sum400_ = sum3_ = peak_ = samplePeak_ = 0;
     momentary_ = shortTerm_ = negInf;
@@ -77,6 +87,7 @@ void LoudnessMeter::process(std::span<const float* const> input, int frames) SUP
         double energy = 0;
         for (int c = 0; c < channels_; ++c) {
             const float x = input[static_cast<std::size_t>(c)][i];
+            hopSamplePeak_ = std::max(hopSamplePeak_, std::abs(static_cast<double>(x)));
             samplePeak_ = std::max(samplePeak_, std::abs(static_cast<double>(x)));
             peak_ = std::max(peak_, std::abs(static_cast<double>(x)));
             if (factor_ > 1) {
@@ -85,6 +96,11 @@ void LoudnessMeter::process(std::span<const float* const> input, int frames) SUP
                 for (int p = 0; p < factor_; ++p)
                     peak_ = std::max(peak_, std::abs(phases[static_cast<std::size_t>(p)]));
             }
+            hopPeak_ = std::max(hopPeak_, std::abs(static_cast<double>(x)));
+            if (factor_ > 1)
+                for (int phase = 0; phase < factor_; ++phase)
+                    hopPeak_ =
+                        std::max(hopPeak_, std::abs(phases[static_cast<std::size_t>(phase)]));
             if (weights_[static_cast<std::size_t>(c)] != 0) {
                 const double y = highpass_[static_cast<std::size_t>(c)].process(
                     shelf_[static_cast<std::size_t>(c)].process(static_cast<double>(x)));
@@ -106,11 +122,32 @@ void LoudnessMeter::process(std::span<const float* const> input, int frames) SUP
         if (samples_ >= static_cast<std::uint64_t>(window3_))
             maxShortEnergy_ = std::max(maxShortEnergy_, sum3_ / window3_);
         if (samples_ % static_cast<std::uint64_t>(hop_) != 0) continue;
+        if (rolling_) {
+            rollingPeaks_[peakHead_] = hopPeak_;
+            rollingSamplePeaks_[peakHead_] = hopSamplePeak_;
+            peakHead_ = (peakHead_ + 1) % rollingPeaks_.size();
+            peak_ = *std::max_element(rollingPeaks_.begin(), rollingPeaks_.end());
+            samplePeak_ = *std::max_element(rollingSamplePeaks_.begin(), rollingSamplePeaks_.end());
+            hopPeak_ = hopSamplePeak_ = 0;
+        }
         if (samples_ >= static_cast<std::uint64_t>(window400_)) {
             const double e = std::max(0.0, sum400_) / window400_;
             momentary_ = loudness(e);
+            if (rolling_) {
+                const double old = rollingBlocks_[blockHead_];
+                if (mode_ == Mode::Histogram && loudness(old) >= -70) {
+                    const auto b = static_cast<std::size_t>(bin(loudness(old)));
+                    --blocksHist_[b];
+                    blockEnergyHist_[b] -= old;
+                }
+                rollingBlocks_[blockHead_] = e;
+                blockHead_ = (blockHead_ + 1) % rollingBlocks_.size();
+            }
             if (mode_ == Mode::Exact) {
-                if (blockCount_ < exactBlocks_.size()) exactBlocks_[blockCount_++] = e;
+                if (rolling_)
+                    blockCount_ = std::min(blockCount_ + 1, rollingBlocks_.size());
+                else if (blockCount_ < exactBlocks_.size())
+                    exactBlocks_[blockCount_++] = e;
             } else {
                 if (momentary_ >= -70) {
                     const auto b = static_cast<std::size_t>(bin(momentary_));
@@ -118,13 +155,27 @@ void LoudnessMeter::process(std::span<const float* const> input, int frames) SUP
                     blockEnergyHist_[b] += e;
                 }
                 ++blockCount_;
+                if (rolling_) blockCount_ = std::min(blockCount_, rollingBlocks_.size());
             }
         }
         if (samples_ >= static_cast<std::uint64_t>(window3_)) {
             const double e = std::max(0.0, sum3_) / window3_;
             shortTerm_ = loudness(e);
+            if (rolling_) {
+                const double old = rollingShort_[shortHead_];
+                if (mode_ == Mode::Histogram && loudness(old) >= -70) {
+                    const auto b = static_cast<std::size_t>(bin(loudness(old)));
+                    --shortHist_[b];
+                    shortEnergyHist_[b] -= old;
+                }
+                rollingShort_[shortHead_] = e;
+                shortHead_ = (shortHead_ + 1) % rollingShort_.size();
+            }
             if (mode_ == Mode::Exact) {
-                if (shortCount_ < exactShort_.size()) exactShort_[shortCount_++] = e;
+                if (rolling_)
+                    shortCount_ = std::min(shortCount_ + 1, rollingShort_.size());
+                else if (shortCount_ < exactShort_.size())
+                    exactShort_[shortCount_++] = e;
             } else {
                 if (shortTerm_ >= -70) {
                     const auto b = static_cast<std::size_t>(bin(shortTerm_));
@@ -132,6 +183,7 @@ void LoudnessMeter::process(std::span<const float* const> input, int frames) SUP
                     shortEnergyHist_[b] += e;
                 }
                 ++shortCount_;
+                if (rolling_) shortCount_ = std::min(shortCount_, rollingShort_.size());
             }
         }
     }
@@ -140,9 +192,10 @@ double LoudnessMeter::integrated() const {
     double sum = 0;
     std::size_t count = 0;
     if (mode_ == Mode::Exact) {
+        const auto& energies = rolling_ ? rollingBlocks_ : exactBlocks_;
         for (std::size_t i = 0; i < blockCount_; ++i)
-            if (loudness(exactBlocks_[i]) >= -70) {
-                sum += exactBlocks_[i];
+            if (loudness(energies[i]) >= -70) {
+                sum += energies[i];
                 ++count;
             }
     } else {
@@ -156,9 +209,10 @@ double LoudnessMeter::integrated() const {
     sum = 0;
     count = 0;
     if (mode_ == Mode::Exact) {
+        const auto& energies = rolling_ ? rollingBlocks_ : exactBlocks_;
         for (std::size_t i = 0; i < blockCount_; ++i)
-            if (loudness(exactBlocks_[i]) >= -70 && loudness(exactBlocks_[i]) >= gate) {
-                sum += exactBlocks_[i];
+            if (loudness(energies[i]) >= -70 && loudness(energies[i]) >= gate) {
+                sum += energies[i];
                 ++count;
             }
     } else {
@@ -176,9 +230,10 @@ double LoudnessMeter::loudnessRange() const {
     double sum = 0;
     std::size_t count = 0;
     if (mode_ == Mode::Exact) {
+        const auto& energies = rolling_ ? rollingShort_ : exactShort_;
         for (std::size_t i = 0; i < shortCount_; ++i)
-            if (loudness(exactShort_[i]) >= -70) {
-                sum += exactShort_[i];
+            if (loudness(energies[i]) >= -70) {
+                sum += energies[i];
                 ++count;
             }
     } else {
@@ -190,10 +245,11 @@ double LoudnessMeter::loudnessRange() const {
     if (!count) return negInf;
     const double gate = loudness(sum / count) - 20;
     if (mode_ == Mode::Exact) {
+        const auto& energies = rolling_ ? rollingShort_ : exactShort_;
         std::vector<double> values;
         values.reserve(shortCount_);
         for (std::size_t i = 0; i < shortCount_; ++i) {
-            const double lu = loudness(exactShort_[i]);
+            const double lu = loudness(energies[i]);
             if (lu >= -70 && lu >= gate) values.push_back(lu);
         }
         if (values.empty()) return negInf;
@@ -219,8 +275,14 @@ double LoudnessMeter::loudnessRange() const {
     };
     return percentile(0.95) - percentile(0.10);
 }
-double LoudnessMeter::maxMomentary() const { return loudness(maxMomentaryEnergy_); }
-double LoudnessMeter::maxShortTerm() const { return loudness(maxShortEnergy_); }
+double LoudnessMeter::maxMomentary() const {
+    return loudness(rolling_ ? *std::max_element(rollingBlocks_.begin(), rollingBlocks_.end())
+                             : maxMomentaryEnergy_);
+}
+double LoudnessMeter::maxShortTerm() const {
+    return loudness(rolling_ ? *std::max_element(rollingShort_.begin(), rollingShort_.end())
+                             : maxShortEnergy_);
+}
 double LoudnessMeter::truePeak() const { return peak_ > 0 ? 20 * std::log10(peak_) : negInf; }
 double LoudnessMeter::samplePeak() const {
     return samplePeak_ > 0 ? 20 * std::log10(samplePeak_) : negInf;

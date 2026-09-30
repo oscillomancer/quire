@@ -199,3 +199,32 @@ TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::de
     CHECK(v[5] == 20000.0);
     MESSAGE("consistent reads during writes: ", reads);
 }
+
+namespace {
+clapx::FlatSemantic* telemetryResolver(const clap_plugin_t* p) {
+    return static_cast<clapx::FlatSemantic*>(p->plugin_data);
+}
+}  // namespace
+TEST_CASE("semantic telemetry is appended optional and forwards stream failure") {
+    static_assert(offsetof(clap_plugin_supple_semantic_params_t, get_telemetry) >
+                  offsetof(clap_plugin_supple_semantic_params_t, describe));
+    patch::FlatPatchType type("telemetry-test", 1, 0, kT, false);
+    clapx::ParamStore values(kT);
+    clapx::FlatSemantic semantic(type, values, "test", "", "", 123);
+    clap_plugin_t plugin{};
+    plugin.plugin_data = &semantic;
+    const auto* old = clapx::FlatSemantic::extension<telemetryResolver>();
+    CHECK(old->get_telemetry == nullptr);
+    const auto* live = clapx::FlatSemantic::extension<telemetryResolver, true>();
+    REQUIRE(live->get_telemetry);
+    CHECK_FALSE(live->get_telemetry(&plugin, nullptr));
+    bool called = false;
+    semantic.telemetry = [&](const clap_ostream_t* out) {
+        called = true;
+        return out != nullptr;
+    };
+    clap_ostream_t out{};
+    CHECK(live->get_telemetry(&plugin, &out));
+    CHECK(called);
+    CHECK_FALSE(live->get_telemetry(&plugin, nullptr));
+}
