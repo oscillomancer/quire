@@ -74,16 +74,18 @@ is decoded, so the universal track has to become typed.
    The C9 Buss is fixed at neutral (A = B = 0.5) and has no fields.
    `width`, `trim` and `phase_invert` leave the strip (a utility insert does
    them); envelopes target `{track, param: volume|pan|mute}` only.
-6. **Console 9 off.** `project.console9` (bool, default `true` for new
-   projects). Off, the plan contains no Console 9 stages: a channel's or
-   buss's fader and pan become the plain gain with the project pan law
-   (`project.pan_law`, as before this ADR), busses and masters sum linearly,
-   send encoders become plain send gain/pan. Strip types, stage order and the
-   routing rules are unchanged (the switch changes DSP, not structure), so
-   switching is a plan rebuild with the usual 10 ms crossfade and costs
-   nothing while off. At unity faders and centred pans a strip is about
-   6.5 dB louder with Console 9 off (research note, "Gain staging"); the skill
-   says so. Nate can ask for a level-matched off mode instead (HUMAN_REVIEW).
+6. **Console 9 off** (level-matched; Nate, 2026-09-30, HUMAN_REVIEW #13).
+   `project.console9` (bool, default `true`). Off, every Console 9 stage keeps
+   its gains and pan law but runs linear: no encode/decode curves, no
+   denormal noise, no dither — the channel stage is `x · pan · f(2B) ·
+   0.763932…`, the buss stage `x · 0.6180339887498949 · pan · 2` (the decode
+   curve's small-signal slope), so on and off are level-matched for small
+   signals and an on/off comparison hears only the summing character.
+   Strip types, stage order and the routing rules are unchanged (the switch
+   changes DSP, not structure): switching is a plan rebuild with the usual
+   10 ms crossfade, and off costs a few multiplies per sample. There is no
+   separate "plain mixer" mode; `project.pan_law` is gone (channels and
+   busses use Console 9's law in both modes, masters the balance of §5).
 7. **Channel counts.** The engine is stereo end to end. A mono channel
    (`channels: 1`) feeds its signal to both sides of its C9 Channel, whose pan
    places it; busses and masters are stereo. When N-channel buffers arrive,
@@ -117,9 +119,10 @@ is decoded, so the universal track has to become typed.
     1.x files migrate: tr_0 → master; tracks with children or receiving
     audio routes → busses (items or record settings on such a track move to
     a new first child channel "<name> items"); all others → channels;
-    `console9: false` (a migrated project sounds as before); non-default
-    width/trim/phase and envelopes on them are dropped with warnings; routes
-    that break the rules are dropped with warnings.
+    `console9: true` with a warning that levels now follow Console 9's
+    staging (there is no pre-Console-9 mixer to migrate to); `pan_law` and
+    non-default width/trim/phase and envelopes on them are dropped with
+    warnings; routes that break the rules are dropped with warnings.
 12. **Credit.** Airwindows and Chris Johnson are credited in THIRD_PARTY.md,
     the skill's gain-staging page and (Phase 5) the About dialog.
 
@@ -129,8 +132,9 @@ is decoded, so the universal track has to become typed.
   edge starts at a C9 Channel output and carries only sum/map/delay; stage
   order per strip type) runs in debug builds and in a fuzz test over random
   sessions (channels, busses, masters, sends of every tap, keys, PDC).
-- Engine tests that check exact levels run with `console9: false` or state
-  Console 9's staging; new tests cover the encode/decode path.
+- Engine tests that check exact levels account for Console 9's staging (a
+  known constant with `console9: false`, where the stages are linear); new
+  tests cover the encode/decode path.
 - Busses cost two Console 9 stages, channels one, send encoders one each;
   the shared-tap rule keeps unity post-fader sends free.
 - REAPER-style workflows that relied on universal tracks (items on a folder

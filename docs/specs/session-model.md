@@ -56,11 +56,10 @@ not objects (ADR-0008).
 other rates is resampled, never converted on import); `ppq` default for new
 MIDI (960); `timebase` default for new items (`time` | `beats` |
 `beats_position`); `media_dir` (relative); `render` default settings (§1.10);
-`next_ids`; `seed` (session randomness, e.g. dither); `pan_law` (centre
-attenuation in dB: 0, −3 (default, constant power), −4.5, −6; used by the
-plain fader/pan stages when Console 9 is off); `console9` (bool, default true:
-Console 9 summing on every strip, ADR-0019); `masters` (ordered master ids,
-tr_0 first).
+`next_ids`; `seed` (session randomness, e.g. dither); `console9` (bool,
+default true: Console 9 summing on every strip; false keeps its gains and pan
+law but runs the stages linear, ADR-0019 §6); `masters` (ordered master
+ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
 
 ### 1.3 Time map (`tempo`) — the contract lives in `libs/timeline`
 

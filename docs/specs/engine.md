@@ -28,8 +28,8 @@ plan (built incrementally from the previous one where possible, §1.6).
   Buss → [pre_fx] → inserts → [pre_fader] → C9 Channel → [post_fader]`;
   master `input sum → C9 Buss → [pre_fx] → inserts → [pre_fader] → plain
   gain/pan → [post_fader]` → outputs/renders/monitor chain. With
-  `project.console9` off the C9 stages are absent and the fader/pan stage
-  is the plain gain with the project pan law. Items play *before* the
+  `project.console9` off the C9 stages run linear (same gains and pan law,
+  no curves, noise or dither; ADR-0019 §6). Items play *before* the
   chain (as in REAPER); input monitoring and record inputs enter channels
   at `inputs`.
 - **SendEncoder** per route into a buss/master that cannot share the
@@ -342,8 +342,7 @@ granted, and CPU governor (read-only facts).
   compensated (a delay of the stage's latency); the pan law applies to tracks,
   the master pans as a balance; mute silences the post-fader tap only; a
   solo-silenced track is still processed. *(Superseded by ADR-0019 for
-  strips: Console 9 stages, mute as a fader ramp before the encode; this
-  remains the behaviour with `project.console9` off.)*
+  strips: Console 9 stages, mute as a fader ramp before the encode.)*
 - **JACK backend** (`jack.h`, `jack_backend.cpp`): libjack is dlopen'ed
   (default `libjack.so.0`) through our own declarations of the API subset we
   use, loaded once per path and never unloaded. The engine block is the

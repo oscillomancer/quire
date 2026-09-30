@@ -57,17 +57,6 @@ and modulation amounts in oct/st/dB/%.
 *Meanwhile:* Phase 1–2 work continues; P3.2 waits for this spec to be frozen,
 with or without your comments.
 
-### 8. Which models and budget for automated LLM evaluations — decision
-The evaluation harness (`docs/specs/eval-harness.md`) runs agents against the
-sandbox over MCP to measure how well they program the synth and write
-notation. Runners exist for the Claude CLI, the Codex CLI, and any Anthropic /
-OpenAI-compatible API (including a local llama-server). Which should it use,
-and how many runs per week are acceptable cost-wise? A local model on the Arc
-B580 is free but weaker; a frontier model is the real target user.
-*Meanwhile:* the harness is specified (`docs/specs/eval-harness.md`) but not
-built yet (corrected 2026-09-26: an earlier note here said it was); it will be
-built and dry-run tested without calling models before any runs.
-
 ### 9. Names for the stock effects — decision (low effort)
 Working names (craft nouns, in the family of your products): EQ **Facet**,
 compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
@@ -75,59 +64,19 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 10. Listen to Orrery — listening check (15 minutes, when convenient)
-Orrery is playable: `Orrery.clap` (release build) is installed in `~/.clap`
-(with its LICENSE/NOTICES) and loads in REAPER with its editor. Two ways to
-listen:
-- **The ten starting recipes** from the agent guide
-  (`skill/guides/sound-design.md`), rendered through the sandbox's MCP server:
-  `renders/listening/orrery-recipes/01-warm-pad.wav` … `10-string-ensemble.wav`
-  (regenerate: `tools/listening/render_orrery_recipes.py`). Levels are not
-  normalized (−19 to −33 LUFS; the snare and pluck are quiet).
-- **In REAPER:** insert Orrery on an instrument track and play; the editor
-  adds modules (click the dashed tiles), changes types, and adds routes.
-What I'd like to know: which recipes sound bad or cheap and why (harsh top,
-thin, static, wrong envelope…), whether the wavetables (`bell`, `formant`,
-`organ`, `digital`) are worth keeping as designed, and anything in the editor
-that is confusing. Descriptor numbers say the recipes hit their targets; only
-you can say whether they sound good.
-*Meanwhile:* performance work continues (18 % → 11.7 % of a core for the
-reference patch so far; target 3 %).
-
-### 11. B1 at a 64-frame period — scheduling (10 minutes of your machine)
-The Phase 4 acceptance benchmark needs the audio device at 64 frames. Quire
-asks for it per client (`PIPEWIRE_LATENCY`), which changes the whole
-PipeWire graph's quantum while the benchmark runs (your other audio apps
-too); nothing is written to any config and it ends with the process. I will
-run it only when you say it is a good time (and with the stock EQ and
-compressor, which are being built now).
-*Meanwhile:* preliminary numbers are in `docs/benchmarks/b1-preliminary.md`.
-
-### 12. Template-built plugins export fmt's GNU-unique symbols — FYI
-Starter.vst3 and Vellum.vst3 (both from the template) export fmt's
-`STB_GNU_UNIQUE` symbols (e.g. `fmt::…::format_facet<std::locale>::id`).
-Loaded into one process, the second binds to the first's copies; unloading
-the first then leaves dangling references (Quire's VST3 scan crashed at exit
-until it stopped unloading modules, which is how it works now). A fix in the
-template would be hidden visibility for everything but the entry points (a
-linker version script, or `-fvisibility=hidden` on the dependencies). I have
-not touched the template or your plug-ins; say if you want a patch proposed.
-
-### 13. Console 9 gain staging and the off switch — decision (low effort)
-ADR-0019 builds Console 9 into every strip. Two choices I made that you may
-want the other way:
-- **The fader's 0 dB is Console 9's native unity** (Fader 0.5). At unity
-  faders and centred pans a channel into a buss is about −6.5 dB for small
-  signals (the channel's ×0.764 staging and both stages' −3 dB centre pan;
-  `docs/research/console9.md`). I kept Chris's staging rather than shift the
-  fader, since the encoder's drive at unity is part of the sound.
-- **"Console 9 off" is regular clean digital summing** (fader = exact dB,
-  the project pan law, linear busses): what you asked for, but it is ~6.5 dB
-  louder than "on" at the same fader positions, so an on/off comparison is
-  not level-matched. The alternative is an off mode that keeps Console 9's
-  gains and pan law and only drops the curves and dither (level-matched).
-Say which you prefer; switching is a small change.
-
 ## Resolved
 
-(none yet)
+### 8. Which models and budget for automated LLM evaluations — decision
+**Answer (2026-09-30):** use Hermes agents (`hermes-team`) with their default model — cheap and capable enough; as many runs as useful. *Follow-up:* the harness gets a Hermes runner and the first runs (STATUS P3.4).
+
+### 10. Listen to Orrery — listening check (15 minutes, when convenient)
+**Answer (2026-09-30):** very impressed — the recipes sound production-ready and fit their descriptions; using Orrery in REAPER feels good and makes nice sounds easy for a non-synthesist. Two notes: the FM electric piano is harsher in the highs than an electric piano should be (likely the recipe, not the synth), and the `digital` and `harmonic ramp` wavetables sound the same. *Follow-up:* darker EP recipe; make the two tables distinct or merge them.
+
+### 11. B1 at a 64-frame period — scheduling (10 minutes of your machine)
+**Answer (2026-09-30):** approved — run B1 and change the quantum as needed, now or when the workers are done. *Plan:* after the Console 9 strips land (so B1 measures the final per-strip cost) and with no builds competing for the CPU.
+
+### 13. Console 9 gain staging and the off switch — decision (low effort)
+**Answer (2026-09-30):** keeping Chris's staging is right. "Console 9 off" keeps Console 9's gains and pan law and drops only the curves and dither (level-matched on/off). ADR-0019 §6/§11 amended.
+
+### 12. Template-built plugins export fmt's GNU-unique symbols — FYI
+**Resolved (2026-09-30):** Nate fixed the template (commit 3d32b8d: explicit Linux export lists + the clap-wrapper self-handle patch); the orchestrator reviewed it and is rolling the same fix into every Quire plugin copy and the vendored clap-wrapper, with a CLAP unload test per plugin.
