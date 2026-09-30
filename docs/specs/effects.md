@@ -411,6 +411,40 @@ main stereo plus a non-main "Sidechain" input.
   indicator and gain history, controls grouped as the compressor's.
   Scenarios: `default`, `drums` (hold 50 ms, range −30, key high-pass).
 
+## 9. Second wave: transient shaper — Flint [`transient`] (`stock-effects.md` §4)
+
+Identity: display name Flint, id `transient`, CLAP id
+`com.suppleaudio.transient`, state magic `QTS1`, AU subtype `QTrn`,
+features audio-effect, transient-shaper (plus `utility` if CLAP has no
+closer feature), stereo. Everything in §1 applies; no sidechain port.
+
+- Detector: the stereo-linked rectified signal (max |L|, |R|) of the input.
+  Two envelope followers in the dB domain: fast (attack 0.1 ms scaled by
+  `speed`/10, release `speed`) and slow (attack `speed`, release 4·`speed`).
+  Their difference d = fast − slow (dB) is positive at onsets, negative in
+  decays.
+- Gain (dB): onset part = (attack/100)·12·clamp(d/10·(sensitivity/50), 0, 1),
+  sustain part = (sustain/100)·12·clamp(−d/10·(sensitivity/50), 0, 1),
+  total = onset + sustain, smoothed with a 1 ms one-pole. This keeps the
+  shaping level-independent (the detector works on dB differences) and
+  bounds it to ±12 dB per part as the spec says; document the final formula
+  in `stock-effects.md` §4 if you refine it.
+- `clip`: a soft clip (tanh-style, unity small-signal slope) after the gain,
+  with 2× oversampling of the clip stage only (latency reported; 2× via the
+  shared `dsp::Oversampler` if it has landed on main, otherwise a local
+  half-band pair — say which in the report).
+- `mix` (dry aligned with any latency) and `output`.
+- Tests: attack +100 on a synthetic drum hit (a 5 ms 1 kHz burst on a decay)
+  raises the first 5 ms by ≥ 6 dB and leaves the tail within 1 dB; sustain
+  −100 lowers the tail by ≥ 6 dB and leaves the onset within 1 dB;
+  level independence: the same hit 10 dB louder gets the same gain curve
+  within 0.5 dB; a steady sine gets no gain change after settling (< 0.1 dB);
+  defaults are bit-exact.
+- GUI: the input and output envelopes of the last ~2 s with the gain curve,
+  attack and sustain large (bipolar arcs from the centre), speed,
+  sensitivity, clip, mix, output. Scenarios: `default`, `punch`
+  (attack +60, sustain −30).
+
 ## 6. Engine and benchmark use
 
 Once built, the plugins are in the build's `plugins/clap/`; the engine
