@@ -3,7 +3,7 @@
 Template copy, MIT license retained per ADR-0011. Functional identity:
 Utility / utility / UTILITY; CLAP `com.suppleaudio.utility`, state magic
 `QUT1`, AU subtype `QUtl`, effect `aufx`. The display name is defined once
-in engine/include/utility/params.h; Product.cmake reads it for artifact names.
+in `cmake/Identity.cmake`; the engine receives `SUPPLE_UTILITY_DISPLAY_NAME`.
 
 Product changes:
 - The SDK-free engine is `supple::utility-engine`, built in the monorepo

@@ -69,7 +69,7 @@ endfunction()
 include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
 supple_plugin_add_monorepo_libraries()
 set(SUPPLE_BUILD_TESTS OFF)
-include(identity.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Identity.cmake)
 add_subdirectory("${SUPPLE_ROOT}/libs/core-analysis" "${CMAKE_BINARY_DIR}/supple/core-analysis")
 target_include_directories(product-info INTERFACE "${CMAKE_BINARY_DIR}/generated")
 

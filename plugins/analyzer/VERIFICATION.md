@@ -67,14 +67,14 @@ build/dev/plugins/analyzer/analyzer-gui-preview 20 build/dev/analyzer-idle.ppm 1
 build/dev/plugins/analyzer/analyzer-gui-preview 20 build/dev/analyzer-music.ppm 1 music
 magick build/dev/analyzer-idle.ppm build/dev/analyzer-idle.png
 magick build/dev/analyzer-music.ppm build/dev/analyzer-music.png
-build/dev/plugins/analyzer/analyzer-linux-host-probe build/dev/plugins/clap/Analyzer.clap build/dev/analyzer-host.ppm
+build/dev/plugins/analyzer/analyzer-linux-host-probe build/dev/plugins/clap/Gauge.clap build/dev/analyzer-host.ppm
 magick build/dev/analyzer-host.ppm build/dev/analyzer-host.png
 ```
 
 Both 820×540 preview PNGs were inspected. The host probe passed with zero
 failures: native parent embedding, mapping, nonblank drawing, resize,
 hide/show, three reopen cycles, timer teardown and concurrent synthetic audio.
-Artifacts remain under `build/dev/`; `Analyzer.clap` is under
+Artifacts remain under `build/dev/`; `Gauge.clap` is under
 `build/dev/plugins/clap/`. Sanitizer/GCC build trees were removed after CI.
 
 The final follow-up restores one whitespace-only Ring line to the template

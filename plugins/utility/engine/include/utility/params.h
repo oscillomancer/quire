@@ -4,7 +4,7 @@
 #include "supple/params/params.h"
 #include "supple/patch/patch.h"
 namespace supple::utility {
-inline constexpr char kDisplayName[] = "Plumb";
+inline constexpr char kDisplayName[] = SUPPLE_UTILITY_DISPLAY_NAME;
 enum ParamId : uint32_t {
     kGain,
     kPan,

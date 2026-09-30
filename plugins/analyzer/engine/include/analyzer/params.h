@@ -5,7 +5,7 @@
 #include "supple/patch/patch.h"
 
 namespace supple::analyzer {
-inline constexpr char kName[] = "Gauge";
+inline constexpr char kName[] = SUPPLE_ANALYZER_DISPLAY_NAME;
 inline constexpr char kPluginId[] = "com.suppleaudio.analyzer";
 inline constexpr std::uint32_t kStateMagic = 0x51414E31;  // QAN1
 

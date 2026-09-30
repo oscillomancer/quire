@@ -3,7 +3,8 @@
 A direct copy of `~/Projects/audio-plugins/template`, renamed
 Starter/starter/STARTER → Drive/drive/DRIVE. Identity: `com.suppleaudio.drive`,
 AU `QDrv`/`Supl`/`aufx`, state `QDR1`, version 0.1.0. The working display name
-is defined once in `engine/include/drive/params.h`, read by Product.cmake.
+is defined once in `cmake/Identity.cmake`, passed to the engine as
+`SUPPLE_DRIVE_DISPLAY_NAME`.
 The copy keeps the template's MIT license (ADR-0011 overrides its product
 checklist's GPL conversion). No dependency or system configuration changes.
 

@@ -2,7 +2,7 @@
 
 An eight-band parametric equalizer with minimum, matched natural and linear
 phase, independent stereo placement, and static pink-weighted auto gain.
-The display name is defined in `identity.cmake`; the permanent CLAP identifier is
+The display name is defined in `cmake/Identity.cmake`; the permanent CLAP identifier is
 `com.suppleaudio.eq`. The parameter table and processor are in `engine/`.
 
 Build from the monorepo with `cmake --preset dev`, then

@@ -1,8 +1,10 @@
 # Analyzer integration
 
-The display name is defined once as `supple::analyzer::kName`; the directory,
-CLAP id (`com.suppleaudio.analyzer`), symbols, AU subtype (`QAna`) and artifact
-(`Analyzer.clap`) use the functional identity. State magic is `QAN1`.
+The display name is defined once in `cmake/Identity.cmake`; the engine's
+`supple::analyzer::kName` receives `SUPPLE_ANALYZER_DISPLAY_NAME`. Artifact
+and bundle paths use that display name (`Gauge.clap`). Directory, symbols,
+CLAP id (`com.suppleaudio.analyzer`), AU subtype (`QAna`) and state magic
+(`QAN1`) retain their functional identity.
 
 Copied the verified effect template without changing it. The MIT license is
 retained under ADR-0011. The window, renderers, widgets, Ring implementation,

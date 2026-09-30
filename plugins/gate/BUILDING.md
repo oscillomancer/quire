@@ -18,8 +18,8 @@ cmake --build --preset release -j
 ctest --preset release
 ```
 
-Outputs are under `build-cmake/gate_assets/`. macOS builds `Gate.clap`,
-`Gate.vst3` and `Gate.component`. Metal is the default. To exercise the
+Outputs are under `build-cmake/gate_assets/`. macOS builds `Sluice.clap`,
+`Sluice.vst3` and `Sluice.component`. Metal is the default. To exercise the
 OpenGL plugin path explicitly:
 
 ```sh
@@ -76,7 +76,7 @@ On macOS, load the binary inside the built bundle:
 
 ```sh
 ./build-cmake/gate-clap-probe \
-  ./build-cmake/gate_assets/Gate.clap/Contents/MacOS/Gate \
+  ./build-cmake/gate_assets/Sluice.clap/Contents/MacOS/Sluice \
   200 --mono --resize --reopen
 ```
 
@@ -177,7 +177,7 @@ With an X11/XWayland display available, run:
 
 ```sh
 ./build-cmake/gate-linux-host-probe \
-  ./build-cmake/gate_assets/Gate.clap /tmp/gate-host.ppm
+  ./build-cmake/gate_assets/Sluice.clap /tmp/gate-host.ppm
 ```
 
 This product-independent probe creates a real X11 parent, verifies the mapped

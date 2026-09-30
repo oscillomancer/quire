@@ -66,7 +66,7 @@ function(drive_target_defaults target)
     endif()
 endfunction()
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/Product.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Identity.cmake)
 include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
 supple_plugin_add_monorepo_libraries()
 

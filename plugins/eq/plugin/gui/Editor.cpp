@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstdio>
 #include "Widgets.h"
-#include "eq/identity.h"
 #include "eq/processor.h"
 #include "supple/analysis/analysis.h"
 extern "C" {

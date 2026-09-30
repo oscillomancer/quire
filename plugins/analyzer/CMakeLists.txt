@@ -73,6 +73,7 @@ function(analyzer_target_defaults target)
     endif()
 endfunction()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Identity.cmake)
 include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
 supple_plugin_add_monorepo_libraries()
 
@@ -104,12 +105,12 @@ if (ANALYZER_BUILD_TOOLS)
             target_link_options(analyzer-semantic-rt PRIVATE -fsanitize=realtime)
         endif()
         add_test(NAME semantic-rt COMMAND analyzer-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap)
+            ${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap com.suppleaudio.analyzer)
+            ${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.clap com.suppleaudio.analyzer)
     endif()
 endif()
 
@@ -219,10 +220,10 @@ if (ANALYZER_BUILD_PLUGIN)
         analyzer_target_defaults(analyzer-host-smoke)
         add_test(NAME host-smoke
                  COMMAND analyzer-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap)
+                         ${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.clap)
         add_test(NAME host-smoke-mono
                  COMMAND analyzer-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/Analyzer.clap --mono)
+                         ${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.clap --mono)
     endif()
 
     option(ANALYZER_VST3 "Build VST3 format" OFF)
@@ -239,7 +240,7 @@ if (ANALYZER_BUILD_PLUGIN)
     make_clapfirst_plugins(
         TARGET_NAME analyzer-plugin
         IMPL_TARGET analyzer-impl
-        OUTPUT_NAME "Analyzer"
+        OUTPUT_NAME "${ANALYZER_DISPLAY_NAME}"
         ENTRY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/plugin/src/analyzer_entry.cpp"
         BUNDLE_IDENTIFIER "com.suppleaudio.analyzer"
         BUNDLE_VERSION ${PROJECT_VERSION}
@@ -281,7 +282,7 @@ if (ANALYZER_BUILD_PLUGIN)
         # is supposed to keep them. The AU is absent here on purpose: its copy
         # has to precede the code signature, so it lives in the prepare step
         # below instead.
-        foreach(spec "analyzer-plugin_clap:Analyzer.clap" "analyzer-plugin_vst3:Analyzer.vst3")
+        foreach(spec "analyzer-plugin_clap:${ANALYZER_DISPLAY_NAME}.clap" "analyzer-plugin_vst3:${ANALYZER_DISPLAY_NAME}.vst3")
             string(REPLACE ":" ";" parts ${spec})
             list(GET parts 0 target)
             list(GET parts 1 bundle)
@@ -318,43 +319,43 @@ if (ANALYZER_BUILD_PLUGIN)
         add_custom_target(analyzer-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/analyzer-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Info.plist"
+                "${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources"
+                "${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${analyzer_license}"
-                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component/Contents/Resources/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/Analyzer.component"
+                "${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component"
             DEPENDS analyzer-plugin_auv2
-            COMMENT "Preparing and ad-hoc signing Analyzer.component"
+            COMMENT "Preparing and ad-hoc signing ${ANALYZER_DISPLAY_NAME}.component"
             VERBATIM)
         if (ANALYZER_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/Analyzer.component
+                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/${ANALYZER_DISPLAY_NAME}.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
 
     if (APPLE)
         set(ANALYZER_INSTALL_SPECS
-            "Analyzer.clap:$ENV{HOME}/Library/Audio/Plug-Ins/CLAP:analyzer-plugin_clap:dir"
-            "Analyzer.vst3:$ENV{HOME}/Library/Audio/Plug-Ins/VST3:analyzer-plugin_vst3:dir"
-            "Analyzer.component:$ENV{HOME}/Library/Audio/Plug-Ins/Components:analyzer-plugin_auv2:dir")
+            "${ANALYZER_DISPLAY_NAME}.clap:$ENV{HOME}/Library/Audio/Plug-Ins/CLAP:analyzer-plugin_clap:dir"
+            "${ANALYZER_DISPLAY_NAME}.vst3:$ENV{HOME}/Library/Audio/Plug-Ins/VST3:analyzer-plugin_vst3:dir"
+            "${ANALYZER_DISPLAY_NAME}.component:$ENV{HOME}/Library/Audio/Plug-Ins/Components:analyzer-plugin_auv2:dir")
     elseif (UNIX)
         # On Linux a CLAP is a bare shared object, not a bundle directory --
         # only the VST3 is a folder here -- so the two are copied differently.
         set(ANALYZER_INSTALL_SPECS
-            "Analyzer.clap:$ENV{HOME}/.clap:analyzer-plugin_clap:file"
-            "Analyzer.vst3:$ENV{HOME}/.vst3:analyzer-plugin_vst3:dir")
+            "${ANALYZER_DISPLAY_NAME}.clap:$ENV{HOME}/.clap:analyzer-plugin_clap:file"
+            "${ANALYZER_DISPLAY_NAME}.vst3:$ENV{HOME}/.vst3:analyzer-plugin_vst3:dir")
     endif()
 
     if (ANALYZER_INSTALL_SPECS)
-        add_custom_target(analyzer-install COMMENT "Installing every Analyzer format")
+        add_custom_target(analyzer-install COMMENT "Installing every ${ANALYZER_DISPLAY_NAME} format")
         if (TARGET analyzer-prepare-auv2)
             add_dependencies(analyzer-install analyzer-prepare-auv2)
         endif()

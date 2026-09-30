@@ -4,7 +4,7 @@
 #include "supple/params/params.h"
 #include "supple/patch/patch.h"
 namespace supple::gate {
-inline constexpr char kName[] = "Sluice";
+inline constexpr char kName[] = SUPPLE_GATE_DISPLAY_NAME;
 inline constexpr char kPluginId[] = "com.suppleaudio.gate";
 inline constexpr uint32_t kStateMagic = 0x51475431;
 enum ParamId : uint32_t {

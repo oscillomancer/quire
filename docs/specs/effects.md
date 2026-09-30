@@ -34,6 +34,15 @@ working name, defined once per plugin.
 
 ### 1.1 Layout
 
+Each stock effect defines its display name only in
+`plugins/<id>/cmake/Identity.cmake`: `set(<PREFIX>_DISPLAY_NAME "<Name>")`.
+The engine receives `SUPPLE_<PREFIX>_DISPLAY_NAME` as a public compile
+definition; its name constant and the plugin's artifact/bundle/test paths
+use that value. `supple_add_plugin(<id> <PREFIX>)` reads the identity file
+itself; an optional third argument names artifacts for template products
+without that file. CLAP ids, state magics and functional code identities
+stay fixed when the display name changes.
+
 Like Orrery (`plugins/orrery`):
 
 - `plugins/<id>/engine/` — the SDK-free core, a monorepo library
@@ -51,7 +60,7 @@ Like Orrery (`plugins/orrery`):
 - `plugins/<id>/` — a copy of the template made exactly as
   `plugins/probe-synth` was (read its `QUIRE.md`: identity renames, vendored
   dependency paths, `supple_plugin_add_monorepo_libraries()`, format-gate and
-  license-check handling, `supple_add_plugin(<id> <PREFIX> <Name>)` in
+  license-check handling, `supple_add_plugin(<id> <PREFIX>)` in
   `plugins/CMakeLists.txt`). The template is an effect already: keep its
   audio-port and process structure. Its `*_clap.cpp` product sections forward
   to `supple::clapx::ParamStore` / `ClapParams` / `FlatSemantic`

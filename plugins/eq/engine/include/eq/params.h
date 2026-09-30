@@ -4,6 +4,7 @@
 #include "supple/params/params.h"
 #include "supple/patch/patch.h"
 namespace supple::eq {
+inline constexpr const char* kDisplayName = SUPPLE_EQ_DISPLAY_NAME;
 inline constexpr std::size_t kBands = 8, kBandParams = 7, kParamCount = 59;
 enum Field : std::size_t { Enabled, Type, Freq, Gain, Q, Slope, Channel };
 enum Filter : int { Bell, LowShelf, HighShelf, HighPass, LowPass, Notch, BandPass, Tilt };
