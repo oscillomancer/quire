@@ -23,7 +23,8 @@ Session
 ├── project        settings, notes, render settings, next-id counters
 ├── tempo          tempo points + meter changes (the time map)
 ├── rulers         markers mk_*, regions rg_*, ruler lanes
-├── tracks         tr_*  (tree: parent + ordered children), master is tr_0
+├── tracks         tr_*  typed strips: channel | buss | master (ADR-0019);
+│                        a forest rooted at the masters, tr_0 the main master
 │   ├── chain      fx_* (ordered; containers nest), input chain
 │   └── lanes      comp lanes (fixed lanes)
 ├── items          it_*  (on a track + lane), each with takes tk_*
@@ -45,7 +46,7 @@ conflict detection (§6.4).
 reused within a lineage: `tr` track, `it` item, `tk` take, `md` media
 source, `mi` MIDI source, `fx` plugin instance, `sd` route, `en` envelope,
 `ai` automation item, `mk` marker, `rg` region, `tp` tempo point, `ts` meter
-change, `gr` group, `ln` lane, `rj` render job. `tr_0` is the master track.
+change, `gr` group, `ln` lane, `rj` render job. `tr_0` is the main master.
 Events inside containers (MIDI notes, envelope points, stretch markers) are
 not objects (ADR-0008).
 
@@ -56,7 +57,10 @@ other rates is resampled, never converted on import); `ppq` default for new
 MIDI (960); `timebase` default for new items (`time` | `beats` |
 `beats_position`); `media_dir` (relative); `render` default settings (§1.10);
 `next_ids`; `seed` (session randomness, e.g. dither); `pan_law` (centre
-attenuation in dB: 0, −3 (default, constant power), −4.5, −6).
+attenuation in dB: 0, −3 (default, constant power), −4.5, −6; used by the
+plain fader/pan stages when Console 9 is off); `console9` (bool, default true:
+Console 9 summing on every strip, ADR-0019); `masters` (ordered master ids,
+tr_0 first).
 
 ### 1.3 Time map (`tempo`) — the contract lives in `libs/timeline`
 
@@ -80,29 +84,40 @@ attenuation in dB: 0, −3 (default, constant power), −4.5, −6).
   beats; property tests over random maps; ramps tested against numeric
   integration.
 
-### 1.4 Tracks
+### 1.4 Tracks (typed strips)
 
-A track is a source, bus, folder and return at once (REAPER's universal
-track). Fields:
+*(Rewritten 2026-09-30 for ADR-0019; the universal REAPER track is gone.)*
+A track is a mixer **strip** of one of three types. Signal order and the
+built-in Console 9 stages are implicit in the type (ADR-0019 §2); `chain`
+holds only user inserts.
+
+| type | summing input | items/record | children | built-in stages | fader/pan drive |
+|---|---|---|---|---|---|
+| `channel` | — (record/monitor inputs only) | yes | never | C9 Channel last | C9 Channel |
+| `buss` | encoded strips | no | yes (folder) | C9 Buss first, C9 Channel last | C9 Channel |
+| `master` | encoded strips | no | yes (folder) | C9 Buss first, plain gain/pan last | plain stage |
+
+Fields:
 
 | field | type | notes |
 |---|---|---|
+| `type` | `channel` \| `buss` \| `master` | default `channel`; tr_0 is always `master` |
 | `name`, `color`, `notes` | string | |
-| `parent` | track id | folder structure is explicit; `tr_0` (master) is the root |
-| `children` | [track id] | order among siblings |
-| `channels` | int 1..64 (even preferred) | internal channel count |
-| `volume` | dB (−inf..+12) | fader |
-| `pan` | % −100..100 | with project pan law |
-| `width` | % −100..100 | stereo width (100 = unchanged) |
-| `mute`, `solo`, `phase_invert` | bool / enum (`off`, `on`, `in_place`, `defeat`) / bool | |
-| `parent_send` | `{enabled, channels: {from: [..], to: [..]}}` | the folder/master send |
-| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | |
-| `timebase` | enum or `project` | default for its items |
-| `chain`, `input_chain` | [fx id] | §1.7 |
-| `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | REAPER 7 fixed lanes (Phase 5 UI; model now) |
+| `parent` | track id or null | a buss or master; null exactly for masters (the roots) |
+| `children` | [track id] | order among siblings; empty on channels |
+| `channels` | int | 1 or 2 (the engine is stereo end to end; a mono channel is placed by its pan) |
+| `volume` | dB (−inf..+12) | the fader: C9 Channel Fader on channels/busses (0 dB = native unity; +12.04 is the native top, clamped to +12), plain gain on masters |
+| `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
+| `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
+| `parent_send` | `{enabled, channels: {from: [..], to: [..]}}` | the encoded output into the parent (no level of its own) |
+| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | channels only |
+| `timebase` | enum or `project` | default for its items (channels) |
+| `chain`, `input_chain` | [fx id] | §1.7; `input_chain` on channels only |
+| `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only (Phase 5 UI; model now) |
 | `locked`, `hidden_tcp`, `hidden_mixer`, `folder_compact` | bool / enum | UI state kept in the model because it is user intent, but tagged `ui: true` so diffs/merges can ignore it |
 
-Every numeric field listed is automatable through envelopes (§1.9).
+`volume`, `pan` and `mute` are automatable (§1.9). Width, trim and polarity
+are not strip fields: insert a utility (Plumb) for them.
 
 ### 1.5 Items and takes
 
@@ -163,19 +178,23 @@ rendered).
 | field | notes |
 |---|---|
 | `from` | `{track: id}` or `{hw_input: {channels: [..]}}` or `{midi_input: device}` |
-| `to` | `{track: id}` or `{hw_output: {channels: [..]}}` |
+| `to` | `{track: id}`, `{fx: id}` (a plug-in's key, ADR-0018) or `{hw_output: {channels: [..]}}` |
 | `tap` | `post_fader` (default), `pre_fader` (post-FX), `pre_fx` |
-| `volume` dB, `pan` %, `mute`, `phase_invert`, `mono` | |
+| `volume` dB, `pan` % or `follow` (default: the strip's pan), `mute`, `phase_invert`, `mono` | into a buss/master: realized by the send's own C9 Channel (ADR-0019 §3) |
 | `channels` | `{from: [..], to: [..]}` channel mapping (e.g. [1,2] → [3,4] for a sidechain) |
 | `midi` | `{from_channel: all|1..16, to_channel: original|1..16}` or null (audio only) |
 
 Folder/master sends are the tracks' `parent_send`, not routes. Record inputs
 are routes from `hw_input`/`midi_input` referenced by `track.record.input`.
 Cycles are rejected at edit time (`route.cycle`, naming the cycle).
+ADR-0019 §4 rules, rejected at edit time with `route.strip_type` (and a hint
+naming the allowed alternative): audio into a channel only from `hw_input`;
+audio into a buss/master only from strips; `hw_output` only from masters; key
+routes from any tap of any strip.
 
 ### 1.9 Envelopes and automation items
 
-`en_*`: `target` — one of `{track: id, param: volume|pan|width|mute|trim}`,
+`en_*`: `target` — one of `{track: id, param: volume|pan|mute}`,
 `{route: id, param: volume|pan|mute}`, `{fx: id, param: <key or CLAP id>}`,
 `{take: id, param: volume|pan|pitch|mute}`, `{tempo: true}` (the tempo map is
 edited through `tempo.*`, not envelopes); `mode`
@@ -227,7 +246,10 @@ deduplicated, reference-counted across versions.
 
 ## 3. Validation invariants (checked after every edit, in debug builds after every command; always before save)
 
-Folder tree is a tree rooted at `tr_0`; every referenced ID exists; items'
+The track tree is a forest rooted at the masters (`project.masters`, tr_0
+first, all of type `master`, parent null); every other track's parent is a
+buss or master; channels have no children; items, lanes, record settings and
+`input_chain` only on channels; routes obey ADR-0019 §4; every referenced ID exists; items'
 tracks/lanes exist; `active_take` ∈ `takes`; sources referenced by takes
 exist (or are marked missing); no route cycles (including parent sends);
 envelope targets exist; points sorted; chains reference fx that belong to
@@ -255,9 +277,13 @@ routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
 
-## 5. Project file (`supple.project/1.0`)
+## 5. Project file (`supple.project/2.0`)
 
 ### 5.1 Shape
+
+*(Schema `supple.project/2.0` since ADR-0019: strip `type`,
+`project.console9`, `project.masters`; strip `width`/`trim`/`phase_invert`
+removed. 1.x files migrate as ADR-0019 §11 says, with warnings.)*
 
 Canonical JSON (ADR-0009) with members in this order: `schema`, `project`,
 `tempo` (`points`, `meters`), `rulers` (`markers`, `regions`), `tracks`,
@@ -370,7 +396,7 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **tempo/meter**: `tempo.set {points}`, `tempo.add`, `tempo.remove`,
   `timesig.set {bar, numerator, denominator}`, `timesig.remove`,
   `time.convert {from, to, value}` (q).
-- **tracks**: `track.add {name, parent, index, channels, template?}`,
+- **tracks**: `track.add {name, type: channel|buss|master, parent, index, channels, template?}`,
   `track.remove`, `track.move {parent, index}`, `track.set {fields}`,
   `track.duplicate`, `track.list` (q).
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,

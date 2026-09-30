@@ -113,6 +113,21 @@ template would be hidden visibility for everything but the entry points (a
 linker version script, or `-fvisibility=hidden` on the dependencies). I have
 not touched the template or your plug-ins; say if you want a patch proposed.
 
+### 13. Console 9 gain staging and the off switch — decision (low effort)
+ADR-0019 builds Console 9 into every strip. Two choices I made that you may
+want the other way:
+- **The fader's 0 dB is Console 9's native unity** (Fader 0.5). At unity
+  faders and centred pans a channel into a buss is about −6.5 dB for small
+  signals (the channel's ×0.764 staging and both stages' −3 dB centre pan;
+  `docs/research/console9.md`). I kept Chris's staging rather than shift the
+  fader, since the encoder's drive at unity is part of the sound.
+- **"Console 9 off" is regular clean digital summing** (fader = exact dB,
+  the project pan law, linear busses): what you asked for, but it is ~6.5 dB
+  louder than "on" at the same fader positions, so an on/off comparison is
+  not level-matched. The alternative is an off mode that keeps Console 9's
+  gains and pan law and only drops the curves and dither (level-matched).
+Say which you prefer; switching is a small change.
+
 ## Resolved
 
 (none yet)

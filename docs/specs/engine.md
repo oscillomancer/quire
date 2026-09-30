@@ -22,11 +22,22 @@ plan (built incrementally from the previous one where possible, §1.6).
 
 ### 1.1 Nodes
 
-- **TrackNode** per track, processing stages in order:
-  `inputs sum → [tap: pre_fx] → items/takes playback mixed in → FX chain →
-  [tap: pre_fader] → trim/volume/pan/width/mute/phase → [tap: post_fader]`.
-  Items play *before* the chain (as in REAPER); input monitoring and record
-  inputs enter at `inputs sum`.
+- **StripNode** per track *(amended 2026-09-30, ADR-0019)*, stages by strip type:
+  channel `inputs → [tap: pre_fx] → items/takes → inserts → [tap: pre_fader]
+  → C9 Channel (fader, pan, mute) → [tap: post_fader]`; buss `input sum → C9
+  Buss → [pre_fx] → inserts → [pre_fader] → C9 Channel → [post_fader]`;
+  master `input sum → C9 Buss → [pre_fx] → inserts → [pre_fader] → plain
+  gain/pan → [post_fader]` → outputs/renders/monitor chain. With
+  `project.console9` off the C9 stages are absent and the fader/pan stage
+  is the plain gain with the project pan law. Items play *before* the
+  chain (as in REAPER); input monitoring and record inputs enter channels
+  at `inputs`.
+- **SendEncoder** per route into a buss/master that cannot share the
+  source's `post_fader` tap: the route's polarity/mono, then its own C9
+  Channel (fader = send level, plus the strip's fader for post-fader
+  sends; pan = send pan or the strip's), then the edge. Edges into a buss
+  or master only sum, channel-map and delay (ADR-0019 §3); a plan-level
+  checker asserts it in debug builds and in the strip fuzz test.
 - **ItemPlayer** (inside a TrackNode): per active item on the track's lanes,
   per take: source reader (audio: disk-streamed decoded+resampled blocks
   from the media cache; MIDI: event generator from the source with playrate
@@ -75,8 +86,9 @@ never by concurrent accumulation — so results are thread-count independent.
 Envelope points are pre-converted to plan time (samples at the engine rate,
 per the time map; beat-timebase points are converted through the tempo map
 at compile time). Per block, each automated target evaluates its segments:
-- mixer targets (volume, pan, width, send gain) interpolate per sample
-  (gain ramps) — cheap and exact;
+- mixer targets (volume, pan, mute, send level/pan) interpolate per sample
+  (gain ramps) and drive the C9 Channel (or the plain stage) — cheap and
+  exact; Console 9 stages restart their seeded dither at every locate;
 - plugin parameters receive CLAP param-value events at segment points and
   every `automation_resolution` samples inside curved/linear segments
   (default 32; always at exact point positions), in the parameter's CLAP
@@ -329,7 +341,9 @@ granted, and CPU governor (read-only facts).
   effects mix wet/dry against the input delayed by their latency; bypass is
   compensated (a delay of the stage's latency); the pan law applies to tracks,
   the master pans as a balance; mute silences the post-fader tap only; a
-  solo-silenced track is still processed.
+  solo-silenced track is still processed. *(Superseded by ADR-0019 for
+  strips: Console 9 stages, mute as a fader ramp before the encode; this
+  remains the behaviour with `project.console9` off.)*
 - **JACK backend** (`jack.h`, `jack_backend.cpp`): libjack is dlopen'ed
   (default `libjack.so.0`) through our own declarations of the API subset we
   use, loaded once per path and never unloaded. The engine block is the
