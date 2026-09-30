@@ -433,6 +433,19 @@ octave band against the parameters (within 10 %) and echo density.
   channels. Commands and CPU numbers are in `plugins/reverb/VERIFICATION.md`.
   The engine test requires density >=0.8 by 150 ms, earlier with diffusion 100,
   late-tail correlation magnitude <0.3 at width 100 and >0.99 at width 0.
+- Test-cost correction after review: `reverb-engine.measure` is an opt-in,
+  unregistered, `EXCLUDE_FROM_ALL` executable. It retains the full 90-response
+  RT60 matrix, seven bands, original density/stereo windows and both long
+  modulated-decay measurements above. Routine CTest uses three 48 kHz cases:
+  decay 0.5/2 s at size 50 (flat low shelf), and decay 0.5 s at size 90 with
+  low_decay 1.5/crossover 1 kHz; damping 2 kHz, bands 250 Hz / 1 kHz / 4 kHz
+  outside active transitions. IR duration is 1.2 times the longest RT60 plus
+  200 ms, leaving the truncation floor below the T30 fit. Density/stereo use
+  1.25 s IRs, and the modulated 8 kHz check uses decay 2 s at 48 kHz.
+  All sample-level predicates are aggregated without dropping samples; the
+  ten-second freeze comparison and five-second automation stress are retained.
+  The TSan-specific timeout override is removed, not increased. Timings and
+  runner commands are in `plugins/reverb/VERIFICATION.md`.
 - The editor is 900 x 560, with the small Supple Audio header, values below
   knobs, a bipolar output arc, decay target/input-bandwidth curves and gated
   sample-peak telemetry. Linux previews use a fixed embedded parent so a

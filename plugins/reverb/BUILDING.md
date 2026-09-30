@@ -42,6 +42,20 @@ cmake --build --preset release --target reverb-bench -j6
 build/release/plugins/reverb/engine/reverb-bench 120
 ```
 
+The full RT60/density matrix is also opt-in and unregistered with CTest:
+
+```sh
+cmake --build --preset release --target reverb-engine.measure -j6
+build/release/plugins/reverb/engine/reverb-engine.measure
+```
+
+It shares the test source with REVERB_MEASURE_SWEEPS enabled, preserving all
+90 responses and long modulated tails. Run it when changing decay design or
+interpolation. Routine CTest uses representative
+short IRs and aggregated sample predicates, retaining block invariance,
+state restore, ten-second freeze stability and five-second automation stress.
+There is no per-test timeout override.
+
 See VERIFICATION.md for measurements, exact commands, CI results and remaining
 platform acceptance. Run tools/ci/format.sh and the repository's full CI once
 at the end of a task, following the worker onboarding rules.

@@ -68,6 +68,7 @@ TEST_CASE("Reverb defaults and sample-offset automation are bit invariant") {
         for (int block : {7, 64, 4096}) CHECK(render(block, events) == ref);
     }
 }
+#ifdef REVERB_MEASURE_SWEEPS
 TEST_CASE("Reverb RT60 octave T30 measurements") {
     double worst = 0;
     std::array<double, 7> bands{};
@@ -113,23 +114,65 @@ TEST_CASE("Reverb RT60 octave T30 measurements") {
                     100 * bands[i]);
     std::printf("RT60 worst relative error: %.4f %%\n", 100 * worst);
 }
+#else
+TEST_CASE("Reverb representative octave T30 measurements") {
+    struct Case {
+        double decay, size, low;
+    };
+    constexpr Case cases[] = {{.5, 50, 1}, {2, 50, 1}, {.5, 90, 1.5}};
+    double worst = 0;
+    for (const auto& c : cases) {
+        auto v = defaults();
+        v[kDecay] = c.decay * 1000;
+        v[kSize] = c.size;
+        v[kLowDecay] = c.low;
+        if (c.low != 1) v[kCrossover] = 1000;
+        v[kDampingFreq] = 2000;
+        v[kModulation] = 0;
+        v[kEarly] = -60;
+        v[kMix] = 100;
+        // More than one longest RT60 keeps truncation below the T30 fit floor.
+        const auto ir = measurements::impulse(v, 48000, c.decay * c.low * 1.2 + .2);
+        for (double f : {250., 1000., 4000.}) {
+            if (c.low != 1 && f > v[kCrossover] * .5 && f < v[kCrossover] * 2) continue;
+            const double target = c.decay * (f <= v[kCrossover] * .5 ? c.low : f >= 4000 ? .5 : 1);
+            const double t = measurements::rt60(ir, f, 48000);
+            CAPTURE(c.decay);
+            CAPTURE(c.size);
+            CAPTURE(f);
+            CAPTURE(t);
+            REQUIRE(std::isfinite(t));
+            worst = std::max(worst, std::abs(t / target - 1));
+        }
+    }
+    CHECK(worst <= .1);
+    std::printf("Representative RT60 worst relative error: %.4f %%\n", 100 * worst);
+}
+#endif
 TEST_CASE("Reverb echo density and stereo decorrelation") {
     auto v = defaults();
     v[kMix] = 100;
-    const auto normal = measurements::impulse(v, 48000, 2.5);
+#ifdef REVERB_MEASURE_SWEEPS
+    constexpr double seconds = 2.5;
+    constexpr std::size_t last = 96000;
+#else
+    constexpr double seconds = 1.25;
+    constexpr std::size_t last = 48000;
+#endif
+    const auto normal = measurements::impulse(v, 48000, seconds);
     const double defaultMs = measurements::densityTime(normal[0], 48000);
     v[kDiffusion] = 100;
-    const auto dense = measurements::impulse(v, 48000, 2.5);
+    const auto dense = measurements::impulse(v, 48000, seconds);
     const double denseMs = measurements::densityTime(dense[0], 48000);
     std::printf("Echo density >=0.8: default %.1f ms, diffusion100 %.1f ms\n", defaultMs, denseMs);
     CHECK(defaultMs <= 150);
     CHECK(denseMs < defaultMs);
-    const double correlation = measurements::correlation(normal, 24000, 96000);
+    const double correlation = measurements::correlation(normal, 24000, last);
     std::printf("Late-tail correlation: %.6f\n", correlation);
     CHECK(std::abs(correlation) < .3);
     v[kWidth] = 0;
-    const auto mono = measurements::impulse(v, 48000, 2.5);
-    CHECK(measurements::correlation(mono, 24000, 96000) > .99);
+    const auto mono = measurements::impulse(v, 48000, seconds);
+    CHECK(measurements::correlation(mono, 24000, last) > .99);
     CHECK(mono[0] == mono[1]);
 }
 TEST_CASE("Reverb freeze is held, early-off is exact and tail is reported") {
@@ -164,8 +207,8 @@ TEST_CASE("Reverb freeze is held, early-off is exact and tail is reported") {
     v[kEarly] = -60;
     v[kPredelay] = 0;
     auto ir = measurements::impulse(v, 48000, .02);
-    for (auto& c : ir)
-        for (double sample : c) CHECK(sample == 0);
+    for (const auto& c : ir)
+        CHECK(std::all_of(c.begin(), c.end(), [](double x) { return x == 0; }));
 }
 TEST_CASE("Reverb dry null, mono, float double and automation stress") {
     for (double fs : {22050., 44100., 48000., 96000., 192000., 384000.}) {
@@ -187,6 +230,8 @@ TEST_CASE("Reverb dry null, mono, float double and automation stress") {
     std::array<double, 64> x{}, l{}, r{};
     const double* in[] = {x.data(), x.data()};
     double* out[] = {l.data(), r.data()};
+    bool finite = true;
+    double peak = 0;
     for (int off = 0; off < 240000;) {
         const auto n = static_cast<std::uint32_t>(1 + rng.next() % 64);
         for (std::size_t i = 0; i < kNumParams; ++i) {
@@ -196,13 +241,13 @@ TEST_CASE("Reverb dry null, mono, float double and automation stress") {
         for (auto& sample : x) sample = (2 * rng.uniform() - 1);
         p.process(in, out, n);
         for (std::size_t i = 0; i < n; ++i) {
-            CHECK(std::isfinite(l[i]));
-            CHECK(std::isfinite(r[i]));
-            CHECK(std::abs(l[i]) < 100);
-            CHECK(std::abs(r[i]) < 100);
+            finite &= std::isfinite(l[i]) && std::isfinite(r[i]);
+            peak = std::max({peak, std::abs(l[i]), std::abs(r[i])});
         }
         off += static_cast<int>(n);
     }
+    CHECK(finite);
+    CHECK(peak < 100);
 }
 
 TEST_CASE("Reverb predelay moves the entire wet impulse and restored freeze ignores input") {
@@ -214,14 +259,14 @@ TEST_CASE("Reverb predelay moves the entire wet impulse and restored freeze igno
     v[kPredelay] = 25;
     const auto delayed = measurements::impulse(v, 48000, 1.025);
     for (std::size_t c = 0; c < 2; ++c) {
-        for (std::size_t i = 0; i < 1200; ++i) CHECK(delayed[c][i] == 0);
-        for (std::size_t i = 0; i < plain[c].size(); ++i)
-            CHECK(delayed[c][i + 1200] == plain[c][i]);
+        CHECK(std::all_of(delayed[c].begin(), delayed[c].begin() + 1200,
+                          [](double x) { return x == 0; }));
+        CHECK(std::equal(plain[c].begin(), plain[c].end(), delayed[c].begin() + 1200));
     }
     v[kFreeze] = 1;
     const auto frozen = measurements::impulse(v, 48000, .25);
     for (const auto& c : frozen)
-        for (double x : c) CHECK(x == 0);
+        CHECK(std::all_of(c.begin(), c.end(), [](double x) { return x == 0; }));
     v[kFreeze] = 0;
     v[kPredelay] = 0;
     v[kEarly] = -60;
@@ -231,22 +276,30 @@ TEST_CASE("Reverb predelay moves the entire wet impulse and restored freeze igno
     double energy = 0;
     for (double x : on[0]) energy += x * x;
     CHECK(energy > 0);
-    for (double x : off[0]) CHECK(x == 0);
+    CHECK(std::all_of(off[0].begin(), off[0].end(), [](double x) { return x == 0; }));
 }
 
 TEST_CASE("Reverb modulation preserves high-frequency decay") {
-    for (double fs : {44100., 48000.}) {
+#ifdef REVERB_MEASURE_SWEEPS
+    constexpr double rates[] = {44100., 48000.};
+    constexpr double decay = 8000, seconds = 13, target = 4;
+#else
+    constexpr double rates[] = {48000.};
+    constexpr double decay = 2000, seconds = 1.75, target = 1;
+#endif
+    for (double fs : rates) {
         auto v = defaults();
         v[kSize] = 20;
-        v[kDecay] = 8000;
+        v[kDecay] = decay;
         v[kMix] = 100;
         v[kEarly] = -60;
         v[kDampingFreq] = 2000;
-        const auto ir = measurements::impulse(v, fs, 13);
+        const auto ir = measurements::impulse(v, fs, seconds);
         const double t = measurements::rt60(ir, 8000, fs);
         CHECK(std::isfinite(t));
-        CHECK(std::abs(t / 4 - 1) < .1);
-        std::printf("Modulation20 size20 decay8: %.0f Hz, 8kHz RT60 %.6f s (target4s)\n", fs, t);
+        CHECK(std::abs(t / target - 1) < .1);
+        std::printf("Modulation20 size20 decay%.1f: %.0f Hz, 8kHz RT60 %.6f s (target%.1fs)\n",
+                    decay * .001, fs, t, target);
     }
 }
 TEST_CASE("Reverb prepare then restore snaps every control before the first sample") {

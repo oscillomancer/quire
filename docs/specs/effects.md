@@ -575,8 +575,8 @@ An original design; write its structure and constants into
   main-thread parameter/state edits set an atomic pending flag.
 - **CPU:** ≤ 2 % of a core per stereo instance at 48 kHz, 512-frame blocks,
   -O2 (a bench executable as the EQ's, not a test); report the number.
-- Tests (beyond §1.7): RT60 per octave band (125 Hz … 8 kHz; octave-band
-  filtered impulse response, Schroeder backward integration, T30 fit)
+- Opt-in `reverb-engine.measure`: full RT60 per octave band (125 Hz … 8 kHz;
+  octave-band filtered impulse response, Schroeder backward integration, T30 fit)
   within 10 % of the three-region target for bands at least an octave from
   `crossover`/`damping_freq`, at decay 0.5/2/8 s and size 20/50/90;
   normalized echo density (Abel & Huang) of the impulse response reaches
@@ -586,6 +586,13 @@ An original design; write its structure and constants into
   width 0); freeze holds the tail RMS within 1 dB over 10 s; `early` at its
   minimum removes the early taps exactly; tail values; defaults bit-exact
   across block sizes.
+- Routine CTest (beyond §1.7) uses representative 48 kHz RT60 cases: decay
+  0.5/2 s at size 50 and 0.5 s at size 90, bands 250 Hz / 1 kHz / 4 kHz
+  outside active transitions. Shortened IRs still reach the T30 fit floor;
+  density/stereo and modulated-decay checks use shorter representative tails.
+  Keep the ten-second freeze comparison and five-second automation stress;
+  aggregate per-sample predicates. No raised timeout: targets ≤10 s dev,
+  ≤120 s TSan, with the dense matrix retained in the opt-in runner.
 - GUI: the decay curve (RT60 against frequency, log axes, from the three
   regions and the cut filters), size and decay large, predelay, diffusion,
   early, modulation, low_decay/crossover, high_decay/damping_freq,

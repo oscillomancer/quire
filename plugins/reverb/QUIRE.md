@@ -40,3 +40,8 @@ conversion checklist does not apply. No template source was modified.
 - Structure, interpolation, diffuser cap and measurement decisions are in
   stock-effects.md §7. The format gate checks product-owned files, preserving
   copied infrastructure. No dependencies were added.
+
+The dense RT60/density measurements are preserved in the opt-in
+reverb-engine.measure target (EXCLUDE_FROM_ALL, never registered with CTest).
+Routine tests use representative short IRs and aggregated assertions; no
+raised timeout or production DSP change. See VERIFICATION.md for timings.

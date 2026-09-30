@@ -2,6 +2,53 @@
 
 Branch p3-reverb, base a9d667c; no rebase. All commands ran in this worktree.
 
+## Test-cost review follow-up
+
+No production DSP changes. Removed the TSan TIMEOUT override. The full
+matrix remains in `reverb-engine.measure`, an EXCLUDE_FROM_ALL target not
+registered with CTest, compiled from the same source with
+REVERB_MEASURE_SWEEPS. Routine tests use representative short IRs and
+aggregate sample predicates without dropping any samples. The ten-second
+freeze comparison and five-second automation stress remain in CTest.
+
+| Final routine checks | Engine runtime | Product suite runtime | Result |
+|---|---:|---:|---|
+| dev | 4.28 s | 1.23 s | both passed |
+| TSan | 16.44 s | 5.30 s | both passed; no race report |
+
+Both engine runs passed 9 cases / 184 assertions. The representative RT60
+subset's worst error is 8.0412% (below 10%; its flat-low-shelf/damping-2-kHz
+shape differs from the dense matrix). Short-IR density crossings remain
+67/52 ms. The short modulated-decay check measured 1.001824 s against 1 s.
+These elapsed times are CTest measurements, not pass/fail assertions.
+
+Exact verification:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev --target reverb-engine.tests reverb-engine.measure plugin-reverb -j6
+ctest --preset dev -R '^(reverb-engine.tests|plugin.reverb.ctest)$' --output-on-failure
+cmake --build --preset dev -j6
+cmake --preset tsan
+cmake --build --preset tsan --target reverb-engine.tests plugin-reverb semantic-conformance -j6
+ctest --preset tsan -R '^(reverb-engine.tests|plugin.reverb.ctest)$' --output-on-failure
+cmake --preset release -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'
+cmake --build --preset release --target reverb-engine.measure -j2
+build/release/plugins/reverb/engine/reverb-engine.measure
+```
+
+The opt-in runner passed 9 cases / 582 aggregated assertions, preserving
+all 90 responses, seven octave bands, original density/stereo windows and
+the 44.1/48 kHz long modulated tails. Dense-matrix RT60/density results below
+were reproduced unchanged. Generated dev/TSan CTest files register only
+reverb-engine.tests and contain no TIMEOUT property. Format and license
+checks pass. No full CI rerun, per the review instruction. The temporary
+TSan tree was removed afterwards; dev, release and verification logs remain.
+
+The following records describe initial bce7a68 verification. The historical
+1800-second workaround and million-assertion suite are superseded by this
+cost fix; the DSP measurements remain valid and were rerun above.
+
 ## Measurements
 
 RT60 uses octave-filtered stereo impulse energies, Schroeder integration and
