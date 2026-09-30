@@ -23,6 +23,4 @@ Values defaults();
 std::string formatValue(std::size_t index, double physical, bool compact = false);
 const patch::FlatPatchType& patchType();
 std::string describe(const Values&, patch::Detail detail = patch::Detail::Changed);
-inline constexpr std::uint32_t kClipLatency = 128;
-std::uint32_t latencyFor(const Values&) SUPPLE_RT;
 }  // namespace supple::transient

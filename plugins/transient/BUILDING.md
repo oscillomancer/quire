@@ -24,7 +24,7 @@ The CLI renders mono/stereo WAV through the same engine:
 build/dev/plugins/transient/transient-cli input.wav output.wav --attack 60 --sustain -30 --mix 100 --output-gain -3 --block 257
 ```
 
-`--clip` enables the 128-sample 2x soft-clip path. The renderer retains the
+`--clip` enables the 72-sample 2x soft-clip path. The renderer retains the
 input file's length (leading latency included; trailing latency is truncated).
 `--bits 24` chooses PCM, default 32 writes float WAV.
 

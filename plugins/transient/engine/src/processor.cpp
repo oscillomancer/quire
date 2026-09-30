@@ -1,20 +1,8 @@
 #include "transient/processor.h"
-#include <numbers>
 namespace supple::transient {
 namespace {
 double db(double x) SUPPLE_RT { return 20 * std::log10(std::max(x, 1e-300)); }
 double flush(double x) SUPPLE_RT { return std::abs(x) < 1e-30 ? 0 : x; }
-// I0's power series; beta <= 11 converges well within these fixed 32 terms.
-// Local design math keeps prepare portable to standard libraries without
-// the optional special-math functions.
-double besselI0(double x) {
-    double term = 1, sum = 1;
-    for (int k = 1; k <= 32; ++k) {
-        term *= x * x / (4 * k * k);
-        sum += term;
-    }
-    return sum;
-}
 }  // namespace
 Processor::Processor() : target_(defaults()), current_(target_) {}
 Status Processor::prepare(double sr, std::uint32_t maxFrames, int channels) {
@@ -27,26 +15,14 @@ Status Processor::prepare(double sr, std::uint32_t maxFrames, int channels) {
     channels_ = channels;
     minHold_ = std::max(1u, static_cast<std::uint32_t>(std::lround(sr * .001)));
     maxHold_ = std::max(minHold_, static_cast<std::uint32_t>(std::lround(sr * .05)));
+    for (auto& os : oversamplers_) os.prepare(2, maxFrames);
     try {
         peaks_.resize(maxHold_ + 2);
+        for (auto& dry : dry_) dry.resize(oversamplers_[0].latency() + 1);
     } catch (...) {
-        return Error{"allocation", "Cannot prepare detector storage.", "prepare",
+        return Error{"allocation", "Cannot prepare detector and clip storage.", "prepare",
                      "Reduce sample rate or free memory."};
     }
-    const double norm = besselI0(11.);
-    double sum = 0;
-    for (std::size_t i = 0; i < kTaps; ++i) {
-        const int n = static_cast<int>(i) - 128;
-        const double pos = n / 128.;
-        double h =
-            n == 0
-                ? .5
-                : (n % 2 == 0 ? 0 : std::sin(std::numbers::pi * n * .5) / (std::numbers::pi * n));
-        h *= besselI0(11. * std::sqrt(std::max(0., 1 - pos * pos))) / norm;
-        taps_[i] = h;
-        sum += h;
-    }
-    for (auto& h : taps_) h /= sum;
     smooth_ = std::exp(-1 / (sr * .02));
     gainAlpha_ = std::exp(-1 / (sr * .001));
     ready_ = true;
@@ -55,9 +31,8 @@ Status Processor::prepare(double sr, std::uint32_t maxFrames, int channels) {
 }
 void Processor::reset() SUPPLE_RT {
     current_ = target_;
-    up_ = {};
-    down_ = {};
-    dry_ = {};
+    for (auto& os : oversamplers_) os.reset();
+    for (auto& dry : dry_) std::fill(dry.begin(), dry.end(), 0.);
     read_ = write_ = dryHead_ = 0;
     clock_ = 0;
     fast_ = slow_ = gainDb_ = reference_ = lastSpeed_ = inputPeak_ = outputPeak_ = gainSum_ = 0;
@@ -74,17 +49,6 @@ void Processor::setParam(std::size_t i, double v) SUPPLE_RT {
     if (p.type == params::Type::Bool) v = v > .5 ? 1 : 0;
     target_[i] = v;
     if (!started_) current_[i] = v;
-}
-double Processor::Fir::run(double x, const std::array<double, kTaps>& taps) SUPPLE_RT {
-    history[head] = flush(x);
-    double y = 0;
-    std::size_t pos = head;
-    for (std::size_t i = 0; i < kTaps; ++i) {
-        if (i % 2 || i == 128) y += taps[i] * history[pos];
-        pos = pos == 0 ? kTaps - 1 : pos - 1;
-    }
-    head = (head + 1) % kTaps;
-    return flush(y);
 }
 double Processor::detect(double x) SUPPLE_RT {
     // A cycle-aware peak hold (1..50 ms) removes carrier zero crossings without
@@ -154,10 +118,10 @@ void Processor::tick(const std::array<double, 2>& x, std::array<double, 2>& y) S
         if (clip) {
             dry_[c][dryHead_] = x[c];
             dry = dry_[c][(dryHead_ + 1) % dry_[c].size()];
-            const double a = std::tanh(2 * up_[c].run(wet, taps_));
-            const double b = std::tanh(2 * up_[c].run(0, taps_));
-            wet = down_[c].run(a, taps_);
-            down_[c].run(b, taps_);
+            std::array<double, 2> hi{};
+            oversamplers_[c].upsample(wet, hi);
+            for (auto& sample : hi) sample = std::tanh(sample);
+            wet = oversamplers_[c].downsample(hi);
         }
         // Preserve the transparent default, including signed zeros.
         y[c] = out * (mix == 1 ? wet : mix == 0 ? dry : dry + mix * (wet - dry));

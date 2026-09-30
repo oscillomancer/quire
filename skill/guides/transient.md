@@ -42,9 +42,9 @@ its initial onset. One part acts at a time, with total gain bounded to
 +/-12 dB and a 1 ms gain pole. Neutral defaults pass bit-exactly. Continuous
 changes smooth for 20 ms; setting a patch before playback snaps its values.
 
-Clip off is zero latency. Clip on adds exactly 128 samples, aligned with
-the dry path, through a local 2x half-band pair. Toggle it while stopped or
-let the host service the requested restart. Clip is a soft tone change;
+Clip off is zero latency. Clip on adds exactly 72 samples, aligned with
+the dry path, through the shared 2x `dsp::Oversampler`. Toggle it while stopped
+or let the host service the requested restart. Clip is a soft tone change;
 it does not guarantee a sample or true-peak ceiling, and output gain can
 raise peaks afterwards. Use Ballast limiting for a mastering ceiling.
 

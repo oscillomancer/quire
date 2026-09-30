@@ -442,8 +442,7 @@ closer feature), stereo. Everything in §1 applies; no sidechain port.
   in `stock-effects.md` §4 if you refine it.
 - `clip`: a soft clip (tanh-style, unity small-signal slope) after the gain,
   with 2× oversampling of the clip stage only (latency reported; 2× via the
-  shared `dsp::Oversampler` if it has landed on main, otherwise a local
-  half-band pair — say which in the report).
+  shared `dsp::Oversampler`, 72 samples round-trip delay).
 - `mix` (dry aligned with any latency) and `output`.
 - Tests: attack +100 on a synthetic drum hit (a 5 ms 1 kHz burst on a decay)
   raises the first 5 ms by ≥ 6 dB and leaves the tail within 1 dB; sustain

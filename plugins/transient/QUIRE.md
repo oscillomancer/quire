@@ -18,11 +18,11 @@ CLAP_PROCESS_ERROR rather than allocating in the callback.
 
 Signal flow: stereo rectified maximum -> bounded cycle peak hold -> fast/slow
 dB followers -> envelope-difference shaping -> 1 ms gain pole -> optional 2x
-`tanh` half-band pair -> aligned dry/wet blend -> output gain. Continuous
-parameters smooth for 20 ms (speed in log space); restored values snap before
-the first sample. Clip is non-automatable and requests host restart; active
+`tanh` via shared `dsp::Oversampler` -> aligned dry/wet blend -> output gain.
+Continuous parameters smooth for 20 ms (speed in log space); restored values
+snap before the first sample. Clip is non-automatable and requests host restart; active
 audio retains the old configuration and delay until reactivation. Clip off
-has zero latency, on has 128 samples. There is no sidechain or bypass key;
+has zero latency, on has 72 samples. There is no sidechain or bypass key;
 neutral defaults pass bit-exactly. See stock-effects §4 for detector decisions.
 
 The shared GUI lifecycle, renderer stack, telemetry Ring, host contract and
