@@ -13,6 +13,7 @@ add_subdirectory(orrery/clap)
 if(SUPPLE_BUILD_PLUGINS)
   include(ExternalProject)
   option(SUPPLE_PLUGIN_VST3 "Also build VST3 versions of the stock plugins" OFF)
+  set(VST3_SDK_ROOT "" CACHE PATH "Complete VST3 SDK for opt-in stock-plugin builds")
   # supple_add_plugin(<dir> <PREFIX> [artifact]): builds plugins/<dir> (a template-derived
   # plugin, ADR-0011) as an isolated ExternalProject. PREFIX is the plugin's
   # CMake option prefix (the template's STARTER after renaming), so the
@@ -54,6 +55,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DSUPPLE_SEMANTIC_CONFORMANCE=${CMAKE_BINARY_DIR}/plugins/common/semantic-conformance
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
         -D${prefix}_VST3=${SUPPLE_PLUGIN_VST3}
+        -DVST3_SDK_ROOT=${VST3_SDK_ROOT}
         -D${prefix}_RTSAN=${plugin_rtsan}
         -DSUPPLE_SANITIZE=${plugin_core_sanitize}
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON
@@ -61,6 +63,12 @@ if(SUPPLE_BUILD_PLUGINS)
     if(SUPPLE_BUILD_TESTS)
       add_test(NAME plugin.${dir}.ctest
         COMMAND ${CMAKE_CTEST_COMMAND} --test-dir "${plugin_build}" --output-on-failure)
+      if(UNIX AND NOT APPLE)
+        add_test(NAME plugin.${dir}.unload COMMAND clap-unload-probe
+          "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
+        set_tests_properties(plugin.${dir}.unload PROPERTIES
+          LABELS "rt;plugin-unload" TIMEOUT 30)
+      endif()
       if(NOT SUPPLE_SANITIZE)
         add_test(NAME plugin.${dir}.validator
           COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"

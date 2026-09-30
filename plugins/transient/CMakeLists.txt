@@ -143,14 +143,18 @@ if (TRANSIENT_BUILD_PLUGIN)
         GIT_SHALLOW OFF)
     FetchContent_MakeAvailable(clap-wrapper)
 
-    # The vendored wrapper carries both template VST3 patches. Never mutate it.
+    # The vendored wrapper carries all three template VST3 patches. Never mutate it.
     execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-all-points.patch
         WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE points_present)
     execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-timer-floor.patch
         WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE timer_present)
-    if (NOT points_present EQUAL 0 OR NOT timer_present EQUAL 0)
+    set(transient_wrapper_self_handle_patch ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-self-handle.patch)
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
+        ${transient_wrapper_self_handle_patch}
+        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE self_handle_present)
+    if (NOT points_present EQUAL 0 OR NOT timer_present EQUAL 0 OR NOT self_handle_present EQUAL 0)
         message(FATAL_ERROR "Vendored clap-wrapper lacks template VST3 patches")
     endif()
 
@@ -257,6 +261,51 @@ if (TRANSIENT_BUILD_PLUGIN)
         target_link_options(transient-plugin_clap PRIVATE -fsanitize=realtime)
     elseif (SUPPLE_SANITIZE STREQUAL "thread" AND TARGET transient-plugin_clap)
         target_link_options(transient-plugin_clap PRIVATE -fsanitize=thread)
+    endif()
+
+    # Linux modules export their entry points and nothing else. Every other
+    # symbol is visible to each plugin in the host process, and the GNU unique
+    # ones among them (fmt's locale facet id, the VST3 SDK's UpdateHandler
+    # singleton) bind across modules whatever RTLD_LOCAL says: the second
+    # plugin runs on the first one's copies, and glibc pins the first against
+    # dlclose. -fvisibility=hidden cannot do this job -- libstdc++ and pugl
+    # mark their own symbols default -- so the linker gets an explicit list.
+    # macOS binds symbols per image (two-level namespace) and Windows exports
+    # only what is dllexport'd, so neither needs it.
+    if (UNIX AND NOT APPLE)
+        foreach(format clap vst3)
+            if (TARGET transient-plugin_${format})
+                set(transient_exports ${CMAKE_CURRENT_SOURCE_DIR}/cmake/exports-${format}.map)
+                target_link_options(transient-plugin_${format} PRIVATE
+                    "LINKER:--version-script=${transient_exports}")
+                set_property(TARGET transient-plugin_${format} APPEND PROPERTY
+                    LINK_DEPENDS ${transient_exports})
+            endif()
+        endforeach()
+
+        if (TRANSIENT_BUILD_TOOLS AND TARGET transient-plugin_clap)
+            add_test(NAME exports-clap
+                COMMAND ${CMAKE_COMMAND}
+                    -DMODULE=$<TARGET_FILE:transient-plugin_clap>
+                    "-DEXPECTED=clap_entry"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_plugin_exports.cmake)
+        endif()
+
+        if (TRANSIENT_BUILD_TOOLS AND TARGET transient-plugin_vst3)
+            add_test(NAME wrapper-self-handle COMMAND ${GIT_EXECUTABLE}
+                -C ${clap-wrapper_SOURCE_DIR} apply --reverse --check
+                ${transient_wrapper_self_handle_patch})
+            add_test(NAME exports-vst3
+                COMMAND ${CMAKE_COMMAND}
+                    -DMODULE=$<TARGET_FILE:transient-plugin_vst3>
+                    "-DEXPECTED=GetPluginFactory,ModuleEntry,ModuleExit,clap_entry"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_plugin_exports.cmake)
+            add_executable(transient-vst3-unload-probe test/vst3_unload_probe.cpp)
+            target_link_libraries(transient-vst3-unload-probe PRIVATE ${CMAKE_DL_LIBS})
+            transient_target_defaults(transient-vst3-unload-probe)
+            add_test(NAME vst3-unload
+                COMMAND transient-vst3-unload-probe $<TARGET_FILE:transient-plugin_vst3>)
+        endif()
     endif()
 
     # The license and attribution have to travel with the binary. Files sitting

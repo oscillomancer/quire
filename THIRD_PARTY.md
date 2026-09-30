@@ -35,6 +35,14 @@ Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts
 Nate's plugin template already ships) are permitted for bundling; see
 ADR-0003.
 
+The vendored clap-wrapper has three pre-applied template patches recorded in
+`third_party/manifest.json`, with copies under `cmake/patches/`: all automation
+points, a timer floor, and `clap-wrapper-vst3-self-handle.patch` (template commit
+`3d32b8d`). The last releases the Linux self-module lookup handle immediately
+and resolves `clap_entry` in that image, avoiding cross-plugin binding and
+unmapping from inside its own static destructor. Plugin builds validate these
+patches without mutating the shared vendored tree.
+
 Template-derived stock plugins build offline against the vendored clap,
 clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subset
 is vendored for the host; stock-plugin VST3 builds remain opt-in. Plugin fonts (Inter, IBM
