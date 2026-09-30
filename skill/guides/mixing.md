@@ -97,3 +97,4 @@ points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
 
 Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
+For track compression, external-key ducking and master peak limiting, see [the compressor/limiter guide](comp.md).

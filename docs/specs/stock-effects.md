@@ -89,7 +89,7 @@ Inputs: main stereo + sidechain stereo (CLAP port 1).
 | `sc_lowpass` | Hz | 1000..20000 (20000 = off) | log | 20000 |
 | `sc_listen` | bool | | | false |
 | `stereo_link` | % | 0..100 | linear | 100 |
-| `lookahead` | enum | `off`, `1ms`, `5ms` (latency) | | `off` |
+| `lookahead` | enum | `off`, `ms1`, `ms5` (latency) | | `off` |
 | `makeup` | dB | −12..+24 | linear | 0 |
 | `auto_makeup` | bool | | | false |
 | `ceiling` | dB | −24..0 (limiter mode: output ceiling) | linear | −1 |
@@ -103,6 +103,68 @@ one-pole smoothing in the dB domain (branching); limiter mode = ratio ∞
 with lookahead peak hold + release, true-peak mode guarantees output ≤
 ceiling dBTP on the Tech 3341 TP signals and on programme material (tested
 with core-analysis true peak).
+
+Implementation decisions (2026-09-29):
+
+- `rms_window` is the exponential mean-square time constant (one pole),
+  not a rectangular window. The RMS sine curve uses input RMS dBFS, while
+  the peak curve uses the detector sample level; a sine's peak and RMS differ
+  by 3.0103 dB. Timing checks use a 20 dB constant-amplitude input step.
+- Feedback detects the previous compressed wet sample before makeup, mix
+  and output gain. An external sidechain always takes precedence over topology.
+- Auto release blends the fast `release` and slow `5 * release` one-pole
+  coefficients. Weight ramps from 0 to 1 over one second while a deeper
+  reduction is held, and returns to 0 over one second when it is releasing.
+  Auto makeup adds the negative static feedforward reduction at -18 dBFS
+  to manual makeup, only in compressor mode.
+- A limiter processes the makeup/mix/output-adjusted signal, then enforces
+  its ceiling. Compressor threshold, detector, topology and sidechain do not
+  alter limiter gain. `sc_listen` auditions the filtered key; in limiter mode
+  the audition passes through the limiter too. Peak parameters in the GUI
+  measure sample peaks; they are labeled dBFS.
+- True-peak limiting adds 16 samples of latency whenever limiter mode and
+  `true_peak` are selected, including lookahead `off`. With `off`, only the
+  sample ceiling is guaranteed. Use `ms1` or `ms5` for the true-peak ceiling.
+  Mode and true-peak changes are non-automatable because they can change latency,
+  as is lookahead. All three configuration controls request a restart even
+  when the resulting delay is equal, avoiding an unsmoothed topology switch.
+  The active DSP retains the old latency configuration until
+  the host reactivates; other parameters can continue to change.
+- The limiter's minimum deque holds targets across the lookahead window;
+  release is capped by the moving average, allowing the attack to ramp instead
+  of jumping to the window minimum. The average has lookahead-samples + 1
+  entries; the interpolator's 16-sample delay is excluded from that ramp.
+  True-peak detection uses only the shared 4x interpolated driven signal,
+  without an L1 reconstruction bound or additional detection margin. With TP
+  lookahead the hold spans twice the total delay to cover the FIR support.
+  Ceiling checks allow 0.1 dBTP measurement tolerance. A -3 dBFS sine below a
+  -1 dBTP ceiling passes unchanged apart from delay; seeded pink noise driven
+  +12 dB retains sample peaks within 0.6 dB of that ceiling. No lookahead
+  setting is a loudness target.
+- The design is 900 x 560, below Orrery's 1120 x 700 limit. Knob values sit
+  below the knob and label, clear of the pointer. Limiter mode disables
+  threshold, ratio, knee, attack, detector, RMS window, topology, auto release
+  and auto makeup; key selection and filters are enabled only while key
+  audition is on. Limiter key audition uses feedforward key filtering.
+  Release, stereo link, makeup, mix, output, ceiling, true peak and lookahead
+  remain active. Its transfer curve includes the makeup/dry-wet/output drive
+  and flattens at the ceiling. Linux previews embed in a fixed-size parent
+  so a tiling window manager cannot enlarge or distort the capture.
+- Sidechain filters use 12 dB/oct Butterworth TPT sections. Endpoint bypass
+  blends across 10–20 Hz for highpass and 19–20 kHz for lowpass; endpoints are
+  exactly off. Continuous parameters smooth over 20 ms, positive log-domain
+  controls in log space; ratio smooths its inverse in the gain-computer slope
+  so the infinity endpoint has no jump. Detector/source/topology/listen
+  switches use 10 ms ramps.
+
+Lookahead choice keys are `ms1` and `ms5` (displayed as 1 ms and 5 ms):
+core-params requires enum keys to start with a lowercase letter, so the
+original `1ms` / `5ms` spellings could not pass table validation.
+
+Mono main configurations retain a stereo key; its maximum detector level
+controls the mono gain regardless of `stereo_link`. The implementation also
+accepts positive sample rates through 768 kHz for host-validator coverage;
+the response contract remains 22.05–384 kHz.
 
 ## 3. Gate / expander — "Sluice" [`gate`]
 
