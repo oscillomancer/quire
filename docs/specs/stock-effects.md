@@ -322,6 +322,41 @@ detector time constant separating attack from sustain), `sensitivity` %
 envelope followers (fast/slow) on a detector signal; gain = f(fast − slow);
 level-independent (a 10 dB louder input yields the same shaping).
 
+Implementation decisions (2026-09-30):
+
+- Defaults for the abbreviated keys: `clip` false, `mix` 100 % (0..100),
+  `output` 0 dB (-24..+24). All continuous controls smooth for 20 ms,
+  speed in log space; restored values snap before processing.
+- The stereo maximum rectifier feeds a cycle-aware rectangular peak hold:
+  at least 1 ms, otherwise the interval between the two most recent local
+  maxima plus one sample, capped at 50 ms. This suppresses carrier zero
+  crossings so steady tones do not get constant onset gain. It adds no audio
+  latency, but low-frequency decay detection can lag by up to half a cycle.
+  A bounded preallocated monotonic deque implements the hold.
+- Fast attack is `0.1 ms * speed/10`, fast release and slow attack are
+  `speed`, slow release is `4*speed`; both operate in dB. At the first
+  nonzero detector sample, both start 60 dB below that level. The silence
+  floor tracks 120 dB below the largest detector level since reset. These
+  relative references preserve identical gain curves under level scaling.
+- With `d = fast - slow`, onset gain is
+  `12*(attack/100)*clamp(d*sensitivity/500,0,1)`, sustain gain is
+  `12*(sustain/100)*clamp(-d*sensitivity/500,0,1)`. Their sum feeds a 1 ms
+  one-pole. Total gain is bounded to +/-12 dB because only one part is
+  nonzero at a time. Sensitivity zero disables shaping. No threshold/key.
+- Clip is `tanh`, unity small-signal slope, applied after shaping and before
+  mix/output. The shared oversampler had not landed at implementation start;
+  the local 2x pair uses 257-tap Kaiser (beta 11) windowed-sinc half-band FIRs,
+  128 high-rate samples of group delay per FIR, 128 base samples total.
+  The dry path has the exact same integer delay. Clip off has zero delay;
+  `clip` is non-automatable and requests restart, retaining the old DSP and
+  latency until reactivation. Output gain can raise clipped peaks; clip is
+  a tone control, not a ceiling limiter.
+- Appended readonly host meters: `input_level`, `output_level` (sample peak
+  dBFS, -120..40), and `gain` (average shaping dB, -12..12), every 50 ms.
+  The visible editor gets the same frames; its 900 x 560 design plots two
+  seconds of envelopes plus gain. Knob values are below the face; attack,
+  sustain and output arcs start at their zero centre.
+
 ## 5. Saturation — "Kiln" [`drive`]
 
 Keys: `curve` enum `tape`, `tube`, `transistor`, `diode`, `fold`, `hard`
