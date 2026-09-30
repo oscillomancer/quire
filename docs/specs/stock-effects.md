@@ -11,6 +11,10 @@ except for the decisions recorded there.
 
 ## 0. Conventions shared by every stock effect
 
+- **Enum keys** start with a lowercase letter (core-params validation):
+  numeric choices take a unit prefix — `db12`, `ms5`, `x4` — while their
+  display labels keep the numbers ("12 dB/oct", "5 ms", "4x"). Tables below
+  that still show digit-led keys mean these prefixed forms.
 - **Patch form:** flat (core-patch `FlatPatchType`): `"params": {"<key>":
   value}` with dotted keys (`band2.freq`). One form for every effect, so an
   agent learns it once. Keys and units are the parameter table.
