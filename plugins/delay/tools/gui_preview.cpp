@@ -12,52 +12,96 @@
 #include <thread>
 #include <vector>
 
-#include "Gui.h"
 #include "DelayParams.h"
+#include "Gui.h"
 #include "Telemetry.h"
+#include "delay/processor.h"
+#if defined(__linux__)
+#include <X11/Xlib.h>
+#endif
 
 extern "C" void delayReadPixels(int w, int h, unsigned char* rgb);
 extern "C" void delayViewportSize(int* w, int* h);
 
-using namespace delay;
-using namespace delay::gui;
+using namespace supple::delay;
+using namespace supple::delay::gui;
 
 namespace {
-constexpr double kRate = 250.0;
+constexpr double kRate = 20.0;
+#if defined(__linux__)
+struct PreviewParent {
+    Display* display = XOpenDisplay(nullptr);
+    ::Window window = 0;
+    PreviewParent(int width, int height) {
+        if (!display) return;
+        XSetWindowAttributes attributes{};
+        attributes.override_redirect = True;
+        // An embedded view gets its design size even under a tiling WM.
+        window =
+            XCreateWindow(display, DefaultRootWindow(display), 40, 40, static_cast<unsigned>(width),
+                          static_cast<unsigned>(height), 0, CopyFromParent, InputOutput,
+                          CopyFromParent, CWOverrideRedirect, &attributes);
+        XMapWindow(display, window);
+        XSync(display, False);
+    }
+    ~PreviewParent() {
+        if (window) XDestroyWindow(display, window);
+        if (display) XCloseDisplay(display);
+    }
+};
+#endif
 
 class PreviewHost : public EditorHost {
   public:
-    PreviewHost() {
+    PreviewHost(const char* scenario) {
         for (const auto& p : kParams) values_[p.id] = p.def;
-        values_[kInputGain] = 3.0;
+        if (!std::strcmp(scenario, "pingpong")) {
+            values_[kSync] = 8;
+            values_[kMode] = 1;
+            values_[kFeedback] = 55;
+            values_[kModDepth] = 30;
+        }
+        if (!processor_.prepare(48000, 2400)) std::exit(1);
+        for (size_t i = 0; i < kNumParams; ++i) processor_.setParam(i, values_[i]);
     }
     double paramValue(uint32_t id) const override { return values_[id]; }
     void beginEdit(uint32_t) override {}
     void setParam(uint32_t id, double value) override {
-        if (const ParamDef* p = findParam(id); p && !p->readonly)
+        if (const ParamDef* p = findParam(id); p && !(p->flags & supple::params::kReadonly))
             values_[id] = std::clamp(value, p->min, p->max);
     }
     void endEdit(uint32_t) override {}
     TelemetryRing& telemetry() override { return ring_; }
-    int latencySamples() const override { return 0; }
+    int latencySamples() const override { return static_cast<int>(processor_.latency()); }
     double sampleRate() const override { return 48000.0; }
 
     void advance(int frames) {
-        for (int i = 0; i < frames; ++i) {
-            time_ += 1.0 / kRate;
-            const double beat = time_ * 2.0;
-            const double phase = beat - std::floor(beat);
-            const double transient = std::exp(-phase * 18.0);
-            const double bed = -18.0 + 3.0 * std::sin(time_ * 0.7);
+        for (int frame = 0; frame < frames; ++frame) {
+            float l[2400], r[2400];
+            for (int i = 0; i < 2400; ++i) {
+                time_ += 1 / 48000.;
+                const double phase = std::fmod(time_ * 2, 1.);
+                const double amp = .08 + .8 * std::exp(-phase * 18);
+                l[i] = static_cast<float>(amp * std::sin(time_ * 6283.185307));
+                r[i] = l[i];
+            }
+            const float* in[]{l, r};
+            float* out[]{l, r};
+            processor_.process(in, out, 2400);
+            const auto t = processor_.telemetry();
             Frame f;
-            f.inputPeakDb = static_cast<float>(bed + transient * 17.0);
-            f.outputPeakDb = static_cast<float>(f.inputPeakDb + values_[kInputGain] +
-                                                 values_[kOutputGain]);
+            f.inputPeakDb = float(t.inputDb);
+            f.outputPeakDb = float(t.wetDb);
+            f.leftMs = float(t.timeMs[0]);
+            f.rightMs = float(t.timeMs[1]);
+            f.tempo = float(t.tempo);
+            f.duckDb = float(t.duckDb);
             ring_.push(f);
         }
     }
 
   private:
+    Processor processor_;
     double values_[kNumParams]{};
     TelemetryRing ring_;
     double time_ = 0.0;
@@ -86,13 +130,21 @@ int main(int argc, char** argv) {
     const char* output = argc > 2 ? argv[2] : "delay-gui.ppm";
     const int scale = argc > 3 ? std::atoi(argv[3]) : 1;
     if (scale != 1 && scale != 2) return 4;
-    PreviewHost host;
+    const char* scenario = argc > 4 ? argv[4] : "default";
+    if (std::strcmp(scenario, "default") && std::strcmp(scenario, "pingpong")) return 4;
+    PreviewHost host(scenario);
+    uintptr_t parent = 0;
+#if defined(__linux__)
+    PreviewParent previewParent(static_cast<int>(kDesignW * scale),
+                                static_cast<int>(kDesignH * scale));
+    if (!previewParent.window) return 1;
+    parent = static_cast<uintptr_t>(previewParent.window);
+#endif
     Gui gui(host, true);
     Capture cap;
     gui.setFrameCallback(&capture, &cap);
-    gui.setSize(static_cast<uint32_t>(kDesignW * scale),
-                static_cast<uint32_t>(kDesignH * scale));
-    if (!gui.create() || !gui.setParent(0) || !gui.show()) return 1;
+    gui.setSize(static_cast<uint32_t>(kDesignW * scale), static_cast<uint32_t>(kDesignH * scale));
+    if (!gui.create() || !gui.setParent(parent) || !gui.show()) return 1;
     // Let the X11 view realize before feeding it telemetry. Otherwise the
     // 256-slot queue fills while the map/expose travels through the server,
     // and captures contain a timing-dependent slice of the history.
@@ -101,17 +153,12 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (!cap.frameSeen) return 2;
-    const int observations = static_cast<int>(kHistorySeconds * kRate) + 100 +
-                             std::max(0, frames) * 4;
+    const int observations =
+        static_cast<int>(kHistorySeconds * kRate) + 100 + std::max(0, frames) * 4;
     for (int i = 0; i < observations; i += 4) {
         host.advance(std::min(4, observations - i));
         gui.tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    if (argc > 4) {
-        if (std::strcmp(argv[4], "bypass-on") == 0) gui.previewClick(620, 382);
-        else if (std::strcmp(argv[4], "bypass-hover") != 0) return 4;
-        gui.previewMove(620, 382);
     }
     cap.want = true;
     gui.previewRepaint();

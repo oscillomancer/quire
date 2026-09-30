@@ -12,7 +12,7 @@
 
 #include "Theme.h"
 
-namespace delay::gui {
+namespace supple::delay::gui {
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -123,7 +123,7 @@ constexpr float kKnobA1 = 3.14159265f * 2.25f;
 
 inline void knob(NVGcontext* vg, float cx, float cy, float r, float t,
                  const char* nameRaw, const char* value, const char* unit, bool big,
-                 bool hot = false) {
+                 bool hot = false, bool bipolar = false) {
     const float a = kKnobA0 + (kKnobA1 - kKnobA0) * (t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t);
 
     // The shadow extends past the track; the darker seat separates the face
@@ -183,9 +183,10 @@ inline void knob(NVGcontext* vg, float cx, float cy, float r, float t,
     nvgStroke(vg);
 
     // value arc, with a little bloom so it reads as lit rather than painted
-    if (a > kKnobA0 + 0.001f) {
+    if (bipolar ? std::abs(t - .5f) > .0002f : a > kKnobA0 + 0.001f) {
         nvgBeginPath(vg);
-        nvgArc(vg, cx, cy, r, kKnobA0, a, NVG_CW);
+        nvgArc(vg, cx, cy, r, bipolar ? (kKnobA0 + kKnobA1) * .5f : kKnobA0, a,
+               bipolar && t < .5f ? NVG_CCW : NVG_CW);
         nvgLineCap(vg, NVG_ROUND);
         glowStroke(vg, rgb(col::accent), hot ? 3.2f : 2.8f, 2);
     }
@@ -309,4 +310,4 @@ inline void section(NVGcontext* vg, float x, float y, float w, const char* title
     hairline(vg, x + tw, y + 0.5f, x + w - rightPad, y + 0.5f, rgb(col::edge));
 }
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui

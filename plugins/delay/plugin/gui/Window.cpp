@@ -33,7 +33,7 @@ void delayClear(NVGcontext* ctx, float r, float g, float b);
 #include "pugl_metal.h"
 #endif
 
-namespace delay::gui {
+namespace supple::delay::gui {
 namespace {
 // Any small id; pugl only requires that we recognise our own.
 constexpr uintptr_t kFallbackTimerId = 1;
@@ -558,4 +558,4 @@ void Window::draw() {
     if (onFrameDrawn) onFrameDrawn(frameUser);
 }
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui

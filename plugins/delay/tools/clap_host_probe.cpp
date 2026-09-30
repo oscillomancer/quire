@@ -407,8 +407,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    double outputLevel = -120.0;
-    if (params) params->get_value(g.plugin, delay::kOutputMeter, &outputLevel);
+    // This effect sends its wet level through GUI telemetry only.
 
 #if defined(__APPLE__)
     // Grab what the editor actually put on screen inside the host's window.
@@ -424,12 +423,7 @@ int main(int argc, char** argv) {
     std::printf("\n--- results ---\n");
     std::printf("timers registered : %d\n", g.timersRegistered);
     std::printf("on_timer calls    : %d\n", g.onTimerCalls);
-    const char* meterStatus = destroyHot
-                                  ? "(telemetry disabled after editor teardown)"
-                                  : outputLevel > -3.0 && outputLevel < 0.0
-                                        ? "(audio path is live)"
-                                        : "(unexpected level)";
-    std::printf("output meter      : %.3f dBFS  %s\n", outputLevel, meterStatus);
+    std::printf("output meter      : GUI telemetry only\n");
     std::printf("flush requests    : %d\n", g.flushRequests);
     std::printf("out events        : %d\n", g.outEventsSeen);
     std::printf("main callbacks    : %d\n", g.callbacksRequested);

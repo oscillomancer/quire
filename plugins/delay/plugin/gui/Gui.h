@@ -16,7 +16,7 @@
 #include "Theme.h"
 #include "Window.h"
 
-namespace delay::gui {
+namespace supple::delay::gui {
 
 class Gui {
   public:
@@ -78,4 +78,4 @@ class Gui {
     Window window_;
 };
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui

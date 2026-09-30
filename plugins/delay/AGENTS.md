@@ -35,6 +35,10 @@ identity checklist below before implementation.
    and license header, and drifting copies are how the same bug gets fixed
    three times and missed the fourth.
 
+## Monorepo override
+
+Keep MIT under ADR-0011. Never modify the upstream template. Repository licensing and user instructions override the upstream checklist.
+
 ## Product identity checklist
 
 Perform this before substantive DSP work. Search the complete tree (excluding

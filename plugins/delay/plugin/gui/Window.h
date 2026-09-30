@@ -16,7 +16,7 @@
 struct PuglViewImpl;
 struct PuglWorldImpl;
 
-namespace delay::gui {
+namespace supple::delay::gui {
 
 class Editor;
 
@@ -142,4 +142,4 @@ class Window {
     Cursor cursor_ = Cursor::Arrow;
 };
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui

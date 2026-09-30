@@ -7,11 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace delay::gui {
+namespace supple::delay::gui {
 
 struct Frame {
     float inputPeakDb = -120.0f;
     float outputPeakDb = -120.0f;
+    float leftMs=375,rightMs=375,tempo=120,duckDb=0;
 };
 
 template <typename T, int CapacityPow2>
@@ -95,4 +96,4 @@ class EditorHost {
     virtual double sampleRate() const = 0;
 };
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui

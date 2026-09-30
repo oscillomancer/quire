@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 
 #include <nanovg.h>
@@ -11,16 +12,13 @@
 #include "Telemetry.h"
 #include "Theme.h"
 
-namespace delay::gui {
+namespace supple::delay::gui {
 
 enum class EditorKey { Tab, Left, Right, Up, Down, Home, End, Enter, Space };
 
 class Editor {
   public:
-    explicit Editor(EditorHost& host) : host_(host) {
-        for (int i = 0; i < kHistoryColumns; ++i)
-            historyIn_[i] = historyOut_[i] = -120.0f;
-    }
+    explicit Editor(EditorHost& host) : host_(host) {}
     bool attach(NVGcontext* vg);
     void onContextLost() { fontsReady_ = false; }
     void pump(double elapsedSeconds);
@@ -43,18 +41,10 @@ class Editor {
     void setFromNormal(uint32_t id, double normal);
     void focusParam(uint32_t id);
     void closeScrollGesture();
-    void drawMeter(NVGcontext* vg, float x, const char* name, float value,
-                   float held, NVGcolor colour);
     void drawFocus(NVGcontext* vg);
 
     EditorHost& host_;
-    float historyIn_[kHistoryColumns]{};
-    float historyOut_[kHistoryColumns]{};
-    int historyHead_ = 0;
-    float historyFill_ = 0.0f;
-    float latestIn_ = -120.0f, latestOut_ = -120.0f;
-    float heldIn_ = -120.0f, heldOut_ = -120.0f;
-    float holdAgeIn_ = 0.0f, holdAgeOut_ = 0.0f;
+    Frame latest_{};
     int dragId_ = -1, focus_ = -1, scrollId_ = -1, hover_ = -1;
     float dragStartY_ = 0.0f, scrollIdle_ = 0.0f;
     double dragStartNormal_ = 0.0;
@@ -63,4 +53,4 @@ class Editor {
     double shown_[kNumParams]{};
 };
 
-}  // namespace delay::gui
+}  // namespace supple::delay::gui
