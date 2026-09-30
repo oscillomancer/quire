@@ -23,7 +23,7 @@ The slope varies with frequency; this is not a broadband straight-line EQ.
 Positive tone drives high frequencies harder. Floats ramp over 20 ms; curve and
 auto-gain changes crossfade over 10 ms. Oversampling changes require reactivation;
 the current sound and latency remain until the host performs the restart.
-Latency: 1, 513, 577, 609 samples at 1x/2x/4x/8x, at every sample rate. Dry mix
+Latency: 1, 73, 81, 84 samples at 1x/2x/4x/8x, at every sample rate. Dry mix
 uses the same integer delay. 1x has intentional ADAA high-frequency attenuation.
 
 Three starting recipes (semantic merge patches):
@@ -42,16 +42,18 @@ Auto gain compensates the *RMS* gain of Gaussian noise at −18 dBFS RMS, using 
 prepare-time table per curve at 0.25 dB drive steps and linear interpolation.
 It is not a programme loudness rider and does not compensate bias or tone.
 On deterministic 20 Hz–20 kHz pink noise at −18 dBFS RMS, drives 0/6/12/18/24/30/36,
-4x, bias/tone zero, the largest absolute LUFS difference was tape 0.328, tube
-0.333, transistor 0.326, diode 0.350, fold 0.913, hard 0.357 LU. At −30 dBFS RMS,
-differences across drive ranged approximately −0.12 to +13.90 LU; at −6 dBFS RMS,
-−14.44 to 0 LU. Set output by measured LUFS for material away from the reference.
+4x, bias/tone zero, the largest absolute LUFS difference was tape 0.323, tube
+0.327, transistor 0.320, diode 0.343, fold 0.906, hard 0.351 LU. At −30 dBFS RMS,
+differences across drive ranged approximately −0.12 to +13.89 LU; at −6 dBFS RMS,
+−14.45 to 0 LU. Set output by measured LUFS for material away from the reference.
 
 Aliasing measurement: 5 kHz sine, **−18 dBFS RMS** (−14.9897 dBFS peak), drive
 24 dB, 48 kHz, bias/tone zero, auto gain off; coherent FFT after 1 s settling.
-Worst non-harmonic bins relative to the fundamental at 4x: tape −155.26,
-tube −104.89, transistor −134.73, diode −153.48 dBc. Fold: −154.67/−154.50 dBc
-at 4x/8x; hard: −81.42/−91.92 dBc. These figures describe that input level,
-not a universal alias bound. **Prefer 8x for hard/fold**, particularly when
+Worst non-harmonic bins in **20 Hz–20 kHz** relative to the fundamental at
+4x: tape −155.71,
+tube −104.89, transistor −134.76, diode −154.26 dBc. Fold: −159.59/−158.53 dBc
+at 4x/8x; hard: −81.42/−91.86 dBc. These figures describe that input level,
+not a universal alias bound. Aliases above 20 kHz up to Nyquist are accepted.
+**Prefer 8x for hard/fold**, particularly when
 hitting them harder or adding tone/bias. Output can exceed 0 dBFS; Kiln is not
 a mastering limiter. Compare renders at matched loudness and check peaks.

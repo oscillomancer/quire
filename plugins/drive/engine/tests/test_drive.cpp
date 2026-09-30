@@ -4,6 +4,7 @@
 #include <cmath>
 #include <complex>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <numbers>
@@ -16,12 +17,19 @@ using namespace supple;
 using namespace supple::drive;
 namespace {
 constexpr double pi = std::numbers::pi;
+#ifdef DRIVE_MEASURE_SWEEPS
+constexpr bool exhaustive = true;
+#else
+constexpr bool exhaustive = false;
+#endif
+const std::vector<double> drives =
+    exhaustive ? std::vector<double>{0, 6, 12, 18, 24, 30, 36} : std::vector<double>{0, 18, 36};
 void process(Processor& p, std::vector<double>& x, size_t start = 0, size_t count = 0) {
     double* io[] = {x.data() + start};
     p.process(io, static_cast<int>(count ? count : x.size() - start));
 }
 std::vector<double> sine(Processor& p, double hz, double peak, double fs, size_t count) {
-    std::vector<double> x(count + static_cast<size_t>(fs));
+    std::vector<double> x(count + static_cast<size_t>(exhaustive ? fs : fs / 8));
     for (size_t n = 0; n < x.size(); ++n) x[n] = peak * std::sin(2 * pi * hz * n / fs);
     process(p, x);
     return {x.end() - static_cast<ptrdiff_t>(count), x.end()};
@@ -52,7 +60,7 @@ double loudness(const std::vector<double>& x) {
     return m.integrated();
 }
 std::vector<double> pink() {
-    constexpr size_t n = 65536;
+    constexpr size_t n = exhaustive ? 65536 : 32768;
     std::mt19937 rng(481);
     std::normal_distribution<double> noise;
     std::vector<double> white(n);
@@ -111,7 +119,9 @@ TEST_CASE("drive antiderivatives and odd symmetry agree with analytic curves") {
         }
 }
 TEST_CASE("drive reported latency matches impulse and dry path across rates and factors") {
-    for (double fs : {22050., 44100., 48000., 88200., 96000., 192000., 384000.})
+    for (double fs : exhaustive
+                         ? std::vector<double>{22050, 44100, 48000, 88200, 96000, 192000, 384000}
+                         : std::vector<double>{22050, 48000, 384000})
         for (int q = 0; q < 4; ++q) {
             auto p = instance(0, 0, q, 0, fs);
             std::vector<double> x(1024);
@@ -129,9 +139,10 @@ TEST_CASE("drive reported latency matches impulse and dry path across rates and 
             double sum = 0;
             for (double y : x) sum += std::abs(y);
             CHECK(sum == .5);
+            if (!exhaustive && fs != 48000) continue;
             p.setParam(kMix, 50);
             p.reset();
-            auto y = sine(p, 100, 1e-4, fs, static_cast<size_t>(fs));
+            auto y = sine(p, 100, 1e-4, fs, static_cast<size_t>(exhaustive ? fs : fs / 25));
             double power = 0;
             for (double z : y) power += z * z;
             CHECK(std::abs(10 * std::log10(2 * power / y.size() / 1e-8)) < .012);
@@ -139,10 +150,14 @@ TEST_CASE("drive reported latency matches impulse and dry path across rates and 
 }
 TEST_CASE("drive THD rises with drive except fold; bias creates even harmonics and rejects DC") {
     // 1 kHz sine, -18 dBFS RMS (peak sqrt(2)*10^(-18/20)).
+    auto p = instance(0, 0);
     for (int c = 0; c < 6; ++c) {
+        p.setParam(kCurve, c);
+        p.setParam(kBias, 0);
         double previous = -1;
-        for (double d : {0., 6., 12., 18., 24., 30., 36.}) {
-            auto p = instance(c, d);
+        for (double d : drives) {
+            p.setParam(kDrive, d);
+            p.reset();
             const auto s = spectrum(sine(p, 1000, std::sqrt(2.) * std::pow(10., -.9), 48000, 4800));
             double odd = 0, even = 0;
             for (int h = 2; h <= 20; ++h) (h % 2 ? odd : even) += std::norm(s[h * 100]);
@@ -151,19 +166,24 @@ TEST_CASE("drive THD rises with drive except fold; bias creates even harmonics a
             previous = thd;
             CHECK(10 * std::log10(std::max(1e-30, even / std::norm(s[100]))) < -100);
         }
-        auto p = instance(c, 12, 2, 50);
+        p.setParam(kDrive, 12);
+        p.setParam(kBias, 50);
+        p.reset();
         const auto s = spectrum(sine(p, 1000, std::sqrt(2.) * std::pow(10., -.9), 48000, 4800));
         CHECK(20 * std::log10(std::abs(s[200] / s[100])) > -40);
         p.reset();
-        std::vector<double> dc(96000, .2);
+        const size_t settle = exhaustive ? 48000 : 18000;
+        constexpr size_t window = 4096;
+        std::vector<double> dc(settle + window, .2);
         process(p, dc);
         double mean = 0;
-        for (size_t n = 48000; n < dc.size(); ++n) mean += dc[n];
-        CHECK(std::abs(mean / 48000) < 1e-5);
+        for (size_t n = settle; n < dc.size(); ++n) mean += dc[n];
+        CHECK(std::abs(mean / window) < 1e-5);
     }
 }
 TEST_CASE("drive 5 kHz aliases at 24 dB: smooth 4x and hard-fold 8x") {
-    // -18 dBFS RMS, -14.9897 dBFS peak; coherent 0.1 s observation after 1 s settle.
+    // -18 dBFS RMS, -14.9897 dBFS peak; one coherent 4800-sample FFT.
+    // The measurement target settles 1 s; CI settles 125 ms.
     for (int c = 0; c < 6; ++c)
         for (int q : {2, 3}) {
             auto p = instance(c, 24, q);
@@ -171,7 +191,7 @@ TEST_CASE("drive 5 kHz aliases at 24 dB: smooth 4x and hard-fold 8x") {
             size_t worstBin = 0;
             double worst = 0;
             for (size_t k = 1; k < s.size(); ++k)
-                if (k != 500 && k != 1500)
+                if (k * 10 >= 20 && k * 10 <= 20000 && k != 500 && k != 1500)
                     if (std::abs(s[k]) > worst) {
                         worst = std::abs(s[k]);
                         worstBin = k;
@@ -185,24 +205,25 @@ TEST_CASE("drive 5 kHz aliases at 24 dB: smooth 4x and hard-fold 8x") {
 }
 TEST_CASE("drive reference RMS compensation: pink noise loudness and level dependence") {
     auto input = pink();
+    auto p = instance(0, 0);
+    p.setParam(kAutoGain, 1);
     for (int c = 0; c < 6; ++c) {
         double worstReference = 0, lowMin = 0, lowMax = 0, highMin = 0, highMax = 0;
         for (double level : {-30., -18., -6.})
-            for (double d : {0., 6., 12., 18., 24., 30., 36.}) {
-                auto p = instance(c, d);
-                p.setParam(kAutoGain, 1);
+            for (double d : drives) {
+                p.setParam(kCurve, c);
+                p.setParam(kDrive, d);
                 p.reset();
                 std::vector<double> x = input;
                 const double scale = std::pow(10., level / 20);
                 for (auto& y : x) y *= scale;
-                const double before = loudness(x);
                 process(p, x);
                 // Compare matching samples after fixed FIR startup, not a truncated tail.
                 std::vector<double> aligned(x.begin() + p.latency() + 1024, x.end());
                 std::vector<double> reference(input.begin() + 1024, input.end() - p.latency());
                 for (auto& y : reference) y *= scale;
                 const double delta = loudness(aligned) - loudness(reference);
-                CHECK(std::isfinite(before));
+                CHECK(std::isfinite(delta));
                 if (level == -18) {
                     worstReference = std::max(worstReference, std::abs(delta));
                     CHECK(std::abs(delta) <= 1);
@@ -264,13 +285,15 @@ TEST_CASE("drive automation block invariance and restored state") {
     process(q, b);
     CHECK(a == b);
 }
-TEST_CASE("drive five-second full-range automation is finite, bounded, mono and stereo") {
+TEST_CASE("drive full-range automation is finite, bounded, mono and stereo") {
     std::mt19937 rng(123);
     Processor p;
     p.prepare(48000, 64, 2);
     double l[64], r[64];
     double* io[] = {l, r};
-    for (int pos = 0; pos < 240000;) {
+    bool finite = true;
+    double peak = 0;
+    for (int pos = 0; pos < (exhaustive ? 240000 : 8192);) {
         const int n = 1 + static_cast<int>(rng() % 64);
         for (size_t i = 0; i < 8; ++i)
             p.setParam(i, kParams[i].min + (kParams[i].max - kParams[i].min) *
@@ -281,13 +304,13 @@ TEST_CASE("drive five-second full-range automation is finite, bounded, mono and 
         }
         p.process(io, n, true);
         for (int i = 0; i < n; ++i) {
-            CHECK(std::isfinite(l[i]));
-            CHECK(std::isfinite(r[i]));
-            CHECK(std::abs(l[i]) < 100);
-            CHECK(std::abs(r[i]) < 100);
+            finite = finite && std::isfinite(l[i]) && std::isfinite(r[i]);
+            peak = std::max({peak, std::abs(l[i]), std::abs(r[i])});
         }
         pos += n;
     }
+    CHECK(finite);
+    CHECK(peak < 100);
     const auto telemetry = p.takeTelemetry();
     CHECK(std::isfinite(telemetry.inputPeakDb));
     CHECK(std::isfinite(telemetry.outputPeakDb));
@@ -295,16 +318,18 @@ TEST_CASE("drive five-second full-range automation is finite, bounded, mono and 
     float f[512]{}, g[512]{};
     float* floats[] = {f, g};
     p.process(floats, 512);
-    for (float x : f) CHECK(std::isfinite(x));
+    CHECK(std::all_of(std::begin(f), std::end(f), [](float x) { return std::isfinite(x); }));
+    CHECK(std::all_of(std::begin(g), std::end(g), [](float x) { return std::isfinite(x); }));
 }
 TEST_CASE("drive tilt pair small-signal response follows ADAA at every sample rate") {
-    for (double fs : {44100., 48000., 88200., 96000., 192000.})
+    for (double fs : {44100., 48000., 88200., 96000., 192000.}) {
+        auto p = instance(0, 0, 2, 0, fs);
         for (double tone : {-6., 0., 6.})
             for (double hz : {100., 1000., 8000.}) {
-                auto p = instance(0, 0, 2, 0, fs);
                 p.setParam(kTone, tone);
                 p.reset();
-                const auto x = sine(p, hz, 1e-5, fs, static_cast<size_t>(fs / 10));
+                const auto x =
+                    sine(p, hz, 1e-5, fs, static_cast<size_t>(exhaustive ? fs / 10 : fs / 50));
                 double power = 0;
                 for (double y : x) power += y * y;
                 const double omega = 2 * pi * hz / (fs * 4),
@@ -315,6 +340,7 @@ TEST_CASE("drive tilt pair small-signal response follows ADAA at every sample ra
                 CHECK(std::abs(10 * std::log10(2 * power / x.size() / 1e-10) -
                                20 * std::log10(expected)) < .01);
             }
+    }
 }
 
 TEST_CASE("drive skill recipes validate and render deterministic golden statistics") {
@@ -343,10 +369,10 @@ TEST_CASE("drive skill recipes validate and render deterministic golden statisti
             peak = std::max(peak, std::abs(x[i]));
             power += x[i] * x[i];
         }
-        std::cout << "recipe " << recipe << " peak=" << peak << " rms=" << std::sqrt(power / 4096)
-                  << "\n";
-        constexpr double expectedPeak[] = {.284340, .255588, .171353};
-        constexpr double expectedRms[] = {.157131, .133200, .108421};
+        std::cout << std::setprecision(12) << "recipe " << recipe << " peak=" << peak
+                  << " rms=" << std::sqrt(power / 4096) << "\n";
+        constexpr double expectedPeak[] = {.284339972005, .255501539866, .171385724600};
+        constexpr double expectedRms[] = {.157801851329, .133788396228, .108735460056};
         REQUIRE(recipe < 3);
         CHECK(std::abs(peak - expectedPeak[recipe]) < 2e-6);
         CHECK(std::abs(std::sqrt(power / 4096) - expectedRms[recipe]) < 2e-6);

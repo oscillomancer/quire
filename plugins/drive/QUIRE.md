@@ -30,7 +30,7 @@ An active change updates the saved/requested setting, coalesces request_restart,
 and keeps the prepared factor and latency until reactivation. The engine
 preallocates fixed-capacity histories; prepare computes the reference Gaussian
 RMS compensation tables. No DSP topology is rebuilt on the audio thread.
-Latency is 1/513/577/609 base samples, including ADAA and its integer padding;
+Latency is 1/73/81/84 base samples, including ADAA and its integer padding;
 dry mix is delayed identically. Input/output readonly peak parameters publish
 at 50 ms intervals. No template binary state existed for this new identity;
 only canonical framed JSON is accepted transactionally.
@@ -53,3 +53,13 @@ its shared host_contract.h remains unchanged.
 Linux hosts must implement clap.timer-support, as in the unchanged template
 Window.cpp. The optional --no-host-timer probe cannot map/repaint its child
 without that host pump; this unsupported path is reported rather than altered.
+
+Review refinement: 145/33/25-tap stages protect the audible band without
+requiring rejection between 20 kHz and Nyquist in the Kiln alias test.
+The stage pass/stop bands and integer delays are in oversampler.h.
+CI tests retain property coverage with aggregated sample checks, shorter
+observations and representative grids. Dense measurements are opt-in:
+`cmake --build --preset dev -j6 --target drive-engine.measure drive-bench`,
+then run the binaries in `build/dev/plugins/drive/engine/`. The measurement
+runner is not registered with CTest; the separate CPU runner uses -O2 for
+processor.cpp and oversampler.cpp. No test timeout override remains.

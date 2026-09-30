@@ -366,7 +366,7 @@ int main(int argc, char** argv) {
     // A prepared factor and its delay stay fixed until the host restarts.
     check((latInfo.flags & CLAP_PARAM_IS_AUTOMATABLE) == 0,
           "oversampling is stepped and not automatable");
-    const uint32_t expected[] = {1, 513, 577, 609};
+    const uint32_t expected[] = {1, 73, 81, 84};
     for (int quality = 0; quality < 4; ++quality) {
         if (quality == static_cast<int>(latNow)) continue;
         const uint32_t before = latency->get(plug);

@@ -150,11 +150,14 @@ Implementation decisions (2026-09-29; approved refinements to effects.md §7):
 - First-order ADAA evaluates the antiderivative difference, falling back
   to f((x+x_previous)/2) for |difference|<1e-5. A half-sample averaging
   delay and factor−1 high-rate samples complete one integer base sample.
-  The shared linear-phase half-band Oversampler uses a 1025-tap first stage
-  and 257-tap subsequent stages, Kaiser beta 12, exact zero half-band taps.
-  The narrow first transition rejects a 25 kHz harmonic before 48 kHz
-  decimation. Its own round-trip delays are 0/512/576/608 samples;
-  Kiln reports **1/513/577/609 samples**, with the same dry delay.
+  The shared linear-phase half-band Oversampler uses 145/33/25 taps at
+  2x/4x/8x, Kaiser beta 11, exact zero half-band taps. The base-adjacent
+  stage has passband 0..0.45·fs and stopband from 0.55·fs; later stopbands
+  start at 1.55·fs and 3.55·fs (fs is the base rate). Each stage rejects
+  at least 100 dB; round-trip ripple is below 0.01 dB in 0..0.45·fs.
+  Its round-trip delays are 0/72/80/83 samples; Kiln reports
+  **1/73/81/84 samples**, with the same dry delay (1.688 ms at default
+  4x/48 kHz). Symmetry and integer delay are preserved.
 - Order: pre tilt → drive and bias/100 → ADAA curve → reference gain →
   integer delay padding → inverse tilt → 5 Hz DC blocker → downsample →
   latency-aligned mix → output. Tone is a first-order tilt at 1 kHz, with
@@ -185,30 +188,58 @@ zero, auto gain on, drive 0/6/12/18/24/30/36):
 
 | Curve | Largest absolute ΔLU at −18 dBFS RMS | ΔLU range at −30 dBFS RMS | ΔLU range at −6 dBFS RMS |
 |---|---:|---:|---:|
-| tape | 0.328 | 0..+9.967 | −11.113..0 |
-| tube | 0.334 | 0..+10.761 | −11.348..0 |
-| transistor | 0.326 | −0.110..+9.690 | −11.045..0 |
-| diode | 0.350 | 0..+10.671 | −11.387..0 |
-| fold | 0.913 | −0.033..+13.899 | −14.439..0 |
-| hard | 0.357 | −0.120..+11.259 | −11.527..0 |
+| tape | 0.323 | 0..+9.966 | −11.120..0 |
+| tube | 0.327 | 0..+10.758 | −11.355..0 |
+| transistor | 0.320 | −0.109..+9.689 | −11.052..0 |
+| diode | 0.343 | 0..+10.668 | −11.395..0 |
+| fold | 0.906 | −0.033..+13.892 | −14.454..0 |
+| hard | 0.351 | −0.120..+11.256 | −11.535..0 |
 
 Aliasing: 5 kHz sine, **−18 dBFS RMS** (−14.9897 dBFS peak), 24 dB drive,
 48 kHz, bias/tone zero, auto gain off; coherent 4800-sample FFT after 1 s
 settling. Only unaliased 5/15 kHz harmonics are excluded; largest other
-bin relative to the fundamental:
+bin **within 20 Hz–20 kHz** relative to the fundamental. Aliases between
+20 kHz and Nyquist are accepted; suppressing those inaudible components
+is not a filter-design requirement:
 
 | Curve | 4x (dBc) | 8x (dBc) |
 |---|---:|---:|
-| tape | −155.26 | −154.85 |
-| tube | −104.89 | −150.34 |
-| transistor | −134.73 | −157.92 |
-| diode | −153.48 | −153.22 |
-| fold | −154.67 | −154.50 |
-| hard | −81.42 | −91.92 |
+| tape | −155.71 | −154.79 |
+| tube | −104.89 | −149.90 |
+| transistor | −134.76 | −158.25 |
+| diode | −154.26 | −153.09 |
+| fold | −159.59 | −158.53 |
+| hard | −81.42 | −91.86 |
 
 Smooth curves require ≤−90 dBc at 4x on this test; hard/fold require
 ≤−60 dBc at 8x and publish both measurements. Recommend **8x for hard/fold**.
 These are level-specific measurements, not universal alias guarantees.
+
+CPU measurement (Intel Core Ultra 5 225F, Linux Clang `-O2`, stereo 48 kHz,
+256-frame blocks, 4x; median of three 10 s process-CPU intervals, excluding
+prepare and 8192-frame warmup; 1 kHz sine at −18 dBFS RMS in each channel,
+90° channel phase offset, auto gain on, bias/tone zero, mix 100%, output 0 dB):
+
+| Curve / drive | CPU, percent of one core | ns per stereo frame |
+|---|---:|---:|
+| tape / 6 dB (default) | 1.883 | 392.3 |
+| tape / 24 dB | 2.021 | 421.1 |
+| tube / 24 dB | 1.953 | 406.9 |
+| transistor / 24 dB | 2.031 | 423.0 |
+| diode / 24 dB | 1.914 | 398.8 |
+| fold / 24 dB | 2.246 | 467.9 |
+| hard / 24 dB | 1.401 | 291.9 |
+
+Reproduce with `cmake --build --preset dev -j6 --target drive-bench`, then
+`build/dev/plugins/drive/engine/drive-bench`; the runner compiles both DSP
+kernels with `-O2`. Numbers describe this workstation, not a CI threshold.
+CI checks the same properties with shorter coherent observations, drive
+0/18/36 and representative rates; per-sample checks accumulate a max/flag.
+The opt-in `drive-engine.measure` target retains the dense drive/rate sweeps,
+full reference-noise record, 1 s sine settling and 5 s automation stream;
+it is not registered with CTest. The alias/loudness tables above come from
+that runner.
+
 GUI transfer/harmonics depict the static setting (sine spectrum computed
 on the main thread), with programme peak telemetry for the moving dot.
 

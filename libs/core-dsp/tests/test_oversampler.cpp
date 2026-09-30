@@ -12,7 +12,7 @@ namespace {
 std::vector<double> impulse(int factor) {
     Oversampler os;
     os.prepare(factor, 4096);
-    std::vector<double> out(4096);
+    std::vector<double> out(512);
     std::array<double, 8> hi{};
     for (size_t n = 0; n < out.size(); ++n) {
         os.upsample(n == 0 ? 1 : 0, hi);
@@ -36,36 +36,43 @@ TEST_CASE("oversampler exact integer latency and passband") {
             maximum = std::max(maximum, std::abs(20 * std::log10(std::abs(sum))));
         }
         CHECK(maximum < .01);
+        bool symmetric = true;
         for (size_t n = 1; n <= os.latency(); ++n)
-            CHECK(h[os.latency() - n] == doctest::Approx(h[os.latency() + n]).epsilon(1e-12));
+            symmetric = (std::abs(h[os.latency() - n] - h[os.latency() + n]) < 1e-12) && symmetric;
+        CHECK(symmetric);
     }
 }
 TEST_CASE("oversampler rejects interpolation images and downsampling aliases") {
-    for (int f : {2, 4, 8}) {
-        Oversampler up;
-        up.prepare(f);
-        std::array<double, 8> hi{};
-        std::complex<double> base{}, image{}, alias{};
-        Oversampler down;
-        down.prepare(f);
-        constexpr int count = 10000;
-        for (int n = 0; n < count + 1024; ++n) {
-            const double x = std::sin(2 * std::numbers::pi * .125 * n);
-            up.upsample(x, hi);
-            if (n >= 1024)
-                for (int p = 0; p < f; ++p) {
-                    const int t = n * f + p;
-                    base += hi[p] * std::polar(1.0, -2 * std::numbers::pi * .125 / f * t);
-                    image += hi[p] * std::polar(1.0, -2 * std::numbers::pi * .875 / f * t);
+    for (int f : {2, 4, 8})
+        for (double hz : {.125, .45})
+            for (int imageRate = 1; imageRate <= f / 2; imageRate *= 2) {
+                Oversampler up, down;
+                up.prepare(f);
+                down.prepare(f);
+                std::array<double, 8> hi{};
+                std::complex<double> base{}, image{}, alias{};
+                constexpr int count = 2000;  // Coherent for both frequencies.
+                const double imageHz = imageRate - hz;
+                for (int n = 0; n < count + 256; ++n) {
+                    up.upsample(std::sin(2 * std::numbers::pi * hz * n), hi);
+                    if (n >= 256)
+                        for (int p = 0; p < f; ++p) {
+                            const int t = n * f + p;
+                            base += hi[p] * std::polar(1.0, -2 * std::numbers::pi * hz / f * t);
+                            image +=
+                                hi[p] * std::polar(1.0, -2 * std::numbers::pi * imageHz / f * t);
+                        }
+                    for (int p = 0; p < f; ++p)
+                        hi[p] = std::sin(2 * std::numbers::pi * imageHz / f * (n * f + p));
+                    const double y = down.downsample(hi);
+                    if (n >= 256) alias += y * std::polar(1.0, -2 * std::numbers::pi * hz * n);
                 }
-            for (int p = 0; p < f; ++p)
-                hi[p] = std::sin(2 * std::numbers::pi * .875 / f * (n * f + p));
-            const double y = down.downsample(hi);
-            if (n >= 1024) alias += y * std::polar(1.0, -2 * std::numbers::pi * .125 * n);
-        }
-        CHECK(20 * std::log10(std::abs(image / base)) < -100);
-        CHECK(20 * std::log10(std::abs(alias) * 2 / count) < -100);
-    }
+                CAPTURE(f);
+                CAPTURE(hz);
+                CAPTURE(imageRate);
+                CHECK(20 * std::log10(std::abs(image / base)) < -100);
+                CHECK(20 * std::log10(std::abs(alias) * 2 / count) < -100);
+            }
 }
 TEST_CASE("oversampler state is independent of block boundaries and reset") {
     for (int f : {1, 2, 4, 8}) {
@@ -74,11 +81,13 @@ TEST_CASE("oversampler state is independent of block boundaries and reset") {
             Oversampler os;
             os.prepare(f, 4096);
             std::array<double, 8> hi{};
-            for (int start = 0; start < 4096; start += block)
-                for (int n = start; n < std::min(4096, start + block); ++n) {
+            bool same = true;
+            for (int start = 0; start < 512; start += block)
+                for (int n = start; n < std::min(512, start + block); ++n) {
                     os.upsample(n == 0 ? 1 : 0, hi);
-                    CHECK(os.downsample(hi) == reference[n]);
+                    same = (os.downsample(hi) == reference[n]) && same;
                 }
+            CHECK(same);
             os.reset();
             os.upsample(1, hi);
             CHECK(os.downsample(hi) == reference[0]);

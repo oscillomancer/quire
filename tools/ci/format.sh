@@ -21,6 +21,7 @@ files+=(
   plugins/drive/engine/src/params.cpp
   plugins/drive/engine/src/processor.cpp
   plugins/drive/engine/tests/test_drive.cpp
+  plugins/drive/engine/bench/drive_bench.cpp
   plugins/drive/plugin/src/DriveParams.h
   plugins/drive/plugin/src/drive_clap.cpp
   plugins/drive/plugin/gui/Editor.cpp

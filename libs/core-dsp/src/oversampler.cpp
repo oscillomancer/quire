@@ -10,7 +10,7 @@ void Oversampler::prepare(int factor, uint32_t) {
     count_ = factor_ == 8 ? 3 : factor_ == 4 ? 2 : factor_ == 2 ? 1 : 0;
     latency_ = 0;
     for (int s = 0; s < count_; ++s) {
-        const int center = s == 0 ? 512 : 128;
+        const int center = s == 0 ? 72 : s == 1 ? 16 : 12;
         stages_[s].center = static_cast<size_t>(center);
         latency_ += static_cast<uint32_t>(center) >> s;
         auto& h = stages_[s].h;
@@ -20,7 +20,7 @@ void Oversampler::prepare(int factor, uint32_t) {
         for (int i = 1; i < 2 * center + 1; i += 2) {
             const double x = i - center;
             h[i] = std::sin(std::numbers::pi * x * .5) / (std::numbers::pi * x) *
-                   kaiser(i, 2 * center + 1, 12);
+                   kaiser(i, 2 * center + 1, 11);
             sum += h[i];
         }
         for (int i = 1; i < 2 * center + 1; i += 2) h[i] *= .5 / sum;
@@ -36,19 +36,19 @@ void Oversampler::reset() SUPPLE_RT {
 }
 void Oversampler::Stage::interpolate(double x, double* out) SUPPLE_RT {
     up[upHead] = x;
-    out[0] = up[(upHead + 1024 - center / 2) & 1023];
+    out[0] = up[(upHead + 128 - center / 2) & 127];
     double y = 0;
-    for (size_t i = 0; i < center; ++i) y += 2 * h[2 * i + 1] * up[(upHead + 1024 - i) & 1023];
+    for (size_t i = 0; i < center; ++i) y += 2 * h[2 * i + 1] * up[(upHead + 128 - i) & 127];
     out[1] = y;
-    upHead = (upHead + 1) & 1023;
+    upHead = (upHead + 1) & 127;
 }
 double Oversampler::Stage::decimate(const double* in) SUPPLE_RT {
     down[downHead] = in[0];
-    double y = .5 * down[(downHead + 2048 - center) & 2047];
-    for (size_t i = 1; i < 2 * center + 1; i += 2) y += h[i] * down[(downHead + 2048 - i) & 2047];
-    downHead = (downHead + 1) & 2047;
+    double y = .5 * down[(downHead + 256 - center) & 255];
+    for (size_t i = 1; i < 2 * center + 1; i += 2) y += h[i] * down[(downHead + 256 - i) & 255];
+    downHead = (downHead + 1) & 255;
     down[downHead] = in[1];
-    downHead = (downHead + 1) & 2047;
+    downHead = (downHead + 1) & 255;
     return y;
 }
 void Oversampler::upsample(double input, std::span<double> output) SUPPLE_RT {

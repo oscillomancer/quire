@@ -6,13 +6,14 @@
 #include "supple/base/rt.h"
 
 namespace supple::dsp {
-// One channel, factors 1/2/4/8. The first stage uses 1025 taps; subsequent stages use
-// 257 taps. All are symmetric half-band sincs, Kaiser beta 12, cutoff pi/2. Even taps except the
-// centre are exactly zero. The 0.45..0.55 transition (relative to the lower rate) gives >100 dB
-// rejection and <0.01 dB ripple through 0.45 of the base rate. The first stage has a narrower
-// transition to reject a 25 kHz harmonic before decimation to 48 kHz. Up/down delay is
-// 0/512/576/608 base samples. No fractional phase or host-block-dependent state. Storage is fixed
-// for the largest factor, so prepare needs no per-block scratch.
+// One channel, factors 1/2/4/8, symmetric half-band sincs (Kaiser beta 11).
+// Stages use 145/33/25 taps at 2/4/8 times the base sample rate fs. Even taps
+// except the centre are zero. The first stage protects 0..0.45*fs with a
+// stopband from 0.55*fs; later stopbands start at 1.55*fs and 3.55*fs.
+// Rejection is >=100 dB and round-trip ripple <0.01 dB in the protected band.
+// Integer up/down delays are 0/72/80/83 base samples: stage centres 72/16/12
+// divided by 1/2/4. Frequencies above 0.45*fs may lie in a transition band.
+// Fixed-capacity storage; no fractional phase or host-block-dependent state.
 class Oversampler {
   public:
     void prepare(int factor, uint32_t maxFrames = 0);
@@ -24,10 +25,10 @@ class Oversampler {
 
   private:
     struct Stage {
-        std::array<double, 1025> h{};
-        std::array<double, 2048> down{};
-        std::array<double, 1024> up{};
-        size_t center = 512;
+        std::array<double, 145> h{};
+        std::array<double, 256> down{};
+        std::array<double, 128> up{};
+        size_t center = 72;
         size_t upHead = 0, downHead = 0;
         void interpolate(double x, double* out) SUPPLE_RT;
         double decimate(const double* in) SUPPLE_RT;
