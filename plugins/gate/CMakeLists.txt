@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
+if (NOT SUPPLE_ROOT)
+    get_filename_component(SUPPLE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+endif()
 
 # This must be set before project(): project() creates the cache entry, and a
 # later non-FORCE assignment leaves it empty. macOS 11 is the first release that
@@ -25,7 +28,7 @@ endif()
 
 
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (UNIX AND NOT APPLE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -36,6 +39,7 @@ option(GATE_BUILD_TOOLS "Build tests and integration probes" ON)
 option(GATE_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(GATE_STRICT_WARNINGS "Enable warnings on gate-owned code" ON)
 option(GATE_SANITIZERS "Enable AddressSanitizer and UBSan on gate-owned code" OFF)
+option(GATE_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
 
 function(gate_target_defaults target)
     if (GATE_STRICT_WARNINGS)
@@ -56,20 +60,56 @@ function(gate_target_defaults target)
             -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
     endif()
+    if (SUPPLE_SANITIZE STREQUAL "thread")
+        target_compile_options(${target} PRIVATE -fsanitize=thread)
+        target_link_options(${target} PRIVATE -fsanitize=thread)
+    endif()
+    if (SUPPLE_SANITIZE STREQUAL "address")
+        target_compile_options(${target} PRIVATE -fsanitize=address)
+        target_link_options(${target} PRIVATE -fsanitize=address)
+    elseif (SUPPLE_SANITIZE STREQUAL "undefined")
+        target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-sanitize-recover=undefined)
+        target_link_options(${target} PRIVATE -fsanitize=undefined)
+    endif()
 endfunction()
 
+include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
+supple_plugin_add_monorepo_libraries()
+
+set(SUPPLE_BUILD_TESTS OFF)
+add_subdirectory(engine ${CMAKE_BINARY_DIR}/supple/gate-engine)
+set(SUPPLE_BUILD_TESTS ON)
 add_library(gate-dsp INTERFACE)
-target_include_directories(gate-dsp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/dsp/include)
+target_link_libraries(gate-dsp INTERFACE supple::gate-engine)
 
 if (GATE_BUILD_TOOLS)
     enable_testing()
-    add_executable(gate-cli tools/gate_cli.cpp)
-    target_link_libraries(gate-cli PRIVATE gate-dsp)
-    gate_target_defaults(gate-cli)
     add_executable(gate-test test/test_core.cpp)
     target_link_libraries(gate-test PRIVATE gate-dsp)
     gate_target_defaults(gate-test)
+    if (GATE_RTSAN)
+        target_compile_options(gate-test PRIVATE -fsanitize=realtime)
+        target_link_options(gate-test PRIVATE -fsanitize=realtime)
+    endif()
     add_test(NAME core COMMAND gate-test)
+    if (UNIX AND NOT APPLE)
+        find_package(Threads REQUIRED)
+        add_executable(gate-semantic-rt test/semantic_rt.cpp)
+        target_link_libraries(gate-semantic-rt PRIVATE
+            supple::plugin-support gate-dsp Threads::Threads ${CMAKE_DL_LIBS})
+        gate_target_defaults(gate-semantic-rt)
+        if (GATE_RTSAN)
+            target_compile_options(gate-semantic-rt PRIVATE -fsanitize=realtime)
+            target_link_options(gate-semantic-rt PRIVATE -fsanitize=realtime)
+        endif()
+        add_test(NAME semantic-rt COMMAND gate-semantic-rt
+            ${CMAKE_BINARY_DIR}/../clap/Gate.clap)
+    endif()
+
+    if (SUPPLE_SEMANTIC_CONFORMANCE)
+        add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
+            ${CMAKE_BINARY_DIR}/../clap/Gate.clap com.suppleaudio.gate)
+    endif()
 endif()
 
 function(gate_add_gui_preview)
@@ -87,7 +127,12 @@ if (GATE_BUILD_PLUGIN)
     include(FetchContent)
     # Patch validation needs Git even when dependency sources are overridden.
     find_package(Git REQUIRED)
-    set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES ON CACHE BOOL "" FORCE)
+    set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL "" FORCE)
+    set(CLAP_SDK_ROOT "${SUPPLE_ROOT}/third_party/clap" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_CLAP-WRAPPER "${SUPPLE_ROOT}/third_party/clap-wrapper" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_PUGL "${SUPPLE_ROOT}/third_party/pugl" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_NANOVG "${SUPPLE_ROOT}/third_party/nanovg" CACHE PATH "" FORCE)
     set(CLAP_WRAPPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(clap-wrapper
         GIT_REPOSITORY https://github.com/free-audio/clap-wrapper.git
@@ -95,55 +140,15 @@ if (GATE_BUILD_PLUGIN)
         GIT_SHALLOW OFF)
     FetchContent_MakeAvailable(clap-wrapper)
 
-    # clap-wrapper 0.16.0 keeps only the final VST3 automation point in each
-    # parameter queue. Apply the small upstreamable fix after population; the
-    # reverse check makes repeated configure runs idempotent.
-    set(gate_wrapper_vst3_patch ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-all-points.patch)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply --check ${gate_wrapper_vst3_patch}
-        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-        RESULT_VARIABLE wrapper_patch_applicable
-        OUTPUT_QUIET ERROR_QUIET)
-    if (wrapper_patch_applicable EQUAL 0)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply ${gate_wrapper_vst3_patch}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            COMMAND_ERROR_IS_FATAL ANY)
-    else()
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${gate_wrapper_vst3_patch}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            RESULT_VARIABLE wrapper_patch_present
-            OUTPUT_QUIET ERROR_QUIET)
-        if (NOT wrapper_patch_present EQUAL 0)
-            message(FATAL_ERROR "clap-wrapper VST3 automation patch no longer applies")
-        endif()
-    endif()
-
-    # register_timer() clamps every request to 30ms upstream, capping a VST3
-    # editor at 33fps however fast it asked to run. The AUv2 path returns false
-    # instead and falls through to the plugin's own timer at the full 60Hz,
-    # which is why an AU looks smoother than the VST3 of the same build.
-    set(gate_wrapper_vst3_patch_timer ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-timer-floor.patch)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} apply --check ${gate_wrapper_vst3_patch_timer}
-        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-        RESULT_VARIABLE wrapper_timer_applicable
-        OUTPUT_QUIET ERROR_QUIET)
-    if (wrapper_timer_applicable EQUAL 0)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply ${gate_wrapper_vst3_patch_timer}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            COMMAND_ERROR_IS_FATAL ANY)
-    else()
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${gate_wrapper_vst3_patch_timer}
-            WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR}
-            RESULT_VARIABLE wrapper_timer_present
-            OUTPUT_QUIET ERROR_QUIET)
-        if (NOT wrapper_timer_present EQUAL 0)
-            message(FATAL_ERROR "clap-wrapper VST3 timer floor patch no longer applies")
-        endif()
+    # The vendored wrapper carries both template VST3 patches. Never mutate it.
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-all-points.patch
+        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE points_present)
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/clap-wrapper-vst3-timer-floor.patch
+        WORKING_DIRECTORY ${clap-wrapper_SOURCE_DIR} RESULT_VARIABLE timer_present)
+    if (NOT points_present EQUAL 0 OR NOT timer_present EQUAL 0)
+        message(FATAL_ERROR "Vendored clap-wrapper lacks template VST3 patches")
     endif()
 
     if (GATE_BUILD_TOOLS)
@@ -158,7 +163,11 @@ if (GATE_BUILD_PLUGIN)
     endif()
 
     add_library(gate-impl STATIC plugin/src/gate_clap.cpp)
-    target_link_libraries(gate-impl PUBLIC clap clap-wrapper-extensions gate-dsp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(gate-impl PUBLIC clap clap-wrapper-extensions gate-dsp supple::plugin-support Threads::Threads)
+    if (GATE_RTSAN)
+        target_compile_options(gate-impl PRIVATE -fsanitize=realtime)
+    endif()
     gate_target_defaults(gate-impl)
 
     if (GATE_BUILD_GUI)
@@ -168,7 +177,7 @@ if (GATE_BUILD_PLUGIN)
         if (GATE_BUILD_TOOLS)
             gate_add_gui_preview()
             add_executable(gate-editor-test test/editor_input.cpp)
-            target_link_libraries(gate-editor-test PRIVATE
+            target_link_libraries(gate-editor-test PRIVATE supple::plugin-support
                 $<IF:$<TARGET_EXISTS:gate-gui-gl>,gate-gui-gl,gate-gui>)
             target_include_directories(gate-editor-test PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
@@ -181,7 +190,7 @@ if (GATE_BUILD_PLUGIN)
                 target_link_libraries(gate-linux-host-probe PRIVATE clap X11::X11 ${CMAKE_DL_LIBS} Threads::Threads)
             endif()
             add_executable(gate-clap-probe tools/clap_host_probe.cpp)
-            target_link_libraries(gate-clap-probe PRIVATE clap)
+            target_link_libraries(gate-clap-probe PRIVATE clap gate-dsp)
             target_include_directories(gate-clap-probe PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/plugin/src)
             if (APPLE)
@@ -200,19 +209,27 @@ if (GATE_BUILD_PLUGIN)
     if (GATE_BUILD_TOOLS)
         add_executable(gate-host-smoke test/host_smoke.cpp)
         target_link_libraries(gate-host-smoke PRIVATE clap)
+        if (GATE_RTSAN)
+            target_link_options(gate-host-smoke PRIVATE -fsanitize=realtime)
+        endif()
         target_compile_definitions(gate-host-smoke PRIVATE
             HOST_SMOKE_PLUGIN_ID="com.suppleaudio.gate"
-            HOST_SMOKE_PLAIN_PARAM="Input Gain")
+            HOST_SMOKE_PLAIN_PARAM="Output"
+            HOST_SMOKE_LATENCY_PARAM="Lookahead")
         gate_target_defaults(gate-host-smoke)
         add_test(NAME host-smoke
                  COMMAND gate-host-smoke
-                         ${CMAKE_BINARY_DIR}/gate_assets/Gate.clap)
+                         ${CMAKE_BINARY_DIR}/../clap/Gate.clap)
         add_test(NAME host-smoke-mono
                  COMMAND gate-host-smoke
-                         ${CMAKE_BINARY_DIR}/gate_assets/Gate.clap --mono)
+                         ${CMAKE_BINARY_DIR}/../clap/Gate.clap --mono)
     endif()
 
-    set(GATE_FORMATS CLAP VST3)
+    option(GATE_VST3 "Build VST3 format" OFF)
+    set(GATE_FORMATS CLAP)
+    if (GATE_VST3)
+        list(APPEND GATE_FORMATS VST3)
+    endif()
     if (APPLE)
         list(APPEND GATE_FORMATS AUV2)
     endif()
@@ -228,11 +245,19 @@ if (GATE_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${GATE_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/gate_assets
+        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
-        AUV2_SUBTYPE_CODE "StFx"
+        AUV2_SUBTYPE_CODE "QGat"
         AUV2_INSTRUMENT_TYPE "aufx")
+    if (TARGET gate-plugin_clap)
+        gate_target_defaults(gate-plugin_clap)
+    endif()
+    if (GATE_RTSAN AND TARGET gate-plugin_clap)
+        target_link_options(gate-plugin_clap PRIVATE -fsanitize=realtime)
+    elseif (SUPPLE_SANITIZE STREQUAL "thread" AND TARGET gate-plugin_clap)
+        target_link_options(gate-plugin_clap PRIVATE -fsanitize=thread)
+    endif()
 
     # The license and attribution have to travel with the binary. Files sitting
     # in the repository do nothing for someone who is handed only a bundle, and
@@ -264,11 +289,11 @@ if (GATE_BUILD_PLUGIN)
                 add_dependencies(gate-notices ${target})
                 add_custom_command(TARGET gate-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/gate_assets/${bundle}/Contents/Resources"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_notices}"
-                        "${CMAKE_BINARY_DIR}/gate_assets/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_license}"
-                        "${CMAKE_BINARY_DIR}/gate_assets/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -278,9 +303,9 @@ if (GATE_BUILD_PLUGIN)
         # it is the release archive that has to carry it.
         add_custom_command(TARGET gate-notices POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_notices}"
-                "${CMAKE_BINARY_DIR}/gate_assets/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_license}"
-                "${CMAKE_BINARY_DIR}/gate_assets/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -293,24 +318,24 @@ if (GATE_BUILD_PLUGIN)
         add_custom_target(gate-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/gate-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/gate_assets/Gate.component/Contents/Info.plist"
+                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/gate_assets/Gate.component/Contents/Resources"
+                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_notices}"
-                "${CMAKE_BINARY_DIR}/gate_assets/Gate.component/Contents/Resources/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_license}"
-                "${CMAKE_BINARY_DIR}/gate_assets/Gate.component/Contents/Resources/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/gate_assets/Gate.component"
+                "${CMAKE_BINARY_DIR}/../clap/Gate.component"
             DEPENDS gate-plugin_auv2
             COMMENT "Preparing and ad-hoc signing Gate.component"
             VERBATIM)
         if (GATE_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/gate_assets/Gate.component
+                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/Gate.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -350,7 +375,7 @@ if (GATE_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/gate_assets/${bundle}"
+                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()

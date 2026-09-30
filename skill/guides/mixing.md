@@ -97,3 +97,5 @@ points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
 
 Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
+
+Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.

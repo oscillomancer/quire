@@ -14,10 +14,11 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "gate/processor.h"
+#include "supple/clap/plugin_support.h"
 
 #include <clap/clap.h>
 
-#include "../../dsp/include/gate/Processor.h"
 #include "GateParams.h"
 #include "gate_entry.h"
 
@@ -34,19 +35,19 @@ using namespace gate;
 
 // ---------------------------------------------------------------------------
 
-const char* kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
-                           CLAP_PLUGIN_FEATURE_STEREO, nullptr};
+const char* kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_GATE,
+                           CLAP_PLUGIN_FEATURE_EXPANDER, CLAP_PLUGIN_FEATURE_STEREO, nullptr};
 
 const clap_plugin_descriptor_t kDesc = {
     CLAP_VERSION_INIT,
     "com.suppleaudio.gate",
-    "Gate",
+    kName,
     "Supple Audio",
     "",
     "",
     "",
     "0.1.0",
-    "A transparent starting point for a new audio effect.",
+    "Stereo gate and downward expander with filtered sidechain and aligned lookahead.",
     kFeatures};
 
 // ---------------------------------------------------------------------------
@@ -60,14 +61,30 @@ struct Plug
     const clap_host_t* host = nullptr;
     const clap_host_params_t* hostParams = nullptr;
 
-    gate::Processor processor;
+    supple::gate::Processor processor;
+    supple::clapx::ParamStore values{table()};
+    supple::clapx::FlatSemantic semantic{
+        patchType(),
+        values,
+        kPluginId,
+        "Gate and downward expander; physical parameters, latency-aligned mix and filtered key.",
+        std::string(kName) + ": ",
+        kStateMagic};
+    Values audioValues = defaults();
+    uint64_t seen = 0;
+    uint64_t meterSamples = 0;
+    std::atomic<bool> restartPending{false};
+    std::atomic<int> restartChoice{-1};
+    std::atomic<int> activeChoice{0};
+    uint64_t elapsedSamples = 0;
+
     // Written by the audio thread (automation) and by the editor; read by
     // both. Plain doubles here would be a genuine race now that a GUI exists.
-    std::atomic<double> values[kNumParams];
+
     std::atomic<double> srAtomic{48000.0};
     int channels = 2;
     int preparedChannels = 0;
-    bool active = false;
+    std::atomic<bool> active{false};
     std::atomic<int> latencyAtomic{0};
     // Scratch for process(), sized once from the selected mono/stereo port
     // configuration during activation and never resized on the audio thread.
@@ -79,25 +96,65 @@ struct Plug
         ptrs64.resize((size_t)nch);
     }
 
-    double pv(uint32_t id) const { return values[id].load(std::memory_order_relaxed); }
-    void sv(uint32_t id, double v) { values[id].store(v, std::memory_order_relaxed); }
-
-    void loadDefaults() {
-        for (int i = 0; i < kParamCount; ++i) sv(kParams[i].id, kParams[i].def);
+    double pv(uint32_t id) const { return values.get(id); }
+    void sv(uint32_t id, double v) { values.set(id, v); }
+    void loadDefaults() { values.resetToDefaults(); }
+    void pushParams() SUPPLE_RT {
+        const auto generation = values.generation();
+        if (generation == seen || !values.readAll(audioValues)) return;
+        seen = generation;
+        auto consumed = audioValues;
+        if (active.load(std::memory_order_relaxed))
+            consumed[kLookahead] = activeChoice.load(std::memory_order_relaxed);
+        processor.setParams(consumed);
+        if (active.load(std::memory_order_relaxed) &&
+            static_cast<int>(audioValues[kLookahead]) !=
+                activeChoice.load(std::memory_order_relaxed) &&
+            !restartPending.exchange(true))
+            if (host && host->request_callback) host->request_callback(host);
     }
-
-    gate::Processor::Params toParams() const {
-        gate::Processor::Params p;
-        p.inputGainDb = pv(kInputGain);
-        p.outputGainDb = pv(kOutputGain);
-        p.mix = pv(kMix);
-        p.bypass      = pv(kBypass) > 0.5;
-        return p;
+    void publishMeters(const clap_output_events_t* out, uint32_t frame) SUPPLE_RT {
+        const auto t = processor.telemetry();
+        sv(kGr, t.gr);
+        sv(kOpen, t.open);
+        for (uint32_t id : {kGr, kOpen}) {
+            clap_event_param_value_t e{};
+            e.header = {sizeof(e), frame, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
+            e.param_id = id;
+            e.note_id = e.port_index = e.channel = e.key = -1;
+            e.value = supple::params::toClap(table()[id], pv(id));
+            if (out) out->try_push(out, &e.header);
+        }
+#if GATE_WITH_GUI
+        if (telemetryOn.load(std::memory_order_relaxed))
+            telemetryRing.push(
+                {t.level, t.gr, t.open,
+                 static_cast<double>(elapsedSamples) / srAtomic.load(std::memory_order_relaxed)});
+#endif
     }
-
-    void pushParams() {
-        processor.setParams(toParams());
-        latencyAtomic.store(processor.latencySamples(), std::memory_order_relaxed);
+    template <class T>
+    void runChunks(std::vector<T*>& v, int n, const clap_output_events_t* out, uint32_t base,
+                   const T* const* key) SUPPLE_RT {
+        const auto interval =
+            static_cast<uint64_t>(std::ceil(srAtomic.load(std::memory_order_relaxed) * .05));
+        int off = 0;
+        while (off < n) {
+            const int count =
+                static_cast<int>(std::min<uint64_t>(n - off, interval - meterSamples));
+            const T* input[]{v[0], channels == 1 ? v[0] : v[1]};
+            const T* k[]{key && key[0] ? key[0] + off : nullptr,
+                         key && key[1] ? key[1] + off : nullptr};
+            processor.process(input, v.data(), static_cast<uint32_t>(count), key ? k : nullptr);
+            for (auto& ptr : v) ptr += count;
+            off += count;
+            meterSamples += count;
+            elapsedSamples += count;
+            if (meterSamples == interval) {
+                publishMeters(out, base + static_cast<uint32_t>(off - 1));
+                meterSamples = 0;
+            }
+        }
+        for (auto& ptr : v) ptr -= n;
     }
 
 #if GATE_WITH_GUI
@@ -120,49 +177,6 @@ struct Plug
     int deferredGesturePhase = 0;
     std::atomic<bool> editRetryOnMain{false};
 
-    void captureTelemetry() {
-        const gate::Processor::Telemetry t = processor.takeTelemetry();
-        gate::gui::Frame f{};
-        f.inputPeakDb = static_cast<float>(t.inputPeakDb);
-        f.outputPeakDb = static_cast<float>(t.outputPeakDb);
-        sv(kInputMeter, t.inputPeakDb);
-        sv(kOutputMeter, t.outputPeakDb);
-        telemetryRing.push(f);
-    }
-
-    // Telemetry changes observation cadence only. Product DSP must remain
-    // invariant across both host and telemetry block boundaries.
-    template <typename T>
-    void runChunks(std::vector<T*>& v, int n) {
-        // With no editor open there is nobody to read any of this, so skip the
-        // whole apparatus: no chunking and no frames pushed into a ring that
-        // will only wrap. This is the common case -- a plugin spends most of
-        // its life in a session with its window shut -- and it costs one
-        // relaxed load per block to find out.
-        if (!telemetryOn.load(std::memory_order_relaxed)) {
-            processor.process(v.data(), n, false);
-            return;
-        }
-        const int nch = (int)v.size();
-        int off = 0;
-        while (off < n) {
-            const int m = std::min(telemetryChunk, n - off);
-            processor.process(v.data(), m, true);
-            for (int c = 0; c < nch; ++c) v[(size_t)c] += m;
-            off += m;
-            captureTelemetry();
-        }
-        for (int c = 0; c < nch; ++c) v[(size_t)c] -= n;
-    }
-#else
-    template <typename T>
-    void runChunks(std::vector<T*>& v, int n) {
-        processor.process(v.data(), n, false);
-    }
-#endif
-
-#if GATE_WITH_GUI
-
     // --- EditorHost ---------------------------------------------------------
 
     double paramValue(uint32_t id) const override { return pv(id); }
@@ -177,13 +191,12 @@ struct Plug
 
     void setParam(uint32_t id, double v) override {
         const ParamDef* d = findParam(id);
-        if (!d || d->readonly) return;
+        if (!d || (d->flags & supple::params::kReadonly)) return;
         const double c = std::max(d->min, std::min(d->max, v));
         // Apply locally at once so the knob tracks the mouse even with the
         // transport stopped; the ring is what tells the host.
         sv(id, c);
-        if (gestureQueued && id == gestureId)
-            queueEdit({id, c, gate::gui::ParamEdit::kValue});
+        if (gestureQueued && id == gestureId) queueEdit({id, c, gate::gui::ParamEdit::kValue});
     }
 
     void endEdit(uint32_t id) override {
@@ -220,10 +233,20 @@ struct Plug
 // Extension: audio ports
 // ---------------------------------------------------------------------------
 
-uint32_t CLAP_ABI apCount(const clap_plugin_t*, bool) { return 1; }
+uint32_t CLAP_ABI apCount(const clap_plugin_t*, bool input) { return input ? 2 : 1; }
 
 bool CLAP_ABI apGet(const clap_plugin_t* p, uint32_t index, bool isInput,
                     clap_audio_port_info_t* info) {
+    if (index == 1 && isInput) {
+        std::memset(info, 0, sizeof(*info));
+        info->id = 1;
+        std::snprintf(info->name, sizeof(info->name), "Sidechain");
+        info->flags = CLAP_AUDIO_PORT_SUPPORTS_64BITS | CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE;
+        info->channel_count = 2;
+        info->port_type = CLAP_PORT_STEREO;
+        info->in_place_pair = CLAP_INVALID_ID;
+        return true;
+    }
     if (index != 0) return false;
     auto* self = (Plug*)p->plugin_data;
     info->id = 0;
@@ -254,7 +277,7 @@ bool CLAP_ABI apcGet(const clap_plugin_t*, uint32_t index, clap_audio_ports_conf
     const bool stereo = index == 1;
     config->id = stereo ? kStereoConfig : kMonoConfig;
     std::snprintf(config->name, sizeof(config->name), "%s", stereo ? "Stereo" : "Mono");
-    config->input_port_count = 1;
+    config->input_port_count = 2;
     config->output_port_count = 1;
     config->has_main_input = true;
     config->main_input_channel_count = stereo ? 2u : 1u;
@@ -279,7 +302,8 @@ const clap_plugin_audio_ports_config_t kAudioPortsConfig = {apcCount, apcGet, ap
 // ---------------------------------------------------------------------------
 
 uint32_t CLAP_ABI latGet(const clap_plugin_t* p) {
-    return (uint32_t)((Plug*)p->plugin_data)->processor.latencySamples();
+    return static_cast<uint32_t>(
+        ((Plug*)p->plugin_data)->latencyAtomic.load(std::memory_order_relaxed));
 }
 const clap_plugin_latency_t kLatency = {latGet};
 
@@ -287,55 +311,28 @@ const clap_plugin_latency_t kLatency = {latGet};
 // Extension: params
 // ---------------------------------------------------------------------------
 
-uint32_t CLAP_ABI paramCount(const clap_plugin_t*) { return (uint32_t)kParamCount; }
-
+uint32_t CLAP_ABI paramCount(const clap_plugin_t*) {
+    return supple::clapx::ClapParams::count(table());
+}
 bool CLAP_ABI paramInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
-    if (index >= (uint32_t)kParamCount) return false;
-    const ParamDef& d = kParams[index];
-    std::memset(info, 0, sizeof(*info));
-    info->id = d.id;
-    std::snprintf(info->name, sizeof(info->name), "%s", d.name);
-    std::snprintf(info->module, sizeof(info->module), "%s", d.module);
-    info->min_value = d.min;
-    info->max_value = d.max;
-    info->default_value = d.def;
-    info->flags = 0;
-    if (d.readonly) {
-        info->flags |= CLAP_PARAM_IS_READONLY;
-    } else {
-        info->flags |= CLAP_PARAM_IS_AUTOMATABLE;
-    }
-    if (d.stepped) info->flags |= CLAP_PARAM_IS_STEPPED;
-    if (d.isBypass) info->flags |= CLAP_PARAM_IS_BYPASS;
-    return true;
+    return supple::clapx::ClapParams::info(table(), index, info);
 }
-
 bool CLAP_ABI paramGetValue(const clap_plugin_t* p, clap_id id, double* out) {
-    auto* self = (Plug*)p->plugin_data;
-    if (!findParam(id)) return false;
-    *out = self->pv(id);
-    return true;
+    return ((Plug*)p->plugin_data)->values.getClap(id, *out);
 }
-
 bool CLAP_ABI paramValueToText(const clap_plugin_t*, clap_id id, double v, char* out,
                                uint32_t size) {
-    if (!findParam(id)) return false;
-    gate::formatValue(id, v, out, size);
-    return true;
+    return supple::clapx::ClapParams::valueToText(table(), id, v, out, size);
 }
-
-bool CLAP_ABI paramTextToValue(const clap_plugin_t*, clap_id id, const char* text,
-                               double* out) {
-    return gate::parseValue(id, text, *out);
+bool CLAP_ABI paramTextToValue(const clap_plugin_t*, clap_id id, const char* text, double* out) {
+    return supple::clapx::ClapParams::textToValue(table(), id, text, out);
 }
-
-void applyEvent(Plug* self, const clap_event_header_t* h) {
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
-    if (h->type != CLAP_EVENT_PARAM_VALUE) return;
-    const auto* ev = (const clap_event_param_value_t*)h;
-    const ParamDef* d = findParam(ev->param_id);
-    if (!d || d->readonly) return;
-    self->sv(ev->param_id, std::max(d->min, std::min(d->max, ev->value)));
+void applyEvent(Plug* self, const clap_event_header_t* h) SUPPLE_RT {
+    if (!h || h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE ||
+        h->size < sizeof(clap_event_param_value_t))
+        return;
+    const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(h);
+    self->values.setClap(ev->param_id, ev->value);
 }
 
 // Edits made in the editor reach the host from here and from process(). Both
@@ -360,16 +357,15 @@ bool emitEdit(const clap_output_events_t* out, const gate::gui::ParamEdit& e, ui
         ev.port_index = -1;
         ev.channel = -1;
         ev.key = -1;
-        ev.value = e.value;
+        ev.value = supple::params::toClap(table()[e.id], e.value);
         return out->try_push(out, &ev.header);
     }
     clap_event_param_gesture_t ev{};
     ev.header.size = sizeof(ev);
     ev.header.time = frame;
     ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-    ev.header.type = e.kind == gate::gui::ParamEdit::kBegin
-                         ? CLAP_EVENT_PARAM_GESTURE_BEGIN
-                         : CLAP_EVENT_PARAM_GESTURE_END;
+    ev.header.type = e.kind == gate::gui::ParamEdit::kBegin ? CLAP_EVENT_PARAM_GESTURE_BEGIN
+                                                            : CLAP_EVENT_PARAM_GESTURE_END;
     ev.header.flags = 0;
     ev.param_id = e.id;
     return out->try_push(out, &ev.header);
@@ -379,8 +375,8 @@ void requestEditRetry(Plug* self) {
     // request_flush is explicitly forbidden on the audio thread. Hop through
     // the CLAP main-thread callback instead; request_callback itself is
     // thread-safe and coalescing avoids callback storms under host backpressure.
-    if (!self->editRetryOnMain.exchange(true, std::memory_order_acq_rel) &&
-        self->host && self->host->request_callback)
+    if (!self->editRetryOnMain.exchange(true, std::memory_order_acq_rel) && self->host &&
+        self->host->request_callback)
         self->host->request_callback(self->host);
 }
 #endif
@@ -391,7 +387,10 @@ bool drainEdits(Plug* self, const clap_output_events_t* out, uint32_t frame) {
     gate::gui::ParamEdit e;
     while (self->editRing.peek(e)) {
         any = true;
-        if (!emitEdit(out, e, frame)) { requestEditRetry(self); return any; }
+        if (!emitEdit(out, e, frame)) {
+            requestEditRetry(self);
+            return any;
+        }
         self->editRing.consume();
     }
 
@@ -401,12 +400,15 @@ bool drainEdits(Plug* self, const clap_output_events_t* out, uint32_t frame) {
             self->deferredGestureActive = true;
             self->deferredGesturePhase = 0;
         }
-        const auto kind = self->deferredGesturePhase == 0 ? gate::gui::ParamEdit::kBegin
-                         : self->deferredGesturePhase == 1 ? gate::gui::ParamEdit::kValue
-                                                         : gate::gui::ParamEdit::kEnd;
+        const auto kind = self->deferredGesturePhase == 0   ? gate::gui::ParamEdit::kBegin
+                          : self->deferredGesturePhase == 1 ? gate::gui::ParamEdit::kValue
+                                                            : gate::gui::ParamEdit::kEnd;
         e = {self->deferredGesture.id, self->deferredGesture.value, kind};
         any = true;
-        if (!emitEdit(out, e, frame)) { requestEditRetry(self); return any; }
+        if (!emitEdit(out, e, frame)) {
+            requestEditRetry(self);
+            return any;
+        }
         if (++self->deferredGesturePhase == 3) {
             self->deferredGestureRing.consume();
             self->deferredGestureActive = false;
@@ -414,7 +416,9 @@ bool drainEdits(Plug* self, const clap_output_events_t* out, uint32_t frame) {
     }
     return any;
 #else
-    (void)self; (void)out; (void)frame;
+    (void)self;
+    (void)out;
+    (void)frame;
     return false;
 #endif
 }
@@ -422,13 +426,13 @@ bool drainEdits(Plug* self, const clap_output_events_t* out, uint32_t frame) {
 void CLAP_ABI paramFlush(const clap_plugin_t* p, const clap_input_events_t* in,
                          const clap_output_events_t* out) {
     auto* self = (Plug*)p->plugin_data;
-    const uint32_t n = in->size(in);
+    const uint32_t n = in ? in->size(in) : 0;
     for (uint32_t i = 0; i < n; ++i) applyEvent(self, in->get(in, i));
     drainEdits(self, out, 0);
     self->pushParams();
 }
 
-const clap_plugin_params_t kParamsExt = {paramCount,      paramInfo,        paramGetValue,
+const clap_plugin_params_t kParamsExt = {paramCount,       paramInfo,        paramGetValue,
                                          paramValueToText, paramTextToValue, paramFlush};
 
 // ---------------------------------------------------------------------------
@@ -438,91 +442,16 @@ const clap_plugin_params_t kParamsExt = {paramCount,      paramInfo,        para
 // Versioned id/value pairs rather than a raw struct dump, so that reordering or
 // adding parameters later cannot silently misread an old session.
 
-constexpr uint32_t kStateMagic = 0x53545231;  // "STR1"
-constexpr uint32_t kStateVersion = 1;
-
 bool CLAP_ABI stateSave(const clap_plugin_t* p, const clap_ostream_t* os) {
-    auto* self = (Plug*)p->plugin_data;
-    std::vector<uint8_t> buf;
-    auto put32 = [&](uint32_t v) {
-        for (int i = 0; i < 4; ++i) buf.push_back((uint8_t)(v >> (8 * i)));
-    };
-    auto putd = [&](double v) {
-        uint64_t u;
-        std::memcpy(&u, &v, 8);
-        for (int i = 0; i < 8; ++i) buf.push_back((uint8_t)(u >> (8 * i)));
-    };
-    put32(kStateMagic);
-    put32(kStateVersion);
-    uint32_t saved = 0;
-    for (int i = 0; i < kParamCount; ++i)
-        if (!kParams[i].readonly) ++saved;
-    put32(saved);
-    for (int i = 0; i < kParamCount; ++i) {
-        if (kParams[i].readonly) continue;
-        put32((uint32_t)kParams[i].id);
-        putd(self->pv(kParams[i].id));
-    }
-
-    size_t off = 0;
-    while (off < buf.size()) {
-        const int64_t n = os->write(os, buf.data() + off, buf.size() - off);
-        if (n <= 0) return false;
-        off += (size_t)n;
-    }
-    return true;
+    return ((Plug*)p->plugin_data)->semantic.saveState(os);
 }
-
 bool CLAP_ABI stateLoad(const clap_plugin_t* p, const clap_istream_t* is) {
-    auto* self = (Plug*)p->plugin_data;
-    std::vector<uint8_t> buf;
-    uint8_t tmp[1024];
-    for (;;) {
-        const int64_t n = is->read(is, tmp, sizeof(tmp));
-        if (n < 0) return false;
-        if (n == 0) break;
-        buf.insert(buf.end(), tmp, tmp + n);
-    }
-    size_t off = 0;
-    auto get32 = [&](uint32_t& v) {
-        if (off + 4 > buf.size()) return false;
-        v = 0;
-        for (int i = 0; i < 4; ++i) v |= (uint32_t)buf[off + (size_t)i] << (8 * i);
-        off += 4;
-        return true;
-    };
-    auto getd = [&](double& v) {
-        if (off + 8 > buf.size()) return false;
-        uint64_t u = 0;
-        for (int i = 0; i < 8; ++i) u |= (uint64_t)buf[off + (size_t)i] << (8 * i);
-        std::memcpy(&v, &u, 8);
-        off += 8;
-        return true;
-    };
-
-    uint32_t magic = 0, version = 0, count = 0;
-    if (!get32(magic) || magic != kStateMagic) return false;
-    if (!get32(version) || version > kStateVersion) return false;
-    if (!get32(count)) return false;
-
-    self->loadDefaults();  // anything absent from an older state keeps its default
-    for (uint32_t i = 0; i < count; ++i) {
-        uint32_t id = 0;
-        double v = 0.0;
-        if (!get32(id) || !getd(v)) return false;
-        const ParamDef* d = findParam((clap_id)id);
-        if (d && !d->readonly) self->sv(id, std::max(d->min, std::min(d->max, v)));
-    }
-    self->pushParams();
-    if (self->host) {
-        auto* hp = (const clap_host_params_t*)self->host->get_extension(self->host,
-                                                                        CLAP_EXT_PARAMS);
-        if (hp && hp->rescan) hp->rescan(self->host, CLAP_PARAM_RESCAN_VALUES);
-    }
-    return true;
+    return ((Plug*)p->plugin_data)->semantic.loadState(is);
 }
-
 const clap_plugin_state_t kState = {stateSave, stateLoad};
+supple::clapx::FlatSemantic* resolve(const clap_plugin_t* p) {
+    return &((Plug*)p->plugin_data)->semantic;
+}
 
 // ---------------------------------------------------------------------------
 // Plugin lifecycle
@@ -535,6 +464,28 @@ void stopGuiTimer(Plug* self);  // defined with the rest of the GUI extension
 bool CLAP_ABI plugInit(const clap_plugin_t* p) {
     auto* self = (Plug*)p->plugin_data;
     self->loadDefaults();
+    self->processor.prepare(48000, 4096, 2);
+    self->semantic.onApplied = [self](const auto&, const auto&) {
+        if (!self->active) {
+            self->pushParams();
+        }
+        if (self->active.load() &&
+            static_cast<int>(self->pv(kLookahead)) != self->activeChoice.load() && self->host &&
+            self->host->request_restart) {
+            const int choice = static_cast<int>(self->pv(kLookahead));
+            if (self->restartChoice.exchange(choice) != choice)
+                self->host->request_restart(self->host);
+        }
+        if (self->hostParams && self->hostParams->rescan)
+            self->hostParams->rescan(self->host, CLAP_PARAM_RESCAN_VALUES);
+        if (self->host) {
+            const auto* semanticHost = static_cast<const clap_host_supple_semantic_params_t*>(
+                self->host->get_extension(self->host, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));
+            if (semanticHost && semanticHost->struct_size >= sizeof(*semanticHost) &&
+                semanticHost->changed)
+                semanticHost->changed(self->host, CLAP_SUPPLE_CHANGED_PATCH);
+        }
+    };
     if (self->host)
         self->hostParams =
             (const clap_host_params_t*)self->host->get_extension(self->host, CLAP_EXT_PARAMS);
@@ -553,38 +504,43 @@ void CLAP_ABI plugDestroy(const clap_plugin_t* p) {
     delete self;
 }
 
-bool CLAP_ABI plugActivate(const clap_plugin_t* p, double sr, uint32_t, uint32_t) {
+bool CLAP_ABI plugActivate(const clap_plugin_t* p, double sr, uint32_t, uint32_t maxFrames) {
     auto* self = (Plug*)p->plugin_data;
+    if (!std::isfinite(sr) || sr < 1000 || sr > 768000 || !maxFrames) return false;
     self->srAtomic.store(sr, std::memory_order_relaxed);
 #if GATE_WITH_GUI
     // 250 Hz of telemetry at any session rate.
     self->telemetryChunk = std::max(1, (int)std::lround(sr / 250.0));
 #endif
-    self->processor.prepare(sr, self->channels);
+    self->processor.prepare(sr, maxFrames, self->channels);
+    self->seen = 0;
+    self->meterSamples = 0;
     self->preparedChannels = self->channels;
     self->sizeScratch(self->channels);
     self->pushParams();
+    self->activeChoice.store(static_cast<int>(self->pv(kLookahead)));
+    self->latencyAtomic.store(self->processor.latencySamples());
+    self->restartChoice.store(-1);
+    self->restartPending.store(false);
+    self->elapsedSamples = 0;
     self->active = true;
     return true;
 }
-
-void CLAP_ABI plugDeactivate(const clap_plugin_t* p) {
-    ((Plug*)p->plugin_data)->active = false;
-}
+void CLAP_ABI plugDeactivate(const clap_plugin_t* p) { ((Plug*)p->plugin_data)->active = false; }
 
 bool CLAP_ABI plugStartProcessing(const clap_plugin_t*) { return true; }
 void CLAP_ABI plugStopProcessing(const clap_plugin_t*) {}
 
 void CLAP_ABI plugReset(const clap_plugin_t* p) { ((Plug*)p->plugin_data)->processor.reset(); }
 
-clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_process_t* proc) {
+clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p,
+                                         const clap_process_t* proc) SUPPLE_RT {
     auto* self = (Plug*)p->plugin_data;
     const uint32_t nframes = proc->frames_count;
     const clap_input_events_t* in = proc->in_events;
     const uint32_t nev = in ? in->size(in) : 0;
 
-    if (proc->audio_inputs_count < 1 || proc->audio_outputs_count < 1)
-        return CLAP_PROCESS_CONTINUE;
+    if (proc->audio_inputs_count < 1 || proc->audio_outputs_count < 1) return CLAP_PROCESS_CONTINUE;
 
     const clap_audio_buffer_t& ib = proc->audio_inputs[0];
     clap_audio_buffer_t& ob = proc->audio_outputs[0];
@@ -594,12 +550,12 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_proc
     // Port selection happens while deactivated and the channel count is fixed
     // by activate(). A mismatch is a host-contract violation, not permission to
     // allocate or rebuild topology on the realtime thread.
-    if ((int)nch != self->preparedChannels)
-        return CLAP_PROCESS_ERROR;
+    if ((int)nch != self->preparedChannels) return CLAP_PROCESS_ERROR;
 
     // Editor edits are drained before any audio is rendered, so a knob move
     // takes effect in the block you hear it in rather than the next one.
-    if (drainEdits(self, proc->out_events, 0)) self->pushParams();
+    drainEdits(self, proc->out_events, 0);
+    self->pushParams();
 
     uint32_t ev = 0, frame = 0;
     bool dirty = false;
@@ -633,14 +589,26 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p, const clap_proc
                     std::memcpy(ob.data32[c] + frame, ib.data32[c] + frame, n * sizeof(float));
                 self->ptrs32[c] = ob.data32[c] + frame;
             }
-            self->runChunks(self->ptrs32, (int)n);
+            const float* key[2]{};
+            if (proc->audio_inputs_count > 1 && proc->audio_inputs[1].data32) {
+                const auto& k = proc->audio_inputs[1];
+                for (uint32_t c = 0; c < std::min(2u, k.channel_count); ++c)
+                    if (k.data32[c]) key[c] = k.data32[c] + frame;
+            }
+            self->runChunks(self->ptrs32, (int)n, proc->out_events, frame, key);
         } else if (ob.data64 && ib.data64) {
             for (uint32_t c = 0; c < nch; ++c) {
                 if (ob.data64[c] != ib.data64[c])
                     std::memcpy(ob.data64[c] + frame, ib.data64[c] + frame, n * sizeof(double));
                 self->ptrs64[c] = ob.data64[c] + frame;
             }
-            self->runChunks(self->ptrs64, (int)n);
+            const double* key[2]{};
+            if (proc->audio_inputs_count > 1 && proc->audio_inputs[1].data64) {
+                const auto& k = proc->audio_inputs[1];
+                for (uint32_t c = 0; c < std::min(2u, k.channel_count); ++c)
+                    if (k.data64[c]) key[c] = k.data64[c] + frame;
+            }
+            self->runChunks(self->ptrs64, (int)n, proc->out_events, frame, key);
         }
         frame = next;
     }
@@ -669,16 +637,16 @@ constexpr uint32_t kGuiTimerMs = 16;  // ~60 Hz
 
 void startGuiTimer(Plug* self) {
     if (self->guiTimerRunning || !self->host) return;
-    auto* ht = (const clap_host_timer_support_t*)self->host->get_extension(
-        self->host, CLAP_EXT_TIMER_SUPPORT);
+    auto* ht = (const clap_host_timer_support_t*)self->host->get_extension(self->host,
+                                                                           CLAP_EXT_TIMER_SUPPORT);
     if (ht && ht->register_timer && ht->register_timer(self->host, kGuiTimerMs, &self->guiTimerId))
         self->guiTimerRunning = true;
 }
 
 void stopGuiTimer(Plug* self) {
     if (!self->guiTimerRunning || !self->host) return;
-    auto* ht = (const clap_host_timer_support_t*)self->host->get_extension(
-        self->host, CLAP_EXT_TIMER_SUPPORT);
+    auto* ht = (const clap_host_timer_support_t*)self->host->get_extension(self->host,
+                                                                           CLAP_EXT_TIMER_SUPPORT);
     if (ht && ht->unregister_timer) ht->unregister_timer(self->host, self->guiTimerId);
     self->guiTimerRunning = false;
 }
@@ -700,7 +668,8 @@ bool CLAP_ABI guiCreate(const clap_plugin_t* p, const char* api, bool isFloating
     // A previous editor may have closed with unread frames. Drain them before
     // re-enabling the producer so a reopened graph starts with current audio.
     gate::gui::Frame stale;
-    while (self->telemetryRing.pop(stale)) {}
+    while (self->telemetryRing.pop(stale)) {
+    }
     self->telemetryOn.store(true, std::memory_order_relaxed);
     if (!self->gui->create()) {
         self->telemetryOn.store(false, std::memory_order_relaxed);
@@ -724,7 +693,8 @@ bool CLAP_ABI guiSetScale(const clap_plugin_t* p, double scale) {
     auto* self = (Plug*)p->plugin_data;
 #if defined(__APPLE__)
     // Cocoa is specified in logical pixels, so the host must not also scale us.
-    (void)self; (void)scale;
+    (void)self;
+    (void)scale;
     return false;
 #else
     if (!self->gui) return false;
@@ -775,8 +745,7 @@ bool CLAP_ABI guiSetParent(const clap_plugin_t* p, const clap_window_t* window) 
     // register_timer is a hard `return false`, which leaves the editor correct
     // but frozen -- input still arrives through the native view, so controls
     // work while nothing ever repaints. Drive it ourselves in that case.
-    if (ok && !self->guiTimerRunning)
-        self->gui->startFallbackTimer((double)kGuiTimerMs / 1000.0);
+    if (ok && !self->guiTimerRunning) self->gui->startFallbackTimer((double)kGuiTimerMs / 1000.0);
     return ok;
 }
 
@@ -787,13 +756,13 @@ bool CLAP_ABI guiShow(const clap_plugin_t* p) {
     auto* self = (Plug*)p->plugin_data;
     if (!self->gui) return false;
     gate::gui::Frame stale;
-    while (self->telemetryRing.pop(stale)) {}
+    while (self->telemetryRing.pop(stale)) {
+    }
     const bool shown = self->gui->show();
     self->telemetryOn.store(shown, std::memory_order_relaxed);
     if (shown) {
         startGuiTimer(self);
-        if (!self->guiTimerRunning)
-            self->gui->startFallbackTimer((double)kGuiTimerMs / 1000.0);
+        if (!self->guiTimerRunning) self->gui->startFallbackTimer((double)kGuiTimerMs / 1000.0);
     }
     return shown;
 }
@@ -807,13 +776,15 @@ bool CLAP_ABI guiHide(const clap_plugin_t* p) {
 }
 
 const clap_plugin_gui_t kGui = {
-    guiIsApiSupported, guiGetPreferredApi, guiCreate,     guiDestroy,   guiSetScale,
+    guiIsApiSupported, guiGetPreferredApi, guiCreate,         guiDestroy,    guiSetScale,
     guiGetSize,        guiCanResize,       guiGetResizeHints, guiAdjustSize, guiSetSize,
-    guiSetParent,      guiSetTransient,    guiSuggestTitle, guiShow,      guiHide};
+    guiSetParent,      guiSetTransient,    guiSuggestTitle,   guiShow,       guiHide};
 
 void CLAP_ABI plugOnGuiTimer(const clap_plugin_t* p, clap_id timerId) {
     auto* self = (Plug*)p->plugin_data;
-    if (self->gui && timerId == self->guiTimerId) self->gui->tick();
+    if (self->gui && timerId == self->guiTimerId) {
+        self->gui->tick();
+    }
 }
 
 const clap_plugin_timer_support_t kTimerSupport = {plugOnGuiTimer};
@@ -823,6 +794,27 @@ const clap_plugin_timer_support_t kTimerSupport = {plugOnGuiTimer};
 const void* CLAP_ABI plugGetExtension(const clap_plugin_t*, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &kAudioPortsConfig;
+    if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS)) {
+        static const auto semantic = [] {
+            auto ext = *supple::clapx::FlatSemantic::extension<resolve>();
+            ext.describe =
+                +[](const clap_plugin_t* plugin, uint32_t detail, const clap_ostream_t* out) {
+                    if (!out || !out->write) return false;
+                    const auto text = supple::gate::describe(
+                        ((Plug*)plugin->plugin_data)->semantic.current().body.values,
+                        detail == CLAP_SUPPLE_PATCH_DETAIL_CHANGED);
+                    size_t offset = 0;
+                    while (offset < text.size()) {
+                        const auto n = out->write(out, text.data() + offset, text.size() - offset);
+                        if (n <= 0 || static_cast<uint64_t>(n) > text.size() - offset) return false;
+                        offset += static_cast<size_t>(n);
+                    }
+                    return true;
+                };
+            return ext;
+        }();
+        return &semantic;
+    }
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kParamsExt;
     if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kLatency;
@@ -834,10 +826,16 @@ const void* CLAP_ABI plugGetExtension(const clap_plugin_t*, const char* id) {
 }
 
 void CLAP_ABI plugOnMainThread(const clap_plugin_t* p) {
-#if GATE_WITH_GUI
     auto* self = (Plug*)p->plugin_data;
-    if (self->editRetryOnMain.exchange(false, std::memory_order_acq_rel) &&
-        self->hostParams && self->hostParams->request_flush)
+    if (self->restartPending.exchange(false) && self->active.load()) {
+        const int choice = static_cast<int>(self->pv(kLookahead));
+        if (choice != self->activeChoice.load() && self->restartChoice.exchange(choice) != choice &&
+            self->host && self->host->request_restart)
+            self->host->request_restart(self->host);
+    }
+#if GATE_WITH_GUI
+    if (self->editRetryOnMain.exchange(false, std::memory_order_acq_rel) && self->hostParams &&
+        self->hostParams->request_flush)
         self->hostParams->request_flush(self->host);
 #else
     (void)p;
@@ -855,8 +853,8 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryGetDesc(const clap_plugin_factor
     return index == 0 ? &kDesc : nullptr;
 }
 
-const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*,
-                                            const clap_host_t* host, const char* id) {
+const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
+                                            const char* id) {
     if (!id || std::strcmp(id, kDesc.id)) return nullptr;
     auto* self = new Plug();
     self->host = host;

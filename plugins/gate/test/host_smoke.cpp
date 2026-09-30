@@ -235,7 +235,14 @@ int main(int argc, char** argv) {
     check(namesOk, "every parameter reports info and a name");
     check(textOk, "every parameter formats its default value");
 
-    host_contract::ports(plug, channels, check);
+    clap_audio_port_info_t in{},out{},keyPort{};
+    check(ports->count(plug,true)==2&&ports->count(plug,false)==1,"main and sidechain inputs plus one output");
+    check(ports->get(plug,0,true,&in)&&ports->get(plug,0,false,&out)&&ports->get(plug,1,true,&keyPort),"all audio port metadata available");
+    const char* type=channels==1?CLAP_PORT_MONO:CLAP_PORT_STEREO;
+    check(in.channel_count==channels&&out.channel_count==channels&&!std::strcmp(in.port_type,type)&&!std::strcmp(out.port_type,type),"main bus negotiated mono/stereo layout");
+    check((in.flags&CLAP_AUDIO_PORT_IS_MAIN)&&(out.flags&CLAP_AUDIO_PORT_IS_MAIN)&&in.in_place_pair==out.id&&out.in_place_pair==in.id,"main ports are reciprocal in-place partners");
+    check(keyPort.channel_count==2&&!std::strcmp(keyPort.port_type,CLAP_PORT_STEREO)&&!(keyPort.flags&CLAP_AUDIO_PORT_IS_MAIN)&&keyPort.in_place_pair==CLAP_INVALID_ID,"sidechain is non-main stereo with no in-place pair");
+    for(const auto* port:{&in,&out,&keyPort})check((port->flags&CLAP_AUDIO_PORT_SUPPORTS_64BITS)&&(port->flags&CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE),"all ports advertise matching float/double precision");
     host_contract::parameterText(plug, check);
     host_contract::processing(fac, desc->id, HOST_SMOKE_PLAIN_PARAM, channels,
                               48000.0, isInstrument, check);
@@ -363,41 +370,21 @@ int main(int argc, char** argv) {
         plug->process(plug, &proc);
     };
 
-    // Search the range for a setting that actually moves latency rather than
-    // assuming which one does. A product may change latency only at one end --
-    // a true-peak filter can cost the same at every oversampling factor above
-    // the first -- and assuming otherwise tests nothing on that product.
-    const uint32_t latBase = latency->get(plug);
-    double latTarget = latNow;
-    bool movesLatency = false;
-    for (double v = latInfo.min_value; v <= latInfo.max_value + 0.5; v += 1.0) {
-        if (v == latNow) continue;
-        applyAndProcess(idLat, v);
-        if (latency->get(plug) != latBase) {
-            latTarget = v;
-            movesLatency = true;
-            break;
-        }
-    }
-    // Put it back and let the restart bookkeeping settle before measuring.
-    applyAndProcess(idLat, latNow);
-    check(movesLatency, HOST_SMOKE_LATENCY_PARAM " has a setting that changes latency");
-
-    if (movesLatency) {
-        const uint32_t latBefore = latency->get(plug);
-        g_restarts = 0;
-        applyAndProcess(idLat, latTarget);
-        check(g_restarts >= 1, "changing " HOST_SMOKE_LATENCY_PARAM " does request a restart");
-        check(latency->get(plug) != latBefore, "and the reported latency actually changed");
-
-        // ...and then settles, rather than looping.
-        g_restarts = 0;
-        for (int i = 0; i < 50; ++i) {
-            for (uint32_t k = 0; k < block; ++k) l[k] = r[k] = 0.0f;
-            plug->process(plug, &proc);
-        }
-        check(g_restarts == 0, "holding that value stops requesting restarts");
-    }
+    const uint32_t latBase=latency->get(plug);
+    const double latTarget=latNow==0?2:0;
+    g_restarts=0;
+    applyAndProcess(idLat,latTarget);
+    check(g_restarts==1,"lookahead edit requests exactly one restart");
+    check(latency->get(plug)==latBase,"active latency stays unchanged until reactivation");
+    g_restarts=0;for(int i=0;i<50;++i)applyAndProcess(idLat,latTarget);
+    check(g_restarts==0,"repeated pending lookahead edits cause no restart storm");
+    plug->stop_processing(plug);plug->deactivate(plug);
+    check(plug->activate(plug,48000,32,block)&&plug->start_processing(plug),"restart reactivates the processor");
+    check(latency->get(plug)==(latTarget==2?240u:0u),"reactivated latency equals selected lookahead");
+    check(latency->get(plug)!=latBase,"lookahead really changes the activated delay");
+    applyAndProcess(idLat,latNow);
+    plug->stop_processing(plug);plug->deactivate(plug);
+    check(plug->activate(plug,48000,32,block)&&plug->start_processing(plug),"restore lookahead through a second restart");
 #endif
 
     g_events.active = false;

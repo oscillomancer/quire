@@ -35,6 +35,10 @@ identity checklist below before implementation.
    and license header, and drifting copies are how the same bug gets fixed
    three times and missed the fourth.
 
+## Monorepo override
+
+Keep MIT under ADR-0011. Never modify the upstream template. Repository licensing and user instructions override the upstream conversion/checklist.
+
 ## Product identity checklist
 
 Perform this before substantive DSP work. Search the complete tree (excluding
@@ -68,7 +72,7 @@ Replace identifiers deliberately, respecting case:
 - `GATE` — CMake option and preprocessor form.
 - `com.suppleaudio.gate` — CLAP and bundle identifier (rename only the
   last component).
-- `StFx` — AU subtype code.
+- `QGat` — AU subtype code.
 
 On macOS the `Gate` form additionally namespaces the Objective-C classes that
 pugl and nanovg_metal define (`GATE_OBJC_CLASSES` in `plugin/gui/CMakeLists.txt`,

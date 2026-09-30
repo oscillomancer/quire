@@ -9,10 +9,7 @@
 
 namespace gate::gui {
 
-struct Frame {
-    float inputPeakDb = -120.0f;
-    float outputPeakDb = -120.0f;
-};
+struct Frame { double level=-120,gr=-80; bool open=false; double seconds=0; };
 
 template <typename T, int CapacityPow2>
 class Ring {

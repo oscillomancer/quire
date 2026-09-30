@@ -110,6 +110,48 @@ Sidechain input as for the compressor. Keys: `mode` (`gate`, `expander`),
 `sc_lowpass`, `sc_listen`, `stereo_link` %, `mix` %, `output` dB, readonly
 `gr` dB, readonly `open` bool.
 
+### Implementation decisions (2026-09-29)
+
+- `mode` defaults to `gate`. Shared detector/output keys use the compressor's
+  ranges/defaults: `sidechain` internal/external (internal), `sc_highpass`
+  10..500 Hz log (10 = off), `sc_lowpass` 1000..20000 Hz log (20000 = off),
+  `sc_listen` false, `stereo_link` 0..100 % (100), `mix` 0..100 % (100),
+  `output` −24..24 dB (0). `ratio` and `hold` have linear host curves.
+  Lookahead machine keys are `off`/`ms1`/`ms5`, labels off/1 ms/5 ms,
+  following the lowercase-letter enum-key convention; default off.
+- The key uses 12 dB/oct Butterworth TPT high/low-pass sections. Corners
+  clamp to 0.45 fs internally. Linking blends each channel's absolute key
+  with the stereo maximum in amplitude, before converting to dB. A missing
+  external key is silence; the sidechain bus remains stereo in mono mode.
+- Gate state opens strictly above threshold, refreshes hold at or above
+  threshold minus hysteresis, and closes after that sample-counted hold.
+  `open` reports either channel's logical state, independent of gain ramp.
+  The expander uses the same state/hold: while latched open it has unity
+  target gain; while closed it uses `(ratio−1)·(level−threshold)`, capped
+  between range and 0 dB. Thus its hysteresis band is history-dependent.
+- Attack/release are one-pole time constants in the dB domain: 63.2 % of
+  the change after one time constant, not full settling. A −80 dB range is
+  exact mute initially closed and once within 0.0001 dB of the closing
+  floor; finite ranges retain their stated gain. Dry mix remains audible.
+- Lookahead is rounded to samples, delays both main and monitored key,
+  and aligns the dry path. Opening normalizes the one-pole ramp to the
+  available lookahead so it reaches unity before the delayed onset, even
+  if attack is longer. Hold is at least lookahead + one sample to preserve
+  short onsets. With lookahead off, the attack time constant is unmodified.
+  Active edits request a coalesced host restart; both processing delay and
+  reported latency remain the activated value until reactivation.
+- Continuous controls ramp over 20 ms (key frequency in log space); mode,
+  key source, listen and key-filter enable transitions ramp over 10 ms.
+  Filter/time coefficients update on a reset-counted 16-sample grid.
+  Restoration before processing snaps. Nonfinite input becomes zero and
+  input magnitudes above 1e8 are bounded before they enter recursive state.
+  Activation also supports the validator's 8 kHz case; lookahead alignment
+  is tested up to 768 kHz in addition to the required rate sweep.
+- Key listen replaces the wet signal with the filtered, delayed key; mix
+  and output still apply. Readonly `gr` is −80..0 dB, the deepest channel
+  gain before mix/output; `open` is bool. Both publish every 50 ms. Editor
+  key level is the current linked detector sample at that same cadence.
+
 ## 4. Transient shaper — "Flint" [`transient`]
 
 Keys: `attack` % −100..+100 (0; boost/cut of the transient portion, ±12 dB

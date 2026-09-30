@@ -1,50 +1,15 @@
-# Audio Plugin Template
+# Stock gate / expander
 
-A working CLAP-first audio effect with VST3 and AUv2 wrappers, a custom
-Pugl/NanoVG editor, Metal rendering on macOS, OpenGL on Linux and Windows, and
-host-level integration probes. It distills the reusable infrastructure and
-engineering conventions established in Ferric and Plateau without carrying
-either product's DSP or identity into the next plugin.
+Stereo/mono gate and downward expander with hysteresis, hold, filtered stereo
+sidechain, lookahead and a latency-aligned dry/wet mix. The display name lives
+once in `engine/include/gate/params.h`; code and artifact identity use `gate`.
 
-![Verified gate editor](docs/gate-gui.png)
+Build: `cmake --preset dev && cmake --build --preset dev -j6` from the
+monorepo. Artifact: `build/dev/plugins/clap/Gate.clap`.
 
-The included processor is intentionally transparent. Input Gain, Output Gain,
-Mix and Bypass prove that parameters, automation, state, smoothing, float and
-double audio, meters, gestures and every wrapper are connected. Replace the
-identity operation in `dsp/include/gate/Processor.h` with the new product's
-DSP; do not build a product by accumulating hacks in the wrapper.
+Preview: `build/dev/plugins/gate/gate-gui-preview 20 build/dev/gate-default.ppm
+1 default` (or `drums`). Tests and previews need no audio device. The MIT
+license and third-party notices travel beside the artifact. See `QUIRE.md`
+and `../../skill/guides/gate.md` for behavior and integration decisions.
 
-## Start here
-
-1. Read `AGENTS.md` and `CONVENTIONS.md` before changing code.
-2. Follow the product identity checklist in `AGENTS.md` before opening the project
-   in a DAW. Plugin IDs and AU four-character codes must be unique forever.
-3. Build and run the untouched baseline once, following `BUILDING.md`.
-4. Add DSP behind `gate::Processor`, extend the single parameter table, and
-   add independent measurements for every important sonic or marketing claim.
-5. Exercise the built CLAP bundle with `gate-clap-probe`; the standalone GUI
-   preview does not validate embedding, wrapper timers, resizing or teardown.
-
-## Repository map
-
-- `dsp/include/gate/Processor.h` — SDK-free, testable DSP core and the
-  explicit product-DSP insertion point.
-- `plugin/src/GateParams.h` — the only parameter metadata and formatter.
-- `plugin/src/gate_clap.cpp` — CLAP lifecycle, sample-accurate automation,
-  versioned state, audio ports, telemetry gating and GUI bridge.
-- `plugin/gui` — renderer-independent editor/window code, custom Pugl Metal
-  backend, NanoVG Metal/OpenGL seams, widgets, theme and embedded fonts.
-- `test` — deterministic DSP and input/gesture tests.
-- `tools/gate_cli.cpp` — offline WAV renderer for DSP measurements and
-  block-boundary debugging without a DAW.
-- `tools/clap_host_probe.cpp` — a small real CLAP host for bundle-level GUI and
-  audio tests.
-- `tools/gui_preview.cpp` — image rendering for visual review only.
-
-## License
-
-The template is MIT licensed, copyright (c) 2026 Supple Audio; see
-[LICENSE](LICENSE). Products built from it choose their own license (Supple
-Audio products are GPL-3.0-or-later; the checklist in `AGENTS.md` covers the
-switch). Required dependency and font notices are summarized in
-[THIRD_PARTY.md](THIRD_PARTY.md), with full texts in [NOTICES.txt](NOTICES.txt).
+Verification commands, results and remaining acceptance: `VERIFICATION.md`.
