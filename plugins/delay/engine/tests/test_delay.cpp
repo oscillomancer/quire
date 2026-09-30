@@ -166,6 +166,42 @@ TEST_CASE("Delay dry path null, deterministic modulation and exact partitions wi
     std::copy(restored->body.values.begin(), restored->body.values.end(), values.begin());
     CHECK(render(values, 48000, 30000).l == render(v, 48000, 30000).l);
 }
+TEST_CASE("Delay drive ramp from bypass to 2 dB has no loud echo level step") {
+    const auto check = []<class T>() {
+        Processor bypass, driven;
+        REQUIRE(bypass.prepare(48000, 1));
+        REQUIRE(driven.prepare(48000, 1));
+        auto v = wet(10);
+        v[kFeedback] = 0;
+        bypass.setParams(v);
+        driven.setParams(v);
+        // Start the existing 20 ms parameter ramp on a settled 0.5-amplitude echo peak.
+        constexpr int start = 9600 + 12, period = 48;
+        double previousDb = 0, largestStep = 0, finalDb = 0;
+        for (int n = 0; n <= start + 1200; ++n) {
+            if (n == start) driven.setParam(kDrive, 2);
+            const T sample = T(.5 * std::sin(2 * pi * n / period));
+            const T* in[]{&sample, &sample};
+            T reference[2]{}, output[2]{};
+            T* referenceOut[]{&reference[0], &reference[1]};
+            T* drivenOut[]{&output[0], &output[1]};
+            bypass.process(in, referenceOut, 1);
+            driven.process(in, drivenOut, 1);
+            if (n < start || (n - start) % period != 0) continue;
+            REQUIRE(std::abs(double(reference[0])) > .45);
+            finalDb = 20 * std::log10(std::abs(double(output[0]) / double(reference[0])));
+            if (n == start) CHECK(std::abs(finalDb) < .01);
+            largestStep = std::max(largestStep, std::abs(finalDb - previousDb));
+            previousDb = finalDb;
+        }
+        // Compare equal-phase peaks: ordinary waveform slopes are not level steps.
+        CHECK(largestStep < .15);
+        CHECK(finalDb < -.8);
+        CHECK(finalDb > -2);
+    };
+    SUBCASE("32-bit audio") { check.operator()<float>(); }
+    SUBCASE("64-bit audio") { check.operator()<double>(); }
+}
 TEST_CASE("Delay ping-pong offset, mono and width") {
     auto v = wet(40);
     v[kMode] = 1;

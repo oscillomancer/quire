@@ -69,10 +69,37 @@ failures across embedding, map, resize, hide/show, three reopen cycles,
 timer cleanup and concurrent synthetic audio.
 
 Full matrix command: `tools/ci/run-all.sh` once, outside the sandbox for socket
-tests. Result pending at implementation commit; updated after completion.
+tests. License, format and all six presets passed before the drive follow-up.
 The parent external-plugin helper forwards TSan/RTSan to child plugins;
 ASan/UBSan cover parent engine/shared-library tests, while that helper does
 not forward these flags to the child build. This is existing infrastructure.
+
+## Drive continuity follow-up (`p3-delay-drive`)
+
+Based on main `9b38a31`. Drive now crossfades bypass to the existing curve over
+0–1 dB, retaining exact zero bypass and the full curve at 1 dB and above.
+Processor, engine test, stock-effects §6 and the delay guide changed.
+
+The new 32-/64-bit regression starts the 0→2 dB parameter ramp on a settled
+0.5-amplitude echo peak. Before the fix it failed with a 0.684661 dB initial
+drop. After the fix it passes: initial change <0.01 dB, successive equal-phase
+peak changes <0.15 dB, with actual saturation at the end of the ramp.
+
+```sh
+cmake --preset dev
+cmake --build --preset dev -j6
+build/dev/plugins/delay/engine/delay-engine.tests
+ctest --test-dir build/dev/plugins/delay --output-on-failure
+tools/ci/format.sh --check
+git diff --check
+rm -rf -- build/gcc build/asan build/ubsan build/tsan build/rtsan
+```
+
+Dev configure/build passed (only existing vendored VST3 SDK warnings).
+Engine: 13 cases / 3737 assertions passed. Plugin: 10/10 passed. Format/diff
+checks passed. All five listed build trees were deleted; dev was retained.
+No full CI rerun for this follow-up, as requested. Review and merge remain
+orchestrator work; no open implementation questions.
 
 ## Remaining acceptance
 

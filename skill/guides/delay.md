@@ -55,6 +55,8 @@ Wow combines a sine with deterministic smooth random variation; maximum
 excursion is 3 ms, capped at 45% of the current line time. Zero depth is exact.
 The filters sit in the loop and therefore darken/thin each repeat; endpoints
 remain active. Drive is a small-signal-preserving loop saturator, not makeup.
+It bypasses exactly at 0 dB and fades into its saturation curve over the first
+1 dB, so raising drive from zero does not cause a level step.
 
 Freeze fades the input and loop processing out over 10 ms, holds the current
 read times and replays the captured period without cumulative interpolation

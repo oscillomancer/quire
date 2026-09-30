@@ -523,8 +523,10 @@ tempo sync via CLAP transport.
 - The safety curve is x for |x| ≤ 0.5, otherwise
   sign(x)·[0.5 + 0.5·tanh(2·(|x|−0.5))]. Every normal echo is bounded by
   unity before width/output. Drive zero bypasses its nonlinearity exactly;
-  above zero its curve is tanh(g·x)/g, g = 10^(drive/20). Stereo, ping-pong
-  and mono routing interpolate over 10 ms. Width 100 bypasses M/S arithmetic
+  it crossfades linearly from bypass to tanh(g·x)/g over drive 0–1 dB,
+  g = 10^(drive/20), using the full curve from 1 dB upward. This avoids a
+  level step when leaving zero. Stereo, ping-pong and mono routing
+  interpolate over 10 ms. Width 100 bypasses M/S arithmetic
   exactly; mono sends the left line to both wet outputs and ignores width.
 - Duck measures the linked main input peak in dB with 1 ms attack and
   250 ms release; attenuation is duck·clamp((level+60)/30,0,1). It affects
