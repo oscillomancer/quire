@@ -6,7 +6,7 @@ loudness, true peak, stereo correlation/width/balance, spectral centroid and
 
 Build from the monorepo with `cmake --preset dev` and
 `cmake --build --preset dev -j6`. The artifact is
-`build/dev/plugins/clap/Analyzer.clap`. For behavior and limits see
+`build/dev/plugins/clap/Gauge.clap`. For behavior and limits see
 `../../skill/guides/analyzer.md`; integration differences are in `QUIRE.md`.
 
 Preview: `build/dev/plugins/analyzer/analyzer-gui-preview 60

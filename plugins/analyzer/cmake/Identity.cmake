@@ -1,0 +1,1 @@
+set(ANALYZER_DISPLAY_NAME "Gauge")

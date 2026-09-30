@@ -18,8 +18,8 @@ cmake --build --preset release -j
 ctest --preset release
 ```
 
-Outputs are under `build-cmake/analyzer_assets/`. macOS builds `Analyzer.clap`,
-`Analyzer.vst3` and `Analyzer.component`. Metal is the default. To exercise the
+Outputs are under `build-cmake/analyzer_assets/`. macOS builds `Gauge.clap`,
+`Gauge.vst3` and `Gauge.component`. Metal is the default. To exercise the
 OpenGL plugin path explicitly:
 
 ```sh
@@ -76,7 +76,7 @@ On macOS, load the binary inside the built bundle:
 
 ```sh
 ./build-cmake/analyzer-clap-probe \
-  ./build-cmake/analyzer_assets/Analyzer.clap/Contents/MacOS/Analyzer \
+  ./build-cmake/analyzer_assets/Gauge.clap/Contents/MacOS/Gauge \
   200 --mono --resize --reopen
 ```
 
@@ -177,7 +177,7 @@ With an X11/XWayland display available, run:
 
 ```sh
 ./build-cmake/analyzer-linux-host-probe \
-  ./build-cmake/analyzer_assets/Analyzer.clap /tmp/analyzer-host.ppm
+  ./build-cmake/analyzer_assets/Gauge.clap /tmp/analyzer-host.ppm
 ```
 
 This product-independent probe creates a real X11 parent, verifies the mapped

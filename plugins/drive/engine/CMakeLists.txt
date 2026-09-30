@@ -1,5 +1,7 @@
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Identity.cmake")
 supple_add_library(drive-engine SOURCES src/params.cpp src/processor.cpp
   DEPS supple::core-base supple::core-params supple::core-patch supple::core-dsp)
+target_compile_definitions(drive-engine PUBLIC SUPPLE_DRIVE_DISPLAY_NAME="${DRIVE_DISPLAY_NAME}")
 supple_add_tests(drive-engine SOURCES tests/test_drive.cpp DEPS supple::core-analysis LABELS rt)
 if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(drive-engine.tests PRIVATE

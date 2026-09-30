@@ -73,6 +73,7 @@ function(gate_target_defaults target)
     endif()
 endfunction()
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Identity.cmake)
 include(${SUPPLE_ROOT}/plugins/common/cmake/LinkMonorepo.cmake)
 supple_plugin_add_monorepo_libraries()
 
@@ -103,12 +104,12 @@ if (GATE_BUILD_TOOLS)
             target_link_options(gate-semantic-rt PRIVATE -fsanitize=realtime)
         endif()
         add_test(NAME semantic-rt COMMAND gate-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/Gate.clap)
+            ${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/Gate.clap com.suppleaudio.gate)
+            ${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.clap com.suppleaudio.gate)
     endif()
 endif()
 
@@ -219,10 +220,10 @@ if (GATE_BUILD_PLUGIN)
         gate_target_defaults(gate-host-smoke)
         add_test(NAME host-smoke
                  COMMAND gate-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/Gate.clap)
+                         ${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.clap)
         add_test(NAME host-smoke-mono
                  COMMAND gate-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/Gate.clap --mono)
+                         ${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.clap --mono)
     endif()
 
     option(GATE_VST3 "Build VST3 format" OFF)
@@ -239,7 +240,7 @@ if (GATE_BUILD_PLUGIN)
     make_clapfirst_plugins(
         TARGET_NAME gate-plugin
         IMPL_TARGET gate-impl
-        OUTPUT_NAME "Gate"
+        OUTPUT_NAME "${GATE_DISPLAY_NAME}"
         ENTRY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/plugin/src/gate_entry.cpp"
         BUNDLE_IDENTIFIER "com.suppleaudio.gate"
         BUNDLE_VERSION ${PROJECT_VERSION}
@@ -281,7 +282,7 @@ if (GATE_BUILD_PLUGIN)
         # is supposed to keep them. The AU is absent here on purpose: its copy
         # has to precede the code signature, so it lives in the prepare step
         # below instead.
-        foreach(spec "gate-plugin_clap:Gate.clap" "gate-plugin_vst3:Gate.vst3")
+        foreach(spec "gate-plugin_clap:${GATE_DISPLAY_NAME}.clap" "gate-plugin_vst3:${GATE_DISPLAY_NAME}.vst3")
             string(REPLACE ":" ";" parts ${spec})
             list(GET parts 0 target)
             list(GET parts 1 bundle)
@@ -318,43 +319,43 @@ if (GATE_BUILD_PLUGIN)
         add_custom_target(gate-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/gate-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Info.plist"
+                "${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources"
+                "${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources/NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${gate_license}"
-                "${CMAKE_BINARY_DIR}/../clap/Gate.component/Contents/Resources/LICENSE.txt"
+                "${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/Gate.component"
+                "${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component"
             DEPENDS gate-plugin_auv2
-            COMMENT "Preparing and ad-hoc signing Gate.component"
+            COMMENT "Preparing and ad-hoc signing ${GATE_DISPLAY_NAME}.component"
             VERBATIM)
         if (GATE_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/Gate.component
+                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/${GATE_DISPLAY_NAME}.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
 
     if (APPLE)
         set(GATE_INSTALL_SPECS
-            "Gate.clap:$ENV{HOME}/Library/Audio/Plug-Ins/CLAP:gate-plugin_clap:dir"
-            "Gate.vst3:$ENV{HOME}/Library/Audio/Plug-Ins/VST3:gate-plugin_vst3:dir"
-            "Gate.component:$ENV{HOME}/Library/Audio/Plug-Ins/Components:gate-plugin_auv2:dir")
+            "${GATE_DISPLAY_NAME}.clap:$ENV{HOME}/Library/Audio/Plug-Ins/CLAP:gate-plugin_clap:dir"
+            "${GATE_DISPLAY_NAME}.vst3:$ENV{HOME}/Library/Audio/Plug-Ins/VST3:gate-plugin_vst3:dir"
+            "${GATE_DISPLAY_NAME}.component:$ENV{HOME}/Library/Audio/Plug-Ins/Components:gate-plugin_auv2:dir")
     elseif (UNIX)
         # On Linux a CLAP is a bare shared object, not a bundle directory --
         # only the VST3 is a folder here -- so the two are copied differently.
         set(GATE_INSTALL_SPECS
-            "Gate.clap:$ENV{HOME}/.clap:gate-plugin_clap:file"
-            "Gate.vst3:$ENV{HOME}/.vst3:gate-plugin_vst3:dir")
+            "${GATE_DISPLAY_NAME}.clap:$ENV{HOME}/.clap:gate-plugin_clap:file"
+            "${GATE_DISPLAY_NAME}.vst3:$ENV{HOME}/.vst3:gate-plugin_vst3:dir")
     endif()
 
     if (GATE_INSTALL_SPECS)
-        add_custom_target(gate-install COMMENT "Installing every Gate format")
+        add_custom_target(gate-install COMMENT "Installing every ${GATE_DISPLAY_NAME} format")
         if (TARGET gate-prepare-auv2)
             add_dependencies(gate-install gate-prepare-auv2)
         endif()

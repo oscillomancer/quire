@@ -31,7 +31,7 @@ cmake --build --preset dev -j6
 build/dev/plugins/gate/engine/gate-engine.tests
 ctest --test-dir build/dev/plugins/gate --output-on-failure
 ctest --test-dir build/dev -j6 --output-on-failure
-tools/validator/run.sh build/dev/plugins/clap/Gate.clap
+tools/validator/run.sh build/dev/plugins/clap/Sluice.clap
 git diff --check
 tools/ci/format.sh --check
 python3 tools/license-check/check.py --root .
@@ -53,7 +53,7 @@ build/dev/plugins/gate/gate-gui-preview 20 build/dev/gate-default.ppm 1 default
 build/dev/plugins/gate/gate-gui-preview 20 build/dev/gate-drums.ppm 1 drums
 magick build/dev/gate-default.ppm build/dev/gate-default.png
 magick build/dev/gate-drums.ppm build/dev/gate-drums.png
-build/dev/plugins/gate/gate-linux-host-probe build/dev/plugins/clap/Gate.clap build/dev/gate-host.ppm
+build/dev/plugins/gate/gate-linux-host-probe build/dev/plugins/clap/Sluice.clap build/dev/gate-host.ppm
 magick build/dev/gate-host.ppm build/dev/gate-host.png
 ```
 

@@ -4,7 +4,7 @@
 #include "supple/params/params.h"
 #include "supple/patch/patch.h"
 namespace supple::drive {
-inline constexpr char kDisplayName[] = "Kiln";
+inline constexpr char kDisplayName[] = SUPPLE_DRIVE_DISPLAY_NAME;
 enum ParamId : uint32_t {
     kCurve,
     kDrive,

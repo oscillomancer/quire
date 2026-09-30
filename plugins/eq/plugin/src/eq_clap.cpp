@@ -20,7 +20,6 @@
 #include <chrono>
 #include <thread>
 #include "EqParams.h"
-#include "eq/identity.h"
 #include "eq/processor.h"
 #include "eq_entry.h"
 #include "supple/clap/plugin_support.h"

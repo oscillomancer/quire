@@ -9,7 +9,7 @@ ctest --test-dir build/dev -j6 --output-on-failure
 ctest --test-dir build/dev -R eq --output-on-failure
 ```
 
-The CLAP artifact is in `build/dev/plugins/clap/`, named from `identity.cmake`.
+The CLAP artifact is in `build/dev/plugins/clap/`, named from `cmake/Identity.cmake`.
 `SUPPLE_PLUGIN_VST3=ON` enables the template wrapper's optional VST3 format.
 Neither a build nor a preview installs into a host's scan path.
 

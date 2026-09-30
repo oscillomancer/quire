@@ -2,9 +2,9 @@
 
 Instantiated Nate's MIT template, without changing its source repository. Identity
 renames are Eq / eq / EQ, CLAP `com.suppleaudio.eq`, state magic `QEQ1`, AU subtype
-`QEq_`. The display name is configured once in `identity.cmake`; CMake artifacts,
-the descriptor and editor read the generated identity. The source license stays
-MIT under ADR-0011, overriding the template's product-license recommendation.
+`QEq_`. The display name is defined once in `cmake/Identity.cmake`; CMake artifacts,
+the descriptor and editor read the engine's display-name compile definition.
+The source license stays MIT under ADR-0011, overriding the template's product-license recommendation.
 
 The SDK-free `engine` replaces the template identity DSP. Its permanent table
 has 59 parameters. The format layer forwards physical values, normalized host

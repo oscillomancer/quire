@@ -5,7 +5,7 @@ sidechain, lookahead and a latency-aligned dry/wet mix. The display name lives
 once in `engine/include/gate/params.h`; code and artifact identity use `gate`.
 
 Build: `cmake --preset dev && cmake --build --preset dev -j6` from the
-monorepo. Artifact: `build/dev/plugins/clap/Gate.clap`.
+monorepo. Artifact: `build/dev/plugins/clap/Sluice.clap`.
 
 Preview: `build/dev/plugins/gate/gate-gui-preview 20 build/dev/gate-default.ppm
 1 default` (or `drums`). Tests and previews need no audio device. The MIT
