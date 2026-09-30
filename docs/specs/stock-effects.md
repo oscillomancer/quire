@@ -344,13 +344,12 @@ Implementation decisions (2026-09-30):
   one-pole. Total gain is bounded to +/-12 dB because only one part is
   nonzero at a time. Sensitivity zero disables shaping. No threshold/key.
 - Clip is `tanh`, unity small-signal slope, applied after shaping and before
-  mix/output. The shared oversampler had not landed at implementation start;
-  the local 2x pair uses 257-tap Kaiser (beta 11) windowed-sinc half-band FIRs,
-  128 high-rate samples of group delay per FIR, 128 base samples total.
-  The dry path has the exact same integer delay. Clip off has zero delay;
-  `clip` is non-automatable and requests restart, retaining the old DSP and
-  latency until reactivation. Output gain can raise clipped peaks; clip is
-  a tone control, not a ceiling limiter.
+  mix/output. The shared `dsp::Oversampler` at 2x uses a 145-tap Kaiser
+  (beta 11) half-band pair with 72 base samples of round-trip delay. The dry
+  path and reported latency follow the prepared oversampler's integer delay.
+  Clip off has zero delay; `clip` is non-automatable and requests restart,
+  retaining the old DSP and latency until reactivation. Output gain can raise
+  clipped peaks; clip is a tone control, not a ceiling limiter.
 - Appended readonly host meters: `input_level`, `output_level` (sample peak
   dBFS, -120..40), and `gain` (average shaping dB, -12..12), every 50 ms.
   The visible editor gets the same frames; its 900 x 560 design plots two

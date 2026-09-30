@@ -202,34 +202,58 @@ TEST_CASE("transient stereo link and sample rate timing") {
         CHECK(p.shapingGain() == doctest::Approx(12 * (1 - std::exp(-1.))).epsilon(.02));
     }
 }
-TEST_CASE("transient clip exact latency, dry alignment and passband") {
+TEST_CASE("transient clip exact latency, dry alignment, reset and passband") {
     for (double sr : {44100., 48000., 96000., 192000.}) {
+        CAPTURE(sr);
         auto v = defaults();
         v[kClip] = 1;
         Processor p;
         REQUIRE(p.prepare(sr, 4096));
+        CHECK(p.latency() == 0);
         p.setParam(kClip, 1);
-        CHECK(p.latency() == 128);
+        dsp::Oversampler os;
+        os.prepare(2);
+        CHECK(p.latency() == os.latency());
+        CHECK(p.latency() == 72);
+        const auto delay = p.latency();
         auto a = silence(1024);
         a[0][0] = a[1][0] = 1e-5;
         auto b = render(a, v, sr);
         auto it = std::max_element(b[0].begin(), b[0].end());
-        CHECK(static_cast<std::size_t>(it - b[0].begin()) == p.latency());
+        CHECK(static_cast<std::size_t>(it - b[0].begin()) == delay);
+        // Reset must clear both histories while retaining prepared FIR coefficients.
+        auto resetOut = silence(a[0].size());
+        const double* in[]{a[0].data(), a[1].data()};
+        double* out[]{resetOut[0].data(), resetOut[1].data()};
+        p.process(in, out, static_cast<std::uint32_t>(a[0].size()));
+        CHECK(resetOut == b);
+        p.reset();
+        p.process(in, out, static_cast<std::uint32_t>(a[0].size()));
+        CHECK(resetOut == b);
         v[kMix] = 0;
+        a = sine(sr, .04, .3, 997);
+        for (auto& sample : a[1]) sample *= -.37;
         b = render(a, v, sr);
-        for (std::size_t i = 0; i < b[0].size(); ++i)
-            CHECK(b[0][i] == (i < 128 ? 0 : a[0][i - 128]));
+        for (std::size_t c = 0; c < a.size(); ++c)
+            for (std::size_t i = 0; i < b[c].size(); ++i)
+                CHECK(b[c][i] == (i < delay ? 0 : a[c][i - delay]));
         v[kMix] = 100;
+        double worst = 0;
         for (double ratio : {.01, .1, .2, .3, .4, .45}) {
             a = sine(sr, .04, 1e-5, sr * ratio);
             b = render(a, v, sr);
             const double error = db(rms(b[0], 1024, b[0].size() - 256) /
-                                    rms(a[0], 1024 - 128, a[0].size() - 256 - 128));
+                                    rms(a[0], 1024 - delay, a[0].size() - 256 - delay));
             CHECK(std::abs(error) < .01);
+            worst = std::max(worst, std::abs(error));
         }
+        std::printf("%s clip %.0f Hz: %u samples, stereo dry exact, worst passband %.6f dB\n",
+                    kName, sr, delay, worst);
         a = sine(sr, .05, 3, sr * .1);
         b = render(a, v, sr);
         for (auto x : b[0]) CHECK(std::isfinite(x));
+        p.setParam(kClip, 0);
+        CHECK(p.latency() == 0);
     }
 }
 TEST_CASE("transient clip suppresses folded harmonics versus base-rate tanh") {

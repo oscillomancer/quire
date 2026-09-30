@@ -52,7 +52,7 @@ constexpr ParamSpec specs[] = {
      .name = "Clip",
      .group = "Output",
      .type = Type::Bool,
-     .description = "2x tanh soft clip; 128 samples latency, restart required.",
+     .description = "2x tanh soft clip; 72 samples latency, restart required.",
      .flags = 0},
     {.id = kMix,
      .key = "mix",
@@ -133,5 +133,4 @@ std::string describe(const Values& v, patch::Detail detail) {
     }
     return text;
 }
-std::uint32_t latencyFor(const Values& v) SUPPLE_RT { return v[kClip] > .5 ? kClipLatency : 0; }
 }  // namespace supple::transient

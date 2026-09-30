@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include "supple/dsp/dsp.h"
+#include "supple/dsp/oversampler.h"
 #include "transient/params.h"
 namespace supple::transient {
 class Processor {
@@ -15,7 +16,9 @@ class Processor {
     Status prepare(double sampleRate, std::uint32_t maxFrames, int channels = 2);
     void reset() SUPPLE_RT;
     void setParam(std::size_t, double physical) SUPPLE_RT;
-    std::uint32_t latency() const SUPPLE_RT { return latencyFor(target_); }
+    std::uint32_t latency() const SUPPLE_RT {
+        return target_[kClip] > .5 ? oversamplers_[0].latency() : 0;
+    }
     double shapingGain() const SUPPLE_RT { return gainDb_; }
     Telemetry takeTelemetry() SUPPLE_RT;
     template <class T>
@@ -45,14 +48,6 @@ class Processor {
     }
 
   private:
-    // Local 2x half-band pair: 257-tap Kaiser(beta=11) windowed sinc.
-    // Each FIR has 128 high-rate samples delay; the pair is 128 base samples.
-    static constexpr std::size_t kTaps = 257;
-    struct Fir {
-        std::array<double, kTaps> history{};
-        std::size_t head = 0;
-        double run(double, const std::array<double, kTaps>&) SUPPLE_RT;
-    };
     struct Peak {
         std::uint64_t time = 0;
         double value = 0;
@@ -60,9 +55,8 @@ class Processor {
     void tick(const std::array<double, 2>&, std::array<double, 2>&) SUPPLE_RT;
     double detect(double) SUPPLE_RT;
     Values target_, current_;
-    std::array<double, kTaps> taps_{};
-    std::array<Fir, 2> up_{}, down_{};
-    std::array<std::array<double, kClipLatency + 1>, 2> dry_{};
+    std::array<dsp::Oversampler, 2> oversamplers_;
+    std::array<std::vector<double>, 2> dry_;
     std::vector<Peak> peaks_;
     std::size_t read_ = 0, write_ = 0, dryHead_ = 0;
     std::uint64_t clock_ = 0;
