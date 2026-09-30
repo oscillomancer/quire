@@ -1,7 +1,7 @@
 # REAPER CLAP acceptance (P3.10)
 
 On-demand Linux REAPER load, offline render, automation and state checks for
-stock CLAP artifacts. Python 3.10+, standard library only. REAPER is a local
+stock CLAP artifacts, with an optional floating-editor check. Python 3.10+, standard library only. REAPER is a local
 runtime requirement, **not a build dependency**. This tool is deliberately
 not registered with CTest or `tools/ci/run-all.sh`.
 
@@ -9,6 +9,8 @@ not registered with CTest or `tools/ci/run-all.sh`.
 cmake --preset dev
 cmake --build --preset dev -j6
 python3 tools/reaper-check/check.py --build-dir build/dev
+# Open, confirm and close floating editors (requires a desktop display):
+python3 tools/reaper-check/check.py --build-dir build/dev --editor
 # A focused run, another preset or an explicit executable:
 python3 tools/reaper-check/check.py --build-dir build/release --plugin com.suppleaudio.utility
 python3 tools/reaper-check/check.py --reaper /usr/lib/REAPER/reaper --timeout 30
@@ -25,7 +27,8 @@ SHA-256 hashes, so a retained artifact from an earlier branch is identifiable.
 
 Outputs go to a fresh `build/reaper-check/<timestamp>-<random>/` directory:
 `report.json` (schema, REAPER version, exact command arrays, table, measurements
-and errors), console table, logs, generated scripts, REAPER-saved RPPs, WAVs
+and errors, plus editor status/reason when requested), console table, logs,
+generated scripts, REAPER-saved RPPs, WAVs
 and configuration checksum listings. Exit 0 means all selected artifacts
 passed; any failed check, timeout, launch error, interruption or user-config
 change returns nonzero. A missing REAPER executable/build is an argument error.
@@ -47,8 +50,9 @@ The Linux dummy system is selected by `linux_audio_mode=3`; the script checks
 then calls `Audio_Quit()` (also closes MIDI). Offline renders use
 `-renderproject <absolute RPP>` and exit. Private MIDI input/output masks are
 zero, and JACK/PipeWire/Pulse server environment settings prevent an accidental
-connection to the workstation's servers. No plugin editor is opened. REAPER's
-main/render windows may appear briefly; the tool never operates the GUI.
+connection to the workstation's servers. Editors are opened only with `--editor`.
+REAPER's main/render/editor windows may appear briefly; the tool uses public
+ReaScript calls and never synthesizes desktop input.
 
 Every invocation has a timeout (default 20 seconds) and a new process group.
 The group is terminated and then killed on timeout/interruption; scanner
@@ -62,6 +66,26 @@ file types, SHA-256 contents and symlink targets. Access times are ignored
 because reads change them. Any difference stops the suite loudly, preserving
 the two listings; it does not attempt to restore or overwrite user files.
 Concurrent user edits to that tree also correctly trip the guard.
+
+## Optional editor acceptance
+
+`--editor` adds one invocation per plugin, reopening the saved default project
+under the same private configuration, timeout, process-group cleanup and user
+configuration guards. `TrackFX_Show(...,3)` requests a floating editor. Deferred
+callbacks let REAPER process window events; both `TrackFX_GetFloatingWindow()`
+and `TrackFX_GetOpen()` must confirm it is shown. The script then hides the
+floating window and chain and confirms both indicators are closed before
+quitting. Confirmation is bounded to three seconds; the outer process timeout
+still bounds a hung plugin/host call. Errors also attempt to close the editor.
+
+The console/report add an `editor` pass/fail/skipped column and an
+`editor_reason`. Without the flag, editor acceptance is skipped with the reason
+`--editor not requested`. A requested editor failure makes the whole run fail. Once the default project
+loads, editor acceptance runs even if signal or automation acceptance fails.
+A display server is required for this mode. It verifies REAPER's floating UI
+state, not pixel appearance or control interaction. Screenshots are not captured;
+no desktop capture dependency or REAPER extension is needed. Logs and the
+`editor.tsv` host observations are retained beside the projects.
 
 ## Fixtures and expectations
 
