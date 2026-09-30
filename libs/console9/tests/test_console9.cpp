@@ -168,10 +168,11 @@ void staticNull(bool encoder) {
     }
 }
 template <class Port, class T>
-Audio<T> ramped(int block) {
+Audio<T> ramped(int block, bool linear = false) {
     auto input = signal<T>(48000);
     Audio<T> output(input.l.size());
     Port stage;
+    stage.setLinear(linear);
     stage.reset(seedsFor(1, 2));
     stage.set(.2, .1);
     for (size_t off = 0; off < input.l.size();) {
@@ -196,10 +197,10 @@ Audio<T> ramped(int block) {
     return output;
 }
 template <class Port, class T>
-void splitTest() {
-    const auto a = ramped<Port, T>(4096);
+void splitTest(bool linear = false) {
+    const auto a = ramped<Port, T>(4096, linear);
     for (int n : {1, 7, 64, 512}) {
-        const auto b = ramped<Port, T>(n);
+        const auto b = ramped<Port, T>(n, linear);
         CHECK(std::equal(a.l.begin(), a.l.end(), b.l.begin(), identical<T>));
         CHECK(std::equal(a.r.begin(), a.r.end(), b.r.begin(), identical<T>));
     }
@@ -445,4 +446,124 @@ TEST_CASE("Console9 caller-sized fader ramp is linear and zero-length processing
     reference.process(in, refOut, 1);
     CHECK(identical(l, rl));
     CHECK(identical(r, rr));
+}
+namespace {
+template <class Port, class T>
+std::array<T, 2> tick(Port& stage, T x, T y) {
+    std::array<T, 2> output{};
+    if constexpr (std::is_same_v<Port, MonoChannel> || std::is_same_v<Port, MonoBuss>)
+        stage.process(&x, &output[0], 1);
+    else {
+        const T* in[]{&x, &y};
+        T* out[]{&output[0], &output[1]};
+        stage.process(in, out, 1);
+    }
+    return output;
+}
+template <class Port, class T>
+void linearState() {
+    Port stage, control;
+    stage.setNative(.71f, .3f);
+    control.setNative(.71f, .3f);
+    const auto seeds = seedsFor(45, 67);
+    stage.reset(seeds);
+    control.reset(seeds);
+    CHECK(tick(stage, T(0), T(0)) == tick(control, T(0), T(0)));
+    stage.setLinear(true);
+    for (int i = 0; i < 1000; ++i) {
+        const auto silent = tick(stage, T(0), T(0));
+        CHECK(silent[0] == 0);
+        CHECK(silent[1] == 0);
+    }
+    const auto tiny = tick(stage, T(1e-25), T(-1e-25));
+    CHECK(std::abs(double(tiny[0])) < 1e-24);
+    CHECK(tiny[0] > 0);  // No denormal replacement, and the actual tiny input survives.
+    const auto bad =
+        tick(stage, std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::infinity());
+    CHECK(bad[0] == 0);
+    CHECK(bad[1] == 0);
+    stage.setLinear(false);
+    const auto actual = tick(stage, T(0), T(0)), expected = tick(control, T(0), T(0));
+    CHECK(identical(actual[0], expected[0]));
+    CHECK(identical(actual[1], expected[1]));
+}
+template <class Port, class T>
+void smallSignal() {
+    for (float B : {.05f, .5f, 1.f})
+        for (float A : {.25f, .5f, .75f}) {
+            Port curves, linear;
+            curves.setNative(B, A);
+            linear.setNative(B, A);
+            linear.setLinear(true);
+            auto seeds = seedsFor(4, 5);
+            curves.reset(seeds);
+            linear.reset(seeds);
+            for (int i = 1; i <= 31; ++i) {
+                const T x = T(double(i) * (std::is_same_v<T, float> ? 1e-10 : 1e-18));
+                const auto on = tick(curves, x, T(-x)), off = tick(linear, x, T(-x));
+                for (size_t c = 0;
+                     c < (std::is_same_v<Port, MonoChannel> || std::is_same_v<Port, MonoBuss> ? 1u
+                                                                                              : 2u);
+                     ++c) {
+                    int exponent = 0;
+                    std::frexp(std::abs(double(off[c])), &exponent);
+                    const double ulp = std::ldexp(1., exponent - std::numeric_limits<T>::digits);
+                    // Float has upstream +/-one-ulp dither; double has arithmetic roundoff only.
+                    CHECK(std::abs(double(on[c]) - double(off[c])) <=
+                          ulp * (std::is_same_v<T, float> ? 2 : 16));
+                }
+            }
+        }
+}
+template <class T>
+void linearNeutral() {
+    Channel channel;
+    Buss buss;
+    channel.setLinear(true);
+    buss.setLinear(true);
+    const double pan = std::sin(.785398165);
+    for (int e = -40; e <= 20; ++e)
+        for (double sign : {-1., 1.}) {
+            const T x = T(sign * std::ldexp(1., e));
+            const auto encoded = tick(channel, x, x);
+            const auto output = tick(buss, encoded[0], encoded[1]);
+            const T expected = T(double(x) * .763932022500211 * .6180339887498949 * 2 * pan * pan);
+            CHECK(identical(output[0], expected));
+            CHECK(identical(output[1], expected));
+        }
+}
+}  // namespace
+TEST_CASE("Console9 linear neutral cascade is exactly the specified gain and has no clipping") {
+    linearNeutral<float>();
+    linearNeutral<double>();
+}
+TEST_CASE("Console9 linear preserves small-signal gains within float dither and double roundoff") {
+    smallSignal<Channel, float>();
+    smallSignal<Channel, double>();
+    smallSignal<Buss, float>();
+    smallSignal<Buss, double>();
+    smallSignal<MonoChannel, float>();
+    smallSignal<MonoChannel, double>();
+    smallSignal<MonoBuss, float>();
+    smallSignal<MonoBuss, double>();
+}
+TEST_CASE("Console9 linear makes no noise or RNG progress in every stage and precision") {
+    linearState<Channel, float>();
+    linearState<Channel, double>();
+    linearState<Buss, float>();
+    linearState<Buss, double>();
+    linearState<MonoChannel, float>();
+    linearState<MonoChannel, double>();
+    linearState<MonoBuss, float>();
+    linearState<MonoBuss, double>();
+}
+TEST_CASE("Console9 linear ramps are bit exact across partitions") {
+    splitTest<Channel, float>(true);
+    splitTest<Channel, double>(true);
+    splitTest<Buss, float>(true);
+    splitTest<Buss, double>(true);
+    splitTest<MonoChannel, float>(true);
+    splitTest<MonoChannel, double>(true);
+    splitTest<MonoBuss, float>(true);
+    splitTest<MonoBuss, double>(true);
 }

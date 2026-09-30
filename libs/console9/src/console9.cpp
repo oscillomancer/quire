@@ -91,6 +91,10 @@ void Stage<E, S>::reset(Seeds seeds) {
     seeds_ = {std::max(seeds.left, uint32_t(16386)), std::max(seeds.right, uint32_t(16386))};
 }
 template <bool E, bool S>
+void Stage<E, S>::setLinear(bool linear) {
+    linear_ = linear;
+}
+template <bool E, bool S>
 void Stage<E, S>::coefficients() {
     trim_ = gain_.value * (E ? 0.763932022500211 : 2.0);
     if constexpr (S) {
@@ -110,7 +114,7 @@ void Stage<E, S>::setNative(float fader, float pan, uint32_t rampSamples) {
     set(shape(double(std::clamp(fader, 0.f, 1.f)) * 2.0), double(pan), rampSamples);
 }
 template <bool E, bool S>
-template <class T>
+template <class T, bool Linear>
 void Stage<E, S>::render(const T* left, const T* right, T* outLeft, T* outRight, uint32_t frames) {
     for (uint32_t i = 0; i < frames; ++i) {
         if (gain_.remaining || angle_.remaining) {
@@ -123,18 +127,23 @@ void Stage<E, S>::render(const T* left, const T* right, T* outLeft, T* outRight,
         if constexpr (S) samples[1] = double(right[i]);
         for (uint32_t c = 0; c < (S ? 2u : 1u); ++c) {
             double x = std::isfinite(samples[c]) ? samples[c] : 0;
-            auto& state = c == 0 ? seeds_.left : seeds_.right;
-            if (std::fabs(x) < 1.18e-23) x = state * 1.18e-17;
-            if constexpr (!E) x = curve<false>(x);
+            if constexpr (Linear) {
+                if constexpr (!E) x *= 0.6180339887498949;
+            } else {
+                auto& state = c == 0 ? seeds_.left : seeds_.right;
+                if (std::fabs(x) < 1.18e-23) x = state * 1.18e-17;
+                if constexpr (!E) x = curve<false>(x);
+            }
             if constexpr (S)
                 x = x * (c == 0 ? left_ : right_) * trim_;
             else
                 x = x * trim_;
-            if constexpr (E) {
+            if constexpr (E && !Linear) {
                 x *= 0.618033988749895;
                 x = curve<true>(x);
             }
-            const T result = static_cast<T>(dither<T>(x, state));
+            if constexpr (!Linear) x = dither<T>(x, c == 0 ? seeds_.left : seeds_.right);
+            const T result = static_cast<T>(x);
             if (c == 0)
                 outLeft[i] = result;
             else
@@ -143,28 +152,37 @@ void Stage<E, S>::render(const T* left, const T* right, T* outLeft, T* outRight,
     }
 }
 template <bool E, bool S>
+template <class T>
+void Stage<E, S>::dispatch(const T* left, const T* right, T* outLeft, T* outRight,
+                           uint32_t frames) {
+    if (linear_)
+        render<T, true>(left, right, outLeft, outRight, frames);
+    else
+        render<T, false>(left, right, outLeft, outRight, frames);
+}
+template <bool E, bool S>
 void Stage<E, S>::process(const float* const* in, float* const* out, uint32_t n)
     requires(S)
 {
-    render(in[0], in[1], out[0], out[1], n);
+    dispatch(in[0], in[1], out[0], out[1], n);
 }
 template <bool E, bool S>
 void Stage<E, S>::process(const double* const* in, double* const* out, uint32_t n)
     requires(S)
 {
-    render(in[0], in[1], out[0], out[1], n);
+    dispatch(in[0], in[1], out[0], out[1], n);
 }
 template <bool E, bool S>
 void Stage<E, S>::process(const float* in, float* out, uint32_t n)
     requires(!S)
 {
-    render(in, static_cast<const float*>(nullptr), out, static_cast<float*>(nullptr), n);
+    dispatch(in, static_cast<const float*>(nullptr), out, static_cast<float*>(nullptr), n);
 }
 template <bool E, bool S>
 void Stage<E, S>::process(const double* in, double* out, uint32_t n)
     requires(!S)
 {
-    render(in, static_cast<const double*>(nullptr), out, static_cast<double*>(nullptr), n);
+    dispatch(in, static_cast<const double*>(nullptr), out, static_cast<double*>(nullptr), n);
 }
 template class Stage<true, true>;
 template class Stage<false, true>;

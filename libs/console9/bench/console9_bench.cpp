@@ -7,9 +7,10 @@
 using namespace supple::console9;
 namespace {
 template <class Stage, class T>
-void bench(const char* name, bool ramp) {
+void bench(const char* name, bool ramp, bool linear = false) {
     constexpr uint32_t block = 512, loops = 4096;
     Stage stage;
+    stage.setLinear(linear);
     stage.reset(seedsFor(123, 456));
     std::vector<T> in(block), l(block), r(block);
     for (uint32_t i = 0; i < block; ++i) in[i] = T(.1 * std::sin(double(i) * .1));
@@ -24,9 +25,9 @@ void bench(const char* name, bool ramp) {
     const auto end = std::chrono::steady_clock::now();
     const double ns =
         std::chrono::duration<double, std::nano>(end - start).count() / (double(loops) * block);
-    std::printf("%-7s %2zu %-8s %.3f ns/stereo-frame %.4f%% core@48k checksum=%.9g\n", name,
-                sizeof(T) * 8, ramp ? "ramping" : "constant", ns, ns * 48000 / 1e7,
-                double(l[17]) + double(r[31]));
+    std::printf("%-7s %2zu %-6s %-8s %.3f ns/stereo-frame %.4f%% core@48k checksum=%.9g\n", name,
+                sizeof(T) * 8, linear ? "linear" : "curves", ramp ? "ramping" : "constant", ns,
+                ns * 48000 / 1e7, double(l[17]) + double(r[31]));
 }
 }  // namespace
 int main() {
@@ -38,4 +39,12 @@ int main() {
     bench<Channel, double>("channel", true);
     bench<Buss, double>("buss", false);
     bench<Buss, double>("buss", true);
+    bench<Channel, float>("channel", false, true);
+    bench<Channel, float>("channel", true, true);
+    bench<Buss, float>("buss", false, true);
+    bench<Buss, float>("buss", true, true);
+    bench<Channel, double>("channel", false, true);
+    bench<Channel, double>("channel", true, true);
+    bench<Buss, double>("buss", false, true);
+    bench<Buss, double>("buss", true, true);
 }

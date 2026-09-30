@@ -24,6 +24,20 @@ one input/output pointer, with the AU mono kernels' fader-only behaviour;
 their pan argument is ignored. Double mono processing follows the stereo
 reference's double convention. No stage has a sample-rate argument.
 
+`setLinear(true)` selects the level-matched Console 9 off mode (amended
+ADR-0019 §6); default is curves on. It keeps the native fader, pan law and
+ramps. Channel skips both the ×0.618 pre-scale and encoder curve, retaining
+`x * pan * (gain * 0.763932022500211)`. Buss substitutes its small-signal slope
+for the decoder: `x * 0.6180339887498949 * pan * (gain * 2.0)`. Mono uses the
+same formulas without pan. There is no clipping, denormal replacement,
+dither or RNG progress in linear mode; actual tiny inputs are preserved
+through ordinary arithmetic and silence stays silent. The nonfinite-input
+policy still applies. Gain terms retain the reference's multiplication
+order, including float rounding between stages. Mode selection dispatches
+once per block to a separate sample loop. It preserves settings and RNG
+state; switching/crossfading is a plan-level responsibility, with no internal
+mode ramp. There is no separate unity-gain mixer mode.
+
 `set(g,A,n)` takes linear gain g=f(2B), clamped to 0…4, and native pan A,
 clamped to 0…1; n=0 is immediate. `setNative(float B,float A,n)` computes the
 native fader using the original promotion/order and constants. Gain and pan
@@ -98,6 +112,6 @@ build/release/libs/console9/console9-bench
 ```
 
 Reports ns per stereo frame and `% of one core = ns * 48000 / 1e7`, for
-Channel/Buss, float/double, stationary and changing gain/pan. Timing is an
+Channel/Buss, float/double, curves/linear, stationary and changing gain/pan. Timing is an
 observation, never a test pass/fail criterion. See `VERIFICATION.md` for the
 measured null table, benchmark numbers and commands.

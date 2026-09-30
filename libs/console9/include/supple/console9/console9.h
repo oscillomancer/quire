@@ -25,6 +25,9 @@ class Stage {
     // Reset only the RNG streams. Settings and pending ramps remain unchanged.
     // Invalid seed words are clamped to the reference constructor's lower bound.
     void reset(Seeds seeds) SUPPLE_RT;
+    // Plan-level choice: preserve gains/pan, omit curves/noise/dither and RNG advances.
+    // Does not alter parameters, ramps or seeds; no internal mode crossfade.
+    void setLinear(bool linear) SUPPLE_RT;
     // Gain is f(2B), pan is native A. Zero ramp length applies immediately.
     // Call on the audio thread; retargeting starts from the current ramp position.
     void set(double gain, double pan = .5, uint32_t rampSamples = 0) SUPPLE_RT;
@@ -50,12 +53,15 @@ class Stage {
         void set(double v, uint32_t samples);
         double next();
     };
-    template <class T>
+    template <class T, bool Linear>
     void render(const T* left, const T* right, T* outLeft, T* outRight, uint32_t frames);
+    template <class T>
+    void dispatch(const T* left, const T* right, T* outLeft, T* outRight, uint32_t frames);
     void coefficients();
     Ramp gain_, angle_;
     double trim_ = 0, left_ = 0, right_ = 0;
     Seeds seeds_{};
+    bool linear_ = false;
 };
 }  // namespace detail
 

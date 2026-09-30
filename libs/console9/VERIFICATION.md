@@ -1,7 +1,8 @@
 # Console 9 worker verification
 
-Branch `p1-console9`, base `8fdb7bb`. Reviewed and approved by the orchestrator. Integration and
-STATUS changes are orchestrator work. No `host/` changes.
+Branch `p1-console9`, base `8fdb7bb`. Port `82d6c2e` reviewed and approved by
+the orchestrator; the linear addition awaits review. Integration and STATUS
+changes are orchestrator work. No `host/` changes.
 
 ## Null acceptance
 
@@ -66,10 +67,10 @@ exactly by the coefficient-injection diagnostic. Ramp split tests compare
 sample bits, including signed zero, for blocks 1/7/64/512/4096 in all four
 stage types and both precisions, including retargeting.
 
-## Release benchmark
+## Release benchmark (reviewed port)
 
 Clang Release, workstation observation, 512-frame blocks ×4096 iterations
-following 32 warm-up blocks. No full CI/build ran concurrently with timing.
+following 32 warm-up blocks. This worktree's CI/build was idle during timing.
 
 | Stage | Bits | Settings | ns/stereo frame | One core at 48 kHz |
 |---|---:|---|---:|---:|
@@ -117,3 +118,81 @@ Full matrix: `tools/ci/run-all.sh` once, outside the sandbox for sockets.
 License, format and all six presets passed. No sample-rate API, device access,
 engine integration or stock-plugin changes: this task supplies the DSP
 library only. No open implementation questions.
+
+## Level-matched linear addition
+
+Nate's decision/amended ADR-0019 §6: `setLinear(true)` retains fader gain,
+pan law and ramps, skipping only curves, denormal replacement and dither.
+Channel also skips the ×0.618 pre-scale (its product with the encoder's
+small-signal slope is unity); Buss uses the exact slope 0.6180339887498949
+before pan and fader. Dispatch selects a separate loop once per block.
+There is no RNG advance, noise, clipping or internal mode crossfade. A plan
+rebuild controls the on/off transition. Nonfinite input is still treated as
+zero. All four stages support the mode, and it defaults off (curves on).
+
+Tests verify exact neutral cascade gain over signed powers-of-two from
+2^−40 to 2^20, with no clipping; small signals versus curves within two float
+ulps (dither) or 16 double ulps (roundoff; reference double additive dither is
+disabled); bit-exact split ramps; silent zero output and actual tiny-input
+preservation; nonfinite input; and unchanged RNG progress by matching the
+next curves-on zero-input sample against a control after a prior common
+sample and 1000 linear samples. All checks cover stereo/mono and both I/O
+precisions. The full curves-on null matrix still has zero unexplained
+samples; the table above is updated to the final Release run.
+
+Commands for the addition:
+
+```sh
+cmake --build --preset dev -j6 --target console9.tests console9-bench
+build/dev/libs/console9/console9.tests -tc='Console9 linear*'
+build/dev/libs/console9/console9.tests
+cmake --build --preset release -j6 --target console9.tests console9-bench
+build/release/libs/console9/console9.tests
+build/release/libs/console9/console9-bench
+cmake --build --preset gcc -j6 --target console9.tests
+ctest --test-dir build/gcc -R '^console9\.tests$' --output-on-failure
+for preset in asan ubsan tsan rtsan; do
+  cmake --build --preset "$preset" -j6 --target console9.tests
+  ctest --preset "$preset" -R '^console9\.tests$' --output-on-failure
+done
+tools/ci/format.sh --check
+git diff --check
+sha256sum -c build/console9-upstream.sha256
+```
+
+Dev/Release: 12 cases / 70431 assertions pass. Four new cases / 19956
+assertions pass. GCC/ASan/UBSan/TSan/RTSan focused builds and complete library
+tests pass; format/diff checks and upstream hashes pass. The first direct
+ASan CTest invocation passed all assertions, then LeakSanitizer could not run
+under the sandbox's ptrace; using the repository test preset (detect_leaks=0,
+as in full CI) passed. The reviewed port's full CI passed all six presets;
+the addition reran focused library checks in all presets rather than another
+full matrix. No engine code was changed.
+
+Updated Clang Release benchmark, same setup, no build/CI in this worktree
+running during timing:
+
+| Stage | Bits | Mode | Settings | ns/stereo frame | One core at 48 kHz |
+|---|---:|---|---|---:|---:|
+| channel | 32 | curves | constant | 32.657 | 0.1568% |
+| channel | 32 | curves | ramping | 37.458 | 0.1798% |
+| buss | 32 | curves | constant | 25.417 | 0.1220% |
+| buss | 32 | curves | ramping | 35.349 | 0.1697% |
+| channel | 64 | curves | constant | 14.105 | 0.0677% |
+| channel | 64 | curves | ramping | 23.710 | 0.1138% |
+| buss | 64 | curves | constant | 13.157 | 0.0632% |
+| buss | 64 | curves | ramping | 20.727 | 0.0995% |
+| channel | 32 | linear | constant | 1.465 | 0.0070% |
+| channel | 32 | linear | ramping | 7.076 | 0.0340% |
+| buss | 32 | linear | constant | 1.525 | 0.0073% |
+| buss | 32 | linear | ramping | 7.332 | 0.0352% |
+| channel | 64 | linear | constant | 0.652 | 0.0031% |
+| channel | 64 | linear | ramping | 6.783 | 0.0326% |
+| buss | 64 | linear | constant | 0.945 | 0.0045% |
+| buss | 64 | linear | ramping | 6.905 | 0.0331% |
+
+Cleanup: `rm -rf -- build/gcc build/asan build/ubsan build/tsan build/rtsan`
+completed after verification. Dev/Release, benchmark logs and hash evidence
+are retained. No processes or audio device left running. No open
+implementation questions; follow-up review/integration remain orchestrator
+work.
