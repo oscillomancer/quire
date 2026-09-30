@@ -542,20 +542,23 @@ An original design; write its structure and constants into
   scaled by size, gains falling with time, seeded tap times (fixed seed, so
   every instance and render is identical), alternating pan; level `early`.
 - **Diffusion:** 4 series Schroeder allpasses per channel (1..12 ms scaled
-  by size, seeded), coefficient 0.7·diffusion/100.
+  by size, seeded), coefficient 0.7·diffusion/100, capped so diffuser RT60
+  stays below half the shortest requested band tail (stock-effects §7).
 - **FDN:** 16 lines, base lengths spaced geometrically over ≈ 25..95 ms with
   seeded ±5 % jitter, all × a size factor 2^((size − 50)/50·1.5)
   (≈ 0.35×..2.8×). Buffers sized in `prepare` for the largest size plus
-  modulation; size changes glide the fractional read positions (cubic
-  Hermite). Mixing: the normalized 16×16 Hadamard matrix as a fast
+  modulation; size changes glide the fractional read positions (twelve-point
+  Lagrange FDN reads; cubic Hermite for early/diffuser reads). Mixing: the
+  normalized 16×16 Hadamard matrix as a fast
   Walsh–Hadamard transform (×1/4). Input injection and the stereo output
   taps use fixed orthogonal ± sign vectors (output scaled 1/√8).
 - **Decay:** per line, the attenuation per pass for an RT60 T is
   g(T) = 10^(−3·L/(fs·T)) (L the line length in samples). Three regions:
   T_low = decay·low_decay below `crossover`, T_mid = decay, T_high =
-  decay·high_decay above `damping_freq`; realize g(T_mid) × a first-order
-  low shelf at `crossover` (DC gain g(T_low)/g(T_mid)) × a first-order high
-  shelf at `damping_freq` (Nyquist gain g(T_high)/g(T_mid)). Coefficients
+  decay·high_decay above `damping_freq`; realize g(T_mid) × a second-order
+  Butterworth-Q low shelf at `crossover` (DC gain g(T_low)/g(T_mid)) × a
+  second-order Butterworth-Q high shelf at `damping_freq` (Nyquist gain
+  g(T_high)/g(T_mid)). Coefficients
   recomputed only while decay/size/shelf parameters move (fixed 16-sample
   grid, as the EQ).
 - **Modulation:** each line's read position moves by seeded slow sinusoids
@@ -568,6 +571,8 @@ An original design; write its structure and constants into
 - **`mix`/`output`:** linear dry/wet crossfade, output gain; smoothed.
 - **Tail:** the CLAP tail extension as the delay's: infinite while frozen,
   otherwise predelay + 1.5 × the longest band RT60 + 100 ms.
+  `clap_host_tail::changed` runs from `process()` on the audio thread;
+  main-thread parameter/state edits set an atomic pending flag.
 - **CPU:** ≤ 2 % of a core per stereo instance at 48 kHz, 512-frame blocks,
   -O2 (a bench executable as the EQ's, not a test); report the number.
 - Tests (beyond §1.7): RT60 per octave band (125 Hz … 8 kHz; octave-band

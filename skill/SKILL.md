@@ -45,6 +45,7 @@ their undo history and can be reviewed.
 | Writing melodies, chords, drums, bass lines, controller moves | `guides/notation.md` |
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
 | Corrective EQ (rumble, masking, harshness) | `guides/eq.md` |
+| Early reflections, room/hall tails, held ambience | `guides/reverb.md` |
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, `generated/plugins/orrery.md` |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing, external-key ducking, or limiting master peaks | `guides/comp.md` |

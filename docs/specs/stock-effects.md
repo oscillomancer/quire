@@ -323,6 +323,124 @@ two-band decay filters derived from the RT60 targets, input allpass
 diffusion, seeded line-length jitter and modulation; tests measure RT60 per
 octave band against the parameters (within 10 %) and echo density.
 
+### Reverb implementation decisions (2026-09-30)
+
+- Identity follows the compressor: `plugins/reverb/cmake/Identity.cmake`
+  defines `REVERB_DISPLAY_NAME`; the engine receives
+  `SUPPLE_REVERB_DISPLAY_NAME`, and all artifact paths use the CMake variable.
+  CLAP id `com.suppleaudio.reverb`, state `QRV1`, AU subtype `QRvb` remain
+  functional identities. Decay multipliers use core unit `x`, with text such
+  as `1.5 x` accepted by patches and CLAP. Mono/stereo, float/double, zero latency;
+  predelay is a musical delay, not reported latency. The dry null uses mix 0;
+  defaults intentionally contain wet audio.
+- Structure: 12 early taps per input channel, then four Schroeder allpasses
+  per channel into a 16-line normalized Hadamard FDN. A private original LCG
+  (`1664525*s + 1013904223`, unsigned 32-bit wrap) starts at `0x4e415645`.
+  Line i's base milliseconds are `25*(95/25)^(i/15)*(0.95+0.1*u)`.
+  Subsequent seeded early times are `5+75*(j+0.6*u)/12` ms; gains are
+  `exp(-time/35)`, normalized to sum to 1 per input. Each tap alternates
+  80/20 and 20/80 output pan (the other input reverses it). Allpass times
+  are `(1+11*j/3)*(0.9+0.2*u)` ms. Size multiplies all times by
+  `2^((size-50)*0.03)`. Stationary lengths round to samples; early taps and
+  diffusers glide through cubic Hermite reads when size moves.
+- The feedback transform is the 16-point Walsh–Hadamard butterfly scaled
+  by 1/4. Input sign vectors are Hadamard columns 8 and 4, injected at 1/4;
+  output sign vectors are columns 1 and 2, scaled by 1/sqrt(8). They are
+  mutually orthogonal. Width acts on the combined early/late wet signal;
+  mono output takes its mid. There is no limiter or automatic level match.
+- Approved correction: decay shelves are second-order Butterworth-Q
+  (1/sqrt(2)) sections rather than the plan's first-order shelves. The latter
+  gave 11.7572% worst RT60 error in the requested matrix. Each line's mid
+  attenuation is `10^(-3*L/(fs*T))`, with DC/Nyquist shelf gains derived from
+  the low/high RT60 ratios. Geometric analog pole/zero placement holds the
+  shelf midpoint at its frequency; the bilinear transform preserves the
+  endpoints. Double-state transposed direct-form-II runs the sections, with
+  exact bypass for flat shelves. Coefficients update on a fixed 16-sample
+  grid while size/decay/filter controls move, including the final update;
+  mix, output, width and texture changes do not redesign decay filters.
+- Diffuser coefficient is `0.7*diffusion/100`, capped at
+  `10^(-3*longest_allpass_seconds/(0.5*shortest_band_RT60))`. Without this
+  cap, input diffusion itself outlasted short high-frequency tails at large
+  size (40.87% error in the expanded matrix). Defaults/hall retain the
+  planned coefficient. This cap keeps diffuser RT60 at most half the shortest
+  requested band tail. `early` uses finite -60 dB with `kOffAtMin`, exactly
+  off at the endpoint; all other values retain their finite dB gain.
+- Fractional FDN reads use an original twelve-point centred Lagrange basis,
+  precomputed at activation into 257 phases and linearly blended between
+  adjacent rows. Integer positions bypass interpolation exactly. This
+  replaces cubic FDN interpolation: with default modulation, size 20,
+  decay 8 s and damping 2 kHz, cubic gave 8 kHz T30 RT60 3.277741/3.362107 s
+  at 44.1/48 kHz against a 4 s target. The twelve-point read gives
+  3.945919/3.949229 s (1.35/1.27% error). It also serves size glides, avoiding
+  an interpolation-mode switch. Predelay, early taps and diffusers retain
+  cubic reads; predelay below one sample uses a causal linear read.
+- Each modulation oscillator has rate
+  `0.1+1.1*(i+0.7*u)/16` Hz and phase `2*pi*u`, from seed `0x53504143`.
+  A double sine/cosine rotation runs per sample; depth is at most 0.5 ms.
+  Zero modulation is exactly zero offset. All buffers are preallocated
+  powers of two, with double storage and recursive states flushed below
+  1e-30. RT processing has no allocation or synchronization.
+- Controls have finite 20 ms physical ramps; output gain ramps in amplitude.
+  Delay positions use two cascaded one-pole smoothers with 50 ms time
+  constants (critically damped); initial/restored values snap before audio.
+  Frequency targets clamp to 0.45*fs internally. The response contract is
+  22.05–384 kHz; activation also accepts 1–768000 Hz for host-validation
+  coverage, with seven-sample minimum FDN lengths and bounded shelf ratios
+  protecting unusually low rates.
+- Freeze fades wet excitation out in 10 ms, moves loop attenuation to unity,
+  removes modulation, and holds size. Held line lengths settle on the nearest
+  integer sample; full freeze bypasses the damping sections and recirculates
+  through the orthogonal matrix. This avoids interpolation loss in a held
+  tail. After unfreezing, the latest size target glides into place. The
+  measured stereo tail RMS change over the ten-second comparison is
+  -0.0326 dB. Dry input still passes according to mix.
+- Tail extension correction: `clap_host_tail::changed` is an **audio-thread**
+  callback. Main-thread edits/state loads set an atomic pending flag;
+  `process()` adopts values and notifies the host. Freeze reports UINT32_MAX;
+  otherwise tail samples are ceil(fs/1000 * (predelay + 1.5*longest_RT60_ms
+  + 100)). Tail queries are safe on either permitted thread. No restart is
+  required. A product-owned test checks state edits, inactive flush,
+  sample-offset freeze automation and callback thread placement.
+- RT60 measurements use stereo octave-filtered impulse energies (fourth-order
+  Butterworth edges), Schroeder backward integration, and a least-squares
+  -5..-35 dB T30 fit. The matrix is 44.1/48/88.2/96/192 kHz,
+  decay 0.5/2/8 s, size 20/50/90; both the default decay shape and
+  low_decay 1.5 / crossover 1 kHz / damping 2 kHz. High_decay is 0.5,
+  modulation and early taps off for these static measurements. Bands at least
+  an octave from both transition frequencies are compared with their region
+  target; other bands are measured but excluded from the plateau bound.
+
+  | Octave band | Worst absolute relative RT60 error |
+  |---:|---:|
+  | 125 Hz | 7.4396% |
+  | 250 Hz | 4.3463% |
+  | 500 Hz | 7.4759% |
+  | 1 kHz | 6.0268% |
+  | 2 kHz | 7.6802% |
+  | 4 kHz | 6.3230% |
+  | 8 kHz | 2.7007% |
+
+  The normal matrix meets 10%; default-modulation long/bright-tail coverage
+  is the separate 8 kHz measurement above. Extreme ratios, overlapping
+  transitions and the 100 ms/maximum-size corner remain approximation limits,
+  outside this measured matrix. Input cuts change excitation, not loop RT60.
+- Echo density follows the statistical definition of
+  [Abel and Huang (2006)](https://aes.org/publications/elibrary-page/?id=13819):
+  the fraction of samples outside the local standard deviation, divided by
+  erfc(1/sqrt(2)). Tests use a centred 20 ms rectangular window, 1 ms steps,
+  and a crossing sustained for 10 ms: default 67 ms, diffusion 100 at 52 ms.
+  Late-tail correlation at width 100 is 0.049305; width 0 renders identical
+  channels. Commands and CPU numbers are in `plugins/reverb/VERIFICATION.md`.
+  The engine test requires density >=0.8 by 150 ms, earlier with diffusion 100,
+  late-tail correlation magnitude <0.3 at width 100 and >0.99 at width 0.
+- The editor is 900 x 560, with the small Supple Audio header, values below
+  knobs, a bipolar output arc, decay target/input-bandwidth curves and gated
+  sample-peak telemetry. Linux previews use a fixed embedded parent so a
+  tiling window manager cannot resize the capture. CPU uses a standalone
+  `reverb-bench` executable, Clang -O2, 48 kHz stereo 512-frame blocks,
+  120 audio seconds per trial, median of five CPU-time trials with the editor
+  closed; timing is never a CTest pass/fail condition.
+
 ## 8. Utility — "Plumb" [`utility`]
 
 Keys: `gain` dB −inf..+24 (0), `pan` % −100..100 (0), `width` % 0..200 (100),
