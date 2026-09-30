@@ -379,6 +379,38 @@ stereo. Everything in §1 applies.
 - Orrery keeps its own minimum-phase decimator (voices are generated at the
   oversampled rate); do not change Orrery.
 
+## 8. Second wave: gate / expander — Sluice [`gate`] (`stock-effects.md` §3)
+
+Identity: display name Sluice, id `gate`, CLAP id `com.suppleaudio.gate`,
+state magic `QGT1`, AU subtype `QGat`, features audio-effect, gate,
+expander, stereo. Everything in §1 applies. Ports as the compressor (§3):
+main stereo plus a non-main "Sidechain" input.
+
+- Detector as the compressor's (key filters `sc_highpass`/`sc_lowpass`,
+  peak, stereo link; `sc_listen` outputs the filtered key). Reuse nothing by
+  linking across plugins: copy the few lines you need into this engine.
+- **Gate:** a state machine per linked detector — opens when the level
+  rises above `threshold`, closes when it falls below `threshold −
+  hysteresis` and `hold` has elapsed since it last exceeded the close level.
+  The gain moves between 0 dB and `range` with `attack` (opening) and
+  `release` (closing) as one-pole ramps in the dB domain (the floor is
+  `range`, not silence, unless range is −80 → treat −80 as −inf: exact zero).
+- **Expander:** downward expansion below `threshold` by `ratio`
+  (gain = (ratio − 1)·(level − threshold) dB, floored at `range`), with the
+  same attack/release ballistics and hysteresis on the threshold.
+- `lookahead` (`off`/`1ms`/`5ms`, stepped): delays the audio so the gate is
+  open when a transient arrives; latency = lookahead samples.
+- Readonly `gr` (dB) and `open` (bool) update at most every 50 ms.
+- Tests: a burst above threshold opens within attack (±10 %) and closes
+  after hold + release; hysteresis prevents chatter on a signal oscillating
+  ±2 dB around the threshold (count transitions); range −40 dB floors the
+  closed gain at −40 ± 0.1 dB, range −80 gives exact zeros; external key
+  gating a silent-keyed input keeps it closed; lookahead: the transient's
+  first sample passes at full gain; expander static curve within 0.2 dB.
+- GUI: a level/threshold meter with the hysteresis band, open/closed
+  indicator and gain history, controls grouped as the compressor's.
+  Scenarios: `default`, `drums` (hold 50 ms, range −30, key high-pass).
+
 ## 6. Engine and benchmark use
 
 Once built, the plugins are in the build's `plugins/clap/`; the engine
