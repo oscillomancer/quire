@@ -31,3 +31,17 @@ The preview needs the workstation X11 display. It synthesizes audio through the
 real processor and pre/post spectrum telemetry. See `QUIRE.md` for original
 infrastructure and product deviations. Real DAW load/automation and non-Linux
 platform acceptance remain separate checks for the orchestrator.
+
+Natural-mode CPU and analog accuracy measurements (not CTest timing assertions):
+
+```sh
+cmake --preset release -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'
+cmake --build --preset release --target eq-bench -j6
+build/release/plugins/eq/engine/eq-bench 120
+build/release/plugins/eq/engine/eq-bench --accuracy
+```
+
+The benchmark uses fixed non-flat four/eight-band patches at 48 kHz and stereo
+512-frame blocks, median of five CPU-time trials, with auto gain on and off.
+Accuracy prints worst errors and their parameters in the required domain and
+separate resonant/near-Nyquist domains. The latter have no ≤0.3 dB guarantee.

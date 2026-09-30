@@ -1,93 +1,101 @@
-# EQ worker verification — 2026-09-29
+# EQ review corrections — 2026-09-30
 
-Branch: `p3-eq`. Linux workstation, dummy/fake audio backends; no installation
-or real audio-device access. The display identity is in `identity.cmake`.
+Branch `p3-eq`, follow-up to `4b8ac5a`. Original matched-filter math implementation;
+no third-party code or dependencies added. The half-band code was removed.
+Natural uses host-rate, double-state DF2T sections with a fixed 16-sample
+coefficient grid during smoothing. Bells and shelves include a small fitted
+correction SOS. Auto gain reuses current designs and skips unchanged curves;
+control/UI response sweeps cache band designs. Minimum and linear remain intact.
 
-## Build and full matrix
+The user clarified the accuracy requirement: bells Q ≤4, shelves Q ≤1,
+f0 ≤10 kHz, through 20 kHz at 44.1/48 kHz, full ±30 dB gain range. Larger-Q
+and near-Nyquist cases are measured approximation limits. Filter-specific fits
+were explicitly approved after the requested three-point fit missed the bound.
+
+## Exact commands and results
 
 ```sh
 cmake --preset dev
 cmake --build --preset dev -j6
-ctest --test-dir build/dev -j6 --output-on-failure
+ctest --test-dir build/dev -R eq --output-on-failure
+```
+
+PASS: 3/3 — aggregate plugin tests, validator, engine. The engine includes
+normal-domain accuracy, analog/process agreement, matched Butterworth cutoff,
+block partition invariance, all-mode automation and silent tails, canonical
+patch/state and RT/host contracts. Final logs:
+`build/eq-revision-{config,build,tests}.log`.
+
+```sh
+cmake --preset release -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'
+cmake --build --preset release --target eq-bench -j6
+build/release/plugins/eq/engine/eq-bench 120
+build/release/plugins/eq/engine/eq-bench --accuracy
+```
+
+PASS: steady CPU below the ≤2× minimum budget, median of five CPU-time trials
+per fixed non-flat patch, 120 audio seconds each, 48 kHz / stereo / 512 frames:
+
+| Bands | Auto gain | Minimum (% core) | Natural (% core) | Ratio |
+|---:|---|---:|---:|---:|
+| 4 | off | 0.3103 | 0.2440 | 0.787× |
+| 8 | off | 0.6081 | 0.4259 | 0.700× |
+| 4 | on | 0.3431 | 0.3138 | 0.915× |
+| 8 | on | 0.6675 | 0.4987 | 0.747× |
+
+No benchmark is registered as a timing test. Patch definitions and measurement
+loops are in `engine/bench/eq_bench.cpp`. CPU log: `build/eq-revision-cpu.log`.
+
+Accuracy: 25 f0 values, gain in 3 dB steps, Q 0.1…4 for bells / 0.1…1 for normal
+shelves; 2049 log and 2049 linear frequency probes plus resonance probes per
+case. Both shelf directions have equal worst errors due to reciprocal design.
+
+| Domain | 44.1 kHz maximum | 48 kHz maximum |
+|---|---:|---:|
+| Normal bells | 0.173604 dB | 0.059654 dB |
+| Normal shelves | 0.254058 dB | 0.223204 dB |
+| Resonant shelves, f0 ≤10 kHz, Q 1.2…24 | 17.219869 dB | 0.840856 dB |
+| Bells near Nyquist, Q 4…24 | 1.500638 dB | 1.291749 dB |
+| Shelves near Nyquist, Q 1.2…24 | 21.030647 dB | 16.180889 dB |
+
+The last three rows are explicit limits, not ≤0.3 dB guarantees. The resonant
+shelf fit tries the analog bump, rejects unrealizable/opposite-extremum fits,
+and preserves damped analog zeros (without aliasing out-of-band zeros).
+Full worst-case coordinates: `build/eq-revision-accuracy.log`.
+
+```sh
 tools/ci/run-all.sh
 ```
 
-The initial dev build passed. One unrestricted full-CI attempt was externally
-terminated (SIGTERM, exit 143); its incomplete log is
-`build/ci-dev-unrestricted-interrupted.log`. The subsequent complete matrix
-ran in the sandbox. License and format passed; EQ passed in every preset.
-The complete matrix returned 1 because the socket tests cannot open sockets
-in this sandbox (`Operation not permitted`):
+Completed once. EQ passed all six presets, including TSan and RealtimeSanitizer;
+validators passed in dev/GCC. License and format passed. Whole-repository CI
+returned 1 only because of the onboarding-documented sandbox socket failures
+(`Operation not permitted`):
 
-| Preset | Whole-repository result | EQ result |
+| Preset | Whole repository | EQ |
 |---|---|---|
-| dev | 40/45 pass | engine, plugin, validator pass |
-| gcc | 40/45 pass | engine, plugin, validator pass |
-| asan | 36/40 pass | engine and plugin pass |
-| ubsan | 35/39 pass | engine and plugin pass |
-| tsan | 34/38 pass | engine and plugin pass |
-| rtsan | 36/40 pass | engine and plugin pass |
+| dev | 40/45 pass | plugin, validator, engine pass |
+| gcc | 40/45 pass | plugin, validator, engine pass |
+| asan | 36/40 pass | plugin, engine pass |
+| ubsan | 35/39 pass | plugin, engine pass |
+| tsan | 34/38 pass | plugin, engine pass |
+| rtsan | 36/40 pass | plugin, engine pass |
 
 Failures: `control-protocol.tests`, `sandbox.mcp-proxy`, `engine.mcp-proxy`,
-`mcp.tests`, plus `mcp.demo` in dev/GCC. These are the onboarding-documented
-sandbox limitations; no socket test was changed. Logs: `build/ci-<preset>.log`.
+`mcp.tests`, plus `mcp.demo` in dev/GCC. No socket tests were changed.
+Logs: `build/ci-<preset>.log`. Independent review also confirmed natural
+0.24/0.43% versus minimum 0.31/0.61% for four/eight bands.
 
-## Final corrections
-
-After the complete matrix, review found unbounded auto-gain compensation for
-extreme stopbands, resampling choices affected by ignored filter controls,
-and cancellation of side-only audio in spectrum telemetry. Those were corrected;
-auto gain now clamps to ±24 dB, ignored controls have bit-identical regression
-coverage, and LTAS analyzes separate stereo channels. The GUI probe measures
-actual output sample peaks rather than reading a nonexistent meter parameter.
-
-```sh
-for p in dev gcc asan ubsan tsan rtsan; do
-  cmake --build --preset "$p" --target eq-engine.tests plugin-eq -j6
-  ctest --preset "$p" \
-    -R '(^eq-engine.tests$|^plugin.eq.ctest$|^plugin.eq.validator$)' \
-    --output-on-failure
-done
-```
-
-PASS: dev and GCC 3/3 each; ASan, UBSan, TSan and RTSan 2/2 each (validator
-is intentionally excluded by those presets). Aggregate plugin CTest includes
-host-smoke stereo/mono, host contracts, semantic/state/RT checks, editor input,
-and wrapper patch checks. Logs: `build/eq-<preset>-final-{build,tests}.log`.
-
-The five-second full-range automation stress fixture was subsequently extended
-to all three phase modes and two seconds of silent tails. Phase stays fixed per
-activation, with restart behavior separately checked by the host regression.
-Linear kernel publication coalesces on a deterministic 4096-sample grid while
-all automatable targets jump every 1–64 samples. The fixture uses −480 dBFS
-noise to exercise cumulative boosts without a hidden ceiling limiter.
-
-```sh
-for p in dev gcc asan ubsan tsan rtsan; do
-  cmake --build --preset "$p" --target eq-engine.tests -j6
-  ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
-  UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
-  TSAN_OPTIONS=halt_on_error=1 RTSAN_OPTIONS=halt_on_error=1 \
-    "build/$p/plugins/eq/engine/eq-engine.tests" \
-    -tc='EQ full-range automation*'
-done
-```
-
-PASS in all six presets. Logs: `build/eq-<preset>-stress-{build,tests}.log`.
+After verification, `build/{gcc,asan,ubsan,tsan,rtsan}` were removed. Dev,
+the small release benchmark build, previews and verification logs remain.
 
 ```sh
 python3 tools/license-check/check.py --root .
 tools/ci/format.sh --check
-git diff --cached --check -- . ':!plugins/eq/cmake/*.patch'
+git diff --check
 ```
 
-PASS: 12 approved dependencies, formatting and staged whitespace. The two
-verbatim template patch files retain required blank context-line spaces and
-are excluded from the whitespace check. No new dependency
-or shared library changes. Local half-band and FFT/convolution primitives are
-documented in `QUIRE.md`.
-
-## Previews and remaining acceptance
+PASS: 12 approved dependencies, formatting and whitespace.
 
 ```sh
 build/dev/plugins/eq/eq-gui-preview 0 build/dev/eq-flat.ppm 1 flat
@@ -96,11 +104,10 @@ build/dev/plugins/eq/eq-gui-preview 0 build/dev/eq-mix.ppm 1 mix
 magick build/dev/eq-mix.ppm build/dev/eq-mix.png
 ```
 
-PASS and visually checked: `build/dev/eq-flat.png`, `build/dev/eq-mix.png`,
-1259×683 workstation captures of the 900×560 design. Rendering required access
-to the workstation X11 display outside the sandbox.
+PASS and visually checked: both captures are exactly 900×560 (≤1120×700), with
+“Supple Audio” above the display name. The Linux preview embeds in a fixed-size
+native parent, preventing the tiling WM from changing the capture dimensions.
+X11 access for rendering required execution outside the sandbox.
 
-REAPER installation/load/automation, real-device and macOS/Windows acceptance
-were not run. Independent review and `STATUS.md` updates belong to the
-orchestrator. No open worker questions; the user approved `db6`…`db96` slope
-keys. All implementation decisions are recorded in stock-effects.md §1.
+REAPER installation/load/automation and non-Linux acceptance were not run;
+independent review and STATUS.md remain with the orchestrator. No open questions.

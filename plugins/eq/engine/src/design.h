@@ -5,33 +5,20 @@
 #include <numbers>
 #include "eq/processor.h"
 namespace supple::eq {
-inline int naturalStages(int type, int slope, double frequency, double gain, double q, double fs) {
-    if (type != Bell && type != LowShelf && type != HighShelf && type != Tilt) gain = 0;
-    if (type == Tilt) q = .71;
-    if ((type == HighPass || type == LowPass) && slope != 1) {
-        constexpr int orders[] = {1, 2, 3, 4, 6, 8, 12, 16};
-        const int order = orders[slope];
-        q = order == 1 ? .71 : 1 / (2 * std::sin(std::numbers::pi / (2 * order)));
-    }
-    const double effectiveQ = q * std::pow(10., std::abs(gain) / 40.);
-    const double difficulty = effectiveQ * std::pow(std::min(frequency, fs * .49) / fs, 2);
-    int stages = 4;
-    double capacity = .25;
-    while (stages < 7 && difficulty > capacity) {
-        ++stages;
-        capacity *= 4;
-    }
-    return stages;
-}
 struct Section {
     double g = 0, k = 0, m0 = 1, m1 = 0, m2 = 0, a1 = 1, a2 = 0, a3 = 0;
-    bool first = false;
+    bool first = false, matched = false;
+    double b0 = 1, b1 = 0, b2 = 0, zA1 = 0, zA2 = 0;
     void finish() {
         a1 = 1 / (1 + g * (g + k));
         a2 = g * a1;
         a3 = g * a2;
     }
     std::complex<double> response(double hz, double fs) const {
+        if (matched) {
+            const auto z = std::polar(1., -2 * std::numbers::pi * hz / fs);
+            return (b0 + b1 * z + b2 * z * z) / (1. + zA1 * z + zA2 * z * z);
+        }
         const std::complex<double> t(0, std::tan(std::numbers::pi * hz / fs));
         if (first) return m0 + m2 * g / (t + g);
         const auto den = t * t + k * g * t + g * g;
@@ -42,11 +29,14 @@ struct Design {
     std::array<Section, 8> s{};
     int n = 0;
 };
+}  // namespace supple::eq
+#include "matched.h"
+namespace supple::eq {
 inline Design design(int type, double freq, double gain, double q, int slope, double fs,
                      bool natural) {
+    if (natural) return matchedDesign(type, freq, gain, q, slope, fs);
     Design d;
-    const double g =
-        natural ? std::numbers::pi * freq / fs : std::tan(std::numbers::pi * freq / fs);
+    const double g = std::tan(std::numbers::pi * freq / fs);
     const double a = std::pow(10., gain / 40.);
     auto add = [&](Section s) {
         s.finish();

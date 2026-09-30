@@ -4,7 +4,8 @@
 #include "eq/params.h"
 #include "supple/base/rt.h"
 namespace supple::eq {
-// The affected channel's response; channel selection is applied around each band.
+// Control/UI helpers, not RT. The affected channel's response; channel selection
+// is applied around each band.
 double magnitudeDb(const Values&, double hz, double fs);
 double bandMagnitudeDb(const Values&, std::size_t band, double hz, double fs);
 double compensationDb(const Values&, double fs);

@@ -281,8 +281,9 @@ void Editor::render(NVGcontext* vg) {
     nvgRect(vg, 0, 0, kDesignW, kDesignH);
     nvgFillColor(vg, rgb(col::ink));
     nvgFill(vg);
-    text(vg, 22, 29, supple::eq::kDisplayName, 28, col::bone);
-    text(vg, 158, 31, "PARAMETRIC EQ", 11, col::dim);
+    text(vg, 22, 13, "Supple Audio", 9, col::dust);
+    text(vg, 22, 37, supple::eq::kDisplayName, 26, col::bone);
+    text(vg, 158, 36, "PARAMETRIC EQ", 11, col::dim);
     text(vg, 44, 59, "RESPONSE  /  INPUT + OUTPUT SPECTRUM", 10, col::dust);
     text(vg, 855, 59, zoom_ ? "±12 dB" : "±24 dB", 11, col::accent, NVG_ALIGN_RIGHT);
     fillRoundRect(vg, gx, gy, gw, gh, 4, rgb(col::well));

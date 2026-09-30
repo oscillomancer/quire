@@ -17,6 +17,10 @@
 #include "Telemetry.h"
 #include "eq/processor.h"
 
+#if defined(__linux__)
+#include <X11/Xlib.h>
+#endif
+
 extern "C" void eqReadPixels(int w, int h, unsigned char* rgb);
 extern "C" void eqViewportSize(int* w, int* h);
 
@@ -25,6 +29,34 @@ using namespace eq::gui;
 
 namespace {
 constexpr double kRate = 250.0;
+#if defined(__linux__)
+// An embedded child avoids the tiling WM replacing the requested capture size.
+class PreviewParent {
+  public:
+    PreviewParent(unsigned width, unsigned height) {
+        display_ = XOpenDisplay(nullptr);
+        if (!display_) return;
+        XSetWindowAttributes attributes{};
+        attributes.override_redirect = True;
+        window_ = XCreateWindow(display_, DefaultRootWindow(display_), 0, 0, width, height, 0,
+                                CopyFromParent, InputOutput, CopyFromParent, CWOverrideRedirect,
+                                &attributes);
+        XMapWindow(display_, window_);
+        XFlush(display_);
+    }
+    ~PreviewParent() {
+        if (display_) {
+            if (window_) XDestroyWindow(display_, window_);
+            XCloseDisplay(display_);
+        }
+    }
+    uintptr_t native() const { return static_cast<uintptr_t>(window_); }
+
+  private:
+    Display* display_ = nullptr;
+    ::Window window_ = 0;
+};
+#endif
 
 class PreviewHost : public EditorHost {
   public:
@@ -111,11 +143,20 @@ int main(int argc, char** argv) {
     const int scale = argc > 3 ? std::atoi(argv[3]) : 1;
     if (scale != 1 && scale != 2) return 4;
     PreviewHost host(argc > 4 ? argv[4] : "flat");
+#if defined(__linux__)
+    PreviewParent parent(static_cast<unsigned>(kDesignW * scale),
+                         static_cast<unsigned>(kDesignH * scale));
+    if (!parent.native()) return 1;
+    Gui gui(host, false);
+    const uintptr_t nativeParent = parent.native();
+#else
     Gui gui(host, true);
+    constexpr uintptr_t nativeParent = 0;
+#endif
     Capture cap;
     gui.setFrameCallback(&capture, &cap);
     gui.setSize(static_cast<uint32_t>(kDesignW * scale), static_cast<uint32_t>(kDesignH * scale));
-    if (!gui.create() || !gui.setParent(0) || !gui.show()) return 1;
+    if (!gui.create() || !gui.setParent(nativeParent) || !gui.show()) return 1;
     // Let the X11 view realize before feeding it telemetry. Otherwise the
     // 256-slot queue fills while the map/expose travels through the server,
     // and captures contain a timing-dependent slice of the history.

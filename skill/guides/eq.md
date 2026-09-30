@@ -45,8 +45,11 @@ De-harsh the centre while preserving the sides:
 ```
 
 Minimum phase is zero reported latency and uses a bilinear design. Natural uses
-16×…128× IIR oversampling to approximate analog magnitude near Nyquist; it also has
-zero reported latency (its phase and group delay are frequency-dependent).
+matched sections without oversampling, with ≤0.3 dB measured analog-magnitude
+error through 20 kHz at 44.1/48 kHz for f0 ≤10 kHz, bells Q ≤4 and shelves Q ≤1.
+Highly resonant shelves and near-Nyquist bands have larger approximation errors
+(up to about 21 dB in the measured extreme-shelf set); inspect their actual
+response curve. Natural also reports zero latency; its IIR phase is intrinsic.
 Disabled/zero-gain bands are exact bypasses. The factory patch has a 30 Hz
 high-pass, so it intentionally removes subsonic audio; disable band1 for a flat
 null comparison. Internal frequency clamps to 0.49 × the sample rate, while the

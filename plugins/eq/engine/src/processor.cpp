@@ -2,16 +2,10 @@
 #include <algorithm>
 #include <cmath>
 #include "design.h"
-#include "halfband.h"
 #include "linear.h"
 #include "supple/dsp/dsp.h"
 namespace supple::eq {
 namespace {
-const std::vector<double>& halfCoefs() {
-    static const auto c = designHalfband(12, .02);
-    return c;
-}
-bool gainType(int t) { return t == Bell || t == LowShelf || t == HighShelf || t == Tilt; }
 struct Smooth {
     double value = 0, target = 0, step = 0;
     int remaining = 0;
@@ -39,7 +33,11 @@ struct State {
     double i1 = 0, i2 = 0;
     double sample(double x, const Section& s) {
         double y;
-        if (s.first) {
+        if (s.matched) {
+            y = s.b0 * x + i1;
+            i1 = s.b1 * x - s.zA1 * y + i2;
+            i2 = s.b2 * x - s.zA2 * y;
+        } else if (s.first) {
             const double v = (x - i2) * s.g / (1 + s.g);
             const double low = v + i2;
             i2 = low + v;
@@ -58,74 +56,60 @@ struct State {
 struct Band {
     std::array<Smooth, 3> p;
     std::array<std::array<State, 8>, 2> states{};
-    std::array<std::array<Halfband, 7>, 2> up, down;
     Design coefficients;
     int type = Bell, slope = 3, channel = Stereo;
-    int stages = 4, desiredStages = 4;
+    bool dirty = false;
     double wet = 0;
     bool switching = false;
     void clear() {
         for (auto& a : states)
             for (auto& s : a) s = {};
-        for (auto& a : up)
-            for (auto& f : a) f.reset();
-        for (auto& a : down)
-            for (auto& f : a) f.reset();
     }
-    double run(double x, std::size_t c, bool natural) {
-        auto filter = [&](double value) {
-            for (int k = 0; k < coefficients.n; ++k)
-                value = states[c][static_cast<std::size_t>(k)].sample(
-                    value, coefficients.s[static_cast<std::size_t>(k)]);
-            return value;
-        };
-        if (!natural) return filter(x);
-        std::array<double, 128> a{}, b{};
-        a[0] = x;
-        int count = 1;
-        for (std::size_t stage = 0; stage < static_cast<std::size_t>(stages); ++stage) {
-            for (int i = 0; i < count; ++i)
-                up[c][stage].up(a[static_cast<std::size_t>(i)], b[static_cast<std::size_t>(2 * i)],
-                                b[static_cast<std::size_t>(2 * i + 1)]);
-            count *= 2;
-            a = b;
-        }
-        for (int i = 0; i < count; ++i)
-            a[static_cast<std::size_t>(i)] = filter(a[static_cast<std::size_t>(i)]);
-        for (int stage = stages - 1; stage >= 0; --stage) {
-            for (int i = 0; i < count / 2; ++i)
-                b[static_cast<std::size_t>(i)] = down[c][static_cast<std::size_t>(stage)].process(
-                    a[static_cast<std::size_t>(2 * i)], a[static_cast<std::size_t>(2 * i + 1)]);
-            count /= 2;
-            a = b;
-        }
-        return a[0];
+    double run(double x, std::size_t c) {
+        for (int k = 0; k < coefficients.n; ++k)
+            x = states[c][static_cast<std::size_t>(k)].sample(
+                x, coefficients.s[static_cast<std::size_t>(k)]);
+        return x;
     }
 };
 }  // namespace
 double bandMagnitudeDb(const Values& v, std::size_t b, double hz, double fs) {
-    const auto i = b * kBandParams;
-    if (v[i + Enabled] < .5) return 0;
-    const int type = static_cast<int>(v[i + Type]);
-    if (gainType(type) && v[i + Gain] == 0) return 0;
-    const bool natural = v[kPhase] == 1;
-    const int stages =
-        naturalStages(type, static_cast<int>(v[i + Slope]), v[i + Freq], v[i + Gain], v[i + Q], fs);
-    const double rate = natural ? fs * static_cast<double>(1 << stages) : fs;
-    const auto d = design(type, std::min(v[i + Freq], fs * .49), v[i + Gain], v[i + Q],
-                          static_cast<int>(v[i + Slope]), rate, natural);
-    double db = 20 * std::log10(std::max(1e-300, designMagnitude(d, hz, rate)));
-    if (natural)
-        for (int s = 0; s < stages; ++s)
-            db += 2 * halfbandResponseDb(halfCoefs(), hz / (fs * static_cast<double>(2 << s)));
-    return db;
+    // Control/UI helper: reuse each band's design across a response sweep.
+    struct Cache {
+        Values values{};
+        double rate = 0;
+        std::array<Design, kBands> designs;
+    };
+    static thread_local Cache cache;
+    if (cache.rate != fs || cache.values != v) {
+        for (std::size_t band = 0; band < kBands; ++band) {
+            const auto i = band * kBandParams;
+            cache.designs[band] =
+                v[i + Enabled] < .5 ? Design{}
+                                    : design(static_cast<int>(v[i + Type]),
+                                             std::min(v[i + Freq], fs * .49), v[i + Gain], v[i + Q],
+                                             static_cast<int>(v[i + Slope]), fs, v[kPhase] == 1);
+        }
+        cache.values = v;
+        cache.rate = fs;
+    }
+    return 20 * std::log10(std::max(1e-300, designMagnitude(cache.designs[b], hz, fs)));
 }
 double compensationDb(const Values& v, double fs) {
     double sum = 0;
+    std::array<Design, kBands> designs;
+    for (std::size_t b = 0; b < kBands; ++b) {
+        const auto i = b * kBandParams;
+        if (v[i + Enabled] >= .5)
+            designs[b] =
+                design(static_cast<int>(v[i + Type]), std::min(v[i + Freq], fs * .49), v[i + Gain],
+                       v[i + Q], static_cast<int>(v[i + Slope]), fs, v[kPhase] == 1);
+    }
     constexpr int n = 64;
     for (int j = 0; j < n; ++j) {
         const double hz = 20 * std::pow(std::min(20000., .49 * fs) / 20., (j + .5) / n);
-        for (std::size_t b = 0; b < kBands; ++b) sum += bandMagnitudeDb(v, b, hz, fs);
+        for (const auto& d : designs)
+            sum += 20 * std::log10(std::max(1e-300, designMagnitude(d, hz, fs)));
     }
     return std::clamp(-sum / n, -24., 24.);
 }
@@ -148,7 +132,7 @@ struct Processor::Impl {
     Linear linear;
     double fs = 48000;
     int channels = 2, phase = 1, ramp = 960;
-    bool snap = true;
+    bool snap = true, autoDirty = false;
     std::uint64_t sample = 0;
     void snapValues() {
         phase = static_cast<int>(target[kPhase]);
@@ -160,18 +144,16 @@ struct Processor::Impl {
             band.type = static_cast<int>(target[i + Type]);
             band.slope = static_cast<int>(target[i + Slope]);
             band.channel = static_cast<int>(target[i + Channel]);
-            band.stages = band.desiredStages = naturalStages(
-                band.type, band.slope, target[i + Freq], target[i + Gain], target[i + Q], fs);
+            band.dirty = false;
             band.p[0].snap(std::log2(target[i + Freq]));
             band.p[1].snap(target[i + Gain]);
             band.p[2].snap(std::log(target[i + Q]));
             band.wet = target[i + Enabled];
             band.switching = false;
-            band.coefficients =
-                design(band.type, std::min(target[i + Freq], fs * .49), target[i + Gain],
-                       target[i + Q], band.slope,
-                       phase == 1 ? fs * static_cast<double>(1 << band.stages) : fs, phase == 1);
+            band.coefficients = design(band.type, std::min(target[i + Freq], fs * .49),
+                                       target[i + Gain], target[i + Q], band.slope, fs, phase == 1);
         }
+        autoDirty = false;
         snap = false;
     }
     void tickBands() {
@@ -180,11 +162,12 @@ struct Processor::Impl {
             const auto i = b * kBandParams;
             bool moved = false;
             for (auto& p : band.p) moved |= p.tick();
+            band.dirty |= moved;
+            autoDirty |= moved;
             const int type = static_cast<int>(target[i + Type]),
                       slope = static_cast<int>(target[i + Slope]),
                       channel = static_cast<int>(target[i + Channel]);
-            band.switching = type != band.type || slope != band.slope || channel != band.channel ||
-                             (phase == 1 && band.desiredStages != band.stages);
+            band.switching = type != band.type || slope != band.slope || channel != band.channel;
             const double want = band.switching ? 0 : target[i + Enabled];
             const double delta = 1 / (fs * (band.switching ? .005 : .01));
             if (band.wet < want)
@@ -195,29 +178,35 @@ struct Processor::Impl {
                 band.type = type;
                 band.slope = slope;
                 band.channel = channel;
-                band.stages = band.desiredStages;
                 band.clear();
                 moved = true;
+                band.dirty = true;
             }
-            if (moved)
-                band.coefficients = design(
-                    band.type, std::min(std::exp2(band.p[0].value), fs * .49), band.p[1].value,
-                    std::exp(band.p[2].value), band.slope,
-                    phase == 1 ? fs * static_cast<double>(1 << band.stages) : fs, phase == 1);
+            if ((phase == 1 ? (band.dirty && sample % 16 == 0) : moved)) {
+                band.coefficients =
+                    design(band.type, std::min(std::exp2(band.p[0].value), fs * .49),
+                           band.p[1].value, std::exp(band.p[2].value), band.slope, fs, phase == 1);
+                band.dirty = false;
+                autoDirty = true;
+            }
         }
         output.tick();
         autoGain.tick();
-        if (sample % 128 == 0) {
-            Values v = target;
-            for (std::size_t b = 0; b < kBands; ++b) {
-                v[bandParam(b, Freq)] = std::exp2(bands[b].p[0].value);
-                v[bandParam(b, Gain)] = bands[b].p[1].value;
-                v[bandParam(b, Q)] = std::exp(bands[b].p[2].value);
+        if (sample % 128 == 0 && autoDirty) {
+            double sum = 0;
+            if (target[kAutoGain] >= .5) {
+                for (int k = 0; k < 64; ++k) {
+                    const double hz =
+                        20 * std::pow(std::min(20000., .49 * fs) / 20., (k + .5) / 64);
+                    for (std::size_t b = 0; b < kBands; ++b)
+                        if (target[bandParam(b, Enabled)] >= .5)
+                            sum +=
+                                20 * std::log10(std::max(
+                                         1e-300, designMagnitude(bands[b].coefficients, hz, fs)));
+                }
             }
-            if (target[kAutoGain] >= .5)
-                autoGain.set(compensationDb(v, fs), ramp);
-            else
-                autoGain.set(0, ramp);
+            autoGain.set(std::clamp(-sum / 64, -24., 24.), ramp);
+            autoDirty = false;
         }
     }
     template <class T>
@@ -234,7 +223,7 @@ struct Processor::Impl {
                 for (auto& band : bands) {
                     if (band.wet == 0 || band.coefficients.n == 0) continue;
                     auto apply = [&](double x, std::size_t c) {
-                        const double y = band.run(x, c, phase == 1);
+                        const double y = band.run(x, c);
                         return band.wet == 1 ? y : x + band.wet * (y - x);
                     };
                     switch (band.channel) {
@@ -281,10 +270,6 @@ void Processor::prepare(double fs, std::uint32_t, int channels) {
     impl_->fs = std::clamp(fs, 22050., 384000.);
     impl_->channels = std::clamp(channels, 1, 2);
     impl_->ramp = static_cast<int>(.02 * impl_->fs);
-    for (auto& b : impl_->bands)
-        for (auto* array : {&b.up, &b.down})
-            for (auto& channel : *array)
-                for (auto& h : channel) h.setCoefs(halfCoefs());
     impl_->linear.prepare(impl_->fs);
     impl_->linear.publish(impl_->target, impl_->fs);
     reset();
@@ -298,6 +283,7 @@ void Processor::reset() {
 void Processor::setParam(std::size_t i, double v) {
     if (i >= kParamCount) return;
     v = params::clampPhysical(impl_->specs[i], v);
+    if (impl_->target[i] != v && i <= kAutoGain) impl_->autoDirty = true;
     impl_->target[i] = v;
     if (impl_->snap) return;
     if (i == kOutput)
@@ -308,11 +294,6 @@ void Processor::setParam(std::size_t i, double v) {
         if (f == Freq) b.p[0].set(std::log2(v), impl_->ramp);
         if (f == Gain) b.p[1].set(v, impl_->ramp);
         if (f == Q) b.p[2].set(std::log(v), impl_->ramp);
-        const auto base = i / kBandParams * kBandParams;
-        b.desiredStages =
-            naturalStages(static_cast<int>(impl_->target[base + Type]),
-                          static_cast<int>(impl_->target[base + Slope]), impl_->target[base + Freq],
-                          impl_->target[base + Gain], impl_->target[base + Q], impl_->fs);
     }
 }
 void Processor::setLinearValues(const Values& v) { impl_->linear.publish(v, impl_->fs); }

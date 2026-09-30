@@ -17,9 +17,10 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
 files+=(
   plugins/eq/engine/include/eq/params.h
   plugins/eq/engine/include/eq/processor.h
-  plugins/eq/engine/src/{params,processor,linear,halfband}.cpp
-  plugins/eq/engine/src/{design,linear,halfband}.h
+  plugins/eq/engine/src/{params,processor,linear}.cpp
+  plugins/eq/engine/src/{design,linear,matched}.h
   plugins/eq/engine/tests/test_eq.cpp
+  plugins/eq/engine/bench/{accuracy.h,eq_bench.cpp}
   plugins/eq/plugin/src/EqParams.h
   plugins/eq/plugin/src/eq_clap.cpp
   plugins/eq/plugin/gui/Editor.{h,cpp}

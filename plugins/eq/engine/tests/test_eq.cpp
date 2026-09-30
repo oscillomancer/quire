@@ -3,6 +3,7 @@
 #include <cmath>
 #include <complex>
 #include <numbers>
+#include "../bench/accuracy.h"
 #include "eq/processor.h"
 #include "supple/base/rng.h"
 #include "supple/dsp/dsp.h"
@@ -150,48 +151,19 @@ TEST_CASE("EQ bell/shelf/pass response and analytic/process agreement across rat
     }
 }
 TEST_CASE("EQ natural bell/shelf follows analog prototypes through 20 kHz") {
+    for (double fs : {44100., 48000.})
+        for (int type : {eq::Bell, eq::LowShelf, eq::HighShelf}) {
+            const auto worst = eq::measurement::ordinary(type, fs);
+            CAPTURE(fs);
+            CAPTURE(type);
+            CAPTURE(worst.f0);
+            CAPTURE(worst.gain);
+            CAPTURE(worst.q);
+            CAPTURE(worst.hz);
+            CHECK(worst.db <= .3);
+        }
     auto v = flat(1);
     v[0] = 1;
-    v[3] = 6;
-    v[4] = .71;
-    for (int type : {eq::Bell, eq::LowShelf, eq::HighShelf})
-        for (double gain : {-30., 6., 30.})
-            for (double q : {.1, .71, 24.})
-                for (double freq : {30., 200., 1000., 8000., 16000., 22000.}) {
-                    v[3] = gain;
-                    v[4] = q;
-                    v[1] = type;
-                    v[2] = freq;
-                    for (int k = 0; k < 103; ++k) {
-                        const double a = std::pow(10., v[3] / 40.);
-                        const double centre = type == eq::Bell
-                                                  ? freq
-                                                  : (type == eq::LowShelf ? freq / std::sqrt(a)
-                                                                          : freq * std::sqrt(a));
-                        const double hz =
-                            k < 100 ? 20 * std::pow(1000., k / 99.)
-                                    : centre * (1 + (k - 101) * .5 / (q * std::max(a, 1 / a)));
-                        if (hz <= 0 || hz > 20000) continue;
-                        const double w = hz / freq;
-                        const std::complex<double> s(0, w);
-                        std::complex<double> h;
-                        if (type == eq::Bell)
-                            h = 1. + (a * a - 1) * s / (v[4] * a) / (s * s + s / (v[4] * a) + 1.);
-                        else if (type == eq::LowShelf) {
-                            const auto z = s * std::sqrt(a);
-                            h = 1. + ((a - 1) * z / v[4] + a * a - 1.) / (z * z + z / v[4] + 1.);
-                        } else {
-                            const auto z = s / std::sqrt(a);
-                            h = a * a +
-                                ((1 - a) * a * z / v[4] + 1. - a * a) / (z * z + z / v[4] + 1.);
-                        }
-                        CAPTURE(type);
-                        CAPTURE(freq);
-                        CAPTURE(hz);
-                        CHECK(std::abs(eq::magnitudeDb(v, hz, 48000) -
-                                       20 * std::log10(std::abs(h))) < .1);
-                    }
-                }
     v[3] = 6;
     v[4] = .71;
     for (double fs : {44100., 48000., 88200., 96000., 192000.}) {
@@ -463,4 +435,21 @@ TEST_CASE("EQ natural phase ignores controls outside each filter's design") {
     const auto tilt = render(v, 48000, 64, 4096);
     v[4] = 24;
     CHECK(render(v, 48000, 7, 4096) == tilt);
+}
+TEST_CASE("EQ natural matched Butterworth passes retain their cutoff across rates") {
+    auto v = flat(1);
+    v[0] = 1;
+    for (double fs : {44100., 48000., 88200., 96000., 192000.})
+        for (double f : {80., 1000., 10000.})
+            for (int type : {eq::HighPass, eq::LowPass})
+                for (int slope = 0; slope < 8; ++slope) {
+                    v[1] = type;
+                    v[2] = f;
+                    v[5] = slope;
+                    CAPTURE(fs);
+                    CAPTURE(f);
+                    CAPTURE(type);
+                    CAPTURE(slope);
+                    CHECK(std::abs(eq::magnitudeDb(v, f, fs) + 3.0103) < .05);
+                }
 }
