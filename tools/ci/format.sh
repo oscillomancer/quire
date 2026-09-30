@@ -11,6 +11,7 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
+  | grep -v '^plugins/eq/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   | grep -Ev '^plugins/comp/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/comp_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
@@ -30,6 +31,18 @@ files+=(
   plugins/utility/test/semantic_rt.cpp
   plugins/utility/test/editor_input.cpp
   plugins/utility/tools/gui_preview.cpp
+  plugins/eq/engine/include/eq/params.h
+  plugins/eq/engine/include/eq/processor.h
+  plugins/eq/engine/src/{params,processor,linear}.cpp
+  plugins/eq/engine/src/{design,linear,matched}.h
+  plugins/eq/engine/tests/test_eq.cpp
+  plugins/eq/engine/bench/{accuracy.h,eq_bench.cpp}
+  plugins/eq/plugin/src/EqParams.h
+  plugins/eq/plugin/src/eq_clap.cpp
+  plugins/eq/plugin/gui/Editor.{h,cpp}
+  plugins/eq/plugin/gui/Telemetry.h
+  plugins/eq/test/{test_core,editor_input,semantic_rt}.cpp
+  plugins/eq/tools/{gui_preview,clap_host_probe}.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

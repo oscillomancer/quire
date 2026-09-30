@@ -1,0 +1,2 @@
+#pragma once
+namespace supple::eq { inline constexpr const char* kDisplayName = "@EQ_DISPLAY_NAME@"; }
