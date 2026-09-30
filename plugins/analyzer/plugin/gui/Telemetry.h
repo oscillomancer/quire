@@ -51,7 +51,8 @@ class Ring {
         return kCapacity - (w - r);
     }
     bool pending() const {
-        return read_.load(std::memory_order_relaxed) != write_.load(std::memory_order_acquire);
+        return read_.load(std::memory_order_relaxed) !=
+               write_.load(std::memory_order_acquire);
     }
 
   private:

@@ -13,3 +13,5 @@ Preview: `build/dev/plugins/analyzer/analyzer-gui-preview 60
 build/dev/analyzer-music.ppm 1 music` (or `idle`). The real editor is rendered
 via the template's Pugl/NanoVG stack. The license is MIT; third-party license
 texts are staged alongside the artifact. No audio device is needed for tests.
+
+Implementation verification and remaining platform acceptance: `VERIFICATION.md`.
