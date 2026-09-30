@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <clap/clap.h>
@@ -119,6 +120,74 @@ void setParamEvent(clap_id id, double value) {
     g_events.ev.channel = -1;
     g_events.ev.key = -1;
     g_events.active = true;
+}
+
+template <class T>
+void monoKeyOpensBoth(const clap_plugin_factory_t* factory, const char* id,
+                      const clap_host_t* host) {
+    const auto* plug = factory->create_plugin(factory, host, id);
+    check(plug != nullptr, "mono key regression instantiates plugin");
+    if (!plug) return;
+    check(plug->init(plug), "mono key regression initializes plugin");
+    check(host_contract::selectLayout(plug, 2), "mono key regression selects stereo main bus");
+    const auto* params = static_cast<const clap_plugin_params_t*>(
+        plug->get_extension(plug, CLAP_EXT_PARAMS));
+    clap_input_events_t events{nullptr, evCount, evGet};
+    for (const auto* name : {"Sidechain", "Stereo link"}) {
+        clap_id param = CLAP_INVALID_ID;
+        for (uint32_t i = 0; i < params->count(plug); ++i) {
+            clap_param_info_t info{};
+            if (params->get_info(plug, i, &info) && !std::strcmp(info.name, name))
+                param = info.id;
+        }
+        check(param != CLAP_INVALID_ID, "mono key regression finds key/link parameter");
+        setParamEvent(param, !std::strcmp(name, "Sidechain") ? 1 : 0);
+        params->flush(plug, &events, nullptr);
+    }
+    g_events.active = false;
+    constexpr uint32_t block = 256;
+    check(plug->activate(plug, 48000, 1, block), "mono key regression activates plugin");
+    check(plug->start_processing(plug), "mono key regression starts processing");
+    std::vector<T> left(block, T(.001)), right(block, T(.002)), key(block, T(0));
+    std::vector<T> outLeft(block), outRight(block);
+    T* mainPointers[]{left.data(), right.data()};
+    T* keyPointers[]{key.data()};
+    T* outputPointers[]{outLeft.data(), outRight.data()};
+    clap_audio_buffer_t inputs[2]{}, output{};
+    inputs[0].channel_count = output.channel_count = 2;
+    inputs[1].channel_count = 1;
+    if constexpr (std::is_same_v<T, float>) {
+        inputs[0].data32 = mainPointers;
+        inputs[1].data32 = keyPointers;
+        output.data32 = outputPointers;
+    } else {
+        inputs[0].data64 = mainPointers;
+        inputs[1].data64 = keyPointers;
+        output.data64 = outputPointers;
+    }
+    clap_process_t process{};
+    process.frames_count = block;
+    process.audio_inputs = inputs;
+    process.audio_inputs_count = 2;
+    process.audio_outputs = &output;
+    process.audio_outputs_count = 1;
+    bool processed = true;
+    for (int i = 0; i < 8; ++i)
+        processed &= plug->process(plug, &process) != CLAP_PROCESS_ERROR;
+    check(outLeft.back() == 0 && outRight.back() == 0,
+          "silent mono key keeps both unlinked channels closed");
+    std::fill(key.begin(), key.end(), T(.25));
+    for (int i = 0; i < 16; ++i)
+        processed &= plug->process(plug, &process) != CLAP_PROCESS_ERROR;
+    check(processed, "mono key regression processes without error");
+    check(std::abs(outLeft.back() - left.back()) < 1e-6,
+          "mono key opens left channel with stereo link zero");
+    check(std::abs(outRight.back() - right.back()) < 1e-6,
+          std::is_same_v<T, float> ? "32-bit mono key opens right channel with stereo link zero"
+                                   : "64-bit mono key opens right channel with stereo link zero");
+    plug->stop_processing(plug);
+    plug->deactivate(plug);
+    plug->destroy(plug);
 }
 
 }  // namespace
@@ -246,6 +315,8 @@ int main(int argc, char** argv) {
     host_contract::parameterText(plug, check);
     host_contract::processing(fac, desc->id, HOST_SMOKE_PLAIN_PARAM, channels,
                               48000.0, isInstrument, check);
+    monoKeyOpensBoth<float>(fac, desc->id, &host);
+    monoKeyOpensBoth<double>(fac, desc->id, &host);
 
     const uint32_t block = 512;
     check(plug->activate(plug, 48000.0, 32, block), "activate at 48 kHz");

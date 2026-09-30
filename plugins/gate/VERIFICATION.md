@@ -102,3 +102,22 @@ were not run: no installation or audio-device use was requested, and this
 is the Linux CLAP worktree. Independent review, STATUS update and integration
 belong to the orchestrator; onboarding forbids worker-spawned subagents.
 There are no unresolved implementation questions.
+
+## Mono sidechain review fix
+
+The wrapper now duplicates channel zero when the key bus has one channel in
+both float and double processing. A black-box host regression uses a stereo
+main bus, external mono key and stereo link zero: both channels stay closed
+for a silent key, then both open for an above-threshold key. Before the fix,
+only the right-channel opening checks failed in both precisions.
+
+```sh
+cmake --build --preset dev -j6
+ctest --test-dir build/dev/plugins/gate --output-on-failure
+ctest --test-dir build/dev -R '^gate-engine.tests$' --output-on-failure
+tools/ci/format.sh --check
+git diff --check
+```
+
+Dev build passed, plugin tests passed 8/8, engine tests passed 1/1 and
+format/diff checks passed. Full CI was not repeated, as requested in review.

@@ -24,8 +24,10 @@ only while visible. Latency callbacks are coalesced and the activated latency
 stays stable during a pending restart.
 
 The main bus supports mono/stereo and both precisions, with a second stereo
-non-main sidechain input. The product smoke harness checks both input ports
-and the equivalent main-port contracts locally: the shared ports helper
+non-main sidechain input. The wrapper duplicates a mono key bus into both
+detectors for float/double processing, including zero stereo link. The product
+smoke harness covers this case and checks both input ports and the equivalent
+main-port contracts locally: the shared ports helper
 assumes exactly one effect input. It also exercises actual stop/deactivate/
 reactivate for lookahead: the template smoke assumed an active latency edit
 could report its new delay immediately. Shared host_contract.h is unchanged;

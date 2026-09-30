@@ -594,6 +594,7 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p,
                 const auto& k = proc->audio_inputs[1];
                 for (uint32_t c = 0; c < std::min(2u, k.channel_count); ++c)
                     if (k.data32[c]) key[c] = k.data32[c] + frame;
+                if (k.channel_count == 1) key[1] = key[0];
             }
             self->runChunks(self->ptrs32, (int)n, proc->out_events, frame, key);
         } else if (ob.data64 && ib.data64) {
@@ -607,6 +608,7 @@ clap_process_status CLAP_ABI plugProcess(const clap_plugin_t* p,
                 const auto& k = proc->audio_inputs[1];
                 for (uint32_t c = 0; c < std::min(2u, k.channel_count); ++c)
                     if (k.data64[c]) key[c] = k.data64[c] + frame;
+                if (k.channel_count == 1) key[1] = key[0];
             }
             self->runChunks(self->ptrs64, (int)n, proc->out_events, frame, key);
         }
