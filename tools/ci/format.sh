@@ -9,11 +9,23 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
   | grep -v '^plugins/probe-synth/' \
+  | grep -v '^plugins/eq/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.
 files+=(
+  plugins/eq/engine/include/eq/params.h
+  plugins/eq/engine/include/eq/processor.h
+  plugins/eq/engine/src/{params,processor,linear,halfband}.cpp
+  plugins/eq/engine/src/{design,linear,halfband}.h
+  plugins/eq/engine/tests/test_eq.cpp
+  plugins/eq/plugin/src/EqParams.h
+  plugins/eq/plugin/src/eq_clap.cpp
+  plugins/eq/plugin/gui/Editor.{h,cpp}
+  plugins/eq/plugin/gui/Telemetry.h
+  plugins/eq/test/{test_core,editor_input,semantic_rt}.cpp
+  plugins/eq/tools/{gui_preview,clap_host_probe}.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

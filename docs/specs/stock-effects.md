@@ -46,7 +46,7 @@ workflow in mind ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch).
 | `bandN.freq` | Hz | 10..30000 (clamped < 0.49 fs) | log | 30, 200, 1000, 8000, 500, 2000, 4000, 12000 |
 | `bandN.gain` | dB | −30..+30 | linear | 0 |
 | `bandN.q` | none | 0.1..24 | log | 0.71 |
-| `bandN.slope` | enum | `6`, `12`, `18`, `24`, `36`, `48`, `72`, `96` (dB/oct; HP/LP only) | | `24` |
+| `bandN.slope` | enum | `db6`, `db12`, `db18`, `db24`, `db36`, `db48`, `db72`, `db96` (dB/oct; HP/LP only) | | `db24` |
 | `bandN.channel` | enum | `stereo`, `left`, `right`, `mid`, `side` | | `stereo` |
 | `phase` | enum | `minimum`, `natural` (analog-matched magnitude near Nyquist), `linear` (latency; stepped) | | `natural` |
 | `auto_gain` | bool | output level compensation for the static curve | | false |
@@ -63,6 +63,57 @@ section). Coefficient changes smoothed at control rate (no zipper noise
 under full-range sweeps, verified by a spectral test).
 GUI centrepiece: the summed response over a live spectrum (core-analysis
 LTAS of the input, pre/post).
+
+### EQ implementation decisions (2026-09-29)
+
+- Approved correction: slope enum keys are `db6`…`db96`, with dB/oct display
+  labels. Numeric-only enum keys violate core-params validation.
+
+- The authoritative 0.49·fs frequency clamp here takes precedence over the
+  generic implementation plan's 0.45·fs. Values in patches remain unclamped.
+- Natural mode uses four to seven original IIR half-band interpolation/decimation stages
+  (16×…128×), with SVF analog frequencies at the oversampled rate. The proposed 2×
+  path does not sufficiently suppress bilinear frequency warping near Nyquist;
+  the adaptive path is measured against the analog bell/shelf prototype through
+  20 kHz. Its IIR phase/group delay is frequency dependent and reported latency
+  is zero; exact flat bands bypass the resampling path. The stage count is
+  selected from Q·10^(|gain|/40)·(clampedFrequency/fs)^2, using only
+  controls applicable to the filter: gain is zero for passes/notch/band-pass,
+  tilt Q is 0.71, and higher-order passes use their maximum Butterworth section Q.
+  Four stages up to
+  0.25, then one extra stage for each factor of four, capped at seven. Stage
+  changes follow the band fade-out/reset/fade-in transition. Extreme gains,
+  Qs and resonant centres are included in the analog magnitude test.
+- All three phase choices are nonautomatable and require reactivation; latency
+  remains fixed while active. Linear latency is round(2048·fs/48000); its
+  128-sample convolution partition delay is included in that number. Symmetric
+  Lanczos-windowed FIR kernels have 2·(latency−128)+1 taps. Narrow low-frequency
+  responses have finite-length approximation limits. Linear kernel compilation
+  is asynchronous and coalesces updates, followed by a 20 ms interpolation on
+  the fixed partition grid; exact-offset automation applies to minimum/natural.
+- Auto gain samples the summed affected-channel curve at 64 equally spaced
+  log-frequency midpoints from 20 Hz to min(20 kHz,0.49·fs). It is a static
+  pink-weighted estimate, bounded to ±24 dB compensation so deep stopbands
+  cannot create unbounded gain, including for selective channel placement, not an
+  input-dependent loudness match. Updates use a fixed 128-sample grid and a
+  20 ms output ramp. The linear summed curve evaluates the actual windowed FIR;
+  faint per-band curves show their design targets.
+- Type/slope/channel changes fade out for 5 ms, clear filter state, then fade in
+  for 10 ms; enables/disables use 10 ms ramps. Floats use 20 ms ramps in log
+  frequency, dB gain and log Q.
+- Shelf settling and pass −3 dB checks refer to the default Q (0.71); resonant
+  user Q intentionally changes the response. Tilt uses symmetric first-order
+  shelves around its frequency.
+- Full-range stress uses low-level noise: simultaneous +30 dB boosts across
+  eight bands legitimately exceed +40 dBFS on full-scale input. The EQ does not
+  impose an undocumented limiter. Finite output and the +40 dBFS test bound are
+  checked with −480 dBFS excitation throughout the full parameter domain in
+  each phase mode, followed by two seconds of silence. Linear stress coalesces
+  kernel publication every 4096 samples; phase itself is fixed per activation.
+- The editor's pre/post spectrum uses core-analysis LTAS on 4096-sample batches
+  copied as separate left/right channels through its telemetry ring; analysis runs on the GUI thread, never RT.
+  Factory defaults include the high-pass, so the bit-exact null fixture disables
+  it (or makes every band a zero-gain gain-type filter).
 
 ## 2. Compressor / limiter — "Ballast" [`comp`]
 

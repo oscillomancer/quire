@@ -1,4 +1,5 @@
 add_subdirectory(common)
+add_subdirectory(eq/engine)
 add_subdirectory(orrery/engine)
 add_subdirectory(orrery/clap)
 
@@ -56,4 +57,6 @@ if(SUPPLE_BUILD_PLUGINS)
   endfunction()
   supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
+  include(eq/identity.cmake)
+  supple_add_plugin(eq EQ ${EQ_DISPLAY_NAME})
 endif()
