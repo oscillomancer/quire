@@ -202,7 +202,11 @@ void Processor::render(const T* const* in, T* const* out, uint32_t frames) {
             raw[c] = l.captured ? l.frozenRead() : l.read(delay);
             const double filtered = l.lp.tick(l.hp.tick(raw[c], true), false);
             const double gain = std::pow(10., v[kDrive] / 20);
-            const double driven = v[kDrive] == 0 ? filtered : std::tanh(gain * filtered) / gain;
+            // The curve at unity gain is not identity; fade it in over the first dB.
+            const double blend = std::clamp(v[kDrive], 0., 1.);
+            const double driven =
+                v[kDrive] == 0 ? filtered
+                               : (1 - blend) * filtered + blend * std::tanh(gain * filtered) / gain;
             echo[c] = (1 - frozen) * safetyLimit(driven) + frozen * raw[c];
         }
         const double mono = (input[0] + input[1]) * .5, fb = v[kFeedback] / 100;
