@@ -102,3 +102,4 @@ Use [Facet, the stock EQ](eq.md) for measured rumble, masking and harshness cuts
 Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.
 Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
 For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).
+For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).

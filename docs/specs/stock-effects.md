@@ -495,6 +495,66 @@ saturation), `duck` dB 0..24 (0; wet ducking under the input), `width` %
 delay (cubic/allpass), smooth time changes (tape-like glide, no clicks),
 tempo sync via CLAP transport.
 
+
+### Delay implementation decisions (2026-09-30)
+
+- Identity is `delay`, CLAP `com.suppleaudio.delay`, state `QDL1`, AU `QDly`;
+  the display name is defined once in `plugins/delay/cmake/Identity.cmake`.
+  Sync copies Orrery's `off`, `n8_1` … `n1_32` choices; `n1_8d` is default.
+  Both line times clamp to 1–5000 ms after converting the note and applying
+  the right offset to the original, unclamped left time. Missing, nonfinite
+  or nonpositive transport tempo means 120 BPM. Output is −24…+24 dB (0),
+  mix is 0…100 % (25), width is 0…200 % (100), freeze defaults off.
+- A two-pole critically damped glide consists of cascaded one-poles with
+  100 ms time constants, initialized to restored times before processing.
+  This applies to free time, sync, offset and transport tempo. Other floats
+  ramp for 20 ms (frequencies/rate in log space); routing modes and freeze
+  use 10 ms ramps. Loop coefficients update on a fixed 16-sample grid.
+  Frequencies clamp internally to 0.45·fs. Filters are always active;
+  their range endpoints are wide settings, not bypasses.
+- Float circular storage uses four-point cubic Hermite reads. Two lines are
+  allocated for 5000 ms + 3 ms wow + interpolation margin. At validator-only
+  rates below the 22.05 kHz response contract, reads have a two-sample causal
+  minimum; activation accepts 1000…768000 Hz.
+- Wow uses 0.8 sine + 0.2 smooth random, ±3 ms at full depth, capped to
+  45 % of the current line time. The random endpoints come from fixed
+  per-line xorshift32 seeds and join with a cubic smoothstep once per wow
+  cycle. The right sine starts a quarter cycle later. Depth zero is exact.
+- The safety curve is x for |x| ≤ 0.5, otherwise
+  sign(x)·[0.5 + 0.5·tanh(2·(|x|−0.5))]. Every normal echo is bounded by
+  unity before width/output. Drive zero bypasses its nonlinearity exactly;
+  above zero its curve is tanh(g·x)/g, g = 10^(drive/20). Stereo, ping-pong
+  and mono routing interpolate over 10 ms. Width 100 bypasses M/S arithmetic
+  exactly; mono sends the left line to both wet outputs and ignores width.
+- Duck measures the linked main input peak in dB with 1 ms attack and
+  250 ms release; attenuation is duck·clamp((level+60)/30,0,1). It affects
+  the wet outputs only, after recirculation, so it never changes the loop.
+- Freeze holds the current unmodulated read times immediately; modulation,
+  input and loop processing fade out over 10 ms. At completion each line
+  replays a stationary view of its existing ring period, rounded to the
+  nearest sample, with the held fractional phase interpolated only at output.
+  The original samples are never rewritten. This avoids accumulating cubic
+  interpolation loss on every frozen repeat; the held period differs by at
+  most half a sample. No extra allocation, copy or filter reset occurs.
+  Unfreeze aligns the write head with the frozen playback cursor and restores
+  the normal loop over 10 ms. New time/tempo targets take effect on unfreeze.
+- Tail is the longest requested line time × max(1,ceil(ln(1e-4)/ln(fb)))
+  + 50 ms, rounded up to samples; zero feedback still has one repeat.
+  Freeze or feedback ≥100 % reports INT32_MAX (infinite). **Approved
+  correction to effects.md §10:** `clap_host_tail::changed` runs in
+  `process()`, following CLAP's audio-thread contract; parameter/state edits
+  set an atomic pending flag and notifications coalesce there. No restart
+  is needed; latency is always zero.
+- Nonfinite inputs become zero and finite inputs clamp to ±1e8 before the
+  recursive loop. Recursive filter/storage states below 1e-30 flush to zero.
+  The documented self-oscillation ceiling applies to each normal echo at
+  width 100/output 0; width >100 or positive output gain can exceed 0 dBFS,
+  and freeze intentionally bypasses the limiter.
+- The 900×560 editor shows parameter/tempo-derived repeat positions and
+  levels, a digital loop response, telemetry for wet level and ducking,
+  and values below each knob. These are per-line nominal repeats, before
+  output width/mix/duck; the fractional glide and wow alter actual timing.
+
 ## 7. Reverb — "Nave" [`reverb`]
 
 Keys: `size` % 0..100 (50), `decay` ms 100..60000 log (2000; RT60 at mid
