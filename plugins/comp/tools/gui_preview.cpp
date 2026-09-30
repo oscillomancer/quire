@@ -16,6 +16,9 @@
 #include "Gui.h"
 #include "Telemetry.h"
 #include "comp/processor.h"
+#if defined(__linux__)
+#include <X11/Xlib.h>
+#endif
 
 extern "C" void compReadPixels(int w, int h, unsigned char* rgb);
 extern "C" void compViewportSize(int* w, int* h);
@@ -25,6 +28,28 @@ using namespace supple::comp::gui;
 
 namespace {
 constexpr double kRate = 20.0;
+#if defined(__linux__)
+struct PreviewParent {
+    Display* display = XOpenDisplay(nullptr);
+    ::Window window = 0;
+    PreviewParent(int width, int height) {
+        if (!display) return;
+        XSetWindowAttributes attributes{};
+        attributes.override_redirect = True;
+        // An embedded view gets its design size even under a tiling WM.
+        window =
+            XCreateWindow(display, DefaultRootWindow(display), 40, 40, static_cast<unsigned>(width),
+                          static_cast<unsigned>(height), 0, CopyFromParent, InputOutput,
+                          CopyFromParent, CWOverrideRedirect, &attributes);
+        XMapWindow(display, window);
+        XSync(display, False);
+    }
+    ~PreviewParent() {
+        if (window) XDestroyWindow(display, window);
+        if (display) XCloseDisplay(display);
+    }
+};
+#endif
 
 class PreviewHost : public EditorHost {
   public:
@@ -36,7 +61,7 @@ class PreviewHost : public EditorHost {
             values_[kSidechain] = 1;
         }
         if (!std::strcmp(scenario, "infinity")) values_[kRatio] = 100;
-        if (!std::strcmp(scenario, "limiter") && std::strcmp(scenario, "infinity")) {
+        if (!std::strcmp(scenario, "limiter")) {
             values_[kMode] = 1;
             values_[kLookahead] = 1;
             values_[kOutput] = 9;
@@ -116,11 +141,18 @@ int main(int argc, char** argv) {
         std::strcmp(scenario, "limiter") && std::strcmp(scenario, "infinity"))
         return 4;
     PreviewHost host(scenario);
+    uintptr_t parent = 0;
+#if defined(__linux__)
+    PreviewParent previewParent(static_cast<int>(kDesignW * scale),
+                                static_cast<int>(kDesignH * scale));
+    if (!previewParent.window) return 1;
+    parent = static_cast<uintptr_t>(previewParent.window);
+#endif
     Gui gui(host, true);
     Capture cap;
     gui.setFrameCallback(&capture, &cap);
     gui.setSize(static_cast<uint32_t>(kDesignW * scale), static_cast<uint32_t>(kDesignH * scale));
-    if (!gui.create() || !gui.setParent(0) || !gui.show()) return 1;
+    if (!gui.create() || !gui.setParent(parent) || !gui.show()) return 1;
     // Let the X11 view realize before feeding it telemetry. Otherwise the
     // 256-slot queue fills while the map/expose travels through the server,
     // and captures contain a timing-dependent slice of the history.

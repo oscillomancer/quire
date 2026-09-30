@@ -72,6 +72,9 @@ bool Editor::attach(NVGcontext* vg) {
 }
 
 void Editor::pump(double elapsedSeconds) {
+    if (dragId_ >= 0 && !controlEnabled(static_cast<uint32_t>(dragId_))) onMouseUp();
+    if (scrollId_ >= 0 && !controlEnabled(static_cast<uint32_t>(scrollId_))) closeScrollGesture();
+    if (focus_ >= 0 && !controlEnabled(static_cast<uint32_t>(focus_))) focus_ = -1;
     const float dt = static_cast<float>(std::clamp(elapsedSeconds, 0.0, 0.25));
     Frame f;
     while (host_.telemetry().pop(f)) {
@@ -145,7 +148,13 @@ void Editor::render(NVGcontext* vg) {
     }
     hairline(vg, 65, 249, 430, 107, rgba(col::dust, .3f));
     auto transfer = [&](double in) {
-        if (limiter) return std::min(in, host_.paramValue(kCeiling));
+        if (limiter) {
+            const double wet = host_.paramValue(kMix) / 100;
+            const double makeup = std::pow(10., host_.paramValue(kMakeup) / 20);
+            const double drive =
+                host_.paramValue(kOutput) + 20 * std::log10(1 - wet + wet * makeup);
+            return std::min(in + drive, host_.paramValue(kCeiling));
+        }
         return in + gainReduction(in, host_.paramValue(kThreshold), host_.paramValue(kRatio),
                                   host_.paramValue(kKnee));
     };
@@ -163,7 +172,8 @@ void Editor::render(NVGcontext* vg) {
     nvgStrokeColor(vg, rgb(col::accent));
     nvgStroke(vg);
     nvgBeginPath(vg);
-    nvgCircle(vg, plotX(latestDetector_), plotY(static_cast<float>(transfer(latestDetector_))), 4);
+    const float dotLevel = limiter ? latestIn_ : latestDetector_;
+    nvgCircle(vg, plotX(dotLevel), plotY(static_cast<float>(transfer(dotLevel))), 4);
     nvgFillColor(vg, rgb(col::bone));
     nvgFill(vg);
     cell(vg, 470, 80, 340, 170, "Gain reduction · last 4 seconds");
@@ -217,12 +227,14 @@ void Editor::render(NVGcontext* vg) {
     for (const auto& g : kControls) {
         const auto* p = findParam(g.id);
         const double value = host_.paramValue(g.id);
-        char text[48];
-        formatCompact(g.id, value, text, sizeof(text));
+        const bool enabled = controlEnabled(g.id);
+        nvgSave(vg);
+        if (!enabled) nvgGlobalAlpha(vg, .3f);
         if (p->type == params::Type::Float) {
-            if (g.id == kRatio && value >= 100) std::snprintf(text, sizeof(text), "∞");
-            knob(vg, g.x, g.y, g.r, static_cast<float>(toNormalised(*p, value)), p->name.data(),
-                 text, units::unitName(p->unit).data(), false, hover_ == static_cast<int>(g.id));
+            knob(vg, g.x, g.y, g.r, static_cast<float>(toNormalised(*p, value)), p->name.data(), "",
+                 "", false, enabled && hover_ == static_cast<int>(g.id));
+            const auto text = formatValue(g.id, value);
+            num(vg, text.c_str(), g.x, g.y + g.r + 31, 10.5f, rgb(col::bone), Align::Center);
         } else {
             label(vg, p->name.data(), g.x, g.y - 26, 9, rgb(col::dust), Align::Center);
             const auto formatted = params::format(*p, value);
@@ -231,6 +243,7 @@ void Editor::render(NVGcontext* vg) {
             pill(vg, g.x - width / 2, g.y - 10, width, 22, formatted.c_str(), value > .5,
                  rgb(col::accent), boolean, hover_ == static_cast<int>(g.id));
         }
+        nvgRestore(vg);
     }
     label(vg, "CLAP", 20, 543, 9, rgb(col::dim));
     char latency[60];
@@ -243,11 +256,34 @@ void Editor::render(NVGcontext* vg) {
 
 int Editor::controlAt(float x, float y) const {
     for (const auto& g : kControls) {
+        if (!controlEnabled(g.id)) continue;
         const float dx = x - g.x, dy = y - g.y;
         if (dx * dx + dy * dy <= (g.r + 14) * (g.r + 14)) return static_cast<int>(g.id);
     }
     if (x >= 190 && x <= 315 && y >= 22 && y <= 48) return kMode;
     return -1;
+}
+
+bool Editor::controlEnabled(uint32_t id) const {
+    if (host_.paramValue(kMode) <= .5) return id != kCeiling && id != kTruePeak;
+    switch (id) {
+        case kThreshold:
+        case kRatio:
+        case kKnee:
+        case kAttack:
+        case kAutoRelease:
+        case kDetector:
+        case kRmsWindow:
+        case kTopology:
+        case kAutoMakeup:
+            return false;
+        case kSidechain:
+        case kScHighpass:
+        case kScLowpass:
+            return host_.paramValue(kScListen) > .5;
+        default:
+            return true;
+    }
 }
 
 void Editor::focusParam(uint32_t id) {
@@ -284,6 +320,10 @@ void Editor::onMouseMove(float x, float y, bool fine) {
         dirty_ = true;
     }
     if (dragId_ < 0) return;
+    if (!controlEnabled(static_cast<uint32_t>(dragId_))) {
+        onMouseUp();
+        return;
+    }
     const double scale = fine ? 0.0015 : 0.006;
     setFromNormal(static_cast<uint32_t>(dragId_), dragStartNormal_ + (dragStartY_ - y) * scale);
 }
@@ -341,17 +381,22 @@ void Editor::setFromNormal(uint32_t id, double normal) {
 
 void Editor::onKey(EditorKey key, bool fineOrReverse) {
     if (key == EditorKey::Tab) {
-        int index = 0;
+        int index = -1;
         for (int i = 0; i < kGr; ++i)
             if (static_cast<int>(kEditable[i]) == focus_) index = i;
-        index = focus_ < 0 ? (fineOrReverse ? kGr - 1 : 0)
-                           : (index + (fineOrReverse ? kGr - 1 : 1)) % kGr;
-        focusParam(kEditable[index]);
+        for (int visited = 0; visited < kGr; ++visited) {
+            index = index < 0 ? (fineOrReverse ? kGr - 1 : 0)
+                              : (index + (fineOrReverse ? kGr - 1 : 1)) % kGr;
+            if (controlEnabled(kEditable[index])) {
+                focusParam(kEditable[index]);
+                break;
+            }
+        }
         return;
     }
     if (focus_ < 0) return;
     const ParamDef* p = findParam(static_cast<uint32_t>(focus_));
-    if (!p || (p->flags & params::kReadonly)) return;
+    if (!p || (p->flags & params::kReadonly) || !controlEnabled(p->id)) return;
     if ((key == EditorKey::Enter || key == EditorKey::Space) && p->type != params::Type::Float) {
         host_.beginEdit(p->id);
         host_.setParam(p->id,
@@ -383,7 +428,7 @@ void Editor::onKey(EditorKey key, bool fineOrReverse) {
 }
 
 void Editor::drawFocus(NVGcontext* vg) {
-    if (focus_ < 0) return;
+    if (focus_ < 0 || !controlEnabled(static_cast<uint32_t>(focus_))) return;
     for (const auto& g : kControls)
         if (static_cast<int>(g.id) == focus_) {
             nvgBeginPath(vg);

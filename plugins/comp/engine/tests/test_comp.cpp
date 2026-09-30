@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <cstdio>
 #include <numbers>
 #include "comp/processor.h"
 #include "supple/analysis/loudness.h"
@@ -319,6 +320,118 @@ TEST_CASE("comp limiter below ceiling null and latency at all rates") {
                 for (std::size_t i = 0; i < a[0].size(); ++i)
                     CHECK(std::abs(out[0][i] - (i < d ? 0 : a[0][i - d])) < 1e-6f);
             }
+}
+TEST_CASE("comp limiter attack follows the lookahead moving average without a gain step") {
+    constexpr double sr = 48000;
+    constexpr std::size_t step = 480;
+    for (double ahead : {1., 2.}) {
+        auto v = defaults();
+        v[kMode] = 1;
+        v[kTruePeak] = 0;
+        v[kLookahead] = ahead;
+        v[kCeiling] = 0;
+        const auto delay = latencyFor(v, sr);
+        const auto length = delay + 1;
+        auto a = silence(step + delay + 100);
+        for (auto& ch : a) {
+            std::fill(ch.begin(), ch.end(), .5f);
+            std::fill(ch.begin() + step, ch.end(), 2.f);
+        }
+        const auto out = render(a, v, sr);
+        double previous = 1, maximumDrop = 0;
+        for (std::size_t i = step; i <= step + delay; ++i) {
+            const double applied =
+                static_cast<double>(out[0][i]) / static_cast<double>(a[0][i - delay]);
+            CHECK(applied <= previous + 1e-7);
+            maximumDrop = std::max(maximumDrop, previous - applied);
+            CHECK(previous - applied <= 1.05 * .5 / length);
+            previous = applied;
+        }
+        CHECK(previous == doctest::Approx(.5).epsilon(1e-7));
+        std::printf("limiter ramp: %u samples, max gain drop %.9f, allowed %.9f, arrival %.9f\n",
+                    length, maximumDrop, 1.05 * .5 / length, previous);
+    }
+}
+TEST_CASE("comp limiter ignores compressor controls including during key audition") {
+    auto a = sine(48000, .08, .5, 1000);
+    for (double listen : {0., 1.}) {
+        auto v = defaults();
+        v[kMode] = 1;
+        v[kLookahead] = 1;
+        v[kScListen] = listen;
+        v[kScHighpass] = 200;
+        const auto expected = render(a, v);
+        v[kThreshold] = -60;
+        v[kRatio] = 100;
+        v[kKnee] = 24;
+        v[kAttack] = .01;
+        v[kAutoRelease] = 1;
+        v[kDetector] = 1;
+        v[kRmsWindow] = 100;
+        v[kTopology] = 1;
+        v[kAutoMakeup] = 1;
+        CHECK(render(a, v) == expected);
+    }
+}
+TEST_CASE("comp true peak limiter preserves a minus three dB sine below a minus one ceiling") {
+    for (double sr : {22050., 44100., 48000., 88200., 96000., 192000., 384000.})
+        for (double ahead : {1., 2.}) {
+            auto v = defaults();
+            v[kMode] = 1;
+            v[kLookahead] = ahead;
+            auto a = sine(sr, .08, std::pow(10., -3. / 20), 1000);
+            const auto out = render(a, v, sr);
+            const auto delay = latencyFor(v, sr);
+            double error = 0;
+            for (std::size_t i = 0; i < a[0].size(); ++i)
+                error = std::max(error,
+                                 std::abs(static_cast<double>(out[0][i]) -
+                                          (i < delay ? 0 : static_cast<double>(a[0][i - delay]))));
+            CHECK(error < 1e-6);
+            if (sr == 48000 && ahead == 1)
+                std::printf("limiter -3 dB sine: delayed error %.9g, input %.6f dBTP\n", error,
+                            tp(a, sr));
+        }
+}
+TEST_CASE("comp true peak pink noise ceiling retains usable sample peak headroom") {
+    for (double sr : {44100., 48000., 96000.}) {
+        auto a = silence(static_cast<std::size_t>(sr * 2));
+        Rng r(67);
+        std::array<double, 12> rows{};
+        double inputPeak = 0;
+        for (std::size_t i = 0; i < a[0].size(); ++i) {
+            double sample = static_cast<double>(r.bipolar());
+            // Equal-energy octave bands, with independent held random values.
+            for (std::size_t j = 0; j < rows.size(); ++j) {
+                if (i % (std::size_t{1} << j) == 0) rows[j] = static_cast<double>(r.bipolar());
+                sample += rows[j];
+            }
+            a[0][i] = a[1][i] = static_cast<float>(sample);
+            inputPeak = std::max(inputPeak, std::abs(sample));
+        }
+        for (auto& ch : a)
+            for (auto& sample : ch)
+                sample = static_cast<float>(static_cast<double>(sample) / inputPeak);
+        for (double ahead : {1., 2.}) {
+            auto v = defaults();
+            v[kMode] = 1;
+            v[kLookahead] = ahead;
+            v[kOutput] = 12;
+            const auto out = render(a, v, sr);
+            double peak = 0;
+            for (float sample : out[0])
+                peak = std::max(peak, std::abs(static_cast<double>(sample)));
+            const double truePeak = tp(out, sr), samplePeak = db(peak);
+            CAPTURE(sr);
+            CAPTURE(ahead);
+            CAPTURE(samplePeak);
+            CAPTURE(truePeak);
+            CHECK(samplePeak >= -1.6);
+            CHECK(truePeak <= -.9);
+            std::printf("limiter pink +12 dB: %.0f Hz, %.0f ms, %.6f dBFS, %.6f dBTP\n", sr,
+                        ahead == 1 ? 1. : 5., samplePeak, truePeak);
+        }
+    }
 }
 TEST_CASE("comp limiter ceiling on bursts squares noise and intersample peaks") {
     for (double sr : {44100., 48000., 88200., 96000., 192000.})

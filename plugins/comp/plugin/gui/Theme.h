@@ -11,6 +11,7 @@
 namespace supple::comp::gui {
 
 constexpr float kDesignW = 900, kDesignH = 560, kHeaderH = 62, kFooterTop = 542;
+static_assert(kDesignW <= 1120 && kDesignH <= 700);
 constexpr int kHistoryColumns = 540;
 constexpr float kHistorySeconds = 4;
 

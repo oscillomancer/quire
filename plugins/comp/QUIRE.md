@@ -44,3 +44,12 @@ Preview scenarios `default`, `heavy`, `limiter` feed synthetic audio through
 the actual engine and telemetry. The preview tool writes PPM; convert its
 output to PNG under `build/dev` for review. Preview drawing does not establish
 REAPER or other-platform host acceptance.
+
+Review corrections: limiter release is capped by the moving-average target,
+preserving a smooth lookahead attack. TP detection uses only the 4x signal,
+without the L1 bound or added margin; its 16-sample detector delay is excluded
+from the averaging length. New tests measure the attack ramp, a transparent
+-3 dBFS sine, and +12 dB driven seeded pink noise against a -1 dBTP ceiling.
+Knob values are outside the pointer face; the editor disables unused limiter
+controls and plots the combined makeup/mix/output drive through the ceiling.
+Linux previews use a fixed-size embedded parent for exact 900x560 captures.

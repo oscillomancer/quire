@@ -127,12 +127,25 @@ Implementation decisions (2026-09-29):
   The active DSP retains the old latency configuration until
   the host reactivates; other parameters can continue to change.
 - The limiter's minimum deque holds targets across the lookahead window;
-  its moving average is capped by the held minimum before release. With TP
-  lookahead it also uses a conservative reconstruction bound: the maximum
-  absolute phase-kernel sum of the shared 4x interpolator, with a hold of twice
-  the total delay. This protects peaks created by gain modulation and can
-  attenuate loud material more than a bare input-peak limiter. It passes the
-  documented -10 dBFS sine null. No lookahead setting is a loudness target.
+  release is capped by the moving average, allowing the attack to ramp instead
+  of jumping to the window minimum. The average has lookahead-samples + 1
+  entries; the interpolator's 16-sample delay is excluded from that ramp.
+  True-peak detection uses only the shared 4x interpolated driven signal,
+  without an L1 reconstruction bound or additional detection margin. With TP
+  lookahead the hold spans twice the total delay to cover the FIR support.
+  Ceiling checks allow 0.1 dBTP measurement tolerance. A -3 dBFS sine below a
+  -1 dBTP ceiling passes unchanged apart from delay; seeded pink noise driven
+  +12 dB retains sample peaks within 0.6 dB of that ceiling. No lookahead
+  setting is a loudness target.
+- The design is 900 x 560, below Orrery's 1120 x 700 limit. Knob values sit
+  below the knob and label, clear of the pointer. Limiter mode disables
+  threshold, ratio, knee, attack, detector, RMS window, topology, auto release
+  and auto makeup; key selection and filters are enabled only while key
+  audition is on. Limiter key audition uses feedforward key filtering.
+  Release, stereo link, makeup, mix, output, ceiling, true peak and lookahead
+  remain active. Its transfer curve includes the makeup/dry-wet/output drive
+  and flattens at the ceiling. Linux previews embed in a fixed-size parent
+  so a tiling window manager cannot enlarge or distort the capture.
 - Sidechain filters use 12 dB/oct Butterworth TPT sections. Endpoint bypass
   blends across 10–20 Hz for highpass and 19–20 kHz for lowpass; endpoints are
   exactly off. Continuous parameters smooth over 20 ms, positive log-domain

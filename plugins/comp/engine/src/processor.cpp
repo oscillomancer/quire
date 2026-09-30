@@ -28,16 +28,6 @@ Status Processor::prepare(double sr, std::uint32_t maxFrames, int channels) {
             minimum_[c].queue.resize(2 * capacity + 2);
             interpolators_[c].prepare(4);
         }
-        // A reconstruction bound also covers peaks created by changing gain, which
-        // input-only oversampling cannot predict. Obtain it from the same kernel.
-        dsp::PolyphaseUpsampler probe;
-        probe.prepare(4);
-        std::array<double, 4> sums{}, phases{};
-        for (int t = 0; t < 32; ++t) {
-            probe.process(t == 0 ? 1.f : 0.f, phases);
-            for (std::size_t p = 0; p < 4; ++p) sums[p] += std::abs(phases[p]);
-        }
-        tpBound_ = *std::max_element(sums.begin(), sums.end()) * (1 + 1e-6);
         reset();
         return okStatus();
     } catch (const std::exception&) {
@@ -116,15 +106,18 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
     if (std::abs(inverseRatio_ - ratioTarget) < 1e-12) inverseRatio_ = ratioTarget;
     const auto& v = current_;
     const std::uint32_t delay = latency();
+    const bool limiter = v[kMode] > .5, tp = v[kTruePeak] > .5;
+    // Interpolated detection is delayed by 16 samples; only the actual
+    // lookahead belongs in the gain ramp, so it finishes at the delayed peak.
+    const auto averageSize = static_cast<std::size_t>(delay - (limiter && tp ? 16 : 0)) + 1;
     const auto capacity = delay_[0].size();
-    if (averageSize_ != static_cast<size_t>(delay) + 1) {
-        averageSize_ = static_cast<size_t>(delay) + 1;
+    if (averageSize_ != averageSize) {
+        averageSize_ = averageSize;
         averageHead_ = 0;
         averageSum_.fill(static_cast<double>(averageSize_));
         for (auto& samples : average_) std::fill(samples.begin(), samples.end(), 1);
     }
     const double link = channels_ == 1 ? 1 : v[kStereoLink] / 100, wet = v[kMix] / 100;
-    const bool limiter = v[kMode] > .5, tp = v[kTruePeak] > .5;
     const double makeup =
         v[kMakeup] - (limiter ? 0
                               : v[kAutoMakeup] * reductionFromSlope(-18, v[kThreshold],
@@ -164,8 +157,9 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
             level[s] = (1 - v[kDetector]) * std::abs(f[s]) +
                        v[kDetector] * (v[kDetector] > 0 ? std::sqrt(std::max(0., rms_[s][c])) : 0);
         }
-        filtered[c] = (1 - v[kSidechain]) * ((1 - v[kTopology]) * f[0] + v[kTopology] * f[1]) +
-                      v[kSidechain] * f[2];
+        const double topology = limiter ? 0 : v[kTopology];
+        filtered[c] =
+            (1 - v[kSidechain]) * ((1 - topology) * f[0] + topology * f[1]) + v[kSidechain] * f[2];
         levels[c] =
             (1 - v[kSidechain]) * ((1 - v[kTopology]) * level[0] + v[kTopology] * level[1]) +
             v[kSidechain] * level[2];
@@ -176,15 +170,14 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
         if (limiter && tp) {
             std::array<double, 4> phases{};
             interpolators_[c].process(static_cast<float>(driven), phases);
+            peak = 0;
             for (double phase : phases) peak = std::max(peak, std::abs(phase));
-            if (v[kLookahead] > .5) peak = std::max(peak, std::abs(driven) * tpBound_);
         }
         const double ceiling = ceilingGain_;
         const double target = peak > ceiling ? ceiling / peak : 1;
         // With TP lookahead the extended hold protects each entire FIR support.
         const auto width = tp && v[kLookahead] > .5 ? 2 * delay : delay;
         const double minimum = minimum_[c].push(clock_, target, width);
-        const auto averageSize = static_cast<std::size_t>(delay) + 1;
         const auto slot = averageHead_ % averageSize;
         if (clock_ == 0) averageSum_[c] = static_cast<double>(averageSize);
         averageSum_[c] += minimum - average_[c][slot];
@@ -192,7 +185,7 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
         const double averaged = averageSum_[c] / static_cast<double>(averageSize);
         const double releaseAlpha = releaseAlpha_;
         limiterGain_[c] =
-            std::min(minimum, releaseAlpha * limiterGain_[c] + (1 - releaseAlpha) * averaged);
+            std::min(averaged, releaseAlpha * limiterGain_[c] + (1 - releaseAlpha) * averaged);
         limitTarget[c] = limiterGain_[c];
     }
     const double linked = std::max(levels[0], levels[1]);

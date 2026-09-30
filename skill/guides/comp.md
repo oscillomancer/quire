@@ -53,9 +53,11 @@ more limiting is wanted. This controls peaks; it does not normalize LUFS.
 
 The limiter ignores compressor threshold/ratio/topology/detector and external
 key for gain control. Ceiling applies after makeup, mix and output, including
-key audition. Its true-peak reconstruction guard is conservative and can
-reduce loud signals more than their input peak alone suggests. Below-ceiling
-transparency is verified for a -10 dBFS sine with a -1 dB ceiling.
+key audition. True-peak detection uses the 4x-interpolated driven signal;
+the moving-average gain ramps through the lookahead rather than stepping.
+There is no additional detection margin or reconstruction bound. Below-ceiling
+transparency is verified for -10 and -3 dBFS sines with a -1 dB ceiling;
+true-peak ceiling checks allow 0.1 dB measurement tolerance.
 
 Lookahead delays dry and wet equally. With limiter true-peak detection, add
 16 samples to the selected lookahead. `off` guarantees sample peaks only,
@@ -66,3 +68,7 @@ Feedback detects the previous compressed wet sample before makeup/mix/output;
 external key overrides feedback. Auto release blends release and five-times
 release coefficients according to reduction held over the last second.
 The GUI peak readouts are sample peak dBFS, and `gr` is not a loudness meter.
+In limiter mode the editor disables unused compressor controls. Key selection
+and filters remain available during key audition; topology does not affect
+that audition. Makeup, mix and output set the limiter's input drive, shown
+in its transfer curve before flattening at the ceiling.

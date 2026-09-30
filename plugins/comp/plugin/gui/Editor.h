@@ -39,6 +39,7 @@ class Editor {
 
   private:
     int controlAt(float x, float y) const;
+    bool controlEnabled(uint32_t id) const;
     void setFromNormal(uint32_t id, double normal);
     void focusParam(uint32_t id);
     void closeScrollGesture();

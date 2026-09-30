@@ -67,7 +67,7 @@ class Processor {
     double hpG_ = 0, lpG_ = 0, rmsAlpha_ = 0, attackAlpha_ = 0, releaseAlpha_ = 0, slowAlpha_ = 0;
     double outGain_ = 1, wetGain_ = 1, ceilingGain_ = 1, inverseRatio_ = .25;
     std::array<double, 3> peaks_{};
-    double sampleRate_ = 48000, smooth_ = 0, switch_ = 0, tpBound_ = 1;
+    double sampleRate_ = 48000, smooth_ = 0, switch_ = 0;
     int channels_ = 2;
     bool started_ = false;
     std::array<std::vector<double>, 2> delay_, average_;
