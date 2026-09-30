@@ -57,8 +57,7 @@ int cycle(const char* path, bool keep) {
     Factory* factory = get();
     if (!factory) return fail("GetPluginFactory returned null");
     auto count = reinterpret_cast<int (*)(Factory*)>(factory->vtable[kCountClasses]);
-    auto info =
-        reinterpret_cast<int (*)(Factory*, int, PClassInfo*)>(factory->vtable[kGetClassInfo]);
+    auto info = reinterpret_cast<int (*)(Factory*, int, PClassInfo*)>(factory->vtable[kGetClassInfo]);
     auto release = reinterpret_cast<unsigned (*)(Factory*)>(factory->vtable[kRelease]);
     if (count(factory) < 1) return fail("the factory lists no classes");
     PClassInfo first{};
