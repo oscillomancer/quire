@@ -19,6 +19,11 @@ Code identity uses the functional ids until Nate confirms the working names
 | `comp` | Ballast | `com.suppleaudio.comp` | `QCM1` | `QCmp` | audio-effect, compressor, limiter, stereo |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
+| `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
+| `gate` | Sluice | `com.suppleaudio.gate` | `QGT1` | `QGat` | audio-effect, gate, expander, stereo |
+| `transient` | Flint | `com.suppleaudio.transient` | `QTS1` | `QTrn` | audio-effect, transient-shaper, stereo |
+| `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
+| `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
 In the template's identity checklist the code name is the id (`Eq`/`eq`/`EQ`,
 `Comp`/`comp`/`COMP`, `Utility`/`utility`/`UTILITY`,
@@ -180,9 +185,11 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
 - **`natural` (default):** the magnitude of the analog prototype held to
   20 kHz at 44.1/48 kHz — matched second-order sections (magnitude matched at
   DC, centre and Nyquist) or 2× oversampling of the `minimum` design,
-  whichever the tests show more exact (`stock-effects.md` §1: within 0.1 dB
-  of the analog bell/shelf up to 20 kHz at 48 kHz). Record the choice in
-  `stock-effects.md`.
+  whichever the tests show more exact. Decided 2026-09-30: matched sections
+  (oversampling cost 50× the minimum mode); the bound is ≤ 0.3 dB for bells
+  with Q ≤ 4 and shelves with Q ≤ 1, f0 ≤ 10 kHz, to 20 kHz at 44.1/48 kHz,
+  with measured limits for resonant and near-Nyquist bands
+  (`stock-effects.md` §1).
 - **`linear`:** a linear-phase FIR of the current magnitude response,
   partitioned convolution, latency 2048 samples at 48 kHz (scaled with the
   rate); recomputed off the audio thread when parameters change and swapped
@@ -444,6 +451,141 @@ closer feature), stereo. Everything in §1 applies; no sidechain port.
   attack and sustain large (bipolar arcs from the centre), speed,
   sensitivity, clip, mix, output. Scenarios: `default`, `punch`
   (attack +60, sustain −30).
+
+## 10. Third wave: delay — Echelon [`delay`] (`stock-effects.md` §6)
+
+Identity: display name Echelon, id `delay`, CLAP id `com.suppleaudio.delay`,
+state magic `QDL1`, AU subtype `QDly`, features audio-effect, delay,
+stereo. Everything in §1 applies; no sidechain port; latency 0.
+
+- **`sync`** keys and labels exactly as Orrery's note values
+  (`plugins/orrery/engine/src/params.cpp` `kNotes`: `off`, `n8_1` … `n1_32`,
+  labels `8/1` … `1/32`; default `n1_8d` = "1/8."). Copy the table, do not
+  link Orrery. Tempo comes from the CLAP process transport
+  (`CLAP_TRANSPORT_HAS_TEMPO`), 120 BPM without one. A synced time is the
+  note length at the current tempo; every line time (synced or `time`, and
+  the offset right time `time·(1 + offset/100)`) is clamped to 1..5000 ms —
+  document the clamp.
+- **Lines:** one circular buffer per line (float storage), sized in
+  `prepare` for 5000 ms + the maximum modulation + interpolation margin at
+  the prepared rate. Fractional reads with 4-point cubic Hermite
+  interpolation.
+- **Glide:** each line's delay (in samples) follows its target through a
+  critically damped two-pole smoother (time constant 100 ms), so time and
+  tempo changes move the read head continuously (tape-like pitch bend, no
+  clicks, no crossfades). The same smoother serves sync and free time.
+- **Wow (`mod_rate`, `mod_depth`):** delay offset = depth·3 ms·(0.8·sin +
+  0.2·seeded smooth random), right line's sine at +90°; capped at 45 % of
+  the line's current delay; `mod_depth` 0 is exactly no modulation. The
+  random part is seeded at `reset()` (deterministic renders).
+- **Loop, per line:** y = read → high-pass then low-pass (12 dB/oct TPT
+  SVFs, Butterworth Q; `highpass`/`lowpass` smoothed) → `drive` (at 0 dB
+  bypassed exactly; above, tanh(g·y)/g with g from `drive`, i.e. level-
+  preserving for small signals) → safety limiter → this is the echo (wet)
+  and, × `feedback`, what is written back with the input. The safety
+  limiter is linear below 0.5 and soft-saturates to ±1.0 above (document
+  the curve), so feedback > 100 % self-oscillates up to ≈ 0 dBFS and never
+  beyond, and nothing below −6 dBFS is touched.
+- **Modes:** `stereo` — two independent lines; `ping_pong` — the mono sum
+  (L+R)/2 enters the left line only; left line input = in + fb·R_echo,
+  right line input = fb·L_echo (first echo left, then alternating);
+  `mono` — the mono sum through the left line, echo to both outputs.
+- **`width`:** mid/side on the echo only (S × width/100); `mono` ignores it.
+- **`duck`:** detector = input peak max(|L|,|R|) with 1 ms attack, 250 ms
+  release, in dB; echo attenuation = `duck`·clamp((level + 60)/30, 0, 1) dB
+  (none at −60 dBFS and below, the full `duck` at −30 dBFS and above).
+- **`freeze`:** input to the lines fades out over 10 ms; the loop moves
+  (10 ms crossfade) to exact recirculation (gain 1, filters, drive and
+  limiter out of the loop), modulation fades to 0, line times hold their
+  current values until unfrozen. Off returns to the normal loop over 10 ms.
+- **`mix`/`output`:** linear dry/wet crossfade (as the other stock
+  effects), then output gain; both smoothed.
+- **Tail:** add the CLAP tail extension to this plugin (the template has
+  none; the host already queries it): infinite while `freeze` is on or
+  `feedback` ≥ 100 %, otherwise the longest line time ×
+  ceil(ln(1e-4)/ln(feedback)) + 50 ms (at least one repeat). Tell the host
+  (`clap_host_tail::changed`, from the main thread via `request_callback`)
+  when it changes.
+- Tests (beyond §1.7): impulse → first echo at the line time (fractional,
+  within one sample, measured by cross-correlation) and each repeat × fb
+  (within 0.2 dB at filters wide open); sync at 120 BPM, 1/8. = 375 ms, and a
+  transport tempo change moves the echo with the glide; a time jump
+  (375 → 200 ms) on a sine gives no click (the second difference of the
+  output stays within 4× its steady-state peak); ping-pong alternates left
+  and right with the offset spacing; feedback 110 % after a noise burst
+  stays ≤ 0 dBFS peak for 30 s, keeps oscillating (last-second RMS above
+  −30 dBFS) and never produces NaN/Inf; freeze holds the loop RMS within
+  0.2 dB over 20 s and ignores new input; duck 12 dB with a steady −20 dBFS
+  input attenuates the echo by 12 ± 0.5 dB and recovers after the input
+  stops; `mono` gives L = R; width 0 gives echo L = R; tail values.
+- GUI: the echo pattern (left and right tap positions and levels for the
+  first repeats, drawn from the parameters and tempo), time/sync and
+  feedback large, filters as a small loop-response curve, mod, drive, duck,
+  width, freeze, mode, mix, output. Scenarios: `default`, `pingpong` (1/4,
+  `ping_pong`, feedback 55, mod_depth 30).
+
+## 11. Third wave: reverb — Nave [`reverb`] (`stock-effects.md` §7)
+
+Identity: display name Nave, id `reverb`, CLAP id `com.suppleaudio.reverb`,
+state magic `QRV1`, AU subtype `QRvb`, features audio-effect, reverb,
+stereo. Everything in §1 applies; no sidechain port; latency 0.
+
+An original design; write its structure and constants into
+`stock-effects.md` §7 as you settle them.
+
+- **`early`** dB uses the utility's convention: a finite −60 dB endpoint
+  with `kOffAtMin` (exactly off, displayed −inf), up to +6.
+- **Input:** the stereo input → `low_cut`/`high_cut` (12 dB/oct) →
+  `predelay` (fractional, glides with a 50 ms two-pole smoother like the
+  delay's) → early reflections and the diffuser.
+- **Early reflections:** a tapped delay per channel, 12 taps in 5..80 ms
+  scaled by size, gains falling with time, seeded tap times (fixed seed, so
+  every instance and render is identical), alternating pan; level `early`.
+- **Diffusion:** 4 series Schroeder allpasses per channel (1..12 ms scaled
+  by size, seeded), coefficient 0.7·diffusion/100.
+- **FDN:** 16 lines, base lengths spaced geometrically over ≈ 25..95 ms with
+  seeded ±5 % jitter, all × a size factor 2^((size − 50)/50·1.5)
+  (≈ 0.35×..2.8×). Buffers sized in `prepare` for the largest size plus
+  modulation; size changes glide the fractional read positions (cubic
+  Hermite). Mixing: the normalized 16×16 Hadamard matrix as a fast
+  Walsh–Hadamard transform (×1/4). Input injection and the stereo output
+  taps use fixed orthogonal ± sign vectors (output scaled 1/√8).
+- **Decay:** per line, the attenuation per pass for an RT60 T is
+  g(T) = 10^(−3·L/(fs·T)) (L the line length in samples). Three regions:
+  T_low = decay·low_decay below `crossover`, T_mid = decay, T_high =
+  decay·high_decay above `damping_freq`; realize g(T_mid) × a first-order
+  low shelf at `crossover` (DC gain g(T_low)/g(T_mid)) × a first-order high
+  shelf at `damping_freq` (Nyquist gain g(T_high)/g(T_mid)). Coefficients
+  recomputed only while decay/size/shelf parameters move (fixed 16-sample
+  grid, as the EQ).
+- **Modulation:** each line's read position moves by seeded slow sinusoids
+  (0.1..1.2 Hz, distinct rates and phases), depth up to ±0.5 ms at
+  `modulation` 100 %; 0 is exactly none.
+- **Width:** mid/side on the whole wet (early + late), S × width/100.
+- **`freeze`:** input to the FDN and early taps fades out over 10 ms; decay
+  gains glide to 1 and the shelves flat (lossless loop), modulation fades
+  out, size holds. Off restores the decay over 10 ms.
+- **`mix`/`output`:** linear dry/wet crossfade, output gain; smoothed.
+- **Tail:** the CLAP tail extension as the delay's: infinite while frozen,
+  otherwise predelay + 1.5 × the longest band RT60 + 100 ms.
+- **CPU:** ≤ 2 % of a core per stereo instance at 48 kHz, 512-frame blocks,
+  -O2 (a bench executable as the EQ's, not a test); report the number.
+- Tests (beyond §1.7): RT60 per octave band (125 Hz … 8 kHz; octave-band
+  filtered impulse response, Schroeder backward integration, T30 fit)
+  within 10 % of the three-region target for bands at least an octave from
+  `crossover`/`damping_freq`, at decay 0.5/2/8 s and size 20/50/90;
+  normalized echo density (Abel & Huang) of the impulse response reaches
+  ≥ 0.8 within 150 ms at the defaults, and earlier with more diffusion
+  (report the measured times); a mono input gives a decorrelated tail
+  (interchannel correlation of the late tail < 0.3 at width 100, > 0.99 at
+  width 0); freeze holds the tail RMS within 1 dB over 10 s; `early` at its
+  minimum removes the early taps exactly; tail values; defaults bit-exact
+  across block sizes.
+- GUI: the decay curve (RT60 against frequency, log axes, from the three
+  regions and the cut filters), size and decay large, predelay, diffusion,
+  early, modulation, low_decay/crossover, high_decay/damping_freq,
+  low_cut/high_cut, width, freeze, mix, output. Scenarios: `default`,
+  `hall` (size 85, decay 4500 ms, predelay 25 ms, high_decay 0.4).
 
 ## 6. Engine and benchmark use
 
