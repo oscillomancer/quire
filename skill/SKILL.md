@@ -46,6 +46,7 @@ their undo history and can be reviewed.
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, `generated/plugins/orrery.md` |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
+| Compressing, external-key ducking, or limiting master peaks | `guides/comp.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | `generated/plugins/<plugin>.md` |

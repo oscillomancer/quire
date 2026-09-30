@@ -93,3 +93,5 @@ route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
+
+For track compression, external-key ducking and master peak limiting, see [the compressor/limiter guide](comp.md).
