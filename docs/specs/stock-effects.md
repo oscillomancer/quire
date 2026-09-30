@@ -350,6 +350,11 @@ Implementation decisions (2026-09-30):
   Clip off has zero delay; `clip` is non-automatable and requests restart,
   retaining the old DSP and latency until reactivation. Output gain can raise
   clipped peaks; clip is a tone control, not a ceiling limiter.
+  The alias regression uses a 5 kHz sine at amplitude 3 peak, 48 kHz sample
+  rate: harmonics 7/9/11 fold to 13/3/7 kHz at 1x and must each be at least
+  20 dB lower with 2x than base-rate tanh. Aliases between 20 kHz and
+  Nyquist are accepted; the fifth harmonic's 23 kHz fold is outside this
+  acceptance band.
 - Appended readonly host meters: `input_level`, `output_level` (sample peak
   dBFS, -120..40), and `gain` (average shaping dB, -12..12), every 50 ms.
   The visible editor gets the same frames; its 900 x 560 design plots two

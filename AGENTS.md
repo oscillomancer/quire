@@ -76,7 +76,8 @@ check. Reports and logs are saved under `build/reaper-check/`; see
 `tools/reaper-check/README.md`. REAPER is not part of CI.
 
 The JACK backend's tests use a stand-in libjack; the real server (the audio
-device, 2 s of silence) only on request:
+device, 2 s of silence) only when `SUPPLE_AUDIO_DEVICE_TEST` is exactly `1`
+(unset, empty, `0`, or any other value skips the test):
 `SUPPLE_AUDIO_DEVICE_TEST=1 build/dev/host/engine/engine.tests -tc='real JACK*'`.
 
 CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
