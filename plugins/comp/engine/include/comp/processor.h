@@ -34,11 +34,14 @@ class Processor {
                 if (!std::isfinite(x[n])) x[n] = 0;
             }
             // The optional key always has two channel pointers, also in mono.
-            if (key)
+            // A mono key bus (second pointer null) feeds both detectors.
+            if (key) {
                 for (std::size_t c = 0; c < 2; ++c) {
                     k[c] = key[c] ? static_cast<double>(key[c][i]) : 0;
                     if (!std::isfinite(k[c])) k[c] = 0;
                 }
+                if (key[0] && !key[1]) k[1] = k[0];
+            }
             if (channels_ == 1) x[1] = x[0];
             tick(x, k, y);
             for (int c = 0; c < channels_; ++c)

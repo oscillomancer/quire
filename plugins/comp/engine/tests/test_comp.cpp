@@ -566,6 +566,20 @@ TEST_CASE("comp mono still detects the right side of a stereo external key") {
     for (int i = 0; i < 1000; ++i) p.process(in, out, 1, key);
     CHECK(output < .15f);
 }
+TEST_CASE("comp mono external key feeds both detectors when unlinked") {
+    Processor p;
+    REQUIRE(p.prepare(48000, 1));
+    p.setParam(kSidechain, 1);
+    p.setParam(kStereoLink, 0);
+    p.setParam(kAttack, .01);
+    float input = .5f, keyMono = 1, l = 0, r = 0;
+    const float* in[]{&input, &input};
+    float* out[]{&l, &r};
+    const float* key[]{&keyMono, nullptr};
+    for (int i = 0; i < 1000; ++i) p.process(in, out, 1, key);
+    CHECK(l < .15f);
+    CHECK(r == l);
+}
 TEST_CASE("comp ratio smoothing reaches infinity without an endpoint jump") {
     Processor p;
     REQUIRE(p.prepare(48000, 1));
