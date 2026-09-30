@@ -36,9 +36,11 @@ asan, ubsan, tsan, rtsan + license + format; ADRs 0004/0005/0006 recorded.
 | P1.10 | audio-file: WAV read/write, FLAC/MP3 decode, resampler | `specs/core-analysis.md` §9 | **done** (orchestrator; resampler by analysis, merged 514cf5d) |
 | P1.11 | command-bus: registry, descriptors, dispatcher, batch, doc/schema export, example-tests, jobs | `specs/command-bus.md`, `specs/optimizer.md` §4 | **done** (json; merged bd33e44; reviewed by the orchestrator: dispatch/batch/transactions/error paths sound). Follow-up: the meta commands' summaries are terse ("Run commands atomically.") — batch is an MCP tool, give it a real description |
 
+| P1.12 | console9: the Airwindows Console 9 Channel/Buss port, null-tested against the reference (build prompt §3, added 2026-09-30) | `research/console9.md`, ADR-0019 §7–§9 | in progress (Codex `margin`, branch `p1-console9`) |
+
 Acceptance: unit tests per library; loudness validated against EBU R128
 reference signals; notation round-trips its corpus; example analysis
-reports committed in docs.
+reports committed in docs. The Console 9 port null-tests against the reference.
 
 ## Phase 2 — Sandbox host and the first MCP loop
 
@@ -81,6 +83,7 @@ Acceptance (build prompt Phase 4), as of 2026-09-27:
 | A crashing plugin in isolation does not take down the engine | **passes** (P4.8; shared bridge in review) |
 | An LLM over MCP builds a small arrangement headlessly and renders it | **passes** (P4.14, engine.mcp-arrangement) |
 | Benchmarks vs REAPER recorded in docs/benchmarks/ | **open** (needs B1 proper) |
+| Console 9 invariants hold (strip-layout fuzz test; fader/pan drive C9 Channel or the master's plain stage) — added 2026-09-30 | **open**: designed (ADR-0019; session-model/engine amended); model + plan work queued after `libs/console9` |
 
 | ID | Task | State |
 |---|---|---|
@@ -107,15 +110,17 @@ Acceptance (build prompt Phase 4), as of 2026-09-27:
 | P4.20 | the model-thread service tick (engine.md §6) | **done** (json-9, Hermes; reviewed by the orchestrator: buffered MCP stdin, timer teardown, autosave back-off): `ModelLoop::every` timers and an MCP pump that ticks while idle; every 100 ms plans are freed, `fx.failed` is emitted unasked, a device change restarts the engine (`engine.restarting`, back-off, `engine.error` after 30 s; position and loop kept), autosave to `<file>-data/autosave-<n>.json` (newest 5; `autosave_available` on open) |
 | — | review round 14 (transport seqlock, VST3, commands) | **fixed** (reviewer, Hermes, on the orchestrator's decisions): the renderer's transport read is bounded; a VST3's controller is never called on the audio thread (plain automation lanes compile into the normalized domain; `Instance::paramsNormalized/normalizedParam/plainParam`, bridged); settled VST3 bus widths, reset() ends sounding notes; render path symlink check; `track.move`; checked ids; item.set conflicts |
 
-## Team (Hermes workers via Herdr)
+## Team (Codex workers via Herdr)
 
-Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Codex is
-retired for now; four Hermes workers (DeepSeek, API-billed) take
-well-specified implementation and reviews, one worktree each; the
-orchestrator designs, reviews every branch and integrates.
+Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Four Codex
+workers (`gpt-6.1-sol`), one worktree each, take well-specified
+implementation; the orchestrator designs, reviews every branch and
+integrates. Hermes is retired.
 
-- **stretch**, **lua**, **tick** — delivered P4.19, P4.18, P4.20; idle.
-- **reviewer** — review round 14 and its fixes; idle.
+- **contour** — EQ (landed), reverb (in progress).
+- **margin** — analyzer, gate, delay (landed); `libs/console9` (in progress).
+- **press** — compressor/limiter, transient shaper (landed); one display-name definition per plugin (in progress).
+- **trim** — utility, saturation (landed); automated REAPER load/render/automation check (in progress).
 
 Test labels: `slow` (dev/gcc/asan only), `tsan-skip` (AGENTS.md). Local CI
 is ~25 min per full run and grows with the optimizer/analysis suites.
