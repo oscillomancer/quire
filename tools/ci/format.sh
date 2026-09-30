@@ -10,11 +10,27 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/utility/' \
+  | grep -v '^plugins/drive/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.
 files+=(
+  plugins/drive/engine/include/drive/params.h
+  plugins/drive/engine/include/drive/processor.h
+  plugins/drive/engine/src/params.cpp
+  plugins/drive/engine/src/processor.cpp
+  plugins/drive/engine/tests/test_drive.cpp
+  plugins/drive/plugin/src/DriveParams.h
+  plugins/drive/plugin/src/drive_clap.cpp
+  plugins/drive/plugin/gui/Editor.cpp
+  plugins/drive/plugin/gui/Editor.h
+  plugins/drive/plugin/gui/Theme.h
+  plugins/drive/test/host_smoke.cpp
+  plugins/drive/test/semantic_rt.cpp
+  plugins/drive/test/editor_input.cpp
+  plugins/drive/tools/gui_preview.cpp
+
   plugins/utility/engine/include/utility/params.h
   plugins/utility/engine/include/utility/processor.h
   plugins/utility/engine/src/params.cpp

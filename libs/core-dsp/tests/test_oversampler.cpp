@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: MIT
+#include <doctest/doctest.h>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <complex>
+#include <numbers>
+#include <vector>
+#include "supple/dsp/oversampler.h"
+using namespace supple::dsp;
+namespace {
+std::vector<double> impulse(int factor) {
+    Oversampler os;
+    os.prepare(factor, 4096);
+    std::vector<double> out(4096);
+    std::array<double, 8> hi{};
+    for (size_t n = 0; n < out.size(); ++n) {
+        os.upsample(n == 0 ? 1 : 0, hi);
+        out[n] = os.downsample(hi);
+    }
+    return out;
+}
+}  // namespace
+TEST_CASE("oversampler exact integer latency and passband") {
+    for (int f : {1, 2, 4, 8}) {
+        Oversampler os;
+        os.prepare(f);
+        auto h = impulse(f);
+        auto peak = static_cast<uint32_t>(std::max_element(h.begin(), h.end()) - h.begin());
+        CHECK(peak == os.latency());
+        double maximum = 0;
+        for (int k = 0; k <= 90; ++k) {
+            std::complex<double> sum{};
+            for (size_t n = 0; n < h.size(); ++n)
+                sum += h[n] * std::polar(1.0, -2 * std::numbers::pi * (k * .005) * n);
+            maximum = std::max(maximum, std::abs(20 * std::log10(std::abs(sum))));
+        }
+        CHECK(maximum < .01);
+        for (size_t n = 1; n <= os.latency(); ++n)
+            CHECK(h[os.latency() - n] == doctest::Approx(h[os.latency() + n]).epsilon(1e-12));
+    }
+}
+TEST_CASE("oversampler rejects interpolation images and downsampling aliases") {
+    for (int f : {2, 4, 8}) {
+        Oversampler up;
+        up.prepare(f);
+        std::array<double, 8> hi{};
+        std::complex<double> base{}, image{}, alias{};
+        Oversampler down;
+        down.prepare(f);
+        constexpr int count = 10000;
+        for (int n = 0; n < count + 1024; ++n) {
+            const double x = std::sin(2 * std::numbers::pi * .125 * n);
+            up.upsample(x, hi);
+            if (n >= 1024)
+                for (int p = 0; p < f; ++p) {
+                    const int t = n * f + p;
+                    base += hi[p] * std::polar(1.0, -2 * std::numbers::pi * .125 / f * t);
+                    image += hi[p] * std::polar(1.0, -2 * std::numbers::pi * .875 / f * t);
+                }
+            for (int p = 0; p < f; ++p)
+                hi[p] = std::sin(2 * std::numbers::pi * .875 / f * (n * f + p));
+            const double y = down.downsample(hi);
+            if (n >= 1024) alias += y * std::polar(1.0, -2 * std::numbers::pi * .125 * n);
+        }
+        CHECK(20 * std::log10(std::abs(image / base)) < -100);
+        CHECK(20 * std::log10(std::abs(alias) * 2 / count) < -100);
+    }
+}
+TEST_CASE("oversampler state is independent of block boundaries and reset") {
+    for (int f : {1, 2, 4, 8}) {
+        const auto reference = impulse(f);
+        for (int block : {1, 7, 64, 4096}) {
+            Oversampler os;
+            os.prepare(f, 4096);
+            std::array<double, 8> hi{};
+            for (int start = 0; start < 4096; start += block)
+                for (int n = start; n < std::min(4096, start + block); ++n) {
+                    os.upsample(n == 0 ? 1 : 0, hi);
+                    CHECK(os.downsample(hi) == reference[n]);
+                }
+            os.reset();
+            os.upsample(1, hi);
+            CHECK(os.downsample(hi) == reference[0]);
+        }
+    }
+}

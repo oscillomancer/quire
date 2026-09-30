@@ -95,3 +95,5 @@ points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
 
 Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
+
+- [Kiln saturation](drive.md): drive, asymmetry, wavefolding and reference level compensation.
