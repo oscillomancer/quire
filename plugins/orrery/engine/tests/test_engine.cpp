@@ -243,6 +243,40 @@ TEST_CASE("FM: a modulator-only operator changes the carrier's spectrum") {
     CHECK(diff > 100.0);
 }
 
+TEST_CASE("FM depth follows the modulator's level, and an envelope on it shapes the FM") {
+    // Spec §5.4: a modulator is heard after its level, so the FM depth envelope is a
+    // route to the modulator's level. (The engine once read the raw oscillator.)
+    const Patch plain = parse(R"("oscillators": {"osc1": {"type": "fm"}})");
+    auto fm = [](std::string_view level) {
+        return parse(std::string(R"("oscillators": {"osc1": {"type": "fm"},
+                                  "osc2": {"type": "fm", "ratio": 3, "level": ")") +
+                     std::string(level) +
+                     R"(", "to": "none"}}, "routes": {"osc2>osc1.fm": {"amount": 4}})");
+    };
+    const Audio sine = render(plain, {note(0, 57, 1.0)}, 9600, 256);
+    auto deviation = [&](const Audio& x, std::size_t from, std::size_t to) {
+        double d = 0.0;
+        for (std::size_t i = from; i < to; ++i)
+            d += std::fabs(static_cast<double>(x.l[i] - sine.l[i]));
+        return d;
+    };
+    const Audio full = render(fm("0 dB"), {note(0, 57, 1.0)}, 9600, 256);
+    const Audio quiet = render(fm("-40 dB"), {note(0, 57, 1.0)}, 9600, 256);
+    CHECK(deviation(quiet, 2000, 9600) < 0.1 * deviation(full, 2000, 9600));
+
+    // A decaying envelope on the modulator's level: a bright onset that settles back to
+    // the constant -40 dB modulator's small residual.
+    const Patch shaped = parse(R"("oscillators": {"osc1": {"type": "fm"},
+                                 "osc2": {"type": "fm", "ratio": 3, "level": "-40 dB", "to": "none"}},
+                 "envelopes": {"env2": {"attack": "0 ms", "decay": "30 ms", "sustain": 0}},
+                 "routes": {"osc2>osc1.fm": {"amount": 4}, "env2>osc2.level": {"amount": "+40 dB"}})");
+    const Audio a = render(shaped, {note(0, 57, 1.0)}, 9600, 256);
+    CHECK(deviation(a, 48, 480) > 5.0 * deviation(quiet, 48, 480));
+    CHECK(deviation(a, 7200, 7632) == doctest::Approx(deviation(quiet, 7200, 7632)).epsilon(0.1));
+    const Audio b = render(shaped, {note(0, 57, 1.0)}, 9600, 17);
+    CHECK(a.l == b.l);
+}
+
 TEST_CASE("legato keeps the envelope running; mono retriggers") {
     auto levelAfterSecondNote = [](std::string_view mode, std::string_view retrigger) {
         const Patch p = parse(std::string(R"("voice": {"mode": ")") + std::string(mode) +

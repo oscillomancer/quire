@@ -482,7 +482,8 @@ real-time engine). The code is the reference; these notes explain the choices.
   `bell` (hum, prime, tierce, quint, nominal … with ratios quantized to 1/8 of
   the played pitch: the table's fundamental is pitch/8), `organ` (nine drawbars
   at pitch/2, eight registrations, 3 dB per step), `digital` (a ramp through
-  sample-and-hold 4096 → 16 steps and 16 → 3 bits, then band-limited),
+  sample-and-hold 16 → 6 steps and 5 → 3 bits, then band-limited; coarse from
+  position 0 since 2026-09-30 so it never sounds like `harmonic_ramp`'s saw),
   `spectral_comb` (a raised-cosine comb over 1/k^0.6, period 16 → 3 harmonics).
   32 frames per table (`position` crossfades adjacent frames); 10 mip levels
   of 512 >> L harmonics at ≥ 8 samples per top harmonic, one gain per frame.
