@@ -208,7 +208,7 @@ TEST_CASE("Reverb freeze is held, early-off is exact and tail is reported") {
     v[kPredelay] = 0;
     auto ir = measurements::impulse(v, 48000, .02);
     for (const auto& c : ir)
-        CHECK(std::all_of(c.begin(), c.end(), [](double x) { return x == 0; }));
+        CHECK(std::all_of(c.begin(), c.end(), [](double s) { return s == 0; }));
 }
 TEST_CASE("Reverb dry null, mono, float double and automation stress") {
     for (double fs : {22050., 44100., 48000., 96000., 192000., 384000.}) {
