@@ -12,6 +12,7 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -v '^plugins/eq/' \
+  | grep -Ev '^plugins/gate/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/gate_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   | grep -Ev '^plugins/comp/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/comp_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)

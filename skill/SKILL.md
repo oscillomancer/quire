@@ -59,3 +59,5 @@ installed version. If a guide and a generated reference disagree, the
 generated reference is right.
 
 - [Utility: Plumb](guides/utility.md) — gain, balance, width, polarity and bass mono.
+
+- [Gate / expander](guides/gate.md): sidechain cleanup, hold and hysteresis.
