@@ -327,6 +327,58 @@ the ceiling and input/output peak meters. Scenarios: `default`, `heavy`
   the 1/3-octave spectrum, correlation and balance meters. Scenarios:
   `idle`, `music` (a synthetic mix fed through the telemetry path).
 
+## 7. Second wave: saturation — Kiln [`drive`] (`stock-effects.md` §5)
+
+Identity: display name Kiln, id `drive`, CLAP id `com.suppleaudio.drive`,
+state magic `QDR1`, AU subtype `QDrv`, features audio-effect, distortion,
+stereo. Everything in §1 applies.
+
+- **Oversampling** (`1x`, `2x`, `4x`, `8x`; stepped, latency): a shared
+  primitive this plugin adds to `libs/core-dsp` (the only worker touching
+  it): `dsp::Oversampler` — cascaded linear-phase half-band FIR stages
+  (design documented in the header: stopband ≥ 100 dB, passband to 0.45 of
+  the base rate within ±0.01 dB), up and down per channel, preallocated for
+  the maximum block, `latency()` exact in base-rate samples (an integer:
+  pad the stage delays so it is). Tests in `libs/core-dsp`: passband,
+  stopband (images and aliases), exact latency, block-size invariance.
+- **Curves** with first-order antiderivative anti-aliasing (ADAA): for
+  f(x) with antiderivative F, y[n] = (F(x[n]) − F(x[n−1])) / (x[n] − x[n−1]),
+  falling back to f((x[n] + x[n−1]) / 2) when |x[n] − x[n−1]| < 1e-5; this
+  adds half a sample of delay at the oversampled rate, which the dry path and
+  the reported latency include (round the total to whole base-rate samples
+  by adding delay). Curves (all odd-symmetric before `bias`, unity small-
+  signal slope, bounded): `tape` (tanh-like soft curve with a slightly
+  wider knee), `tube` (a gentler onset than tape and stronger compression when
+  driven; like every curve it is odd-symmetric, and its even harmonics come
+  from `bias`), `transistor` (harder knee, x/(1+|x|ⁿ)
+  family), `diode` (exponential knee), `fold` (smooth sine-based wavefolder;
+  its antiderivative is closed-form), `hard` (clip at ±1). Write each curve
+  and its antiderivative in `stock-effects.md` §5.
+- **Drive/bias/tone:** input × drive (dB); `bias` adds a DC offset before
+  the curve (asymmetry → even harmonics) and a DC blocker (5 Hz) after it;
+  `tone` is a first-order tilt before the curve and its inverse after
+  (so the dry tone is kept at low drive).
+- **`auto_gain`:** divide by the curve's small-signal gain model at the
+  current drive (analytic per curve, documented), verified to hold loudness
+  within 1 LU on pink noise across the drive range (core-analysis LUFS).
+- **`mix`/`output`:** dry path delayed by the full latency; mix and output
+  smoothed.
+- Tests (beyond §1.7): THD rises monotonically with drive for each curve;
+  aliasing of a 5 kHz sine at 24 dB drive, `4x`, 48 kHz: every non-harmonic
+  component below −90 dBFS relative to the fundamental; `bias` 0 gives no
+  even harmonics above −100 dB for odd curves, `bias` 50 % gives a 2nd
+  harmonic above −40 dB; DC-free output (mean below 1e-5 after 1 s); latency
+  reported equals the measured delay for every factor at 44.1/48/96 kHz;
+  `mix` 50 % on a sine at drive 0 dB and `tape` equals the input within
+  0.01 dB (alignment check).
+- GUI: the transfer curve (input vs output, with a moving dot) and a
+  harmonic spectrum bar display of the current setting (computed from a
+  test sine on the main thread), drive large, curve selector, bias, tone,
+  oversampling, auto gain, mix, output. Scenarios: `default`, `hot` (fold,
+  24 dB, bias 30 %).
+- Orrery keeps its own minimum-phase decimator (voices are generated at the
+  oversampled rate); do not change Orrery.
+
 ## 6. Engine and benchmark use
 
 Once built, the plugins are in the build's `plugins/clap/`; the engine
