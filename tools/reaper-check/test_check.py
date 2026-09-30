@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Pure helper and process-isolation tests; no REAPER or audio device required."""
 from array import array
+from contextlib import redirect_stdout
+from io import StringIO
 import importlib.util
 import json
 import math
@@ -102,6 +104,80 @@ class Helpers(unittest.TestCase):
         quoted = check.lua_string(value)
         self.assertTrue(quoted.startswith("[==["))
         self.assertEqual(quoted[4:-4], value)
+
+
+class EditorChecks(unittest.TestCase):
+    def test_host_confirmation_requires_both_shown_and_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Plumb"
+            folder.mkdir()
+            class Runner:
+                def run(self, args, label):
+                    self.invocation = (args, label)
+            runner = Runner()
+            metadata = folder / "editor.tsv"
+            metadata.write_text("shown\t1\nclosed\t1\ncomplete\t1\n")
+            result = check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+            self.assertEqual(result["closed"], "1")
+            self.assertEqual(runner.invocation, ([str(folder / "editor.lua")], "Plumb-editor"))
+            # A successful exit or complete marker alone cannot pass the check.
+            for content in ("complete\t1\n", "shown\t1\ncomplete\t1\n",
+                            "shown\t1\nclosed\t1\n", "error\tUI failed\n"):
+                metadata.write_text(content)
+                with self.assertRaises(check.CheckError):
+                    check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+            metadata.unlink()
+            with self.assertRaisesRegex(check.CheckError, "editor did not produce metadata"):
+                check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+
+    def test_editor_is_checked_after_signal_failure_but_not_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            class Runner:
+                def run(self, args, label):
+                    if args[0] == "-renderproject":
+                        Path(args[1]).with_suffix(".wav").touch()
+            with patch.object(check, "read_metadata", return_value={"complete": "1"}), \
+                    patch.object(check, "read_wav", return_value=[]), \
+                    patch.object(check, "rms", return_value=0), \
+                    patch.object(check, "difference", return_value=0), \
+                    patch.object(check, "check_editor", return_value={"shown": "1", "closed": "1"}) as editor:
+                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                                         Runner(), root / "enabled", root / "config", root / "source", True)
+                self.assertEqual((row["load"], row["signal"], row["editor"]), ("pass", "fail", "pass"))
+                editor.assert_called_once()
+                editor.reset_mock()
+                editor.side_effect = check.CheckError("editor failed")
+                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                                         Runner(), root / "failed", root / "config", root / "source", True)
+                self.assertEqual((row["signal"], row["editor"]), ("fail", "fail"))
+                self.assertEqual(row["editor_reason"], "editor failed")
+                self.assertEqual(row["editor_error"]["code"], "check.failed")
+                editor.reset_mock()
+                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                                         Runner(), root / "disabled", root / "config", root / "source")
+                self.assertEqual(row["editor"], "skipped")
+                self.assertEqual(row["editor_reason"], "--editor not requested")
+                editor.assert_not_called()
+
+    def test_editor_failure_sets_nonzero_exit_and_preserves_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugins = root / "build/dev/plugins/clap"
+            plugins.mkdir(parents=True)
+            (plugins / "Plumb.clap").write_bytes(b"test artifact")
+            row = {"plugin": "com.suppleaudio.utility", "load": "pass", "signal": "pass",
+                   "automation": "pass", "state": "pass", "editor": "fail", "reason": "UI failed"}
+            with patch.object(check, "ROOT", root), patch.object(check.Path, "home", return_value=root), \
+                    patch.object(check, "test_signal"), patch.object(check, "check_plugin", return_value=row) as plugin, \
+                    redirect_stdout(StringIO()):
+                self.assertEqual(check.main(["--build-dir", str(root / "build/dev"),
+                                             "--reaper", "fake-reaper", "--editor"]), 1)
+            self.assertTrue(plugin.call_args.args[-1])
+            report = json.loads(next((root / "build/reaper-check").glob("*/report.json")).read_text())
+            self.assertTrue(report["editor_requested"])
+            self.assertEqual(report["results"][0]["editor"], "fail")
+            self.assertTrue(report["user_config_unchanged"])
 
 
 class ProcessIsolation(unittest.TestCase):

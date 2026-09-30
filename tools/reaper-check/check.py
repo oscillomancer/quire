@@ -367,9 +367,85 @@ reaper.defer(function() reaper.Main_OnCommand(40004,0) end)
     return prefix + source + suffix
 
 
-def read_metadata(path):
+def editor_script(plugin_id, folder, cfg):
+    """Pump REAPER's UI through defer; never synthesize desktop input."""
+    return f"""local folder = {lua_string(folder)} .. '/'
+local expected_resource = {lua_string(cfg)}
+local log = assert(io.open(folder .. 'editor.tsv', 'w'))
+local track, fx = nil, 0
+local done, phase, turns = false, 'opening', 0
+local deadline = 0
+local function say(key,value)
+  log:write(key .. '\\t' .. tostring(value):gsub('[\\r\\n\\t]', ' ') .. '\\n'); log:flush()
+end
+local function finish(err)
+  if done then return end
+  done = true
+  if err then say('error',err) else say('complete','1') end
+  -- Close even when confirmation fails. The outer runner kills this entire
+  -- instance if any host call hangs before we can reach the deferred quit.
+  if track then
+    reaper.TrackFX_Show(track,fx,2)
+    reaper.TrackFX_Show(track,fx,0)
+  end
+  log:close()
+  reaper.Main_openProject('noprompt:' .. folder .. 'empty.RPP')
+  reaper.defer(function() reaper.Main_OnCommand(40004,0) end)
+end
+local function poll()
+  local ok,err = xpcall(function()
+    turns = turns + 1
+    assert(reaper.time_precise() <= deadline, 'editor ' .. phase .. ' confirmation timed out')
+    local floating = reaper.TrackFX_GetFloatingWindow(track,fx) ~= nil
+    local opened = reaper.TrackFX_GetOpen(track,fx)
+    if phase == 'opening' and floating and opened and turns >= 2 then
+      say('shown','1')
+      reaper.TrackFX_Show(track,fx,2)
+      reaper.TrackFX_Show(track,fx,0)
+      phase,turns = 'closing',0
+    elseif phase == 'closing' and not floating and not opened then
+      say('closed','1')
+      finish()
+      return
+    end
+    reaper.defer(poll)
+  end,debug.traceback)
+  if not ok then finish(err) end
+end
+local ok,err = xpcall(function()
+  say('version',reaper.GetAppVersion())
+  assert(reaper.GetResourcePath() == expected_resource, 'private resource directory not selected')
+  local opened,mode = reaper.GetAudioDeviceInfo('MODE')
+  say('audio_mode',opened and mode or 'closed (Dummy configured)')
+  assert(not opened or mode:lower():find('dummy'), 'expected Dummy audio; refusing to continue')
+  reaper.Audio_Quit()
+  reaper.Main_openProject('noprompt:' .. folder .. 'default.RPP')
+  track = reaper.GetTrack(0,0)
+  assert(track, 'saved project has no track')
+  local _,ident = reaper.TrackFX_GetNamedConfigParm(track,fx,'fx_ident')
+  assert(ident:find({lua_string(plugin_id)},1,true), 'loaded unexpected plugin identity')
+  say('fx_ident',ident)
+  deadline = reaper.time_precise() + 3
+  reaper.TrackFX_Show(track,fx,3)
+  reaper.defer(poll)
+end,debug.traceback)
+if not ok then finish(err) end
+"""
+
+
+def check_editor(plugin_id, runner, folder, cfg):
+    script = folder / "editor.lua"
+    script.write_text(editor_script(plugin_id, folder, cfg))
+    runner.run([str(script)], folder.name + "-editor")
+    metadata = read_metadata(folder / "editor.tsv", "editor")
+    if "error" in metadata or any(metadata.get(key) != "1" for key in ("shown", "closed", "complete")):
+        raise CheckError(metadata.get("error", "editor was not confirmed shown and closed"))
+    return metadata
+
+
+def read_metadata(path, context="setup"):
     if not path.exists():
-        raise CheckError("setup did not produce metadata; see setup log (display/license/script startup)")
+        raise CheckError(f"{context} did not produce metadata; see {context} log (display/license/script startup)")
     return dict(line.split("\t", 1) for line in path.read_text().splitlines() if "\t" in line)
 
 
@@ -438,9 +514,11 @@ def automation_delta(automated, reference):
     return 20 * math.log10(max(1e-15, ratios[1]) / max(1e-15, ratios[0]))
 
 
-def check_plugin(plugin_id, case, runner, folder, cfg, media):
+def check_plugin(plugin_id, case, runner, folder, cfg, media, editor=False):
     row = {"plugin": plugin_id, "load": "fail", "signal": "skipped",
-           "automation": "skipped", "state": "skipped", "reason": "", "metrics": {}}
+           "automation": "skipped", "state": "skipped", "editor": "skipped",
+           "editor_reason": "default project did not load" if editor else "--editor not requested",
+           "reason": "", "metrics": {}}
     folder.mkdir()
     (folder / "empty.RPP").write_text('<REAPER_PROJECT 0.1 "7" 0\n>\n')
     script = folder / "setup.lua"
@@ -500,6 +578,19 @@ def check_plugin(plugin_id, case, runner, folder, cfg, media):
         row["error"] = structured.structured(str(folder))
         if (folder / "metadata.tsv").exists():
             row["metadata"] = read_metadata(folder / "metadata.tsv")
+    if editor and row["load"] == "pass":
+        try:
+            row["editor_metadata"] = check_editor(plugin_id, runner, folder, cfg)
+            row["editor"] = "pass"
+            row["editor_reason"] = "floating editor confirmed shown and closed; screenshot not captured"
+        except ConfigChanged:
+            raise
+        except (CheckError, OSError, ValueError) as error:
+            row["editor"] = "fail"
+            row["editor_reason"] = str(error)
+            row["reason"] = "; ".join(filter(None, (row["reason"], "editor: " + str(error))))
+            structured = error if isinstance(error, CheckError) else CheckError(str(error))
+            row["editor_error"] = structured.structured(str(folder))
     return row
 
 
@@ -509,6 +600,8 @@ def main(argv=None):
     parser.add_argument("--reaper", default=shutil.which("reaper"))
     parser.add_argument("--timeout", type=float, default=20)
     parser.add_argument("--plugin", action="append", choices=sorted(CASES))
+    parser.add_argument("--editor", action="store_true",
+                        help="also confirm each floating editor is shown and closed (requires a display)")
     args = parser.parse_args(argv)
     if not args.reaper or not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("REAPER executable and positive finite timeout required")
@@ -536,7 +629,8 @@ def main(argv=None):
             if pair is None:
                 if not args.plugin:
                     results.append({"plugin": artifact.name, "load": "fail", "signal": "skipped",
-                                    "automation": "skipped", "state": "skipped",
+                                    "automation": "skipped", "state": "skipped", "editor": "skipped",
+                                    "editor_reason": "unknown artifact",
                                     "reason": "unknown artifact; add an explicit CASES entry"})
                 continue
             plugin_id, case = pair
@@ -544,10 +638,11 @@ def main(argv=None):
                 continue
             seen.add(plugin_id)
             results.append(check_plugin(plugin_id, case, runner, directory / case.artifact,
-                                        ini.parent, media))
+                                        ini.parent, media, args.editor))
         for missing in set(args.plugin or ()) - seen:
             results.append({"plugin": missing, "load": "fail", "signal": "skipped",
-                            "automation": "skipped", "state": "skipped", "reason": "artifact absent"})
+                            "automation": "skipped", "state": "skipped", "editor": "skipped",
+                            "editor_reason": "artifact absent", "reason": "artifact absent"})
     except (CheckError, OSError, KeyboardInterrupt) as error:
         fatal = str(error) or "interrupted"
         structured = error if isinstance(error, CheckError) else CheckError(fatal)
@@ -565,17 +660,19 @@ def main(argv=None):
                   "version": next((r.get("metadata", {}).get("version") for r in results
                                    if r.get("metadata", {}).get("version")), "unavailable"),
                   "commands": runner.commands if runner else [], "results": results,
+                  "editor_requested": args.editor,
                   "fatal": fatal, "error": fatal_error, "user_config_unchanged": not changed}
         write_json(directory / "report.json", report)
         print("\nREAPER " + report["version"])
-        print("plugin | load | signal | automation | state | reason")
+        print("plugin | load | signal | automation | state | editor | reason")
         for row in results:
-            print(" | ".join(str(row[k]) for k in ("plugin", "load", "signal", "automation", "state", "reason")))
+            columns = ("plugin", "load", "signal", "automation", "state", "editor", "reason")
+            print(" | ".join(str(row[k]) for k in columns))
         if fatal:
             print("FAIL: " + fatal, file=sys.stderr)
         print("Report: " + str(directory / "report.json"))
     return int(bool(fatal) or not results or any("fail" == r[k] for r in results
-                                               for k in ("load", "signal", "automation", "state")))
+                                               for k in ("load", "signal", "automation", "state", "editor")))
 
 
 if __name__ == "__main__":

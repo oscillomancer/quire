@@ -68,9 +68,12 @@ tools/validator/build.sh     # pinned clap-validator 0.4.1 in the user-space cac
 tools/validator/run.sh build/dev/plugins/clap/ProbeSynth.clap build/dev/plugins/clap/Orrery.clap
 ```
 
-Phase 3 acceptance in REAPER (only when the plugin is installed in a CLAP path
-REAPER scans, e.g. ~/.clap; opens the audio device):
-`tools/reaper/load-test.sh <plugin display name>`.
+Phase 3 acceptance in REAPER (on demand; private configuration, build CLAP path
+only, Dummy/closed audio and offline renders):
+`python3 tools/reaper-check/check.py --build-dir build/dev`. Add `--editor` to
+confirm floating editors open and close; use `--plugin <CLAP id>` for a focused
+check. Reports and logs are saved under `build/reaper-check/`; see
+`tools/reaper-check/README.md`. REAPER is not part of CI.
 
 The JACK backend's tests use a stand-in libjack; the real server (the audio
 device, 2 s of silence) only on request:
