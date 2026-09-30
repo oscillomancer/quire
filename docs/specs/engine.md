@@ -366,7 +366,9 @@ granted, and CPU governor (read-only facts).
   restarts the engine after a device change. Tests use a stand-in libjack
   (`tests/fake_jack.cpp`) that drives the
   process callback from its own thread and injects period/rate changes,
-  xruns, stalls and shutdown; the real server is used only by
+  xruns, stalls and shutdown; the real server is used only when
+  `SUPPLE_AUDIO_DEVICE_TEST` equals exactly `1` (unset, empty, `0`, and
+  all other values skip it):
   `SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='real JACK*'` (2 s of silence
   at a 64-frame block). First run on this machine: 48 kHz, period 128 for a
   64-frame request, 0 xruns, final callback on the JACK thread.

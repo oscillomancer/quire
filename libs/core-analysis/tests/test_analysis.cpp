@@ -1,5 +1,6 @@
 // Descriptors against synthetic signals with known answers (core-analysis §10).
 #include <doctest/doctest.h>
+#include <supple/base/environment.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -436,7 +437,7 @@ TEST_CASE("example reports (docs/specs/examples/analysis)") {
         }));
     const std::filesystem::path dir =
         std::filesystem::path(SUPPLE_SOURCE_DIR) / "docs/specs/examples/analysis";
-    const bool update = std::getenv("SUPPLE_UPDATE_EXAMPLES") != nullptr;
+    const bool update = supple::environmentFlagEnabled("SUPPLE_UPDATE_EXAMPLES");
     for (auto& [name, audio] : examples) {
         CAPTURE(name);
         const std::string text = json::writeCanonical(toJson(run(audio), Detail::Standard)) + "\n";
