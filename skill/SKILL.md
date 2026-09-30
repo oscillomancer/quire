@@ -48,6 +48,9 @@ their undo history and can be reviewed.
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, `generated/plugins/orrery.md` |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing, external-key ducking, or limiting master peaks | `guides/comp.md` |
+| Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
+| Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
+| Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | `generated/plugins/<plugin>.md` |
@@ -57,7 +60,3 @@ their undo history and can be reviewed.
 Files under `generated/` are produced from the code and always match the
 installed version. If a guide and a generated reference disagree, the
 generated reference is right.
-
-- [Utility: Plumb](guides/utility.md) — gain, balance, width, polarity and bass mono.
-
-- [Gate / expander](guides/gate.md): sidechain cleanup, hold and hysteresis.

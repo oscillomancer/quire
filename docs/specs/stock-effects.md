@@ -325,16 +325,126 @@ level-independent (a 10 dB louder input yields the same shaping).
 ## 5. Saturation — "Kiln" [`drive`]
 
 Keys: `curve` enum `tape`, `tube`, `transistor`, `diode`, `fold`, `hard`
-(`tape`); `drive` dB 0..36 (6); `bias` % −100..100 (0; asymmetry → even
-harmonics); `tone` dB/oct −6..+6 (0; tilt before/after pair keeps the
-dry-matched tone); `oversampling` enum `1x`, `2x`, `4x`, `8x` (`4x`;
-latency); `auto_gain` bool (true; equal loudness by an analytic
-small-signal gain model, verified with core-analysis LUFS within 1 LU over
-the drive range on pink noise); `mix` %, `output` dB. DSP: first-order
-antiderivative anti-aliasing (ADAA) for every static curve plus
-oversampling; `fold` uses a smooth wavefolder with ADAA. Tests: THD vs drive
-curves per `curve`, aliasing below −90 dB for a 5 kHz sine at `4x`/24 dB
-drive, DC-free output (bias adds DC blocking after the nonlinearity).
+(`tape`); `drive` dB 0..36 (6); `bias` % −100..100 (0); `tone` dB/oct
+−6..+6 (0); `oversampling` enum `x1`, `x2`, `x4`, `x8` (`x4`; displayed
+1x/2x/4x/8x, stepped, latency); `auto_gain` bool (true); `mix` % 0..100
+(100), `output` dB −24..+24 (0). Append-only readonly `input_level` and
+`output_level` dBFS −120..40 (−120), sample peaks published every 50 ms.
+
+Implementation decisions (2026-09-29; approved refinements to effects.md §7):
+
+- Patch choice keys begin with a letter, as required by core-params:
+  `x1`/`x2`/`x4`/`x8`. The original digit-leading keys were not valid.
+- All curves have unity slope at zero and are odd and bounded. Define
+  R(a,c,x) = a·(u + c·u³), u = (x/a)/sqrt(1+(x/a)²).
+  Its even antiderivative, zero at the origin, is
+  I(a,c,x) = a²·[(1+c)(r−1) + c(1/r−1)], r = sqrt(1+(x/a)²).
+  Tape: R(1.2,0,x), F = I(1.2,0,x), wide soft knee.
+  Tube: R(0.6,0.4,x), F = I(0.6,0.4,x), gentler onset but lower
+  asymptotic ceiling (±0.84). Transistor: R(1,0.5,x), F = I(1,0.5,x),
+  a rational-family knee with zero cubic term at the origin, bounded ±1.5.
+  Diode: tanh(x), F = |x| + log(1+exp(−2|x|)) − log(2).
+  Fold: 0.35·R(1.2,0,x) + 0.65·sin(x),
+  F = 0.35·I(1.2,0,x) + 0.65·(1−cos(x)); the soft residual retains
+  low-frequency content when the sine folds, so RMS compensation also
+  meets the reference pink-noise LUFS tolerance. Hard: clip(x,−1,1),
+  F = x²/2 for |x|≤1, else |x|−1/2. These are static character curves,
+  not claimed physical circuit/tape models.
+- First-order ADAA evaluates the antiderivative difference, falling back
+  to f((x+x_previous)/2) for |difference|<1e-5. A half-sample averaging
+  delay and factor−1 high-rate samples complete one integer base sample.
+  The shared linear-phase half-band Oversampler uses 145/33/25 taps at
+  2x/4x/8x, Kaiser beta 11, exact zero half-band taps. The base-adjacent
+  stage has passband 0..0.45·fs and stopband from 0.55·fs; later stopbands
+  start at 1.55·fs and 3.55·fs (fs is the base rate). Each stage rejects
+  at least 100 dB; round-trip ripple is below 0.01 dB in 0..0.45·fs.
+  Its round-trip delays are 0/72/80/83 samples; Kiln reports
+  **1/73/81/84 samples**, with the same dry delay (1.688 ms at default
+  4x/48 kHz). Symmetry and integer delay are preserved.
+- Order: pre tilt → drive and bias/100 → ADAA curve → reference gain →
+  integer delay padding → inverse tilt → 5 Hz DC blocker → downsample →
+  latency-aligned mix → output. Tone is a first-order tilt at 1 kHz, with
+  DC/HF gain −2·tone/+2·tone dB (canonical unit dB, UI explains dB/oct).
+  Its slope varies with frequency, rather than being a straight line.
+  The inverse exactly cancels the linear pre-filter. Floats ramp over
+  20 ms; curve weights and auto-gain enable ramp over 10 ms. Values snap
+  on reset/prepare; oversampling is adopted only on reactivation.
+- `auto_gain` uses **Gaussian RMS**, superseding the small-signal model:
+  σ = 10^(−18/20), g = 10^(drive/20), compensation
+  σ/sqrt(E[f(g·σ·Z)²]), Z standard normal. Prepare computes a table for
+  every curve at 0.25 dB drive intervals with 2048 trapezoids over Z∈[−8,8].
+  Processing interpolates the table. Bias and tone are not compensated;
+  this is not an input-adaptive loudness rider.
+- THD is non-decreasing for tape/tube/transistor/diode/hard on a 1 kHz
+  **−18 dBFS RMS** sine, drive 0/6/12/18/24/30/36, 4x, bias/tone zero,
+  auto gain off. Fold is explicitly excluded because folding is
+  non-monotonic. Bias 50% produces second harmonics above −40 dBc;
+  bias zero leaves even harmonics below −100 dBc. DC mean after settling
+  is below 1e-5. Small-signal alignment uses a 100 Hz, 0.0001 peak sine,
+  tape, 0 dB drive, auto gain off and 50% mix (within 0.012 dB,
+  including the specified 5 Hz DC blocker; 0.01 dB applies at default 4x).
+
+Measured reference limits (Linux Clang dev; deterministic seed 481;
+20 Hz–20 kHz FFT-shaped Gaussian pink noise, 65536 samples, 48 kHz;
+startup discarded and dry/wet observation windows aligned; 4x, bias/tone
+zero, auto gain on, drive 0/6/12/18/24/30/36):
+
+| Curve | Largest absolute ΔLU at −18 dBFS RMS | ΔLU range at −30 dBFS RMS | ΔLU range at −6 dBFS RMS |
+|---|---:|---:|---:|
+| tape | 0.323 | 0..+9.966 | −11.120..0 |
+| tube | 0.327 | 0..+10.758 | −11.355..0 |
+| transistor | 0.320 | −0.109..+9.689 | −11.052..0 |
+| diode | 0.343 | 0..+10.668 | −11.395..0 |
+| fold | 0.906 | −0.033..+13.892 | −14.454..0 |
+| hard | 0.351 | −0.120..+11.256 | −11.535..0 |
+
+Aliasing: 5 kHz sine, **−18 dBFS RMS** (−14.9897 dBFS peak), 24 dB drive,
+48 kHz, bias/tone zero, auto gain off; coherent 4800-sample FFT after 1 s
+settling. Only unaliased 5/15 kHz harmonics are excluded; largest other
+bin **within 20 Hz–20 kHz** relative to the fundamental. Aliases between
+20 kHz and Nyquist are accepted; suppressing those inaudible components
+is not a filter-design requirement:
+
+| Curve | 4x (dBc) | 8x (dBc) |
+|---|---:|---:|
+| tape | −155.71 | −154.79 |
+| tube | −104.89 | −149.90 |
+| transistor | −134.76 | −158.25 |
+| diode | −154.26 | −153.09 |
+| fold | −159.59 | −158.53 |
+| hard | −81.42 | −91.86 |
+
+Smooth curves require ≤−90 dBc at 4x on this test; hard/fold require
+≤−60 dBc at 8x and publish both measurements. Recommend **8x for hard/fold**.
+These are level-specific measurements, not universal alias guarantees.
+
+CPU measurement (Intel Core Ultra 5 225F, Linux Clang `-O2`, stereo 48 kHz,
+256-frame blocks, 4x; median of three 10 s process-CPU intervals, excluding
+prepare and 8192-frame warmup; 1 kHz sine at −18 dBFS RMS in each channel,
+90° channel phase offset, auto gain on, bias/tone zero, mix 100%, output 0 dB):
+
+| Curve / drive | CPU, percent of one core | ns per stereo frame |
+|---|---:|---:|
+| tape / 6 dB (default) | 1.883 | 392.3 |
+| tape / 24 dB | 2.021 | 421.1 |
+| tube / 24 dB | 1.953 | 406.9 |
+| transistor / 24 dB | 2.031 | 423.0 |
+| diode / 24 dB | 1.914 | 398.8 |
+| fold / 24 dB | 2.246 | 467.9 |
+| hard / 24 dB | 1.401 | 291.9 |
+
+Reproduce with `cmake --build --preset dev -j6 --target drive-bench`, then
+`build/dev/plugins/drive/engine/drive-bench`; the runner compiles both DSP
+kernels with `-O2`. Numbers describe this workstation, not a CI threshold.
+CI checks the same properties with shorter coherent observations, drive
+0/18/36 and representative rates; per-sample checks accumulate a max/flag.
+The opt-in `drive-engine.measure` target retains the dense drive/rate sweeps,
+full reference-noise record, 1 s sine settling and 5 s automation stream;
+it is not registered with CTest. The alias/loudness tables above come from
+that runner.
+
+GUI transfer/harmonics depict the static setting (sine spectrum computed
+on the main thread), with programme peak telemetry for the moving dot.
 
 ## 6. Delay — "Echelon" [`delay`]
 

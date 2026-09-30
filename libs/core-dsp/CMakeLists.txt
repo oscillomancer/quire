@@ -1,5 +1,5 @@
-supple_add_library(core-dsp SOURCES src/dsp.cpp DEPS supple::core-base PRIVATE_DEPS supple::pocketfft)
+supple_add_library(core-dsp SOURCES src/dsp.cpp src/oversampler.cpp DEPS supple::core-base PRIVATE_DEPS supple::pocketfft)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT SUPPLE_SANITIZE)
   target_compile_options(core-dsp PRIVATE -O2)
 endif()
-supple_add_tests(core-dsp SOURCES tests/test_dsp.cpp LABELS rt)
+supple_add_tests(core-dsp SOURCES tests/test_dsp.cpp tests/test_oversampler.cpp LABELS rt)
