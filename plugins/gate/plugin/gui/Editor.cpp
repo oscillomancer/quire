@@ -148,12 +148,11 @@ void Editor::render(NVGcontext* vg) {
     for (const auto& g : kControls) {
         const auto& p = table()[g.id];
         const double value = host_.paramValue(g.id);
-        const auto text = p.type == pa::Type::Float ? supple::params::formatCompact(p, value)
-                                                    : supple::params::format(p, value);
+        const auto text = supple::params::format(p, value);
         if (p.type == pa::Type::Float) {
             knob(vg, g.x + 44, g.y + 26, 22, static_cast<float>(toNormalised(p, value)),
-                 p.name.data(), text.c_str(), supple::units::unitName(p.unit).data(), false,
-                 hover_ == static_cast<int>(g.id));
+                 p.name.data(), "", "", false, hover_ == static_cast<int>(g.id));
+            num(vg, text.c_str(), g.x + 44, g.y + 82, 12, rgb(col::bone), Align::Center);
         } else {
             label(vg, p.name.data(), g.x + 44, g.y + 63, 10, rgb(col::dust), Align::Center);
             pill(vg, g.x, g.y + 12, g.w, 28, text.c_str(), value != 0, rgb(col::accent), true,

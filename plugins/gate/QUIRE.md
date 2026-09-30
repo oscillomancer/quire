@@ -35,6 +35,7 @@ The editor has a linked key-level display with threshold/hysteresis band,
 logical state lamp, four-second gain history and two rows of dynamics,
 sidechain and output controls. All metadata comes from the table. Keyboard,
 250 ms wheel gestures, drag/focus handling and renderer isolation are kept.
+Knob values and units sit below their labels, clear of the pointer dots.
 The preview feeds deterministic synthetic drum bursts through the real engine
 for default and drums settings. Its palette and typography match Orrery.
 

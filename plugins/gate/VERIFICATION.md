@@ -57,16 +57,38 @@ build/dev/plugins/gate/gate-linux-host-probe build/dev/plugins/clap/Gate.clap bu
 magick build/dev/gate-host.ppm build/dev/gate-host.png
 ```
 
-Both 820×560 previews were inspected. The X11 host probe passed with zero
+Both previews were inspected at the 820×560 design size and again after
+the knob readout correction (1259×683 under the current window manager).
+Values and units now sit below the knob labels, clear of every pointer dot.
+The X11 host probe passed with zero
 failures: native parent embedding, mapping, nonblank rendering, resize,
 hide/show, three reopen cycles, timer cleanup and concurrent synthetic audio.
 PNG files and the CLAP artifact remain under `build/dev/`.
 
 Full matrix command: `tools/ci/run-all.sh` (once, outside the sandbox).
-Result: pending at implementation commit; updated after completion.
+Result: all passed — license, format, dev, gcc, asan, ubsan, tsan and rtsan.
 The shared external-plugin helper forwards TSan/RTSan to the child build;
 ASan/UBSan instrument parent engine/shared-library tests, while that helper
 does not forward those flags to child plugin builds.
+
+The subsequent requested change only moves GUI readouts; DSP is unchanged.
+Both previews and the X11 host probe were rerun using the commands above.
+Targeted verification after that change:
+
+```sh
+clang-format -i plugins/gate/plugin/gui/Editor.cpp
+cmake --build build/dev --target plugin-gate -j6
+cmake --build build/gcc --target plugin-gate -j6
+ctest --test-dir build/dev/plugins/gate --output-on-failure
+ctest --test-dir build/gcc/plugins/gate --output-on-failure
+git diff --check
+tools/ci/format.sh --check
+```
+
+Both builds passed without warnings and both plugin suites passed 8/8.
+The full matrix was not repeated, following onboarding's once-only rule.
+The gcc/asan/ubsan/tsan/rtsan build trees were removed after verification;
+dev artifacts, previews and CI logs were retained.
 
 ## Remaining acceptance
 
