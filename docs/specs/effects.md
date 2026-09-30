@@ -344,7 +344,10 @@ stereo. Everything in §1 applies.
   primitive this plugin adds to `libs/core-dsp` (the only worker touching
   it): `dsp::Oversampler` — cascaded linear-phase half-band FIR stages
   (design documented in the header: stopband ≥ 100 dB, passband to 0.45 of
-  the base rate within ±0.01 dB), up and down per channel, preallocated for
+  the base rate within ±0.01 dB; the stage next to the base rate stops from
+  0.55·fs, later stages only from their input rate − 0.45·fs, so they stay
+  short — corrected 2026-09-30 after a 1025-tap first stage cost 12 ms of
+  latency), up and down per channel, preallocated for
   the maximum block, `latency()` exact in base-rate samples (an integer:
   pad the stage delays so it is). Tests in `libs/core-dsp`: passband,
   stopband (images and aliases), exact latency, block-size invariance.
@@ -372,7 +375,8 @@ stereo. Everything in §1 applies.
   smoothed.
 - Tests (beyond §1.7): THD rises monotonically with drive for each curve;
   aliasing of a 5 kHz sine at 24 dB drive, `4x`, 48 kHz: every non-harmonic
-  component below −90 dBFS relative to the fundamental; `bias` 0 gives no
+  component in 20 Hz–20 kHz below −90 dB relative to the fundamental
+  (aliases between 20 kHz and Nyquist are accepted); `bias` 0 gives no
   even harmonics above −100 dB for odd curves, `bias` 50 % gives a 2nd
   harmonic above −40 dB; DC-free output (mean below 1e-5 after 1 s); latency
   reported equals the measured delay for every factor at 44.1/48/96 kHz;
