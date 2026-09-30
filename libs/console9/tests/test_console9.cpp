@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: MIT
+#include <doctest/doctest.h>
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstdio>
+#include <limits>
+#include <numbers>
+#include <type_traits>
+#include <vector>
+#include "reference.h"
+#include "supple/base/rng.h"
+#include "supple/console9/console9.h"
+namespace supple::console9::detail {
+// Inject only the original static endpoint interpolation, not any sample DSP.
+// This diagnostic stage must null against every sample of the unmodified reference.
+struct StaticReferenceAccess {
+    template <class Port>
+    static void set(Port& stage, float B, float A, double temp) {
+        const double angle = double(A) * 1.57079633, trim = double(B) * 2.0;
+        const double pan = (angle * temp) + (angle * (1.0 - temp));
+        double gain = (trim * temp) + (trim * (1.0 - temp));
+        if (gain > 1.0) gain *= gain;
+        if (gain < 1.0) gain = 1.0 - std::pow(1.0 - gain, 2);
+        stage.gain_.set(gain, 0);
+        stage.angle_.set(pan, 0);
+        stage.coefficients();
+    }
+};
+}  // namespace supple::console9::detail
+using namespace supple::console9;
+namespace {
+constexpr double pi = std::numbers::pi;
+template <class T>
+using Bits = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
+template <class T>
+bool identical(T a, T b) {
+    return std::bit_cast<Bits<T>>(a) == std::bit_cast<Bits<T>>(b);
+}
+template <class T>
+struct Audio {
+    std::vector<T> l, r;
+    explicit Audio(size_t n) : l(n), r(n) {}
+};
+struct Stats {
+    uint64_t samples = 0, same = 0, endpoints = 0;
+    double maxFloatUlps = 0, maxAbs = 0;
+    template <class T>
+    void add(T a, T b, bool endpoint) {
+        ++samples;
+        if (identical(a, b)) {
+            ++same;
+            return;
+        }
+        if (endpoint) ++endpoints;
+        const double diff = std::abs(double(a) - double(b));
+        int exponent = 0;
+        std::frexp(std::abs(double(b)), &exponent);
+        const double ulp = std::ldexp(1., std::max(-149, exponent - 24));
+        maxFloatUlps = std::max(maxFloatUlps, diff / ulp);
+        maxAbs = std::max(maxAbs, diff);
+    }
+};
+template <class T>
+Audio<T> signal(double rate) {
+    Audio<T> a(4096);
+    supple::Rng rng(12345);
+    double phase = 0;
+    for (size_t i = 0; i < a.l.size(); ++i) {
+        double l = 0, r = 0;
+        if (i < 2048) {
+            const double t = double(i) / 2047;
+            const double level = std::pow(10., (-60 + 72 * t) / 20);
+            phase += 2 * pi * (20 + 19980 * t) / rate;
+            l = level * std::sin(phase);
+            r = level * std::cos(phase * .731);
+        } else if (i < 3072) {
+            const double level = std::pow(10., (-60 + 72 * double(i - 2048) / 1023) / 20);
+            l = rng.uniform(-1, 1) * level;
+            r = rng.uniform(-1, 1) * level;
+        } else if (i < 3584) {
+            constexpr double threshold = 1.18e-23;
+            const double tiny[]{std::nextafter(threshold, 0.),
+                                threshold,
+                                std::nextafter(threshold, 1.),
+                                -std::nextafter(threshold, 0.),
+                                -threshold,
+                                -std::nextafter(threshold, 1.),
+                                0.,
+                                -0.,
+                                1e-30,
+                                -1e-30,
+                                double(std::nextafter(float(threshold), 0.f)),
+                                double(float(threshold)),
+                                double(std::nextafter(float(threshold), 1.f)),
+                                -double(std::nextafter(float(threshold), 0.f)),
+                                -double(float(threshold)),
+                                -double(std::nextafter(float(threshold), 1.f))};
+            l = tiny[i % std::size(tiny)];
+            r = tiny[(i + 3) % std::size(tiny)];
+        }
+        a.l[i] = T(l);
+        a.r[i] = T(r);
+    }
+    return a;
+}
+template <class Port, class T>
+void staticNull(bool encoder) {
+    constexpr int sizes[]{1, 7, 64, 512, 4096};
+    for (int block : sizes) {
+        Stats stats, ordinary;
+        uint64_t unexplained = 0;
+        for (double rate : {44100., 48000., 96000.}) {
+            auto input = signal<T>(rate);
+            Audio<T> actual(input.l.size()), expected(input.l.size());
+            for (int f = 0; f <= 20; ++f)
+                for (int p = 0; p <= 4; ++p) {
+                    const float B = float(f) / 20.f, A = float(p) / 4.f;
+                    const auto seeds = seedsFor(99, uint64_t(f * 5 + p));
+                    Port port;
+                    port.setNative(B, A);
+                    port.reset(seeds);
+                    auto diagnostic = port;
+                    auto reference = encoder ? test::channelReference() : test::bussReference();
+                    reference->set(B, A, seeds);
+                    for (size_t off = 0; off < input.l.size();) {
+                        const auto n = uint32_t(std::min(size_t(block), input.l.size() - off));
+                        T* in[]{input.l.data() + off, input.r.data() + off};
+                        T* out[]{actual.l.data() + off, actual.r.data() + off};
+                        T* refOut[]{expected.l.data() + off, expected.r.data() + off};
+                        port.process(in, out, n);
+                        reference->process(in, refOut, int32_t(n));
+                        for (uint32_t i = 0; i < n; ++i) {
+                            stats.add(out[0][i], refOut[0][i], i == n - 1);
+                            stats.add(out[1][i], refOut[1][i], i == n - 1);
+                            if (p != 4) ordinary.add(out[0][i], refOut[0][i], false);
+                            ordinary.add(out[1][i], refOut[1][i], false);
+                            if (block != 1) {
+                                detail::StaticReferenceAccess::set(diagnostic, B, A,
+                                                                   double(n - i - 1) / n);
+                                const T* di[]{in[0] + i, in[1] + i};
+                                T dl = 0, dr = 0;
+                                T* dout[]{&dl, &dr};
+                                diagnostic.process(di, dout, 1);
+                                if (!identical(dl, refOut[0][i])) ++unexplained;
+                                if (!identical(dr, refOut[1][i])) ++unexplained;
+                            }
+                        }
+                        off += n;
+                    }
+                }
+        }
+        INFO("stage=" << (encoder ? "channel" : "buss") << " bits=" << sizeof(T) * 8
+                      << " block=" << block);
+        CHECK(stats.endpoints == 0);  // Reference interpolation weight is zero on block endpoints.
+        if (block == 1) CHECK(stats.same == stats.samples);
+        CHECK(ordinary.maxFloatUlps <= 2);
+        CHECK(unexplained == 0);
+        std::printf(
+            "NULL %-7s %2zu block=%4d identical=%llu/%llu (%.9f%%) max_float_ulp=%.9g "
+            "max_abs=%.9g ordinary_ulp=%.9g unexplained=%llu\n",
+            encoder ? "channel" : "buss", sizeof(T) * 8, block,
+            static_cast<unsigned long long>(stats.same),
+            static_cast<unsigned long long>(stats.samples),
+            100 * double(stats.same) / double(stats.samples), stats.maxFloatUlps, stats.maxAbs,
+            ordinary.maxFloatUlps, static_cast<unsigned long long>(unexplained));
+    }
+}
+template <class Port, class T>
+Audio<T> ramped(int block) {
+    auto input = signal<T>(48000);
+    Audio<T> output(input.l.size());
+    Port stage;
+    stage.reset(seedsFor(1, 2));
+    stage.set(.2, .1);
+    for (size_t off = 0; off < input.l.size();) {
+        if (off == 0) stage.set(4, 1, 1203);
+        if (off == 997) stage.set(.03, .2, 703);
+        if (off == 1700) stage.set(0, .5, 480);
+        if (off == 2180) stage.setNative(.5f, .75f, 960);
+        if (off == 3140) stage.setNative(1, 0, 333);
+        size_t next = input.l.size();
+        for (size_t event : {997u, 1700u, 2180u, 3140u})
+            if (event > off) next = std::min(next, event);
+        const auto n = uint32_t(std::min(size_t(block), next - off));
+        if constexpr (std::is_same_v<Port, MonoChannel> || std::is_same_v<Port, MonoBuss>)
+            stage.process(input.l.data() + off, output.l.data() + off, n);
+        else {
+            const T* in[]{input.l.data() + off, input.r.data() + off};
+            T* out[]{output.l.data() + off, output.r.data() + off};
+            stage.process(in, out, n);
+        }
+        off += n;
+    }
+    return output;
+}
+template <class Port, class T>
+void splitTest() {
+    const auto a = ramped<Port, T>(4096);
+    for (int n : {1, 7, 64, 512}) {
+        const auto b = ramped<Port, T>(n);
+        CHECK(std::equal(a.l.begin(), a.l.end(), b.l.begin(), identical<T>));
+        CHECK(std::equal(a.r.begin(), a.r.end(), b.r.begin(), identical<T>));
+    }
+}
+template <class T>
+void sumNull(int block) {
+    const auto input = signal<T>(48000);
+    Audio<T> sum(input.l.size()), refSum(input.l.size()), encoded(input.l.size()),
+        refEncoded(input.l.size());
+    uint64_t unexplained = 0;
+    for (int c = 0; c < 5; ++c) {
+        Channel stage;
+        auto reference = test::channelReference();
+        const auto seeds = seedsFor(10, uint64_t(c));
+        const float f = .18f + .04f * float(c), p = .1f + .2f * float(c);
+        stage.setNative(f, p);
+        stage.reset(seeds);
+        auto diagnostic = stage;
+        reference->set(f, p, seeds);
+        Audio<T> scaled(input.l.size());
+        for (size_t i = 0; i < input.l.size(); ++i) {
+            scaled.l[i] = T(double(input.l[i]) * .1 * std::cos(double(c) + double(i) * .001));
+            scaled.r[i] = T(double(input.r[i]) * .1 * std::sin(double(c) + double(i) * .003));
+        }
+        for (size_t off = 0; off < input.l.size();) {
+            auto n = uint32_t(std::min(size_t(block), input.l.size() - off));
+            T* in[]{scaled.l.data() + off, scaled.r.data() + off};
+            T* out[]{encoded.l.data() + off, encoded.r.data() + off};
+            T* ro[]{refEncoded.l.data() + off, refEncoded.r.data() + off};
+            stage.process(in, out, n);
+            reference->process(in, ro, int32_t(n));
+            for (uint32_t i = 0; i < n; ++i) {
+                detail::StaticReferenceAccess::set(diagnostic, f, p, double(n - i - 1) / n);
+                const T* di[]{in[0] + i, in[1] + i};
+                T dl = 0, dr = 0;
+                T* dout[]{&dl, &dr};
+                diagnostic.process(di, dout, 1);
+                if (!identical(dl, ro[0][i])) ++unexplained;
+                if (!identical(dr, ro[1][i])) ++unexplained;
+            }
+            off += n;
+        }
+        for (size_t i = 0; i < input.l.size(); ++i) {
+            sum.l[i] += encoded.l[i];
+            sum.r[i] += encoded.r[i];
+            refSum.l[i] += refEncoded.l[i];
+            refSum.r[i] += refEncoded.r[i];
+        }
+    }
+    Buss buss;
+    auto reference = test::bussReference();
+    const auto seeds = seedsFor(10, 99);
+    buss.reset(seeds);
+    auto diagnostic = buss;
+    reference->set(.5f, .5f, seeds);
+    Stats stats;
+    for (size_t off = 0; off < input.l.size();) {
+        auto n = uint32_t(std::min(size_t(block), input.l.size() - off));
+        T* in[]{sum.l.data() + off, sum.r.data() + off};
+        T* ri[]{refSum.l.data() + off, refSum.r.data() + off};
+        T* out[]{encoded.l.data() + off, encoded.r.data() + off};
+        T* ro[]{refEncoded.l.data() + off, refEncoded.r.data() + off};
+        buss.process(in, out, n);
+        reference->process(ri, ro, int32_t(n));
+        for (uint32_t i = 0; i < n; ++i) {
+            stats.add(out[0][i], ro[0][i], false);
+            stats.add(out[1][i], ro[1][i], false);
+            detail::StaticReferenceAccess::set(diagnostic, .5f, .5f, double(n - i - 1) / n);
+            const T* di[]{ri[0] + i, ri[1] + i};
+            T dl = 0, dr = 0;
+            T* dout[]{&dl, &dr};
+            diagnostic.process(di, dout, 1);
+            if (!identical(dl, ro[0][i])) ++unexplained;
+            if (!identical(dr, ro[1][i])) ++unexplained;
+        }
+        off += n;
+    }
+    if (block == 1) CHECK(stats.same == stats.samples);
+    CHECK(stats.maxFloatUlps <= 4);
+    CHECK(unexplained == 0);
+    std::printf(
+        "SUM  %2zu block=%4d identical=%.9f%% max_float_ulp=%.9g max_abs=%.9g unexplained=%llu\n",
+        sizeof(T) * 8, block, 100 * double(stats.same) / double(stats.samples), stats.maxFloatUlps,
+        stats.maxAbs, static_cast<unsigned long long>(unexplained));
+}
+}  // namespace
+TEST_CASE("Console9 static reference null matrix") {
+    staticNull<Channel, float>(true);
+    staticNull<Channel, double>(true);
+    staticNull<Buss, float>(false);
+    staticNull<Buss, double>(false);
+}
+TEST_CASE("Console9 encoded channel sums decode against reference") {
+    for (int n : {1, 7, 64, 512, 4096}) {
+        sumNull<float>(n);
+        sumNull<double>(n);
+    }
+}
+TEST_CASE("Console9 ramps are bit exact across every partition and retarget") {
+    splitTest<Channel, float>();
+    splitTest<Channel, double>();
+    splitTest<Buss, float>();
+    splitTest<Buss, double>();
+    splitTest<MonoChannel, float>();
+    splitTest<MonoChannel, double>();
+    splitTest<MonoBuss, float>();
+    splitTest<MonoBuss, double>();
+}
+TEST_CASE("Console9 mappings and deterministic seed domain") {
+    CHECK(faderGain(0) == 1);
+    CHECK(faderGain(100) == 4);
+    CHECK(faderGain(-std::numeric_limits<double>::infinity()) == 0);
+    CHECK(faderGain(std::numeric_limits<double>::quiet_NaN()) == 0);
+    CHECK(nativeFader(0) == .5);
+    CHECK(nativeFader(100) == 1);
+    CHECK(std::isinf(faderDb(0)));
+    CHECK(faderDb(.5) == 0);
+    CHECK(nativePan(-100) == 0);
+    CHECK(nativePan(0) == .5);
+    CHECK(nativePan(100) == 1);
+    for (double db : {-120., -60., -24., -6., 0., 6., 12.})
+        CHECK(faderDb(nativeFader(db)) == doctest::Approx(db).epsilon(1e-9));
+    for (uint64_t i = 0; i < 10000; ++i) {
+        const auto a = seedsFor(42, i);
+        CHECK(a == seedsFor(42, i));
+        CHECK(a.left >= 16386);
+        CHECK(a.right >= 16386);
+        CHECK_FALSE(a == seedsFor(43, i));
+        CHECK_FALSE(a == seedsFor(42, i + 1));
+    }
+}
+TEST_CASE("Console9 neutral staging clip mono input reset and nonfinite policy") {
+    Channel channel;
+    Buss buss;
+    double x = .00001, l = 0, r = 0, dl = 0, dr = 0;
+    const double* in[]{&x, &x};
+    double* encoded[]{&l, &r};
+    channel.process(in, encoded, 1);
+    const double* ei[]{&l, &r};
+    double* decoded[]{&dl, &dr};
+    buss.process(ei, decoded, 1);
+    CHECK(dl / x == doctest::Approx(.472135956694964).epsilon(1e-8));
+    CHECK(dl == dr);
+    x = std::pow(10., 12. / 20);
+    channel.process(in, encoded, 1);
+    CHECK(l == 1);
+    CHECK(r == 1);
+    auto seeds = seedsFor(7, 8);
+    channel.reset(seeds);
+    x = 0;
+    channel.process(in, encoded, 1);
+    double first = l;
+    channel.reset(seeds);
+    channel.process(in, encoded, 1);
+    CHECK(l == first);
+    CHECK(l > 0);
+    channel.reset(seeds);
+    x = std::numeric_limits<double>::quiet_NaN();
+    channel.process(in, encoded, 1);
+    CHECK(l == first);
+    channel.reset(seeds);
+    x = std::numeric_limits<double>::infinity();
+    channel.process(in, encoded, 1);
+    CHECK(l == first);
+    // In-place duplicated mono source must be read before either destination is written.
+    double mono = .2, right = 0, expectedL = 0, expectedR = 0;
+    channel.reset(seeds);
+    x = mono;
+    channel.process(in, encoded, 1);
+    expectedL = l;
+    expectedR = r;
+    channel.reset(seeds);
+    const double* mi[]{&mono, &mono};
+    double* mo[]{&mono, &right};
+    channel.process(mi, mo, 1);
+    CHECK(mono == expectedL);
+    CHECK(right == expectedR);
+    channel.reset({0, 0});
+    x = 0;
+    channel.process(in, encoded, 1);
+    CHECK(std::isfinite(l));
+}
+TEST_CASE("Console9 mono kernels have no pan and match stereo at hard left") {
+    for (bool encode : {false, true}) {
+        auto input = signal<float>(48000);
+        Audio<float> stereo(input.l.size());
+        std::vector<float> mono(input.l.size());
+        const auto seeds = seedsFor(8, 9);
+        for (float b : {0.f, .05f, .5f, .75f, 1.f}) {
+            const float* in[]{input.l.data(), input.r.data()};
+            float* out[]{stereo.l.data(), stereo.r.data()};
+            if (encode) {
+                MonoChannel m;
+                Channel s;
+                m.setNative(b);
+                s.setNative(b, 0);
+                m.reset(seeds);
+                s.reset(seeds);
+                m.process(input.l.data(), mono.data(), uint32_t(mono.size()));
+                s.process(in, out, uint32_t(mono.size()));
+            } else {
+                MonoBuss m;
+                Buss s;
+                m.setNative(b);
+                s.setNative(b, 0);
+                m.reset(seeds);
+                s.reset(seeds);
+                m.process(input.l.data(), mono.data(), uint32_t(mono.size()));
+                s.process(in, out, uint32_t(mono.size()));
+            }
+            // sin(1.57079633) rounds to unity in double; left is exactly the fader-only path.
+            CHECK(mono == stereo.l);
+        }
+    }
+}
+TEST_CASE("Console9 pow power-of-two equivalence across all float exponents") {
+    for (int e = -149; e <= 128; ++e) CHECK(std::pow(2, e + 62) == std::ldexp(1., e + 62));
+}
+TEST_CASE("Console9 caller-sized fader ramp is linear and zero-length processing is inert") {
+    MonoBuss stage, neutral;
+    stage.set(0);
+    stage.set(1, .5, 4);
+    double x = .1, unity = 0;
+    neutral.process(&x, &unity, 1);
+    for (int i = 1; i <= 6; ++i) {
+        double y = 0;
+        stage.process(&x, &y, 0);
+        stage.process(&x, &y, 1);
+        CHECK(y == unity * std::min(1., double(i) / 4));
+    }
+    Channel channel, reference;
+    channel.setNative(.7f, .2f);
+    reference.setNative(.7f, .2f);
+    const auto seeds = seedsFor(1, 100);
+    channel.reset(seeds);
+    reference.reset(seeds);
+    float zero = 0, l = 0, r = 0, rl = 0, rr = 0;
+    const float* in[]{&zero, &zero};
+    float* out[]{&l, &r};
+    float* refOut[]{&rl, &rr};
+    channel.process(in, out, 0);
+    channel.process(in, out, 1);
+    reference.process(in, refOut, 1);
+    CHECK(identical(l, rl));
+    CHECK(identical(r, rr));
+}

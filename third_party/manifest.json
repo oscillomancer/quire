@@ -15,6 +15,17 @@
   ],
   "dependencies": [
     {
+      "name": "airwindows-console9",
+      "dir": "airwindows-console9",
+      "license": "MIT",
+      "license_file": "airwindows-console9/LICENSE",
+      "version": "Console 9",
+      "source": "https://github.com/airwindows/airwindows",
+      "commit": "d22a25b7f7c0c8c05e9f3ae480e7f1da9769f49d",
+      "purpose": "Airwindows Console 9 stereo reference null tests; mono AU kernels retained as reference text, not compiled",
+      "linkage": "tests"
+    },
+    {
       "name": "clap",
       "dir": "clap",
       "license": "MIT",
