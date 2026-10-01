@@ -145,6 +145,23 @@ Result<std::uint32_t> EngineApp::fxSidechainChannels(const model::FxInstance& fx
     return (*in)->sidechainChannels();
 }
 
+Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxInstance& fx) {
+    // A running instance already knows the plan's rate and block. Otherwise
+    // activate a throwaway instance at the project rate: a plugin reports its
+    // latency in samples, so a rate is needed even when nothing is playing.
+    if (host::Instance* live = instanceOf(id); live && live->active()) return live->latency();
+    auto info = findPlugin(fx.plugin.id);
+    if (!info) return std::move(info).error();
+    auto made = host::Instance::create(*info, options_.identity);
+    if (!made) return std::move(made).error();
+    host::Instance& probe = **made;
+    constexpr std::uint32_t kProbeBlock = 512;  // OfflineSettings' default block
+    SUPPLE_TRY(probe.activate(head().project->sampleRate, 1, kProbeBlock));
+    const std::uint32_t latency = probe.latency();
+    probe.deactivate();
+    return latency;
+}
+
 Result<json::Value> EngineApp::mergedPatch(const model::FxInstance& fx, const json::Value& patch,
                                            bool replace) {
     auto inr = scratch(fx);

@@ -113,6 +113,9 @@ class EngineApp : public cmd::Host {
     // The plugin's CLAP parameters (from a scratch instance).
     Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
     Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input
+    // The instance's reported latency in samples (the running one when there is
+    // one, else a throwaway activation at the project rate).
+    Result<std::uint32_t> fxLatencySamples(model::Id id, const model::FxInstance& fx);
     // fx's patch after applying `patch` (a merge patch, or a complete patch
     // when `replace`), validated by the plugin; the complete canonical patch.
     Result<json::Value> mergedPatch(const model::FxInstance& fx, const json::Value& patch,
