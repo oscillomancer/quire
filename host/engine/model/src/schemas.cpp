@@ -1,4 +1,6 @@
 #include "supple/model/schemas.h"
+#include "migration.h"
+#include "supple/schema/document.h"
 
 #include "supple/base/files.h"
 
@@ -23,7 +25,16 @@ Schema<int> intS() { return schema::integerOf<int>(); }
 Schema<double> num() { return schema::number(); }
 Schema<std::string> str() { return schema::string(); }
 Schema<bool> boolean() { return schema::boolean(); }
-Schema<std::vector<Id>> ids() { return schema::arrayOf(idSchema()); }
+Schema<std::vector<Id>> ids() {
+    auto array = schema::arrayOf(idSchema());
+    return {"ids",
+            [array](const json::Value& v, std::vector<Id>& out, schema::DecodeCtx& ctx,
+                    const std::string& path) {
+                out.clear();  // project.masters has a nonempty default
+                return array.decodeInto(v, out, ctx, path);
+            },
+            [array](const std::vector<Id>& v) { return array.encode(v); }, array.jsonSchema()};
+}
 
 std::string hex2(unsigned v) {
     char b[3];
@@ -288,8 +299,10 @@ const Schema<Project>& schemaOf<Project>() {
         dflt(b, d.timebase);
         b.field("media_dir", &Project::mediaDir, str());
         dflt(b, d.mediaDir);
-        b.field("pan_law_db", &Project::panLawDb, num().range(-6, 0));
-        dflt(b, d.panLawDb);
+        b.field("console9", &Project::console9, boolean());
+        dflt(b, d.console9);
+        b.field("masters", &Project::masters, ids());
+        dflt(b, d.masters);
         b.field("seed", &Project::seed, schema::integerOf<std::uint64_t>());
         dflt(b, d.seed);
         b.field("render", &Project::render, schema::any());
@@ -345,6 +358,8 @@ const Schema<Track>& schemaOf<Track>() {
                                        {RecordMode::MidiReplace, "midi_replace"}}))
                 .build();
         ObjectBuilder<Track> b = schema::object<Track>("track");
+        b.field("type", &Track::type, stripTypeSchema());
+        dflt(b, d.type);
         b.field("name", &Track::name, str());
         dflt(b, d.name);
         b.field("color", &Track::color, str());
@@ -354,14 +369,12 @@ const Schema<Track>& schemaOf<Track>() {
         b.field("parent", &Track::parent, idSchema());
         b.field("children", &Track::children, ids());
         dflt(b, d.children);
-        b.field("channels", &Track::channels, intS().range(1, 64));
+        b.field("channels", &Track::channels, intS().range(1, 2));
         dflt(b, d.channels);
         b.field("volume_db", &Track::volumeDb, num().range(kSilenceDb, 12));
         dflt(b, d.volumeDb);
         b.field("pan", &Track::pan, num().range(-100, 100));
         dflt(b, d.pan);
-        b.field("width", &Track::width, num().range(-100, 100));
-        dflt(b, d.width);
         b.field("mute", &Track::mute, boolean());
         dflt(b, d.mute);
         b.field("solo", &Track::solo,
@@ -370,8 +383,6 @@ const Schema<Track>& schemaOf<Track>() {
                           {Solo::InPlace, "in_place"},
                           {Solo::Defeat, "defeat"}}));
         dflt(b, d.solo);
-        b.field("phase_invert", &Track::phaseInvert, boolean());
-        dflt(b, d.phaseInvert);
         b.field("parent_send", &Track::parentSend, parentSend);
         dflt(b, d.parentSend);
         b.field("record", &Track::record, record);
@@ -627,7 +638,7 @@ const Schema<Route>& schemaOf<Route>() {
         dflt(b, d.tap);
         b.field("volume_db", &Route::volumeDb, num().range(kSilenceDb, 12));
         dflt(b, d.volumeDb);
-        b.field("pan", &Route::pan, num().range(-100, 100));
+        b.field("pan", &Route::pan, routePanSchema());
         dflt(b, d.pan);
         b.field("mute", &Route::mute, boolean());
         dflt(b, d.mute);
@@ -743,7 +754,8 @@ json::Value mapToJson(const IdMap<T>& m) {
 // Decodes {id: object} of one kind into the builder, collecting errors.
 template <class T>
 void mapFromJson(const json::Value* v, const std::string& path, Kind kind,
-                 typename IdMap<T>::Builder& out, std::vector<Error>& errors) {
+                 typename IdMap<T>::Builder& out, std::vector<Error>& errors,
+                 const schema::DecodeOptions& options, std::vector<schema::Warning>* warnings) {
     if (!v) return;
     if (!v->isObject()) {
         errors.emplace_back("schema.type", "expected an object keyed by id", path);
@@ -758,7 +770,13 @@ void mapFromJson(const json::Value* v, const std::string& path, Kind kind,
                                 at, "keys here look like " + std::string(prefix(kind)) + "_1");
             continue;
         }
-        auto obj = schemaOf<T>().decode(m.value);
+        std::vector<schema::Warning> localWarnings;
+        auto obj = schemaOf<T>().decode(m.value, options, &localWarnings);
+        if (warnings)
+            for (auto& warning : localWarnings) {
+                warning.path = at + warning.path;
+                warnings->push_back(std::move(warning));
+            }
         if (!obj) {
             Error e = std::move(obj).error();
             auto fix = [&](Error& x) { x.path = at + x.path; };
@@ -811,15 +829,26 @@ std::string serializeProject(const Session& s) {
     return json::writeCanonical(projectToJson(s)) + "\n";
 }
 
-Result<Session> projectFromJson(const json::Value& doc) {
+Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Warning>* warnings) {
+    json::Value doc = input;
     if (!doc.isObject()) return Error("project.type", "a project is a JSON object");
     const json::Value* schemaId = doc.find("schema");
     if (!schemaId || !schemaId->isString())
         return Error("project.schema", "missing \"schema\"", "/schema",
                      "\"schema\": \"" + std::string(kProjectSchema) + "\"");
-    if (schemaId->asString() != kProjectSchema)
+    auto version = schema::parseDocumentId(schemaId->asString());
+    if (!version || version->ns != "supple" || version->type != "project" || version->major < 1 ||
+        version->major > 2)
         return Error("project.version", "unsupported project format " + schemaId->asString(),
-                     "/schema", "this build reads " + std::string(kProjectSchema));
+                     "/schema",
+                     "this build reads supple.project/1.x and " + std::string(kProjectSchema));
+    schema::DecodeOptions options;
+    if (version->major == 1) {
+        auto migrated = migrateProject1(std::move(doc), warnings);
+        if (!migrated) return std::move(migrated).error();
+        doc = std::move(*migrated);
+    } else if (version->minor > 0)
+        options.unknownMembers = schema::UnknownMembers::Ignore;
     std::vector<Error> errors;
     Session s;
     s.version = 0;
@@ -827,7 +856,13 @@ Result<Session> projectFromJson(const json::Value& doc) {
         json::Value copy = *p;
         const json::Value* next = p->find("next_ids");
         if (copy.isObject()) copy.asObject().erase("next_ids");
-        auto project = schemaOf<Project>().decode(copy);
+        std::vector<schema::Warning> localWarnings;
+        auto project = schemaOf<Project>().decode(copy, options, &localWarnings);
+        if (warnings)
+            for (auto& warning : localWarnings) {
+                warning.path = "/project" + warning.path;
+                warnings->push_back(std::move(warning));
+            }
         if (!project) {
             Error e = std::move(project).error();
             e.path = "/project" + e.path;
@@ -859,21 +894,30 @@ Result<Session> projectFromJson(const json::Value& doc) {
     IdMap<Route>::Builder routes(s.routes);
     IdMap<Envelope>::Builder envelopes(s.envelopes);
     mapFromJson<TempoPointObj>(sub("tempo", "points"), "/tempo/points", Kind::TempoPoint, tempo,
-                               errors);
-    mapFromJson<MeterObj>(sub("tempo", "meters"), "/tempo/meters", Kind::Meter, meters, errors);
-    mapFromJson<Marker>(sub("rulers", "markers"), "/rulers/markers", Kind::Marker, markers, errors);
-    mapFromJson<Region>(sub("rulers", "regions"), "/rulers/regions", Kind::Region, regions, errors);
-    mapFromJson<Track>(sub("tracks", nullptr), "/tracks", Kind::Track, tracks, errors);
-    mapFromJson<Item>(sub("items", nullptr), "/items", Kind::Item, items, errors);
-    mapFromJson<Take>(sub("takes", nullptr), "/takes", Kind::Take, takes, errors);
-    mapFromJson<MediaSource>(sub("sources", "media"), "/sources/media", Kind::Media, media, errors);
-    mapFromJson<MidiSource>(sub("sources", "midi"), "/sources/midi", Kind::Midi, midis, errors);
-    mapFromJson<Route>(sub("routes", nullptr), "/routes", Kind::Route, routes, errors);
+                               errors, options, warnings);
+    mapFromJson<MeterObj>(sub("tempo", "meters"), "/tempo/meters", Kind::Meter, meters, errors,
+                          options, warnings);
+    mapFromJson<Marker>(sub("rulers", "markers"), "/rulers/markers", Kind::Marker, markers, errors,
+                        options, warnings);
+    mapFromJson<Region>(sub("rulers", "regions"), "/rulers/regions", Kind::Region, regions, errors,
+                        options, warnings);
+    mapFromJson<Track>(sub("tracks", nullptr), "/tracks", Kind::Track, tracks, errors, options,
+                       warnings);
+    mapFromJson<Item>(sub("items", nullptr), "/items", Kind::Item, items, errors, options,
+                      warnings);
+    mapFromJson<Take>(sub("takes", nullptr), "/takes", Kind::Take, takes, errors, options,
+                      warnings);
+    mapFromJson<MediaSource>(sub("sources", "media"), "/sources/media", Kind::Media, media, errors,
+                             options, warnings);
+    mapFromJson<MidiSource>(sub("sources", "midi"), "/sources/midi", Kind::Midi, midis, errors,
+                            options, warnings);
+    mapFromJson<Route>(sub("routes", nullptr), "/routes", Kind::Route, routes, errors, options,
+                       warnings);
     mapFromJson<Envelope>(sub("envelopes", nullptr), "/envelopes", Kind::Envelope, envelopes,
-                          errors);
+                          errors, options, warnings);
     // fx live under "fx" (a top-level collection keyed by fx id).
     IdMap<FxInstance>::Builder fx(s.fx);
-    mapFromJson<FxInstance>(sub("fx", nullptr), "/fx", Kind::Fx, fx, errors);
+    mapFromJson<FxInstance>(sub("fx", nullptr), "/fx", Kind::Fx, fx, errors, options, warnings);
     if (const json::Value* blobs = doc.find("blobs"); blobs && blobs->isObject()) {
         for (const auto& m : blobs->asObject()) {
             const json::Value* data = m.value.find("data");
@@ -914,10 +958,10 @@ Result<Session> projectFromJson(const json::Value& doc) {
     return txn.commit();
 }
 
-Result<Session> parseProject(std::string_view text) {
+Result<Session> parseProject(std::string_view text, std::vector<schema::Warning>* warnings) {
     auto doc = json::parse(text);
     if (!doc) return std::move(doc).error();
-    return projectFromJson(*doc);
+    return projectFromJson(*doc, warnings);
 }
 
 }  // namespace supple::model

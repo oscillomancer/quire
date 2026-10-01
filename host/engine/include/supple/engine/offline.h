@@ -119,6 +119,7 @@ class MediaCache {
 };
 
 struct OfflineSettings {
+    model::Id master = model::kMaster;  // mix output root, ignored for isolated track taps
     double startSeconds = 0.0;
     double endSeconds = 0.0;   // exclusive; the tail follows
     double tailSeconds = 0.0;  // rendered after endSeconds

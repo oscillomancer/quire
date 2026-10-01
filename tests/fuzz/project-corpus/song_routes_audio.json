@@ -1,5 +1,5 @@
 {
-  "schema": "supple.project/1.0",
+  "schema": "supple.project/2.0",
   "project": {
     "next_ids": {
       "tr": 2,
@@ -41,6 +41,7 @@
   },
   "tracks": {
     "tr_0": {
+      "type": "master",
       "name": "Master",
       "children": ["tr_1"]
     },
@@ -84,7 +85,8 @@
       },
       "to": {
         "track": "tr_1"
-      }
+      },
+      "pan": 0.0
     }
   },
   "envelopes": {

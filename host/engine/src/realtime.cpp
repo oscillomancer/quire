@@ -596,7 +596,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
     if (plan && !playing_ && plan->anyLive && !shutDown_.load() && frames <= plan->block) {
         // Stopped, but a track monitors its input: plugins run, nothing plays.
         if (detail::processBlock(*plan, pos_, frames, false)) {
-            const detail::Node& master = plan->nodes.back();
+            const detail::Node& master = plan->nodes[plan->mainMaster];
             std::copy_n(master.post.l.begin(), frames, out[0]);
             std::copy_n(master.post.r.begin(), frames, out[1]);
         } else {
@@ -623,7 +623,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             ok = false;
             break;
         }
-        const detail::Node& master = plan->nodes.back();
+        const detail::Node& master = plan->nodes[plan->mainMaster];
         std::copy_n(master.post.l.begin(), k, out[0] + done);
         std::copy_n(master.post.r.begin(), k, out[1] + done);
         if (detail::Recorder* r = recorder_.load()) {
@@ -863,7 +863,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
                 plan_->frontierRings[j]->publish();
             }
         } else {
-            fill(ring_->slot(), plan_->nodes.back().post);
+            fill(ring_->slot(), plan_->nodes[plan_->mainMaster].post);
             ring_->publish();
         }
         const std::int64_t next = loopR_.next(pos_, pos_ + n);
@@ -1007,7 +1007,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     bool ok = true;
     for (std::size_t i : p.liveNodes) ok = detail::processNode(p, i, livePos_, k, t, self) && ok;
     if (!ok) processErrors_.fetch_add(1);
-    const detail::Node& master = p.nodes.back();
+    const detail::Node& master = p.nodes[p.mainMaster];
     std::copy_n(master.post.l.begin(), k, out[0]);
     std::copy_n(master.post.r.begin(), k, out[1]);
     if (playing) {

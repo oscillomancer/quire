@@ -283,9 +283,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     if (!order) return std::move(order).error();
     std::map<Id, std::size_t> index;
     for (std::size_t i = 0; i < order->size(); ++i) index[(*order)[i]] = i;
-    // The master must be last so its output is final (it has no outputs).
-    if (order->back() != model::kMaster)
-        return Error("engine.topology", "the master is not the last track");
+    p.mainMaster = index.at(model::kMaster);
     p.nodes.resize(order->size());
     for (std::size_t i = 0; i < order->size(); ++i) {
         Node& n = p.nodes[i];
@@ -294,16 +292,15 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         n.volume = dbToGain(t.volumeDb);
         n.volumeDb = t.volumeDb;
         n.pan = t.pan;
-        n.panLawDb = s.project->panLawDb;
-        n.master = n.id == model::kMaster;
-        n.width = t.width / 100.0;
-        if (n.id == model::kMaster) {
+        n.panLawDb = -3.0;
+        n.master = t.type == model::StripType::Master;
+        if (n.master) {
             // The master pans as a balance control: no attenuation at the centre.
             const double b = std::clamp(t.pan / 100.0, -1.0, 1.0);
             n.panL = b <= 0 ? 1.0 : 1.0 - b;
             n.panR = b >= 0 ? 1.0 : 1.0 + b;
         } else {
-            std::tie(n.panL, n.panR) = panGains(t.pan / 100.0, s.project->panLawDb);
+            std::tie(n.panL, n.panR) = panGains(t.pan / 100.0, -3.0);
         }
         n.mute = t.mute;
         for (Id fxId : t.chain) {
@@ -366,9 +363,9 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         }
         ed.tap = r.tap;
         ed.volumeDb = r.volumeDb;
-        ed.pan = r.pan;
+        ed.pan = r.pan.resolve(s.tracks.find(*r.from.track)->pan);
         const double g = dbToGain(r.volumeDb);
-        auto [pl, pr] = panGains(r.pan / 100.0, s.project->panLawDb);
+        auto [pl, pr] = panGains(ed.pan / 100.0, -3.0);
         ed.gainL = g * pl;
         ed.gainR = g * pr;
         ed.mono = r.mono;
@@ -444,12 +441,10 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         Automation* slot = nullptr;
         if (o.kind == Kind::Track && index.count(o)) {
             Node& n = p.nodes[index.at(o)];
-            slot = param == "volume"  ? &n.autoVolume
-                   : param == "trim"  ? &n.autoTrim
-                   : param == "pan"   ? &n.autoPan
-                   : param == "width" ? &n.autoWidth
-                   : param == "mute"  ? &n.autoMute
-                                      : nullptr;
+            slot = param == "volume" ? &n.autoVolume
+                   : param == "pan"  ? &n.autoPan
+                   : param == "mute" ? &n.autoMute
+                                     : nullptr;
         } else if (o.kind == Kind::Route) {
             for (Edge& ed : p.edges)
                 if (ed.route == o)
@@ -516,7 +511,12 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     }
     // The master is the output: live whenever anything is (even a monitored
     // track that feeds nothing).
-    if (p.anyLive) p.nodes.back().live = true;
+    if (p.anyLive) {
+        p.nodes[p.mainMaster].live = true;
+        // A main-master key may feed later strips, which must stay with the live executor.
+        for (Node& n : p.nodes)
+            for (std::size_t edge : n.in) n.live = n.live || p.nodes[p.edges[edge].from].live;
+    }
     return p;
 }
 
@@ -585,7 +585,7 @@ Status prepare(Plan& p, const Session& s) {
         }
         n.soloGain.assign(block, 1.0f);
     }
-    const Node& master = p.nodes.back();
+    const Node& master = p.nodes[p.mainMaster];
     p.outputLatency = master.latIn + master.latChain;
     // Automation lines up with the signal where it is applied: the fader sees
     // the track's input and chain latency, a route's gain its target's input.
@@ -659,9 +659,8 @@ Status prepare(Plan& p, const Session& s) {
             c.mode = take->channelMode;
             const double g =
                 dbToGain(it.gainDb) * dbToGain(take->gainDb) * (take->phaseInvert ? -1.0 : 1.0);
-            const auto [pl, pr] = take->pan == 0.0
-                                      ? std::pair{1.0, 1.0}
-                                      : panGains(take->pan / 100.0, s.project->panLawDb);
+            const auto [pl, pr] =
+                take->pan == 0.0 ? std::pair{1.0, 1.0} : panGains(take->pan / 100.0, -3.0);
             c.gainL = g * pl;
             c.gainR = g * pr;
             c.fadeIn = time::samplesAt(it.fadeIn.length, p.rate);

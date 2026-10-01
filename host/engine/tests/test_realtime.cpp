@@ -1875,3 +1875,79 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
             CHECK(energy > 1.0);
         }
 }
+
+TEST_CASE("multiple masters: real-time main output is independent of later roots" *
+          doctest::description("rt")) {
+    model::EditTxn t(synthSession(), 2);
+    model::Track master;
+    master.type = model::StripType::Master;
+    const Id alt = t.create(master);
+    auto project = t.project();
+    project.masters.push_back(alt);
+    t.setProject(project);
+    model::FxInstance gain;
+    gain.plugin.id = "com.suppleaudio.test.gain";
+    gain.patch =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+            .value();
+    const Id fx = t.create(gain);
+    t.modify<model::Track>(alt, [&](auto& tr) { tr.chain.push_back(fx); });
+    const auto s = t.commit();
+    REQUIRE(s);
+    auto pool = makePool();
+    auto offline = renderOffline(*s, pool, {.startSeconds = 0, .endSeconds = 0.1});
+    REQUIRE(offline);
+    CHECK(offline->outputLatency == 0);
+    auto other = renderOffline(*s, pool, {.master = alt, .startSeconds = 0, .endSeconds = 0.1});
+    REQUIRE(other);
+    CHECK(other->outputLatency == 64);
+    for (const auto& options : {kInCallback, EngineOptions{.workers = 3}}) {
+        auto rtPool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
+        Engine engine(rtPool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+        REQUIRE(engine.load(*s).ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 64, 128);
+        else
+            backend.run(64);
+        CHECK(engine.outputLatency() == 0);
+        CHECK(engine.processErrors() == 0);
+        engine.stop();
+        CHECK(maxDiff(backend.capture().channels[0], 0, offline->audio.channels[0], 4800) == 0);
+    }
+}
+
+TEST_CASE("a master key is legal and its downstream node follows the live executor") {
+    model::EditTxn t(monitoring(synthSession()), 2);
+    model::Track alt;
+    alt.type = model::StripType::Master;
+    const Id root = t.create(alt);
+    auto project = t.project();
+    project.masters.push_back(root);
+    t.setProject(project);
+    model::FxInstance keyed;
+    keyed.plugin.id = "com.suppleaudio.test.keymix";
+    const Id fx = t.create(keyed);
+    t.modify<model::Track>(root, [&](auto& tr) { tr.chain.push_back(fx); });
+    model::Route key;
+    key.from.track = kMaster;
+    key.to.fx = fx;
+    t.create(key);
+    model::Route hw;
+    hw.from.track = kMaster;
+    hw.to.hwChannels = std::vector<int>{1, 2};
+    t.create(hw);
+    auto s = t.commit();
+    REQUIRE(s);
+    auto pool = makePool();
+    auto plan = detail::compile(*s, pool, 0, 128);
+    REQUIRE(plan);
+    CHECK(plan->nodes[plan->mainMaster].live);
+    auto other = std::find_if(plan->nodes.begin(), plan->nodes.end(),
+                              [&](const auto& n) { return n.id == root; });
+    REQUIRE(other != plan->nodes.end());
+    CHECK(other->live);
+}

@@ -268,7 +268,12 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     p.projectDir = opt.projectDir;
     p.media = opt.media ? opt.media : &localMedia;
     SUPPLE_TRY(prepare(p, selectedSession));
-    const Node* selected = &p.nodes.back();
+    auto master = std::find_if(p.nodes.begin(), p.nodes.end(),
+                               [&](const Node& node) { return node.id == opt.master; });
+    if (master == p.nodes.end() || !master->master)
+        return Error("track.strip_type", "mix output must be a master", "/master",
+                     "choose a master id from track.list");
+    const Node* selected = &*master;
     if (opt.track) {
         auto it = std::find_if(p.nodes.begin(), p.nodes.end(),
                                [&](const Node& node) { return node.id == *opt.track; });
@@ -282,7 +287,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         for (Node& node : p.nodes) node.soloSilenced = false;
     const auto outputLatency =
         opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
-                  : p.outputLatency;
+                  : selected->latIn + selected->latChain;
     const std::int64_t length = time::samplesAt(opt.endSeconds, p.rate) -
                                 time::samplesAt(opt.startSeconds, p.rate) +
                                 time::samplesAt(opt.tailSeconds, p.rate);

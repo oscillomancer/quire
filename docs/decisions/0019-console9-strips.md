@@ -63,6 +63,7 @@ is decoded, so the universal track has to become typed.
    (ADR-0018) from any tap of any strip and never encoded (a key is a
    detector, not a summing input; a `post_fader` key tap hears the encoded
    signal). MIDI routes are unaffected. Cycles are still rejected.
+   Masters cannot send audio to busses/masters; key and hardware-output routes stay allowed.
 5. **Fader, pan, mute.** On channels and busses `volume` (dB, −inf..+12.04)
    and `pan` (%, −100..100) *are* the C9 Channel's Fader and Pan (mapping in
    the research note; the DSP uses the linear gain, never the native 0..1

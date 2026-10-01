@@ -217,7 +217,7 @@ Render settings (defaults for `render.*`): `format` (wav/flac, bit depth,
 dither), `sample_rate`, `channels`, `normalize` (`none` | `{mode: lufs_i|
 lufs_s|lufs_m|peak|true_peak|rms, target, limit_true_peak_db?}`), `tail_ms`,
 `pattern` (file-name pattern, §7.3), `secondary` format, `matrix`
-(`{rg id or "project": [track ids or "master"]}`).
+(`{rg id or "project": [track/master ids, e.g. "tr_0"]}`).
 
 ### 1.11 Blobs
 
@@ -267,7 +267,7 @@ never a user error — user errors are caught by command validation first.
 
 ```
 Project "Demo" · 48 kHz · 120 BPM 4/4 · 16 bars (0:32.0)
-tr_1 Drums [folder] → master
+tr_1 Drums [buss] → master
   tr_2 Kick   vol −3.0 dB · fx: fx_2 EQ (4 bands), fx_3 Comp (−4 dB GR@1:1…)
               it_4 bars 1–17 "kick loop" (audio md_1, 1.00×)
   tr_3 Snare  it_5 bars 1–17 (MIDI mi_2, 64 notes)
@@ -283,6 +283,16 @@ markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 *(Schema `supple.project/2.0` since ADR-0019: strip `type`,
 `project.console9`, `project.masters`; strip `width`/`trim`/`phase_invert`
 removed. 1.x files migrate as ADR-0019 §11 says, with warnings.)*
+
+The loader accepts 1.x and 2.x documents and saves 2.0. Migration allocates
+child channel IDs in track-ID order, inserts each child first, and moves the
+source items and record/input FX there while keeping user inserts on the
+buss. Hardware/MIDI record routes follow the new child. Legacy numeric send
+pan remains numeric (including the old default centre); new sends default to
+`follow`. `project.open` includes nonempty load `warnings` as structured
+`{code, message, path}` entries, including the change to Console 9 staging.
+Masters are ordered by `project.masters`, independently of processing order;
+`track.list` and `session.describe` visit every root in that order.
 
 Canonical JSON (ADR-0009) with members in this order: `schema`, `project`,
 `tempo` (`points`, `meters`), `rulers` (`markers`, `regions`), `tracks`,
@@ -423,7 +433,7 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **transport** (a): `transport.play`, `transport.stop`, `transport.pause`,
   `transport.record`, `transport.seek {pos}`, `transport.loop {range}`,
   `transport.get` (q).
-- **render** (a): `render.mix`, `render.stems`, `render.regions` (matrix),
+- **render** (a): `render.mix {master}` (default tr_0), `render.stems`, `render.regions` (matrix),
   `render.items`, `render.dry-run` (q: resolved file list), `render.job.*`
   (queue).
 - **analysis** (q): `analyze.render {render}`, `analyze.track {track, range}`

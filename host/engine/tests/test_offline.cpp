@@ -30,9 +30,11 @@ InstancePool makePool() {
     });
 }
 
-Id addTrack(model::EditTxn& t, std::string name, Id parent = kMaster) {
+Id addTrack(model::EditTxn& t, std::string name, Id parent = kMaster,
+            model::StripType type = model::StripType::Channel) {
     model::Track tr;
     tr.name = std::move(name);
+    tr.type = type;
     tr.parent = parent;
     const Id id = t.create(tr);
     t.modify<model::Track>(parent, [&](model::Track& p) { p.children.push_back(id); });
@@ -176,7 +178,7 @@ TEST_CASE("an instrument track plays its MIDI item at the right samples" *
 TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     auto pool = makePool();
     model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
     const Id a = addTrack(t, "A", folder);
     addFx(t, a, kSine);
     addNote(t, a, 0.0, 1.0);
@@ -191,7 +193,7 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
 
     // Mute A but send it pre-fader to a bus: the bus still hears it.
     model::EditTxn t2(s, 2);
-    const Id bus = addTrack(t2, "Bus");
+    const Id bus = addTrack(t2, "Bus", kMaster, model::StripType::Buss);
     t2.modify<model::Track>(a, [](model::Track& x) { x.mute = true; });
     model::Route send;
     send.from.track = a;
@@ -317,7 +319,7 @@ TEST_CASE("route automation") {
     addFx(t, src, kSine);
     addNote(t, src, 0.0, 4.0);
     t.modify<model::Track>(src, [](model::Track& x) { x.mute = true; });
-    const Id bus = addTrack(t, "Bus");
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
     model::Route send;
     send.from.track = src;
     send.to.track = bus;
@@ -332,7 +334,7 @@ TEST_CASE("route automation") {
 TEST_CASE("solo: soloed tracks and their signal path stay audible") {
     auto pool = makePool();
     model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
     const Id a = addTrack(t, "A", folder);
     const Id b = addTrack(t, "B");
     addFx(t, a, kSine);
@@ -554,9 +556,9 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
 TEST_CASE("offline renders are bit-identical for any thread count (B4)") {
     auto pool = makePool();
     model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
-    const Id busA = addTrack(t, "Bus A");
-    const Id busB = addTrack(t, "Bus B");
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
+    const Id busA = addTrack(t, "Bus A", kMaster, model::StripType::Buss);
+    const Id busB = addTrack(t, "Bus B", kMaster, model::StripType::Buss);
     addFx(t, busB, kGain,
           json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
               .value());

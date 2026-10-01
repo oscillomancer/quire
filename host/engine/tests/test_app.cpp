@@ -1103,7 +1103,7 @@ TEST_CASE("render stems sum to the master-less mix, and regions match dry run") 
     CHECK(regionAudio->frames() == 96000);
     call(
         "project.set",
-        R"({"render":{"matrix":{"project":["master"],"rg_1":["tr_1","master"]},"pattern":"matrix-{region}-{track}-{counter:02}"}})");
+        R"({"render":{"matrix":{"project":["tr_0"],"rg_1":["tr_1","tr_0"]},"pattern":"matrix-{region}-{track}-{counter:02}"}})");
     auto matrix = call("render.regions", R"({})");
     CHECK(matrix.find("files")->size() == 3);
 }

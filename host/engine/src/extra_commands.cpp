@@ -57,14 +57,16 @@ struct RouteArgs {
     std::string from;
     std::optional<std::string> to, fx;
     std::optional<model::Tap> tap;
-    std::optional<double> volumeDb, pan;
+    std::optional<double> volumeDb;
+    std::optional<model::RoutePan> pan;
     std::optional<bool> mute;
 };
 struct RouteSetArgs {
     std::string route;
     std::optional<std::string> from, to, fx;
     std::optional<model::Tap> tap;
-    std::optional<double> volumeDb, pan;
+    std::optional<double> volumeDb;
+    std::optional<model::RoutePan> pan;
     std::optional<bool> mute;
 };
 struct RouteRef {
@@ -77,7 +79,8 @@ struct TrackMoveArgs {
 };
 struct RouteEntry {
     std::string id, from, to, fx, tap;
-    double volumeDb = 0, pan = 0;
+    double volumeDb = 0;
+    model::RoutePan pan;
     bool mute = false;
 };
 struct RouteList {
@@ -211,7 +214,7 @@ schema::Schema<T> routeArgsSchema(const char* name) {
     b.field("tap", &T::tap, tapSchema());
     b.field("volume_db", &T::volumeDb,
             schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB));
-    b.field("pan", &T::pan, schema::number().range(-100, 100).unit(units::Unit::percent));
+    b.field("pan", &T::pan, model::routePanSchema());
     b.field("mute", &T::mute, schema::boolean());
     return b.build();
 }
@@ -298,11 +301,19 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
     if (!r.from.track || !target)
         return Error("route.endpoint", "a source track and a destination are required", "",
                      "give from and to (a track) or fx (a plug-in's key)");
+    if (!r.to.fx && !r.midi && s.tracks.find(*r.from.track)->type == model::StripType::Master)
+        return Error("route.strip_type", "masters are terminal", "/from",
+                     "masters feed hardware outputs and renders; use a buss to group");
     if (auto cycle = routeCycle(s, *r.from.track, *target, ignored)) {
         std::string names;
         for (Id id : *cycle) names += (names.empty() ? "" : " -> ") + id.str();
         return Error("route.cycle", "route creates a cycle: " + names, "/to",
                      "choose a destination that does not feed the source");
+    }
+    if (!r.to.fx && !r.midi) {
+        if (s.tracks.find(*target)->type == model::StripType::Channel)
+            return Error("route.strip_type", "a channel accepts only hardware audio", "/to",
+                         "add a buss and route the channels into it; use fx for a key");
     }
     if (a.tap) r.tap = *a.tap;
     if (a.volumeDb) r.volumeDb = *a.volumeDb;
@@ -444,7 +455,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                          .field("fx", &RouteEntry::fx, schema::string())
                          .field("tap", &RouteEntry::tap, schema::string())
                          .field("volume_db", &RouteEntry::volumeDb, schema::number())
-                         .field("pan", &RouteEntry::pan, schema::number())
+                         .field("pan", &RouteEntry::pan, model::routePanSchema())
                          .field("mute", &RouteEntry::mute, schema::boolean())
                          .build();
         c.result = schema::object<RouteList>("route_list")
@@ -494,9 +505,22 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Track>(s, a.track, "/track");
             if (!id) return std::move(id).error();
             if (*id == model::kMaster)
-                return Error("tr.master", "the master track cannot be moved", "/track");
+                return Error("track.strip_type", "tr_0 must remain the first root", "/track",
+                             "reorder another master or move a channel/buss instead");
             const model::Track& track = *s.tracks.find(*id);
-            const Id from = track.parent.value_or(model::kMaster);
+            if (track.type == model::StripType::Master) {
+                if (a.parent)
+                    return Error("track.strip_type", "masters have no parent", "/parent",
+                                 "omit parent to reorder a master");
+                auto p = app(ctx).txn().project();
+                std::erase(p.masters, *id);
+                auto at = a.index ? std::clamp<std::size_t>(*a.index, 1, p.masters.size())
+                                  : p.masters.size();
+                p.masters.insert(p.masters.begin() + static_cast<std::ptrdiff_t>(at), *id);
+                app(ctx).txn().setProject(std::move(p));
+                return Empty{};
+            }
+            const Id from = *track.parent;
             Id target = from;
             if (a.parent) {
                 auto parent = require<model::Track>(s, *a.parent, "/parent");
@@ -518,6 +542,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                     return Error("tr.cycle", "the move creates a cycle: " + names, "/parent",
                                  "choose a destination that does not feed this track");
                 }
+            if (s.tracks.find(target)->type == model::StripType::Channel)
+                return Error("track.strip_type", "a channel cannot have children", "/parent",
+                             "add a buss and place the channels under it");
             model::EditTxn& t = app(ctx).txn();
             t.modify<model::Track>(from, [&](model::Track& p) {
                 p.children.erase(std::remove(p.children.begin(), p.children.end(), *id),

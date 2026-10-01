@@ -5,7 +5,9 @@
 #include <filesystem>
 
 #include <supple/audio/audio_file.h>
+#include <supple/base/files.h>
 #include <supple/engine/app.h>
+#include <supple/model/schemas.h>
 
 using namespace supple;
 using namespace supple::engine;
@@ -54,7 +56,7 @@ TEST_CASE("route sends through a gain bus, rejects cycles and replays in a branc
     registerEngineCommands(registry);
     cmd::Dispatcher bus(registry, *app);
     run(bus, "track.add", R"({"name":"Source"})");
-    run(bus, "track.add", R"({"name":"Bus"})");
+    run(bus, "track.add", R"({"name":"Bus","type":"buss"})");
     run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
     run(bus, "fx.add",
         R"({"track":"tr_2","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-6}}})");
@@ -267,9 +269,9 @@ TEST_CASE("track.move re-parents, reorders, and refuses a cycle (review 14 D5)")
     cmd::Registry registry;
     registerEngineCommands(registry);
     cmd::Dispatcher bus(registry, *app);
-    run(bus, "track.add", R"({"name":"A"})");            // tr_1
-    run(bus, "track.add", R"({"name":"B"})");            // tr_2
-    run(bus, "track.add", R"({"name":"C","index":0})");  // tr_3, first under the master
+    run(bus, "track.add", R"({"name":"A","type":"buss"})");  // tr_1
+    run(bus, "track.add", R"({"name":"B","type":"buss"})");  // tr_2
+    run(bus, "track.add", R"({"name":"C","index":0})");      // tr_3, first under the master
     const auto first = childrenOf(app->view(), "tr_0");
     REQUIRE(first.size() == 3);
     CHECK(first[0].str() == "tr_3");
@@ -294,7 +296,7 @@ TEST_CASE("track.move re-parents, reorders, and refuses a cycle (review 14 D5)")
     // A track cannot move under its own child, under itself, or move the master.
     CHECK(fails(bus, "track.move", R"({"track":"tr_1","parent":"tr_2"})") == "tr.cycle");
     CHECK(fails(bus, "track.move", R"({"track":"tr_1","parent":"tr_1"})") == "tr.cycle");
-    CHECK(fails(bus, "track.move", R"({"track":"tr_0"})") == "tr.master");
+    CHECK(fails(bus, "track.move", R"({"track":"tr_0"})") == "track.strip_type");
     CHECK(fails(bus, "track.move", R"({"track":"tr_9"})") == "tr.unknown");
     // Sorting an index past the end appends, like track.add.
     run(bus, "track.move", R"({"track":"tr_2","parent":"tr_0","index":99})");
@@ -393,4 +395,85 @@ TEST_CASE("key routes over the bus: route.add {fx}, validation, listing, removal
     run(bus, "fx.remove", R"({"fx":")" + keyMix + R"("})");
     json::Value after = run(bus, "route.list", "{}");
     CHECK(after["routes"].asArray().empty());
+}
+
+TEST_CASE("typed strip commands: rejected edits roll back and masters render independently") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Alt","type":"master","parent":null})");
+    run(bus, "track.add", R"({"name":"Group","type":"buss","parent":"tr_1"})");
+    run(bus, "track.add", R"({"name":"Tone","parent":"tr_2"})");
+    run(bus, "fx.add", R"({"track":"tr_3","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_3","notation":"voice a; 1: C4:w"})");
+    const auto masters = app->head().project->masters;
+    CHECK(masters == std::vector<model::Id>{model::kMaster, *model::Id::parse("tr_1")});
+    auto rejected = [&](const char* command, const char* args, const char* code) {
+        const auto version = app->head().version;
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == code);
+        CHECK_FALSE(result.error().hint.empty());
+        CHECK(app->head().version == version);
+        CHECK(model::checkInvariants(app->head()).ok());
+    };
+    rejected("track.add", R"({"parent":"tr_3"})", "track.strip_type");
+    rejected("track.set", R"({"track":"tr_3","type":"buss"})", "track.strip_type");
+    rejected("track.set", R"({"track":"tr_0","type":"buss"})", "track.strip_type");
+    rejected("track.set", R"({"track":"tr_2","armed":true})", "track.strip_type");
+    rejected("item.move", R"({"item":"it_1","track":"tr_2"})", "track.strip_type");
+    rejected("item.add", R"({"track":"tr_1"})", "track.strip_type");
+    rejected("route.add", R"({"from":"tr_0","to":"tr_2"})", "route.strip_type");
+    rejected("route.add", R"({"from":"tr_0","to":"tr_1"})", "route.strip_type");
+    rejected("route.add", R"({"from":"tr_2","to":"tr_3"})", "route.cycle");
+    rejected("env.add", R"({"track":"tr_3","param":"trim"})", "track.strip_type");
+    rejected("render.mix", R"({"master":"tr_2","end_beat":1})", "track.strip_type");
+    auto list = run(bus, "track.list", "{}");
+    CHECK(list["tracks"].at(0).find("type")->asString() == "master");
+    CHECK(list["tracks"].at(2).find("type")->asString() == "buss");
+    CHECK(describeSession(app->head()).find("[master]") != std::string::npos);
+    CHECK(describeSession(app->head()).find("[buss]") != std::string::npos);
+    const auto main = run(bus, "render.mix", R"({"name":"main","end_beat":1})");
+    const auto alt = run(bus, "render.mix", R"({"master":"tr_1","name":"alt","end_beat":1})");
+    CHECK(peak(main.find("path")->asString()) == 0);
+    CHECK(peak(alt.find("path")->asString()) > 0.01);
+    run(bus, "project.set",
+        R"({"console9":false,"render":{"matrix":{"project":["tr_0","tr_1"]},"pattern":"master-{track}"}})");
+    auto matrix = run(bus, "render.dry-run", R"({"operation":"regions","end_beat":1})");
+    CHECK(matrix["files"].size() == 2);
+    auto actual = run(bus, "render.regions", R"({"end_beat":1})");
+    CHECK(actual["files"].size() == 2);
+    run(bus, "route.add", R"({"from":"tr_3","to":"tr_0","pan":"follow"})");
+    CHECK(run(bus, "route.list", "{}")["routes"].at(0).find("pan")->asString() == "follow");
+    run(bus, "route.set", R"({"route":"sd_1","pan":-25})");
+    CHECK(app->head().routes.find(*model::Id::parse("sd_1"))->pan.percent == -25);
+    run(bus, "route.remove", R"({"route":"sd_1"})");
+    run(bus, "track.add", R"({"name":"Empty"})");
+    run(bus, "track.set", R"({"track":"tr_4","type":"master"})");
+    CHECK(app->head().project->masters.back().str() == "tr_4");
+    run(bus, "track.move", R"({"track":"tr_4","index":1})");
+    CHECK(app->head().project->masters[1].str() == "tr_4");
+    run(bus, "track.set", R"({"track":"tr_4","type":"buss"})");
+    CHECK(app->head().project->masters == masters);
+    run(bus, "track.set", R"({"track":"tr_4","type":"master"})");
+    run(bus, "track.remove", R"({"track":"tr_4"})");
+    CHECK(app->head().project->masters == masters);
+}
+
+TEST_CASE("project.open returns migration warnings in its load report") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    auto doc = model::projectToJson(app->head());
+    doc["schema"] = "supple.project/1.0";
+    doc["project"]["pan_law_db"] = -3;
+    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)).ok());
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto loaded = run(bus, "project.open", R"({"path":"legacy.json"})");
+    REQUIRE(loaded.find("warnings"));
+    CHECK(loaded["warnings"].size() == 2);
+    CHECK(loaded["warnings"].at(1).find("path")->asString() == "/project/console9");
 }

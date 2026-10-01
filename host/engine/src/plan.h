@@ -330,7 +330,8 @@ struct Node {
 
 struct Plan {
     std::uint64_t generation = 0;  // set by the real-time engine when it publishes the plan
-    std::vector<Node> nodes;       // topological order; the master is last
+    std::vector<Node> nodes;       // topological order
+    std::size_t mainMaster = 0;    // tr_0 need not be last (multiple roots and key routes)
     std::vector<Edge> edges;
     double rate = 48000.0;
     std::uint32_t smoothFrames = 480;  // 10 ms: ramps at plan swaps (carryMix)

@@ -24,6 +24,7 @@ Session richSession() {
     Session s = Session::create({.name = "Demo", .sampleRate = 48000});
     EditTxn t(s, 1);
     const Id drums = addTrack(t, "Drums");
+    t.modify<Track>(drums, [](Track& tr) { tr.type = StripType::Buss; });
     const Id kick = addTrack(t, "Kick", drums);
     const Id bass = addTrack(t, "Bass");
     t.modify<Track>(kick, [](Track& k) { k.volumeDb = -3.0; });
@@ -62,7 +63,7 @@ Session richSession() {
     t.modify<Track>(bass, [&](Track& b) { b.chain = {fx, fx2}; });
     Route side;
     side.from.track = kick;
-    side.to.track = bass;
+    side.to.fx = fx2;
     side.tap = Tap::PreFader;
     side.channels = {{1, 2}, {3, 4}};
     t.create(side);
@@ -147,6 +148,8 @@ TEST_CASE("invariants catch structural bugs") {
         EditTxn t(s0, 1);
         const Id x = addTrack(t, "X");
         const Id y = addTrack(t, "Y");
+        t.modify<Track>(x, [](Track& tr) { tr.type = StripType::Buss; });
+        t.modify<Track>(y, [](Track& tr) { tr.type = StripType::Buss; });
         Route r1, r2;
         r1.from.track = x;
         r1.to.track = y;
@@ -257,4 +260,159 @@ TEST_CASE("diff: object-level, deterministic, field names") {
     CHECK(d[2].id == Id{Kind::Track, 2});
     CHECK(d[2].fields == std::vector<std::string>{"mute", "volume_db"});
     CHECK(d[3].op == Change::Op::Add);
+}
+
+TEST_CASE("typed strips: master forest, follow pan and edit validation") {
+    EditTxn t(Session::create(), 1);
+    const Id buss = addTrack(t, "Group");
+    t.modify<Track>(buss, [](auto& tr) { tr.type = StripType::Buss; });
+    const Id channel = addTrack(t, "Source", buss);
+    Track master;
+    master.type = StripType::Master;
+    master.name = "Alt";
+    const Id alt = t.create(master);
+    auto p = t.project();
+    p.masters.push_back(alt);
+    p.console9 = false;
+    t.setProject(p);
+    Route send;
+    send.from.track = channel;
+    send.to.track = alt;
+    const Id route = t.create(send);
+    auto s = t.commit();
+    REQUIRE(s);
+    CHECK(s->routes.find(route)->pan.resolve(34) == 34);
+    CHECK(toJson(*s->routes.find(route)).find("pan") == nullptr);
+    auto parsed = parseProject(serializeProject(*s));
+    REQUIRE(parsed);
+    CHECK(parsed->project->masters == std::vector<Id>{kMaster, alt});
+    CHECK_FALSE(parsed->project->console9);
+    CHECK(serializeProject(*parsed) == serializeProject(*s));
+    auto rejected = [&](auto mutate, const char* code) {
+        EditTxn bad(*s, 2);
+        mutate(bad);
+        auto result = validateStripRules(bad.preview());
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == code);
+        CHECK_FALSE(result.error().hint.empty());
+    };
+    rejected(
+        [&](EditTxn& bad) {
+            bad.modify<Track>(buss, [](auto& tr) { tr.type = StripType::Channel; });
+        },
+        "track.strip_type");
+    rejected(
+        [&](EditTxn& bad) {
+            Item i;
+            i.track = buss;
+            bad.create(i);
+        },
+        "track.strip_type");
+    rejected(
+        [&](EditTxn& bad) { bad.modify<Track>(buss, [](auto& tr) { tr.record.armed = true; }); },
+        "track.strip_type");
+    rejected(
+        [&](EditTxn& bad) { bad.modify<Route>(route, [&](auto& r) { r.to.track = channel; }); },
+        "route.strip_type");
+    rejected(
+        [&](EditTxn& bad) { bad.modify<Route>(route, [&](auto& r) { r.from.track = kMaster; }); },
+        "route.strip_type");
+    rejected(
+        [&](EditTxn& bad) {
+            bad.modify<Route>(route, [&](auto& r) {
+                r.from.track.reset();
+                r.from.hwChannels = std::vector<int>{1, 2};
+            });
+        },
+        "route.strip_type");
+    rejected(
+        [&](EditTxn& bad) {
+            bad.modify<Route>(route, [&](auto& r) {
+                r.to.track.reset();
+                r.to.hwChannels = std::vector<int>{1, 2};
+            });
+        },
+        "route.strip_type");
+    rejected(
+        [&](EditTxn& bad) {
+            Envelope e;
+            e.target = {channel, "width"};
+            bad.create(e);
+        },
+        "track.strip_type");
+    auto pan = routePanSchema().decode(json::Value("follow"));
+    REQUIRE(pan);
+    CHECK_FALSE(pan->percent);
+    CHECK(routePanSchema().decode(json::Value(-21))->resolve(0) == -21);
+}
+
+TEST_CASE("project 1.x migration: folders and receives become busses with child sources") {
+    auto doc = projectToJson(Session::create());
+    doc["schema"] = "supple.project/1.7";
+    doc["project"]["pan_law_db"] = -3;
+    doc["project"]["next_ids"]["tr"] = 4;
+    doc["project"]["next_ids"]["sd"] = 4;
+    doc["project"]["next_ids"]["it"] = 2;
+    doc["project"]["next_ids"]["en"] = 2;
+    doc["tracks"] = json::parse(R"({
+      "tr_0":{"name":"Master","children":["tr_1","tr_3"]},
+      "tr_1":{"name":"Folder","parent":"tr_0","children":["tr_2"],"width":50,"phase_invert":true,
+                "record":{"armed":true,"input":"sd_2","monitor":"on","mode":"input"}},
+      "tr_2":{"name":"Source","parent":"tr_1"},
+      "tr_3":{"name":"Receive","parent":"tr_0"}
+    })")
+                        .value();
+    Item item;
+    item.track = Id{Kind::Track, 1};
+    doc["items"]["it_1"] = toJson(item);
+    doc["routes"] = json::parse(R"({
+       "sd_1":{"from":{"track":"tr_2"},"to":{"track":"tr_3"}},
+       "sd_2":{"from":{"hw_channels":[1,2]},"to":{"track":"tr_1"}},
+       "sd_3":{"from":{"track":"tr_0"},"to":{"track":"tr_3"}}
+    })")
+                        .value();
+    Envelope env;
+    env.target = {Id{Kind::Track, 1}, "width"};
+    doc["envelopes"]["en_1"] = toJson(env);
+    std::vector<schema::Warning> warnings;
+    auto migrated = projectFromJson(doc, &warnings);
+    REQUIRE_MESSAGE(migrated, (migrated ? std::string() : migrated.error().toString()));
+    CHECK(migrated->project->console9);
+    CHECK(migrated->project->masters == std::vector<Id>{kMaster});
+    CHECK(migrated->tracks.find(Id{Kind::Track, 1})->type == StripType::Buss);
+    CHECK(migrated->tracks.find(Id{Kind::Track, 3})->type == StripType::Buss);
+    const Id child{Kind::Track, 4};
+    CHECK(migrated->tracks.find(child)->name == "Folder items");
+    CHECK(migrated->tracks.find(Id{Kind::Track, 1})->children.front() == child);
+    CHECK(migrated->items.find(Id{Kind::Item, 1})->track == child);
+    CHECK(migrated->tracks.find(child)->record.armed);
+    CHECK(migrated->routes.find(Id{Kind::Route, 2})->to.track == child);
+    CHECK(migrated->next[Kind::Track] == 5);
+    CHECK_FALSE(migrated->routes.contains(Id{Kind::Route, 3}));
+    CHECK(migrated->envelopes.empty());
+    CHECK(warnings.size() == 7);
+    bool staging = false;
+    for (const auto& w : warnings) {
+        CHECK_FALSE(w.path.empty());
+        staging |= w.path == "/project/console9" && w.message.find("levels") != std::string::npos;
+    }
+    CHECK(staging);
+    const auto text = serializeProject(*migrated);
+    CHECK(text.find("supple.project/2.0") != std::string::npos);
+    auto back = parseProject(text);
+    REQUIRE(back);
+    CHECK(serializeProject(*back) == text);
+}
+
+TEST_CASE("project newer minor ignores unknown fields with load warnings") {
+    auto doc = projectToJson(Session::create());
+    doc["schema"] = "supple.project/2.1";
+    doc["tracks"]["tr_0"]["future"] = true;
+    std::vector<schema::Warning> warnings;
+    auto parsed = projectFromJson(doc, &warnings);
+    REQUIRE(parsed);
+    REQUIRE(warnings.size() == 1);
+    CHECK(warnings[0].path == "/tracks/tr_0/future");
+    doc["schema"] = "supple.project/2.0";
+    CHECK_FALSE(projectFromJson(doc));
 }

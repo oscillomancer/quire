@@ -198,11 +198,15 @@ class EditTxn {
 // --- invariants and diffs --------------------------------------------------------
 
 // Checks every structural invariant (session-model §3): the track tree is
-// rooted at tr_0, every reference resolves, active takes belong to their
+// rooted at project.masters, every reference resolves, active takes belong to their
 // items, no route/parent-send cycles, each fx in exactly one chain, envelope
 // points sorted, counters past every used ID, tempo point at beat 0 and meter
 // at bar 1. Errors: code "model.invariant" with a path like "/tracks/tr_3".
 Status checkInvariants(const Session& s);
+
+// Edit-time strip/routing rules, with actionable track.strip_type and
+// route.strip_type errors. Also checked by the invariant checker.
+Status validateStripRules(const Session& s);
 
 // The track whose FX chain holds `fx` (not input chains or take FX), if any.
 std::optional<Id> trackOfFx(const Session& s, Id fx);

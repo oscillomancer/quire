@@ -89,7 +89,7 @@ env.add {"track": "tr_2", "param": "volume",
          "points": [{"bar": 16, "value": 0}, {"bar": 17, "value": "-60 dB"}]}
 ```
 
-Mixer targets: track `volume`, `trim` (dB), `pan`, `width` (%), `mute`;
+Mixer targets: track `volume` (dB), `pan` (%), `mute`;
 route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 `fx.describe` lists (values in their unit; a cutoff sweep moves evenly in
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces

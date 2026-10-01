@@ -73,6 +73,7 @@ struct ProjectInfo {
     std::int64_t version = 0;
     std::int64_t recoverable = 0;    // recordings project.recover can bring back
     bool autosaveAvailable = false;  // a newer autosave exists (not loaded)
+    std::optional<std::vector<schema::Warning>> warnings;
 };
 
 schema::Schema<ProjectInfo> projectInfoSchema() {
@@ -86,6 +87,12 @@ schema::Schema<ProjectInfo> projectInfoSchema() {
         .field("version", &ProjectInfo::version, schema::integer())
         .field("recoverable", &ProjectInfo::recoverable, schema::integer())
         .field("autosave_available", &ProjectInfo::autosaveAvailable, schema::boolean())
+        .field("warnings", &ProjectInfo::warnings,
+               schema::arrayOf(schema::object<schema::Warning>("load_warning")
+                                   .field("code", &schema::Warning::code, schema::string())
+                                   .field("message", &schema::Warning::message, schema::string())
+                                   .field("path", &schema::Warning::path, schema::string())
+                                   .build()))
         .build();
 }
 
@@ -100,7 +107,8 @@ ProjectInfo projectInfo(EngineApp& app, const model::Session& s) {
                        std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
                        static_cast<std::int64_t>(s.version),
                        static_cast<std::int64_t>(app.recoverable().size()),
-                       !app.newerAutosave(project).empty()};
+                       !app.newerAutosave(project).empty(),
+                       std::nullopt};
 }
 
 struct RecoverableList {
@@ -115,7 +123,7 @@ struct RecoverResult {
 };
 struct ProjectSetArgs {
     std::optional<std::string> name, title, author, notes;
-    std::optional<double> panLawDb;
+    std::optional<bool> console9;
     std::optional<json::Value> render;
 };
 struct PathArgs {
@@ -273,11 +281,9 @@ schema::Schema<EnvPointArg> envPointSchema() {
 }
 
 // A mixer parameter's unit, or none when `param` is not one.
-std::optional<units::Unit> mixerUnit(model::Kind kind, const std::string& param) {
-    if (param == "volume" || (kind == model::Kind::Track && param == "trim"))
-        return units::Unit::dB;
-    if (param == "pan" || (kind == model::Kind::Track && param == "width"))
-        return units::Unit::percent;
+std::optional<units::Unit> mixerUnit(model::Kind, const std::string& param) {
+    if (param == "volume") return units::Unit::dB;
+    if (param == "pan") return units::Unit::percent;
     if (param == "mute") return units::Unit::none;
     return std::nullopt;
 }
@@ -296,10 +302,12 @@ Result<EnvDomain> envDomain(EngineApp& app, const model::Session& s, const model
     if (t.object.kind != model::Kind::Fx) {
         d.mixer = mixerUnit(t.object.kind, t.param);
         if (!d.mixer)
-            return Error("env.param",
+            return Error(t.object.kind == model::Kind::Track ? "track.strip_type" : "env.param",
                          "no automatable parameter \"" + t.param + "\" on " + t.object.str(), path,
-                         t.object.kind == model::Kind::Track ? "volume, trim, pan, width, mute"
-                                                             : "volume, pan, mute");
+                         t.object.kind == model::Kind::Track
+                             ? "automate volume, pan or mute; use a utility insert for trim, width "
+                               "or polarity"
+                             : "volume, pan, mute");
         return d;
     }
     const model::FxInstance& fx = *s.fx.find(t.object);
@@ -395,6 +403,7 @@ struct CountResult {
 // --- tracks -----------------------------------------------------------------------------
 
 struct TrackAddArgs {
+    model::StripType type = model::StripType::Channel;
     std::optional<std::string> name, parent;
     std::optional<std::int64_t> index;
     std::optional<std::int64_t> channels;
@@ -405,8 +414,9 @@ struct TrackRef {
 struct TrackSetArgs {
     std::string track;
     std::optional<std::string> name, color, notes;
-    std::optional<double> volumeDb, pan, width;
-    std::optional<bool> mute, phaseInvert;
+    std::optional<double> volumeDb, pan;
+    std::optional<model::StripType> type;
+    std::optional<bool> mute;
     std::optional<std::string> solo;
     std::optional<bool> armed;
     std::optional<std::vector<std::int64_t>> recordInput;
@@ -417,6 +427,7 @@ struct TrackSetArgs {
 };
 struct TrackEntry {
     std::string id, name, parent;
+    model::StripType type = model::StripType::Channel;
     std::int64_t depth = 0;
     double volumeDb = 0;
     bool mute = false;
@@ -511,6 +522,7 @@ constexpr std::size_t kMaxListedParams = 512;
 
 enum class RenderAnalyze { Summary, Full };
 struct RenderMixArgs {
+    std::optional<std::string> master;
     std::optional<double> startBeat, endBeat, tailS;
     std::optional<std::string> name;
     std::optional<std::string> pattern;
@@ -552,6 +564,7 @@ Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
                                                      : "mix-v" + std::to_string(session.version)));
     RenderPatternContext context;
     context.project = session.project->name.empty() ? "project" : session.project->name;
+    if (args.master) context.track = session.tracks.find(*model::Id::parse(*args.master))->name;
     context.startBeats = args.startBeat.value_or(0);
     context.startSeconds = session.timeMap->secondsAt(context.startBeats);
     const auto* rateSetting = defaults.isObject() ? defaults.find("sample_rate") : nullptr;
@@ -649,15 +662,14 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "project.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Change project metadata (name, title, author, notes, pan law).";
+        c.summary = "Change project metadata (name, title, author, notes, Console 9).";
         c.tags = {"project"};
         c.args = schema::object<ProjectSetArgs>("project_set_args")
                      .field("name", &ProjectSetArgs::name, schema::string())
                      .field("title", &ProjectSetArgs::title, schema::string())
                      .field("author", &ProjectSetArgs::author, schema::string())
                      .field("notes", &ProjectSetArgs::notes, schema::string())
-                     .field("pan_law_db", &ProjectSetArgs::panLawDb,
-                            schema::number().range(-6, 0).unit(units::Unit::dB))
+                     .field("console9", &ProjectSetArgs::console9, schema::boolean())
                      .field("render", &ProjectSetArgs::render, schema::any())
                      .build();
         c.result = emptySchema();
@@ -669,7 +681,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.title) p.title = *a.title;
             if (a.author) p.author = *a.author;
             if (a.notes) p.notes = *a.notes;
-            if (a.panLawDb) p.panLawDb = *a.panLawDb;
+            if (a.console9) p.console9 = *a.console9;
             if (a.render) {
                 if (!a.render->isObject())
                     return Error("render.settings", "render settings must be an object", "/render");
@@ -689,9 +701,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                         for (const auto& cell : row.asArray()) {
                             if (!cell.isString())
                                 return Error("render.matrix",
-                                             "matrix cell must be a track id or master",
+                                             "matrix cell must be a track or master id",
                                              "/render/matrix");
-                            if (cell.asString() != "master") {
+                            {
                                 auto id = model::Id::parse(cell.asString());
                                 if (!id || !A(ctx).view().tracks.contains(*id))
                                     return Error("render.matrix",
@@ -761,8 +773,12 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const PathArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
             if (!a.path) return Error("project.no_path", "give the project file to open", "/path");
-            SUPPLE_TRY(app.open(*a.path));
-            return projectInfo(app, app.head());
+            std::vector<schema::Warning> warnings;
+            SUPPLE_TRY(app.open(*a.path, &warnings));
+            for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
+            auto info = projectInfo(app, app.head());
+            if (!warnings.empty()) info.warnings = std::move(warnings);
+            return info;
         };
         registry.add(std::move(c));
     }
@@ -952,16 +968,19 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "track.add";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Add a track (under the master, or inside a folder track) and return its id.";
+        c.summary = "Add a channel, buss or master strip and return its id.";
         c.description =
-            "parent: a track id to nest under (it becomes a folder); index: position among its "
+            "parent: a buss/master id (default tr_0); masters have no parent; index: position "
+            "among its "
             "siblings.";
         c.tags = {"track"};
         c.args = schema::object<TrackAddArgs>("track_add_args")
+                     .field("type", &TrackAddArgs::type, model::stripTypeSchema())
+                     .defaultValue(model::StripType::Channel)
                      .field("name", &TrackAddArgs::name, schema::string())
                      .field("parent", &TrackAddArgs::parent, idArg("tr", "Parent track"))
                      .field("index", &TrackAddArgs::index, schema::integer().min(0))
-                     .field("channels", &TrackAddArgs::channels, schema::integer().range(1, 64))
+                     .field("channels", &TrackAddArgs::channels, schema::integer().range(1, 2))
                      .build();
         c.result = schema::object<TrackRef>("track_ref")
                        .field("track", &TrackRef::track, schema::string())
@@ -978,17 +997,31 @@ void registerEngineCommands(cmd::Registry& registry) {
                                  "see track.list");
                 parent = *p;
             }
+            if (a.type == model::StripType::Master && a.parent)
+                return Error("track.strip_type", "a master has no parent", "/parent",
+                             "omit parent when adding a master");
+            if (a.type != model::StripType::Master &&
+                t.get<model::Track>(parent)->type == model::StripType::Channel)
+                return Error("track.strip_type", "a channel cannot have children", "/parent",
+                             "add a buss and place the channels under it");
             model::Track tr;
+            tr.type = a.type;
             tr.name = a.name.value_or("");
-            tr.parent = parent;
+            if (a.type != model::StripType::Master) tr.parent = parent;
             if (a.channels) tr.channels = static_cast<int>(*a.channels);
             const Id id = t.create(tr);
-            t.modify<model::Track>(parent, [&](model::Track& p) {
-                const auto at = a.index ? std::min<std::size_t>(static_cast<std::size_t>(*a.index),
+            if (tr.type == model::StripType::Master) {
+                auto p = t.project();
+                p.masters.push_back(id);
+                t.setProject(std::move(p));
+            } else
+                t.modify<model::Track>(parent, [&](model::Track& p) {
+                    const auto at = a.index
+                                        ? std::min<std::size_t>(static_cast<std::size_t>(*a.index),
                                                                 p.children.size())
                                         : p.children.size();
-                p.children.insert(p.children.begin() + static_cast<std::ptrdiff_t>(at), id);
-            });
+                    p.children.insert(p.children.begin() + static_cast<std::ptrdiff_t>(at), id);
+                });
             return TrackRef{id.str()};
         };
         registry.add(std::move(c));
@@ -1014,7 +1047,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!idr) return std::move(idr).error();
             const Id id = *idr;
             if (id == model::kMaster)
-                return Error("tr.master", "the master track cannot be removed", "/track");
+                return Error("track.strip_type", "tr_0 cannot be removed", "/track",
+                             "keep the main master; remove another empty strip instead");
             const model::Track& tr = *s.tracks.find(id);
             if (!tr.children.empty())
                 return Error(
@@ -1045,10 +1079,15 @@ void registerEngineCommands(cmd::Registry& registry) {
                 }
             for (const auto& e : s.envelopes)
                 if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
-            t.modify<model::Track>(*tr.parent, [&](model::Track& p) {
-                p.children.erase(std::remove(p.children.begin(), p.children.end(), id),
-                                 p.children.end());
-            });
+            if (!tr.parent) {
+                auto p = t.project();
+                std::erase(p.masters, id);
+                t.setProject(std::move(p));
+            } else
+                t.modify<model::Track>(*tr.parent, [&](model::Track& p) {
+                    p.children.erase(std::remove(p.children.begin(), p.children.end(), id),
+                                     p.children.end());
+                });
             t.remove<model::Track>(id);
             return Empty{};
         };
@@ -1061,7 +1100,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
         c.summary =
-            "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.";
+            "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.";
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
@@ -1075,6 +1114,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args =
             schema::object<TrackSetArgs>("track_set_args")
                 .field("track", &TrackSetArgs::track, idArg("tr", "Track"))
+                .field("type", &TrackSetArgs::type, model::stripTypeSchema())
                 .field("name", &TrackSetArgs::name, schema::string())
                 .field("color", &TrackSetArgs::color, schema::string())
                 .field("notes", &TrackSetArgs::notes, schema::string())
@@ -1082,10 +1122,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB))
                 .field("pan", &TrackSetArgs::pan,
                        schema::number().range(-100, 100).unit(units::Unit::percent))
-                .field("width", &TrackSetArgs::width,
-                       schema::number().range(-100, 100).unit(units::Unit::percent))
                 .field("mute", &TrackSetArgs::mute, schema::boolean())
-                .field("phase_invert", &TrackSetArgs::phaseInvert, schema::boolean())
                 .field("solo", &TrackSetArgs::solo,
                        schema::string().pattern("^(off|on|in_place|defeat)$",
                                                 "off, on, in_place or defeat"))
@@ -1120,8 +1157,32 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             if ((a.armed || a.recordInput || a.recordMidi || a.midiChannel || a.recordMode ||
                  a.monitor) &&
-                *id == model::kMaster)
-                return Error("track.master", "the master does not record", "/track");
+                a.type.value_or(s.tracks.find(*id)->type) != model::StripType::Channel)
+                return Error("track.strip_type", "only channels record or monitor", "/track",
+                             "record or monitor on a child channel instead");
+            if (a.type && *a.type != s.tracks.find(*id)->type) {
+                if (*id == model::kMaster)
+                    return Error("track.strip_type", "tr_0 cannot be retyped", "/type",
+                                 "keep the main master; add another strip instead");
+                model::EditTxn& txn = app.txn();
+                const auto& old = *s.tracks.find(*id);
+                if (*a.type == model::StripType::Master) {
+                    txn.modify<model::Track>(*old.parent,
+                                             [&](auto& p) { std::erase(p.children, *id); });
+                    auto p = txn.project();
+                    p.masters.push_back(*id);
+                    txn.setProject(std::move(p));
+                    txn.modify<model::Track>(*id, [](auto& tr) { tr.parent.reset(); });
+                } else if (old.type == model::StripType::Master) {
+                    auto p = txn.project();
+                    std::erase(p.masters, *id);
+                    txn.setProject(std::move(p));
+                    txn.modify<model::Track>(model::kMaster,
+                                             [&](auto& tr) { tr.children.push_back(*id); });
+                    txn.modify<model::Track>(*id, [](auto& tr) { tr.parent = model::kMaster; });
+                }
+                txn.modify<model::Track>(*id, [&](auto& tr) { tr.type = *a.type; });
+            }
             if (a.recordInput && a.recordMidi)
                 return Error("track.record_input", "record audio or MIDI, not both",
                              "/record_midi");
@@ -1176,15 +1237,25 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.notes) t.notes = *a.notes;
                 if (a.volumeDb) t.volumeDb = *a.volumeDb;
                 if (a.pan) t.pan = *a.pan;
-                if (a.width) t.width = *a.width;
                 if (a.mute) t.mute = *a.mute;
-                if (a.phaseInvert) t.phaseInvert = *a.phaseInvert;
                 if (a.solo)
                     t.solo = *a.solo == "on"         ? model::Solo::On
                              : *a.solo == "in_place" ? model::Solo::InPlace
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            if (a.type && *a.type != s.tracks.find(*id)->type) {
+                SUPPLE_TRY(model::validateStripRules(app.view()));
+                auto valid = model::checkInvariants(app.view());
+                if (!valid) {
+                    auto error = std::move(valid).error();
+                    error.code = "track.strip_type";
+                    error.hint =
+                        "keep a type and parent that preserve the routing graph; use a buss to "
+                        "group";
+                    return error;
+                }
+            }
             return Empty{};
         };
         registry.add(std::move(c));
@@ -1201,6 +1272,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         auto entry = schema::object<TrackEntry>("track_entry")
                          .field("id", &TrackEntry::id, schema::string())
                          .field("name", &TrackEntry::name, schema::string())
+                         .field("type", &TrackEntry::type, model::stripTypeSchema())
                          .field("parent", &TrackEntry::parent, schema::string())
                          .field("depth", &TrackEntry::depth, schema::integer())
                          .field("volume_db", &TrackEntry::volumeDb, schema::number())
@@ -1222,6 +1294,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 TrackEntry e;
                 e.id = id.str();
                 e.name = t.name;
+                e.type = t.type;
                 e.parent = t.parent ? t.parent->str() : "";
                 e.depth = depth;
                 e.volumeDb = t.volumeDb;
@@ -1233,7 +1306,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 out.tracks.push_back(std::move(e));
                 for (Id c2 : t.children) walk(c2, depth + 1);
             };
-            walk(model::kMaster, 0);
+            for (Id master : s.project->masters) walk(master, 0);
             return out;
         };
         registry.add(std::move(c));
@@ -1286,8 +1359,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto track = existing<model::Track>(s, a.track, "/track");
             if (!track) return std::move(track).error();
-            if (*track == model::kMaster)
-                return Error("item.master", "items cannot go on the master", "/track");
+            if (s.tracks.find(*track)->type != model::StripType::Channel)
+                return Error("track.strip_type", "only channels hold items", "/track",
+                             "put items on a child channel instead");
             if ((a.notation ? 1 : 0) + (a.audioFile ? 1 : 0) > 1)
                 return Error("item.source", "give notation or audio_file, not both");
             const double pos = beatsOf(
@@ -1403,8 +1477,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.track) {
                 auto tr = existing<model::Track>(s, *a.track, "/track");
                 if (!tr) return std::move(tr).error();
-                if (*tr == model::kMaster)
-                    return Error("item.master", "items cannot go on the master", "/track");
+                if (s.tracks.find(*tr)->type != model::StripType::Channel)
+                    return Error("track.strip_type", "only channels hold items", "/track",
+                                 "put items on a child channel instead");
                 track = *tr;
             }
             app.txn().modify<model::Item>(*id, [&](model::Item& it) {
@@ -1846,6 +1921,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             "The render id can be passed to analyze.render or analyze.compare.";
         c.tags = {"render"};
         c.args = schema::object<RenderMixArgs>("render_mix_args")
+                     .field("master", &RenderMixArgs::master,
+                            idArg("tr", "Master output (default tr_0)"))
                      .field("start_beat", &RenderMixArgs::startBeat, schema::number().min(0))
                      .field("end_beat", &RenderMixArgs::endBeat, schema::number().exclusiveMin(0))
                      .field("tail_s", &RenderMixArgs::tailS, schema::number().range(0, 60))
@@ -1899,6 +1976,14 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (endBeat <= a.startBeat.value_or(0.0))
                 return Error("render.empty", "nothing to render", {}, "add items or give end_beat");
             OfflineSettings o;
+            if (a.master) {
+                auto master = existing<model::Track>(s, *a.master, "/master");
+                if (!master) return std::move(master).error();
+                if (s.tracks.find(*master)->type != model::StripType::Master)
+                    return Error("track.strip_type", "mix output must be a master", "/master",
+                                 "choose a master id from track.list");
+                o.master = *master;
+            }
             o.startSeconds = s.timeMap->secondsAt(a.startBeat.value_or(0.0));
             o.endSeconds = s.timeMap->secondsAt(endBeat);
             const auto* tailDefault =
@@ -2759,10 +2844,10 @@ std::string describeSession(const model::Session& s) {
     };
     std::function<void(Id, int)> walk = [&](Id id, int depth) {
         const model::Track& t = *s.tracks.find(id);
-        if (id != model::kMaster) {
-            std::string line(static_cast<std::size_t>(2 * (depth - 1)), ' ');
+        {
+            std::string line(static_cast<std::size_t>(2 * depth), ' ');
             line += id.str() + " " + (t.name.empty() ? "(unnamed)" : t.name);
-            if (!t.children.empty()) line += " [folder]";
+            line += " [" + std::string(model::stripTypeName(t.type)) + "]";
             if (t.volumeDb != 0) {
                 char v[32];
                 std::snprintf(v, sizeof v, " · vol %+.1f dB", t.volumeDb);
@@ -2804,7 +2889,7 @@ std::string describeSession(const model::Session& s) {
         }
         for (Id c : t.children) walk(c, depth + 1);
     };
-    walk(model::kMaster, 0);
+    for (Id master : s.project->masters) walk(master, 0);
     if (!s.routes.empty()) {
         out += "routes:";
         for (const auto& e : s.routes) {
