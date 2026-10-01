@@ -175,11 +175,11 @@ class ActionsPanel : public ui::Node {
                 values[action.prompts[i]] = parsed ? *parsed : json::Value(text);
             }
             // closePopup destroys this lambda (it lives in the form): copy first.
-            ui::Root* root = rootp;
-            AppActions* actions = actionsp;
+            ui::Root* owner = rootp;
+            AppActions* runner = actionsp;
             const actions::Action act = action;
-            root->closePopup();
-            (void)actions->run(act, values);
+            owner->closePopup();
+            (void)runner->run(act, values);
         };
         for (ui::TextField* f : *fields) f->onSubmit = submit;
         root.openPopup(std::move(form), {}, ui::Placement::Center);
