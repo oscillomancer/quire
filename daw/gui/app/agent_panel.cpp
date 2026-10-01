@@ -156,6 +156,10 @@ void AgentPanel::toggle() {
     if (panel_->visible) root_.focus(input_);
 }
 
+void AgentPanel::setVisible(bool visible) {
+    if (panel_ && panel_->visible != visible) toggle();
+}
+
 void AgentPanel::append(std::unique_ptr<ui::Node> node) {
     transcript_->content().add(std::move(node));
     transcript_->invalidate();

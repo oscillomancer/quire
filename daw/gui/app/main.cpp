@@ -37,6 +37,7 @@
 #include "supple/rpc/model_loop.h"
 #include "supple/rpc/protocol.h"
 #include "supple/ui/root.h"
+#include "ui_persistence.h"
 
 namespace fs = std::filesystem;
 using namespace supple;
@@ -299,6 +300,78 @@ int main(int argc, char** argv) {
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
+    // Per-project UI state (gui.md §1.2).
+    gui::UiPersistence uiFile;
+    uiFile.add(
+        "selection",
+        [&] {
+            json::Value v = json::Value::object(), tracks = json::Value::array(),
+                        items = json::Value::array();
+            for (const auto& t : uiState.selectedTracks) tracks.push_back(t);
+            for (const auto& i : uiState.selectedItems) items.push_back(i);
+            v["tracks"] = std::move(tracks);
+            v["items"] = std::move(items);
+            return v;
+        },
+        [&](const json::Value& v) {
+            auto ids = [](const json::Value* a) {
+                std::vector<std::string> out;
+                if (a && a->isArray())
+                    for (const auto& x : a->asArray())
+                        if (x.isString()) out.push_back(x.asString());
+                return out;
+            };
+            uiState.selectedTracks = ids(v.find("tracks"));
+            uiState.selectedItems = ids(v.find("items"));
+        });
+    uiFile.add(
+        "panels",
+        [&] {
+            json::Value v = json::Value::object();
+            v["agent"] = agentPanel.visible();
+            return v;
+        },
+        [&](const json::Value& v) {
+            if (const json::Value* a = v.find("agent"); a && a->isBool())
+                agentPanel.setVisible(a->asBool());
+        });
+    uiFile.add(
+        "window",
+        [&] {
+            json::Value v = json::Value::object();
+            v["width"] = static_cast<int>((*window)->width());
+            v["height"] = static_cast<int>((*window)->height());
+            return v;
+        },
+        [&](const json::Value& v) {
+            const json::Value* w = v.find("width");
+            const json::Value* h = v.find("height");
+            if (!o.offscreen && w && h && w->isNumber() && h->isNumber())
+                (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
+        });
+    uiFile.add(
+        "lanes",
+        [&] {
+            const views::Viewport& vp = shell.lanes()->viewport();
+            json::Value v = json::Value::object();
+            v["start_seconds"] = vp.startSeconds;
+            v["pixels_per_second"] = vp.pixelsPerSecond;
+            v["scroll_y"] = static_cast<double>(vp.scrollY);
+            v["row_height"] = static_cast<double>(vp.rowHeight);
+            return v;
+        },
+        [&](const json::Value& v) {
+            views::Viewport vp = shell.lanes()->viewport();
+            auto num = [&](const char* k, auto& out) {
+                if (const json::Value* x = v.find(k); x && x->isNumber())
+                    out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
+            };
+            num("start_seconds", vp.startSeconds);
+            num("pixels_per_second", vp.pixelsPerSecond);
+            num("scroll_y", vp.scrollY);
+            num("row_height", vp.rowHeight);
+            shell.lanes()->setViewport(vp);
+        });
     if (o.viewStart >= 0) {
         views::Viewport v;
         v.startSeconds = o.viewStart;
@@ -323,6 +396,7 @@ int main(int argc, char** argv) {
             longestTaskMs = std::max(longestTaskMs, ms);
         }
         shell.sync();
+        uiFile.tick((*app)->projectPath());
         if (o.script && warm) {
             views::Lanes& lanes = *shell.lanes();
             views::Viewport v = lanes.viewport();
@@ -380,6 +454,7 @@ int main(int argc, char** argv) {
     }
     tick.cancel();
     if (server) server->stop();
+    (void)uiFile.flush((*app)->projectPath());
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
         shell.sync();
         root.damageAll();

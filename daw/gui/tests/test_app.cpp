@@ -18,6 +18,7 @@
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
+#include "ui_persistence.h"
 
 using namespace supple;
 
@@ -253,4 +254,51 @@ TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd 
     CHECK(a.tracks("buss") == 1);
     CHECK_FALSE(a.root->find("agent.review")->visible);
     CHECK(panel.session()->branch().empty());
+}
+
+TEST_CASE("UI state is saved beside the project and restored when it is opened") {
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-ui-state-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto project = dir / "song.json";
+    double zoom = 40;
+    bool panel = false;
+    auto make = [&](gui::UiPersistence& p) {
+        p.add(
+            "view",
+            [&] {
+                json::Value v = json::Value::object();
+                v["zoom"] = zoom;
+                return v;
+            },
+            [&](const json::Value& v) { zoom = v.find("zoom")->asDouble(); });
+        p.add(
+            "panels",
+            [&] {
+                json::Value v = json::Value::object();
+                v["agent"] = panel;
+                return v;
+            },
+            [&](const json::Value& v) { panel = v.find("agent")->asBool(); });
+    };
+    {
+        gui::UiPersistence p;
+        make(p);
+        p.tick(project);  // nothing on disk yet
+        zoom = 160;
+        panel = true;
+        REQUIRE(p.flush(project));
+        CHECK(std::filesystem::exists(dir / "song.ui.json"));
+        p.tick({});  // an unsaved project writes nothing
+    }
+    zoom = 1;
+    panel = false;
+    {
+        gui::UiPersistence p;
+        make(p);
+        p.tick(project);  // opening the project restores its UI state
+        CHECK(zoom == 160);
+        CHECK(panel);
+    }
+    std::filesystem::remove_all(dir);
 }
