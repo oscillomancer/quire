@@ -53,11 +53,21 @@ class PluginBrowser {
     const std::filesystem::path& favouritesFile() const { return favouritesFile_; }
     // The action the browser adds through (set by open()).
     const std::function<void(const std::string&)>& onAdd() const { return onAdd_; }
+    // The composed text of a row — exactly what paintRow draws, so tests can
+    // read a row without pixels. `vendor` is "stock", the vendor, or
+    // "shadowed" for a copy an earlier path entry wins over.
+    struct RowText {
+        std::string name, vendor, id;
+    };
+    RowText rowText(std::size_t row) const;
+    std::size_t rowCount() const { return rows_.size(); }
+    // The selected plugin's own file, and the shadowed note when it is one.
+    const std::string& detail() const { return detail_; }
 
   private:
     struct Entry {
-        std::string id, name, vendor, format;
-        bool instrument = false, semantic = false;
+        std::string id, name, vendor, format, path;
+        bool instrument = false, semantic = false, shadowed = false;
     };
     struct Row {
         const Entry* entry;
@@ -67,6 +77,7 @@ class PluginBrowser {
     void sortAndFilter();
     void activate(std::size_t row);
     void runScan();
+    void updateDetail();
 
     cmd::Dispatcher& dispatcher_;
     ui::Root& root_;
@@ -81,6 +92,8 @@ class PluginBrowser {
     ui::TextField* search_ = nullptr;
     ui::List* list_ = nullptr;
     ui::Label* status_ = nullptr;
+    ui::Label* detailLabel_ = nullptr;
+    std::string detail_;
     bool scanPending_ = false;
 };
 

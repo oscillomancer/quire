@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,12 @@ class FxWindow {
     // State the tests read back.
     model::Id track() const { return track_; }
     model::Id selected() const { return selected_; }
+    // The badge a row shows: how the effect runs (in-process / shared bridge /
+    // isolated), offline, and failed. Pure, so the composition is testable
+    // without an engine that can crash a bridge.
+    static std::string badgeText(const model::FxInstance& fx, bool failed);
+    // Engine-reported failures (engine.status failed_fx), by effect id.
+    const std::set<std::string>& failed() const { return failed_; }
     void select(model::Id fx);
     void showParamsTab();
     void showChainTab();
@@ -71,6 +78,7 @@ class FxWindow {
     std::string latencyOf(model::Id fx);
     void moveFx(model::Id fx, int delta);
     void addFx(const std::string& pluginId);
+    void checkFailures();  // engine.status failed_fx, at most twice a second
 
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
@@ -84,6 +92,8 @@ class FxWindow {
     std::string gesture_;                         // the active slider drag
     std::string pendingChain_ = "main";           // where Add plugin… inserts
     std::map<std::string, std::string> latency_;  // measured once per effect
+    std::set<std::string> failed_;                // engine.status failed_fx
+    double failureCheckMs_ = -1e9;
     ui::Node* page_ = nullptr;
     ui::Node* body_ = nullptr;
     ui::Node* tabsRow_ = nullptr;

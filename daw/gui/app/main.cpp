@@ -276,7 +276,22 @@ int main(int argc, char** argv) {
 
     peaks::PeakService peaks(peaks::defaultCacheDir(product::kSlug),
                              [&](std::function<void()> f) { loop.post(std::move(f)); });
-    gui::Shell shell(**app, status, peaks);
+    // One meter feed for both views (the TCP and the mixer), filled from what
+    // the engine heard since the last poll, once per pass.
+    gui::MeterFeed meterFeed([&] {
+        std::vector<gui::StripReading> out;
+        for (const engine::MeterReading& m : (*app)->meters()) {
+            gui::StripReading r;
+            r.track = m.track.str();
+            for (int ch = 0; ch < 2; ++ch) {
+                r.peak[ch] = m.peak[ch];
+                r.rms[ch] = m.rms[ch];
+            }
+            out.push_back(r);
+        }
+        return out;
+    });
+    gui::Shell shell(**app, dispatcher, uiState, status, peaks, meterFeed);
     peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
     bool quit = false;
@@ -298,20 +313,6 @@ int main(int argc, char** argv) {
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
-    // Meters: what the engine heard since the last poll, once per pass.
-    gui::MeterFeed meterFeed([&] {
-        std::vector<gui::StripReading> out;
-        for (const engine::MeterReading& m : (*app)->meters()) {
-            gui::StripReading r;
-            r.track = m.track.str();
-            for (int ch = 0; ch < 2; ++ch) {
-                r.peak[ch] = m.peak[ch];
-                r.rms[ch] = m.rms[ch];
-            }
-            out.push_back(r);
-        }
-        return out;
-    });
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
@@ -347,7 +348,7 @@ int main(int argc, char** argv) {
         auto& center = body.emplace<ui::Node>("center");
         center.layout.dir = ui::Layout::Dir::Column;
         center.layout.width = ui::SizeRule::fraction();
-        center.add(shell.build());
+        center.add(shell.build(root, appActions));
         center.add(midiEditor.build());
         center.add(mixer.build());
         body.add(history.build());
