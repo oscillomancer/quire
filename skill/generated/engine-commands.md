@@ -2273,9 +2273,9 @@ Result:
 
 ## `item.set@1`
 
-Set an item's position, length, playback, fades, name, or color.
+Set an item's position, length, playback, fades, name, color, or lock.
 
-Positions and lengths are in beats; fades are in seconds. Name is the active take's name.
+Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {"locked": false}.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2289,6 +2289,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `length` | number |  | 0.0.. |  |  |
 | `mute` | boolean |  |  |  |  |
 | `loop` | boolean |  |  |  |  |
+| `locked` | boolean |  |  |  | The arrange view marks locked items. |
 | `gain_db` | value | dB | -150.0..24.0 |  | Quantity strings are range-checked by the server. |
 | `fade_in` | number |  | 0.0.. |  |  |
 | `fade_out` | number |  | 0.0.. |  |  |

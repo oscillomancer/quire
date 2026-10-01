@@ -1681,8 +1681,8 @@
   },
   {
     "name": "item_set",
-    "title": "Set an item's position, length, playback, fades, name, or color.",
-    "description": "Set an item's position, length, playback, fades, name, or color. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. See describe for errors and examples.",
+    "title": "Set an item's position, length, playback, fades, name, color, or lock.",
+    "description": "Set an item's position, length, playback, fades, name, color, or lock. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {\"locked\": false}. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "item_set_args",
@@ -1708,6 +1708,10 @@
         },
         "loop": {
           "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "The arrange view marks locked items."
         },
         "gain_db": {
           "anyOf": [

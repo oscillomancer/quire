@@ -131,7 +131,7 @@ struct ItemSetArgs {
     std::string item;
     std::optional<double> position, length, gainDb, fadeIn, fadeOut;
     std::optional<std::int64_t> bar;
-    std::optional<bool> mute, loop;
+    std::optional<bool> mute, loop, locked;
     std::optional<std::string> name, color;
 };
 struct ItemDuplicateArgs {
@@ -917,10 +917,10 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "item.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set an item's position, length, playback, fades, name, or color.";
+        c.summary = "Set an item's position, length, playback, fades, name, color, or lock.";
         c.description =
             "Positions and lengths are in beats; fades are in seconds. Name is the active take's "
-            "name.";
+            "name. A locked item refuses every edit except {\"locked\": false}.";
         c.tags = {"item"};
         c.args = schema::object<ItemSetArgs>("item_set_args")
                      .field("item", &ItemSetArgs::item, idSchema("it"))
@@ -929,6 +929,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                      .field("length", &ItemSetArgs::length, schema::number().min(0))
                      .field("mute", &ItemSetArgs::mute, schema::boolean())
                      .field("loop", &ItemSetArgs::loop, schema::boolean())
+                     .field("locked", &ItemSetArgs::locked,
+                            schema::boolean().doc("The arrange view marks locked items."))
                      .field("gain_db", &ItemSetArgs::gainDb,
                             schema::number().range(model::kSilenceDb, 24).unit(units::Unit::dB))
                      .field("fade_in", &ItemSetArgs::fadeIn, schema::number().min(0))
@@ -944,7 +946,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
             const auto& original = *s.items.find(*id);
-            if (original.locked)
+            // A locked item refuses edits; unlocking it is the one exception.
+            const bool unlocking = a.locked && !*a.locked;
+            if (original.locked && !unlocking)
                 return Error("item.locked", "item is locked", "/item", "unlock the item first");
             if (a.position && a.bar)
                 return Error("item.position", "give position or bar, not both", "/position",
@@ -958,6 +962,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.length) it.length = *a.length;
             if (a.mute) it.mute = *a.mute;
             if (a.loop) it.loop = *a.loop;
+            if (a.locked) it.locked = *a.locked;
             if (a.gainDb) it.gainDb = *a.gainDb;
             if (a.fadeIn) it.fadeIn.length = *a.fadeIn;
             if (a.fadeOut) it.fadeOut.length = *a.fadeOut;

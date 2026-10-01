@@ -285,6 +285,7 @@ q = nil
 ---@field length? number
 ---@field mute? boolean
 ---@field loop? boolean
+---@field locked? boolean The arrange view marks locked items.
 ---@field gain_db? number|string Quantity strings are range-checked by the server.
 ---@field fade_in? number
 ---@field fade_out? number
@@ -833,7 +834,7 @@ q = nil
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
----@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, or color.
+---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, color, or lock.
 ---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an audio or MIDI item at a beat, keeping take source positions aligned.
 
 ---@class Quire.job
