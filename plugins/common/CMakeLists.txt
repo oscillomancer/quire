@@ -12,6 +12,12 @@ supple_add_library(plugin-support
 if(SUPPLE_BUILD_TESTS)
   supple_add_tests(plugin-support SOURCES tests/test_plugin_support.cpp LABELS rt)
 
+  if(UNIX AND NOT APPLE)
+    add_executable(clap-unload-probe tools/clap_unload_probe.cpp)
+    target_link_libraries(clap-unload-probe PRIVATE supple::clap ${CMAKE_DL_LIBS})
+    supple_target_defaults(clap-unload-probe)
+  endif()
+
   # Checks any plugin's semantic extension through the real host (spec §7).
   add_executable(semantic-conformance tools/semantic_conformance.cpp)
   target_link_libraries(semantic-conformance PRIVATE supple::clap-host supple::core-json)

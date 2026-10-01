@@ -1,0 +1,25 @@
+--- a/src/detail/clap/fsutil.cpp
++++ b/src/detail/clap/fsutil.cpp
+@@ -378,13 +378,19 @@
+   Dl_info info;
+   if (dladdr(reinterpret_cast<const void *>(&ffeomwe), &info) && info.dli_fname[0])
+   {
+-    auto lhandle = dlopen(info.dli_fname, RTLD_LOCAL | RTLD_LAZY);
++    // This module is already loaded -- we are running in it -- so RTLD_NOLOAD
++    // only looks it up, and the handle is released straight away. Keeping it
++    // for the Library dtor to dlclose would pin the module against the host's
++    // dlclose, then unmap it from inside its own static destructors at exit,
++    // with ~Library still running. Windows takes its self handle with
++    // GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT for the same reason.
++    auto lhandle = dlopen(info.dli_fname, RTLD_LOCAL | RTLD_LAZY | RTLD_NOLOAD);
+     if (lhandle)
+     {
+-      auto liptr = (int *)dlsym(_handle, "clap_entry");
++      auto liptr = (int *)dlsym(lhandle, "clap_entry");
++      dlclose(lhandle);
+       if (liptr)
+       {
+-        _handle = lhandle;  // as a result the Library dtor will dlclose me
+         _pluginEntry = (const clap_plugin_entry_t *)liptr;
+         _selfcontained = true;
+ 

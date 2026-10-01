@@ -2,6 +2,7 @@
 // no device. The real server is exercised only on request:
 //   SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='*real JACK*'
 #include <doctest/doctest.h>
+#include <supple/base/environment.h>
 
 #include <array>
 #include <atomic>
@@ -246,7 +247,7 @@ TEST_CASE("the backend restarts") {
 // Opens the real server for two seconds of silence at a 64-frame block and
 // reports what the graph granted. Opt-in: it uses the audio device.
 TEST_CASE("real JACK: silence at 64 frames" *
-          doctest::skip(std::getenv("SUPPLE_AUDIO_DEVICE_TEST") == nullptr)) {
+          doctest::skip(!supple::environmentFlagEnabled("SUPPLE_AUDIO_DEVICE_TEST"))) {
     JackBackend::Options o;
     o.clientName = "supple-device-test";
     JackBackend backend(o);

@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <supple/base/environment.h>
 
 #include <supple/model/schemas.h>
 #include <supple/model/session.h>
@@ -196,7 +197,7 @@ TEST_CASE("invariants catch structural bugs") {
 TEST_CASE("project file: canonical, defaults omitted, byte-identical round trip") {
     const Session s = richSession();
     const std::string text = serializeProject(s);
-    if (std::getenv("SUPPLE_DUMP_PROJECT")) std::fputs(text.c_str(), stdout);
+    if (supple::environmentFlagEnabled("SUPPLE_DUMP_PROJECT")) std::fputs(text.c_str(), stdout);
     auto back = parseProject(text);
     REQUIRE_MESSAGE(back, (back ? std::string() : back.error().toString()));
     CHECK(serializeProject(*back) == text);

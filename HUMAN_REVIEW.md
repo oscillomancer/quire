@@ -64,6 +64,22 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
+### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check (5 minutes)
+Your EP note found a synth bug, not a recipe problem: an FM modulator's
+level knob and envelope did not scale its modulation, so every FM patch
+modulated at full depth all the time. Fixed (508a229): the EP's energy
+above 4 kHz fell from 74 % to 5 % of the total (spectral centroid
+5039 → 699 Hz), and the bell's centroid went 4077 → 1939 Hz. `digital` is now
+a coarse stepped, bit-reduced table (16 → 6 steps, 5 → 3 bits across the
+position). It measures about 4 dB from a saw, where it used to be almost the same as
+`harmonic ramp`. Renders:
+`renders/listening/orrery-recipes-2026-09-30b/` (all ten recipes, plus
+`wavetable-{digital,harmonic_ramp}-pos{000,050,100}.wav`). The rebuilt
+Orrery is in `~/.clap` (reload it in REAPER). Questions: is the EP soft
+enough now? Is the bell still a bell? Do `digital` and `harmonic ramp` now
+sound distinct?
+*Meanwhile:* nothing waits on this.
+
 ## Resolved
 
 ### 8. Which models and budget for automated LLM evaluations — decision

@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <supple/base/environment.h>
 #include <supple/cmd/bus.h>
 #include <chrono>
 #include <cstdlib>
@@ -350,7 +351,7 @@ TEST_CASE("generated registry, tools and reference match golden files") {
     };
     for (const auto& [name, output] : outputs) {
         const auto file = directory / name;
-        if (std::getenv("SUPPLE_UPDATE_BUS_GOLDENS")) {
+        if (supple::environmentFlagEnabled("SUPPLE_UPDATE_BUS_GOLDENS")) {
             std::ofstream out(file, std::ios::binary);
             out << output;
             REQUIRE(out.good());

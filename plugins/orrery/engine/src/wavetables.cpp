@@ -122,12 +122,15 @@ Spectrum organ(double p) {
 }
 
 // digital: a ramp through a sample-and-hold and a bit quantizer that coarsen
-// with position (16 → 3 bits, 4096 → 16 steps per cycle), then band-limited.
+// with position (5 → 3 bits, 16 → 6 steps per cycle), then band-limited.
+// Coarse from the start: at 16 bits and 4096 steps (the first design) the
+// low positions were indistinguishable from harmonic_ramp's saw (Nate's
+// listening check, 2026-09-30).
 Spectrum digital(double p) {
     constexpr std::size_t kN = 4096;
-    const double bits = 16.0 - 13.0 * p;
+    const double bits = 5.0 - 2.0 * p;
     const double levels = std::exp2(bits - 1.0);
-    const auto steps = static_cast<std::size_t>(std::lround(std::exp2(12.0 - 8.0 * p)));
+    const auto steps = static_cast<std::size_t>(std::lround(std::exp2(4.0 - 1.415 * p)));
     const std::size_t hold = kN / std::max<std::size_t>(1, steps);
     std::vector<double> x(kN);
     for (std::size_t n = 0; n < kN; ++n) {

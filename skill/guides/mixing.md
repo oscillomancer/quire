@@ -103,3 +103,4 @@ Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady r
 Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
 For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).
 For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).
+Use [Nave, the stock reverb](reverb.md) for room/hall ambience, predelay and frequency-dependent tails; use 100% wet on a send return.

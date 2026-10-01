@@ -8,6 +8,7 @@ mode=(-i)
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
+  | grep -Ev '^plugins/(analyzer|comp|delay|drive|eq|gate|orrery|probe-synth|transient|utility)/test/vst3_unload_probe\.cpp$' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/delay/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/delay_entry\.(h|cpp)|test/(host_(smoke\.cpp|contract\.h)|vst3_unload_probe\.cpp)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
@@ -15,6 +16,7 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -v '^plugins/eq/' \
   | grep -Ev '^plugins/gate/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/gate_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -v '^plugins/drive/' \
+  | grep -v '^plugins/reverb/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   | grep -Ev '^plugins/comp/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/comp_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   | grep -Ev '^plugins/transient/(plugin/gui/(Gui|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/transient_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
@@ -37,7 +39,14 @@ files+=(
   plugins/drive/test/semantic_rt.cpp
   plugins/drive/test/editor_input.cpp
   plugins/drive/tools/gui_preview.cpp
-
+  plugins/reverb/engine/include/reverb/{params,processor}.h
+  plugins/reverb/engine/src/{params,processor}.cpp
+  plugins/reverb/engine/tests/{measurements.h,test_reverb.cpp}
+  plugins/reverb/engine/bench/reverb_bench.cpp
+  plugins/reverb/plugin/src/{ReverbParams.h,reverb_clap.cpp}
+  plugins/reverb/plugin/gui/{Editor.h,Editor.cpp,Theme.h}
+  plugins/reverb/test/{test_core,editor_input,semantic_rt,tail_rt}.cpp
+  plugins/reverb/tools/{reverb_cli,gui_preview}.cpp
   plugins/utility/engine/include/utility/params.h
   plugins/utility/engine/include/utility/processor.h
   plugins/utility/engine/src/params.cpp

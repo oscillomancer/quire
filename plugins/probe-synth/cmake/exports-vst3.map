@@ -1,0 +1,19 @@
+/* Linux VST3 export list. A VST3 module needs exactly three entry points; the
+ * fourth, clap_entry, is looked up by name by clap-wrapper in its own image to
+ * reach the statically linked CLAP, so dropping it leaves a plugin that loads
+ * and returns a null factory.
+ *
+ * Everything else stays local. Two plugins in one process otherwise resolve
+ * each other's fmt, VST3 SDK and libstdc++ symbols, and the GNU unique ones
+ * among them bind process-wide whatever RTLD_LOCAL says. That both ties one
+ * plugin's code to another's lifetime and makes glibc pin the first module
+ * against dlclose. */
+{
+  global:
+    GetPluginFactory;
+    ModuleEntry;
+    ModuleExit;
+    clap_entry;
+  local:
+    *;
+};

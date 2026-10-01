@@ -16,6 +16,7 @@ need an approved `HUMAN_REVIEW.md` entry. Dynamically linked OS libraries
 |---|---|---|---|---|
 | clap | MIT | 1.2.10 / `195b42a` | CLAP plugin ABI headers for hosting and for the stock plugins | headers |
 | doctest | MIT | 2.5.3 / `2d0a935` | Unit-test framework; tests only, never shipped | tests |
+| airwindows-console9 | MIT, © 2018 Chris Johnson | `d22a25b7f7c0c8c05e9f3ae480e7f1da9769f49d` | Airwindows Console 9 Channel/Buss reference for the DSP null test; mono AU kernels retained as reference text | test-only, never linked into a shipped binary |
 | dr_libs | Unlicense OR MIT-0 | dr_wav 0.14.5 / `fa931f3` | WAV read/write; FLAC and MP3 decode | static (header) |
 | pocketfft | BSD-3-Clause | cpp branch / `c90e55b` | FFT for offline analysis and analyzer displays | headers |
 | signalsmith-stretch | MIT | 1.4.0 / `a670068` (tarball sha256 `077235…f284`) | Pitch-preserving offline time-stretch of media takes (`take.playrate`/`preserve_pitch`/`pitch`) | headers |
@@ -34,6 +35,14 @@ OS library, dynamic only — explicitly permitted by policy), libX11/libGL.
 Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts
 Nate's plugin template already ships) are permitted for bundling; see
 ADR-0003.
+
+The vendored clap-wrapper has three pre-applied template patches recorded in
+`third_party/manifest.json`, with copies under `cmake/patches/`: all automation
+points, a timer floor, and `clap-wrapper-vst3-self-handle.patch` (template commit
+`3d32b8d`). The last releases the Linux self-module lookup handle immediately
+and resolves `clap_entry` in that image, avoiding cross-plugin binding and
+unmapping from inside its own static destructor. Plugin builds validate these
+patches without mutating the shared vendored tree.
 
 Template-derived stock plugins build offline against the vendored clap,
 clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subset

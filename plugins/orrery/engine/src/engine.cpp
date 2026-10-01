@@ -208,6 +208,8 @@ struct Ramp {
 
 struct Targets {
     std::array<double, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{}, position{};
+    // Each oscillator's level alone (no pan): FM/AM modulators are heard after it.
+    std::array<double, kOscCount> modGain{};
     std::array<double, kFilterCount> g{}, k{}, drive{}, level{}, delay{}, feedback{}, damping{};
     std::array<Formant::Coefs, kFilterCount> formant{};
     double bal1 = 1.0, bal2 = 1.0;
@@ -249,6 +251,7 @@ struct Voice {
     std::array<std::array<double, kOscCount>, kOscCount> fmIndex{}, amDepth{};
     // Per-sample ramps across a control tick.
     std::array<dsp::Lerp, kOscCount> inc{}, gainL{}, gainR{}, width{}, shape{}, fb{}, position{};
+    std::array<dsp::Lerp, kOscCount> modGain{};
     std::array<dsp::Lerp, kFilterCount> g{}, k{}, drive{}, level{}, delay{}, feedback{}, damping{};
     std::array<Formant::Coefs, kFilterCount> formantCoefs{};
     dsp::Lerp bal1, bal2, driveGain, driveBias, driveMix, driveComp, ampL, ampR;
@@ -583,6 +586,7 @@ struct Engine::Impl {
             out.inc[static_cast<std::size_t>(o)] = std::min(hz / fs, 0.49);
             const auto pg = dsp::pan(get(OscF::pan) / 100.0);
             const double lvl = dsp::levelGain(get(OscF::level)) * std::numbers::sqrt2;
+            out.modGain[static_cast<std::size_t>(o)] = dsp::levelGain(get(OscF::level));
             out.gainL[static_cast<std::size_t>(o)] = lvl * pg.l;
             out.gainR[static_cast<std::size_t>(o)] = lvl * pg.r;
             out.width[static_cast<std::size_t>(o)] = get(OscF::width) / 100.0;
@@ -655,6 +659,7 @@ struct Engine::Impl {
             go(v.inc[o], t.inc[o]);
             go(v.gainL[o], t.gainL[o]);
             go(v.gainR[o], t.gainR[o]);
+            go(v.modGain[o], t.modGain[o]);
             go(v.width[o], t.width[o]);
             go(v.shape[o], t.shape[o]);
             go(v.fb[o], t.fb[o]);
@@ -804,9 +809,14 @@ struct Engine::Impl {
         sb.mono = mono;
         sb.channels = mono ? 1 : 2;
 
-        // Oscillators.
+        // Oscillators. A modulator is heard after its level (synth spec §5.4): mg
+        // is each oscillator's level ramp, advanced every sample like the mixer's.
         double out[kOscCount][kSeg];
+        double mg[kOscCount][kSeg];
         double wrap[kSeg];
+        for (std::size_t o = 0; o < kOscCount; ++o)
+            if (P.st.osc[o])
+                for (std::uint32_t s = 0; s < n; ++s) mg[o][s] = v.modGain[o].next();
         for (int oi = 0; oi < kOscCount; ++oi) {
             const int o = P.order[static_cast<std::size_t>(oi)];
             const auto uo = static_cast<std::size_t>(o);
@@ -822,7 +832,7 @@ struct Engine::Impl {
                 double pm = 0.0;
                 for (int j = 0; j < fmN; ++j) {
                     const std::size_t m = fmM[static_cast<std::size_t>(j)];
-                    pm += v.fmIndex[uo][m] * out[m][s];
+                    pm += v.fmIndex[uo][m] * out[m][s] * mg[m][s];
                 }
                 return pm;
             };
@@ -881,13 +891,13 @@ struct Engine::Impl {
             for (int j = 0; j < amN; ++j) {
                 const std::size_t m = amM[static_cast<std::size_t>(j)];
                 const double a = v.amDepth[uo][m];
-                for (std::uint32_t s = 0; s < n; ++s) dst[s] *= 1.0 - a + a * out[m][s];
+                for (std::uint32_t s = 0; s < n; ++s) dst[s] *= 1.0 - a + a * out[m][s] * mg[m][s];
             }
             if (o == 0)  // what sync reads: osc1's wrap after each of its samples
                 for (std::uint32_t s = 0; s < n; ++s) wrap[s] = v.va[0].wrapped();
         }
         for (std::size_t o = 0; o < kOscCount; ++o)
-            v.prevOut[o] = P.st.osc[o] ? out[o][n - 1] : 0.0;
+            v.prevOut[o] = P.st.osc[o] ? out[o][n - 1] * mg[o][n - 1] : 0.0;
 
         // Mixer.
         auto& in1 = sb.in1;
@@ -1176,7 +1186,9 @@ struct Engine::Impl {
         v.monoPath = mono;
         const int channels = mono ? 1 : 2;
         for (std::uint32_t s = 0; s < n; ++s) {
-            std::array<double, kOscCount> out{};
+            std::array<double, kOscCount> out{}, mg{};
+            for (std::size_t o = 0; o < kOscCount; ++o)
+                if (P.st.osc[o]) mg[o] = v.modGain[o].next();
             for (int oi = 0; oi < kOscCount; ++oi) {
                 const int o = P.order[static_cast<std::size_t>(oi)];
                 const auto uo = static_cast<std::size_t>(o);
@@ -1185,7 +1197,7 @@ struct Engine::Impl {
                 double pm = 0.0;
                 for (std::size_t m = 0; m < kOscCount; ++m)
                     if (v.fmIndex[uo][m] != 0.0)
-                        pm += v.fmIndex[uo][m] * (P.delayed[uo][m] ? v.prevOut[m] : out[m]);
+                        pm += v.fmIndex[uo][m] * (P.delayed[uo][m] ? v.prevOut[m] : out[m] * mg[m]);
                 const double inc = v.inc[uo].next();
                 double x = 0.0;
                 switch (*type) {
@@ -1212,11 +1224,11 @@ struct Engine::Impl {
                 for (std::size_t m = 0; m < kOscCount; ++m)
                     if (P.am[uo][m] != 0.0) {
                         const double a = v.amDepth[uo][m];
-                        x *= 1.0 - a + a * (P.delayed[uo][m] ? v.prevOut[m] : out[m]);
+                        x *= 1.0 - a + a * (P.delayed[uo][m] ? v.prevOut[m] : out[m] * mg[m]);
                     }
                 out[uo] = x;
             }
-            v.prevOut = out;
+            for (std::size_t o = 0; o < kOscCount; ++o) v.prevOut[o] = out[o] * mg[o];
             // Mixer: per-oscillator level/pan into the filter inputs.
             double in1[2] = {0.0, 0.0}, in2[2] = {0.0, 0.0}, direct[2] = {0.0, 0.0};
             for (std::size_t o = 0; o < kOscCount; ++o) {

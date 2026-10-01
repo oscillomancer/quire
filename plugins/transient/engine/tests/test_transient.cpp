@@ -263,14 +263,20 @@ TEST_CASE("transient clip suppresses folded harmonics versus base-rate tanh") {
     auto b = render(a, v);
     auto naive = a;
     for (auto& x : naive[0]) x = std::tanh(x);
-    // Fifth harmonic at 25 kHz folds to 23 kHz at 1x; 2x filters it before decimation.
-    const double alias = component(b[0], 48000, 23000, 2400),
-                 base = component(naive[0], 48000, 23000, 2400);
-    std::printf(
-        "%s clip 5 kHz, amplitude 3: 23 kHz folded component %.3f dBFS (1x %.3f), improvement "
-        "%.3f dB\n",
-        kName, db(alias), db(base), db(base / alias));
-    CHECK(db(alias / base) < -20);
+    // At 48 kHz, harmonics 7/9/11 (35/45/55 kHz) fold to 13/3/7 kHz at 1x.
+    // The fifth folds to 23 kHz, outside the audible band we protect.
+    for (const int harmonic : {7, 9, 11}) {
+        const double fold = std::abs(std::remainder(harmonic * 5000.0, 48000.0));
+        const double alias = component(b[0], 48000, fold, 2400),
+                     base = component(naive[0], 48000, fold, 2400);
+        CAPTURE(harmonic);
+        CAPTURE(fold);
+        std::printf(
+            "%s clip 5 kHz, amplitude 3 peak, 48 kHz: harmonic %d folds to %.0f Hz, "
+            "2x %.3f dBFS (1x %.3f), improvement %.3f dB\n",
+            kName, harmonic, fold, db(alias), db(base), db(base / alias));
+        CHECK(db(alias / base) < -20);
+    }
 }
 TEST_CASE("transient automation stress, silence recovery and repeatable saved state") {
     Rng rng(73);

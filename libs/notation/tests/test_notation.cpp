@@ -1,6 +1,7 @@
 #include <supple/notation/notation.h>
 
 #include <doctest/doctest.h>
+#include <supple/base/environment.h>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -50,7 +51,7 @@ TEST_CASE("valid notation corpus matches event listings") {
         const auto expectedPath =
             entry.path().parent_path() / (entry.path().stem().string() + ".events");
         const auto actual = dump(result->sequence);
-        if (std::getenv("SUPPLE_UPDATE_NOTATION_GOLDENS")) {
+        if (supple::environmentFlagEnabled("SUPPLE_UPDATE_NOTATION_GOLDENS")) {
             std::ofstream output(expectedPath);
             output << actual;
         } else

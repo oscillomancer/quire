@@ -15,6 +15,17 @@
   ],
   "dependencies": [
     {
+      "name": "airwindows-console9",
+      "dir": "airwindows-console9",
+      "license": "MIT",
+      "license_file": "airwindows-console9/LICENSE",
+      "version": "Console 9",
+      "source": "https://github.com/airwindows/airwindows",
+      "commit": "d22a25b7f7c0c8c05e9f3ae480e7f1da9769f49d",
+      "purpose": "Airwindows Console 9 stereo reference null tests; mono AU kernels retained as reference text, not compiled",
+      "linkage": "tests"
+    },
+    {
       "name": "clap",
       "dir": "clap",
       "license": "MIT",
@@ -103,11 +114,12 @@
       "version": "0.16.0 (template pin)",
       "source": "https://github.com/free-audio/clap-wrapper",
       "commit": "1cca996e96f29ab2be7ae9f8cfe532bbc92e1dd6",
-      "purpose": "Builds template-derived plugins as CLAP (and VST3/AUv2 when enabled). Bundles fmt (MIT, license in libs/fmt/fmt/format.h) and the PreSonus gain-reduction header (public domain). The template's two VST3 fixes (from ~/Projects/audio-plugins/template/cmake/) are pre-applied; copies in cmake/patches/.",
+      "purpose": "Builds template-derived plugins as CLAP (and VST3/AUv2 when enabled). Bundles fmt (MIT, license in libs/fmt/fmt/format.h) and the PreSonus gain-reduction header (public domain). The template's three VST3 fixes (from ~/Projects/audio-plugins/template/cmake/) are pre-applied; copies in cmake/patches/.",
       "linkage": "static (plugins only)",
       "local_patches": [
         "cmake/patches/clap-wrapper-vst3-all-points.patch",
-        "cmake/patches/clap-wrapper-vst3-timer-floor.patch"
+        "cmake/patches/clap-wrapper-vst3-timer-floor.patch",
+        "cmake/patches/clap-wrapper-vst3-self-handle.patch"
       ]
     },
     {
