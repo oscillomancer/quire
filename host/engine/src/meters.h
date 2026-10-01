@@ -106,8 +106,12 @@ class MeterBank {
         bool used = false;  // in the plan being compiled (beginPlan/endPlan)
     };
     std::array<Slot, kSlots> slots_{};
-    std::map<model::Id, std::uint16_t> byTrack_;    // assigned tracks -> slot
-    std::vector<std::uint16_t> freeSlots_;          // never-assigned + released
+    std::map<model::Id, std::uint16_t> byTrack_;  // assigned tracks -> slot
+    std::vector<std::uint16_t> freeSlots_;        // never-assigned + reusable
+    // Released slots wait two plans before they are handed out again: the plan
+    // that dropped a track is still playing while the next one is compiled, and
+    // the one before it may still push an entry for the slot during a crossfade.
+    std::vector<std::uint16_t> retiredPrev_, retired_;
     std::vector<std::vector<MeterEntry>> pending_;  // per slot
 };
 

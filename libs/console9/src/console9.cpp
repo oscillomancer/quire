@@ -58,6 +58,11 @@ double nativeFader(double db) {
 }
 double faderDb(double native) { return 20 * std::log10(shape(clamp(native, 0., 1.) * 2.0)); }
 double nativePan(double percent) { return (clamp(percent, -100., 100.) / 100 + 1) / 2; }
+double panAngle(double nativePan) { return clamp(nativePan, 0., 1.) * 1.57079633; }
+void panGains(double angle, double& left, double& right) {
+    right = std::sin(angle);
+    left = std::sin(1.57079633 - angle);
+}
 Seeds seedsFor(uint64_t projectSeed, uint64_t salt) {
     uint64_t saltState = salt;
     uint64_t state = projectSeed ^ splitmix(saltState);
@@ -97,15 +102,12 @@ void Stage<E, S>::setLinear(bool linear) {
 template <bool E, bool S>
 void Stage<E, S>::coefficients() {
     trim_ = gain_.value * (E ? 0.763932022500211 : 2.0);
-    if constexpr (S) {
-        right_ = std::sin(angle_.value);
-        left_ = std::sin(1.57079633 - angle_.value);
-    }
+    if constexpr (S) panGains(angle_.value, left_, right_);
 }
 template <bool E, bool S>
 void Stage<E, S>::set(double gain, double pan, uint32_t rampSamples) {
     gain_.set(clamp(gain, 0., 4.), rampSamples);
-    angle_.set(clamp(pan, 0., 1.) * 1.57079633, rampSamples);
+    angle_.set(panAngle(pan), rampSamples);
     coefficients();
 }
 template <bool E, bool S>

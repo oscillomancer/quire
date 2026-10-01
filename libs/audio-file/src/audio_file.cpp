@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -58,9 +59,16 @@ Error decodeError(const char* what) {
                  "the file may be truncated or use an unsupported variant");
 }
 
+// Tests: every whole-file decode (audio_file.h).
+std::atomic<std::uint64_t> g_decodes{0};
+
 }  // namespace
 
+std::uint64_t decodeCountForTests() { return g_decodes.load(std::memory_order_relaxed); }
+void resetDecodeCountForTests() { g_decodes.store(0, std::memory_order_relaxed); }
+
 Result<AudioData> readAudio(std::span<const std::uint8_t> bytes) {
+    g_decodes.fetch_add(1, std::memory_order_relaxed);
     switch (detect(bytes)) {
         case Container::Wav: {
             drwav wav;

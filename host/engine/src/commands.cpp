@@ -10,6 +10,7 @@
 #include "analysis_commands.h"
 #include "render_commands.h"
 #include "supple/audio/audio_file.h"
+#include "supple/base/sha256.h"
 #include "supple/engine/app.h"
 #include "supple/model/schemas.h"
 #include "supple/notation/notation.h"
@@ -156,6 +157,13 @@ struct RangeArgs {
     std::optional<std::int64_t> startBar, endBar;
 };
 
+schema::Schema<MeterDrops> meterDropsSchema() {
+    return schema::object<MeterDrops>("meter_drops")
+        .field("renderer", &MeterDrops::renderer, schema::integer())
+        .field("callback", &MeterDrops::callback, schema::integer())
+        .build();
+}
+
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
         .field("running", &EngineStatus::running, schema::boolean())
@@ -171,6 +179,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
         .field("anticipative", &EngineStatus::anticipative, schema::boolean())
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
+        .field("meter_drops", &EngineStatus::meterDrops, meterDropsSchema())
         .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
         .build();
 }
@@ -613,6 +622,50 @@ struct HistoryList {
     std::vector<HistoryEntry> versions;
     bool canUndo = false, canRedo = false;
 };
+
+// The model's name for a container ("wav"/"flac"/"mp3"): the detected one, not
+// the file's extension.
+const char* formatName(audio::Container container) {
+    switch (container) {
+        case audio::Container::Wav:
+            return "wav";
+        case audio::Container::Flac:
+            return "flac";
+        case audio::Container::Mp3:
+            return "mp3";
+        case audio::Container::Unknown:
+            return "";
+    }
+    return "";
+}
+
+// A media source added before hashes existed: there is no hash to match, so the
+// path (resolved the way the loader resolves it) and the header it was added
+// from decide whether the file is still the one it came from. Reusing it lets a
+// pre-hash project converge on one source per file instead of duplicating it.
+std::optional<model::Id> legacyMediaSourceFor(const model::Session& s, const fs::path& file,
+                                              const audio::FileInfo& info, const fs::path& media) {
+    const auto same = [](const fs::path& a, const fs::path& b) {
+        std::error_code ea, eb;
+        const fs::path ca = fs::weakly_canonical(a, ea);
+        const fs::path cb = fs::weakly_canonical(b, eb);
+        return (ea ? a.lexically_normal() : ca) == (eb ? b.lexically_normal() : cb);
+    };
+    for (const auto& e : s.media) {
+        const model::MediaSource& md = *e.value;
+        if (!md.hash.empty()) continue;  // a hashed source is matched by its bytes
+        if (md.sampleRate != info.sampleRate || md.channels != info.channels ||
+            md.frames != info.frames)
+            continue;  // not the recording the source was added from
+        std::filesystem::path path = md.path;
+        if (path.is_relative()) {
+            const fs::path inMedia = media / path;
+            path = fs::exists(inMedia) ? inMedia : media.parent_path() / path;
+        }
+        if (same(path, file)) return e.id;
+    }
+    return std::nullopt;
+}
 
 // Compiles notation into a MIDI source; the length in beats is the item's.
 Result<std::pair<model::MidiSource, double>> compileNotation(const model::Session& s,
@@ -1439,21 +1492,48 @@ void registerEngineCommands(cmd::Registry& registry) {
                 take.source = mi;
                 r.source = mi.str();
             } else if (a.audioFile) {
-                auto data = audio::readAudio(*a.audioFile);
-                if (!data) return std::move(data).error().at("/audio_file");
-                model::MediaSource md;
-                md.path = fs::absolute(*a.audioFile).string();
-                md.format = fs::path(*a.audioFile).extension().string().substr(1);
-                md.sampleRate = data->sampleRate;
-                md.channels = static_cast<int>(data->channelCount());
-                md.frames = static_cast<std::int64_t>(data->frames());
-                if (!a.length) {
-                    const double secs = data->seconds();
+                // The header, not a decode: the media model needs only the rate,
+                // the channel count and the length, and adding one file to many
+                // items must not decode it many times. The hash is the source's
+                // identity, so a second add of the same bytes reuses the md_*.
+                auto info = audio::inspect(*a.audioFile);
+                if (!info) return std::move(info).error().at("/audio_file");
+                auto hash = sha256File(*a.audioFile);
+                if (!hash) return std::move(hash).error().at("/audio_file");
+                if (!a.length && info->sampleRate > 0) {
+                    const double secs = static_cast<double>(info->frames) / info->sampleRate;
                     length = s.timeMap->beatAt(s.timeMap->secondsAt(pos) + secs) - pos;
                 }
-                const Id md_ = t.create(std::move(md));
-                take.source = md_;
-                r.source = md_.str();
+                // The same bytes are one media source: a second add of the same
+                // file reuses the source it already has. A project saved before
+                // hashes existed has a source with none, so the file's path and
+                // header decide, and the source's hash is filled in with the
+                // bytes on disk now — an old project converges rather than
+                // growing a second source for the same file.
+                std::optional<model::Id> known = model::mediaSourceWithHash(s, *hash);
+                if (!known) {
+                    if (const auto legacy =
+                            legacyMediaSourceFor(s, *a.audioFile, *info, app.mediaDir()))
+                        known = *legacy;
+                    if (known)
+                        t.modify<model::MediaSource>(
+                            *known, [&](model::MediaSource& md) { md.hash = *hash; });
+                }
+                if (known) {
+                    take.source = *known;
+                    r.source = known->str();
+                } else {
+                    model::MediaSource md;
+                    md.path = fs::absolute(*a.audioFile).string();
+                    md.hash = *hash;
+                    md.format = formatName(info->container);
+                    md.sampleRate = info->sampleRate;
+                    md.channels = info->channels;
+                    md.frames = info->frames;
+                    const Id md_ = t.create(std::move(md));
+                    take.source = md_;
+                    r.source = md_.str();
+                }
             }
             const Id tk = t.create(std::move(take));
             model::Item item;
@@ -2717,7 +2797,8 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
-                     "anticipative": true, "anticipation_misses": 0, "failed_fx": []})"),
+                     "anticipative": true, "anticipation_misses": 0,
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
@@ -2796,7 +2877,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
-            "away; engine.stop and engine.start again. failed_fx: isolated plugins whose "
+            "away; engine.stop and engine.start again. meter_drops: meter entries a full ring "
+            "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
+            "never audio. failed_fx: isolated plugins whose "
             "process crashed or hung (silent now; fx.restart re-creates them).";
         c.tags = {"engine"};
         c.args = schema::object<NoArgs>("no_args").build();
@@ -2805,7 +2888,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
-                     "anticipative": false, "anticipation_misses": 0, "failed_fx": []})"),
+                     "anticipative": false, "anticipation_misses": 0,
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();

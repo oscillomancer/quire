@@ -350,6 +350,9 @@ if (DELAY_BUILD_PLUGIN)
         # to put anything in, so the file lands beside the built artifacts and
         # it is the release archive that has to carry it.
         add_custom_command(TARGET delay-notices POST_BUILD
+            # The plugins create that directory when they link, but a clean build
+            # can reach this copy first, so create it here as well.
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/../clap"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_notices}"
                 "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_license}"

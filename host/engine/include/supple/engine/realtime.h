@@ -71,6 +71,9 @@ struct RecordedSegment {
 struct RecordedTake {
     model::Id track;
     std::filesystem::path file;
+    // "sha256:<hex>" of the file's bytes, taken when the recorder closed it
+    // (audio takes only; empty for MIDI and for a failed write).
+    std::string hash;
     std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
     std::int64_t frames = 0;
     // The runs, in file order; the first is {0, startSample}. More than one:

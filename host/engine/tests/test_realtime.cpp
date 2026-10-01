@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <supple/audio/audio_file.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
 #include <supple/host/clap_host.h>
@@ -964,6 +965,10 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
             if (audio->channels[1][i] != -audio->channels[0][i]) ++breaks;
         }
         CHECK(breaks == 0);  // contiguous: nothing lost, nothing doubled
+        // The recorder hashed the file it closed, so the commit never reads the
+        // recording back and the hash names the bytes on disk.
+        CHECK(t.hash == sha256File(t.file).value());
+        CHECK(t.hash.size() == 7 + 64);
         engine.stop();
         std::filesystem::remove_all(dir);
     }
@@ -2036,6 +2041,7 @@ TEST_CASE("meters report what has been heard, not what has been rendered" *
     model::Track sine;
     sine.name = "Sine";
     sine.parent = kMaster;
+    sine.volumeDb = -6.0;  // so the meter's fader factor is not unity either
     const Id sineTrack = t.create(sine);
     model::Track quiet;
     quiet.name = "Quiet";
@@ -2101,10 +2107,21 @@ TEST_CASE("meters report what has been heard, not what has been rendered" *
     const auto after = frame();
     CHECK(levelOf(after, quietTrack).peak == 0.0);
     CHECK(levelOf(after, quietTrack).rms == 0.0);
-    CHECK(levelOf(after, sineTrack).peak > 0.2);
+    // A strip's meter is its signal after the fader and after the pan law, and
+    // before the Console 9 encode — so a -6 dBFS item on a -6 dB fader reads
+    // its own peak times the fader law times the Channel pan law at centre
+    // (libs/console9's own gains, not a guess).
+    double panLeft = 0.0, panRight = 0.0;
+    console9::panGains(console9::panAngle(0.5), panLeft, panRight);
+    double sourcePeak = 0.0;
+    for (std::size_t i = 0; i < 9600 && i < tone.channels[0].size(); ++i)
+        sourcePeak = std::max(sourcePeak, std::fabs(static_cast<double>(tone.channels[0][i])));
+    CHECK(sourcePeak > 0.49);  // the item is -6 dBFS
+    const double fader = console9::faderGain(-6.0);
+    CHECK(levelOf(after, sineTrack).peak ==
+          doctest::Approx(sourcePeak * fader * panLeft).epsilon(1e-3));
     // A steady sine: the RMS is the peak over √2, so a strip's peak and energy
-    // are of the same signal (a strip's post is its encoded Channel level; the
-    // master's is the decoded mix).
+    // are of the same signal.
     CHECK(levelOf(after, sineTrack).rms * std::sqrt(2.0) ==
           doctest::Approx(levelOf(after, sineTrack).peak).epsilon(0.01));
     // What is heard: the master's meter is exactly the level an offline render

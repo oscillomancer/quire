@@ -18,6 +18,11 @@ std::vector<std::uint16_t> allSlots() {
 MeterBank::MeterBank() : freeSlots_(allSlots()), pending_(kSlots) {}
 
 void MeterBank::beginPlan() {
+    // What the plan before this one dropped is reusable now; what the last plan
+    // dropped waits one more swap (see retiredPrev_/retired_).
+    freeSlots_.insert(freeSlots_.end(), retiredPrev_.begin(), retiredPrev_.end());
+    retiredPrev_.swap(retired_);
+    retired_.clear();
     for (Slot& slot : slots_) slot.used = false;
 }
 
@@ -40,10 +45,10 @@ void MeterBank::endPlan() {
             ++it;
             continue;
         }
-        // The plan no longer has this track: hand the slot back.
+        // The plan no longer has this track: retire the slot (not yet reusable).
         const std::uint16_t slot = it->second;
         pending_[slot].clear();
-        freeSlots_.push_back(slot);
+        retired_.push_back(slot);
         it = byTrack_.erase(it);
     }
 }

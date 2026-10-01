@@ -10,6 +10,7 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/app.h>
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
@@ -552,6 +553,11 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     CHECK(take.find("lost_frames")->asInt() == 0);
     CHECK(fs::exists(take.find("file")->asString()));
     CHECK(app->head().items.size() == 1);
+    // The committed source carries the recording's hash: the recorder took the
+    // bytes when it closed the take, so the commit read nothing back.
+    REQUIRE(app->head().media.size() == 1);
+    CHECK(app->head().media.begin()->value->hash ==
+          sha256File(fs::path(take.find("file")->asString())).value());
     app->stopEngine();
 
     // The take plays back in a render: the sine, centred (-3 dB).
@@ -1489,6 +1495,10 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
     auto status = call("engine.status", "{}");
     REQUIRE(status["running"].asBool());
     CHECK(status["sample_rate"].asDouble() == 44100.0);
+    // The meter rings report their drops (P5.3c); a quiet engine drops nothing.
+    REQUIRE(status.find("meter_drops") != nullptr);
+    CHECK(status["meter_drops"]["renderer"].asInt() == 0);
+    CHECK(status["meter_drops"]["callback"].asInt() == 0);
     auto t = call("transport.get", "{}");
     CHECK_FALSE(t["playing"].asBool());
     CHECK(t["seconds"].asDouble() == doctest::Approx(1.0).epsilon(0.2));

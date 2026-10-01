@@ -15,14 +15,30 @@ import subprocess
 import sys
 import time
 
-from common import HERE, ROOT, Mcp, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
+from common import HERE, ROOT, Mcp, PluginProvenanceError, check_plugin_provenance, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
 import runners
 from scoring import notation_score, transcript_metrics
+
+
+def unpublishable(runner, report):
+    """Why a model run's report must not be published as a measurement, or None."""
+    if runner != "hermes":
+        return None
+    if not report["usage_totals"]["total_tokens"]:
+        # Nothing reached the model: an infrastructure failure, not an evaluation result.
+        return "no attempt reached the model"
+    if all(r.get("incomplete") or r.get("error") for r in report["tasks"]):
+        # Every attempt broke off (e.g. the provider refused requests: credits,
+        # rate limits): a 0% here would describe an outage, not the model.
+        return "every attempt was incomplete"
+    return None
 
 
 def render_patch(task, patch, directory, seed, binary=None):
     with Mcp(sandbox_command(directory, binary), directory) as client:
         setup(client, task, seed)
+        # A reference render is only comparable if it comes from this build.
+        check_plugin_provenance(client, what="the reference render")
         client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=seed)})
         rendered = client.call("render", dict(task["render"], notation=task["phrase"]))
         report = client.call("analyze", {"source": rendered["render"], "detail": "full"})["report"]
@@ -51,6 +67,9 @@ def score_final(task, directory, seed, binary=None, reference=None):
     scorer_dir = directory.parent / (directory.name + "-score")
     with Mcp(sandbox_command(scorer_dir, binary), scorer_dir) as client:
         setup(client, task, seed)
+        # The scorer must run the same plugin build as the attempt (a stale
+        # install used to shadow the built one and silently change the numbers).
+        provenance = check_plugin_provenance(client, what="the scorer")
         client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=seed)})
         rendered = client.call("render", dict(task["render"], notation=phrase))
         report = client.call("analyze", {"source": rendered["render"], "detail": "full"})["report"]
@@ -83,6 +102,7 @@ def score_final(task, directory, seed, binary=None, reference=None):
     write_json(directory / "analysis.json", report)
     return {"valid_patch": True, "score": score, "efficiency": metrics, "render": str(path),
             "render_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "plugin_provenance": provenance,
             "final_patch": patch, "final_notation": phrase}
 
 
@@ -207,6 +227,17 @@ def main(argv=None):
         try:
             record["runner"] = (runners.dry(task, directory, options.seed, options.sandbox)
                                 if runner == "dry" else runners.hermes(task, directory, options.seed, options, reference))
+            # What the attempt actually ran: the relay records it at initialize.
+            plugins = directory / "plugins.json"
+            if plugins.exists():
+                record["plugin_provenance"] = read_json(plugins)
+                if record["plugin_provenance"].get("error"):
+                    raise PluginProvenanceError(
+                        f"{task['id']} repeat {repeat + 1}: "
+                        + record["plugin_provenance"]["error"])
+            elif runner == "hermes":
+                raise PluginProvenanceError(
+                    f"{task['id']} repeat {repeat + 1}: the attempt recorded no plugin provenance")
             record.update(score_final(task, directory, options.seed, options.sandbox, reference))
             record["limits_exceeded"] = record["efficiency"]["tool_calls"] > task["limits"]["tool_calls"]
             if record["runner"]["exit_code"] or record["runner"]["timed_out"] or record["limits_exceeded"]:
@@ -214,6 +245,10 @@ def main(argv=None):
                 record["incomplete"] = True
             if runner == "dry" and not record["score"]["pass"]:
                 record["error"] = "Scripted reference failed its own scorer/profile"
+        except PluginProvenanceError:
+            # A plugin outside the build invalidates every number in the run:
+            # stop instead of publishing a measurement of the wrong plugin.
+            raise
         except (ValueError, KeyError, OSError, RuntimeError, TimeoutError, subprocess.SubprocessError) as error:
             record.update(valid_patch=False, error=str(error))
         record["usage"] = read_json(directory / "usage.json") if (directory / "usage.json").exists() else {}
@@ -231,9 +266,15 @@ def main(argv=None):
     # Attempts are independent (own directory, Hermes home and sandbox); the
     # report keeps task/repeat order whatever the completion order.
     order = [(index, task, repeat) for index, task in enumerate(tasks) for repeat in range(options.repeat)]
-    with ThreadPoolExecutor(max_workers=options.jobs) as pool:
-        futures = {pool.submit(attempt, task, repeat): (index, repeat) for index, task, repeat in order}
-        done = {futures[f]: f.result() for f in as_completed(futures)}
+    try:
+        with ThreadPoolExecutor(max_workers=options.jobs) as pool:
+            futures = {pool.submit(attempt, task, repeat): (index, repeat) for index, task, repeat in order}
+            done = {futures[f]: f.result() for f in as_completed(futures)}
+    except PluginProvenanceError as error:
+        print("error:", error, file=sys.stderr)
+        print("nothing published: a plugin outside the build is loaded, so every number in this "
+              "run would describe the wrong plugin. See", run_dir, file=sys.stderr)
+        return 3
     report["tasks"] = [done[key] for key in sorted(done)]
     usage_totals = {"total_tokens": 0, "estimated_cost_usd": 0.0, "cost_known": True}
     for record in report["tasks"]:
@@ -253,9 +294,9 @@ def main(argv=None):
     losses = [r["score"]["loss"] for r in report["tasks"] if r.get("score")]
     report["median_loss"] = statistics.median(losses) if losses else None
     write_json(run_dir / "report.json", report)
-    if runner == "hermes" and not usage_totals["total_tokens"]:
-        # Nothing reached the model: an infrastructure failure, not an evaluation result.
-        print("error: no attempt reached the model; nothing published. See", run_dir, file=sys.stderr)
+    refusal = unpublishable(runner, report)
+    if refusal:
+        print(f"error: {refusal}; nothing published. See", run_dir, file=sys.stderr)
         return 2
     if runner == "hermes" or options.publish:
         path = publish(report)

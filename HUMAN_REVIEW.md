@@ -80,6 +80,20 @@ evaluation model. Most useful, in order:
 *Meanwhile:* the reference suite waits for the harness/optimizer fixes listed
 in the summary; nothing else waits on this.
 
+### 16. Evaluation listening — 20261001T130928234028Z-synth-reference-hermes
+Suite: synth-reference, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `reference.acid-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.acid-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.acid-bass-worst.wav` — Is the resonant snap recognizably acid-like and controlled?
+- `reference.bell`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.bell-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.bell-worst.wav` — Does the strike sound metallic, with a smooth ringing decay?
+- `reference.fm-e-piano`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.fm-e-piano-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.fm-e-piano-worst.wav` — Does the attack have FM character while the body stays mellow?
+- `reference.formant-lead`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.formant-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.formant-lead-worst.wav` — Can you hear vowel-like movement without losing the pitched lead?
+- `reference.noise-snare`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.noise-snare-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.noise-snare-worst.wav` — Is the body audible under the fizz, and does the hit end cleanly?
+- `reference.pad`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pad-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pad-worst.wav` — Does it swell warmly and stay wide without sounding harsh?
+- `reference.pluck-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pluck-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pluck-bass-worst.wav` — Is the filter snap short and audible, with convincing bass weight?
+- `reference.strings`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.strings-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.strings-worst.wav` — Does it feel like a cohesive sustained ensemble with a natural swell?
+- `reference.sub-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
+- `reference.supersaw-lead`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.supersaw-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.supersaw-lead-worst.wav` — Is this a bright, playable lead with a stable wide image?
+
 ## Resolved
 
 ### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check

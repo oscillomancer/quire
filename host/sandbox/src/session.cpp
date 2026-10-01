@@ -315,10 +315,21 @@ Result<host::Instance*> Session::instance(std::string_view id) {
     return (*l)->instance.get();
 }
 
-const json::Value& Session::schema(std::string_view id) const {
+const json::Value& Session::schema(std::string_view id) {
     static const json::Value kNull;
-    const Loaded* l = findLoaded(id);
-    return l ? l->schema : kNull;
+    auto it = instances_.find(std::string(id));
+    if (it == instances_.end()) return kNull;
+    Loaded& l = *it->second;
+    if (!l.info.semantic) return l.schema;  // null: no semantic view
+    // The plugin derives each parameter's "active" flag from its current
+    // patch, so the schema captured at load goes stale the moment a patch adds
+    // or drops a module (filter1.cutoff reads active: false until
+    // filters.filter1 exists, while optimize.start already accepts it). Re-read
+    // it here: a query-path call, and the plugin builds the document from its
+    // own state.
+    auto live = l.instance->semanticSchema();
+    if (live) l.schema = std::move(*live);
+    return l.schema;
 }
 
 Result<std::string> Session::load(std::string_view pluginIdOrPath,
@@ -416,6 +427,10 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
     host::Instance& in = *l.instance;
     json::Value out = json::Value::object();
     if (l.info.semantic) {
+        // The keys, units and curves here do not depend on the patch; the only
+        // part of the schema that follows it is each parameter's "active" flag,
+        // which param.get does not report (plugin.describe does, and refreshes
+        // the cache through Session::schema).
         const json::Value* params = l.schema.find("params");
         auto text = in.getPatch(false);
         if (!text) return std::move(text).error();

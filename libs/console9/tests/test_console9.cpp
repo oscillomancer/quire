@@ -567,3 +567,35 @@ TEST_CASE("Console9 linear ramps are bit exact across partitions") {
     splitTest<MonoBuss, float>(true);
     splitTest<MonoBuss, double>(true);
 }
+
+TEST_CASE("the Channel pan law at centre is measured as sin(pi/4) per channel") {
+    // Measured from the stage rather than assumed: in linear mode a Channel
+    // applies gain x pan gains x trim, so the ratio of a centred pan to a hard
+    // pan is the pan law itself. panGains() — what a host meters a strip's
+    // pre-encode level with — must produce exactly the stage's coefficients.
+    const auto run = [](double gain, double pan) {
+        Channel stage;
+        stage.setLinear(true);
+        stage.reset(seedsFor(1, 2));
+        stage.set(gain, pan);
+        std::array<float, 4> l{1.0f, 1.0f, 1.0f, 1.0f}, r{1.0f, 1.0f, 1.0f, 1.0f};
+        const float* in[]{l.data(), r.data()};
+        std::array<float, 4> ol{}, orr{};
+        float* out[]{ol.data(), orr.data()};
+        stage.process(in, out, 4);
+        return std::pair<double, double>{double(ol.back()), double(orr.back())};
+    };
+    const auto hard = run(1.0, 0.0);  // hard left: the fader times the encode trim
+    const auto centre = run(1.0, 0.5);
+    CHECK(hard.second == 0.0);
+    CHECK(centre.first / hard.first == doctest::Approx(std::sin(pi / 4)).epsilon(1e-6));
+    CHECK(centre.second == doctest::Approx(centre.first));
+    double left = 0, right = 0;
+    panGains(panAngle(0.5), left, right);
+    CHECK(centre.first == doctest::Approx(hard.first * left).epsilon(1e-6));
+    CHECK(centre.second == doctest::Approx(hard.first * right).epsilon(1e-6));
+    CHECK(panAngle(0.5) == doctest::Approx(pi / 4).epsilon(1e-7));  // native .5 is centre
+    panGains(panAngle(0.0), left, right);
+    CHECK(left == doctest::Approx(1.0).epsilon(1e-9));  // hard left
+    CHECK(right == doctest::Approx(0.0).epsilon(1e-9));
+}

@@ -179,22 +179,25 @@ a benchmark failure).
 6. Write hardware outputs; publish meters (lossy rings) and state deltas
    (coalescing slots).
 
-**Meters** (P5.3c). Per strip, the peak and the mean square of the **post**
-signal (post-fader, post-pan; for a Channel strip that is the Console 9 encoded
-level the master sees) since the reader's last call. Two SPSC rings of
-`MeterEntry` carry them, one per producer: the renderer thread publishes what it
-renders ahead (after the block, collected from its nodes, never from worker
-tasks), the audio callback publishes what it plays — the live nodes, or the
-whole graph when anticipation is off. An entry is **heard** once the callback's
-play position in that epoch has passed the end of the block it covers, minus
-the device's reported output latency; entries of an older epoch (a seek or a
-pause bumped it) are dropped, and while the transport is stopped everything
-already processed counts as heard (monitored input). `EngineApp::meters()`
-drains the rings and returns one reading per strip of the newest plan — zeros
-for a strip with no heard audio; decay and peak hold belong to the GUI. A full
-ring drops the entry and counts it (`MeterBank::dropped*`). Offline renders do
-not meter at all (no bank: zero cost), and the publishers never touch the
-signal, so renders stay bit-identical.
+**Meters** (P5.3c). Per strip, the peak and the mean square of the strip's signal
+**after the fader and after the pan law, before the Console 9 encode**
+(`sum × faderGain × ` the stage's own `panGains` — what a user expects at
+unity: a −6 dBFS item at 0 dB reads its own peak times the Channel pan law)
+since the reader's last call; a master has no encode and measures its output,
+the signal the device is given. Two SPSC rings of `MeterEntry` carry the
+numbers, one per producer: the renderer thread publishes what it renders ahead
+(after the block, collected from its nodes, never from worker tasks), the audio
+callback publishes what it plays — the live nodes, or the whole graph when
+anticipation is off. An entry is **heard** once the callback's play position in
+that epoch has passed the end of the block it covers, minus the device's
+reported output latency; entries of an older epoch (a seek or a pause bumped
+it) are dropped, and while the transport is stopped everything already
+processed counts as heard (monitored input). `EngineApp::meters()` drains the
+rings and returns one reading per strip of the newest plan — zeros for a strip
+with no heard audio; decay and peak hold belong to the GUI. A full ring drops
+the entry and counts it (`engine.status.meter_drops`, per producer). Offline
+renders do not meter at all (no bank: zero cost), and the publishers never
+touch the signal, so renders stay bit-identical.
 
 Everything in this cycle is `SUPPLE_RT` and runs under rtsan in the `rtsan`
 preset's engine tests (with the dummy backend).
@@ -232,6 +235,18 @@ preset's engine tests (with the dummy backend).
   1200 ms like REAPER's media buffer).
 - **Peaks**: min/max pyramids built on I/O threads, cached by content hash,
   never in project diffs.
+- **Content hash**: `MediaSource.hash` is `"sha256:<hex>"` of a file's bytes —
+  read with the file when it is imported (`item.add`, media import) and by the
+  recorder's I/O thread as it closes each take, so a commit never reads a
+  recording back. Adding the same bytes again reuses the media source it already
+  has. Metadata for an import comes from the container's header
+  (`audio::inspect`), never a decode: adding one file to many items costs one
+  header read at a time. Projects saved before the hash existed keep their empty
+  hashes (the peak cache falls back to path + size + mtime); adding one of their
+  files again reuses its source — the path and the header it was added from
+  decide — and fills the hash with the bytes now on disk, so such a project
+  converges instead of growing a second source for one file. A file is hashed
+  the same way when it is recorded.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last
@@ -279,7 +294,7 @@ bus and exposes it through the control protocol (Unix socket), Lua (Phase
 4/5 bindings) and MCP (proxy or in-process). Engine-specific commands:
 `engine.start {backend, device, rate, block}`, `engine.stop`,
 `engine.status` (q: backend, rate, block, load, xruns, anticipation
-misses), `engine.graph` (q: nodes, live/anticipative classification,
+misses, meter drops), `engine.graph` (q: nodes, live/anticipative classification,
 latencies, CPU per node), `engine.settings.set {render_ahead_ms,
 worker_threads, live_multiprocessing, automation_resolution, …}`.
 Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),

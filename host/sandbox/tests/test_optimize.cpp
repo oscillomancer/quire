@@ -234,6 +234,94 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     CHECK(shifted["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(0.5));
 }
 
+TEST_CASE("a render depends only on the patch, not on the session's history") {
+    // The sandbox's promise: a render of a given patch is the same audio
+    // whether the session rendered before or not. A change to a *smoothed*
+    // parameter (here the amp level) must not glide in from the previous
+    // render's value.
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    const std::string render = R"({"notation": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3})";
+    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
+        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
+        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
+        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}}}})";
+    const std::string level = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
+        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
+        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
+        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}},
+        "amp": {"level": "0.825 dB"}}})";
+
+    // (a) fresh: the target patch is the session's first render.
+    h.call("patch.set", level);
+    json::Value fresh = h.call("render", render);
+
+    // (b) the same patch after a render of a different patch, applied as a
+    // separate command (a flat params merge, as an agent or the optimizer does).
+    h.call("patch.set", start);
+    h.call("render", render);
+    h.call("patch.merge", R"({"instance": "in_1", "patch": {"amp": {"level": "0.825 dB"}}})");
+    json::Value after = h.call("render", render);
+
+    auto audio = [](const std::string& path) {
+        auto a = audio::readAudio(path);
+        REQUIRE(a);
+        REQUIRE_FALSE(a->channels.empty());
+        return a->channels[0];
+    };
+    const auto x = audio(fresh["path"].asString());
+    const auto y = audio(after["path"].asString());
+    REQUIRE(x.size() == y.size());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i)
+        worst = std::max(worst, std::fabs(static_cast<double>(x[i]) - static_cast<double>(y[i])));
+    // NOTE (open): this covers the dispatcher path. The same sequence driven
+    // through the MCP server (what tools/eval-harness uses) still differs in the
+    // first ~40 ms after a level change (1922 of 211456 samples, max 1e-2, which
+    // `analyze` turns into decay20_ms 348 vs 585): see
+    // docs/benchmarks/eval/2026-10-01-p3.4c-reference-rerun.md.
+    INFO("worst sample difference: " << worst);
+    CHECK(worst == 0.0);
+}
+
+TEST_CASE("plugin.describe reports parameter activity from the current patch") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    // At load the patch has no filter, so the *load-time* schema marks filter1's
+    // parameters inactive; kPatch adds filters.filter1, and from then on the
+    // plugin reports them active. describe must follow the patch, not the copy
+    // taken at load (this check fails on the old behavior).
+    h.call("patch.set", kPatch);
+    json::Value after = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
+    REQUIRE(after["params"].find("filter1.cutoff") != nullptr);
+    CHECK(after["params"]["filter1.cutoff"].find("active") == nullptr);
+    CHECK(after["params"]["filter1.cutoff"]["type"].asString() == "float");
+    // The optimizer reads the instance's live schema, so the two agree; before
+    // the fix they disagreed, which is what made this confusing to an agent.
+    json::Value probe = h.call("optimize.start",
+                               R"({"instance": "in_1", "params": ["filter1.cutoff"],
+            "target": {"profile": {"schema": "supple.analysis-profile/1.0",
+                       "targets": {"spectral.centroid_hz.median": {"target": 1500, "tolerance": 100}}}},
+            "evaluations": 10, "seconds": 0.2, "tail_s": 0})");
+    CHECK(probe["params"].size() == 1);
+    h.call("job.cancel", R"({"job": ")" + probe["job"].asString() + R"("})");
+    h.call("job.wait", R"({"job": ")" + probe["job"].asString() + R"(", "timeout_s": 30})");
+    // Drop the module again: describe reports inactive and the optimizer
+    // refuses the key, the same way round.
+    h.call("patch.set", R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0"}})");
+    json::Value dropped = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
+    REQUIRE(dropped["params"]["filter1.cutoff"].find("active") != nullptr);
+    CHECK(dropped["params"]["filter1.cutoff"]["active"].asBool() == false);
+    auto refused =
+        h.d->execute({"optimize.start", j(R"({"instance": "in_1", "params": ["filter1.cutoff"],
+               "target": {"profile": {"schema": "supple.analysis-profile/1.0",
+                          "targets": {"spectral.centroid_hz.median": {"target": 1500, "tolerance": 100}}}},
+               "evaluations": 10, "seconds": 0.2, "tail_s": 0})"),
+                      kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "optimize.not_tunable");
+}
+
 TEST_CASE("auto search windows follow the parameter's shape") {
     params::ParamSpec cutoff;  // 20 Hz .. 20 kHz, log
     cutoff.unit = params::Unit::Hz;

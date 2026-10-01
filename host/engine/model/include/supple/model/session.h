@@ -211,6 +211,10 @@ Status validateStripRules(const Session& s);
 // The track whose FX chain holds `fx` (not input chains or take FX), if any.
 std::optional<Id> trackOfFx(const Session& s, Id fx);
 
+// The media source holding the bytes `hash` identifies ("sha256:<hex>"), if the
+// session has one: a file added twice is one source, not two.
+std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash);
+
 // Where an item sits after resolving its timebase (item, then track, then
 // project): its start in beats and seconds and its end in seconds. The
 // engine plays and the GUI draws items through this one mapping.

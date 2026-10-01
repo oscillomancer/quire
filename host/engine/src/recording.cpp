@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "supple/base/files.h"
+#include "supple/base/sha256.h"
 #include "supple/json/json.h"
 
 namespace supple::engine::detail {
@@ -296,6 +297,13 @@ std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
         r.loop = {loop.start, loop.end};
         r.overflowFrames = t->overflow.load();
         if (auto st = t->writer.close(); !st && writeError_) writeError_ = std::move(st);
+        // The file's bytes are final now that it is closed, so hash them here:
+        // the commit then never reads the recording back. (An incremental hash
+        // of the write stream cannot be the file's digest — close() rewrites the
+        // header's sizes — so this one read is what "the file's bytes" costs.)
+        if (writeError_.ok()) {
+            if (auto hash = sha256File(t->target.file)) r.hash = *hash;
+        }
         if (r.segments.size() > 1 && started_.load(std::memory_order_relaxed)) {
             // Where each pass belongs, for recovery of an unsaved take.
             RecordingInfo info{t->target.track, start, rate_, r.segments, loop.start, loop.end};
