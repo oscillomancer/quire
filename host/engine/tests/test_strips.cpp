@@ -193,6 +193,52 @@ TEST_CASE("Console 9: send sharing, tap encoders, control ramps and mode swaps")
     CHECK_FALSE(checkStrips(next));
 }
 
+TEST_CASE("Console 9: envelope activation and reversed mode fades preserve control semantics") {
+    auto pool = emptyPool();
+    const auto base = monitored(false);
+    auto source = [](Plan& p) -> Node& {
+        return *std::find_if(p.nodes.begin(), p.nodes.end(),
+                             [](const Node& n) { return n.type == model::StripType::Channel; });
+    };
+    auto before = plan(base, pool);
+    run(before, .25f, 64, 64);
+    model::EditTxn volume(base, 2);
+    volume.modify<model::Track>(source(before).id, [](auto& tr) { tr.volumeDb = -12; });
+    const auto changed = volume.commit();
+    REQUIRE(changed);
+    auto ramp = plan(*changed, pool);
+    carryMix(before, ramp, -1);
+    run(ramp, .25f, 64, 64);
+    CHECK(source(ramp).fader.gain.left > 0);
+    model::EditTxn automation(*changed, 3);
+    envelope(automation, source(ramp).id, "volume", -12, -12);
+    const auto automated = automation.commit();
+    REQUIRE(automated);
+    auto controlled = plan(*automated, pool);
+    carryMix(ramp, controlled, -1);
+    const auto samples = run(controlled, .25f, 64, 64);
+    CHECK(static_cast<double>(samples[0]) ==
+          doctest::Approx(.25 * std::pow(10.0, -12.0 / 20) * .472135955).epsilon(1e-6));
+    CHECK(source(controlled).fader.gain.left == 0);
+
+    model::EditTxn mode(base, 4);
+    auto project = mode.project();
+    project.console9 = true;
+    mode.setProject(project);
+    const auto enabled = mode.commit();
+    REQUIRE(enabled);
+    auto off = plan(base, pool), on = plan(*enabled, pool), back = plan(base, pool);
+    run(off, .5f, 64, 64);
+    carryMix(off, on, -1);
+    run(on, .5f, 64, 64);
+    const float last = source(on).post.l[63];
+    carryMix(on, back, -1);
+    run(back, .5f, 1, 1);
+    CHECK(std::abs(source(back).post.l[0] - last) < 1e-4f);
+    CHECK(source(back).post.l[0] >= last);
+    CHECK(source(back).encoder.left == 479);
+}
+
 TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and deterministic renders") {
     std::mt19937 random(193819);
     for (int iteration = 0; iteration < 40; ++iteration) {

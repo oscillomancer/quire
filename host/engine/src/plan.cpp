@@ -539,7 +539,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                               : e.volumeDb + (e.tap == model::Tap::PostFader ? source.volumeDb : 0);
         e.staticGain = db <= model::kSilenceDb ? 0.0 : console9::faderGain(db);
         e.staticPan = console9::nativePan(e.pan);
-        const auto salt = (e.route->n << 3) | 3;
+        const auto salt = std::rotl(source.id.n, 32) ^ ((e.route->n << 3) | 3);
         e.encoder.init(console9::seedsFor(s.project->seed, salt), p.linearConsole);
     }
     SUPPLE_TRY(checkStrips(p));

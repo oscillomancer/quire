@@ -11,7 +11,7 @@ struct ControlRamp {
     double value = 0, target = 0, step = 0;
     std::uint32_t left = 0;
     void set(double v, std::uint32_t n) SUPPLE_RT {
-        if (v == target) return;
+        if (v == target && (n || !left)) return;
         target = v;
         left = n;
         if (n)
@@ -50,7 +50,7 @@ struct ConsoleStage {
     console9::Seeds seeds;
     bool linear = false;
     std::uint32_t left = 0, span = 1;
-    double lastGain = 1, lastPan = .5;
+    double lastGain = 1, lastPan = .5, fadeFrom = 0;
     void init(console9::Seeds s, bool off) {
         seeds = s;
         linear = off;
@@ -67,15 +67,22 @@ struct ConsoleStage {
         current = old.current;
         lastGain = old.lastGain;
         lastPan = old.lastPan;
-        current.setLinear(linear);
         if (linear != old.linear) {
             previous = old.current;
+            fadeFrom = 0;
+            if (old.left) {
+                // Reversing a two-mode fade starts from the mix actually heard.
+                current = old.previous;
+                fadeFrom = (1 - old.fadeFrom) * old.left / old.span;
+            }
             left = span = frames;
         } else {
             previous = old.previous;
             left = old.left;
             span = old.span;
+            fadeFrom = old.fadeFrom;
         }
+        current.setLinear(linear);
     }
     void sample(float l, float r, float& ol, float& or_, double gain = 1,
                 double pan = .5) SUPPLE_RT {
@@ -90,7 +97,7 @@ struct ConsoleStage {
             float* po[] = {&pl, &pr};
             if (changed) previous.set(gain, pan);
             previous.process(in, po, 1);
-            const float t = static_cast<float>(span - --left) / span;
+            const float t = static_cast<float>(fadeFrom + (1 - fadeFrom) * (span - --left) / span);
             ol = pl + (ol - pl) * t;
             or_ = pr + (or_ - pr) * t;
         }

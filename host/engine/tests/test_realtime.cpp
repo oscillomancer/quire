@@ -1871,8 +1871,9 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
                     std::erase(m.children, keyed);
                     m.children.push_back(busId);
                 });
-                t.modify<model::Track>(keyed, [&](auto& tr) { tr.parent = busId; });
-                t.modify<model::Track>(busId, [&](auto& tr) { tr.children.push_back(keyed); });
+                t.modify<model::Track>(keyed, [&](auto& child) { child.parent = busId; });
+                t.modify<model::Track>(busId,
+                                       [&](auto& group) { group.children.push_back(keyed); });
                 model::Route send;
                 send.from.track = source;
                 send.to.track = busId;
