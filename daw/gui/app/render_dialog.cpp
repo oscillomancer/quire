@@ -147,6 +147,9 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     actions.layout.gap = 6;
     actions.layout.align = ui::Layout::Align::Center;
     actions.emplace<ui::Button>("render.run", "Render", [this] { run(); });
+    addButton_ = &actions.emplace<ui::Button>("render.add", "[ ] Add to project", [this] {
+        setAddToProject(!addToProject_);
+    });
     status_ = &actions.emplace<ui::Label>("render.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
 
@@ -182,6 +185,12 @@ void RenderDialog::open() {
 
 void RenderDialog::close() {
     if (page_) root_.closePopup();
+}
+
+void RenderDialog::setAddToProject(bool on) {
+    addToProject_ = on;
+    if (addButton_) addButton_->setText(on ? "[x] Add to project" : "[ ] Add to project");
+    root_.damageAll();
 }
 
 void RenderDialog::setSource(Source source) {
@@ -260,6 +269,7 @@ json::Value RenderDialog::args(bool forJob) const {
         if (!mode_.empty()) a["mode"] = mode_;
         if (!tap_.empty()) a["tap"] = tap_;
     }
+    if (addToProject_) a["add_to_project"] = true;
     if (forJob) a["job"] = true;
     return a;
 }

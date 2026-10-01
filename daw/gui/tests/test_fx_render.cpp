@@ -124,6 +124,21 @@ struct Fixture {
         FAIL("no channel track");
         return {};
     }
+    std::size_t trackCount() { return app->head().tracks.size(); }
+    // The media path of the first item on the track named `name`.
+    std::string sourcePathOf(const std::string& name) {
+        const model::Session& s = app->head();
+        for (const auto& t : s.tracks)
+            if (t.value->name == name)
+                for (const auto& i : s.items)
+                    if (i.value->track == t.id && i.value->activeTake) {
+                        const model::Take* take = s.takes.find(*i.value->activeTake);
+                        if (!take || !take->source) continue;
+                        if (const model::MediaSource* media = s.media.find(*take->source))
+                            return media->path;
+                    }
+        return {};
+    }
     void frame() {
         root->damageAll();
         root->frame(false);
@@ -409,4 +424,26 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     REQUIRE(f.render->resultFiles().size() == 1);
     CHECK(std::filesystem::exists(f.render->resultFiles()[0]));
     CHECK(f.render->statusText().find("1 file") != std::string::npos);
+
+    // add_to_project: the file lands as an item on a new track (one undo step).
+    const std::size_t tracksBefore = f.trackCount();
+    const std::size_t historyBefore = f.historyCount();
+    CHECK_FALSE(f.render->addToProject());
+    f.click("render.add");
+    CHECK(f.render->addToProject());
+    CHECK(f.root->find("render.add")->valueText() == "[x] Add to project");
+    f.render->setField("render.pattern", "added-{counter:02}");
+    f.render->refreshPreview();
+    f.render->run();
+    REQUIRE_FALSE(f.render->job().empty());
+    for (int i = 0; i < 2000 && !f.render->job().empty(); ++i) {
+        f.render->tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    f.dispatcher->flushJobEvents();  // the follow-up runs on the model thread
+    REQUIRE(f.render->resultFiles().size() == 1);
+    CHECK(f.trackCount() == tracksBefore + 1);
+    CHECK(f.sourcePathOf("added-01") == f.render->resultFiles()[0]);
+    // The import is its own undo step; starting a job changes no model state.
+    CHECK(f.historyCount() == historyBefore + 1);
 }

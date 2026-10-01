@@ -16,6 +16,7 @@
 
 namespace supple::ui {
 class Root;
+class Button;
 class Label;
 class TextBlock;
 class TextField;
@@ -41,6 +42,9 @@ class RenderDialog {
     enum class Source { Master, Stems, Regions };
     void setSource(Source source);
     Source source() const { return source_; }
+    // add_to_project: the rendered files become items on new tracks (engine).
+    void setAddToProject(bool on);
+    bool addToProject() const { return addToProject_; }
     // The pattern currently in the field ("" when empty).
     const std::string& pattern() const;
     const std::string& preview() const { return previewText_; }
@@ -62,6 +66,7 @@ class RenderDialog {
     cmd::Dispatcher& dispatcher_;
     ui::Root& root_;
     Source source_ = Source::Master;
+    bool addToProject_ = false;
     std::string pattern_, start_, end_, tail_, sampleRate_, bitDepth_, channels_, normalize_,
         target_, limit_, mode_, tap_;
     std::string previewText_, statusText_, job_;
@@ -80,6 +85,7 @@ class RenderDialog {
     ui::Label* tapLabel_ = nullptr;
     ui::TextField* modeField_ = nullptr;
     ui::TextField* tapField_ = nullptr;
+    ui::Button* addButton_ = nullptr;
 };
 
 }  // namespace supple::gui
