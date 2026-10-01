@@ -115,9 +115,11 @@ Session& session6() {
     return s;
 }
 
-// Frames until the view has every visible pyramid.
+// Frames until the view has every visible pyramid. A deadline, not a frame
+// count: under a parallel ctest the peak worker can take several seconds.
 void settle(ui::Root& root, views::Lanes& lanes) {
-    for (int i = 0; i < 400; ++i) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (std::chrono::steady_clock::now() < deadline) {
         session6().drain();
         root.damageAll();
         root.frame(false);
