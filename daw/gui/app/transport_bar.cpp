@@ -53,6 +53,16 @@ std::string meterText(const time::TimeMap& tm) {
     return std::to_string(m.numerator) + "/" + std::to_string(m.denominator);
 }
 
+// Setting a label's text damages it (and relays out), so only write when the
+// value actually changed: the idle loop must stay at zero work.
+void setIfChanged(ui::Label* label, const std::string& text) {
+    if (label && label->text() != text) label->setText(text);
+}
+
+void setIfChanged(ui::Button* button, const std::string& text) {
+    if (button && button->valueText() != text) button->setText(text);
+}
+
 }  // namespace
 
 TransportBar::TransportBar(engine::EngineApp& app, AppActions& actions, cmd::Dispatcher& dispatcher,
@@ -108,19 +118,19 @@ void TransportBar::sync() {
     const model::Session& s = app_.head();
     engine::TransportInfo info;
     if (auto r = app_.transport("get")) info = *r;
-    if (position_) position_->setText(barsText(info.beat, *s.timeMap));
-    if (time_) time_->setText(timeText(info.seconds));
-    if (tempo_) tempo_->setText(bpmText(*s.timeMap));
-    if (meter_) meter_->setText(meterText(*s.timeMap));
-    if (play_) play_->setText(info.playing ? "stop" : "play");
-    if (loop_) loop_->setText(info.loop.enabled ? "loop on" : "loop");
-    if (punch_) punch_->setText(info.punch.enabled ? "punch on" : "punch");
+    if (position_) setIfChanged(position_, barsText(info.beat, *s.timeMap));
+    if (time_) setIfChanged(time_, timeText(info.seconds));
+    if (tempo_) setIfChanged(tempo_, bpmText(*s.timeMap));
+    if (meter_) setIfChanged(meter_, meterText(*s.timeMap));
+    if (play_) setIfChanged(play_, info.playing ? "stop" : "play");
+    if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
+    if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     const double now = nowMs();
     if (engine_ && now - lastStatusMs_ >= 250.0) {  // ≤ 4 Hz
         lastStatusMs_ = now;
         const engine::EngineStatus st = app_.engineStatus();
         if (!st.running) {
-            engine_->setText("engine stopped");
+            setIfChanged(engine_, "engine stopped");
         } else {
             char buf[96];
             std::snprintf(buf, sizeof buf, "%.1fk/%lld  xr %lld  err %lld  mis %lld",
@@ -128,7 +138,7 @@ void TransportBar::sync() {
                           static_cast<long long>(st.xruns),
                           static_cast<long long>(st.processErrors),
                           static_cast<long long>(st.anticipationMisses));
-            engine_->setText(buf);
+            setIfChanged(engine_, buf);
         }
     }
 }

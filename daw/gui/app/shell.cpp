@@ -93,14 +93,17 @@ void Shell::installOverlay(ui::Root& root) {
 
 void Shell::sync() {
     const model::Session& s = app_.head();
-    if (s.version != shownVersion_) {
+    const bool moved = s.version != shownVersion_;
+    if (moved) {
         shownVersion_ = s.version;
         const int strips = static_cast<int>(s.tracks.size());
         counts_->setText(std::to_string(strips) + (strips == 1 ? " strip  " : " strips  ") +
                          "version " + std::to_string(s.version));
         arrange_->show(s);
     }
-    if (transport_) transport_->sync();
+    // The bar changes with the model or while the engine runs; refreshing it on
+    // every idle pass would repaint (and cost) for nothing.
+    if (transport_ && (moved || app_.engine())) transport_->sync();
 }
 
 bool Shell::isSelected(const model::Id& track) const {
