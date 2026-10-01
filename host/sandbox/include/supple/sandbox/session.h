@@ -113,8 +113,12 @@ class Session {
     const std::vector<std::string>& chain() const { return chain_; }
     // Error "sandbox.unknown_instance" listing the loaded instances.
     Result<host::Instance*> instance(std::string_view id);
-    // The semantic schema captured at load (null for third-party plugins).
-    const json::Value& schema(std::string_view id) const;
+    // The plugin's semantic schema as of now: an empty value for a third-party
+    // plugin, and for an unknown instance. It is not static — a parameter is
+    // "active" only while its module is in the patch — so this re-reads the
+    // instance (and refreshes the cached copy) rather than reporting the schema
+    // captured at load.
+    const json::Value& schema(std::string_view id);
 
     // --- parameters ------------------------------------------------------------
     // Semantic plugins: keys are semantic keys and values physical (numbers,
