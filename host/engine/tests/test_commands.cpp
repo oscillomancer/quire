@@ -366,6 +366,46 @@ TEST_CASE("fx.move names a real command in its hint, and stops at the first chai
     CHECK(fails(bus, "fx.move", R"({"fx":"fx_1","index":9})") == "fx.index");
 }
 
+TEST_CASE("fx.add {chain:\"input\"} fills the input chain; fx.move/remove work on it") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"A"})");
+    auto strip = [&] { return *app->view().tracks.find(*model::Id::parse("tr_1")); };
+    // The input chain is separate from the track's chain.
+    auto added = run(bus, "fx.add",
+                     R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","chain":"input"})");
+    CHECK(added["chain"].asArray().size() == 1);
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.sine"})");
+    CHECK(strip().inputChain.size() == 1);
+    CHECK(strip().inputChain[0].str() == "fx_1");
+    REQUIRE(strip().chain.size() == 1);
+    CHECK(strip().chain[0].str() == "fx_2");
+    // Reorder inside the input chain.
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","chain":"input"})");
+    REQUIRE(strip().inputChain.size() == 2);
+    CHECK(strip().inputChain[0].str() == "fx_1");
+    CHECK(strip().inputChain[1].str() == "fx_3");
+    run(bus, "fx.move", R"({"fx":"fx_3","index":0})");
+    CHECK(strip().inputChain[0].str() == "fx_3");
+    CHECK(strip().inputChain[1].str() == "fx_1");
+    CHECK(fails(bus, "fx.move", R"({"fx":"fx_3","index":9})") == "fx.index");
+    // An input-chain effect stays on its track: moving it elsewhere is refused.
+    run(bus, "track.add", R"({"name":"B"})");
+    CHECK(fails(bus, "fx.move", R"({"fx":"fx_3","track":"tr_2","index":0})") == "fx.chain");
+    // Remove empties it from the input chain, leaving the track's chain alone.
+    run(bus, "fx.remove", R"({"fx":"fx_3"})");
+    CHECK(strip().inputChain.size() == 1);
+    CHECK(strip().chain.size() == 1);
+    // A bad chain name is rejected by the schema.
+    CHECK_FALSE(
+        fails(bus, "fx.add",
+              R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","chain":"sidechain"})")
+            .empty());
+}
+
 TEST_CASE("key routes over the bus: route.add {fx}, validation, listing, removal (ADR-0018)") {
     Workdir dir;
     auto app = makeApp(dir.path);

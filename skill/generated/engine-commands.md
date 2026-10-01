@@ -1305,7 +1305,7 @@ Result:
 
 Insert a plugin into a track's FX chain and return its id.
 
-plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins.
+plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1317,6 +1317,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `plugin` | string |  |  |  |  |
 | `index` | integer |  | 0.0.. |  |  |
 | `patch` | value |  |  |  |  |
+| `chain` | string |  |  |  |  |
 
 ### Result
 
@@ -1370,6 +1371,29 @@ Result:
   "fx": "fx_1",
   "name": "Test Sine",
   "semantic": false,
+  "chain": ["fx_1"]
+}
+
+```
+
+**An effect in the track's input chain** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "plugin": "com.suppleaudio.test.gain",
+  "chain": "input"
+}
+
+```
+
+Result:
+
+```json
+{
+  "fx": "fx_1",
+  "name": "<any>",
+  "semantic": "<any>",
   "chain": ["fx_1"]
 }
 
@@ -1455,7 +1479,7 @@ Result:
 
 Move a plugin within a track chain or to another track.
 
-
+Works on the track's chain and on its input chain (an input-chain effect stays on its track).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
