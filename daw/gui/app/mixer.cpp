@@ -277,7 +277,7 @@ void Mixer::rebuild() {
         rec.layout.gap = 3;
         if (t.type == model::StripType::Channel) {
             st.arm = &rec.emplace<ui::Toggle>(
-                "mixer.arm." + tid, "●", "armed",
+                "mixer.arm." + tid, "R", "armed",
                 [this, tid](bool on) { (void)set(tid, "armed", json::Value(on)); });
             st.monitor = &rec.emplace<ui::Button>("mixer.monitor." + tid, "Mon", [this, tid] {
                 const auto parsed = model::Id::parse(tid);

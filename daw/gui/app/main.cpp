@@ -28,6 +28,7 @@
 #include "chrome.h"
 #include "file_actions.h"
 #include "generate.h"
+#include "history_panel.h"
 #include "meter_feed.h"
 #include "midi_editor.h"
 #include "mixer.h"
@@ -293,8 +294,22 @@ int main(int argc, char** argv) {
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
-    gui::MeterFeed meterFeed;
+    // Meters: what the engine heard since the last poll, once per pass.
+    gui::MeterFeed meterFeed([&] {
+        std::vector<gui::StripReading> out;
+        for (const engine::MeterReading& m : (*app)->meters()) {
+            gui::StripReading r;
+            r.track = m.track.str();
+            for (int ch = 0; ch < 2; ++ch) {
+                r.peak[ch] = m.peak[ch];
+                r.rms[ch] = m.rms[ch];
+            }
+            out.push_back(r);
+        }
+        return out;
+    });
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
+    gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
@@ -323,6 +338,7 @@ int main(int argc, char** argv) {
         center.add(shell.build());
         center.add(midiEditor.build());
         center.add(mixer.build());
+        body.add(history.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
@@ -371,6 +387,7 @@ int main(int argc, char** argv) {
             json::Value v = json::Value::object();
             v["agent"] = agentPanel.visible();
             v["mixer"] = mixer.visible();
+            v["history"] = history.visible();
             return v;
         },
         [&](const json::Value& v) {
@@ -378,6 +395,8 @@ int main(int argc, char** argv) {
                 agentPanel.setVisible(a->asBool());
             if (const json::Value* m = v.find("mixer"); m && m->isBool())
                 mixer.setVisible(m->asBool());
+            if (const json::Value* h = v.find("history"); h && h->isBool())
+                history.setVisible(h->asBool());
         });
     uiFile.add(
         "window",
@@ -461,6 +480,7 @@ int main(int argc, char** argv) {
         midiEditor.sync();
         routing.sync();
         mixer.sync();
+        history.sync();
         meterFeed.poll();
         uiFile.tick((*app)->projectPath());
         const bool moved = shell.arrange()->poll();
@@ -518,6 +538,7 @@ int main(int argc, char** argv) {
             midiEditor.sync();
             routing.sync();
             mixer.sync();
+            history.sync();
             meterFeed.poll();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
@@ -538,6 +559,7 @@ int main(int argc, char** argv) {
         midiEditor.sync();
         routing.sync();
         mixer.sync();
+        history.sync();
         meterFeed.poll();
         root.damageAll();
         root.frame(false);

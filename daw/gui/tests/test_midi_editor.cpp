@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "app_actions.h"
+#include "history_panel.h"
 #include "midi_editor.h"
 #include "mixer.h"
 #include "routing_matrix.h"
@@ -431,4 +432,49 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     CHECK(mixer.strips()[0].meter->shownPeakDb(0) ==
           doctest::Approx(20 * std::log10(0.5)).epsilon(0.02));
     f.snapshot("mixer.png");
+}
+
+TEST_CASE(
+    "history dock: versions, jump back, redo, branches, the command log with agents attributed") {
+    Fixture f;
+    if (!f.ok) return;
+    gui::HistoryPanel history(*f.root, *f.actions, *f.dispatcher, *f.app);
+    f.editor->close();
+    {  // the app's layout: the dock is a full-height column on the right
+        auto frame = std::make_unique<ui::Node>("window");
+        frame->layout.dir = ui::Layout::Dir::Row;
+        frame->emplace<ui::Node>("arrange").layout.width = ui::SizeRule::fraction();
+        frame->add(history.build());
+        f.root->setContent(std::move(frame));
+    }
+    history.setVisible(true);
+    const cmd::Origin agent{cmd::Origin::Type::Agent, "panel", "model-x"};
+    f.exec("track.add", R"({"name":"A"})");
+    f.exec("track.add", R"({"name":"B"})");
+    REQUIRE(f.dispatcher->execute({"track.add", json::parse(R"({"name":"C"})").value(), agent}));
+    history.sync();
+    f.root->frame(false);
+    REQUIRE(history.versions().size() >= 4);
+    CHECK(history.versions().front().origin.rfind("agent:", 0) == 0);  // the head, by the agent
+    // The log: newest last, the agent's command attributed.
+    REQUIRE(!history.entries().empty());
+    CHECK(history.entries().back().origin == "agent:panel/model-x");
+    CHECK(history.entries().back().command == "track.add");
+    f.snapshot("history.png");
+    // Jump back two versions, then redo one.
+    const std::size_t tracks = f.app->head().tracks.size();
+    REQUIRE(history.jumpTo(2));
+    CHECK(f.app->head().tracks.size() == tracks - 2);
+    REQUIRE(f.root->click("history.redo"));
+    CHECK(f.app->head().tracks.size() == tracks - 1);
+    // Branches: create, edit there, back to main.
+    REQUIRE(history.createBranch("idea"));
+    history.sync();
+    CHECK(std::find(history.branches().begin(), history.branches().end(), "idea") !=
+          history.branches().end());
+    f.exec("track.add", R"({"name":"Idea"})");
+    REQUIRE(history.switchBranch("main"));
+    CHECK(f.app->head().tracks.size() == tracks - 1);
+    history.sync();
+    CHECK(history.entries().back().command == "branch.switch");
 }

@@ -508,7 +508,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                        j(R"({"entries":"<any>","last_seq":"<any>"})"), "song"}};
         c.run = [](const LogArgs& a, Context& ctx) -> Result<json::Value> {
             EngineApp& engine = app(ctx);
-            const cmd::Registry& registry = ctx.service<const cmd::Registry>();
+            const cmd::Registry& commands = ctx.service<const cmd::Registry>();
             static constexpr const char* kTypes[] = {"ui",   "lua",      "mcp",  "rpc",
                                                      "test", "internal", "agent"};
             auto originOf = [](const cmd::Origin& o) {
@@ -522,7 +522,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             for (auto it = records.rbegin(); it != records.rend(); ++it) {
                 if (a.since && it->seq <= static_cast<std::uint64_t>(*a.since)) break;
                 if (!a.queries) {
-                    const cmd::CommandInfo* info = registry.find(it->command, it->version);
+                    const cmd::CommandInfo* info = commands.find(it->command, it->version);
                     if (info && info->kind == Kind::Query) continue;
                 }
                 const std::string origin = originOf(it->origin);
