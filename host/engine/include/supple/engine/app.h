@@ -211,6 +211,8 @@ class EngineApp : public cmd::Host {
     // a write envelope never touched is flattened over the pass (one
     // transaction, "Automation written").
     void recordAutomation(model::Id object, const std::string& param, double value);
+    // Whether a change to this parameter would be recorded now.
+    bool writesAutomation(model::Id object, const std::string& param) const;
     // transport.loop / transport.punch (ADR-0015): transport state, not
     // versioned; the loop reaches the engine (now, and whenever it starts),
     // the punch range trims takes when a recording is committed.

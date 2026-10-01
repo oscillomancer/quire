@@ -742,7 +742,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
 
 namespace {
 
-bool writesAutomation(model::EnvMode m) {
+bool writingMode(model::EnvMode m) {
     return m == model::EnvMode::Touch || m == model::EnvMode::Latch ||
            m == model::EnvMode::LatchPreview || m == model::EnvMode::Write;
 }
@@ -788,22 +788,34 @@ double staticValue(const model::Session& s, const model::EnvTarget& t) {
 
 void EngineApp::beginAutomationPass(double beat) {
     autoWrite_.clear();
-    for (const auto& e : view().envelopes)
-        if (e.value->active && e.value->mode == model::EnvMode::Write) {
+    const model::Session s = view();
+    for (const auto& e : s.envelopes)
+        if (e.value->active && e.value->mode == model::EnvMode::Write &&
+            e.value->target.object.kind != model::Kind::Fx) {
             AutoWrite w;
             w.startBeat = w.lastBeat = beat;
-            w.lastValue = staticValue(view(), e.value->target);
+            w.lastValue = staticValue(s, e.value->target);
             autoWrite_[e.id] = w;
         }
 }
 
+bool EngineApp::writesAutomation(model::Id object, const std::string& param) const {
+    if (!engine_ || !txn_ || !engine_->transport().playing) return false;
+    const model::Session s = view();
+    for (const auto& e : s.envelopes)
+        if (e.value->target.object == object && e.value->target.param == param && e.value->active &&
+            writingMode(e.value->mode))
+            return true;
+    return false;
+}
+
 void EngineApp::recordAutomation(model::Id object, const std::string& param, double value) {
     if (!engine_ || !txn_ || !engine_->transport().playing) return;
-    const model::Session& s = view();
+    const model::Session s = view();
     std::optional<model::Id> envId;
     for (const auto& e : s.envelopes)
         if (e.value->target.object == object && e.value->target.param == param && e.value->active &&
-            writesAutomation(e.value->mode))
+            writingMode(e.value->mode))
             envId = e.id;
     if (!envId) return;
     const double beat = s.timeMap->beatAt(engine_->transport().seconds);

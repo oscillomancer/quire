@@ -1885,7 +1885,21 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [mergeRun](const FxParamSetArgs& a, Context& ctx) -> Result<MergeResult> {
             json::Value patch = json::Value::object();
             patch["params"] = a.values;
-            return mergeRun(A(ctx), a.fx, patch, "/values");
+            auto merged = mergeRun(A(ctx), a.fx, patch, "/values");
+            if (!merged || !a.values.isObject()) return merged;
+            // Touch/latch/write envelopes of these parameters record the change
+            // while the transport plays (values in the parameter's unit).
+            const auto fx = model::Id::parse(a.fx);
+            if (!fx) return merged;
+            for (const auto& m : a.values.asObject()) {
+                if (!A(ctx).writesAutomation(*fx, m.key)) continue;
+                const model::EnvTarget target{*fx, m.key};
+                auto domain = envDomain(A(ctx), A(ctx).view(), target, "/values");
+                if (!domain) continue;
+                if (auto v = envValue(*domain, m.value, "/values/" + m.key); v)
+                    A(ctx).recordAutomation(*fx, m.key, *v);
+            }
+            return merged;
         };
         registry.add(std::move(c));
     }

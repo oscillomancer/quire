@@ -1788,6 +1788,8 @@ TEST_CASE(
     call("env.add",
          R"({"track": "tr_1", "param": "volume", "points": [{"beat": 0, "value": -6}]})");
     call("env.add", R"({"track": "tr_1", "param": "pan", "points": [{"beat": 0, "value": 0}]})");
+    call("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain"})");
+    call("env.add", R"({"fx": "fx_1", "param": "gain", "points": [{"beat": 0, "value": "0 dB"}]})");
     auto points = [&](const char* env) {
         return app->head().envelopes.find(*model::Id::parse(env))->points;
     };
@@ -1796,6 +1798,7 @@ TEST_CASE(
     CHECK(points("en_1").size() == 1);
     call("env.set", R"({"env": "en_1", "mode": "touch"})");
     call("env.set", R"({"env": "en_2", "mode": "latch"})");
+    call("env.set", R"({"env": "en_3", "mode": "latch"})");
     call("track.set", R"({"track": "tr_1", "volume_db": -3})");  // stopped
     CHECK(points("en_1").size() == 1);
 
@@ -1808,6 +1811,7 @@ TEST_CASE(
     };
     waitBeats(0.5);
     call("track.set", R"({"track": "tr_1", "volume_db": -12, "pan": -50})");
+    call("fx.param.set", R"({"fx": "fx_1", "values": {"gain": "-12 dB"}})");  // text, in its unit
     waitBeats(0.5);
     call("track.set", R"({"track": "tr_1", "volume_db": -20, "pan": 40})");
     waitBeats(0.5);
@@ -1828,6 +1832,11 @@ TEST_CASE(
     CHECK(pan.back().value == doctest::Approx(40));
     CHECK(pan.back().pos >= stopBeat - 1e-6);
     CHECK(pan.back().pos > pan[pan.size() - 2].pos);
+    // A plugin parameter set through fx.param.set is recorded too (in its unit).
+    const auto gain = points("en_3");
+    REQUIRE(gain.size() == 4);  // start, hold, -12 dB, held to the stop
+    CHECK(gain[2].value == doctest::Approx(-12));
+    CHECK(gain.back().value == doctest::Approx(-12));
     // The stop's completion is one undo step of its own.
     auto history = call("history.list", "{}");
     CHECK(history["versions"].at(0).find("label")->asString() ==
