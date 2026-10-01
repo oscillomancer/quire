@@ -192,6 +192,7 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                 setPhysical(value, true);
             };
             slider->setValue(params::toNormalized(spec, physical));
+            slider->setDefault(params::toNormalized(spec, spec.def));
             slider->enabled = writable;
         }
         auto& field =

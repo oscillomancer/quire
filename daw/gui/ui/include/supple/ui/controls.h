@@ -48,13 +48,18 @@ class Fader : public Node {
 
 // A normalized slider: [0, 1] along its width, for values whose curve the
 // caller owns (a plugin parameter through core-params, a wet/dry percent).
-// Drags report a gesture like the fader, so a drag is one undo step.
+// Like the fader, a press never jumps the value: drags are relative to the
+// press (Shift for fine), a double click resets to the caller's default and
+// the keys/wheel step. Drags report a gesture, so a drag is one undo step.
 class Slider : public Node {
   public:
     explicit Slider(std::string id);
     std::function<void(double value, Gesture)> onChange;
     void setValue(double value);  // from the model; no callback
     double value() const { return value_; }
+    // What a double click (and the caller's "reset") returns to.
+    void setDefault(double value) { defaultValue_ = std::clamp(value, 0.0, 1.0); }
+    double defaultValue() const { return defaultValue_; }
     bool dragging() const { return dragging_; }
     static constexpr float kInset = 10;  // knob travel inset per side
 
@@ -66,9 +71,8 @@ class Slider : public Node {
 
   private:
     Rect track() const;
-    double valueAt(Point p) const;
     void change(double value, Gesture g);
-    double value_ = 0, pressValue_ = 0;
+    double value_ = 0, pressValue_ = 0, defaultValue_ = 0;
     Point press_{};
     bool dragging_ = false;
 };

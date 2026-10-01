@@ -315,12 +315,6 @@ Rect Slider::track() const {
     return {b.x + kInset, b.y, std::max(1.0f, b.w - 2 * kInset), b.h};
 }
 
-double Slider::valueAt(Point p) const {
-    const Rect tr = track();
-    const double width = static_cast<double>(tr.w);
-    return std::clamp((static_cast<double>(p.x) - static_cast<double>(tr.x)) / width, 0.0, 1.0);
-}
-
 void Slider::change(double value, Gesture g) {
     const double v = std::clamp(value, 0.0, 1.0);
     if (v != value_ || g == Gesture::Begin || g == Gesture::End) {
@@ -348,11 +342,15 @@ bool Slider::onPointer(const PointerEvent& e) {
         case T::Down:
             if (e.button != 1) return false;
             if (Root* r = root()) r->focus(this);
+            if (e.clicks >= 2) {  // reset to the caller's default
+                change(defaultValue_, Gesture::Set);
+                return true;
+            }
             dragging_ = true;
             press_ = e.pos;
             pressValue_ = value_;
             if (Root* r = root()) r->capture(this);
-            change(valueAt(e.pos), Gesture::Begin);
+            change(value_, Gesture::Begin);  // a press never jumps the value
             return true;
         case T::Move: {
             if (!dragging_) return false;

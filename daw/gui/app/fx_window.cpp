@@ -372,6 +372,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
             (void)dispatch("fx.set", std::move(args));
         };
         wet->setValue(inst->wet / 100.0);
+        wet->setDefault(1.0);  // a double click returns to fully wet
         wet->layout.width = ui::SizeRule::fixed(220);
         char wetText[24];
         std::snprintf(wetText, sizeof wetText, "wet %3.0f%%", inst->wet);
