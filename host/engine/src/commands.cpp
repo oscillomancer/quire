@@ -625,6 +625,34 @@ const char* formatName(audio::Container container) {
     return "";
 }
 
+// A media source added before hashes existed: there is no hash to match, so the
+// path (resolved the way the loader resolves it) and the header it was added
+// from decide whether the file is still the one it came from. Reusing it lets a
+// pre-hash project converge on one source per file instead of duplicating it.
+std::optional<model::Id> legacyMediaSourceFor(const model::Session& s, const fs::path& file,
+                                              const audio::FileInfo& info, const fs::path& media) {
+    const auto same = [](const fs::path& a, const fs::path& b) {
+        std::error_code ea, eb;
+        const fs::path ca = fs::weakly_canonical(a, ea);
+        const fs::path cb = fs::weakly_canonical(b, eb);
+        return (ea ? a.lexically_normal() : ca) == (eb ? b.lexically_normal() : cb);
+    };
+    for (const auto& e : s.media) {
+        const model::MediaSource& md = *e.value;
+        if (!md.hash.empty()) continue;  // a hashed source is matched by its bytes
+        if (md.sampleRate != info.sampleRate || md.channels != info.channels ||
+            md.frames != info.frames)
+            continue;  // not the recording the source was added from
+        std::filesystem::path path = md.path;
+        if (path.is_relative()) {
+            const fs::path inMedia = media / path;
+            path = fs::exists(inMedia) ? inMedia : media.parent_path() / path;
+        }
+        if (same(path, file)) return e.id;
+    }
+    return std::nullopt;
+}
+
 // Compiles notation into a MIDI source; the length in beats is the item's.
 Result<std::pair<model::MidiSource, double>> compileNotation(const model::Session& s,
                                                              const std::string& text,
@@ -1409,8 +1437,21 @@ void registerEngineCommands(cmd::Registry& registry) {
                     length = s.timeMap->beatAt(s.timeMap->secondsAt(pos) + secs) - pos;
                 }
                 // The same bytes are one media source: a second add of the same
-                // file reuses the source it already has.
-                if (const auto known = model::mediaSourceWithHash(s, *hash)) {
+                // file reuses the source it already has. A project saved before
+                // hashes existed has a source with none, so the file's path and
+                // header decide, and the source's hash is filled in with the
+                // bytes on disk now — an old project converges rather than
+                // growing a second source for the same file.
+                std::optional<model::Id> known = model::mediaSourceWithHash(s, *hash);
+                if (!known) {
+                    if (const auto legacy =
+                            legacyMediaSourceFor(s, *a.audioFile, *info, app.mediaDir()))
+                        known = *legacy;
+                    if (known)
+                        t.modify<model::MediaSource>(
+                            *known, [&](model::MediaSource& md) { md.hash = *hash; });
+                }
+                if (known) {
                     take.source = *known;
                     r.source = known->str();
                 } else {

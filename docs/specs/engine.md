@@ -239,8 +239,11 @@ preset's engine tests (with the dummy backend).
   has. Metadata for an import comes from the container's header
   (`audio::inspect`), never a decode: adding one file to many items costs one
   header read at a time. Projects saved before the hash existed keep their empty
-  hashes (the peak cache falls back to path + size + mtime); a file is hashed
-  when it is next imported or recorded.
+  hashes (the peak cache falls back to path + size + mtime); adding one of their
+  files again reuses its source — the path and the header it was added from
+  decide — and fills the hash with the bytes now on disk, so such a project
+  converges instead of growing a second source for one file. A file is hashed
+  the same way when it is recorded.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last

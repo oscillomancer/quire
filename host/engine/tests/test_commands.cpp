@@ -530,3 +530,56 @@ TEST_CASE("item.add hashes the file, reads its header, and adds one source per f
     REQUIRE(again != nullptr);
     CHECK(again->hash == md->hash);
 }
+
+TEST_CASE("item.add reuses a pre-hash source for the same file and backfills its hash") {
+    Workdir dir;
+    audio::AudioData source;
+    source.sampleRate = 48000;
+    source.channels.assign(2, std::vector<float>(48000));  // 1 s stereo
+    for (std::size_t i = 0; i < source.frames(); ++i)
+        source.channels[0][i] = source.channels[1][i] =
+            static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
+    const fs::path file = dir.path / "source.wav";
+    REQUIRE(audio::writeWav(file, source).ok());
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Audio"})");
+    const std::string add =
+        "{\"track\":\"tr_1\",\"audio_file\":" + json::writeCompact(json::Value(file.string())) +
+        "}";
+    run(bus, "item.add", add);
+
+    // A project saved before MediaSource::hash existed: the source keeps the
+    // file's path and header, and has no hash.
+    auto doc = model::projectToJson(app->head());
+    doc["schema"] = "supple.project/1.0";
+    doc["sources"]["media"]["md_1"]["hash"] = "";
+    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)).ok());
+    REQUIRE(app->open(dir.path / "legacy.json").ok());
+    REQUIRE(app->head().media.size() == 1);
+    const auto media = [&] { return app->head().media.find(model::Id{model::Kind::Media, 1}); };
+    REQUIRE(media() != nullptr);
+    CHECK(media()->hash.empty());
+
+    // Adding the same file again converges on that source and fills its hash,
+    // instead of growing a second source for one file.
+    const auto again = run(bus, "item.add", add);
+    CHECK(again.find("source")->asString() == "md_1");
+    CHECK(app->head().media.size() == 1);
+    CHECK(app->head().items.size() == 2);  // the item is still added
+    CHECK(media()->hash == sha256File(file).value());
+
+    // A different file of the same length is not conflated with it: the path
+    // has to be the same file, not just the same shape.
+    audio::AudioData other = source;
+    for (float& v : other.channels[0]) v *= 0.5f;
+    const fs::path otherFile = dir.path / "other.wav";
+    REQUIRE(audio::writeWav(otherFile, other).ok());
+    const auto third = run(bus, "item.add",
+                           "{\"track\":\"tr_1\",\"audio_file\":" +
+                               json::writeCompact(json::Value(otherFile.string())) + "}");
+    CHECK(third.find("source")->asString() == "md_2");
+    CHECK(app->head().media.size() == 2);
+}
