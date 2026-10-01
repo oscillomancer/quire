@@ -2,8 +2,11 @@
 
 #include "supple/views/envelope_lane.h"
 
+#include <SDL3/SDL_keycode.h>
+
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -80,6 +83,66 @@ std::string gestureFor(std::string_view what, const model::Id& track, std::uint6
 
 }  // namespace
 
+// Output gestures keep the source id in the panel, independent of pooled rows.
+class TcpPanel::OutButton : public ui::Button {
+  public:
+    OutButton(TcpPanel& panel, std::string id, std::function<std::optional<model::Id>()> track)
+        : Button(std::move(id), "out"), panel_(panel), track_(std::move(track)) {
+        onClick = [this] {
+            if (const auto from = track_(); from && panel_.cb_.routing)
+                panel_.cb_.routing(*from, bounds());
+        };
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (panel_.sendFrom_) return panel_.sendPointer(e, *panel_.sendFrom_, bounds());
+        const auto from = track_();
+        return from && panel_.sendPointer(e, *from, bounds());
+    }
+    bool onKey(const ui::KeyEvent& e) override {
+        if (e.key == SDLK_ESCAPE && panel_.sendFrom_) {
+            panel_.cancelSend();
+            if (root()) root()->capture(nullptr);
+            return true;
+        }
+        return Button::onKey(e);
+    }
+
+  private:
+    TcpPanel& panel_;
+    std::function<std::optional<model::Id>()> track_;
+};
+
+class TcpPanel::SendGhost : public ui::Node {
+  public:
+    explicit SendGhost(std::shared_ptr<TcpPanel*> alive)
+        : Node("tcp.send-ghost"), alive_(std::move(alive)) {}
+    void arrange(const ui::Canvas&, const ui::Rect&) override {
+        if (parent()) setBounds(parent()->bounds());
+    }
+    void paint(ui::Canvas& c) override {
+        if (!*alive_) return;
+        const auto& panel = **alive_;
+        if (!panel.sendFrom_ || !panel.sendMoved_) return;
+        const auto colour = c.theme().color("focus");
+        if (const auto row = panel.sendRowAt(panel.sendPointer_)) {
+            const ui::Rect tcp = panel.rowRect(*row).intersect(panel.bounds());
+            c.fillRect(tcp, colour.withAlpha(0.2f));
+            c.strokeRect(tcp.inset(0.5f), colour, 1);
+            if (panel.cb_.lanesRect) {
+                const ui::Rect lanes = panel.cb_.lanesRect();
+                c.fillRect(ui::Rect{lanes.x, tcp.y, lanes.w, tcp.h}.intersect(lanes),
+                           colour.withAlpha(0.1f));
+            }
+        }
+        c.line({panel.sendAnchor_.x + panel.sendAnchor_.w / 2,
+                panel.sendAnchor_.y + panel.sendAnchor_.h / 2},
+               panel.sendPointer_, colour, 2);
+    }
+
+  private:
+    std::shared_ptr<TcpPanel*> alive_;
+};
+
 // One strip's controls. Rows are pooled: a row is bound to a track and
 // re-bound as the scroll moves, so its controls keep their identity.
 class TcpPanel::Row : public ui::Node {
@@ -119,6 +182,7 @@ class TcpPanel::Row : public ui::Node {
     ui::Label* fx_ = nullptr;
     ui::Button* input_ = nullptr;
     ui::Button* env_ = nullptr;
+    OutButton* out_ = nullptr;
     std::string inputText_;  // the full label; arrange() clips it to fit
 };
 
@@ -206,6 +270,7 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         if (!track_ || !panel_.cb_.envelopes) return;
         panel_.cb_.envelopes(*track_, absoluteRect(*env_));
     });
+    out_ = &emplace<OutButton>(panel_, id + ".out", [this] { return track_; });
 }
 
 TcpPanel::Row::~Row() = default;
@@ -267,6 +332,7 @@ void TcpPanel::Row::unbind() {
 ui::Node* TcpPanel::Row::control(std::string_view what) const {
     if (what == "name") return name_;
     if (what == "env") return env_;
+    if (what == "out") return out_;
     if (what == "rename") return rename_;
     if (what == "mute") return mute_;
     if (what == "solo") return solo_;
@@ -299,7 +365,9 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     input_->visible = controls && channel_;
     fx_->visible = controls;
     env_->visible = controls;
-    float tx = x + 26 + indent;
+    out_->visible = controls;
+    // Keep both I/O buttons inside the TCP, even on deeply nested channels.
+    float tx = x + std::min(26 + indent, std::max(6.0f, r.w - 180));
     for (ui::Node* n : {static_cast<ui::Node*>(mute_), static_cast<ui::Node*>(solo_),
                         static_cast<ui::Node*>(arm_), static_cast<ui::Node*>(monitor_)}) {
         if (!n->visible) continue;
@@ -310,14 +378,20 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     if (input_->visible) {
         // The input names the device's ports; the strip has room for a short
         // one and the picker's menu shows them whole.
-        input_->arrange(canvas, {tx, ty, 58, 14});
-        tx += 60;
+        const float width = std::clamp(right - tx - 70, 12.0f, 58.0f);
+        input_->arrange(canvas, {tx, ty, width, 14});
+        tx += width + 2;
     }
     if (env_->visible) {
         env_->arrange(canvas, {tx, ty, 28, 14});
         tx += 30;
     }
-    if (fx_->visible) fx_->arrange(canvas, {tx, ty, std::max(20.0f, right - tx - 8), 14});
+    if (out_->visible) {
+        out_->arrange(canvas, {tx, ty, 28, 14});
+        tx += 30;
+    }
+    fx_->visible = controls && right - tx - 8 >= 20;
+    if (fx_->visible) fx_->arrange(canvas, {tx, ty, right - tx - 8, 14});
     fader_->visible = big;
     pan_->visible = big;
     if (big) {
@@ -377,6 +451,7 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
 TcpPanel::TcpPanel(const TrackLayout& rowLayout, const Viewport& view, TcpCallbacks callbacks)
     : Node("tcp", ui::Role::List), layout_(rowLayout), view_(view), cb_(std::move(callbacks)) {
     clipsChildren = true;
+    alive_ = std::make_shared<TcpPanel*>(this);
     add_ = &emplace<ui::Button>("tcp.add", "+ strip", [this] { openAddMenu(); });
     add_->layout.width = ui::SizeRule::fixed(56);
     add_->layout.height = ui::SizeRule::fixed(18);
@@ -401,10 +476,64 @@ void TcpPanel::openAddMenu() {
 }
 
 TcpPanel::~TcpPanel() {
+    *alive_ = nullptr;
     // The app's meter feed must not keep pointers to nodes that are going away.
     if (cb_.meterHidden)
         for (Row* row : rows_)
             if (row->bound()) cb_.meterHidden(meterOf(row));
+}
+
+std::optional<std::size_t> TcpPanel::sendRowAt(ui::Point p) const {
+    const ui::Rect lanes = cb_.lanesRect ? cb_.lanesRect() : ui::Rect{};
+    if (!bounds().contains(p) && !lanes.contains(p)) return std::nullopt;
+    for (std::size_t row = 0; row < layout_.rowCount(); ++row) {
+        const ui::Rect r = rowRect(row);
+        if (p.y >= r.y && p.y < r.bottom()) return row;
+    }
+    return std::nullopt;
+}
+
+void TcpPanel::cancelSend() {
+    sendFrom_.reset();
+    sendMoved_ = false;
+    if (root()) root()->requestAnimationFrame();
+}
+
+bool TcpPanel::sendPointer(const ui::PointerEvent& e, const model::Id& from,
+                           const ui::Rect& anchor) {
+    if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
+        sendFrom_ = from;
+        sendAnchor_ = anchor;
+        sendPress_ = sendPointer_ = e.pos;
+        sendMoved_ = false;
+        if (root() && !sendOverlay_) {
+            root()->overlay().add(std::make_unique<SendGhost>(alive_));
+            sendOverlay_ = true;
+        }
+        return true;
+    }
+    if (!sendFrom_) return false;
+    if (e.type != ui::PointerEvent::Type::Move && e.type != ui::PointerEvent::Type::Up)
+        return false;
+    sendPointer_ = e.pos;
+    sendMoved_ = sendMoved_ || std::hypot(e.pos.x - sendPress_.x, e.pos.y - sendPress_.y) >= 4;
+    if (root()) root()->requestAnimationFrame();
+    if (e.type == ui::PointerEvent::Type::Up && e.button == 1) {
+        const model::Id source = *sendFrom_;
+        const bool moved = sendMoved_;
+        const ui::Rect button = sendAnchor_;
+        const auto row = sendRowAt(e.pos);
+        cancelSend();
+        if (!moved) {
+            if (cb_.routing) cb_.routing(source, button);
+        } else if (row && cb_.addSend) {
+            const model::Id target = layout_.rows()[*row].track;
+            if (source == target) return true;
+            auto result = cb_.addSend(source, target);
+            if (!result && cb_.onError) cb_.onError(result.error());
+        }
+    }
+    return true;
 }
 
 ui::Rect TcpPanel::rowRect(std::size_t row) const {

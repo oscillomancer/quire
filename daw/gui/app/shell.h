@@ -56,6 +56,8 @@ class Shell {
     const json::Value& inputs(bool force = false);
     // Shown by the app's status line when a command fails.
     std::function<void(const std::string&)> onError;
+    // The TCP's output click hands the matrix its strip and popup anchor.
+    std::function<void(const model::Id&, const ui::Rect&)> onRouting;
 
   private:
     bool isSelected(const model::Id& track) const;

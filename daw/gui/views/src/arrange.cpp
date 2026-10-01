@@ -664,6 +664,20 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     forward.envelopes = [this](const model::Id& id, const ui::Rect& anchor) {
         if (tcpCallbacks_.envelopes) tcpCallbacks_.envelopes(id, anchor);
     };
+    forward.addSend = [this](const model::Id& from, const model::Id& to) -> Result<json::Value> {
+        if (tcpCallbacks_.addSend) return tcpCallbacks_.addSend(from, to);
+        return Error("gui.send", "send editing is unavailable", {}, "wire the TCP send callback");
+    };
+    forward.onError = [this](const Error& error) {
+        if (tcpCallbacks_.onError) tcpCallbacks_.onError(error);
+    };
+    forward.routing = [this](const model::Id& track, const ui::Rect& anchor) {
+        if (tcpCallbacks_.routing) tcpCallbacks_.routing(track, anchor);
+    };
+    forward.lanesRect = [this] {
+        return tcpCallbacks_.lanesRect ? tcpCallbacks_.lanesRect() : ui::Rect{};
+    };
+
     tcp_ = &body.emplace<TcpPanel>(layout_, view_, std::move(forward));
     tcp_->layout.width = ui::SizeRule::fixed(kTcpWidth);
     auto& lanesCol = body.emplace<Node>("lanes-column");
