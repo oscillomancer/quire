@@ -1,0 +1,132 @@
+{
+  "changed_modules": [
+    "filters.filter1"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "2 ms",
+        "decay": "400 ms",
+        "release": "80 ms",
+        "sustain": "40 %"
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "180 ms",
+        "sustain": 0
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "450 Hz",
+        "resonance": "35 %",
+        "slope": "24 dB",
+        "type": "ladder"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "type": "va",
+        "wave": "saw"
+      },
+      "osc2": {
+        "level": "-6 dB",
+        "octave": -1,
+        "type": "sub",
+        "wave": "sine"
+      }
+    },
+    "routes": {
+      "env2>filter1.cutoff": {
+        "amount": "+3 oct"
+      },
+      "velocity>filter1.cutoff": {
+        "amount": "+1 oct"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "mode": "mono"
+    }
+  },
+  "id": "reference.pluck-bass",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Is the filter snap short and audible, with convincing bass weight?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 2,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "2 ms",
+        "decay": "400 ms",
+        "release": "80 ms",
+        "sustain": "40 %"
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "180 ms",
+        "sustain": 0
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "300 Hz",
+        "resonance": "35 %",
+        "slope": "24 dB",
+        "type": "ladder"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "type": "va",
+        "wave": "saw"
+      },
+      "osc2": {
+        "level": "-6 dB",
+        "octave": -1,
+        "type": "sub",
+        "wave": "sine"
+      }
+    },
+    "routes": {
+      "env2>filter1.cutoff": {
+        "amount": "+3 oct"
+      },
+      "velocity>filter1.cutoff": {
+        "amount": "+1 oct"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "mode": "mono"
+    }
+  },
+  "suite": "synth-reference",
+  "tier": 1
+}

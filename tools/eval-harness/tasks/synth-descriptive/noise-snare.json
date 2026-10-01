@@ -1,0 +1,51 @@
+{
+  "id": "synth.noise-snare",
+  "limits": {
+    "minutes": 8,
+    "tool_calls": 60
+  },
+  "listening": "Is the body audible under the fizz, and does the hit end cleanly?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:e r:*",
+  "prompt": "Program Orrery as a short noise snare with a pitched body, band-limited fizz and a punchy fast attack.",
+  "recipe_index": 8,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "profile": {
+      "schema": "supple.analysis-profile/1.0",
+      "targets": {
+        "envelope.attack_ms": {
+          "max": 30,
+          "min": 0
+        },
+        "envelope.decay20_ms": {
+          "max": 600,
+          "min": 30
+        },
+        "spectral.centroid_hz.median": {
+          "max": 6000,
+          "min": 500
+        }
+      }
+    },
+    "reference": null
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-descriptive"
+}

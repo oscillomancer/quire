@@ -795,6 +795,37 @@ Result<const RenderRecord*> Session::render(const RenderInput& input) {
     audio::WavOptions wav;
     wav.format = audio::SampleFormat::Float32;
     SUPPLE_TRY(audio::writeWav(rec.path, result->audio, wav));
+    if (options_.recordMidi && input.notes) {
+        json::Value midi = json::Value::object();
+        midi["schema"] = "supple.render-midi/1.0";
+        midi["ppq"] = input.notes->ppq;
+        midi["length_ticks"] = input.notes->length;
+        const auto meter =
+            input.meter.value_or(midi::Meter{settings_.numerator, settings_.denominator});
+        midi["meter"] = std::to_string(meter.numerator) + "/" + std::to_string(meter.denominator);
+        midi["bar_meters"] = json::Value::array();
+        for (const auto& m : input.barMeters)
+            midi["bar_meters"].push_back(std::to_string(m.numerator) + "/" +
+                                         std::to_string(m.denominator));
+        midi["notes"] = json::Value::array();
+        for (const auto& note : input.notes->notes) {
+            json::Value n = json::Value::object();
+            n["start"] = note.start;
+            n["length"] = note.length;
+            n["pitch"] = static_cast<int>(note.pitch);
+            n["velocity"] = static_cast<int>(note.velocity);
+            n["channel"] = static_cast<int>(note.channel);
+            midi["notes"].push_back(std::move(n));
+        }
+        auto sidecar = rec.path;
+        sidecar.replace_extension(".midi.json");
+        auto saved = writeFileAtomic(sidecar, json::writeCanonical(midi));
+        if (!saved) {
+            std::error_code ec;
+            fs::remove(rec.path, ec);
+            return std::move(saved).error();
+        }
+    }
     const std::string id = rec.id;
     auto [it, inserted] = renders_.emplace(id, std::move(rec));
     (void)inserted;
@@ -863,7 +894,12 @@ void Session::reset() {
     chain_.clear();
     instances_.clear();
     std::error_code ec;
-    for (const auto& [id, r] : renders_) fs::remove(r.path, ec);
+    for (const auto& [id, r] : renders_) {
+        fs::remove(r.path, ec);
+        auto sidecar = r.path;
+        sidecar.replace_extension(".midi.json");
+        fs::remove(sidecar, ec);
+    }
     renders_.clear();
     settings_ = {};
 }
@@ -905,6 +941,9 @@ void Session::rollback() {
             ++it;
         } else {
             fs::remove(it->second.path, ec);
+            auto sidecar = it->second.path;
+            sidecar.replace_extension(".midi.json");
+            fs::remove(sidecar, ec);
             it = renders_.erase(it);
         }
     }

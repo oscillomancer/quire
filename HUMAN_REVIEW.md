@@ -64,6 +64,48 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
+### 14. Evaluation listening — 20260930T213159630301Z-synth-descriptive-hermes
+Suite: synth-descriptive, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `synth.sub-bass`: `docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
+
+### 15. Evaluation listening — 20260930T214545229198Z-synth-descriptive-dry
+Suite: synth-descriptive, runner/model: dry/scripted. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `synth.acid-bass`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.acid-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.acid-bass-worst.wav` — Is the resonant snap recognizably acid-like and controlled?
+- `synth.bell`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.bell-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.bell-worst.wav` — Does the strike sound metallic, with a smooth ringing decay?
+- `synth.fm-e-piano`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.fm-e-piano-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.fm-e-piano-worst.wav` — Does the attack have FM character while the body stays mellow?
+- `synth.formant-lead`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.formant-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.formant-lead-worst.wav` — Can you hear vowel-like movement without losing the pitched lead?
+- `synth.noise-snare`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.noise-snare-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.noise-snare-worst.wav` — Is the body audible under the fizz, and does the hit end cleanly?
+- `synth.pad`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.pad-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.pad-worst.wav` — Does it swell warmly and stay wide without sounding harsh?
+- `synth.pluck-bass`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.pluck-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.pluck-bass-worst.wav` — Is the filter snap short and audible, with convincing bass weight?
+- `synth.strings`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.strings-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.strings-worst.wav` — Does it feel like a cohesive sustained ensemble with a natural swell?
+- `synth.sub-bass`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
+- `synth.supersaw-lead`: `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.supersaw-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214545229198Z-synth-descriptive-dry/synth.supersaw-lead-worst.wav` — Is this a bright, playable lead with a stable wide image?
+
+### 16. Evaluation listening — 20260930T214622436678Z-synth-reference-dry
+Suite: synth-reference, runner/model: dry/scripted. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `reference.acid-bass`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.acid-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.acid-bass-worst.wav` — Is the resonant snap recognizably acid-like and controlled?
+- `reference.bell`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.bell-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.bell-worst.wav` — Does the strike sound metallic, with a smooth ringing decay?
+- `reference.fm-e-piano`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.fm-e-piano-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.fm-e-piano-worst.wav` — Does the attack have FM character while the body stays mellow?
+- `reference.formant-lead`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.formant-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.formant-lead-worst.wav` — Can you hear vowel-like movement without losing the pitched lead?
+- `reference.noise-snare`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.noise-snare-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.noise-snare-worst.wav` — Is the body audible under the fizz, and does the hit end cleanly?
+- `reference.pad`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.pad-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.pad-worst.wav` — Does it swell warmly and stay wide without sounding harsh?
+- `reference.pluck-bass`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.pluck-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.pluck-bass-worst.wav` — Is the filter snap short and audible, with convincing bass weight?
+- `reference.strings`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.strings-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.strings-worst.wav` — Does it feel like a cohesive sustained ensemble with a natural swell?
+- `reference.sub-bass`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
+- `reference.supersaw-lead`: `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.supersaw-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214622436678Z-synth-reference-dry/reference.supersaw-lead-worst.wav` — Is this a bright, playable lead with a stable wide image?
+
+### 17. Evaluation listening — 20260930T214717085143Z-notation-dry
+Suite: notation, runner/model: dry/scripted. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `notation.bass-riff`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.bass-riff-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.bass-riff-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.chords`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.chords-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.chords-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.drums`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.drums-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.drums-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.triplet-lead`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.triplet-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.triplet-lead-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.waltz`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.waltz-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.waltz-worst.wav` — Does the rhythm and register fit the requested phrase?
+
 ## Resolved
 
 ### 8. Which models and budget for automated LLM evaluations — decision

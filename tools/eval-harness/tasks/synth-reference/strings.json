@@ -1,0 +1,92 @@
+{
+  "changed_modules": [],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "400 ms",
+        "release": "800 ms",
+        "sustain": "90 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "2.3 kHz",
+        "mode": "lowpass",
+        "resonance": "5 %",
+        "type": "svf"
+      }
+    },
+    "fx": {
+      "chain": [
+        "chorus",
+        "reverb"
+      ],
+      "reverb": {
+        "mix": "30 %",
+        "size": "80 %"
+      }
+    },
+    "lfos": {
+      "lfo1": {
+        "fade": "600 ms",
+        "rate": "5 Hz"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "type": "va",
+        "wave": "saw"
+      },
+      "osc2": {
+        "fine": "+8 ct",
+        "level": "-3 dB",
+        "type": "va",
+        "wave": "saw"
+      }
+    },
+    "routes": {
+      "lfo1>osc1.fine": {
+        "amount": "0.05 st"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "unison": 3,
+      "unison_detune": "16 ct",
+      "unison_spread": "90 %"
+    }
+  },
+  "id": "reference.strings",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Does it feel like a cohesive sustained ensemble with a natural swell?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 10,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-reference",
+  "tier": 3
+}

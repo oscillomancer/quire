@@ -1,0 +1,45 @@
+{
+  "id": "notation.bass-riff",
+  "limits": {
+    "minutes": 4,
+    "tool_calls": 20
+  },
+  "listening": "Does the rhythm and register fit the requested phrase?",
+  "phrase": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e r:e C2:e Eb2:e G1:e Bb1:e C2:e r:e\n2: C2:e Eb2:e C2:e Bb1:e G1:e r:e Bb1:e C2:e",
+  "prompt": "Write two bars in 4/4 at 120 BPM: a bass riff in C minor, pitches G1 through Eb2, six to eight notes per bar with rests.",
+  "recipe_index": 2,
+  "render": {
+    "tail_s": 0
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "structure": {
+      "bars": 2,
+      "meter": "4/4",
+      "notes_per_bar": [
+        6,
+        8
+      ],
+      "pitch_range": [
+        31,
+        39
+      ]
+    }
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 0,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "notation"
+}

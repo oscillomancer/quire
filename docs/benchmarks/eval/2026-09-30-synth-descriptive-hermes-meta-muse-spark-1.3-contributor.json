@@ -1,0 +1,232 @@
+{
+  "git_hash": "508a229fd677e845a8adc3b3d68e0c2b572acb59",
+  "listening_audio": "docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes",
+  "median_loss": 0.0,
+  "model": "meta/muse-spark-1.3-contributor",
+  "pass_rate": 1.0,
+  "provider": "openrouter",
+  "run_directory": "build/eval/20260930T213159630301Z-synth-descriptive-hermes",
+  "run_id": "20260930T213159630301Z-synth-descriptive-hermes",
+  "runner": "hermes",
+  "schema": "supple.eval-report/1.0",
+  "seed": 42,
+  "skill_hash": "73b852df9eb97f84eae9d0ba7ac733fad3c7f8e5e60910287f9cf03defe0b52b",
+  "started_utc": "2026-09-30T21:31:59.630301+00:00",
+  "suite": "synth-descriptive",
+  "task_hashes": {
+    "synth.sub-bass": "2f2cd08b436c0bdc722700ad5490b017cb0b0594a2387ae5805c4016835780f4"
+  },
+  "tasks": [
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 4
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 3.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 80.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 100.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "direct",
+            "type": "va",
+            "wave": "sine",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 0,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 20.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "listening": "Is the sub clean and solid, free of clicks or harsh upper harmonics?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-1-score/renders/rd_1.wav",
+      "render_sha256": "2b72e7fdfa2d72b58fba4699f02cbea718059858c89d6b6cc60741f09f90b1a2",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "hermes_version": "Hermes Agent vunknown (2026.9.24)\nInstall directory: /home/nate/.hermes/installs/19c747d6945b927c/environments/1ea808dae7474a7c82896f6ee4f9a2c7/workspace\nInstall method: unknown\nPython: 3.14.7\nOpenAI SDK: 2.24.0",
+        "model": "meta/muse-spark-1.3-contributor",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 51.28009973198641
+      },
+      "score": {
+        "loss": 0.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "profile_loss": 0.0,
+        "targets": [
+          {
+            "distance": 0.0,
+            "key": "spectral.bands.low.level_db",
+            "pass": true,
+            "value": -1.719
+          },
+          {
+            "distance": 0.0,
+            "key": "spectral.centroid_hz.median",
+            "pass": true,
+            "value": 67.122
+          },
+          {
+            "distance": 0.0,
+            "key": "stereo.width",
+            "pass": true,
+            "value": 0.0
+          }
+        ]
+      },
+      "seed": 42,
+      "task": "synth.sub-bass",
+      "transcript": "build/eval/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 17943,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.013261386,
+        "failed": false,
+        "input_tokens": 129005,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 1625,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 731,
+        "service_tier": null,
+        "session_id": "20260930_163203_1a2aa9",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.013261386,
+          "total_tokens": 149597
+        },
+        "total_tokens": 148573,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 53.109
+    }
+  ],
+  "usage_totals": {
+    "cost_known": true,
+    "estimated_cost_usd": 0.013261386,
+    "total_tokens": 149597
+  },
+  "working_tree_dirty": true
+}

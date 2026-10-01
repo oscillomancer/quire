@@ -1,0 +1,89 @@
+{
+  "changed_modules": [],
+  "hidden_patch": {
+    "drive": {
+      "amount": "3 dB",
+      "type": "soft"
+    },
+    "envelopes": {
+      "amp": {
+        "attack": "0 ms",
+        "decay": "220 ms",
+        "release": "100 ms",
+        "sustain": 0
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "40 ms",
+        "sustain": 0
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "2.6 kHz",
+        "mode": "bandpass",
+        "resonance": "20 %",
+        "type": "svf"
+      },
+      "filter2": {
+        "cutoff": "220 Hz",
+        "damping": "65 %",
+        "feedback": "35 %",
+        "type": "comb"
+      },
+      "routing": "serial"
+    },
+    "oscillators": {
+      "osc1": {
+        "color": "white",
+        "type": "noise"
+      },
+      "osc2": {
+        "coarse": -12,
+        "level": "-6 dB",
+        "to": "direct",
+        "type": "va",
+        "wave": "triangle"
+      }
+    },
+    "routes": {
+      "env2>osc2.pitch": {
+        "amount": "+12 st"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0"
+  },
+  "id": "reference.noise-snare",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Is the body audible under the fizz, and does the hit end cleanly?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:e r:*",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 8,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-reference",
+  "tier": 3
+}

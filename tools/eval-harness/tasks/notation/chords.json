@@ -1,0 +1,45 @@
+{
+  "id": "notation.chords",
+  "limits": {
+    "minutes": 4,
+    "tool_calls": 20
+  },
+  "listening": "Does the rhythm and register fit the requested phrase?",
+  "phrase": "notation 1\nmeter 4/4\nvoice keys ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w",
+  "prompt": "Write two bars in 4/4 of sustained C-major and A-minor triads, one whole-note chord each. Keep every pitch between C4 and C5.",
+  "recipe_index": 1,
+  "render": {
+    "tail_s": 0
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "structure": {
+      "bars": 2,
+      "meter": "4/4",
+      "notes_per_bar": [
+        3,
+        3
+      ],
+      "pitch_range": [
+        60,
+        72
+      ]
+    }
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 0,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "notation"
+}

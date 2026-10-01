@@ -1,0 +1,51 @@
+{
+  "id": "synth.sub-bass",
+  "limits": {
+    "minutes": 8,
+    "tool_calls": 60
+  },
+  "listening": "Is the sub clean and solid, free of clicks or harsh upper harmonics?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
+  "prompt": "Program Orrery as a clean mono sub bass: smooth sine fundamental, fast start and short release.",
+  "recipe_index": 4,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "profile": {
+      "schema": "supple.analysis-profile/1.0",
+      "targets": {
+        "spectral.bands.low.level_db": {
+          "max": 0,
+          "min": -8
+        },
+        "spectral.centroid_hz.median": {
+          "max": 220,
+          "min": 40
+        },
+        "stereo.width": {
+          "max": 0.015,
+          "min": 0
+        }
+      }
+    },
+    "reference": null
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-descriptive"
+}

@@ -1,0 +1,124 @@
+{
+  "changed_modules": [
+    "envelopes.amp",
+    "envelopes.env2",
+    "oscillators.osc2"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "0 ms",
+        "decay": "3 s",
+        "release": "500 ms",
+        "sustain": 0
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "650 ms",
+        "sustain": 0
+      }
+    },
+    "fx": {
+      "chain": [
+        "reverb"
+      ]
+    },
+    "oscillators": {
+      "osc1": {
+        "ratio": 1,
+        "type": "fm"
+      },
+      "osc2": {
+        "level": "-15 dB",
+        "ratio": 3.5,
+        "ratio_mode": "free",
+        "to": "none",
+        "type": "fm"
+      }
+    },
+    "routes": {
+      "env2>osc2.level": {
+        "amount": "+12 dB"
+      },
+      "osc2>osc1.fm": {
+        "amount": 3
+      }
+    },
+    "schema": "supple.orrery-patch/1.0"
+  },
+  "id": "reference.bell",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Does the strike sound metallic, with a smooth ringing decay?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:q r:*",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 6,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "0 ms",
+        "decay": "3 s",
+        "release": "2 s",
+        "sustain": 0
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "1.5 s",
+        "sustain": 0
+      }
+    },
+    "fx": {
+      "chain": [
+        "reverb"
+      ]
+    },
+    "oscillators": {
+      "osc1": {
+        "ratio": 1,
+        "type": "fm"
+      },
+      "osc2": {
+        "level": "-12 dB",
+        "ratio": 3.5,
+        "ratio_mode": "free",
+        "to": "none",
+        "type": "fm"
+      }
+    },
+    "routes": {
+      "env2>osc2.level": {
+        "amount": "+12 dB"
+      },
+      "osc2>osc1.fm": {
+        "amount": 3
+      }
+    },
+    "schema": "supple.orrery-patch/1.0"
+  },
+  "suite": "synth-reference",
+  "tier": 2
+}

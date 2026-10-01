@@ -1,0 +1,975 @@
+{
+  "git_hash": "508a229fd677e845a8adc3b3d68e0c2b572acb59",
+  "listening_audio": "docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry",
+  "median_loss": 0.0,
+  "model": "scripted",
+  "pass_rate": 1.0,
+  "provider": "none",
+  "run_directory": "build/eval/20260930T214717085143Z-notation-dry",
+  "run_id": "20260930T214717085143Z-notation-dry",
+  "runner": "dry",
+  "schema": "supple.eval-report/1.0",
+  "seed": 42,
+  "skill_hash": "73b852df9eb97f84eae9d0ba7ac733fad3c7f8e5e60910287f9cf03defe0b52b",
+  "started_utc": "2026-09-30T21:47:17.085143+00:00",
+  "suite": "notation",
+  "task_hashes": {
+    "notation.bass-riff": "db13f29fcac03f54a482e5d907b73881cbde1532a3b318fcd0bfd1417ca9dde2",
+    "notation.chords": "12d54b552d667dce25d49c034c8800613dfcbea4f5490844b430bc2663052612",
+    "notation.drums": "e70d87c0bd712abe589f5b66fb3f7ced8d21935ba061f1d623b0debe0531c6c8",
+    "notation.triplet-lead": "75663790e687fb607636a5999fc95f060fe26ec4a84fca08e246698b81816249",
+    "notation.waltz": "fbfc54c80f7013577689428fa46ac45ecb155e4657f7d4b48bbd2eb7562f4133"
+  },
+  "tasks": [
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e r:e C2:e Eb2:e G1:e Bb1:e C2:e r:e\n2: C2:e Eb2:e C2:e Bb1:e G1:e r:e Bb1:e C2:e"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e r:e C2:e Eb2:e G1:e Bb1:e C2:e r:e\n2: C2:e Eb2:e C2:e Bb1:e G1:e r:e Bb1:e C2:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 2.0,
+            "attack_curve": 0.0,
+            "decay": 400.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 80.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 40.0
+          },
+          "env2": {
+            "attack": 0.0,
+            "attack_curve": 0.0,
+            "decay": 180.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 0.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 300.0,
+            "drive": 0.0,
+            "keytrack": 0.0,
+            "level": 0.0,
+            "resonance": 35.0,
+            "slope": "24 dB",
+            "type": "ladder"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          },
+          "osc2": {
+            "level": -6.0,
+            "octave": -1,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "to": "filter1",
+            "type": "sub",
+            "wave": "sine"
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {
+          "env2>filter1.cutoff": {
+            "amount": 3.0
+          },
+          "velocity>filter1.cutoff": {
+            "amount": 1.0
+          }
+        },
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T214717085143Z-notation-dry/notation.bass-riff-1-score/renders/rd_1.wav",
+      "render_sha256": "6cd14b78d60435027d191e6149374a54f0d683f41be98873640c61fbd6d32cd8",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "model": "scripted",
+        "provider": "none",
+        "timed_out": false
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 6.5,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          31,
+          39
+        ]
+      },
+      "seed": 42,
+      "task": "notation.bass-riff",
+      "transcript": "build/eval/20260930T214717085143Z-notation-dry/notation.bass-riff-1/transcript.jsonl",
+      "usage": {
+        "completed": true,
+        "estimated_cost_usd": 0,
+        "model": "scripted",
+        "provider": "none",
+        "total_tokens": 0
+      },
+      "valid_patch": true,
+      "wall_seconds": 3.038
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice keys ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice keys ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 600.0,
+            "attack_curve": 0.0,
+            "decay": 1200.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 1500.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 80.0
+          },
+          "env2": {
+            "attack": 1500.0,
+            "attack_curve": 0.0,
+            "decay": 3000.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 2000.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 30.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 1200.0,
+            "drive": 0.0,
+            "keytrack": 0.0,
+            "level": 0.0,
+            "resonance": 25.0,
+            "slope": "24 dB",
+            "type": "ladder"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": [
+            "chorus",
+            "reverb"
+          ],
+          "chorus": {
+            "depth": 30.0,
+            "mix": 50.0,
+            "rate": 0.5,
+            "voices": 2
+          },
+          "reverb": {
+            "damping": 40.0,
+            "decay": 2000.0,
+            "mix": 25.0,
+            "predelay": 10.0,
+            "size": 70.0,
+            "width": 100.0
+          }
+        },
+        "lfos": {
+          "lfo1": {
+            "fade": 0.0,
+            "phase": 0.0,
+            "polarity": "bipolar",
+            "rate": 0.2,
+            "retrigger": "free",
+            "sync": "off",
+            "wave": "sine"
+          }
+        },
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": -7.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          },
+          "osc2": {
+            "coarse": 0,
+            "fine": 7.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "sync": false,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {
+          "env2>filter1.cutoff": {
+            "amount": 2.0
+          },
+          "lfo1>osc1.fine": {
+            "amount": 0.08
+          }
+        },
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 3,
+          "unison_detune": 12.0,
+          "unison_spread": 70.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T214717085143Z-notation-dry/notation.chords-1-score/renders/rd_1.wav",
+      "render_sha256": "79f257b862e793f45a07718c451881d3516576874967ff6d78e19c6c4e5bd5c2",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "model": "scripted",
+        "provider": "none",
+        "timed_out": false
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          69
+        ]
+      },
+      "seed": 42,
+      "task": "notation.chords",
+      "transcript": "build/eval/20260930T214717085143Z-notation-dry/notation.chords-1/transcript.jsonl",
+      "usage": {
+        "completed": true,
+        "estimated_cost_usd": 0,
+        "model": "scripted",
+        "provider": "none",
+        "total_tokens": 0
+      },
+      "valid_patch": true,
+      "wall_seconds": 4.158
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice drums ch 10 grid e\n1: snare x.x.x.x.\n2 = 1"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice drums ch 10 grid e\n1: snare x.x.x.x.\n2 = 1",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 0.0,
+            "attack_curve": 0.0,
+            "decay": 150.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 100.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 0.0
+          },
+          "env2": {
+            "attack": 0.0,
+            "attack_curve": 0.0,
+            "decay": 40.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 0.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 1800.0,
+            "drive": 0.0,
+            "keytrack": 0.0,
+            "level": 0.0,
+            "mode": "bandpass",
+            "resonance": 20.0,
+            "type": "svf"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "color": "white",
+            "level": -6.0,
+            "pan": 0.0,
+            "tilt": 0.0,
+            "to": "filter1",
+            "type": "noise"
+          },
+          "osc2": {
+            "coarse": -12,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "sync": false,
+            "to": "direct",
+            "type": "va",
+            "wave": "triangle",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {
+          "env2>osc2.pitch": {
+            "amount": 12.0
+          }
+        },
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T214717085143Z-notation-dry/notation.drums-1-score/renders/rd_1.wav",
+      "render_sha256": "21ad20a0222ffeba2142bbb11b84594cdb738c65994e2787fd00767dbe0e97d1",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "model": "scripted",
+        "provider": "none",
+        "timed_out": false
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 4.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          38,
+          38
+        ]
+      },
+      "seed": 42,
+      "task": "notation.drums",
+      "transcript": "build/eval/20260930T214717085143Z-notation-dry/notation.drums-1/transcript.jsonl",
+      "usage": {
+        "completed": true,
+        "estimated_cost_usd": 0,
+        "model": "scripted",
+        "provider": "none",
+        "total_tokens": 0
+      },
+      "valid_patch": true,
+      "wall_seconds": 3.156
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice lead ch 1\n1: C4:e3 E4:e3 G4:e3 E4:e3 G4:e3 E4:e3 C4:e3 E4:e3 G4:e3 G4:e3 E4:e3 C4:e3"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice lead ch 1\n1: C4:e3 E4:e3 G4:e3 E4:e3 G4:e3 E4:e3 C4:e3 E4:e3 G4:e3 G4:e3 E4:e3 C4:e3",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 250.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 90.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 6000.0,
+            "drive": 0.0,
+            "keytrack": 0.0,
+            "level": 0.0,
+            "mode": "lowpass",
+            "resonance": 10.0,
+            "type": "svf"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": [
+            "delay",
+            "reverb"
+          ],
+          "delay": {
+            "damping": 30.0,
+            "feedback": 35.0,
+            "mix": 20.0,
+            "ping_pong": false,
+            "sync": "1/8.",
+            "time": 375.0
+          },
+          "reverb": {
+            "damping": 40.0,
+            "decay": 2000.0,
+            "mix": 15.0,
+            "predelay": 10.0,
+            "size": 50.0,
+            "width": 100.0
+          }
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 7,
+          "unison_detune": 25.0,
+          "unison_spread": 80.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T214717085143Z-notation-dry/notation.triplet-lead-1-score/renders/rd_1.wav",
+      "render_sha256": "91b5e676fc9962c8870a7309378ba6470a8f2906cbcf1a37d8d35611bf67352c",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "model": "scripted",
+        "provider": "none",
+        "timed_out": false
+      },
+      "score": {
+        "bars": 1.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 12.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          67
+        ]
+      },
+      "seed": 42,
+      "task": "notation.triplet-lead",
+      "transcript": "build/eval/20260930T214717085143Z-notation-dry/notation.triplet-lead-1/transcript.jsonl",
+      "usage": {
+        "completed": true,
+        "estimated_cost_usd": 0,
+        "model": "scripted",
+        "provider": "none",
+        "total_tokens": 0
+      },
+      "valid_patch": true,
+      "wall_seconds": 3.349
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 3.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 80.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 100.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "direct",
+            "type": "va",
+            "wave": "sine",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 20.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/.herdr/worktrees/quire/p3-contour/build/eval/20260930T214717085143Z-notation-dry/notation.waltz-1-score/renders/rd_1.wav",
+      "render_sha256": "ef23769d1d6b62562f56e9cdfa5b6ef83aa4a3dd60b56c4b8662da9eee845336",
+      "repeat": 1,
+      "runner": {
+        "exit_code": 0,
+        "model": "scripted",
+        "provider": "none",
+        "timed_out": false
+      },
+      "score": {
+        "bars": 4.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          72
+        ]
+      },
+      "seed": 42,
+      "task": "notation.waltz",
+      "transcript": "build/eval/20260930T214717085143Z-notation-dry/notation.waltz-1/transcript.jsonl",
+      "usage": {
+        "completed": true,
+        "estimated_cost_usd": 0,
+        "model": "scripted",
+        "provider": "none",
+        "total_tokens": 0
+      },
+      "valid_patch": true,
+      "wall_seconds": 2.977
+    }
+  ],
+  "usage_totals": {
+    "cost_known": true,
+    "estimated_cost_usd": 0.0,
+    "total_tokens": 0
+  },
+  "working_tree_dirty": true
+}

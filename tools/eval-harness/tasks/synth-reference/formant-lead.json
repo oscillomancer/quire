@@ -1,0 +1,101 @@
+{
+  "changed_modules": [],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "20 ms",
+        "release": "200 ms",
+        "sustain": "90 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "type": "formant",
+        "vowel": 1.8
+      }
+    },
+    "fx": {
+      "chain": [
+        "delay"
+      ]
+    },
+    "lfos": {
+      "lfo1": {
+        "rate": "0.8 Hz"
+      }
+    },
+    "macros": {
+      "macro1": {
+        "name": "Vowel colour",
+        "value": "25 %"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "position": "65 %",
+        "table": "formant",
+        "type": "wavetable"
+      }
+    },
+    "routes": {
+      "lfo1>osc1.position": {
+        "amount": "40 %"
+      },
+      "macro1>filter1.vowel": {
+        "amount": 0.6
+      },
+      "step1>filter1.vowel": {
+        "amount": 0.8
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "steps": {
+      "step1": {
+        "sync": "1/4",
+        "values": [
+          0,
+          0.2,
+          0.6,
+          0.3
+        ]
+      }
+    },
+    "voice": {
+      "glide": "40 ms",
+      "mode": "legato"
+    }
+  },
+  "id": "reference.formant-lead",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Can you hear vowel-like movement without losing the pitched lead?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 9,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-reference",
+  "tier": 3
+}

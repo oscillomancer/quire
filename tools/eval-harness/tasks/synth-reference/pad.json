@@ -1,0 +1,176 @@
+{
+  "changed_modules": [
+    "filters.filter1"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "600 ms",
+        "decay": "1.2 s",
+        "release": "1.5 s",
+        "sustain": "80 %"
+      },
+      "env2": {
+        "attack": "1.5 s",
+        "decay": "3 s",
+        "release": "2 s",
+        "sustain": "30 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "1.8 kHz",
+        "resonance": "25 %",
+        "slope": "24 dB",
+        "type": "ladder"
+      }
+    },
+    "fx": {
+      "chain": [
+        "chorus",
+        "reverb"
+      ],
+      "reverb": {
+        "mix": "25 %",
+        "size": "70 %"
+      }
+    },
+    "lfos": {
+      "lfo1": {
+        "rate": "0.2 Hz",
+        "retrigger": "free"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "fine": "-7 ct",
+        "level": "-6 dB",
+        "type": "va",
+        "wave": "saw"
+      },
+      "osc2": {
+        "fine": "+7 ct",
+        "level": "-6 dB",
+        "type": "va",
+        "wave": "saw"
+      }
+    },
+    "routes": {
+      "env2>filter1.cutoff": {
+        "amount": "+2 oct"
+      },
+      "lfo1>osc1.fine": {
+        "amount": "0.08 st"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "polyphony": 8,
+      "unison": 3,
+      "unison_detune": "12 ct",
+      "unison_spread": "70 %"
+    }
+  },
+  "id": "reference.pad",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Does it swell warmly and stay wide without sounding harsh?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 1,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "600 ms",
+        "decay": "1.2 s",
+        "release": "1.5 s",
+        "sustain": "80 %"
+      },
+      "env2": {
+        "attack": "1.5 s",
+        "decay": "3 s",
+        "release": "2 s",
+        "sustain": "30 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "1.2 kHz",
+        "resonance": "25 %",
+        "slope": "24 dB",
+        "type": "ladder"
+      }
+    },
+    "fx": {
+      "chain": [
+        "chorus",
+        "reverb"
+      ],
+      "reverb": {
+        "mix": "25 %",
+        "size": "70 %"
+      }
+    },
+    "lfos": {
+      "lfo1": {
+        "rate": "0.2 Hz",
+        "retrigger": "free"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "fine": "-7 ct",
+        "level": "-6 dB",
+        "type": "va",
+        "wave": "saw"
+      },
+      "osc2": {
+        "fine": "+7 ct",
+        "level": "-6 dB",
+        "type": "va",
+        "wave": "saw"
+      }
+    },
+    "routes": {
+      "env2>filter1.cutoff": {
+        "amount": "+2 oct"
+      },
+      "lfo1>osc1.fine": {
+        "amount": "0.08 st"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "polyphony": 8,
+      "unison": 3,
+      "unison_detune": "12 ct",
+      "unison_spread": "70 %"
+    }
+  },
+  "suite": "synth-reference",
+  "tier": 1
+}

@@ -1,0 +1,51 @@
+{
+  "id": "synth.acid-bass",
+  "limits": {
+    "minutes": 8,
+    "tool_calls": 60
+  },
+  "listening": "Is the resonant snap recognizably acid-like and controlled?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
+  "prompt": "Program Orrery as a mono acid bass with glide, a resonant filter snap and mild soft drive.",
+  "recipe_index": 3,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "profile": {
+      "schema": "supple.analysis-profile/1.0",
+      "targets": {
+        "envelope.attack_ms": {
+          "max": 60,
+          "min": 0
+        },
+        "spectral.centroid_hz.median": {
+          "max": 4500,
+          "min": 200
+        },
+        "spectral.flatness.median": {
+          "max": 0.15,
+          "min": 0
+        }
+      }
+    },
+    "reference": null
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-descriptive"
+}

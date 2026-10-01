@@ -1,0 +1,45 @@
+{
+  "id": "notation.drums",
+  "limits": {
+    "minutes": 4,
+    "tool_calls": 20
+  },
+  "listening": "Does the rhythm and register fit the requested phrase?",
+  "phrase": "notation 1\nmeter 4/4\nvoice drums ch 10 grid e\n1: snare x.x.x.x.\n2 = 1",
+  "prompt": "Write two bars in 4/4 on channel 10: four snare hits per bar on an eighth-note grid, pitch 38.",
+  "recipe_index": 8,
+  "render": {
+    "tail_s": 0
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "structure": {
+      "bars": 2,
+      "meter": "4/4",
+      "notes_per_bar": [
+        4,
+        4
+      ],
+      "pitch_range": [
+        38,
+        38
+      ]
+    }
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 0,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "notation"
+}

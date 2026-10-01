@@ -1,0 +1,128 @@
+{
+  "changed_modules": [
+    "envelopes.amp",
+    "envelopes.env2",
+    "oscillators.osc2"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "1 ms",
+        "decay": "1.5 s",
+        "release": "500 ms",
+        "sustain": "20 %"
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "650 ms",
+        "sustain": 0
+      }
+    },
+    "fx": {
+      "chain": [
+        "chorus"
+      ]
+    },
+    "oscillators": {
+      "osc1": {
+        "ratio": 1,
+        "type": "fm"
+      },
+      "osc2": {
+        "level": "-15 dB",
+        "ratio": 14,
+        "to": "none",
+        "type": "fm"
+      }
+    },
+    "routes": {
+      "env2>osc2.level": {
+        "amount": "+24 dB"
+      },
+      "osc2>osc1.fm": {
+        "amount": 1.5
+      },
+      "velocity>osc2.level": {
+        "amount": "+6 dB"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0"
+  },
+  "id": "reference.fm-e-piano",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Does the attack have FM character while the body stays mellow?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:q r:*",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 7,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "1 ms",
+        "decay": "1.5 s",
+        "release": "300 ms",
+        "sustain": "20 %"
+      },
+      "env2": {
+        "attack": "0 ms",
+        "decay": "400 ms",
+        "sustain": 0
+      }
+    },
+    "fx": {
+      "chain": [
+        "chorus"
+      ]
+    },
+    "oscillators": {
+      "osc1": {
+        "ratio": 1,
+        "type": "fm"
+      },
+      "osc2": {
+        "level": "-30 dB",
+        "ratio": 14,
+        "to": "none",
+        "type": "fm"
+      }
+    },
+    "routes": {
+      "env2>osc2.level": {
+        "amount": "+24 dB"
+      },
+      "osc2>osc1.fm": {
+        "amount": 1.5
+      },
+      "velocity>osc2.level": {
+        "amount": "+6 dB"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0"
+  },
+  "suite": "synth-reference",
+  "tier": 2
+}

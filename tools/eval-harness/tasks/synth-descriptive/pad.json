@@ -1,0 +1,51 @@
+{
+  "id": "synth.pad",
+  "limits": {
+    "minutes": 8,
+    "tool_calls": 60
+  },
+  "listening": "Does it swell warmly and stay wide without sounding harsh?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
+  "prompt": "Program Orrery as a warm, wide pad with a slow swell, gentle filter movement and a soft tail.",
+  "recipe_index": 1,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "profile": {
+      "schema": "supple.analysis-profile/1.0",
+      "targets": {
+        "envelope.attack_ms": {
+          "max": 2400,
+          "min": 400
+        },
+        "spectral.centroid_hz.median": {
+          "max": 2200,
+          "min": 200
+        },
+        "stereo.width": {
+          "max": 0.48,
+          "min": 0.05
+        }
+      }
+    },
+    "reference": null
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "synth-descriptive"
+}
