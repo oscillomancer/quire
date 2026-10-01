@@ -65,7 +65,7 @@ typedef struct clap_plugin_supple_semantic_params {
 
 enum {
     CLAP_SUPPLE_CHANGED_PATCH = 1u
-                                << 0, /* values changed (GUI edit, preset load in the plugin UI) */
+        << 0, /* values changed (GUI edit, preset load in the plugin UI) */
     CLAP_SUPPLE_CHANGED_SCHEMA = 1u << 1, /* the schema changed */
 };
 
