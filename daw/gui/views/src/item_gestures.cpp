@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "supple/ui/canvas.h"
 #include "supple/ui/root.h"
@@ -82,6 +83,15 @@ class Ghost : public ui::Node {
                     if (auto r = rectFor(*anchor, 0, 0, st.deltaBeats, 0)) {
                         c.fillRect(*r, t.color("focus").withAlpha(0.2f));
                         c.fillRect({r->right() - 2, r->y, 2, r->h}, t.color("focus"));
+                        const model::Take* tk =
+                            anchor->activeTake ? s.takes.find(*anchor->activeTake) : nullptr;
+                        if (st.stretch && tk) {  // the rate the take will play at
+                            char buf[32];
+                            std::snprintf(buf, sizeof buf, "%.3gx",
+                                          g.stretchRate(*anchor, *tk, st.deltaBeats));
+                            c.text({r->right() - 70, r->y + 2, 64, 14}, buf, ui::Font::Mono,
+                                   t.type("caption"), t.color("ink"), ui::kRight | ui::kMiddle);
+                        }
                     }
                 break;
             case ItemGestures::Drag::Slip:
@@ -175,6 +185,16 @@ bool ItemGestures::isSelected(model::Id item) const {
 void ItemGestures::changed() {
     if (root_) root_->requestAnimationFrame();
     if (onSelection) onSelection(selection_);
+}
+
+double ItemGestures::stretchRate(const model::Item& item, const model::Take& take,
+                                 double deltaBeats) const {
+    const model::Session& s = view_.session();
+    const double rate = take.playrate > 0 ? take.playrate : 1.0;
+    const double start = s.timeMap->secondsAt(item.position);
+    const double before = s.timeMap->secondsAt(item.position + item.length) - start;
+    const double after = s.timeMap->secondsAt(item.position + item.length + deltaBeats) - start;
+    return std::clamp(after > 0 ? rate * before / after : rate, 0.01, 100.0);
 }
 
 double ItemGestures::gridBeats() const {
@@ -272,6 +292,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             }
             state_.drag = h->zone;
             if (state_.drag == Drag::Move && (e.mods & ui::kAlt)) state_.drag = Drag::Slip;
+            state_.stretch = state_.drag == Drag::TrimRight && (e.mods & ui::kAlt) &&
+                             !isMidi(activeTake(s, *itemOf(s, h->item)));
         }
         if (root_) root_->capture(&view_);
         return true;
@@ -507,6 +529,15 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             json::Value args = json::Value::object();
             args["item"] = state_.anchor.str();
             args["length"] = anchor->length + state_.deltaBeats;
+            const model::Take* take = activeTake(s, *anchor);
+            if (state_.stretch && take) {
+                json::Value rate = json::Value::object();
+                rate["take"] = anchor->activeTake->str();
+                rate["playrate"] = stretchRate(*anchor, *take, state_.deltaBeats);
+                runSteps("Stretch item",
+                         {{"item.set", std::move(args)}, {"take.set", std::move(rate)}});
+                return;
+            }
             runSteps("Trim item end", {{"item.set", std::move(args)}});
             return;
         }

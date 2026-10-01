@@ -2,7 +2,8 @@
 // reaper-ux.md 8-13): select (click, Shift add, Ctrl toggle, marquee on empty
 // space or a right-drag anywhere), move in time and across channels (snapped
 // to the grid at the current zoom; Shift moves freely; Ctrl-drag copies), trim either edge (the
-// left edge moves the take's source offset so the audio stays put), slip
+// left edge moves the take's source offset so the audio stays put; Alt on the
+// right edge stretches: the play rate follows the length), slip
 // (Alt-drag: the source moves under the item), fade handles at the top
 // corners, the take badge cycles takes, double-click opens a MIDI item, and
 // files dropped on the lanes. On an automation lane: click adds a point, drag
@@ -64,6 +65,9 @@ class ItemGestures {
 
     // The snap grid at the current zoom, in beats (1/16 .. 32).
     double gridBeats() const;
+    // The play rate that keeps a take's material filling the item when its
+    // end moves by `deltaBeats` (the stretch gesture).
+    double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
 
     // What a drag is doing (the overlay and tests read it).
     enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee, EnvPoint };
@@ -73,6 +77,7 @@ class ItemGestures {
         double deltaBeats = 0;   // move / trim-left / trim-right / slip, snapped
         int deltaRows = 0;       // move
         double fadeSeconds = 0;  // fade in/out length being drawn
+        bool stretch = false;    // Alt on the right edge: length and play rate together
         ui::Rect marquee{};
         std::vector<model::Id> marqueeBase;
         // An automation lane's point being added or dragged (P5.14): a click

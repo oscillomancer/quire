@@ -83,6 +83,12 @@ class LaneLabels : public ui::Node {
                     item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
                 std::string name = take ? take->name : std::string();
                 if (name.empty()) name = id.str();
+                if (take && std::abs(take->playrate - 1.0) > 1e-6) {  // a stretched take says so
+                    char rate[48];
+                    std::snprintf(rate, sizeof rate, "  \u00b7 %.3gx%s", take->playrate,
+                                  take->preservePitch ? "" : " varispeed");
+                    name += rate;
+                }
                 const float alpha = item->mute ? 0.45f : 0.85f;
                 // Keep the label clear of the padlock an item may carry.
                 const float textX = item->locked ? r.x + 18.0f : r.x + 4.0f;

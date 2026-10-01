@@ -387,3 +387,21 @@ TEST_CASE("automation lanes: shown under their strip, points added, moved and de
     CHECK_FALSE(f.app->head().envelopes.find(env)->visible);
     CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
 }
+
+TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length and play rate)") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id a = f.itemOnRow(0);
+    const ui::Rect r = f.rectOf(a);
+    const double len0 = f.item(a).length;
+    const float step = static_cast<float>(g.gridBeats()) * f.beatPx();
+    auto steps = f.steps();
+    // Longer by two grid steps: the take plays slower so its material fills it.
+    f.drag({r.right() - 2, r.y + r.h / 2}, {r.right() - 2 + 2 * step, r.y + r.h / 2}, ui::kAlt);
+    const double len1 = f.item(a).length;
+    CHECK(len1 == doctest::Approx(len0 + 2 * g.gridBeats()));
+    const model::Take& take = *f.app->head().takes.find(*f.item(a).activeTake);
+    CHECK(take.playrate == doctest::Approx(len0 / len1));  // one tempo: beats scale as seconds
+    CHECK(f.steps() == steps + 1);
+}
