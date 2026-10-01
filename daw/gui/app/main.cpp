@@ -455,6 +455,39 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.item.duplicate", "Item: duplicate after itself", [&] {
         reportEdit("duplicate", shell.arrange()->gestures().duplicateSelection());
     });
+    // Navigation: the previous/next marker or region start from the playhead.
+    auto jump = [&](bool forward) {
+        views::ArrangeView& a = *shell.arrange();
+        const model::Session& s = (*app)->head();
+        auto secondsOf = [&](double pos, model::Timebase tb) {
+            return tb == model::Timebase::Time ? pos : s.timeMap->secondsAt(pos);
+        };
+        std::vector<double> stops;
+        for (const auto& m : s.markers) stops.push_back(secondsOf(m.value->pos, m.value->timebase));
+        for (const auto& r : s.regions)
+            stops.push_back(secondsOf(r.value->start, r.value->timebase));
+        const double now = a.playhead();
+        std::optional<double> best;
+        for (double t : stops)
+            if (forward ? t > now + 1e-6 : t < now - 1e-6)
+                if (!best || (forward ? t < *best : t > *best)) best = t;
+        if (!best) return;
+        json::Value args = json::Value::object();
+        args["seconds"] = *best;
+        if (!dispatcher.execute(
+                {"transport.seek", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}}))
+            a.setPlayhead(*best);  // the engine is stopped: move the shown playhead
+    };
+    appActions.addUi("ui.marker.prev", "Marker: go to the previous one", [jump] { jump(false); });
+    appActions.addUi("ui.marker.next", "Marker: go to the next one", [jump] { jump(true); });
+    appActions.addUi("ui.item.select_all", "Item: select all", [&] {
+        auto& g = shell.arrange()->gestures();
+        std::vector<model::Id> all;
+        for (const auto& e : (*app)->head().items) all.push_back(e.id);
+        g.setSelection(all);
+        uiState.selectedItems.clear();
+        for (model::Id id : all) uiState.selectedItems.push_back(id.str());
+    });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",

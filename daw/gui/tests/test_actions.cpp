@@ -169,6 +169,17 @@ TEST_CASE("chords print and parse; keymaps resolve sections and sequences") {
     CHECK(k.press(*parseChord("S"), {"arrange", "global"}) ==
           std::optional<std::string>("item.split:playhead"));
     CHECK_FALSE(k.press(*parseChord("S"), {"mixer", "global"}));
+    // The editing and navigation bindings of the arrange view.
+    REQUIRE(parseChord("["));
+    CHECK(parseChord("[")->key == SDLK_LEFTBRACKET);
+    CHECK(k.press(*parseChord("]"), {"arrange", "global"}) ==
+          std::optional<std::string>("ui.marker.next"));
+    CHECK(k.press(*parseChord("["), {"arrange", "global"}) ==
+          std::optional<std::string>("ui.marker.prev"));
+    CHECK(k.press(*parseChord("Ctrl+C"), {"arrange", "global"}) ==
+          std::optional<std::string>("ui.item.copy"));
+    CHECK(k.press(*parseChord("Ctrl+A"), {"arrange", "global"}) ==
+          std::optional<std::string>("ui.item.select_all"));
     // A two-chord sequence.
     k.bind({{*parseChord("Ctrl+K"), *parseChord("Ctrl+S")}, "global", "project.save-as"});
     CHECK_FALSE(k.press(*parseChord("Ctrl+K"), {"global"}));

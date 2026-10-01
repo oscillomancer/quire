@@ -128,6 +128,9 @@ Keymap Keymap::defaults() {
     add({"Ctrl+X"}, "arrange", "ui.item.cut");
     add({"Ctrl+V"}, "arrange", "ui.item.paste");
     add({"Ctrl+D"}, "arrange", "ui.item.duplicate");
+    add({"Ctrl+A"}, "arrange", "ui.item.select_all");
+    add({"["}, "arrange", "ui.marker.prev");
+    add({"]"}, "arrange", "ui.marker.next");
     k.defaults_ = k.bindings_;
     return k;
 }
