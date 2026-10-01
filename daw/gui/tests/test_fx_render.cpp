@@ -45,8 +45,12 @@ struct Fixture {
     bool ok = false;
 
     Fixture() {
-        dir = std::filesystem::temp_directory_path() /
-              ("supple-fx-render-" + std::to_string(::getpid()));
+        dir = std::filesystem::path(__FILE__)
+                  .parent_path()
+                  .parent_path()
+                  .parent_path()
+                  .parent_path() /
+              "build" / ("supple-fx-render-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
         configDir = dir / "config";
         std::filesystem::create_directories(configDir);
@@ -62,6 +66,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.chainDir = dir / "chains";
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
         options.identity = host::HostIdentity{"Quire test", "Supple Audio", "", "0"};
         auto a = engine::EngineApp::create(options);
@@ -587,4 +592,68 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     CHECK(f.sourcePathOf("added-01") == f.render->resultFiles()[0]);
     // The import is its own undo step; starting a job changes no model state.
     CHECK(f.historyCount() == historyBefore + 1);
+}
+
+TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bus") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) {
+        MESSAGE("skipped: no GUI or stock plugins");
+        return;
+    }
+    const auto source = f.addTrack("Source");
+    const auto target = f.addTrack("Target");
+    REQUIRE(f.run("fx.add", f.args({{"track", source.str()},
+                                    {"plugin", f.pluginId("Plumb")},
+                                    {"patch", json::parse(R"({"params":{"gain":-6}})").value()}})));
+    REQUIRE(f.fx->open(source));
+    f.frame();
+    const auto beforeSave = f.historyCount();
+    REQUIRE(f.click("fx.chain.save"));
+    REQUIRE(f.root->focused()->id() == "fx.chain.name");
+    f.type("Guitar");
+    f.key("Return");
+    CHECK(f.historyCount() == beforeSave);
+    CHECK(f.fxStatus() == "Saved Guitar");
+    auto listed = f.run("fx.chain.list", json::Value::object());
+    REQUIRE(listed);
+    CHECK((*listed)["chains"].size() == 1);
+    REQUIRE(f.fx->open(target));
+    const auto beforeLoad = f.historyCount();
+    REQUIRE(f.click("fx.chain.load"));
+    REQUIRE(f.root->find("fx.chain.menu"));
+    f.key("Home");
+    f.key("Return");
+    CHECK(f.historyCount() == beforeLoad + 1);
+    REQUIRE(f.fx->chain().size() == 1);
+    const auto loaded = f.fx->chain()[0];
+    CHECK(f.app->head().fx.find(loaded)->plugin.id == f.pluginId("Plumb"));
+    auto patch = f.run("fx.patch.get", f.args({{"fx", loaded.str()}}));
+    auto original = f.run("fx.patch.get", f.args({{"fx", "fx_1"}}));
+    REQUIRE(patch);
+    REQUIRE(original);
+    CHECK(*patch == *original);
+    REQUIRE(f.click("fx.chain.load"));
+    f.key("Home");
+    f.key("Return");
+    REQUIRE(f.fx->chain().size() == 2);
+    const auto beforeReplace = f.historyCount();
+    REQUIRE(f.click("fx.chain.load"));
+    f.key("Home");
+    f.key("Shift+Return");
+    CHECK(f.historyCount() == beforeReplace + 1);
+    CHECK(f.fx->chain().size() == 1);
+    REQUIRE(f.run("history.undo", json::Value::object()));
+    f.fx->refresh();
+    CHECK(f.fx->chain().size() == 2);
+    // The same controls can target the input chain without changing main FX.
+    REQUIRE(f.click("fx.chain.target"));
+    REQUIRE(f.click("fx.chain.load"));
+    f.key("Home");
+    f.key("Return");
+    CHECK(f.app->head().tracks.find(target)->inputChain.size() == 1);
+    CHECK(f.app->head().tracks.find(target)->chain.size() == 2);
+    REQUIRE(f.click("fx.chain.save"));
+    f.type("Input");
+    f.key("Return");
+    CHECK(f.fxStatus() == "Saved Input");
 }

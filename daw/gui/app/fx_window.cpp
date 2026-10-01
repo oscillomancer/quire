@@ -8,6 +8,7 @@
 
 #include "app_actions.h"
 #include "supple/ui/controls.h"
+#include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
@@ -67,6 +68,86 @@ class Row : public ui::Node {
     std::function<void(int)> onMove_;
 };
 
+// Modifier-aware buttons and menu activation keep scripted input and SDL
+// input on the same path (Shift chooses replacement at either click).
+class LoadChainButton : public ui::Button {
+  public:
+    explicit LoadChainButton(std::function<void(bool)> open)
+        : Button("fx.chain.load", "Load chain…") {
+        onClick = [this, open = std::move(open)] { open(shift_); };
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        shift_ = (e.mods & ui::kShift) != 0;
+        return Button::onPointer(e);
+    }
+    bool onKey(const ui::KeyEvent& e) override {
+        shift_ = (e.mods & ui::kShift) != 0;
+        return Button::onKey(e);
+    }
+
+  private:
+    bool shift_ = false;
+};
+
+class ChainMenu : public ui::List {
+  public:
+    ChainMenu(ui::Root& root, json::Value chains, bool replace,
+              std::function<void(const std::string&, bool)> load)
+        : List("fx.chain.menu"),
+          root_(root),
+          chains_(std::move(chains)),
+          replace_(replace),
+          load_(std::move(load)) {
+        rowHeight = 28;
+        layout.width = ui::SizeRule::fixed(360);
+        setCount(chains_.size());
+        paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
+            const auto& entry = chains_.asArray()[i];
+            c.text({r.x + 8, r.y, r.w - 16, r.h}, entry.find("name")->asString(), ui::Font::Ui,
+                   c.theme().type("small"), c.theme().color("ink"));
+            c.text({r.x, r.y, r.w - 10, r.h},
+                   std::to_string(entry.find("effects")->asInt()) + " FX", ui::Font::Mono,
+                   c.theme().type("caption"), c.theme().color("ink-quiet"),
+                   ui::kRight | ui::kMiddle);
+        };
+        onActivate = [this](std::size_t i) {
+            const std::string path = chains_.asArray()[i]["path"].asString();
+            auto callback = load_;
+            const bool replacing = replace_ || shift_;
+            root_.closePopup();
+            callback(path, replacing);
+        };
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        shift_ = (e.mods & ui::kShift) != 0;
+        if (e.type == ui::PointerEvent::Type::Up && e.button == 1 && selected()) {
+            if (bounds().contains(e.pos)) {
+                const auto row = *selected();
+                auto activate = onActivate;
+                activate(row);
+            }
+            return true;
+        }
+        return List::onPointer(e);
+    }
+    bool onKey(const ui::KeyEvent& e) override {
+        shift_ = (e.mods & ui::kShift) != 0;
+        if ((e.key == SDLK_RETURN || e.key == SDLK_KP_ENTER) && selected()) {
+            const auto row = *selected();
+            auto activate = onActivate;
+            activate(row);  // closes this menu; do not read members afterwards
+            return true;
+        }
+        return List::onKey(e);
+    }
+
+  private:
+    ui::Root& root_;
+    json::Value chains_;
+    bool replace_, shift_ = false;
+    std::function<void(const std::string&, bool)> load_;
+};
+
 ui::Node& line(ui::Node& row, const std::string& id) {
     auto& n = row.emplace<ui::Node>(id);
     n.layout.dir = ui::Layout::Dir::Row;
@@ -107,7 +188,27 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     header.layout.align = ui::Layout::Align::Center;
     title_ = &header.emplace<ui::Label>("fx.title", "FX", ui::Font::UiBold, "title");
     title_->layout.width = ui::SizeRule::fraction();
+    presetChainButton_ = &header.emplace<ui::Button>(
+        "fx.chain.target", "Main chain", [this] { choosePresetChain(presetChain_ != "input"); });
+    header.emplace<ui::Button>("fx.chain.save", "Save chain…", [this] { promptSaveChain(); });
+    header.emplace<LoadChainButton>([this](bool replace) { loadChainMenu(replace); });
     header.emplace<ui::Button>("fx.close", "Close", [this] { close(); });
+
+    savePrompt_ = &page->emplace<ui::Node>("fx.chain.prompt");
+    savePrompt_->layout.dir = ui::Layout::Dir::Row;
+    savePrompt_->layout.height = ui::SizeRule::fixed(28);
+    savePrompt_->layout.gap = 8;
+    savePrompt_->visible = false;
+    saveName_ = &savePrompt_->emplace<ui::TextField>("fx.chain.name", "", "Chain preset name");
+    saveName_->layout.width = ui::SizeRule::fraction();
+    saveName_->onSubmit = [this](const std::string&) { saveChain(); };
+    saveName_->onCancel = [this] {
+        savePrompt_->visible = false;
+        root_.focus(root_.find("fx.chain.save"));
+        root_.relayout();
+        root_.damageAll();
+    };
+    savePrompt_->emplace<ui::Button>("fx.chain.commit", "Save", [this] { saveChain(); });
 
     tabsRow_ = &page->emplace<ui::Node>("fx.tabs");
     tabsRow_->layout.dir = ui::Layout::Dir::Row;
@@ -136,6 +237,9 @@ Status FxWindow::open(model::Id track) {
     track_ = track;
     selected_ = {};
     tab_ = Tab::Chain;
+    presetChain_ = "main";
+    if (presetChainButton_) presetChainButton_->setText("Main chain");
+    if (savePrompt_) savePrompt_->visible = false;
     latency_.clear();  // a fresh window measures each effect again
     if (page_) {       // already open: switch track in place
         refresh();
@@ -148,6 +252,9 @@ Status FxWindow::open(model::Id track) {
         tabsRow_ = nullptr;
         title_ = nullptr;
         status_ = nullptr;
+        presetChainButton_ = nullptr;
+        savePrompt_ = nullptr;
+        saveName_ = nullptr;
     });
     refresh();
     return {};
@@ -262,6 +369,8 @@ void FxWindow::tick() {
 
 void FxWindow::select(model::Id fx) {
     selected_ = fx;
+    const auto input = inputChain();
+    choosePresetChain(std::find(input.begin(), input.end(), fx) != input.end());
     if (tab_ == Tab::Params)
         refresh();
     else
@@ -495,6 +604,68 @@ void FxWindow::addFx(const std::string& pluginId) {
         if (auto id = model::Id::parse(made->asString())) selected_ = *id;
     setStatus("added " + pluginId);
     refresh();
+}
+
+void FxWindow::choosePresetChain(bool input) {
+    presetChain_ = input ? "input" : "main";
+    if (presetChainButton_) presetChainButton_->setText(input ? "Input chain" : "Main chain");
+}
+
+void FxWindow::promptSaveChain() {
+    if (!savePrompt_ || !saveName_) return;
+    savePrompt_->visible = true;
+    saveName_->setText("");
+    root_.relayout();
+    root_.focus(saveName_);
+    setStatus("Save the " + presetChain_ + " chain");
+}
+
+void FxWindow::saveChain() {
+    if (!saveName_) return;
+    auto args = json::Value::object();
+    args["track"] = track_.str();
+    args["name"] = saveName_->text();
+    args["chain"] = presetChain_;
+    auto result = dispatcher_.execute({"fx.chain.save", std::move(args), kUiOrigin});
+    if (!result) {
+        setStatus(result.error().message);
+        return;
+    }
+    setStatus("Saved " + saveName_->text());
+    savePrompt_->visible = false;
+    root_.focus(root_.find("fx.chain.save"));
+    root_.relayout();
+    root_.damageAll();
+}
+
+void FxWindow::loadChainMenu(bool replace) {
+    auto listed = dispatcher_.execute({"fx.chain.list", json::Value::object(), kUiOrigin});
+    if (!listed) {
+        setStatus(listed.error().message);
+        return;
+    }
+    if ((*listed)["chains"].asArray().empty()) {
+        setStatus("No saved chains yet");
+        return;
+    }
+    setStatus("Load into " + presetChain_ + " (Shift = replace)");
+    const auto track = track_;
+    const auto chain = presetChain_;
+    auto menu =
+        std::make_unique<ChainMenu>(root_, (*listed)["chains"], replace,
+                                    [this, track, chain](const std::string& path, bool replacing) {
+                                        auto args = json::Value::object();
+                                        args["track"] = track.str();
+                                        args["path"] = path;
+                                        args["chain"] = chain;
+                                        args["mode"] = replacing ? "replace" : "append";
+                                        if (dispatch("fx.chain.load", std::move(args))) {
+                                            setStatus("Loaded chain");
+                                            refresh();
+                                        }
+                                    });
+    const auto* button = root_.find("fx.chain.load");
+    root_.openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below);
 }
 
 }  // namespace supple::gui

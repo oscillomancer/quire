@@ -1404,6 +1404,203 @@ Result:
 
 ```
 
+## `fx.chain.list@1`
+
+List saved FX chain presets by name, path and effect count.
+
+Lists valid supple.fx-chain/1.0 files, sorted by name and path. Invalid documents are skipped with warnings. See fx.chain.save and fx.chain.load.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_chain_list_result",
+  "properties": {
+    "chains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "fx_chain_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "integer",
+            "minimum": 0.0
+          }
+        },
+        "required": ["name", "path", "effects"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["chains"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List presets** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "chains": []
+}
+
+```
+
+## `fx.chain.load@1`
+
+Append or replace a track's FX chain from a preset in one undo step.
+
+Give exactly one of name (in the user's chains directory) or path (relative to the work directory). mode defaults to append; replace removes the target chain, its envelopes and key routes. Validates every plugin and state before changing the model.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `path` | string |  |  |  |  |
+| `chain` | string |  |  | "main" |  |
+| `mode` | string |  |  | "append" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_chain_load_result",
+  "properties": {
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["effects"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `chain.source`: name/path missing or both given Hint: give exactly one of name or path
+- `chain.plugin_missing`: a saved plugin is not installed Hint: install the named plugin or choose another preset
+
+### Examples
+
+**Load a saved bass chain** (`song_with_saved_chain`)
+
+```json
+{
+  "track": "tr_1",
+  "name": "Bass",
+  "mode": "replace"
+}
+
+```
+
+Result:
+
+```json
+{
+  "effects": ["<any>", "<any>"]
+}
+
+```
+
+## `fx.chain.save@1`
+
+Save an ordered FX chain as a named preset.
+
+Save main (default) or input FX to the user's chains directory. Preserves semantic patches or opaque base64 state. Refuses empty chains; replace: true explicitly overwrites an existing name.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `chain` | string |  |  | "main" |  |
+| `replace` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_chain_save_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "effects": {
+      "type": "integer",
+      "minimum": 0.0
+    }
+  },
+  "required": ["path", "effects"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `chain.name`: invalid preset name Hint: use a name without path separators
+- `chain.empty`: the chain has no effects Hint: add effects before saving
+- `chain.exists`: the name already exists Hint: choose another name or set replace: true
+
+### Examples
+
+**Save the bass chain** (`song_with_chain`)
+
+```json
+{
+  "track": "tr_1",
+  "name": "Bass"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>",
+  "effects": 2
+}
+
+```
+
 ## `fx.describe@1`
 
 Describe a plugin instance in words; full adds its parameters and patch.

@@ -22,6 +22,8 @@
 namespace supple::ui {
 class Root;
 class Label;
+class Button;
+class TextField;
 }  // namespace supple::ui
 
 namespace supple::gui {
@@ -78,6 +80,10 @@ class FxWindow {
     std::string latencyOf(model::Id fx);
     void moveFx(model::Id fx, int delta);
     void addFx(const std::string& pluginId);
+    void promptSaveChain();
+    void saveChain();
+    void loadChainMenu(bool replace);
+    void choosePresetChain(bool input);
     void checkFailures();  // engine.status failed_fx, at most twice a second
 
     engine::EngineApp& app_;
@@ -94,6 +100,10 @@ class FxWindow {
     std::map<std::string, std::string> latency_;  // measured once per effect
     std::set<std::string> failed_;                // engine.status failed_fx
     double failureCheckMs_ = -1e9;
+    std::string presetChain_ = "main";
+    ui::Button* presetChainButton_ = nullptr;
+    ui::Node* savePrompt_ = nullptr;
+    ui::TextField* saveName_ = nullptr;
     ui::Node* page_ = nullptr;
     ui::Node* body_ = nullptr;
     ui::Node* tabsRow_ = nullptr;

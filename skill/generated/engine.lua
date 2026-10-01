@@ -164,6 +164,29 @@ q = nil
 ---@field semantic boolean
 ---@field chain string[]
 
+---@class Quire.fx_chain_list_result
+---@field chains table[]
+
+---@class Quire.fx_chain_load_args
+---@field track string
+---@field name? string
+---@field path? string
+---@field chain? string (default: "main")
+---@field mode? string (default: "append")
+
+---@class Quire.fx_chain_load_result
+---@field effects string[]
+
+---@class Quire.fx_chain_save_args
+---@field track string
+---@field name string
+---@field chain? string (default: "main")
+---@field replace? boolean (default: false)
+
+---@class Quire.fx_chain_save_result
+---@field path string
+---@field effects integer
+
 ---@class Quire.fx_describe_args
 ---@field fx string Plugin instance id, e.g. "fx_1".
 ---@field full? boolean (default: false)
@@ -840,6 +863,11 @@ q = nil
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
 ---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).
 ---@field set fun(args: Quire.fx_set_args): table Set instance options: bypass, offline, wet (%), label, isolation.
+
+---@class Quire.fx.chain
+---@field list fun(): Quire.fx_chain_list_result List saved FX chain presets by name, path and effect count.
+---@field load fun(args: Quire.fx_chain_load_args): Quire.fx_chain_load_result Append or replace a track's FX chain from a preset in one undo step.
+---@field save fun(args: Quire.fx_chain_save_args): Quire.fx_chain_save_result Save an ordered FX chain as a named preset.
 
 ---@class Quire.fx.param
 ---@field get fun(args: Quire.fx_param_get_args): Quire.fx_param_get_result Read one saved plugin parameter by semantic key or numeric CLAP id.
