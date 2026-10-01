@@ -68,7 +68,7 @@ reports committed in docs. The Console 9 port null-tests against the reference.
 | P3.4c | optimizer: 9-parameter auto-range searches never improve a one-parameter-off patch (sub bass, 291 evaluations) | in progress (Hermes `scoring`, branch `p3-optimizer`): benchmark from the reference tasks first, then σ/range/restart/trajectory-scale variants by measurement |
 | P3.4d | `compare` reports the scored loss; `job.wait` timeout | **done** (Hermes `scoring`, f607f02/8c3ae3d): `compare` returns `loss {total, terms, note_off_s}` from the same function as the scorer (equal to 9 places); `job.wait` clamps to 30 s and says so |
 | P3.4e | notation accepts `| N:` when N is the next bar | **done** (Hermes `notation`, 7091475) |
-| P3.4f | every plugin: a render after `reset()` depends only on its state (the P3.4a class of bug) — generic `plugin.<id>.reset` test + fixes | in progress (Hermes `notation`, branch `p3-plugin-reset`) |
+| P3.4f | every plugin: a render after `reset()` depends only on its state (the P3.4a class of bug) — generic `plugin.<id>.reset` test + fixes | **done** (Hermes `notation`, reviewed by the orchestrator): `clap-reset-check` drives each plugin like the sandbox (S1 render, reset, S2 vs a fresh S2, bit-identical at blocks 256 and 64, with non-vacuity guards) for all 11 plugins + headless Orrery; under RTSan it found that Orrery's `params.flush` allocated on the audio thread while active-but-stopped (compiled a program) — fixed with an allocation-free `Engine::setValues` |
 | P3.5 | EQ | **done** (Facet [`eq`], Codex `contour`, reviewed by the orchestrator; `docs/specs/effects.md` §2): 8 bands (bell, shelves, tilt, notch, band-pass, Butterworth HP/LP 6–96 dB/oct), stereo/L/R/M/S per band, three phase modes — `minimum` (prewarped SVFs), `natural` (default; matched second-order sections after Vicanek, replacing a 16×–128× oversampled first version that cost 50× the CPU: now 0.24 %/0.43 % of a core for 4/8 bands at 48 kHz, bells/normal shelves within 0.3 dB of the analog prototype to 20 kHz, measured limits for resonant and near-Nyquist bands) and `linear` (partitioned FIR, 2048 samples at 48 kHz); auto gain; response + live spectrum GUI. REAPER check passed (2026-09-30) |
 | P3.6 | dynamics (comp/limiter with sidechain, gate/expander, transient shaper) | **compressor/limiter done** (Ballast [`comp`], Codex `press`, reviewed by the orchestrator — the limiter's attack follows the lookahead moving average and true peak is detected on the 4× interpolated signal, both fixed after review; effects.md §3): soft-knee feed-forward/feedback compressor with external sidechain (ADR-0018 port), key filters and listen, peak/RMS, auto release/makeup, lookahead, mix; limiter mode with true peak (+12 dB pink noise → −1.00 dBFS / −0.99 dBTP under a −1 dBTP ceiling). **Gate/expander done** (Sluice [`gate`], Codex `margin`, reviewed by the orchestrator; effects.md §8): state-machine gate with hysteresis and hold, downward expander, filtered key (external sidechain, listen), stereo link, lookahead with the opening ramp aligned to the delayed onset, range −80 = exact silence; a mono key bus feeds both detectors (fixed in the gate after review, and in the compressor). **Transient shaper done** (Flint [`transient`], Codex `press`, reviewed by the orchestrator; effects.md §9): level-independent dual-envelope (dB-domain) detector with a cycle-aware peak hold, attack/sustain ±12 dB, optional 2× oversampled tanh clip on the shared `dsp::Oversampler` (72 samples of latency, only while clip is on). REAPER check passed (2026-09-30) |
 | P3.7 | saturation family with oversampling | **done** (Kiln [`drive`], Codex `trim`, reviewed by the orchestrator; effects.md §7): six odd-symmetric curves (tape, tube, transistor, diode, fold, hard) with first-order ADAA, bias (even harmonics) with a 5 Hz DC blocker, pre/post tone tilt, Gaussian-RMS auto gain (within 0.36 LU at −18 dBFS RMS pink noise, fold 0.91), and the shared `dsp::Oversampler` in `libs/core-dsp` (linear-phase half-bands 145/33/25 taps; latency 1/73/81/84 samples at 1x/2x/4x/8x — the first version's 1025-tap stage cost 12 ms and was redesigned after review; aliases in 20 Hz–20 kHz ≤ −104 dBc at 4x for the smooth curves). REAPER check passed (2026-09-30) |
@@ -121,6 +121,21 @@ Acceptance (build prompt Phase 4):
 | P4.21 | worst-case block cost at 64 frames: why one Orrery chain xruns in the callback (Quire without anticipation and REAPER) while the average load is far below a core — per-block timing histogram for the B1 session (note-on/off bursts at chord changes, CPU clock ramp under `powersave`) | queued |
 | — | review round 14 (transport seqlock, VST3, commands) | **fixed** (reviewer, Hermes, on the orchestrator's decisions): the renderer's transport read is bounded; a VST3's controller is never called on the audio thread (plain automation lanes compile into the normalized domain; `Instance::paramsNormalized/normalizedParam/plainParam`, bridged); settled VST3 bus widths, reset() ends sounding notes; render path symlink check; `track.move`; checked ids; item.set conflicts |
 
+## Phase 5 — The DAW GUI (spec `docs/specs/gui.md`, ADR-0005)
+
+| ID | Task | State |
+|---|---|---|
+| P5.1 | app skeleton: `<slug>` binary, SDL3 X11/offscreen window, GL 3.3 + NanoVG, the bus served from the UI thread (ModelLoop inside the SDL loop), offscreen snapshots, cold-start bench | **done** (orchestrator) |
+| P5.2 | toolkit core: nodes, stack layout, damage repainted into a cached framebuffer, input/focus, theme tokens (dark/light, JSON), golden images and scripted UI tests | **done** (orchestrator) |
+| P5.3 | bulk GL layers (strips, instanced rects), peak pyramids (worker, disk cache), the track lanes view, 64-track bench | **done** (orchestrator): release cold start 79–92 ms, 64-track p95 0.45–0.59 ms UI-thread CPU, idle 0.3 % (`docs/benchmarks/gui.md`); `model::itemSpan` shared with the engine. Meters → P5.3c |
+| P5.3c | per-strip meter telemetry aligned to what is heard (anticipation) + meter widgets | engine part in progress (Hermes `notation`, `p5-meters`, brief engine-meters); widgets after |
+| — | toolkit widgets: TextField (UTF-8, IME, clipboard, secret), ScrollBar, virtualized List, popups/menus, TextBlock, ScrollView | **done** (orchestrator) |
+| P5.4 | arrange view, read-only (ruler, tempo/markers, rows shared with the TCP, fades, playhead overlay, zoom/scroll) | in progress (Hermes `gui`, `p5-arrange`) |
+| P5.10 | actions (every command + bound/macro/built-in), keymaps (sections, sequences, user deltas), the actions list (search, prompts, Ctrl+B binding), menus and toolbar (menus.json), `gui.selection` | **done** (orchestrator) |
+| P5.15 | agent panel | core **done** (orchestrator): Anthropic + OpenAI-compatible streaming, tool loop over the MCP surface + `skill_read` + `listen`, work on `agent/<client>/<n>`, diff / A/B / accept / reject, `Origin::Type::Agent`; panel UI in progress |
+| — | `MediaSource::hash` is never filled (no SHA-256 in the tree); peaks key by path meanwhile | queued (brief media-hash) |
+| P5.5–P5.9, P5.11–P5.14, P5.16–P5.17 | TCP/transport, editing gestures, mixer, FX/plugin GUIs, routing, MIDI editor, render dialog, recording, automation, identity pass, gates/gap log | queued |
+
 ## Team (Codex workers via Herdr; Hermes next)
 
 Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Four Codex
@@ -141,6 +156,10 @@ work agents (`herdr agent start <name> --kind hermes --pane <id> -- -p quire-wor
 under test. The eval harness reads only its model identity and key reference
 from it and runs every task in a fresh isolated Hermes home, so evaluations
 and work agents can run at the same time.
+
+- **notation** — notation pipe, plugin reset (landed); now engine meters (P5.3c).
+- **scoring** — scoring (landed); now optimizer tuning (P3.4c).
+- **gui** — the GUI views, starting with the arrange view (P5.4).
 
 Test labels: `slow` (dev/gcc/asan only), `tsan-skip` (AGENTS.md). Local CI
 is ~25 min per full run and grows with the optimizer/analysis suites.
