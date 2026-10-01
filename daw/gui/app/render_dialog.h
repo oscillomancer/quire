@@ -26,7 +26,7 @@ namespace supple::gui {
 
 class RenderDialog {
   public:
-    RenderDialog(engine::EngineApp&, cmd::Dispatcher& dispatcher, ui::Root& root);
+    RenderDialog(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root);
     ~RenderDialog();
 
     void open();
@@ -57,12 +57,15 @@ class RenderDialog {
 
   private:
     std::unique_ptr<ui::Node> buildPage();
+    // The project's render defaults, as the placeholder for an empty field.
+    std::string defaultFor(std::string_view key) const;
     json::Value args(bool forJob) const;
     json::Value previewArgs() const;
     void markDirty();
     void setStatus(std::string text);
     void pollJob();
 
+    engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
     ui::Root& root_;
     Source source_ = Source::Master;

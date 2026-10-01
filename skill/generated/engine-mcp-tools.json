@@ -966,7 +966,7 @@
   {
     "name": "fx_add",
     "title": "Insert a plugin into a track's FX chain and return its id.",
-    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. See describe for errors and examples.",
+    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_add_args",
@@ -984,7 +984,11 @@
           "type": "integer",
           "minimum": 0.0
         },
-        "patch": {}
+        "patch": {},
+        "chain": {
+          "type": "string",
+          "pattern": "^(main|input)$"
+        }
       },
       "required": ["track", "plugin"],
       "additionalProperties": false
@@ -1083,7 +1087,7 @@
   {
     "name": "fx_move",
     "title": "Move a plugin within a track chain or to another track.",
-    "description": "Move a plugin within a track chain or to another track.  See describe for errors and examples.",
+    "description": "Move a plugin within a track chain or to another track. Works on the track's chain and on its input chain (an input-chain effect stays on its track). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_move_args",

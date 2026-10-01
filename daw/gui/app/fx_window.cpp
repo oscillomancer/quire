@@ -7,7 +7,7 @@
 #include <map>
 
 #include "app_actions.h"
-#include "controls.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
@@ -111,6 +111,7 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     tabsRow_->emplace<ui::Button>("fx.tab.chain", "Chain", [this] { showChainTab(); });
     tabsRow_->emplace<ui::Button>("fx.tab.params", "Parameters", [this] { showParamsTab(); });
     tabsRow_->emplace<ui::Button>("fx.add", "Add plugin…", [this] {
+        pendingChain_ = "main";
         browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
     });
     status_ = &tabsRow_->emplace<ui::Label>("fx.status", "", ui::Font::Ui, "caption", "ink-quiet");
@@ -267,12 +268,21 @@ void FxWindow::refresh() {
 void FxWindow::buildChain(ui::Node& body) {
     const model::Track* track = app_.head().tracks.find(track_);
     if (!track) return;
-    if (!track->inputChain.empty()) {
-        body.emplace<ui::Label>("fx.section.input", "Input chain (recorded input)",
-                                ui::Font::UiBold, "caption", "ink-quiet");
-        for (std::size_t i = 0; i < track->inputChain.size(); ++i)
-            buildRow(body, track->inputChain[i], i, true);
-    }
+    // The input chain (fx.add {chain:"input"}): always shown, so it can be
+    // started from here.
+    auto& inputHeader = body.emplace<ui::Node>("fx.input.header");
+    inputHeader.layout.dir = ui::Layout::Dir::Row;
+    inputHeader.layout.height = ui::SizeRule::fixed(22);
+    inputHeader.layout.gap = 6;
+    inputHeader.layout.align = ui::Layout::Align::Center;
+    inputHeader.emplace<ui::Label>("fx.section.input", "Input chain (recorded input)",
+                                   ui::Font::UiBold, "caption", "ink-quiet");
+    inputHeader.emplace<ui::Button>("fx.add.input", "Add input FX", [this] {
+        pendingChain_ = "input";
+        browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
+    });
+    for (std::size_t i = 0; i < track->inputChain.size(); ++i)
+        buildRow(body, track->inputChain[i], i, true);
     body.emplace<ui::Label>("fx.section.chain", "Chain", ui::Font::UiBold, "caption", "ink-quiet");
     if (track->chain.empty())
         body.emplace<ui::Label>("fx.empty", "No effects yet — use “Add plugin…”.", ui::Font::Ui,
@@ -345,19 +355,22 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         auto* wetLabel = &l2.emplace<ui::Label>(prefix + "wetlabel." + id, "", ui::Font::Mono,
                                                 "caption", "ink-quiet");
         wetLabel->layout.width = ui::SizeRule::fixed(76);
-        auto* wet = &l2.emplace<Slider>(
-            prefix + "wet." + id,
-            [this, fx, wetLabel](double normalized) {
-                const double percent = 100.0 * normalized;
-                char text[24];
-                std::snprintf(text, sizeof text, "wet %3.0f%%", percent);
-                wetLabel->setText(text);
-                json::Value args = json::Value::object();
-                args["fx"] = fx.str();
-                args["wet"] = percent;
-                (void)dispatch("fx.set", std::move(args));
-            },
-            [this, fx] { gesture_ = "fx.wet:" + fx.str(); }, [this] { gesture_.clear(); });
+        auto* wet = &l2.emplace<ui::Slider>(prefix + "wet." + id);
+        wet->onChange = [this, fx, wetLabel](double normalized, ui::Gesture g) {
+            if (g == ui::Gesture::End) {
+                gesture_.clear();
+                return;
+            }
+            if (g == ui::Gesture::Begin) gesture_ = "fx.wet:" + fx.str();
+            const double percent = 100.0 * normalized;
+            char text[24];
+            std::snprintf(text, sizeof text, "wet %3.0f%%", percent);
+            wetLabel->setText(text);
+            json::Value args = json::Value::object();
+            args["fx"] = fx.str();
+            args["wet"] = percent;
+            (void)dispatch("fx.set", std::move(args));
+        };
         wet->setValue(inst->wet / 100.0);
         wet->layout.width = ui::SizeRule::fixed(220);
         char wetText[24];
@@ -416,6 +429,7 @@ void FxWindow::addFx(const std::string& pluginId) {
     json::Value args = json::Value::object();
     args["track"] = track_.str();
     args["plugin"] = pluginId;
+    if (pendingChain_ == "input") args["chain"] = "input";
     auto result = dispatcher_.execute({"fx.add", std::move(args), kUiOrigin});
     if (!result) {
         setStatus("fx.add: " + result.error().message);

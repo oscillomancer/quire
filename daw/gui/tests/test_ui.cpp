@@ -493,3 +493,50 @@ TEST_CASE("mixer controls: fader taper and gestures, pan, meter hold and clip, t
     CHECK(soloed);
     CHECK(solo.on());
 }
+
+TEST_CASE("the normalized slider: click-to-set, a relative drag as one gesture, keys") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    content->layout.padding = Insets::all(8);
+    content->layout.width = SizeRule::fixed(400);
+    auto& slider = content->emplace<Slider>("slider");
+    slider.layout.width = SizeRule::fixed(300);
+    std::vector<std::pair<double, Gesture>> calls;
+    slider.onChange = [&](double v, Gesture g) { calls.emplace_back(v, g); };
+    root.setContent(std::move(content));
+    root.frame(false);
+    const Rect b = slider.bounds();
+    // A click on the track sets the value and reports Begin then End.
+    root.pointer({PointerEvent::Type::Down, {b.x + 300 * 0.25f, b.y + 8}, 1});
+    CHECK(slider.value() == doctest::Approx(0.25).epsilon(0.03));
+    CHECK(calls.back().second == Gesture::Begin);
+    root.pointer({PointerEvent::Type::Up, {b.x + 300 * 0.25f, b.y + 8}, 1});
+    CHECK(calls.back().second == Gesture::End);
+    // A drag moves relative to the press (no jump) and reports Move between.
+    slider.setValue(0.5);
+    calls.clear();
+    root.pointer({PointerEvent::Type::Down, {b.x + Slider::kInset + 150, b.y + 8}, 1});
+    CHECK(slider.value() == doctest::Approx(0.5).epsilon(0.03));
+    root.pointer({PointerEvent::Type::Move, {b.x + Slider::kInset + 180, b.y + 8}, 1});
+    CHECK(calls.back().second == Gesture::Move);
+    CHECK(slider.value() > 0.5);
+    const double mid = slider.value();
+    slider.setValue(0.9);  // the model echoing an older value mid-drag is ignored
+    root.pointer({PointerEvent::Type::Move, {b.x + Slider::kInset + 180, b.y + 8}, 1});
+    CHECK(slider.value() == doctest::Approx(mid).epsilon(1e-9));
+    root.pointer({PointerEvent::Type::Up, {b.x + Slider::kInset + 180, b.y + 8}, 1});
+    CHECK(calls.back().second == Gesture::End);
+    // Keys and the wheel are one-shot Sets; Home/End snap to the ends.
+    calls.clear();
+    root.focus(&slider);
+    root.key(SDLK_HOME);
+    CHECK(slider.value() == 0.0);
+    root.key(SDLK_END);
+    CHECK(slider.value() == 1.0);
+    root.key(SDLK_LEFT);
+    CHECK(slider.value() == doctest::Approx(0.99));
+    CHECK(calls.back().second == Gesture::Set);
+    CHECK_FALSE(slider.valueText().empty());
+}

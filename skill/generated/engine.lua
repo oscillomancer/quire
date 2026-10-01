@@ -155,6 +155,7 @@ q = nil
 ---@field plugin string
 ---@field index? integer
 ---@field patch? any
+---@field chain? string
 
 ---@class Quire.fx_add_result
 ---@field fx string

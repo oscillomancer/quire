@@ -479,6 +479,7 @@ struct FxAddArgs {
     std::string track, plugin;
     std::optional<std::int64_t> index;
     std::optional<json::Value> patch;
+    std::optional<std::string> chain;  // "main" (default) or "input"
 };
 struct FxAddResult {
     std::string fx, name;
@@ -1624,13 +1625,16 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Insert a plugin into a track's FX chain and return its id.";
         c.description =
             "plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic "
-            "plugins.";
+            "plugins. chain: main (default; the track's effects) or input (the recorded-input "
+            "chain).";
         c.tags = {"fx"};
         c.args = schema::object<FxAddArgs>("fx_add_args")
                      .field("track", &FxAddArgs::track, idArg("tr", "Track"))
                      .field("plugin", &FxAddArgs::plugin, schema::string().minLength(1))
                      .field("index", &FxAddArgs::index, schema::integer().min(0))
                      .field("patch", &FxAddArgs::patch, schema::any())
+                     .field("chain", &FxAddArgs::chain,
+                            schema::string().pattern("^(main|input)$", "main or input"))
                      .build();
         c.result = schema::object<FxAddResult>("fx_add")
                        .field("fx", &FxAddResult::fx, schema::string())
@@ -1644,6 +1648,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"An instrument on the bass track",
              obj(R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})"),
              obj(R"({"fx": "fx_1", "name": "Test Sine", "semantic": false, "chain": ["fx_1"]})"),
+             "song"},
+            {"An effect in the track's input chain",
+             obj(R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain", "chain": "input"})"),
+             obj(R"({"fx": "fx_1", "name": "<any>", "semantic": "<any>", "chain": ["fx_1"]})"),
              "song"}};
         c.run = [](const FxAddArgs& a, Context& ctx) -> Result<FxAddResult> {
             EngineApp& app = A(ctx);
@@ -1663,15 +1671,21 @@ void registerEngineCommands(cmd::Registry& registry) {
                 }
                 fx.patch = std::move(*merged);
             }
+            const bool input = a.chain && *a.chain == "input";
             model::EditTxn& t = app.txn();
             const Id id = t.create(std::move(fx));
-            std::vector<Id> chain = s.tracks.find(*track)->chain;
+            const model::Track* strip = s.tracks.find(*track);
+            std::vector<Id> chain = input ? strip->inputChain : strip->chain;
             std::size_t at =
                 a.index ? std::min<std::size_t>(static_cast<std::size_t>(*a.index), chain.size())
                         : chain.size();
-            if (info->instrument && !a.index) at = 0;
+            // An instrument goes to the front of the track's chain unless the
+            // caller said where; the input chain keeps the caller's order.
+            if (!input && info->instrument && !a.index) at = 0;
             chain.insert(chain.begin() + static_cast<std::ptrdiff_t>(at), id);
-            t.modify<model::Track>(*track, [&](model::Track& tr) { tr.chain = chain; });
+            t.modify<model::Track>(*track, [&](model::Track& modified) {
+                (input ? modified.inputChain : modified.chain) = chain;
+            });
             FxAddResult r{id.str(), info->name, info->semantic, {}};
             for (Id f : chain) r.chain.push_back(f.str());
             return r;

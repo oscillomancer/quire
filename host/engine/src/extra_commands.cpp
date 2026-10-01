@@ -1388,6 +1388,9 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Move a plugin within a track chain or to another track.";
+        c.description =
+            "Works on the track's chain and on its input chain (an input-chain effect stays on "
+            "its track).";
         c.tags = {"fx"};
         c.args = schema::object<FxMoveArgs>("fx_move_args")
                      .field("fx", &FxMoveArgs::fx, idSchema("fx"))
@@ -1402,18 +1405,25 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::FxInstance>(s, a.fx, "/fx");
             if (!id) return std::move(id).error();
             std::optional<Id> source;
+            bool input = false;
             // The first chain that holds it: a track owns its FX, so a second
             // match would be a broken model, not a second place to remove from.
             for (const auto& e : s.tracks) {
-                if (std::find(e.value->chain.begin(), e.value->chain.end(), *id) ==
-                    e.value->chain.end())
-                    continue;
-                source = e.id;
-                break;
+                if (std::find(e.value->chain.begin(), e.value->chain.end(), *id) !=
+                    e.value->chain.end()) {
+                    source = e.id;
+                    break;
+                }
+                if (std::find(e.value->inputChain.begin(), e.value->inputChain.end(), *id) !=
+                    e.value->inputChain.end()) {
+                    source = e.id;
+                    input = true;
+                    break;
+                }
             }
             if (!source)
                 return Error("fx.chain", "this plugin is not in a track chain", "/fx",
-                             "fx.move reorders track chains only; take chains are not "
+                             "fx.move reorders track chains; take chains are not "
                              "editable yet");
             Id target = *source;
             if (a.track) {
@@ -1423,6 +1433,20 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             auto sourceChain = dangling<model::Track>(s, *source, "/fx");
             if (!sourceChain) return std::move(sourceChain).error();
+            if (input) {
+                if (target != *source)
+                    return Error("fx.chain", "an input-chain effect stays on its track", "/track",
+                                 "remove it and add it to the other track's input chain");
+                std::vector<Id> chain = (*sourceChain)->inputChain;
+                chain.erase(std::remove(chain.begin(), chain.end(), *id), chain.end());
+                if (static_cast<std::size_t>(a.index) > chain.size())
+                    return Error("fx.index", "index is past the end of the input chain", "/index",
+                                 "use an index from 0 to " + std::to_string(chain.size()));
+                chain.insert(chain.begin() + a.index, *id);
+                app(ctx).txn().modify<model::Track>(
+                    *source, [&](model::Track& tr) { tr.inputChain = chain; });
+                return Empty{};
+            }
             auto chain = (*sourceChain)->chain;
             chain.erase(std::remove(chain.begin(), chain.end(), *id), chain.end());
             std::vector<Id> targetChain = chain;

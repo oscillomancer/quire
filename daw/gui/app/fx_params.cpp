@@ -4,9 +4,9 @@
 #include <memory>
 #include <vector>
 
-#include "controls.h"
 #include "supple/json/parse.h"
 #include "supple/params/params.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
@@ -179,15 +179,18 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
             button->enabled = writable;
             button->layout.width = ui::SizeRule::fixed(180);
         } else {
-            auto* slider = &control.emplace<Slider>(
-                "fx.param." + d.key,
-                [spec_keep, key, setPhysical](double normalized) {
-                    const double value = params::clampPhysical(
-                        spec_keep->spec, params::fromNormalized(spec_keep->spec, normalized));
-                    setPhysical(value, true);
-                },
-                [this, key] { gesture_ = "fx.param:" + idText(fx_) + ":" + key; },
-                [this] { gesture_.clear(); });
+            auto* slider = &control.emplace<ui::Slider>("fx.param." + d.key);
+            slider->onChange = [this, spec_keep, key, setPhysical](double normalized,
+                                                                   ui::Gesture g) {
+                if (g == ui::Gesture::End) {
+                    gesture_.clear();
+                    return;
+                }
+                if (g == ui::Gesture::Begin) gesture_ = "fx.param:" + idText(fx_) + ":" + key;
+                const double value = params::clampPhysical(
+                    spec_keep->spec, params::fromNormalized(spec_keep->spec, normalized));
+                setPhysical(value, true);
+            };
             slider->setValue(params::toNormalized(spec, physical));
             slider->enabled = writable;
         }

@@ -292,6 +292,119 @@ bool PanControl::onKey(const KeyEvent& e) {
     }
 }
 
+// ------------------------------------------------------------------------- Slider
+
+Slider::Slider(std::string id) : Node(std::move(id), Role::Slider) {
+    focusable = true;
+    interactive = true;
+    layout.width = SizeRule::fraction();
+    layout.height = SizeRule::fixed(20);
+}
+
+void Slider::setValue(double value) {
+    const double v = std::clamp(value, 0.0, 1.0);
+    if (v == value_) return;
+    value_ = v;
+    invalidate();
+}
+
+Size Slider::measure(const Canvas&, Size available) { return {available.w, 20}; }
+
+Rect Slider::track() const {
+    const Rect b = bounds();
+    return {b.x + kInset, b.y, std::max(1.0f, b.w - 2 * kInset), b.h};
+}
+
+double Slider::valueAt(Point p) const {
+    const Rect tr = track();
+    const double width = static_cast<double>(tr.w);
+    return std::clamp((static_cast<double>(p.x) - static_cast<double>(tr.x)) / width, 0.0, 1.0);
+}
+
+void Slider::change(double value, Gesture g) {
+    const double v = std::clamp(value, 0.0, 1.0);
+    if (v != value_ || g == Gesture::Begin || g == Gesture::End) {
+        value_ = v;
+        invalidate();
+        if (onChange) onChange(value_, g);
+    }
+}
+
+void Slider::paint(Canvas& c) {
+    const Theme& t = c.theme();
+    const Rect b = bounds();
+    const float y = b.y + b.h / 2;
+    c.line({b.x + kInset, y}, {b.right() - kInset, y}, t.color("rule"), 3.0f);
+    const float hx = b.x + kInset + static_cast<float>(value_) * (b.w - 2 * kInset);
+    c.line({b.x + kInset, y}, {hx, y}, t.color("accent"), 3.0f);
+    const Rect cap{hx - 4, b.y + 2, 8, b.h - 4};
+    c.fillRound(cap, 3, dragging_ ? t.color("focus") : t.color("raised"));
+    c.strokeRound(cap, 3, focused() ? t.color("focus") : t.color("rule"));
+}
+
+bool Slider::onPointer(const PointerEvent& e) {
+    using T = PointerEvent::Type;
+    switch (e.type) {
+        case T::Down:
+            if (e.button != 1) return false;
+            if (Root* r = root()) r->focus(this);
+            dragging_ = true;
+            press_ = e.pos;
+            pressValue_ = value_;
+            if (Root* r = root()) r->capture(this);
+            change(valueAt(e.pos), Gesture::Begin);
+            return true;
+        case T::Move: {
+            if (!dragging_) return false;
+            const double scale = (e.mods & kShift) ? 0.1 : 1.0;
+            const double width = static_cast<double>(track().w);
+            const double delta = static_cast<double>(e.pos.x - press_.x) / width;
+            change(pressValue_ + delta * scale, Gesture::Move);
+            return true;
+        }
+        case T::Up:
+            if (!dragging_) return false;
+            dragging_ = false;
+            if (Root* r = root()) r->capture(nullptr);
+            change(value_, Gesture::End);
+            return true;
+        case T::Wheel:
+            change(value_ + static_cast<double>(e.wheelY) * ((e.mods & kShift) ? 0.005 : 0.02),
+                   Gesture::Set);
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Slider::onKey(const KeyEvent& e) {
+    const double step = (e.mods & kShift) ? 0.001 : 0.01;
+    switch (e.key) {
+        case SDLK_RIGHT:
+        case SDLK_UP:
+            change(value_ + step, Gesture::Set);
+            return true;
+        case SDLK_LEFT:
+        case SDLK_DOWN:
+            change(value_ - step, Gesture::Set);
+            return true;
+        case SDLK_HOME:
+            change(0.0, Gesture::Set);
+            return true;
+        case SDLK_END:
+            change(1.0, Gesture::Set);
+            return true;
+        default:
+            return false;
+    }
+}
+
+std::string Slider::valueText() const {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%.4f", value_);
+    return buf;
+}
+
 // ----------------------------------------------------------------- Meter
 
 Meter::Meter(std::string id, bool vertical) : Node(std::move(id)), vertical_(vertical) {
