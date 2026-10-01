@@ -31,7 +31,8 @@ bool iequals(std::string_view a, std::string_view b) {
            });
 }
 std::string originText(const cmd::Origin& o) {
-    static constexpr const char* kTypes[] = {"ui", "lua", "mcp", "rpc", "test", "internal"};
+    static constexpr const char* kTypes[] = {"ui",   "lua",      "mcp",  "rpc",
+                                             "test", "internal", "agent"};
     std::string s = kTypes[static_cast<int>(o.type)];
     if (!o.client.empty()) s += ":" + o.client;
     if (!o.agent.empty()) s += "/" + o.agent;

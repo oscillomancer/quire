@@ -28,7 +28,7 @@ need an approved `HUMAN_REVIEW.md` entry. Dynamically linked OS libraries
 | nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer, fetched by the template CMake on Apple; not vendored, never built on Linux | static, macOS plugins only |
 | nanovg | Zlib (bundled stb_truetype/stb_image: public domain or MIT) | `ce3bf74` (template's pin) | Vector rendering for the DAW GUI | static |
 
-System libraries (dynamically linked, not bundled): SDL3 (Zlib), zlib (Zlib; PNG snapshots), libjack
+System libraries (dynamically linked, not bundled): SDL3 (Zlib), zlib (Zlib; PNG snapshots), libcurl (curl license, MIT-style; the agent panel's HTTP client, with the system TLS library), libjack
 from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL.
 
