@@ -10,6 +10,7 @@
 
 #include "app_actions.h"
 #include "midi_editor.h"
+#include "routing_matrix.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
 #include "supple/ui/text_area.h"
@@ -274,4 +275,72 @@ TEST_CASE("MIDI editor: the notation panel compiles live, writes back, and follo
     f.exec("item.remove", R"({"item":")" + f.item + R"("})");
     f.frame();
     CHECK_FALSE(f.editor->isOpen());
+}
+
+TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes") {
+    Fixture f;
+    if (!f.ok) return;
+    const std::string drums =
+        f.exec("track.add", R"({"type":"buss","name":"Drums"})")["track"].asString();
+    const std::string verb =
+        f.exec("track.add", R"({"type":"buss","name":"Verb"})")["track"].asString();
+    f.exec("route.add", R"({"from":")" + verb + R"(","to":")" + drums + R"("})");
+    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    matrix.open();
+    f.root->frame(false);
+    REQUIRE(matrix.isOpen());
+    const auto& m = matrix.model();
+    auto row = [&](const std::string& id) {
+        for (std::size_t i = 0; i < m.sources.size(); ++i)
+            if (m.sources[i].id == id) return i;
+        FAIL("no source " << id);
+        return std::size_t{0};
+    };
+    auto col = [&](const std::string& id) {
+        for (std::size_t i = 0; i < m.destinations.size(); ++i)
+            if (m.destinations[i].id == id) return i;
+        FAIL("no destination " << id);
+        return std::size_t{0};
+    };
+    std::string keys;
+    for (const auto& s : m.sources)
+        if (s.name == "Keys") keys = s.id;
+    REQUIRE_FALSE(keys.empty());
+    // Rules: a channel takes no strip audio; the master is terminal; Drums -> Verb feeds back.
+    CHECK_FALSE(m.blocked(row(drums), col(keys)).empty());
+    CHECK_FALSE(m.blocked(row("tr_0"), col(drums)).empty());
+    CHECK(m.blocked(row(drums), col(verb)).find("feed back") != std::string::npos);
+    CHECK(m.blocked(row(keys), col(drums)).empty());
+    // Hovering a blocked cell says why.
+    auto* grid = matrix.grid();
+    REQUIRE(grid);
+    f.snapshot("routing-open.png");
+    // A click on an allowed cell sends (one version) and selects the new send.
+    const auto v = f.app->head().version;
+    REQUIRE(matrix.clickCell(row(keys), col(drums)));
+    CHECK(f.app->head().version == v + 1);
+    REQUIRE(matrix.selectedSend());
+    CHECK(m.sendsAt(row(keys), col(drums)).size() == 1);
+    // A blocked click changes nothing.
+    CHECK_FALSE(matrix.clickCell(row(drums), col(verb)));
+    CHECK(f.app->head().version == v + 1);
+    // Edit the send: level with units, pre-fader, mute; then remove it.
+    f.root->click("routing.volume");
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("-6 dB");
+    f.root->key(SDLK_RETURN, 0);
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->volumeDb == doctest::Approx(-6.0));
+    REQUIRE(f.root->click("routing.tap.pre"));
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->tap == "pre_fader");
+    REQUIRE(f.root->click("routing.mute"));
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->mute);
+    f.snapshot("routing-send.png");
+    REQUIRE(f.root->click("routing.remove"));
+    CHECK(m.sendsAt(row(keys), col(drums)).empty());
+    // Changes from elsewhere arrive on sync.
+    f.exec("route.add", R"({"from":")" + keys + R"(","to":")" + verb + R"("})");
+    matrix.sync();
+    CHECK(m.sendsAt(row(keys), col(verb)).size() == 1);
+    REQUIRE(f.root->click("routing.close"));
+    CHECK_FALSE(matrix.isOpen());
 }

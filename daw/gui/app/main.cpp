@@ -30,6 +30,7 @@
 #include "generate.h"
 #include "midi_editor.h"
 #include "plugin_windows.h"
+#include "routing_matrix.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
@@ -289,6 +290,7 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
+    gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
@@ -431,6 +433,7 @@ int main(int argc, char** argv) {
         }
         shell.sync();
         midiEditor.sync();
+        routing.sync();
         uiFile.tick((*app)->projectPath());
         if (o.script && warm) {
             views::Lanes& lanes = *shell.lanes();
@@ -480,6 +483,7 @@ int main(int argc, char** argv) {
             const int next = loop.pump();
             shell.sync();
             midiEditor.sync();
+            routing.sync();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
@@ -497,6 +501,7 @@ int main(int argc, char** argv) {
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
         shell.sync();
         midiEditor.sync();
+        routing.sync();
         root.damageAll();
         root.frame(false);
         auto written = gui::writePng(o.snapshot, root.readBack());

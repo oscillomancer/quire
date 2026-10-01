@@ -479,6 +479,127 @@ void registerExtraCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    {
+        Command<cmd::NoArgs, json::Value> c;
+        c.name = "route.matrix";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "What can be routed where: strips, plug-in keys, sends and blocked pairs.";
+        c.description =
+            "sources: strips in tree order (depth, parent, parent_send). destinations: strips and "
+            "plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule "
+            "applies (masters feed only keys), the destination's rule applies (channels take only "
+            "hardware audio), it is the same strip, or it is listed in cycles (the destination "
+            "already feeds the source). sends: existing routes per pair. Otherwise route.add "
+            "accepts the pair.";
+        c.tags = {"route"};
+        c.args = schema::object<cmd::NoArgs>("no_args").build();
+        c.result = schema::any();
+        c.examples = {
+            {"A song's routing", j("{}"),
+             j(R"({"sources":"<any>","destinations":"<any>","sends":"<any>","cycles":"<any>"})"),
+             "song"}};
+        c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<json::Value> {
+            EngineApp& a = app(ctx);
+            const model::Session s = a.view();
+            auto rule = [](const char* code, const char* message, const char* hint) {
+                json::Value r = json::Value::object();
+                r["code"] = code;
+                r["message"] = message;
+                r["hint"] = hint;
+                return r;
+            };
+            // Tracks in tree order with depth.
+            std::vector<std::pair<Id, int>> order;
+            std::function<void(Id, int)> walk = [&](Id id, int depth) {
+                const model::Track* t = s.tracks.find(id);
+                if (!t) return;
+                order.emplace_back(id, depth);
+                for (Id child : t->children) walk(child, depth + 1);
+            };
+            for (Id m : s.project->masters) walk(m, 0);
+            json::Value sources = json::Value::array(), destinations = json::Value::array();
+            for (const auto& [id, depth] : order) {
+                const model::Track& t = *s.tracks.find(id);
+                json::Value src = json::Value::object();
+                src["id"] = id.str();
+                src["name"] = t.name;
+                src["type"] = std::string(model::stripTypeName(t.type));
+                src["depth"] = depth;
+                if (t.parent) {
+                    src["parent"] = t.parent->str();
+                    src["parent_send"] = t.parentSend.enabled;
+                }
+                if (t.type == model::StripType::Master)
+                    src["rule"] = rule(
+                        "route.strip_type", "masters are terminal (they may feed plug-in keys)",
+                        "masters feed hardware outputs and renders; use a buss to group");
+                sources.push_back(src);
+                json::Value dst = json::Value::object();
+                dst["id"] = id.str();
+                dst["name"] = t.name;
+                dst["kind"] = "track";
+                dst["type"] = std::string(model::stripTypeName(t.type));
+                if (t.type == model::StripType::Channel)
+                    dst["rule"] =
+                        rule("route.strip_type", "a channel accepts only hardware audio",
+                             "add a buss and route the channels into it; use fx for a key");
+                destinations.push_back(std::move(dst));
+                for (Id fx : t.chain) {
+                    const model::FxInstance* inst = s.fx.find(fx);
+                    if (!inst) continue;
+                    auto key = a.fxSidechainChannels(*inst);
+                    if (!key || *key == 0) continue;
+                    json::Value k = json::Value::object();
+                    k["id"] = fx.str();
+                    k["name"] = (inst->label.empty() ? inst->plugin.name : inst->label) + " (key)";
+                    k["kind"] = "key";
+                    k["track"] = id.str();
+                    destinations.push_back(std::move(k));
+                }
+            }
+            json::Value sends = json::Value::array();
+            for (const auto& e : s.routes) {
+                const model::Route& r = *e.value;
+                if (!r.from.track) continue;
+                json::Value v = json::Value::object();
+                v["id"] = e.id.str();
+                v["from"] = r.from.track->str();
+                v["to"] = r.to.fx ? r.to.fx->str() : r.to.track ? r.to.track->str() : "";
+                sends.push_back(std::move(v));
+            }
+            // A route from -> d feeds back when d (or the key's track) already
+            // reaches from: listed per pair, with the path.
+            json::Value cycles = json::Value::array();
+            for (const json::Value& d : destinations.asArray()) {
+                const std::string did = d.find("id")->asString();
+                const bool key = d.find("kind")->asString() == "key";
+                const Id target = *Id::parse(key ? d.find("track")->asString() : did);
+                if (!key && s.tracks.find(target)->type == model::StripType::Channel)
+                    continue;  // type rule
+                for (const auto& [from, depth] : order) {
+                    if (from == target) continue;  // the same strip
+                    if (!key && s.tracks.find(from)->type == model::StripType::Master) continue;
+                    if (auto path = routeCycle(s, from, target)) {
+                        json::Value v = json::Value::object();
+                        v["from"] = from.str();
+                        v["to"] = did;
+                        std::string names;
+                        for (Id at : *path) names += (names.empty() ? "" : " -> ") + at.str();
+                        v["path"] = names;
+                        cycles.push_back(std::move(v));
+                    }
+                }
+            }
+            json::Value out = json::Value::object();
+            out["sources"] = std::move(sources);
+            out["destinations"] = std::move(destinations);
+            out["sends"] = std::move(sends);
+            out["cycles"] = std::move(cycles);
+            return out;
+        };
+        registry.add(std::move(c));
+    }
 
     {
         Command<TrackMoveArgs, Empty> c;

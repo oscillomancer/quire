@@ -887,6 +887,7 @@ q = nil
 ---@class Quire.route
 ---@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, the master, or a plug-in's key.
 ---@field list fun(): Quire.route_list_result List sends with endpoints and mixer settings.
+---@field matrix fun(): table What can be routed where: strips, plug-in keys, sends and blocked pairs.
 ---@field remove fun(args: Quire.route_remove_args): table Remove a send.
 ---@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, or mute.
 

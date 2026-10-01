@@ -4650,6 +4650,47 @@ Result:
 
 ```
 
+## `route.matrix@1`
+
+What can be routed where: strips, plug-in keys, sends and blocked pairs.
+
+sources: strips in tree order (depth, parent, parent_send). destinations: strips and plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule applies (masters feed only keys), the destination's rule applies (channels take only hardware audio), it is the same strip, or it is listed in cycles (the destination already feeds the source). sends: existing routes per pair. Otherwise route.add accepts the pair.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**A song's routing** (`song`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "sources": "<any>",
+  "destinations": "<any>",
+  "sends": "<any>",
+  "cycles": "<any>"
+}
+
+```
+
 ## `route.remove@1`
 
 Remove a send.
