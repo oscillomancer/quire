@@ -239,9 +239,36 @@ struct JackBackend::Impl {
         if (client) api->clientClose(client);
         client = nullptr;
     }
+    std::vector<std::string> inputNames;  // what each input is connected to
 };
 
 JackBackend::JackBackend(Options options) : options_(std::move(options)) {}
+
+std::vector<std::string> JackBackend::inputNames() const {
+    std::vector<std::string> out = impl_ ? impl_->inputNames : std::vector<std::string>{};
+    out.resize(config_.inputs);  // unconnected channels: ""
+    return out;
+}
+
+Result<std::vector<std::string>> JackBackend::captureNames(const Options& options) {
+    auto loadedApi = loadApi(options.library);
+    if (!loadedApi) return std::move(loadedApi).error();
+    const Api* api = *loadedApi;
+    int status = 0;
+    JackClient* client =
+        api->clientOpen((options.clientName + "-probe").c_str(), kNoStartServer, &status);
+    if (!client)
+        return Error("backend.open",
+                     "could not connect to the JACK server (" + statusText(status) + ")");
+    std::vector<std::string> names;
+    if (const char** ports =
+            api->getPorts(client, nullptr, kAudioType, kPortIsPhysical | kPortIsOutput)) {
+        for (std::size_t c = 0; ports[c]; ++c) names.emplace_back(ports[c]);
+        api->free(static_cast<void*>(ports));
+    }
+    api->clientClose(client);
+    return names;
+}
 
 JackBackend::~JackBackend() { stop(); }
 
@@ -347,7 +374,8 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
         if (const char** ports =
                 api->getPorts(impl->client, nullptr, kAudioType, kPortIsPhysical | kPortIsOutput)) {
             for (std::uint32_t c = 0; c < config.inputs && ports[c]; ++c)
-                api->connect(impl->client, ports[c], api->portName(impl->inPorts[c]));
+                if (api->connect(impl->client, ports[c], api->portName(impl->inPorts[c])) == 0)
+                    impl->inputNames.emplace_back(ports[c]);
             api->free(static_cast<void*>(ports));
         }
     }

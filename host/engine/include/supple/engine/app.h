@@ -169,6 +169,7 @@ class EngineApp : public cmd::Host {
     Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
     void stopEngine();
     Engine* engine() { return engine_.get(); }
+    const Backend* backend() const { return backend_; }  // null while stopped
     EngineStatus engineStatus();
     // The meters (P5.3c): one reading per strip of the newest plan, covering
     // the audio heard since the last call. Call it from this (the model)

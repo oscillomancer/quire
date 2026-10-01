@@ -1742,3 +1742,22 @@ TEST_CASE("track.set parent_send: off, a loop it would close is refused, back on
     REQUIRE_FALSE(master);
     CHECK(master.error().code == "track.parent_send");
 }
+
+TEST_CASE("engine.inputs: the record inputs while running, empty while stopped") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto stopped = d.execute({"engine.inputs", j("{}"), kTest});
+    REQUIRE(stopped);
+    CHECK_FALSE(stopped->find("running")->asBool());
+    CHECK(stopped->find("audio")->size() == 0);
+    REQUIRE(d.execute({"engine.start", j(R"({"backend":"dummy"})"), kTest}));
+    auto inputs = d.execute({"engine.inputs", j("{}"), kTest});
+    REQUIRE(inputs);
+    CHECK(inputs->find("backend")->asString() == "dummy");
+    REQUIRE(inputs->find("audio")->size() == 2);
+    CHECK(inputs->find("audio")->at(1).find("channel")->asInt() == 2);
+    REQUIRE(d.execute({"engine.stop", j("{}"), kTest}));
+}

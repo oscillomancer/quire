@@ -2705,6 +2705,48 @@ void registerEngineCommands(cmd::Registry& registry) {
         registry.add(std::move(c));
     }
     {
+        Command<NoArgs, json::Value> c;
+        c.name = "engine.inputs";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "The device inputs a track can record: audio channels and MIDI devices.";
+        c.description =
+            "audio: one entry per input channel (channel, the 1-based number track.set "
+            "record_input takes, and the device port it is connected to). midi: the MIDI devices "
+            "(names track.set record_midi matches). While the engine is stopped: running false and "
+            "empty lists (engine.start opens the device).";
+        c.tags = {"engine", "record"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = schema::any();
+        c.examples = {
+            {"Stopped", obj("{}"), obj(R"({"running": false, "audio": [], "midi": []})"), "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<json::Value> {
+            EngineApp& app = A(ctx);
+            const Backend* backend = app.backend();
+            json::Value out = json::Value::object();
+            out["running"] = backend != nullptr;
+            out["audio"] = json::Value::array();
+            out["midi"] = json::Value::array();
+            if (!backend) return out;
+            json::Value audio = json::Value::array();
+            const auto names = backend->inputNames();
+            const std::uint32_t count = backend->config().inputs;
+            for (std::uint32_t ch = 0; ch < count; ++ch) {
+                json::Value e = json::Value::object();
+                e["channel"] = static_cast<std::int64_t>(ch + 1);
+                e["port"] = ch < names.size() ? names[ch] : std::string();
+                audio.push_back(std::move(e));
+            }
+            json::Value midi = json::Value::array();
+            for (const std::string& name : backend->midiPorts()) midi.push_back(name);
+            out["backend"] = backend->name();
+            out["audio"] = std::move(audio);
+            out["midi"] = std::move(midi);
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+    {
         Command<NoArgs, EngineStatus> c;
         c.name = "engine.status";
         c.kind = Kind::Query;

@@ -627,6 +627,46 @@ Result:
 
 ```
 
+## `engine.inputs@1`
+
+The device inputs a track can record: audio channels and MIDI devices.
+
+audio: one entry per input channel (channel, the 1-based number track.set record_input takes, and the device port it is connected to). midi: the MIDI devices (names track.set record_midi matches). While the engine is stopped: running false and empty lists (engine.start opens the device).
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Stopped** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "running": false,
+  "audio": [],
+  "midi": []
+}
+
+```
+
 ## `engine.start@1`
 
 Start real-time playback on the audio device (jack) or without one (dummy).

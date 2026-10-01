@@ -29,7 +29,7 @@ branch) · **gap** (not started).
 | 15 | Assign shortcuts, show conflicts by context | done — Ctrl+B in the actions list, keymap sections, user deltas |
 | 16 | Add, reorder, bypass, wet/dry FX quickly | done — FX chain window + plugin browser (favourites, stock first) + parameter panel |
 | 17 | Render master with clear source/bounds/format/destination | done — render dialog with live dry-run file names, jobs, add-to-project |
-| 18 | Arm, pick input, monitor, record without hidden state | partial — arm/monitor in the mixer; TCP + transport record in progress (`gui`); **no input picker** (hardware inputs are not listed by any command) and the record path is not shown before recording |
+| 18 | Arm, pick input, monitor, record without hidden state | partial — arm/monitor in the mixer; TCP + transport record in progress (`gui`); `engine.inputs` now lists every capture channel (one engine input per physical port) and the MIDI devices, for the TCP's input menu; the record path is not shown before recording |
 | 19 | Save/reopen with stable IDs and readable diffs | done — File new/open/save/save as, canonical JSON, confirm before discarding |
 | 20 | Undo/redo every edit, expose command results | done — history dock (versions, branches, jump), command log (`log.list`) with origins |
 
@@ -66,8 +66,9 @@ branch) · **gap** (not started).
 ## Gaps found by this pass, and where they go
 
 - Parent-send toggle (#7): fixed in this pass.
-- Hardware input listing for an input picker (#18): engine — a command that
-  lists the backend's capture ports/channels; then the TCP's input menu.
+- Hardware input listing for an input picker (#18): `engine.inputs` added
+  (and JACK opens one input per physical capture port); the TCP's input menu
+  is next (`gui`).
 - Route channel maps (#4): engine — `route.add/set {channels}` over the
   existing `ChannelMap`.
 - Stretch gesture (#12) and take-lane comping (#21): after p5-edit.

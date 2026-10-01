@@ -802,6 +802,7 @@ q = nil
 ---@field switch fun(args: Quire.branch_switch_args): Quire.branch_switch_result Make another branch current (edits, undo and playback follow it).
 
 ---@class Quire.engine
+---@field inputs fun(): table The device inputs a track can record: audio channels and MIDI devices.
 ---@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start real-time playback on the audio device (jack) or without one (dummy).
 ---@field status fun(): Quire.engine_status_result Real-time engine state: backend, rate, block, device period, latency, xruns.
 ---@field stop fun(): table Stop real-time playback and release the audio device.
