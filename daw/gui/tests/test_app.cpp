@@ -361,6 +361,26 @@ TEST_CASE(
     CHECK(a.app->head().items.size() == 0);  // saved before the imports
 }
 
+TEST_CASE("an action binds the selected tracks ($selection.track)") {
+    App a;
+    if (!a.ok) {
+        MESSAGE("skipped: no offscreen GL in this environment");
+        return;
+    }
+    json::Value add = json::Value::object();
+    add["name"] = "Doomed";
+    auto added = a.dispatcher->execute(
+        {"track.add", std::move(add), cmd::Origin{cmd::Origin::Type::Ui, "gui", {}}});
+    REQUIRE(added);
+    const std::string track = (*added)["track"].asString();
+    a.ui.selectedTracks = {track};  // the TCP puts the clicked strip here
+    // track.remove's required argument is named `track`, so the registry binds
+    // it to $selection.track: running the action removes what is selected.
+    auto run = a.actions->run("track.remove");
+    REQUIRE_MESSAGE(run, (run ? "" : run.error().toString()));
+    CHECK(a.app->head().tracks.find(*model::Id::parse(track)) == nullptr);
+}
+
 TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5)") {
     App a;
     if (!a.ok) {

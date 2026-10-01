@@ -989,6 +989,17 @@ TEST_CASE("the TCP meters take readings from the feed and hold peaks") {
     CHECK(held > -10.0f);
     for (int i = 0; i < 30; ++i) feed.poll();
     CHECK(meter->shownPeakDb(0) < held);
+    // A clip (a reading at or over full scale) latches until the meter is
+    // clicked, which also clears the hold.
+    gui::StripReading hot;
+    hot.track = "tr_1";
+    hot.peak[0] = hot.peak[1] = 1.2f;
+    hot.rms[0] = hot.rms[1] = 0.5f;
+    readings = {hot};
+    feed.poll();
+    CHECK(meter->clipped());
+    press(root, meter);
+    CHECK_FALSE(meter->clipped());
 }
 
 TEST_CASE("the meters repaint only themselves, not the arrange content") {
