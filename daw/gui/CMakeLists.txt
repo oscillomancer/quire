@@ -36,9 +36,11 @@ supple_add_library(gui-actions SOURCES actions/src/actions.cpp actions/src/keyma
   PRIVATE_DEPS SDL3::SDL3)
 target_include_directories(gui-actions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/actions/include)
 
-# Views (gui.md §4): the track lanes now; arrange, mixer, editors follow.
-supple_add_library(gui-views SOURCES views/src/lanes.cpp
-  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline)
+# Views (gui.md §4): the arrange view (ruler, lanes, TCP column) now; mixer,
+# editors follow.
+supple_add_library(gui-views SOURCES views/src/lanes.cpp views/src/track_layout.cpp
+                                        views/src/arrange.cpp
+  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline SDL3::SDL3)
 target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.

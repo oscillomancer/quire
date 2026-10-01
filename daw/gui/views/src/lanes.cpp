@@ -24,19 +24,55 @@ std::string_view typeToken(model::StripType t) {
 
 double dbToGain(double db) { return std::pow(10.0, db / 20.0); }
 
+// The fade curve: a normalized gain in [0, 1] for a position t in [0, 1]
+// along the fade. `curve` (% −100..100) bends the shape slowly or quickly.
+float fadeGain(model::FadeShape shape, double curve, float t) {
+    t = std::clamp(t, 0.0f, 1.0f);
+    float g = t;
+    switch (shape) {
+        case model::FadeShape::Linear:
+            g = t;
+            break;
+        case model::FadeShape::Slow:
+            g = t * t;
+            break;
+        case model::FadeShape::Fast:
+            g = std::sqrt(t);
+            break;
+        case model::FadeShape::SlowFast:
+            g = t * t * (3.0f - 2.0f * t);
+            break;
+        case model::FadeShape::FastSlow:
+            g = 1.0f - t * t * (3.0f - 2.0f * t);
+            break;
+        case model::FadeShape::Cos:
+            g = 0.5f - 0.5f * std::cos(3.14159265f * t);
+            break;
+        case model::FadeShape::Exp: {
+            const float k = std::exp(3.0f);
+            g = (std::exp(3.0f * t) - 1.0f) / (k - 1.0f);
+            break;
+        }
+    }
+    const float exponent =
+        std::exp2(std::clamp(static_cast<float>(curve), -100.0f, 100.0f) / 50.0f);
+    return std::pow(std::clamp(g, 0.0f, 1.0f), exponent);
+}
+
 }  // namespace
 
-// Item labels paint after the GL layer (a child paints after its parent).
+// Item chrome (names, take badges, lock marks) paints after the GL layer (a
+// child paints after its parent).
 class LaneLabels : public ui::Node {
   public:
     explicit LaneLabels(Lanes& lanes) : Node("lanes-labels"), lanes_(lanes) {}
     void paint(ui::Canvas& c) override {
         const ui::Theme& t = c.theme();
-        const model::Session& s = lanes_.session_;
-        for (std::size_t i = 0; i < lanes_.rows_.size(); ++i) {
+        const model::Session& s = lanes_.layout_.session();
+        for (std::size_t i = 0; i < lanes_.layout_.rowCount(); ++i) {
             const ui::Rect row = lanes_.rowRect(i).intersect(bounds());
             if (row.empty()) continue;
-            for (model::Id id : lanes_.rows_[i].items) {
+            for (model::Id id : lanes_.rowItems_[i]) {
                 const model::Item* item = s.items.find(id);
                 if (!item) continue;
                 const ui::Rect r = lanes_.itemRect(i, *item).intersect(bounds());
@@ -45,8 +81,23 @@ class LaneLabels : public ui::Node {
                     item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
                 std::string name = take ? take->name : std::string();
                 if (name.empty()) name = id.str();
-                c.text({r.x + 4, r.y + 1, r.w - 8, 14}, name, ui::Font::Ui, t.type("caption"),
-                       t.color("ink").withAlpha(0.85f));
+                const float alpha = item->mute ? 0.45f : 0.85f;
+                const float textW = r.w - 30.0f;
+                c.text({r.x + 4, r.y + 1, textW, 14}, name, ui::Font::Ui, t.type("caption"),
+                       t.color("ink").withAlpha(alpha));
+                // A badge when the item carries more than one take.
+                if (item->takes.size() > 1) {
+                    const ui::Rect badge{r.right() - 18, r.y + 3, 14, 12};
+                    c.fillRound(badge, t.radius("s"), t.color("raised"));
+                    c.text(badge, std::to_string(item->takes.size()), ui::Font::Mono,
+                           t.type("caption"), t.color("ink-quiet"), ui::kCenter | ui::kMiddle);
+                }
+                // A padlock for locked items.
+                if (item->locked) {
+                    const ui::Color ink = t.color("ink-quiet");
+                    c.strokeRect({r.x + 6, r.y + 6, 5, 6}, ink, 1.0f);
+                    c.fillRect({r.x + 4, r.y + 12, 9, 7}, ink);
+                }
             }
         }
     }
@@ -55,45 +106,29 @@ class LaneLabels : public ui::Node {
     Lanes& lanes_;
 };
 
-Lanes::Lanes(peaks::PeakService& peaks, Resolve resolve)
-    : Node("lanes", ui::Role::Custom), peaks_(peaks), resolve_(std::move(resolve)) {
-    interactive = true;
+Lanes::Lanes(peaks::PeakService& peaks, Resolve resolve, const TrackLayout& rowLayout,
+             const Viewport& view)
+    : Node("lanes", ui::Role::Custom),
+      peaks_(peaks),
+      resolve_(std::move(resolve)),
+      layout_(rowLayout),
+      view_(view) {
     drawsGl = true;
     clipsChildren = true;
     emplace<LaneLabels>(*this);
 }
 
-void Lanes::show(const model::Session& session) {
-    if (session.version == indexed_) return;
-    session_ = session;
-    indexed_ = session.version;
-    rows_.clear();
-    std::function<void(model::Id)> visit = [&](model::Id id) {
-        const model::Track* t = session_.tracks.find(id);
-        if (!t) return;
-        if (t->type != model::StripType::Master && !t->hiddenTcp)
-            rows_.push_back({id, t->type, {}});
-        for (model::Id c : t->children) visit(c);
-    };
-    for (model::Id m : session_.project->masters) visit(m);
-    for (const auto& e : session_.items) {
-        auto row = std::find_if(rows_.begin(), rows_.end(),
-                                [&](const Row& r) { return r.track == e.value->track; });
-        if (row != rows_.end()) row->items.push_back(e.id);
+void Lanes::rebuild() {
+    const model::Session& s = layout_.session();
+    rowItems_.assign(layout_.rowCount(), {});
+    for (const auto& e : s.items) {
+        if (auto row = layout_.indexOf(e.value->track)) rowItems_[*row].push_back(e.id);
     }
-    for (Row& r : rows_)
-        std::sort(r.items.begin(), r.items.end(), [&](model::Id a, model::Id b) {
-            return model::itemSpan(session_, *session_.items.find(a)).startSec <
-                   model::itemSpan(session_, *session_.items.find(b)).startSec;
+    for (auto& items : rowItems_)
+        std::sort(items.begin(), items.end(), [&](model::Id a, model::Id b) {
+            return model::itemSpan(s, *s.items.find(a)).startSec <
+                   model::itemSpan(s, *s.items.find(b)).startSec;
         });
-    invalidate();
-}
-
-void Lanes::setViewport(const Viewport& v) {
-    view_ = v;
-    view_.pixelsPerSecond = std::clamp(view_.pixelsPerSecond, 0.01, 200000.0);
-    view_.startSeconds = std::max(0.0, view_.startSeconds);
-    view_.scrollY = std::clamp(view_.scrollY, 0.0f, std::max(0.0f, contentHeight() - bounds().h));
     invalidate();
 }
 
@@ -102,14 +137,14 @@ void Lanes::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     for (const auto& c : children()) c->arrange(canvas, r);
 }
 
-ui::Rect Lanes::rowRect(std::size_t i) const {
-    return {bounds().x, bounds().y + static_cast<float>(i) * view_.rowHeight - view_.scrollY,
-            bounds().w, view_.rowHeight};
+ui::Rect Lanes::rowRect(std::size_t row) const {
+    return {bounds().x, bounds().y + layout_.yOf(row) - view_.scrollY, bounds().w,
+            layout_.heightOf(row)};
 }
 
 ui::Rect Lanes::itemRect(std::size_t row, const model::Item& item) const {
     const ui::Rect r = rowRect(row);
-    const model::ItemSpan span = model::itemSpan(session_, item);
+    const model::ItemSpan span = model::itemSpan(layout_.session(), item);
     const float x0 = xAt(span.startSec), x1 = xAt(span.endSec);
     return {x0, r.y + 1, std::max(1.0f, x1 - x0), r.h - 2};
 }
@@ -118,7 +153,7 @@ void Lanes::paint(ui::Canvas& c) {
     theme_ = &c.theme();
     const ui::Theme& t = c.theme();
     c.fillRect(bounds(), t.color("ground"));
-    for (std::size_t i = 0; i < rows_.size(); ++i) {
+    for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
         const ui::Rect r = rowRect(i);
         if (r.bottom() < bounds().y) continue;
         if (r.y > bounds().bottom()) break;
@@ -147,43 +182,72 @@ void Lanes::paintGl(const ui::GlFrame& frame) {
         notes_.emplace(std::move(*n));
         strips_.emplace(std::move(*s));
     }
+    const model::Session& s = layout_.session();
     const ui::Theme& t = *theme_;
     stats_ = {};
     const ui::Rect clip = frame.clip.intersect(bounds());
     const double t0 = timeAt(clip.x), t1 = timeAt(clip.right());
-    const std::uint32_t wave = ui::packRgba(t.color("ink").withAlpha(0.8f));
     const std::uint32_t noteBorder = ui::packRgba(t.color("ground").withAlpha(0.7f));
-    for (std::size_t i = 0; i < rows_.size(); ++i) {
+    for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
         const ui::Rect row = rowRect(i);
         if (row.bottom() <= clip.y) continue;
         if (row.y >= clip.bottom()) break;
         ++stats_.rows;
-        const ui::Color type = t.color(typeToken(rows_[i].type));
-        const std::uint32_t body = ui::packRgba(type.withAlpha(0.28f));
-        const std::uint32_t edge = ui::packRgba(type.withAlpha(0.85f));
+        const ui::Color type = t.color(typeToken(layout_.rows()[i].type));
         const std::uint32_t note = ui::packRgba(type);
-        for (model::Id id : rows_[i].items) {
-            const model::Item* item = session_.items.find(id);
+        for (model::Id id : rowItems_[i]) {
+            const model::Item* item = s.items.find(id);
             if (!item) continue;
-            const model::ItemSpan span = model::itemSpan(session_, *item);
+            const model::ItemSpan span = model::itemSpan(s, *item);
             if (span.startSec >= t1) break;  // sorted by start
             if (span.endSec <= t0) continue;
             ++stats_.items;
+            const bool dim = item->mute;
+            const std::uint32_t body = ui::packRgba(type.withAlpha(dim ? 0.10f : 0.28f));
+            const std::uint32_t edge = ui::packRgba(type.withAlpha(dim ? 0.35f : 0.85f));
+            const std::uint32_t wave = ui::packRgba(t.color("ink").withAlpha(dim ? 0.3f : 0.8f));
             const ui::Rect r = itemRect(i, *item);
             bodies_->add(r, body, edge);
-            const model::Take* take =
-                item->activeTake ? session_.takes.find(*item->activeTake) : nullptr;
+            const model::Take* take = item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
             if (!take || !take->source) continue;
             const ui::Rect inner{r.x, r.y + 15, r.w, std::max(0.0f, r.h - 17)};  // under the label
-            if (const model::MediaSource* m = session_.media.find(*take->source))
+            if (const model::MediaSource* m = s.media.find(*take->source))
                 drawAudio(frame, inner, *item, *take, *m, wave);
-            else if (const model::MidiSource* s = session_.midi.find(*take->source))
-                drawMidi(inner, *item, *take, *s, note, noteBorder);
+            else if (const model::MidiSource* src = s.midi.find(*take->source))
+                drawMidi(inner, *item, *take, *src, note, noteBorder);
+            drawFades(r, *item, wave);
         }
     }
     bodies_->flush(frame);
     strips_->flush(frame);
     notes_->flush(frame);
+}
+
+void Lanes::drawFades(const ui::Rect& r, const model::Item& item, std::uint32_t rgba) {
+    const model::ItemSpan span = model::itemSpan(layout_.session(), item);
+    auto curve = [&](double fromSec, double toSec, float t0, float t1, model::FadeShape shape,
+                     double bend) {
+        const float x0 = xAt(fromSec), x1 = xAt(toSec);
+        if (x1 <= r.x || x0 >= r.right() || x1 - x0 < 0.5f) return;
+        const double secondsWide = std::abs((toSec - fromSec) * view_.pixelsPerSecond);
+        const int steps = static_cast<int>(std::clamp(std::ceil(secondsWide / 1.5), 2.0, 256.0));
+        strips_->beginRun();
+        for (int k = 0; k <= steps; ++k) {
+            const float t = static_cast<float>(k) / static_cast<float>(steps);
+            const float gain = fadeGain(shape, bend, t0 + (t1 - t0) * t);
+            const float x = x0 + (x1 - x0) * t;
+            const float y = (r.bottom() - 1) - gain * (r.h - 2);
+            strips_->pair(x, y - 0.75f, y + 0.75f, rgba);
+        }
+        strips_->endRun();
+        ++stats_.fades;
+    };
+    if (item.fadeIn.length > 0)
+        curve(span.startSec, span.startSec + item.fadeIn.length, 0.0f, 1.0f, item.fadeIn.shape,
+              item.fadeIn.curve);
+    if (item.fadeOut.length > 0)
+        curve(span.endSec - item.fadeOut.length, span.endSec, 1.0f, 0.0f, item.fadeOut.shape,
+              item.fadeOut.curve);
 }
 
 void Lanes::drawAudio(const ui::GlFrame& frame, const ui::Rect& r, const model::Item& item,
@@ -204,7 +268,7 @@ void Lanes::drawAudio(const ui::GlFrame& frame, const ui::Rect& r, const model::
     const peaks::Level& level = pyramid->pick(framesPerUnit * static_cast<double>(px));
     const float gain = static_cast<float>(dbToGain(item.gainDb + take.gainDb));
     const float laneH = r.h / static_cast<float>(channels);
-    const double itemStart = model::itemSpan(session_, item).startSec;
+    const double itemStart = model::itemSpan(layout_.session(), item).startSec;
     for (int c = 0; c < channels; ++c) {
         const float mid = r.y + laneH * (static_cast<float>(c) + 0.5f), half = laneH * 0.5f - 1;
         strips_->beginRun();
@@ -243,8 +307,8 @@ void Lanes::drawMidi(const ui::Rect& r, const model::Item& item, const model::Ta
     const float noteH = std::max(1.0f, std::min(8.0f, r.h / static_cast<float>(pitches)));
     const float usedH = noteH * static_cast<float>(pitches);
     const float top = r.y + (r.h - usedH) / 2;
-    const time::TimeMap& tm = *session_.timeMap;
-    const model::ItemSpan span = model::itemSpan(session_, item);
+    const time::TimeMap& tm = *layout_.session().timeMap;
+    const model::ItemSpan span = model::itemSpan(layout_.session(), item);
     const double itemBeat = span.startBeat;
     const double ppq = seq.ppq > 0 ? seq.ppq : 960;
     for (const midi::Note& n : seq.notes) {
@@ -258,23 +322,6 @@ void Lanes::drawMidi(const ui::Rect& r, const model::Item& item, const model::Ta
         notes_->add({xAt(s0), y, std::max(1.0f, xAt(s1) - xAt(s0)), noteH}, rgba, border);
         ++stats_.notes;
     }
-}
-
-bool Lanes::onPointer(const ui::PointerEvent& e) {
-    if (e.type != ui::PointerEvent::Type::Wheel) return false;
-    Viewport v = view_;
-    if (e.mods & ui::kCtrl) {  // zoom around the pointer
-        const double at = timeAt(e.pos.x);
-        v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
-        v.startSeconds = at - static_cast<double>(e.pos.x - bounds().x) / v.pixelsPerSecond;
-    } else if (e.mods & ui::kShift || e.wheelX != 0) {
-        const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
-        v.startSeconds -= static_cast<double>(dx) * 60.0 / view_.pixelsPerSecond;
-    } else {
-        v.scrollY -= e.wheelY * view_.rowHeight;
-    }
-    setViewport(v);
-    return true;
 }
 
 }  // namespace supple::views

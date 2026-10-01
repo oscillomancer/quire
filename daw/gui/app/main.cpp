@@ -272,7 +272,7 @@ int main(int argc, char** argv) {
     peaks::PeakService peaks(peaks::defaultCacheDir(product::kSlug),
                              [&](std::function<void()> f) { loop.post(std::move(f)); });
     gui::Shell shell(**app, status, peaks);
-    peaks.onReady = [&](const std::string&) { shell.lanes()->invalidate(); };
+    peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
     bool quit = false;
     gui::AppActions appActions(registry, dispatcher, **app, uiState,
@@ -385,19 +385,27 @@ int main(int argc, char** argv) {
             if (!o.offscreen && w && h && w->isNumber() && h->isNumber())
                 (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
         });
+    // The arrange view's state (zoom, scroll, row heights, follow).
     uiFile.add(
-        "lanes",
+        "arrange",
         [&] {
-            const views::Viewport& vp = shell.lanes()->viewport();
+            const views::ArrangeView& a = *shell.arrange();
+            const views::Viewport& vp = a.viewport();
             json::Value v = json::Value::object();
             v["start_seconds"] = vp.startSeconds;
             v["pixels_per_second"] = vp.pixelsPerSecond;
             v["scroll_y"] = static_cast<double>(vp.scrollY);
-            v["row_height"] = static_cast<double>(vp.rowHeight);
+            v["row_height"] = static_cast<double>(a.trackLayout().globalHeight());
+            v["follow"] = std::string(views::followName(a.follow()));
+            json::Value heights = json::Value::object();
+            for (const auto& [track, h] : a.trackLayout().heights())
+                heights[track.str()] = static_cast<double>(h);
+            v["track_heights"] = std::move(heights);
             return v;
         },
         [&](const json::Value& v) {
-            views::Viewport vp = shell.lanes()->viewport();
+            views::ArrangeView& a = *shell.arrange();
+            views::Viewport vp = a.viewport();
             auto num = [&](const char* k, auto& out) {
                 if (const json::Value* x = v.find(k); x && x->isNumber())
                     out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
@@ -405,14 +413,24 @@ int main(int argc, char** argv) {
             num("start_seconds", vp.startSeconds);
             num("pixels_per_second", vp.pixelsPerSecond);
             num("scroll_y", vp.scrollY);
-            num("row_height", vp.rowHeight);
-            shell.lanes()->setViewport(vp);
+            a.setViewport(vp);
+            if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
+                a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
+            if (const json::Value* th = v.find("track_heights"); th && th->isObject())
+                for (const auto& m : th->asObject()) {
+                    const auto id = model::Id::parse(m.key);
+                    if (id && m.value.isNumber())
+                        a.trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
+                }
+            if (const json::Value* f = v.find("follow"); f && f->isString())
+                if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
         });
+    shell.installOverlay(root);  // the playhead paints over the whole window
     if (o.viewStart >= 0) {
         views::Viewport v;
         v.startSeconds = o.viewStart;
         v.pixelsPerSecond = o.viewPps;
-        shell.lanes()->setViewport(v);
+        shell.arrange()->setViewport(v);
     }
     int drawn = 0, longTasks = 0;
     double coldStartMs = -1, longestTaskMs = 0;
@@ -435,15 +453,18 @@ int main(int argc, char** argv) {
         midiEditor.sync();
         routing.sync();
         uiFile.tick((*app)->projectPath());
+        const bool moved = shell.arrange()->poll();
+        if (moved) root.requestAnimationFrame();
         if (o.script && warm) {
-            views::Lanes& lanes = *shell.lanes();
-            views::Viewport v = lanes.viewport();
+            views::ArrangeView& arrange = *shell.arrange();
+            views::Viewport v = arrange.viewport();
             const double k = step++;
             v.pixelsPerSecond = 40.0 * std::pow(2.0, 3.0 * std::sin(k / 40.0));
             v.startSeconds = 2.0 + 20.0 * (1 + std::sin(k / 70.0));
-            v.scrollY = static_cast<float>((1 + std::sin(k / 25.0)) / 2) *
-                        std::max(0.0f, lanes.contentHeight() - lanes.bounds().h);
-            lanes.setViewport(v);
+            v.scrollY =
+                static_cast<float>((1 + std::sin(k / 25.0)) / 2) *
+                std::max(0.0f, arrange.trackLayout().contentHeight() - arrange.lanesRect().h);
+            arrange.setViewport(v);
         }
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
         if (root.wantsFrame()) {
@@ -452,7 +473,7 @@ int main(int argc, char** argv) {
             const double cpu = threadCpuMs() - cpu0;
             if (drawn == 0 && coldStartMs < 0) coldStartMs = millisecondsSinceProcessStart();
             if (!warm) {
-                warm = shell.lanes()->stats().pending == 0;
+                warm = shell.arrange()->lanes().stats().pending == 0;
                 if (!warm && wallMs() > warmUntil) {
                     std::fprintf(stderr, "peaks did not become ready within 60 s\n");
                     return 1;
@@ -464,7 +485,9 @@ int main(int argc, char** argv) {
             }
         }
         SDL_Event e;
-        const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
+        int wait = next;
+        if (o.frames == 0 && shell.arrange()->playing() && (wait < 0 || wait > 16)) wait = 16;
+        const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, wait);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
             if (pluginWindows.handle(e)) continue;  // an editor window's event
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -511,7 +534,7 @@ int main(int argc, char** argv) {
         }
     }
     if (o.bench) {
-        const auto& ls = shell.lanes()->stats();
+        const auto& ls = shell.arrange()->lanes().stats();
         std::printf(
             "{\"schema\": \"supple.gui-bench/1.1\", \"driver\": \"%s\", \"cold_start_ms\": %.1f, "
             "\"frames\": %d, \"frame_cpu_ms\": {\"p50\": %.3f, \"p95\": %.3f, \"max\": %.3f}, "

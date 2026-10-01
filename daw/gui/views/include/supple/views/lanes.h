@@ -1,8 +1,8 @@
-// The track lanes: every non-master strip as a row of items, drawn with the
-// bulk GL layers (docs/specs/gui.md §3): item bodies and MIDI notes as
-// instanced rectangles, audio as min/max bands sampled from peak pyramids.
-// Rows and items outside the painted region are skipped (virtualized).
-// P5.4 builds the arrange view (ruler, playhead, selection) on top of this.
+// The track lanes: the arrange view's item area (gui.md §4.3). Items are
+// drawn with the bulk GL layers (§3): bodies, fades and MIDI notes as
+// instanced rectangles, audio as min/max bands sampled from peak pyramids,
+// fades as polyline bands. Rows and items outside the painted region are
+// skipped (virtualized); the row geometry comes from the shared TrackLayout.
 #pragma once
 
 #include <filesystem>
@@ -14,46 +14,22 @@
 #include "supple/peaks/peaks.h"
 #include "supple/ui/gl.h"
 #include "supple/ui/node.h"
+#include "supple/views/track_layout.h"
 
 namespace supple::views {
-
-struct Viewport {
-    double startSeconds = 0;      // time at the left edge
-    double pixelsPerSecond = 40;  // design units per second
-    float scrollY = 0;            // design units scrolled past the first row
-    float rowHeight = 72;
-};
 
 class Lanes : public ui::Node {
   public:
     using Resolve = std::function<std::filesystem::path(const model::MediaSource&)>;
-    Lanes(peaks::PeakService& peaks, Resolve resolve);
+    Lanes(peaks::PeakService& peaks, Resolve resolve, const TrackLayout& rowLayout,
+          const Viewport& view);
 
-    // Takes the session to show (cheap: sessions share structure); rebuilds
-    // the row index when the version moved.
-    void show(const model::Session& session);
-    const Viewport& viewport() const { return view_; }
-    void setViewport(const Viewport& v);
-    float contentHeight() const { return static_cast<float>(rows_.size()) * view_.rowHeight; }
+    // Rebuilds the per-row item index from the layout's session, then
+    // invalidates (the controller calls this after TrackLayout::show).
+    void rebuild();
 
-    void arrange(const ui::Canvas& canvas, const ui::Rect& bounds) override;
-    void paint(ui::Canvas& canvas) override;
-    void paintGl(const ui::GlFrame& frame) override;
-    bool onPointer(const ui::PointerEvent& e) override;
-
-    // What the last paint drew (benchmarks, tests).
-    struct Stats {
-        std::size_t rows = 0, items = 0, columns = 0, notes = 0, pending = 0;
-    };
-    const Stats& stats() const { return stats_; }
-
-  private:
-    struct Row {
-        model::Id track;
-        model::StripType type;
-        std::vector<model::Id> items;  // by position
-    };
-    friend class LaneLabels;
+    // Time <-> x inside the lanes (the arrange controller and the ruler share
+    // this mapping, so the ruler lines up with the items).
     double timeAt(float x) const {
         return view_.startSeconds + static_cast<double>(x - bounds().x) / view_.pixelsPerSecond;
     }
@@ -61,19 +37,34 @@ class Lanes : public ui::Node {
         return bounds().x +
                static_cast<float>((seconds - view_.startSeconds) * view_.pixelsPerSecond);
     }
-    ui::Rect rowRect(std::size_t i) const;
+    float contentHeight() const { return layout_.contentHeight(); }
+    std::size_t rowCount() const { return layout_.rowCount(); }
+    ui::Rect rowRect(std::size_t row) const;
     ui::Rect itemRect(std::size_t row, const model::Item& item) const;
+
+    void arrange(const ui::Canvas& canvas, const ui::Rect& bounds) override;
+    void paint(ui::Canvas& canvas) override;
+    void paintGl(const ui::GlFrame& frame) override;
+
+    // What the last paint drew (benchmarks, tests).
+    struct Stats {
+        std::size_t rows = 0, items = 0, columns = 0, notes = 0, pending = 0, fades = 0;
+    };
+    const Stats& stats() const { return stats_; }
+
+  private:
+    friend class LaneLabels;
     void drawAudio(const ui::GlFrame& frame, const ui::Rect& r, const model::Item& item,
                    const model::Take& take, const model::MediaSource& source, std::uint32_t rgba);
     void drawMidi(const ui::Rect& r, const model::Item& item, const model::Take& take,
                   const model::MidiSource& source, std::uint32_t rgba, std::uint32_t border);
+    void drawFades(const ui::Rect& r, const model::Item& item, std::uint32_t rgba);
 
     peaks::PeakService& peaks_;
     Resolve resolve_;
-    model::Session session_;
-    std::uint64_t indexed_ = ~std::uint64_t{0};
-    std::vector<Row> rows_;
-    Viewport view_;
+    const TrackLayout& layout_;
+    const Viewport& view_;
+    std::vector<std::vector<model::Id>> rowItems_;  // by position within a row
     std::optional<ui::RectRenderer> bodies_, notes_;
     std::optional<ui::StripRenderer> strips_;
     bool glFailed_ = false;
