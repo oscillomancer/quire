@@ -472,6 +472,13 @@ real-time engine). The code is the reference; these notes explain the choices.
 - **Quality changes** keep sounding notes: their filters and feedback state
   restart at the new rate, envelopes, gate and pitch continue, and fades keep
   their duration.
+- **`reset()`** clears every bit of processing state and keeps the parameter
+  values. A render in a reused instance must match a fresh instance of the same
+  patch, so `reset()` re-adopts the newest program on the next block (every
+  ramp snaps to it, as after `prepare()`), the FX delay time starts at its value
+  instead of gliding in from the previous render's target, and the control-tick
+  bookkeeping and output-gain ramp restart (fix `4a9e8f5`, P3.4a). Guarded by
+  `plugin.orrery.reset`.
 - **Validation:** `drive: {"type": "off"}` takes no other field, and an
   explicit empty step `values` array is an error.
 

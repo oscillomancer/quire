@@ -23,6 +23,12 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(semantic-conformance PRIVATE supple::clap-host supple::core-json)
   supple_target_defaults(semantic-conformance)
 
+  # Checks that a render after reset() depends only on the state set for it
+  # (host/sandbox/src/render.cpp reuses one instance across renders).
+  add_executable(clap-reset-check tools/clap_reset_check.cpp)
+  target_link_libraries(clap-reset-check PRIVATE supple::clap-host)
+  supple_target_defaults(clap-reset-check)
+
   add_library(plugin-support-fixture MODULE tests/helper_fixture.cpp)
   target_link_libraries(plugin-support-fixture PRIVATE supple::plugin-support)
   set_target_properties(plugin-support-fixture PROPERTIES PREFIX "" SUFFIX ".clap" OUTPUT_NAME "tilt-fixture")
