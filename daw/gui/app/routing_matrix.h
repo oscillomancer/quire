@@ -1,0 +1,85 @@
+// The routing matrix (docs/specs/gui.md §4.6): strips (in hierarchy) ×
+// strips and plug-in keys, from route.matrix. A cell creates a send; a cell
+// with a send selects it for editing (tap, level, pan, mute, remove); cells
+// the routing rules reject are drawn disabled and say why on hover.
+#pragma once
+
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "app_actions.h"
+#include "supple/ui/root.h"
+
+namespace supple::ui {
+class Label;
+class TextField;
+class Button;
+}  // namespace supple::ui
+
+namespace supple::gui {
+
+struct MatrixModel {
+    struct Source {
+        std::string id, name, type, parent;
+        int depth = 0;
+        bool parentSend = true;
+        std::string rule;  // why it cannot feed strips (masters)
+    };
+    struct Destination {
+        std::string id, name, kind, type, track;  // kind: track | key
+        std::string rule;                         // why no strip can feed it (channels)
+    };
+    struct Send {
+        std::string id, from, to, tap;
+        double volumeDb = 0, pan = 0;
+        bool mute = false;
+    };
+    std::vector<Source> sources;
+    std::vector<Destination> destinations;
+    std::vector<Send> sends;
+    std::vector<std::pair<std::string, std::string>> cyclePairs;  // (from, to)
+    std::vector<std::string> cyclePaths;
+    // Why from -> to is refused (empty: allowed).
+    std::string blocked(std::size_t row, std::size_t col) const;
+    std::vector<const Send*> sendsAt(std::size_t row, std::size_t col) const;
+};
+
+class RoutingMatrix {
+  public:
+    RoutingMatrix(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
+                  engine::EngineApp& app);
+    void open();
+    bool isOpen() const { return grid_ != nullptr; }
+    void sync();  // reload when the session changed while open
+
+    // Tests.
+    const MatrixModel& model() const { return model_; }
+    ui::Node* grid() const { return grid_; }
+    Status clickCell(std::size_t row, std::size_t col);
+    std::optional<std::string> selectedSend() const { return selected_; }
+    std::string status() const;
+
+  private:
+    Status reload();
+    void select(std::optional<std::string> send);
+    Result<json::Value> exec(const std::string& command, json::Value args);
+    void setSend(const char* field, json::Value value);
+    ui::Root& root_;
+    AppActions& actions_;
+    cmd::Dispatcher& dispatcher_;
+    engine::EngineApp& app_;
+    MatrixModel model_;
+    std::uint64_t version_ = 0;
+    std::optional<std::string> selected_;
+    ui::Node* grid_ = nullptr;
+    ui::Label* status_ = nullptr;
+    ui::Label* sendTitle_ = nullptr;
+    ui::Node* details_ = nullptr;
+    ui::TextField* volume_ = nullptr;
+    ui::TextField* pan_ = nullptr;
+    ui::Button* mute_ = nullptr;
+    std::vector<ui::Button*> taps_;
+};
+
+}  // namespace supple::gui

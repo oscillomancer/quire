@@ -131,7 +131,7 @@ struct ItemSetArgs {
     std::string item;
     std::optional<double> position, length, gainDb, fadeIn, fadeOut;
     std::optional<std::int64_t> bar;
-    std::optional<bool> mute, loop;
+    std::optional<bool> mute, loop, locked;
     std::optional<std::string> name, color;
 };
 struct ItemDuplicateArgs {
@@ -479,6 +479,202 @@ void registerExtraCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    {
+        struct LogArgs {
+            std::optional<std::int64_t> limit, since;
+            bool queries = false;
+            std::optional<std::string> origin;
+        };
+        Command<LogArgs, json::Value> c;
+        c.name = "log.list";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Recent commands with origin, arguments and outcome (the command log).";
+        c.description =
+            "Newest last. Who did what: origin is gui, agent:<client>/<model>, mcp:<client>, "
+            "lua:<script>, rpc. queries: include read-only commands (left out by default). since: "
+            "only entries after this seq (poll with the last seq seen). origin: entries whose "
+            "origin starts with this. The log keeps the last 2000 commands.";
+        c.tags = {"history"};
+        c.args = schema::object<LogArgs>("log_list_args")
+                     .field("limit", &LogArgs::limit, schema::integer().range(1, 2000))
+                     .field("since", &LogArgs::since, schema::integer().min(0))
+                     .field("queries", &LogArgs::queries, schema::boolean())
+                     .defaultValue(false)
+                     .field("origin", &LogArgs::origin, schema::string())
+                     .build();
+        c.result = schema::any();
+        c.examples = {{"The last commands", j(R"({"limit": 5})"),
+                       j(R"({"entries":"<any>","last_seq":"<any>"})"), "song"}};
+        c.run = [](const LogArgs& a, Context& ctx) -> Result<json::Value> {
+            EngineApp& engine = app(ctx);
+            const cmd::Registry& commands = ctx.service<const cmd::Registry>();
+            static constexpr const char* kTypes[] = {"ui",   "lua",      "mcp",  "rpc",
+                                                     "test", "internal", "agent"};
+            auto originOf = [](const cmd::Origin& o) {
+                std::string s = kTypes[static_cast<int>(o.type)];
+                if (!o.client.empty()) s += ":" + o.client;
+                if (!o.agent.empty()) s += "/" + o.agent;
+                return s;
+            };
+            std::vector<const cmd::LogRecord*> picked;
+            const auto& records = engine.records();
+            for (auto it = records.rbegin(); it != records.rend(); ++it) {
+                if (a.since && it->seq <= static_cast<std::uint64_t>(*a.since)) break;
+                if (!a.queries) {
+                    const cmd::CommandInfo* info = commands.find(it->command, it->version);
+                    if (info && info->kind == Kind::Query) continue;
+                }
+                const std::string origin = originOf(it->origin);
+                if (a.origin && origin.rfind(*a.origin, 0) != 0) continue;
+                picked.push_back(&*it);
+                if (picked.size() >= static_cast<std::size_t>(a.limit.value_or(50))) break;
+            }
+            json::Value entries = json::Value::array();
+            for (auto it = picked.rbegin(); it != picked.rend(); ++it) {
+                const cmd::LogRecord& r = **it;
+                json::Value e = json::Value::object();
+                e["seq"] = static_cast<std::int64_t>(r.seq);
+                e["time_ms"] = static_cast<std::int64_t>(r.time_ms);
+                e["origin"] = originOf(r.origin);
+                e["command"] = r.command;
+                e["args"] = r.args;
+                e["ok"] = r.ok;
+                if (!r.ok)
+                    e["error"] = r.errorCode;
+                else if (!r.resultDigest.empty())
+                    e["result"] = r.resultDigest;
+                e["duration_ms"] = std::round(static_cast<double>(r.duration_us) / 10.0) / 100.0;
+                entries.push_back(std::move(e));
+            }
+            json::Value out = json::Value::object();
+            out["entries"] = std::move(entries);
+            out["last_seq"] = static_cast<std::int64_t>(records.empty() ? 0 : records.back().seq);
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<cmd::NoArgs, json::Value> c;
+        c.name = "route.matrix";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "What can be routed where: strips, plug-in keys, sends and blocked pairs.";
+        c.description =
+            "sources: strips in tree order (depth, parent, parent_send). destinations: strips and "
+            "plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule "
+            "applies (masters feed only keys), the destination's rule applies (channels take only "
+            "hardware audio), it is the same strip, or it is listed in cycles (the destination "
+            "already feeds the source). sends: existing routes per pair. Otherwise route.add "
+            "accepts the pair.";
+        c.tags = {"route"};
+        c.args = schema::object<cmd::NoArgs>("no_args").build();
+        c.result = schema::any();
+        c.examples = {
+            {"A song's routing", j("{}"),
+             j(R"({"sources":"<any>","destinations":"<any>","sends":"<any>","cycles":"<any>"})"),
+             "song"}};
+        c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<json::Value> {
+            EngineApp& a = app(ctx);
+            const model::Session s = a.view();
+            auto rule = [](const char* code, const char* message, const char* hint) {
+                json::Value r = json::Value::object();
+                r["code"] = code;
+                r["message"] = message;
+                r["hint"] = hint;
+                return r;
+            };
+            // Tracks in tree order with depth.
+            std::vector<std::pair<Id, int>> order;
+            std::function<void(Id, int)> walk = [&](Id id, int depth) {
+                const model::Track* t = s.tracks.find(id);
+                if (!t) return;
+                order.emplace_back(id, depth);
+                for (Id child : t->children) walk(child, depth + 1);
+            };
+            for (Id m : s.project->masters) walk(m, 0);
+            json::Value sources = json::Value::array(), destinations = json::Value::array();
+            for (const auto& [id, depth] : order) {
+                const model::Track& t = *s.tracks.find(id);
+                json::Value src = json::Value::object();
+                src["id"] = id.str();
+                src["name"] = t.name;
+                src["type"] = std::string(model::stripTypeName(t.type));
+                src["depth"] = depth;
+                if (t.parent) {
+                    src["parent"] = t.parent->str();
+                    src["parent_send"] = t.parentSend.enabled;
+                }
+                if (t.type == model::StripType::Master)
+                    src["rule"] = rule(
+                        "route.strip_type", "masters are terminal (they may feed plug-in keys)",
+                        "masters feed hardware outputs and renders; use a buss to group");
+                sources.push_back(src);
+                json::Value dst = json::Value::object();
+                dst["id"] = id.str();
+                dst["name"] = t.name;
+                dst["kind"] = "track";
+                dst["type"] = std::string(model::stripTypeName(t.type));
+                if (t.type == model::StripType::Channel)
+                    dst["rule"] =
+                        rule("route.strip_type", "a channel accepts only hardware audio",
+                             "add a buss and route the channels into it; use fx for a key");
+                destinations.push_back(std::move(dst));
+                for (Id fx : t.chain) {
+                    const model::FxInstance* inst = s.fx.find(fx);
+                    if (!inst) continue;
+                    auto key = a.fxSidechainChannels(*inst);
+                    if (!key || *key == 0) continue;
+                    json::Value k = json::Value::object();
+                    k["id"] = fx.str();
+                    k["name"] = (inst->label.empty() ? inst->plugin.name : inst->label) + " (key)";
+                    k["kind"] = "key";
+                    k["track"] = id.str();
+                    destinations.push_back(std::move(k));
+                }
+            }
+            json::Value sends = json::Value::array();
+            for (const auto& e : s.routes) {
+                const model::Route& r = *e.value;
+                if (!r.from.track) continue;
+                json::Value v = json::Value::object();
+                v["id"] = e.id.str();
+                v["from"] = r.from.track->str();
+                v["to"] = r.to.fx ? r.to.fx->str() : r.to.track ? r.to.track->str() : "";
+                sends.push_back(std::move(v));
+            }
+            // A route from -> d feeds back when d (or the key's track) already
+            // reaches from: listed per pair, with the path.
+            json::Value cycles = json::Value::array();
+            for (const json::Value& d : destinations.asArray()) {
+                const std::string did = d.find("id")->asString();
+                const bool key = d.find("kind")->asString() == "key";
+                const Id target = *Id::parse(key ? d.find("track")->asString() : did);
+                if (!key && s.tracks.find(target)->type == model::StripType::Channel)
+                    continue;  // type rule
+                for (const auto& [from, depth] : order) {
+                    if (from == target) continue;  // the same strip
+                    if (!key && s.tracks.find(from)->type == model::StripType::Master) continue;
+                    if (auto path = routeCycle(s, from, target)) {
+                        json::Value v = json::Value::object();
+                        v["from"] = from.str();
+                        v["to"] = did;
+                        std::string names;
+                        for (Id at : *path) names += (names.empty() ? "" : " -> ") + at.str();
+                        v["path"] = names;
+                        cycles.push_back(std::move(v));
+                    }
+                }
+            }
+            json::Value out = json::Value::object();
+            out["sources"] = std::move(sources);
+            out["destinations"] = std::move(destinations);
+            out["sends"] = std::move(sends);
+            out["cycles"] = std::move(cycles);
+            return out;
+        };
+        registry.add(std::move(c));
+    }
 
     {
         Command<TrackMoveArgs, Empty> c;
@@ -796,10 +992,10 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "item.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set an item's position, length, playback, fades, name, or color.";
+        c.summary = "Set an item's position, length, playback, fades, name, color, or lock.";
         c.description =
             "Positions and lengths are in beats; fades are in seconds. Name is the active take's "
-            "name.";
+            "name. A locked item refuses every edit except {\"locked\": false}.";
         c.tags = {"item"};
         c.args = schema::object<ItemSetArgs>("item_set_args")
                      .field("item", &ItemSetArgs::item, idSchema("it"))
@@ -808,6 +1004,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                      .field("length", &ItemSetArgs::length, schema::number().min(0))
                      .field("mute", &ItemSetArgs::mute, schema::boolean())
                      .field("loop", &ItemSetArgs::loop, schema::boolean())
+                     .field("locked", &ItemSetArgs::locked,
+                            schema::boolean().doc("The arrange view marks locked items."))
                      .field("gain_db", &ItemSetArgs::gainDb,
                             schema::number().range(model::kSilenceDb, 24).unit(units::Unit::dB))
                      .field("fade_in", &ItemSetArgs::fadeIn, schema::number().min(0))
@@ -823,7 +1021,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
             const auto& original = *s.items.find(*id);
-            if (original.locked)
+            // A locked item refuses edits; unlocking it is the one exception.
+            const bool unlocking = a.locked && !*a.locked;
+            if (original.locked && !unlocking)
                 return Error("item.locked", "item is locked", "/item", "unlock the item first");
             if (a.position && a.bar)
                 return Error("item.position", "give position or bar, not both", "/position",
@@ -837,6 +1037,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.length) it.length = *a.length;
             if (a.mute) it.mute = *a.mute;
             if (a.loop) it.loop = *a.loop;
+            if (a.locked) it.locked = *a.locked;
             if (a.gainDb) it.gainDb = *a.gainDb;
             if (a.fadeIn) it.fadeIn.length = *a.fadeIn;
             if (a.fadeOut) it.fadeOut.length = *a.fadeOut;

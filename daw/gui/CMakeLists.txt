@@ -25,7 +25,7 @@ target_include_directories(gui-peaks PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peaks/in
 # The retained toolkit (gui.md §2): nodes, stack layout, input, damage, theme.
 supple_add_library(gui-ui
   SOURCES ui/src/theme.cpp ui/src/canvas.cpp ui/src/node.cpp ui/src/root.cpp ui/src/widgets.cpp ui/src/gl.cpp
-          ui/src/text_field.cpp ui/src/text_area.cpp ui/src/list.cpp ui/src/popup.cpp ui/src/scroll_view.cpp
+          ui/src/text_field.cpp ui/src/text_area.cpp ui/src/controls.cpp ui/src/list.cpp ui/src/popup.cpp ui/src/scroll_view.cpp
   DEPS supple::gui-platform supple::core-json
   PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
 target_include_directories(gui-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui/include)
@@ -36,17 +36,20 @@ supple_add_library(gui-actions SOURCES actions/src/actions.cpp actions/src/keyma
   PRIVATE_DEPS SDL3::SDL3)
 target_include_directories(gui-actions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/actions/include)
 
-# Views (gui.md §4): the track lanes now; arrange, mixer, editors follow.
-supple_add_library(gui-views SOURCES views/src/lanes.cpp
-  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline)
+# Views (gui.md §4): the arrange view (ruler, lanes, TCP column) now; mixer,
+# editors follow.
+supple_add_library(gui-views SOURCES views/src/lanes.cpp views/src/track_layout.cpp
+                                        views/src/arrange.cpp
+  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline SDL3::SDL3)
 target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/file_actions.cpp app/midi_editor.cpp)
+  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
+  app/history_panel.cpp app/controls.cpp app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_link_libraries(gui-app PUBLIC supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
-                      supple::engine supple::control-protocol supple::product-info SDL3::SDL3)
+                      supple::engine supple::control-protocol supple::core-params supple::product-info SDL3::SDL3)
 target_compile_definitions(gui-app PUBLIC SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
 supple_target_defaults(gui-app)
 
@@ -72,9 +75,11 @@ if(SUPPLE_BUILD_TESTS)
   set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-actions SOURCES tests/test_actions.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
   # The app driven by keys and clicks, asserting on the session (gui.md §10).
-  supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp tests/test_midi_editor.cpp LABELS gui tsan-skip)
+  supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp
+                   tests/test_midi_editor.cpp tests/test_fx_render.cpp LABELS gui tsan-skip)
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
-                             SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap")
+                             SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
+                             SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
   target_include_directories(gui-app.tests PRIVATE ${PROJECT_SOURCE_DIR}/daw/agent-panel/tests)
   set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)

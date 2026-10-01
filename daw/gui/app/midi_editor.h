@@ -107,6 +107,7 @@ class MidiEditor {
     std::string appliedText_;  // the text last compiled into the item
     std::string titleBase_;
     bool textDirty_ = false, compilePending_ = false;
+    std::uint64_t typingSession_ = 0;  // one undo step per focus of the notation panel
     std::chrono::steady_clock::time_point lastEdit_{};
 };
 

@@ -7,6 +7,7 @@
 
 #include "supple/gui/png.h"
 #include "supple/json/parse.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/list.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
@@ -424,4 +425,71 @@ TEST_CASE("a text area edits across lines: vertical motion, indentation, undo, m
     CHECK(area.marks().size() == 1);
     area.setText("a\nb\nc\nd");
     CHECK(area.lineCount() == 4);
+}
+
+TEST_CASE("mixer controls: fader taper and gestures, pan, meter hold and clip, toggle") {
+    // The taper round-trips over its range; -inf at the bottom.
+    for (double db = -60; db <= 12; db += 0.5)
+        CHECK(faderDb(faderPosition(db)) == doctest::Approx(db).epsilon(1e-9));
+    CHECK(faderPosition(kFaderSilenceDb) == 0.0);
+    CHECK(faderDb(0.0) == kFaderSilenceDb);
+    CHECK(faderPosition(0.0) > 0.6);
+    CHECK(faderPosition(0.0) < 0.8);
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    content->layout.padding = Insets::all(8);
+    content->layout.gap = 8;
+    auto& fader = content->emplace<Fader>("fader");
+    auto& meter = content->emplace<Meter>("meter");
+    auto& col = content->emplace<Node>("col");
+    col.layout.dir = Layout::Dir::Column;
+    col.layout.width = SizeRule::fixed(120);
+    auto& pan = col.emplace<PanControl>("pan");
+    bool soloed = false;
+    auto& solo = col.emplace<Toggle>("solo", "S", "meter-hot", [&](bool on) { soloed = on; });
+    std::vector<std::pair<double, Gesture>> calls;
+    fader.onChange = [&](double db, Gesture g) { calls.emplace_back(db, g); };
+    root.setContent(std::move(content));
+    root.frame(false);
+    // A drag up: Begin, Moves, End; the value rises; model updates are ignored meanwhile.
+    const Rect b = fader.bounds();
+    const Point cap{b.x + b.w / 2,
+                    b.bottom() - 8 - static_cast<float>(faderPosition(0)) * (b.h - 16)};
+    root.pointer({PointerEvent::Type::Down, cap, 1});
+    root.pointer({PointerEvent::Type::Move, {cap.x, cap.y - 20}, 1});
+    fader.setValue(-30);  // the model echoing an older value mid-drag
+    root.pointer({PointerEvent::Type::Move, {cap.x, cap.y - 40}, 1});
+    root.pointer({PointerEvent::Type::Up, {cap.x, cap.y - 40}, 1});
+    REQUIRE(calls.size() >= 3);
+    CHECK(calls.front().second == Gesture::Begin);
+    CHECK(calls.back().second == Gesture::End);
+    CHECK(fader.value() > 0.5);
+    // Double-click resets to unity.
+    PointerEvent dbl{PointerEvent::Type::Down, cap, 1};
+    dbl.clicks = 2;
+    root.pointer(dbl);
+    root.pointer({PointerEvent::Type::Up, cap, 1});
+    CHECK(fader.value() == 0.0);
+    CHECK(calls.back().second == Gesture::Set);
+    // Pan: a drag right of the centre pans right.
+    const Rect pb = pan.bounds();
+    root.pointer({PointerEvent::Type::Down, {pb.x + pb.w / 2, pb.y + 8}, 1});
+    root.pointer({PointerEvent::Type::Move, {pb.x + pb.w * 0.75f, pb.y + 8}, 1});
+    root.pointer({PointerEvent::Type::Up, {pb.x + pb.w * 0.75f, pb.y + 8}, 1});
+    CHECK(pan.value() > 30);
+    CHECK(pan.valueText().back() == 'R');
+    // Meter: a hot reading shows, clips latch until clicked.
+    const float peak[2] = {1.2f, 0.5f}, rms[2] = {0.5f, 0.2f};
+    meter.push(peak, rms);
+    CHECK(meter.clipped());
+    CHECK(meter.shownPeakDb(1) == doctest::Approx(20 * std::log10(0.5)).epsilon(0.01));
+    root.frame(false);
+    CHECK(root.click("meter"));
+    CHECK_FALSE(meter.clipped());
+    // Toggle.
+    CHECK(root.click("solo"));
+    CHECK(soloed);
+    CHECK(solo.on());
 }

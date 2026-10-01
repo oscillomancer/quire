@@ -1373,6 +1373,10 @@ Kind: `query`. Exposure: `mcp-tool`.
       "type": "integer",
       "description": "The plug-in's key input: route.add {fx} feeds it"
     },
+    "latency_samples": {
+      "type": "integer",
+      "description": "The instance's reported latency, in samples"
+    },
     "params_total": {
       "type": "integer",
       "description": "Plain parameters matching; at most 512 are listed."
@@ -1401,7 +1405,8 @@ Result:
 {
   "plugin": "com.suppleaudio.test.gain",
   "name": "<any>",
-  "description": "<any>"
+  "description": "<any>",
+  "latency_samples": "<any>"
 }
 
 ```
@@ -2273,9 +2278,9 @@ Result:
 
 ## `item.set@1`
 
-Set an item's position, length, playback, fades, name, or color.
+Set an item's position, length, playback, fades, name, color, or lock.
 
-Positions and lengths are in beats; fades are in seconds. Name is the active take's name.
+Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {"locked": false}.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2289,6 +2294,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `length` | number |  | 0.0.. |  |  |
 | `mute` | boolean |  |  |  |  |
 | `loop` | boolean |  |  |  |  |
+| `locked` | boolean |  |  |  | The arrange view marks locked items. |
 | `gain_db` | value | dB | -150.0..24.0 |  | Quantity strings are range-checked by the server. |
 | `fade_in` | number |  | 0.0.. |  |  |
 | `fade_out` | number |  | 0.0.. |  |  |
@@ -2613,6 +2619,51 @@ Result:
     "fraction": 0.0,
     "message": ""
   }
+}
+
+```
+
+## `log.list@1`
+
+Recent commands with origin, arguments and outcome (the command log).
+
+Newest last. Who did what: origin is gui, agent:<client>/<model>, mcp:<client>, lua:<script>, rpc. queries: include read-only commands (left out by default). since: only entries after this seq (poll with the last seq seen). origin: entries whose origin starts with this. The log keeps the last 2000 commands.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `limit` | integer |  | 1.0..2000.0 |  |  |
+| `since` | integer |  | 0.0.. |  |  |
+| `queries` | boolean |  |  | false |  |
+| `origin` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**The last commands** (`song`)
+
+```json
+{
+  "limit": 5
+}
+
+```
+
+Result:
+
+```json
+{
+  "entries": "<any>",
+  "last_seq": "<any>"
 }
 
 ```
@@ -4646,6 +4697,47 @@ Result:
 ```json
 {
   "routes": []
+}
+
+```
+
+## `route.matrix@1`
+
+What can be routed where: strips, plug-in keys, sends and blocked pairs.
+
+sources: strips in tree order (depth, parent, parent_send). destinations: strips and plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule applies (masters feed only keys), the destination's rule applies (channels take only hardware audio), it is the same strip, or it is listed in cycles (the destination already feeds the source). sends: existing routes per pair. Otherwise route.add accepts the pair.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**A song's routing** (`song`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "sources": "<any>",
+  "destinations": "<any>",
+  "sends": "<any>",
+  "cycles": "<any>"
 }
 
 ```

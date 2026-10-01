@@ -27,9 +27,15 @@
 #include "app_actions.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "fx_window.h"
 #include "generate.h"
+#include "history_panel.h"
+#include "meter_feed.h"
 #include "midi_editor.h"
+#include "mixer.h"
 #include "plugin_windows.h"
+#include "render_dialog.h"
+#include "routing_matrix.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
@@ -271,7 +277,7 @@ int main(int argc, char** argv) {
     peaks::PeakService peaks(peaks::defaultCacheDir(product::kSlug),
                              [&](std::function<void()> f) { loop.post(std::move(f)); });
     gui::Shell shell(**app, status, peaks);
-    peaks.onReady = [&](const std::string&) { shell.lanes()->invalidate(); };
+    peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
     bool quit = false;
     gui::AppActions appActions(registry, dispatcher, **app, uiState,
@@ -289,6 +295,23 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
+    gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
+    // Meters: what the engine heard since the last poll, once per pass.
+    gui::MeterFeed meterFeed([&] {
+        std::vector<gui::StripReading> out;
+        for (const engine::MeterReading& m : (*app)->meters()) {
+            gui::StripReading r;
+            r.track = m.track.str();
+            for (int ch = 0; ch < 2; ++ch) {
+                r.peak[ch] = m.peak[ch];
+                r.rms[ch] = m.rms[ch];
+            }
+            out.push_back(r);
+        }
+        return out;
+    });
+    gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
+    gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
@@ -296,6 +319,14 @@ int main(int argc, char** argv) {
         if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
         return pluginWindows.open(*id);
     });
+    gui::FxWindow fxWindow(**app, dispatcher, root, gui::FxWindow::Hooks{[&](model::Id id) {
+        return pluginWindows.open(id);
+    }},
+                           gui::Favourites::defaultFile(product::kSlug));
+    appActions.addUi("ui.fx.chain", "FX: chain…", "track",
+                     [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
+    gui::RenderDialog renderDialog(**app, dispatcher, root);
+    appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
@@ -316,6 +347,8 @@ int main(int argc, char** argv) {
         center.layout.width = ui::SizeRule::fraction();
         center.add(shell.build());
         center.add(midiEditor.build());
+        center.add(mixer.build());
+        body.add(history.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
@@ -363,11 +396,17 @@ int main(int argc, char** argv) {
         [&] {
             json::Value v = json::Value::object();
             v["agent"] = agentPanel.visible();
+            v["mixer"] = mixer.visible();
+            v["history"] = history.visible();
             return v;
         },
         [&](const json::Value& v) {
             if (const json::Value* a = v.find("agent"); a && a->isBool())
                 agentPanel.setVisible(a->asBool());
+            if (const json::Value* m = v.find("mixer"); m && m->isBool())
+                mixer.setVisible(m->asBool());
+            if (const json::Value* h = v.find("history"); h && h->isBool())
+                history.setVisible(h->asBool());
         });
     uiFile.add(
         "window",
@@ -383,19 +422,27 @@ int main(int argc, char** argv) {
             if (!o.offscreen && w && h && w->isNumber() && h->isNumber())
                 (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
         });
+    // The arrange view's state (zoom, scroll, row heights, follow).
     uiFile.add(
-        "lanes",
+        "arrange",
         [&] {
-            const views::Viewport& vp = shell.lanes()->viewport();
+            const views::ArrangeView& a = *shell.arrange();
+            const views::Viewport& vp = a.viewport();
             json::Value v = json::Value::object();
             v["start_seconds"] = vp.startSeconds;
             v["pixels_per_second"] = vp.pixelsPerSecond;
             v["scroll_y"] = static_cast<double>(vp.scrollY);
-            v["row_height"] = static_cast<double>(vp.rowHeight);
+            v["row_height"] = static_cast<double>(a.trackLayout().globalHeight());
+            v["follow"] = std::string(views::followName(a.follow()));
+            json::Value heights = json::Value::object();
+            for (const auto& [track, h] : a.trackLayout().heights())
+                heights[track.str()] = static_cast<double>(h);
+            v["track_heights"] = std::move(heights);
             return v;
         },
         [&](const json::Value& v) {
-            views::Viewport vp = shell.lanes()->viewport();
+            views::ArrangeView& a = *shell.arrange();
+            views::Viewport vp = a.viewport();
             auto num = [&](const char* k, auto& out) {
                 if (const json::Value* x = v.find(k); x && x->isNumber())
                     out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
@@ -403,14 +450,24 @@ int main(int argc, char** argv) {
             num("start_seconds", vp.startSeconds);
             num("pixels_per_second", vp.pixelsPerSecond);
             num("scroll_y", vp.scrollY);
-            num("row_height", vp.rowHeight);
-            shell.lanes()->setViewport(vp);
+            a.setViewport(vp);
+            if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
+                a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
+            if (const json::Value* th = v.find("track_heights"); th && th->isObject())
+                for (const auto& m : th->asObject()) {
+                    const auto id = model::Id::parse(m.key);
+                    if (id && m.value.isNumber())
+                        a.trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
+                }
+            if (const json::Value* f = v.find("follow"); f && f->isString())
+                if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
         });
+    shell.installOverlay(root);  // the playhead paints over the whole window
     if (o.viewStart >= 0) {
         views::Viewport v;
         v.startSeconds = o.viewStart;
         v.pixelsPerSecond = o.viewPps;
-        shell.lanes()->setViewport(v);
+        shell.arrange()->setViewport(v);
     }
     int drawn = 0, longTasks = 0;
     double coldStartMs = -1, longestTaskMs = 0;
@@ -431,16 +488,25 @@ int main(int argc, char** argv) {
         }
         shell.sync();
         midiEditor.sync();
+        routing.sync();
+        mixer.sync();
+        history.sync();
+        meterFeed.poll();
+        fxWindow.tick();
+        renderDialog.tick();
         uiFile.tick((*app)->projectPath());
+        const bool moved = shell.arrange()->poll();
+        if (moved) root.requestAnimationFrame();
         if (o.script && warm) {
-            views::Lanes& lanes = *shell.lanes();
-            views::Viewport v = lanes.viewport();
+            views::ArrangeView& arrange = *shell.arrange();
+            views::Viewport v = arrange.viewport();
             const double k = step++;
             v.pixelsPerSecond = 40.0 * std::pow(2.0, 3.0 * std::sin(k / 40.0));
             v.startSeconds = 2.0 + 20.0 * (1 + std::sin(k / 70.0));
-            v.scrollY = static_cast<float>((1 + std::sin(k / 25.0)) / 2) *
-                        std::max(0.0f, lanes.contentHeight() - lanes.bounds().h);
-            lanes.setViewport(v);
+            v.scrollY =
+                static_cast<float>((1 + std::sin(k / 25.0)) / 2) *
+                std::max(0.0f, arrange.trackLayout().contentHeight() - arrange.lanesRect().h);
+            arrange.setViewport(v);
         }
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
         if (root.wantsFrame()) {
@@ -449,7 +515,7 @@ int main(int argc, char** argv) {
             const double cpu = threadCpuMs() - cpu0;
             if (drawn == 0 && coldStartMs < 0) coldStartMs = millisecondsSinceProcessStart();
             if (!warm) {
-                warm = shell.lanes()->stats().pending == 0;
+                warm = shell.arrange()->lanes().stats().pending == 0;
                 if (!warm && wallMs() > warmUntil) {
                     std::fprintf(stderr, "peaks did not become ready within 60 s\n");
                     return 1;
@@ -461,7 +527,9 @@ int main(int argc, char** argv) {
             }
         }
         SDL_Event e;
-        const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
+        int wait = next;
+        if (o.frames == 0 && shell.arrange()->playing() && (wait < 0 || wait > 16)) wait = 16;
+        const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, wait);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
             if (pluginWindows.handle(e)) continue;  // an editor window's event
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -480,6 +548,10 @@ int main(int argc, char** argv) {
             const int next = loop.pump();
             shell.sync();
             midiEditor.sync();
+            routing.sync();
+            mixer.sync();
+            history.sync();
+            meterFeed.poll();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
@@ -497,6 +569,10 @@ int main(int argc, char** argv) {
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
         shell.sync();
         midiEditor.sync();
+        routing.sync();
+        mixer.sync();
+        history.sync();
+        meterFeed.poll();
         root.damageAll();
         root.frame(false);
         auto written = gui::writePng(o.snapshot, root.readBack());
@@ -506,7 +582,7 @@ int main(int argc, char** argv) {
         }
     }
     if (o.bench) {
-        const auto& ls = shell.lanes()->stats();
+        const auto& ls = shell.arrange()->lanes().stats();
         std::printf(
             "{\"schema\": \"supple.gui-bench/1.1\", \"driver\": \"%s\", \"cold_start_ms\": %.1f, "
             "\"frames\": %d, \"frame_cpu_ms\": {\"p50\": %.3f, \"p95\": %.3f, \"max\": %.3f}, "

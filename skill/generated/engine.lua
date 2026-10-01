@@ -174,6 +174,7 @@ q = nil
 ---@field params? any
 ---@field patch? any
 ---@field sidechain_channels? integer The plug-in's key input: route.add {fx} feeds it
+---@field latency_samples? integer The instance's reported latency, in samples
 ---@field params_total? integer Plain parameters matching; at most 512 are listed.
 
 ---@class Quire.fx_move_args
@@ -285,6 +286,7 @@ q = nil
 ---@field length? number
 ---@field mute? boolean
 ---@field loop? boolean
+---@field locked? boolean The arrange view marks locked items.
 ---@field gain_db? number|string Quantity strings are range-checked by the server.
 ---@field fade_in? number
 ---@field fade_out? number
@@ -311,6 +313,12 @@ q = nil
 ---@class Quire.job_wait_args
 ---@field job string
 ---@field timeout_s? number Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s.
+
+---@class Quire.log_list_args
+---@field limit? integer
+---@field since? integer
+---@field queries? boolean (default: false)
+---@field origin? string
 
 ---@class Quire.marker_add_args
 ---@field pos? number
@@ -833,7 +841,7 @@ q = nil
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
----@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, or color.
+---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, color, or lock.
 ---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an audio or MIDI item at a beat, keeping take source positions aligned.
 
 ---@class Quire.job
@@ -842,6 +850,9 @@ q = nil
 ---@field list fun(): table List session jobs.
 ---@field status fun(args: Quire.job_status_args): table Get a job's status.
 ---@field wait fun(args: Quire.job_wait_args): table Wait for a job.
+
+---@class Quire.log
+---@field list fun(args?: Quire.log_list_args): table Recent commands with origin, arguments and outcome (the command log).
 
 ---@class Quire.marker
 ---@field add fun(args?: Quire.marker_add_args): Quire.marker_add_result Add a named marker in beats.
@@ -887,6 +898,7 @@ q = nil
 ---@class Quire.route
 ---@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, the master, or a plug-in's key.
 ---@field list fun(): Quire.route_list_result List sends with endpoints and mixer settings.
+---@field matrix fun(): table What can be routed where: strips, plug-in keys, sends and blocked pairs.
 ---@field remove fun(args: Quire.route_remove_args): table Remove a send.
 ---@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, or mute.
 
@@ -937,6 +949,7 @@ q = nil
 ---@field history Quire.history Commands named history.*
 ---@field item Quire.item Commands named item.*
 ---@field job Quire.job Commands named job.*
+---@field log Quire.log Commands named log.*
 ---@field marker Quire.marker Commands named marker.*
 ---@field midi Quire.midi Commands named midi.*
 ---@field plugin Quire.plugin Commands named plugin.*

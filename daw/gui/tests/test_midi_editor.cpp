@@ -9,9 +9,13 @@
 #include <thread>
 
 #include "app_actions.h"
+#include "history_panel.h"
 #include "midi_editor.h"
+#include "mixer.h"
+#include "routing_matrix.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
 
 using namespace supple;
@@ -274,4 +278,203 @@ TEST_CASE("MIDI editor: the notation panel compiles live, writes back, and follo
     f.exec("item.remove", R"({"item":")" + f.item + R"("})");
     f.frame();
     CHECK_FALSE(f.editor->isOpen());
+}
+
+TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes") {
+    Fixture f;
+    if (!f.ok) return;
+    const std::string drums =
+        f.exec("track.add", R"({"type":"buss","name":"Drums"})")["track"].asString();
+    const std::string verb =
+        f.exec("track.add", R"({"type":"buss","name":"Verb"})")["track"].asString();
+    f.exec("route.add", R"({"from":")" + verb + R"(","to":")" + drums + R"("})");
+    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    matrix.open();
+    f.root->frame(false);
+    REQUIRE(matrix.isOpen());
+    const auto& m = matrix.model();
+    auto row = [&](const std::string& id) {
+        for (std::size_t i = 0; i < m.sources.size(); ++i)
+            if (m.sources[i].id == id) return i;
+        FAIL("no source " << id);
+        return std::size_t{0};
+    };
+    auto col = [&](const std::string& id) {
+        for (std::size_t i = 0; i < m.destinations.size(); ++i)
+            if (m.destinations[i].id == id) return i;
+        FAIL("no destination " << id);
+        return std::size_t{0};
+    };
+    std::string keys;
+    for (const auto& s : m.sources)
+        if (s.name == "Keys") keys = s.id;
+    REQUIRE_FALSE(keys.empty());
+    // Rules: a channel takes no strip audio; the master is terminal; Drums -> Verb feeds back.
+    CHECK_FALSE(m.blocked(row(drums), col(keys)).empty());
+    CHECK_FALSE(m.blocked(row("tr_0"), col(drums)).empty());
+    CHECK(m.blocked(row(drums), col(verb)).find("feed back") != std::string::npos);
+    CHECK(m.blocked(row(keys), col(drums)).empty());
+    // Hovering a blocked cell says why.
+    auto* grid = matrix.grid();
+    REQUIRE(grid);
+    f.snapshot("routing-open.png");
+    // A click on an allowed cell sends (one version) and selects the new send.
+    const auto v = f.app->head().version;
+    REQUIRE(matrix.clickCell(row(keys), col(drums)));
+    CHECK(f.app->head().version == v + 1);
+    REQUIRE(matrix.selectedSend());
+    CHECK(m.sendsAt(row(keys), col(drums)).size() == 1);
+    // A blocked click changes nothing.
+    CHECK_FALSE(matrix.clickCell(row(drums), col(verb)));
+    CHECK(f.app->head().version == v + 1);
+    // Edit the send: level with units, pre-fader, mute; then remove it.
+    f.root->click("routing.volume");
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("-6 dB");
+    f.root->key(SDLK_RETURN, 0);
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->volumeDb == doctest::Approx(-6.0));
+    REQUIRE(f.root->click("routing.tap.pre"));
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->tap == "pre_fader");
+    REQUIRE(f.root->click("routing.mute"));
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->mute);
+    f.snapshot("routing-send.png");
+    REQUIRE(f.root->click("routing.remove"));
+    CHECK(m.sendsAt(row(keys), col(drums)).empty());
+    // Changes from elsewhere arrive on sync.
+    f.exec("route.add", R"({"from":")" + keys + R"(","to":")" + verb + R"("})");
+    matrix.sync();
+    CHECK(m.sendsAt(row(keys), col(verb)).size() == 1);
+    REQUIRE(f.root->click("routing.close"));
+    CHECK_FALSE(matrix.isOpen());
+}
+
+TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, Console 9, meters") {
+    Fixture f;
+    if (!f.ok) return;
+    const std::string buss =
+        f.exec("track.add", R"({"type":"buss","name":"Drums"})")["track"].asString();
+    std::vector<gui::StripReading> readings;
+    gui::MeterFeed feed([&] { return readings; });
+    gui::Mixer mixer(*f.root, *f.actions, *f.dispatcher, *f.app, feed);
+    // Swap the editor's dock for the mixer's in the fixture's window.
+    auto* window = f.root->content();
+    window->add(mixer.build());
+    f.editor->close();
+    mixer.setVisible(true);
+    f.root->frame(false);
+    const auto& strips = mixer.strips();
+    REQUIRE(strips.size() == 3);
+    CHECK(strips[0].type == "channel");  // channels, busses, masters
+    CHECK(strips[1].track == buss);
+    CHECK(strips[2].track == "tr_0");
+    CHECK(strips[0].arm != nullptr);
+    CHECK(strips[1].arm == nullptr);  // only channels arm
+    const std::string keys = strips[0].track;
+    auto track = [&](const std::string& id) {
+        return f.app->head().tracks.find(*model::Id::parse(id));
+    };
+
+    // A fader drag: many moves, one undo step; a second drag is another.
+    auto steps = [&] { return f.exec("history.list", "{}")["versions"].size(); };
+    const auto s0 = steps();
+    const ui::Rect fb = strips[0].fader->bounds();
+    REQUIRE(fb.h > 60);
+    const ui::Point cap{fb.x + fb.w / 2,
+                        fb.bottom() - 8 - static_cast<float>(ui::faderPosition(0)) * (fb.h - 16)};
+    f.pointer(ui::PointerEvent::Type::Down, cap);
+    for (int i = 1; i <= 10; ++i)
+        f.pointer(ui::PointerEvent::Type::Move, {cap.x, cap.y + static_cast<float>(i) * 3});
+    f.pointer(ui::PointerEvent::Type::Up, {cap.x, cap.y + 30});
+    mixer.sync();
+    CHECK(track(keys)->volumeDb < -3);
+    CHECK(steps() == s0 + 1);
+    const double dragged = track(keys)->volumeDb;
+    const ui::Point cap2{cap.x, cap.y + 30};
+    f.pointer(ui::PointerEvent::Type::Down, cap2);
+    for (int i = 1; i <= 5; ++i)
+        f.pointer(ui::PointerEvent::Type::Move, {cap2.x, cap2.y + static_cast<float>(i) * 3});
+    f.pointer(ui::PointerEvent::Type::Up, {cap2.x, cap2.y + 15});
+    CHECK(steps() == s0 + 2);
+    f.exec("history.undo", "{}");
+    CHECK(track(keys)->volumeDb == doctest::Approx(dragged));  // only the second drag undone
+    mixer.sync();
+    // Double-click: unity, its own step.
+    f.pointer(ui::PointerEvent::Type::Down, cap2, 2);
+    f.pointer(ui::PointerEvent::Type::Up, cap2);
+    CHECK(track(keys)->volumeDb == 0.0);
+    // Toggles.
+    REQUIRE(f.root->click("mixer.mute." + keys));
+    CHECK(track(keys)->mute);
+    REQUIRE(f.root->click("mixer.solo." + buss));
+    CHECK(track(buss)->solo == model::Solo::On);
+    REQUIRE(f.root->click("mixer.arm." + keys));
+    CHECK(track(keys)->record.armed);
+    REQUIRE(f.root->click("mixer.monitor." + keys));
+    CHECK(track(keys)->record.monitor == model::Monitor::On);
+    // Pan drag right.
+    const ui::Rect pb = strips[0].pan->bounds();
+    f.drag({pb.x + pb.w / 2, pb.y + 8}, {pb.right() - 2, pb.y + 8});
+    CHECK(track(keys)->pan > 50);
+    // Console 9 is a project toggle.
+    const bool c9 = f.app->head().project->console9;
+    REQUIRE(f.root->click("mixer.console9"));
+    CHECK(f.app->head().project->console9 == !c9);
+    // Changes from elsewhere reach the strips; a new track adds a strip.
+    f.exec("track.set", R"({"track":")" + keys + R"(","volume_db":-12})");
+    mixer.sync();
+    CHECK(strips[0].fader->value() == doctest::Approx(-12.0));
+    f.exec("track.add", R"({"name":"Bass"})");
+    mixer.sync();
+    CHECK(mixer.strips().size() == 4);
+    // Meters: readings land on the strip's meter.
+    readings = {{keys, {0.5f, 0.25f}, {0.3f, 0.1f}}};
+    feed.poll();
+    CHECK(mixer.strips()[0].meter->shownPeakDb(0) ==
+          doctest::Approx(20 * std::log10(0.5)).epsilon(0.02));
+    f.snapshot("mixer.png");
+}
+
+TEST_CASE(
+    "history dock: versions, jump back, redo, branches, the command log with agents attributed") {
+    Fixture f;
+    if (!f.ok) return;
+    gui::HistoryPanel history(*f.root, *f.actions, *f.dispatcher, *f.app);
+    f.editor->close();
+    {  // the app's layout: the dock is a full-height column on the right
+        auto frame = std::make_unique<ui::Node>("window");
+        frame->layout.dir = ui::Layout::Dir::Row;
+        frame->emplace<ui::Node>("arrange").layout.width = ui::SizeRule::fraction();
+        frame->add(history.build());
+        f.root->setContent(std::move(frame));
+    }
+    history.setVisible(true);
+    const cmd::Origin agent{cmd::Origin::Type::Agent, "panel", "model-x"};
+    f.exec("track.add", R"({"name":"A"})");
+    f.exec("track.add", R"({"name":"B"})");
+    REQUIRE(f.dispatcher->execute({"track.add", json::parse(R"({"name":"C"})").value(), agent}));
+    history.sync();
+    f.root->frame(false);
+    REQUIRE(history.versions().size() >= 4);
+    CHECK(history.versions().front().origin.rfind("agent:", 0) == 0);  // the head, by the agent
+    // The log: newest last, the agent's command attributed.
+    REQUIRE(!history.entries().empty());
+    CHECK(history.entries().back().origin == "agent:panel/model-x");
+    CHECK(history.entries().back().command == "track.add");
+    f.snapshot("history.png");
+    // Jump back two versions, then redo one.
+    const std::size_t tracks = f.app->head().tracks.size();
+    REQUIRE(history.jumpTo(2));
+    CHECK(f.app->head().tracks.size() == tracks - 2);
+    REQUIRE(f.root->click("history.redo"));
+    CHECK(f.app->head().tracks.size() == tracks - 1);
+    // Branches: create, edit there, back to main.
+    REQUIRE(history.createBranch("idea"));
+    history.sync();
+    CHECK(std::find(history.branches().begin(), history.branches().end(), "idea") !=
+          history.branches().end());
+    f.exec("track.add", R"({"name":"Idea"})");
+    REQUIRE(history.switchBranch("main"));
+    CHECK(f.app->head().tracks.size() == tracks - 1);
+    history.sync();
+    CHECK(history.entries().back().command == "branch.switch");
 }

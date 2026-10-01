@@ -1045,6 +1045,10 @@
           "type": "integer",
           "description": "The plug-in's key input: route.add {fx} feeds it"
         },
+        "latency_samples": {
+          "type": "integer",
+          "description": "The instance's reported latency, in samples"
+        },
         "params_total": {
           "type": "integer",
           "description": "Plain parameters matching; at most 512 are listed."
@@ -1681,8 +1685,8 @@
   },
   {
     "name": "item_set",
-    "title": "Set an item's position, length, playback, fades, name, or color.",
-    "description": "Set an item's position, length, playback, fades, name, or color. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. See describe for errors and examples.",
+    "title": "Set an item's position, length, playback, fades, name, color, or lock.",
+    "description": "Set an item's position, length, playback, fades, name, color, or lock. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {\"locked\": false}. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "item_set_args",
@@ -1708,6 +1712,10 @@
         },
         "loop": {
           "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "The arrange view marks locked items."
         },
         "gain_db": {
           "anyOf": [
@@ -1791,6 +1799,40 @@
     },
     "annotations": {
       "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "log_list",
+    "title": "Recent commands with origin, arguments and outcome (the command log).",
+    "description": "Recent commands with origin, arguments and outcome (the command log). Newest last. Who did what: origin is gui, agent:<client>/<model>, mcp:<client>, lua:<script>, rpc. queries: include read-only commands (left out by default). since: only entries after this seq (poll with the last seq seen). origin: entries whose origin starts with this. The log keeps the last 2000 commands. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "log_list_args",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2000.0
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "queries": {
+          "type": "boolean",
+          "default": false
+        },
+        "origin": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": false
     }
@@ -3408,6 +3450,23 @@
       "required": ["routes"],
       "additionalProperties": false
     },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "route_matrix",
+    "title": "What can be routed where: strips, plug-in keys, sends and blocked pairs.",
+    "description": "What can be routed where: strips, plug-in keys, sends and blocked pairs. sources: strips in tree order (depth, parent, parent_send). destinations: strips and plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule applies (masters feed only keys), the destination's rule applies (channels take only hardware audio), it is the same strip, or it is listed in cycles (the destination already feeds the source). sends: existing routes per pair. Otherwise route.add accepts the pair. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

@@ -646,6 +646,7 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     };
     text.onSubmit = [this](const std::string&) { compileText(true); };
     text.onFocusChange = [this](bool focused) {
+        if (focused) ++typingSession_;
         if (!focused && textDirty_) compileText(true);
     };
     diagnostics_ = &pane.emplace<ui::TextBlock>("midi.notation.diagnostics", "", ui::Font::Mono,
@@ -816,7 +817,8 @@ void MidiEditor::compileText(bool write) {
     args["item"] = state_.item;
     args["notation"] = text;
     cmd::Origin origin = kOrigin;
-    origin.gesture = "notation:" + state_.item;  // a typing session is one undo step
+    origin.gesture =
+        "notation:" + state_.item + ":" + std::to_string(typingSession_);  // one per focus
     auto r = dispatcher_.execute({"midi.write", std::move(args), origin});
     if (!r) {
         showDiagnostics({}, r.error().message);

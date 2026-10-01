@@ -1625,3 +1625,85 @@ TEST_CASE("midi.notes / midi.edit: ops by original index, one undo step, selecti
     r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
     CHECK(r->find("cc")->size() == 2);
 }
+
+TEST_CASE("route.matrix: type rules, cycles and existing sends") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto add = [&](const char* args) {
+        auto r = d.execute({"track.add", j(args), kTest});
+        REQUIRE(r);
+        return r->find("track")->asString();
+    };
+    const std::string a = add(R"({"type":"buss","name":"A"})");
+    const std::string b = add(R"({"type":"buss","name":"B"})");
+    const std::string ch = add(R"({"name":"Vox"})");
+    REQUIRE(d.execute(
+        {"track.move", j(R"({"track":")" + ch + R"(","parent":")" + a + R"("})"), kTest}));
+    auto send =
+        d.execute({"route.add", j(R"({"from":")" + a + R"(","to":")" + b + R"("})"), kTest});
+    REQUIRE(send);
+    auto m = d.execute({"route.matrix", json::Value::object(), kTest});
+    REQUIRE(m);
+    // Sources in tree order with depth; the master's rule; a channel's rule as a destination.
+    const auto& sources = *m->find("sources");
+    CHECK(sources.at(0).find("id")->asString() == "tr_0");
+    CHECK(sources.at(0).find("rule")->find("code")->asString() == "route.strip_type");
+    bool vox = false;
+    for (const auto& src : sources.asArray())
+        if (src.find("id")->asString() == ch) {
+            vox = true;
+            CHECK(src.find("depth")->asInt() == 2);
+            CHECK(src.find("parent")->asString() == a);
+        }
+    CHECK(vox);
+    for (const auto& dst : m->find("destinations")->asArray())
+        if (dst.find("id")->asString() == ch) CHECK(dst.find("rule") != nullptr);
+    // A -> B exists, so B -> A (and Vox -> B -> A is fine; B -> A feeds back) is listed.
+    REQUIRE(m->find("sends")->size() == 1);
+    CHECK(m->find("sends")->at(0).find("from")->asString() == a);
+    bool cycle = false;
+    for (const auto& c : m->find("cycles")->asArray())
+        if (c.find("from")->asString() == b && c.find("to")->asString() == a) cycle = true;
+    CHECK(cycle);
+    // What the matrix allows, route.add accepts; what it lists as a cycle, route.add refuses.
+    CHECK(d.execute({"route.add", j(R"({"from":")" + ch + R"(","to":")" + b + R"("})"), kTest}));
+    auto refused =
+        d.execute({"route.add", j(R"({"from":")" + b + R"(","to":")" + a + R"("})"), kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "route.cycle");
+}
+
+TEST_CASE("log.list: who did what, queries left out, since, origin filter, bounded") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    const cmd::Origin gui{cmd::Origin::Type::Ui, "gui", {}};
+    const cmd::Origin agent{cmd::Origin::Type::Agent, "panel", "claude-x"};
+    REQUIRE(d.execute({"track.add", j(R"({"name":"A"})"), gui}));
+    REQUIRE(d.execute({"track.list", j("{}"), gui}));  // a query
+    REQUIRE(d.execute({"track.add", j(R"({"name":"B"})"), agent}));
+    REQUIRE_FALSE(d.execute({"track.set", j(R"({"track":"tr_99","mute":true})"), agent}));
+    auto log = d.execute({"log.list", j("{}"), kTest});
+    REQUIRE(log);
+    const auto& e = *log->find("entries");
+    REQUIRE(e.size() == 3);  // the query and log.list itself are left out
+    CHECK(e.at(0).find("origin")->asString() == "ui:gui");
+    CHECK(e.at(1).find("origin")->asString() == "agent:panel/claude-x");
+    CHECK(e.at(2).find("ok")->asBool() == false);
+    CHECK(e.at(2).find("error")->asString() == "tr.unknown");
+    // since, origin, queries.
+    const auto seq = e.at(1).find("seq")->asInt();
+    json::Value since = json::Value::object();
+    since["since"] = seq;
+    CHECK(d.execute({"log.list", since, kTest})->find("entries")->size() == 1);
+    CHECK(d.execute({"log.list", j(R"({"origin":"agent"})"), kTest})->find("entries")->size() == 2);
+    CHECK(d.execute({"log.list", j(R"({"queries":true})"), kTest})->find("entries")->size() == 4);
+    // Bounded.
+    for (int i = 0; i < 2100; ++i) (void)d.execute({"project.get", j("{}"), kTest});
+    CHECK(app->records().size() == engine::EngineApp::kMaxRecords);
+}

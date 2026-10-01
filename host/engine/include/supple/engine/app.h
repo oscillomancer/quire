@@ -13,6 +13,7 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -123,6 +124,9 @@ class EngineApp : public cmd::Host {
     // The plugin's CLAP parameters (from a scratch instance).
     Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
     Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input
+    // The instance's reported latency in samples (the running one when there is
+    // one, else a throwaway activation at the project rate).
+    Result<std::uint32_t> fxLatencySamples(model::Id id, const model::FxInstance& fx);
     // fx's patch after applying `patch` (a merge patch, or a complete patch
     // when `replace`), validated by the plugin; the complete canonical patch.
     Result<json::Value> mergedPatch(const model::FxInstance& fx, const json::Value& patch,
@@ -251,7 +255,9 @@ class EngineApp : public cmd::Host {
     std::filesystem::path resolve(const std::filesystem::path& path) const;
 
     // Tests and tools.
-    const std::vector<cmd::LogRecord>& records() const { return records_; }
+    // The command log (log.list): the most recent kMaxRecords invocations.
+    const std::deque<cmd::LogRecord>& records() const { return records_; }
+    static constexpr std::size_t kMaxRecords = 2000;
     std::vector<std::pair<std::string, json::Value>> takeEvents();
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
@@ -297,7 +303,7 @@ class EngineApp : public cmd::Host {
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;
     std::unique_ptr<lua::Runtime> scripts_;
-    std::vector<cmd::LogRecord> records_;
+    std::deque<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
     std::uint64_t fixedClock_ = 0;
 

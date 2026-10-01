@@ -516,6 +516,7 @@ struct FxDescription {
     std::optional<json::Value> params, patch;
     std::optional<std::int64_t> paramsTotal;
     std::optional<std::int64_t> sidechainChannels;  // a key input (ADR-0018)
+    std::optional<std::int64_t> latencySamples;     // the instance's reported latency
 };
 constexpr std::size_t kMaxListedParams = 512;
 
@@ -1882,13 +1883,15 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("patch", &FxDescription::patch, schema::any())
                 .field("sidechain_channels", &FxDescription::sidechainChannels,
                        schema::integer().doc("The plug-in's key input: route.add {fx} feeds it"))
+                .field("latency_samples", &FxDescription::latencySamples,
+                       schema::integer().doc("The instance's reported latency, in samples"))
                 .field("params_total", &FxDescription::paramsTotal,
                        schema::integer().doc("Plain parameters matching; at most " +
                                              std::to_string(kMaxListedParams) + " are listed."))
                 .build();
         c.examples = {
             {"Describe", obj(R"({"fx": "fx_2"})"),
-             obj(R"({"plugin": "com.suppleaudio.test.gain", "name": "<any>", "description": "<any>"})"),
+             obj(R"({"plugin": "com.suppleaudio.test.gain", "name": "<any>", "description": "<any>", "latency_samples": "<any>"})"),
              "song_with_fx"}};
         c.run = [](const FxDescribeArgs& a, Context& ctx) -> Result<FxDescription> {
             EngineApp& app = A(ctx);
@@ -1903,6 +1906,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!d) return std::move(d).error();
             r.description = *d;
             if (auto key = app.fxSidechainChannels(fx); key && *key > 0) r.sidechainChannels = *key;
+            if (auto latency = app.fxLatencySamples(*id, fx)) r.latencySamples = *latency;
             if (a.full) {
                 auto schema = app.fxSchema(fx);
                 if (schema && schema->isObject() && schema->find("params"))
