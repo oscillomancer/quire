@@ -99,6 +99,10 @@ unsigned long Window::x11Window() const {
         SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
 }
 
+void Window::makeCurrent() const {
+    SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
+}
+
 void Window::beginFrame(std::uint32_t rgb) {
     SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
     int pw = 0, ph = 0;

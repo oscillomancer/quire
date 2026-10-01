@@ -27,6 +27,7 @@
 #include "supple/product.h"
 #include "supple/rpc/model_loop.h"
 #include "supple/rpc/protocol.h"
+#include "supple/ui/root.h"
 
 namespace fs = std::filesystem;
 using namespace supple;
@@ -207,54 +208,41 @@ int main(int argc, char** argv) {
         publish();
     });
 
-    gui::Shell shell(**app, *fonts, status);
-    bool dirty = true, quit = false;
+    gui::Shell shell(**app, status);
+    ui::Root root(**window, *fonts, ui::Theme::dark());
+    root.setContent(shell.build());
+    bool quit = false;
     int drawn = 0;
     double coldStartMs = -1;
     std::vector<double> frameCpu;
     while (!quit && !loop.stopRequested()) {
         const int next = loop.pump();
-        dirty = dirty || shell.stale();
-        if (dirty) {
-            gui::Window& w = **window;
+        shell.sync();
+        if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
+        if (root.wantsFrame()) {
             const double cpu0 = threadCpuMs();
-            w.beginFrame(gui::Shell::kGround);
-            shell.draw(w.vg(), w.width(), w.height());
-            w.endFrame();
+            root.frame();
             frameCpu.push_back(threadCpuMs() - cpu0);
-            w.present();
             if (drawn == 0) coldStartMs = millisecondsSinceProcessStart();
-            ++drawn;
-            dirty = o.frames > 0;  // benchmark/test runs redraw every iteration
-            if (o.frames > 0 && drawn >= o.frames) break;
+            if (o.frames > 0 && ++drawn >= o.frames) break;
+            if (o.frames == 0) ++drawn;
         }
         SDL_Event e;
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
-            switch (e.type) {
-                case SDL_EVENT_QUIT:
-                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                    quit = true;
-                    break;
-                case SDL_EVENT_WINDOW_EXPOSED:
-                case SDL_EVENT_WINDOW_RESIZED:
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-                    dirty = true;
-                    break;
-                default:
-                    break;  // the wake event only interrupts the wait
-            }
+            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+                quit = true;
+            else
+                root.handle(e);  // the wake event is ignored: it only interrupts the wait
         }
     }
     tick.cancel();
     if (server) server->stop();
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
-        gui::Window& w = **window;
-        w.beginFrame(gui::Shell::kGround);
-        shell.draw(w.vg(), w.width(), w.height());
-        w.endFrame();
-        auto written = gui::writePng(o.snapshot, w.readPixels());
+        shell.sync();
+        root.damageAll();
+        root.frame(false);
+        auto written = gui::writePng(o.snapshot, root.readBack());
         if (!written) {
             std::fprintf(stderr, "%s\n", written.error().toString().c_str());
             return 1;

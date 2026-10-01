@@ -1,0 +1,123 @@
+#include "supple/ui/theme.h"
+
+#include <cstdlib>
+
+namespace supple::ui {
+Theme Theme::dark() {
+    Theme t;
+    t.name_ = "dark";
+    // Warm graphite ground, ink-toned text, one ink accent; strip types as
+    // bindings (gui.md §7). State colours are reserved for state.
+    for (auto [k, v] : {std::pair{"ground", 0x1c1a17u},
+                        {"panel", 0x24211du},
+                        {"raised", 0x2e2a25u},
+                        {"rule", 0x3a352fu},
+                        {"ink", 0xebe6dau},
+                        {"ink-quiet", 0x9d968bu},
+                        {"ink-faint", 0x6a645bu},
+                        {"accent", 0x7fa3cfu},
+                        {"selection", 0x34465du},
+                        {"focus", 0x9dbde6u},
+                        {"channel", 0x7fa3cfu},
+                        {"buss", 0xc9a14au},
+                        {"master", 0xc0634fu},
+                        {"clip", 0xe0503cu},
+                        {"armed", 0xd6453au},
+                        {"agent", 0x9b84d6u},
+                        {"meter", 0x8fb27au},
+                        {"meter-hot", 0xd8b04au}})
+        t.colors_[k] = Color::hex(v);
+    for (auto [k, v] : {std::pair{"caption", 11.0f},
+                        {"small", 12.0f},
+                        {"body", 14.0f},
+                        {"title", 16.0f},
+                        {"display", 20.0f},
+                        {"mono", 13.0f}})
+        t.type_[k] = v;
+    for (auto [k, v] :
+         {std::pair{"xs", 4.0f}, {"s", 8.0f}, {"m", 12.0f}, {"l", 16.0f}, {"xl", 24.0f}})
+        t.space_[k] = v;
+    for (auto [k, v] : {std::pair{"s", 3.0f}, {"m", 6.0f}, {"l", 10.0f}}) t.radius_[k] = v;
+    return t;
+}
+
+Theme Theme::light() {
+    Theme t = dark();
+    t.name_ = "light";
+    // Off-white paper, ink black; the same accents slightly deepened.
+    for (auto [k, v] : {std::pair{"ground", 0xf3efe6u},
+                        {"panel", 0xebe6dbu},
+                        {"raised", 0xfaf7f0u},
+                        {"rule", 0xd3ccbeu},
+                        {"ink", 0x1f1c18u},
+                        {"ink-quiet", 0x6b655cu},
+                        {"ink-faint", 0x9c958au},
+                        {"accent", 0x3f6ea8u},
+                        {"selection", 0xcdd9e8u},
+                        {"focus", 0x3f6ea8u},
+                        {"channel", 0x3f6ea8u},
+                        {"buss", 0xa57d24u},
+                        {"master", 0xa4442fu}})
+        t.colors_[k] = Color::hex(v);
+    return t;
+}
+
+Result<Theme> Theme::fromJson(const json::Value& document, const Theme& baseTheme) {
+    if (!document.isObject() || !document.find("schema") || !document.find("schema")->isString() ||
+        document.find("schema")->asString() != "supple.theme/1.0")
+        return Error("theme.schema", "expected a supple.theme/1.0 document", "/schema",
+                     R"({"schema": "supple.theme/1.0", "colors": {"accent": "#7fa3cf"}})");
+    Theme t = baseTheme;
+    if (const auto* n = document.find("name"); n && n->isString()) t.name_ = n->asString();
+    if (const auto* colors = document.find("colors")) {
+        if (!colors->isObject())
+            return Error("theme.colors", "colors must be an object", "/colors");
+        for (const auto& m : colors->asObject()) {
+            const std::string path = "/colors/" + m.key;
+            if (!m.value.isString() || m.value.asString().size() != 7 ||
+                m.value.asString()[0] != '#')
+                return Error("theme.color", "a colour is \"#rrggbb\"", path);
+            char* end = nullptr;
+            const auto rgb = std::strtoul(m.value.asString().c_str() + 1, &end, 16);
+            if (*end != '\0') return Error("theme.color", "a colour is \"#rrggbb\"", path);
+            t.colors_[m.key] = Color::hex(static_cast<std::uint32_t>(rgb));
+        }
+    }
+    for (auto [section, target] :
+         {std::pair{"type", &t.type_}, {"space", &t.space_}, {"radius", &t.radius_}}) {
+        const auto* block = document.find(section);
+        if (!block) continue;
+        if (!block->isObject())
+            return Error("theme.section", std::string(section) + " must be an object",
+                         std::string("/") + section);
+        for (const auto& m : block->asObject()) {
+            if (!m.value.isNumber() || m.value.asDouble() < 0)
+                return Error("theme.value", "a size is a non-negative number",
+                             std::string("/") + section + "/" + m.key);
+            (*target)[m.key] = static_cast<float>(m.value.asDouble());
+        }
+    }
+    return t;
+}
+
+Color Theme::color(std::string_view token) const {
+    auto it = colors_.find(token);
+    return it != colors_.end() ? it->second : Color::hex(0xff00ff);
+}
+
+float Theme::type(std::string_view token) const {
+    auto it = type_.find(token);
+    return it != type_.end() ? it->second : 14.0f;
+}
+
+float Theme::space(std::string_view token) const {
+    auto it = space_.find(token);
+    return it != space_.end() ? it->second : 8.0f;
+}
+
+float Theme::radius(std::string_view token) const {
+    auto it = radius_.find(token);
+    return it != radius_.end() ? it->second : 3.0f;
+}
+
+}  // namespace supple::ui

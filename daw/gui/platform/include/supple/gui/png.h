@@ -1,6 +1,5 @@
-// Minimal PNG writer for snapshots and golden images: RGBA8, deflate
-// "stored" blocks (no compression library needed; files are larger, which is
-// fine for test artifacts).
+// Minimal PNG writer for snapshots and golden images: RGBA8, one zlib stream
+// (system zlib), filter 0.
 #pragma once
 
 #include <cstdint>

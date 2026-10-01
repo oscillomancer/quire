@@ -2,6 +2,7 @@
 # offscreen driver for tests and benchmarks), OpenGL 3.3 core, NanoVG GL3.
 find_package(SDL3 REQUIRED CONFIG)
 find_package(OpenGL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # NanoVG with its GL3 backend (vendored, Zlib; stb_image inside is PD/MIT).
 add_library(gui-nanovg STATIC ${PROJECT_SOURCE_DIR}/third_party/nanovg/src/nanovg.c
@@ -13,12 +14,19 @@ set_target_properties(gui-nanovg PROPERTIES POSITION_INDEPENDENT_CODE ON)
 supple_add_library(gui-platform
   SOURCES platform/src/window.cpp platform/src/png.cpp
   DEPS supple::core-base
-  PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
+  PRIVATE_DEPS SDL3::SDL3 gui-nanovg ZLIB::ZLIB)
 target_include_directories(gui-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/include)
 target_link_libraries(gui-platform PUBLIC gui-nanovg)
 
+# The retained toolkit (gui.md §2): nodes, stack layout, input, damage, theme.
+supple_add_library(gui-ui
+  SOURCES ui/src/theme.cpp ui/src/canvas.cpp ui/src/node.cpp ui/src/root.cpp ui/src/widgets.cpp
+  DEPS supple::gui-platform supple::core-json
+  PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
+target_include_directories(gui-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui/include)
+
 add_executable(${PRODUCT_SLUG} app/main.cpp app/shell.cpp)
-target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-platform supple::engine
+target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-ui supple::gui-platform supple::engine
                       supple::control-protocol supple::product-info SDL3::SDL3)
 target_compile_definitions(${PRODUCT_SLUG} PRIVATE
   SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
@@ -32,6 +40,11 @@ if(SUPPLE_BUILD_TESTS)
   # Mesa's allocations outlive the process by design; leak checks would only
   # report the GL driver.
   set_tests_properties(gui-platform.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)
+  target_compile_definitions(gui-ui.tests PRIVATE
+    SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
+    SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
+  set_tests_properties(gui-ui.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   # The app end to end, offscreen: renders, writes a snapshot, reports timings.
   add_test(NAME gui.app-offscreen
            COMMAND ${PRODUCT_SLUG} --offscreen --no-socket --frames 3 --bench

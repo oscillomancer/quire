@@ -69,6 +69,7 @@ class Window {
     // The X11 window id plugin editors are parented to (0 offscreen).
     unsigned long x11Window() const;
 
+    void makeCurrent() const;
     // Makes the context current, clears to `rgb` (0xRRGGBB) and starts a
     // NanoVG frame in design units.
     void beginFrame(std::uint32_t rgb);

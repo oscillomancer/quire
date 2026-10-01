@@ -4,6 +4,8 @@
 #include <array>
 #include <span>
 
+#include <zlib.h>
+
 #include "supple/base/files.h"
 
 namespace supple::gui {
@@ -50,27 +52,12 @@ std::vector<std::uint8_t> encodePng(const Image& image) {
         const auto* row = image.rgba.data() + y * w * 4;
         raw.insert(raw.end(), row, row + w * 4);
     }
-    // zlib stream of stored deflate blocks (≤ 65535 bytes each) + Adler-32.
-    std::vector<std::uint8_t> z = {0x78, 0x01};
-    std::uint32_t a = 1, b = 0;
-    for (std::uint8_t byte : raw) {
-        a = (a + byte) % 65521u;
-        b = (b + a) % 65521u;
-    }
-    std::size_t at = 0;
-    do {
-        const std::size_t len = std::min<std::size_t>(65535, raw.size() - at);
-        const bool last = at + len == raw.size();
-        z.push_back(last ? 1 : 0);
-        z.push_back(static_cast<std::uint8_t>(len & 0xff));
-        z.push_back(static_cast<std::uint8_t>(len >> 8));
-        z.push_back(static_cast<std::uint8_t>(~len & 0xff));
-        z.push_back(static_cast<std::uint8_t>((~len >> 8) & 0xff));
-        z.insert(z.end(), raw.begin() + static_cast<std::ptrdiff_t>(at),
-                 raw.begin() + static_cast<std::ptrdiff_t>(at + len));
-        at += len;
-    } while (at < raw.size());
-    put32(z, (b << 16) | a);
+    // One zlib stream (the system zlib, Zlib license).
+    uLongf zSize = compressBound(static_cast<uLong>(raw.size()));
+    std::vector<std::uint8_t> z(zSize);
+    if (compress2(z.data(), &zSize, raw.data(), static_cast<uLong>(raw.size()), 6) != Z_OK)
+        return {};
+    z.resize(zSize);
 
     std::vector<std::uint8_t> out = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     std::vector<std::uint8_t> ihdr;
