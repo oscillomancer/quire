@@ -19,6 +19,7 @@ namespace supple::engine {
 
 void registerExtraCommands(cmd::Registry& registry);
 void registerMidiCommands(cmd::Registry& registry);
+void registerChainCommands(cmd::Registry& registry);
 
 using cmd::Command;
 using cmd::Context;
@@ -637,6 +638,7 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 void registerEngineCommands(cmd::Registry& registry) {
     registerExtraCommands(registry);
     registerMidiCommands(registry);
+    registerChainCommands(registry);
     lua::registerScriptCommands(registry);
     // ---------------------------------------------------------------- project.get
     {

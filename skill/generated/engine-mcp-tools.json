@@ -1029,6 +1029,155 @@
     }
   },
   {
+    "name": "fx_chain_list",
+    "title": "List saved FX chain presets by name, path and effect count.",
+    "description": "List saved FX chain presets by name, path and effect count. Lists valid supple.fx-chain/1.0 files, sorted by name and path. Invalid documents are skipped with warnings. See fx.chain.save and fx.chain.load. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_chain_list_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_chain_list_result",
+      "properties": {
+        "chains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "fx_chain_entry",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "effects": {
+                "type": "integer",
+                "minimum": 0.0
+              }
+            },
+            "required": ["name", "path", "effects"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["chains"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_chain_load",
+    "title": "Append or replace a track's FX chain from a preset in one undo step.",
+    "description": "Append or replace a track's FX chain from a preset in one undo step. Give exactly one of name (in the user's chains directory) or path (relative to the work directory). mode defaults to append; replace removes the target chain, its envelopes and key routes. Validates every plugin and state before changing the model. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_chain_load_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chain": {
+          "type": "string",
+          "pattern": "^(main|input)$",
+          "default": "main"
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^(append|replace)$",
+          "default": "append"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_chain_load_result",
+      "properties": {
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["effects"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_chain_save",
+    "title": "Save an ordered FX chain as a named preset.",
+    "description": "Save an ordered FX chain as a named preset. Save main (default) or input FX to the user's chains directory. Preserves semantic patches or opaque base64 state. Refuses empty chains; replace: true explicitly overwrites an existing name. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_chain_save_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chain": {
+          "type": "string",
+          "pattern": "^(main|input)$",
+          "default": "main"
+        },
+        "replace": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": ["track", "name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_chain_save_result",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "effects": {
+          "type": "integer",
+          "minimum": 0.0
+        }
+      },
+      "required": ["path", "effects"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_describe",
     "title": "Describe a plugin instance in words; full adds its parameters and patch.",
     "description": "Describe a plugin instance in words; full adds its parameters and patch.  See describe for errors and examples.",

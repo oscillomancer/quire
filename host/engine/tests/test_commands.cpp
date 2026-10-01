@@ -537,3 +537,213 @@ TEST_CASE("project.open returns migration warnings in its load report") {
     CHECK(loaded["warnings"].size() == 2);
     CHECK(loaded["warnings"].at(1).find("path")->asString() == "/project/console9");
 }
+
+namespace {
+struct ChainFixture {
+    fs::path dir = fs::path(__FILE__).parent_path().parent_path().parent_path().parent_path() /
+                   "build" / ("supple-chain-tests-" + std::to_string(::getpid()));
+    std::unique_ptr<EngineApp> app;
+    cmd::Registry registry;
+    std::unique_ptr<cmd::Dispatcher> bus;
+    ChainFixture() {
+        fs::remove_all(dir);
+        AppOptions options;
+        options.workdir = dir;
+        options.chainDir = dir / "chains";
+        options.pluginPath = {FIXTURE_CLAP_PATH};
+        auto result = EngineApp::create(options, {.console9 = false});
+        REQUIRE(result);
+        app = std::move(*result);
+        registerEngineCommands(registry);
+        bus = std::make_unique<cmd::Dispatcher>(registry, *app);
+    }
+    ~ChainFixture() {
+        bus.reset();
+        app.reset();
+        fs::remove_all(dir);
+    }
+    json::Value run(const char* name, std::string_view args = "{}") {
+        return ::run(*bus, name, args);
+    }
+    std::size_t history() { return app->versions().history(1000).size(); }
+    json::Value document(const char* name = "Tone") {
+        auto text = readTextFile(dir / "chains" / (std::string(name) + ".json"));
+        REQUIRE(text);
+        auto value = json::parse(*text);
+        REQUIRE(value);
+        return *value;
+    }
+    void write(json::Value doc, const char* name = "Tone") {
+        REQUIRE(writeFileAtomic(dir / "chains" / (std::string(name) + ".json"),
+                                json::writeCanonical(doc)));
+    }
+};
+}  // namespace
+
+TEST_CASE("FX chain presets round-trip ordered patches, blobs and options in one edit") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("track.add", R"({"name":"Target"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","patch":{"params":{"gain":-9}}})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    f.run("fx.set",
+          R"({"fx":"fx_1","label":"Quiet","bypass":true,"wet":37,"isolation":"in_process"})");
+    f.run("fx.set", R"({"fx":"fx_2","offline":true,"wet":82})");
+    const auto beforeSave = f.history();
+    auto saved = f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
+    CHECK(saved["effects"].asInt() == 2);
+    CHECK(f.history() == beforeSave);
+    auto text = readTextFile(saved["path"].asString());
+    REQUIRE(text);
+    auto doc = f.document();
+    CHECK(doc["schema"].asString() == "supple.fx-chain/1.0");
+    REQUIRE(doc["effects"].size() == 2);
+    CHECK(doc["effects"].at(1).find("state")->asString() == "AAAAAA==");
+    // Oversampling is part of the preset even though fx.set has no such option.
+    doc["effects"].asArray()[0]["oversampling"] = 4;
+    f.write(doc);
+    auto listed = f.run("fx.chain.list");
+    REQUIRE(listed["chains"].size() == 1);
+    CHECK(listed["chains"].at(0).find("effects")->asInt() == 2);
+    const auto beforeLoad = f.history();
+    auto loaded = f.run("fx.chain.load", R"({"track":"tr_2","name":"Tone"})");
+    CHECK(f.history() == beforeLoad + 1);
+    REQUIRE(loaded["effects"].size() == 2);
+    const auto& target = f.app->head().tracks.find(*model::Id::parse("tr_2"))->chain;
+    REQUIRE(target.size() == 2);
+    const auto& first = *f.app->head().fx.find(target[0]);
+    const auto& second = *f.app->head().fx.find(target[1]);
+    CHECK(first.plugin.id == "com.suppleaudio.test.gain");
+    CHECK(second.plugin.id == "com.suppleaudio.test.edge");
+    CHECK(first.label == "Quiet");
+    CHECK(first.bypass);
+    CHECK(first.wet == 37);
+    CHECK(first.isolation == model::Isolation::InProcess);
+    CHECK(first.oversampling == 4);
+    CHECK(second.offline);
+    CHECK(second.wet == 82);
+    REQUIRE(second.state);
+    CHECK(*second.state ==
+          "sha256:df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119");
+    REQUIRE(f.app->head().blobs.contains(*second.state));
+    CHECK(f.app->head().blobs.at(*second.state)->data == std::vector<std::uint8_t>(4, 0));
+    const auto sourcePatch = f.run("fx.patch.get", R"({"fx":"fx_1"})");
+    const auto targetPatch = f.run("fx.patch.get", "{\"fx\":\"" + target[0].str() + "\"}");
+    CHECK(sourcePatch == targetPatch);
+    f.run("history.undo");
+    CHECK(f.app->head().tracks.find(*model::Id::parse("tr_2"))->chain.empty());
+    f.run("history.redo");
+    CHECK(f.app->head().tracks.find(*model::Id::parse("tr_2"))->chain.size() == 2);
+    f.run("fx.chain.save", R"({"track":"tr_2","name":"Copy"})");
+    auto copy = f.document("Copy");
+    CHECK(copy["effects"] == doc["effects"]);
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone","replace":true})");
+    CHECK(readTextFile(saved["path"].asString()).value() == *text);
+}
+
+TEST_CASE("FX chain replace removes envelopes and routes and restores them on undo") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("track.add", R"({"name":"Target"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","chain":"input"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone","chain":"input"})");
+    f.run("fx.add", R"({"track":"tr_2","plugin":"Test Key Mix"})");
+    f.run("route.add", R"({"from":"tr_1","fx":"fx_2"})");
+    f.run("env.add", R"({"route":"sd_1","param":"volume"})");
+    const auto before = f.history();
+    auto loaded = f.run("fx.chain.load", R"({"track":"tr_2","name":"Tone","mode":"replace"})");
+    CHECK(f.history() == before + 1);
+    const auto& track = *f.app->head().tracks.find(*model::Id::parse("tr_2"));
+    CHECK(track.inputChain.empty());
+    REQUIRE(track.chain.size() == 1);
+    CHECK(track.chain[0].str() == loaded["effects"].at(0).asString());
+    CHECK_FALSE(f.app->head().fx.find(*model::Id::parse("fx_2")));
+    CHECK(f.app->head().routes.empty());
+    CHECK(f.app->head().envelopes.empty());
+    f.run("history.undo");
+    CHECK(f.app->head().fx.find(*model::Id::parse("fx_2")));
+    CHECK(f.app->head().routes.size() == 1);
+    CHECK(f.app->head().envelopes.size() == 1);
+    f.run("fx.add", R"({"track":"tr_2","plugin":"Test Gain","chain":"input"})");
+    const auto path = json::writeCompact(json::Value((f.dir / "chains/Tone.json").string()));
+    f.run("fx.chain.load", "{\"track\":\"tr_2\",\"path\":" + path + ",\"chain\":\"input\"}");
+    CHECK(f.app->head().tracks.find(*model::Id::parse("tr_2"))->inputChain.size() == 2);
+}
+
+TEST_CASE("FX chain presets reject invalid names, overwrites and invalid loads atomically") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    auto empty = f.bus->execute({"fx.chain.save", j(R"({"track":"tr_1","name":"Tone"})"), kOrigin});
+    REQUIRE_FALSE(empty);
+    CHECK(empty.error().code == "chain.empty");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
+    auto original = f.document();
+    for (const char* name : {"../Tone", "sub/Tone", "sub\\Tone", ".", ".."}) {
+        auto args = json::Value::object();
+        args["track"] = "tr_1";
+        args["name"] = name;
+        auto result = f.bus->execute({"fx.chain.save", args, kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "chain.name");
+    }
+    auto overwrite =
+        f.bus->execute({"fx.chain.save", j(R"({"track":"tr_1","name":"Tone"})"), kOrigin});
+    REQUIRE_FALSE(overwrite);
+    CHECK(overwrite.error().code == "chain.exists");
+    CHECK(f.document() == original);
+    const auto before = f.history();
+    auto bad = original;
+    bad["effects"].asArray()[1]["plugin"]["id"] = "not-installed";
+    bad["effects"].asArray()[1]["plugin"]["name"] = "Missing Space Echo";
+    f.write(bad);
+    auto missing = f.bus->execute(
+        {"fx.chain.load", j(R"({"track":"tr_1","name":"Tone","mode":"replace"})"), kOrigin});
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().code == "chain.plugin_missing");
+    CHECK(missing.error().message.find("Missing Space Echo") != std::string::npos);
+    CHECK(f.history() == before);
+    CHECK(f.app->head().tracks.find(*model::Id::parse("tr_1"))->chain.size() == 2);
+    bad = original;
+    bad["effects"].asArray()[1]["state"] = "not base64";
+    f.write(bad);
+    auto invalid = f.bus->execute(
+        {"fx.chain.load", j(R"({"track":"tr_1","name":"Tone","mode":"replace"})"), kOrigin});
+    REQUIRE_FALSE(invalid);
+    CHECK(f.history() == before);
+    CHECK(f.app->head().fx.size() == 2);
+    auto ambiguous = f.bus->execute(
+        {"fx.chain.load", j(R"({"track":"tr_1","name":"Tone","path":"Tone.json"})"), kOrigin});
+    REQUIRE_FALSE(ambiguous);
+    CHECK(ambiguous.error().code == "chain.source");
+    REQUIRE(writeFileAtomic(f.dir / "chains/broken.json", "{}"));
+    auto listed = f.run("fx.chain.list");
+    CHECK(listed["chains"].size() == 1);
+}
+
+TEST_CASE("FX chain opaque states have content hashes across SHA-256 block boundaries") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
+    auto doc = f.document();
+    // Standard SHA-256 vectors for bytes 0..n-1, independently checked with hashlib.
+    for (const auto& [size, hash] : std::vector<std::pair<std::size_t, std::string>>{
+             {55, "463eb28e72f82e0a96c0a4cc53690c571281131f672aa229e0d45ae59b598b59"},
+             {56, "da2ae4d6b36748f2a318f23e7ab1dfdf45acdc9d049bd80e59de82a60895f562"},
+             {64, "fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d9151108"},
+             {120, "f52b23db1fbb6ded89ef42a23ce0c8922c45f25c50b568a93bf1c075420bbb7c"}}) {
+        std::vector<std::uint8_t> bytes(size);
+        for (std::size_t i = 0; i < size; ++i) bytes[i] = static_cast<std::uint8_t>(i);
+        doc["effects"].asArray()[0]["state"] = base64Encode(bytes);
+        f.write(doc);
+        auto loaded = f.run("fx.chain.load", R"({"track":"tr_1","name":"Tone","mode":"replace"})");
+        auto id = model::Id::parse(loaded["effects"].at(0).asString());
+        REQUIRE(id);
+        const auto& fx = *f.app->head().fx.find(*id);
+        REQUIRE(fx.state);
+        CHECK(*fx.state == "sha256:" + hash);
+        CHECK(f.app->head().blobs.at(*fx.state)->data == bytes);
+    }
+}
