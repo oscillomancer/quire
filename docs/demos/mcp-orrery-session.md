@@ -1320,7 +1320,7 @@ that exactly duplicates structuredContent is shown once.
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 63.0,
+          "attack_ms": 68.0,
           "decay20_ms": 1020.0,
           "release_ms": 199.0,
           "sustain_db": -4.5,
@@ -1333,7 +1333,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -1475,7 +1475,7 @@ that exactly duplicates structuredContent is shown once.
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 63.0,
+          "attack_ms": 68.0,
           "decay20_ms": 1020.0,
           "release_ms": 199.0,
           "sustain_db": -4.5,
@@ -1491,7 +1491,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
     }
   }
 }
@@ -2810,7 +2810,7 @@ that exactly duplicates structuredContent is shown once.
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 63.0,
+          "attack_ms": 68.0,
           "decay20_ms": 1020.0,
           "release_ms": 199.0,
           "sustain_db": -4.5,
@@ -2823,7 +2823,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -2965,7 +2965,7 @@ that exactly duplicates structuredContent is shown once.
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 63.0,
+          "attack_ms": 68.0,
           "decay20_ms": 1020.0,
           "release_ms": 199.0,
           "sustain_db": -4.5,
@@ -2981,7 +2981,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
     }
   }
 }
