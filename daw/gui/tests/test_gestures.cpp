@@ -14,6 +14,8 @@
 #include "supple/peaks/peaks.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
+#include "supple/views/envelope_lane.h"
+#include "supple/views/tcp.h"
 
 using namespace supple;
 
@@ -317,4 +319,71 @@ TEST_CASE("arrange gestures: marquee, click to seek, take badge, double-click MI
     CHECK(f.app->head().items.size() == items + 2);
     CHECK(f.app->head().tracks.size() == tracks + 1);
     CHECK(f.steps() == s0 + 1);  // one undo step
+}
+
+TEST_CASE("automation lanes: shown under their strip, points added, moved and deleted, modes") {
+    Fixture f;
+    if (!f.ok) return;
+    std::vector<std::pair<std::string, json::Value>> committed;
+    views::TcpCallbacks cb;
+    cb.commit = [&](std::string_view command, json::Value args, std::string) {
+        committed.emplace_back(std::string(command), args);
+        REQUIRE(f.dispatcher->execute({std::string(command), std::move(args), kUi}));
+    };
+    f.view->setTcpCallbacks(std::move(cb));
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(
+             R"({"track":")" + track.str() +
+             R"(","param":"volume","points":[{"beat":0,"value":0},{"beat":16,"value":-12}]})")
+             .value(),
+         kUi});
+    REQUIRE(added);
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    f.sync();
+    // The lane is the row right under its strip, shorter, with no items on it.
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    CHECK(*lane == *f.view->trackLayout().indexOf(track) + 1);
+    CHECK(f.view->trackLayout().heightOf(*lane) < f.view->trackLayout().heightOf(*lane - 1));
+    const ui::Rect laneRect = f.view->rowRect(*lane);
+    auto& g = f.view->gestures();
+    CHECK_FALSE(g.hit({laneRect.x + 30, laneRect.y + laneRect.h / 2}));
+    // Its header in the TCP.
+    REQUIRE(f.view->tcpPanel().envControl(env, "mode"));
+    CHECK(f.view->tcpPanel().envControl(env, "mode")->visible);
+
+    auto points = [&] { return f.app->head().envelopes.find(env)->points; };
+    const ui::Rect area = views::Lanes::envArea(laneRect);
+    const model::Session& s0 = f.app->head();
+    auto xOfBeat = [&](double beat) { return f.view->xAt(f.app->head().timeMap->secondsAt(beat)); };
+    (void)s0;
+    // A click on the lane adds a point there (snapped to the grid), one undo step.
+    auto steps = f.steps();
+    f.click({xOfBeat(8) + 1, area.y + area.h * 0.25f});
+    REQUIRE(points().size() == 3);
+    CHECK(points()[1].pos == doctest::Approx(8));
+    CHECK(points()[1].value > 0);  // the upper quarter is above unity
+    CHECK(f.steps() == steps + 1);
+    // Dragging the last point up raises it.
+    const double before = points()[2].value;
+    const float yLast =
+        area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(before)) * area.h;
+    f.drag({xOfBeat(16), yLast}, {xOfBeat(16), yLast - 12});
+    REQUIRE(points().size() == 3);
+    CHECK(points()[2].value > before);
+    CHECK(points()[2].pos == doctest::Approx(16));  // a vertical drag keeps the time
+    // Alt+click deletes the first point.
+    const float yFirst = area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(0.0)) * area.h;
+    f.click({xOfBeat(0) + 1, yFirst}, ui::kAlt);
+    CHECK(points().size() == 2);
+    // The header's mode button cycles read -> touch; "hide" hides the lane.
+    f.root->click(f.view->tcpPanel().envControl(env, "mode")->id());
+    CHECK(f.app->head().envelopes.find(env)->mode == model::EnvMode::Touch);
+    f.sync();
+    f.root->click(f.view->tcpPanel().envControl(env, "hide")->id());
+    f.sync();
+    CHECK_FALSE(f.app->head().envelopes.find(env)->visible);
+    CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
 }

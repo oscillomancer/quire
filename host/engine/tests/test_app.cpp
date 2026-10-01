@@ -481,6 +481,16 @@ TEST_CASE("an LLM automates a plugin parameter over the bus and hears it in the 
     auto listed = call("env.list", "{}");
     REQUIRE(listed);
     CHECK((*listed)["envelopes"].size() == 1);
+    CHECK((*listed)["envelopes"].at(0).find("visible")->asBool());
+    // Hiding the lane is UI state in the project; the envelope still plays.
+    REQUIRE(call("env.set", R"({"env": "en_1", "visible": false})"));
+    CHECK_FALSE(app->head().envelopes.find(*model::Id::parse("en_1"))->visible);
+    auto hidden = call("env.list", "{}");
+    REQUIRE(hidden);
+    CHECK_FALSE((*hidden)["envelopes"].at(0).find("visible")->asBool());
+    REQUIRE(call("env.set", R"({"env": "en_1", "visible": true})"));
+    REQUIRE(call("history.undo", "{}"));  // both visibility edits, so the undo below
+    REQUIRE(call("history.undo", "{}"));  // still takes the batch
     // Errors say what to do.
     auto twice = call("env.add", R"({"fx": "fx_2", "param": "gain"})");
     REQUIRE_FALSE(twice);

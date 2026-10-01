@@ -5,8 +5,9 @@
 // left edge moves the take's source offset so the audio stays put), slip
 // (Alt-drag: the source moves under the item), fade handles at the top
 // corners, the take badge cycles takes, double-click opens a MIDI item, and
-// files dropped on the lanes. Each gesture previews as a ghost on the root's
-// overlay and commits ONE transaction on release.
+// files dropped on the lanes. On an automation lane: click adds a point, drag
+// moves one (snapped; Shift frees), Alt+click deletes one. Each gesture previews as a ghost on the
+// root's overlay and commits ONE transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -65,7 +66,7 @@ class ItemGestures {
     double gridBeats() const;
 
     // What a drag is doing (the overlay and tests read it).
-    enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee };
+    enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee, EnvPoint };
     struct State {
         Drag drag = Drag::None;
         model::Id anchor{};      // the item under the press
@@ -74,6 +75,13 @@ class ItemGestures {
         double fadeSeconds = 0;  // fade in/out length being drawn
         ui::Rect marquee{};
         std::vector<model::Id> marqueeBase;
+        // An automation lane's point being added or dragged (P5.14): a click
+        // on the lane adds one, a drag moves it, Alt+click deletes one.
+        std::optional<model::Id> env;
+        std::vector<model::EnvPoint> envDraft;
+        std::size_t envIndex = 0;
+        double envOrigPos = 0;
+        bool envCreated = false;
     };
     const State& state() const { return state_; }
 
@@ -92,6 +100,9 @@ class ItemGestures {
 
   private:
     double beatAtX(float x) const;
+    bool envPress(std::size_t row, const ui::PointerEvent& e);
+    void envDrag(const ui::PointerEvent& e);
+    void commitEnv(const std::string& label);
     double snap(double beat, bool free) const;
     void commit(const ui::PointerEvent& e);
     void changed();

@@ -356,6 +356,9 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     forward.pickInput = [this](const model::Id& id, const ui::Rect& anchor) {
         if (tcpCallbacks_.pickInput) tcpCallbacks_.pickInput(id, anchor);
     };
+    forward.envelopes = [this](const model::Id& id, const ui::Rect& anchor) {
+        if (tcpCallbacks_.envelopes) tcpCallbacks_.envelopes(id, anchor);
+    };
     tcp_ = &body.emplace<TcpPanel>(layout_, view_, std::move(forward));
     tcp_->layout.width = ui::SizeRule::fixed(kTcpWidth);
     auto& lanesCol = body.emplace<Node>("lanes-column");

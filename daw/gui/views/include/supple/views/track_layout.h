@@ -16,11 +16,13 @@
 namespace supple::views {
 
 // A visible row: a track and its indentation under the first root (the
-// masters' children are at depth 0).
+// masters' children are at depth 0). An automation lane is a row too: it
+// carries its track (and type/depth) plus the envelope it shows (P5.14).
 struct TrackRow {
     model::Id track;
     model::StripType type = model::StripType::Channel;
     int depth = 0;
+    std::optional<model::Id> env;  // set on an automation lane
 };
 
 // The arrange view's horizontal viewport and vertical scroll (gui.md §1.2:
@@ -45,7 +47,9 @@ class TrackLayout {
     const model::Session& session() const { return session_; }
     const std::vector<TrackRow>& rows() const { return rows_; }
     std::size_t rowCount() const { return rows_.size(); }
-    std::optional<std::size_t> indexOf(model::Id track) const;
+    std::optional<std::size_t> indexOf(model::Id track) const;   // the track's own row
+    std::optional<std::size_t> indexOfEnv(model::Id env) const;  // an automation lane
+    float envHeight() const;  // an automation lane's height (follows the global height)
 
     float globalHeight() const { return globalHeight_; }
     void setGlobalHeight(float h);  // vertical zoom

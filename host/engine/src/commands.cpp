@@ -239,7 +239,7 @@ struct EnvRef {
 };
 struct EnvSetArgs {
     std::string env;
-    std::optional<bool> active;
+    std::optional<bool> active, visible;
     std::optional<model::EnvMode> mode;
 };
 struct EnvListArgs {
@@ -248,7 +248,7 @@ struct EnvListArgs {
 struct EnvEntry {
     std::string env, target, param, mode;
     std::int64_t points = 0;
-    bool active = true;
+    bool active = true, visible = true;
 };
 struct EnvList {
     std::vector<EnvEntry> envelopes;
@@ -2576,10 +2576,14 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Set an envelope's options: active (heard), mode (read, touch, latch, write).";
+        c.description =
+            "visible shows or hides the envelope's lane in the arrange view (a hidden envelope "
+            "still plays while active).";
         c.tags = {"automation"};
         c.args = schema::object<EnvSetArgs>("env_set_args")
                      .field("env", &EnvSetArgs::env, idArg("en", "Envelope"))
                      .field("active", &EnvSetArgs::active, schema::boolean())
+                     .field("visible", &EnvSetArgs::visible, schema::boolean())
                      .field("mode", &EnvSetArgs::mode, envModeSchema())
                      .build();
         c.result = emptySchema();
@@ -2591,6 +2595,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             app.txn().modify<model::Envelope>(*id, [&](model::Envelope& e) {
                 if (a.active) e.active = *a.active;
+                if (a.visible) e.visible = *a.visible;
                 if (a.mode) e.mode = *a.mode;
             });
             return Empty{};
@@ -2634,6 +2639,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                          .field("param", &EnvEntry::param, schema::string())
                          .field("points", &EnvEntry::points, schema::integer())
                          .field("active", &EnvEntry::active, schema::boolean())
+                         .field("visible", &EnvEntry::visible, schema::boolean())
                          .field("mode", &EnvEntry::mode, schema::string())
                          .build();
         c.result = schema::object<EnvList>("env_list")
@@ -2653,7 +2659,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.object && env.target.object.str() != *a.object) continue;
                 out.envelopes.push_back({e.id.str(), env.target.object.str(), env.target.param,
                                          kModes[static_cast<int>(env.mode)],
-                                         static_cast<std::int64_t>(env.points.size()), env.active});
+                                         static_cast<std::int64_t>(env.points.size()), env.active,
+                                         env.visible});
             }
             return out;
         };

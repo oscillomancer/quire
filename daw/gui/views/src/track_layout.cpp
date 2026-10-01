@@ -4,6 +4,8 @@
 #include <functional>
 #include <iterator>
 
+#include "supple/views/envelope_lane.h"
+
 namespace supple::views {
 namespace {
 
@@ -22,7 +24,16 @@ bool TrackLayout::show(const model::Session& session) {
         const model::Track* t = session_.tracks.find(id);
         if (!t) return;
         const bool row = t->type != model::StripType::Master && !t->hiddenTcp;
-        if (row) rows_.push_back({id, t->type, depth});
+        if (row) {
+            rows_.push_back({id, t->type, depth, std::nullopt});
+            // Its visible automation lanes (volume, pan, mute) right below it.
+            std::vector<std::pair<int, model::Id>> lanes;
+            for (const auto& e : session_.envelopes)
+                if (e.value->target.object == id && e.value->visible && envScale(*e.value))
+                    lanes.emplace_back(envOrder(*e.value), e.id);
+            std::sort(lanes.begin(), lanes.end());
+            for (const auto& lane : lanes) rows_.push_back({id, t->type, depth, lane.second});
+        }
         if (t->folderCompact == 2) return;  // a collapsed folder hides its children
         for (model::Id c : t->children) visit(c, row ? depth + 1 : depth);
     };
@@ -36,9 +47,17 @@ bool TrackLayout::show(const model::Session& session) {
 
 std::optional<std::size_t> TrackLayout::indexOf(model::Id track) const {
     for (std::size_t i = 0; i < rows_.size(); ++i)
-        if (rows_[i].track == track) return i;
+        if (rows_[i].track == track && !rows_[i].env) return i;
     return std::nullopt;
 }
+
+std::optional<std::size_t> TrackLayout::indexOfEnv(model::Id env) const {
+    for (std::size_t i = 0; i < rows_.size(); ++i)
+        if (rows_[i].env == env) return i;
+    return std::nullopt;
+}
+
+float TrackLayout::envHeight() const { return clampHeight(std::max(28.0f, globalHeight_ * 0.6f)); }
 
 void TrackLayout::setGlobalHeight(float h) {
     const float clamped = clampHeight(h);
@@ -69,7 +88,7 @@ void TrackLayout::rebuildGeometry() {
     yOffsets_.reserve(rows_.size());
     float y = 0;
     for (const TrackRow& r : rows_) {
-        const float h = baseHeight(r.track);
+        const float h = r.env ? envHeight() : baseHeight(r.track);
         yOffsets_.push_back(y);
         rowHeights_.push_back(h);
         y += h;

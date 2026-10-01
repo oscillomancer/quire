@@ -45,6 +45,9 @@ struct TcpCallbacks {
     // hands the button's window rect so the app can anchor its menu there.
     std::function<std::string(const model::Id& track, const std::string& channels)> inputText;
     std::function<void(const model::Id& track, const ui::Rect& anchor)> pickInput;
+    // The strip's "env" button: the app's menu of its automation lanes
+    // (show/hide volume, pan, mute; creating the envelope when missing).
+    std::function<void(const model::Id& track, const ui::Rect& anchor)> envelopes;
 };
 
 class TcpPanel : public ui::Node {
@@ -63,6 +66,8 @@ class TcpPanel : public ui::Node {
     // of its controls by name ("name", "mute", "fader", …).
     ui::Node* rowNode(const model::Id& track) const;
     ui::Node* controlNode(const model::Id& track, std::string_view what) const;
+    // An automation lane's header control ("title", "mode", "active", "hide").
+    ui::Node* envControl(const model::Id& env, std::string_view what) const;
 
     void arrange(const ui::Canvas& canvas, const ui::Rect& r) override;
     void paint(ui::Canvas& canvas) override;
@@ -71,7 +76,9 @@ class TcpPanel : public ui::Node {
 
   private:
     class Row;
+    class EnvRow;  // an automation lane's header (P5.14)
     friend class Row;
+    friend class EnvRow;
     void bindRows();
     void openAddMenu();
     ui::Meter* meterOf(Row* row) const;
@@ -82,6 +89,7 @@ class TcpPanel : public ui::Node {
     model::Session session_;
     ui::Button* add_ = nullptr;        // "+ strip", at the panel's foot
     std::vector<Row*> rows_;           // a pool: only visible rows exist
+    std::vector<EnvRow*> envRows_;     // the same for automation lanes
     std::uint64_t gestureSerial_ = 0;  // unique per drag (coalescing key)
 };
 

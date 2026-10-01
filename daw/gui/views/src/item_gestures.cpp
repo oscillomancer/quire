@@ -6,6 +6,7 @@
 #include "supple/ui/canvas.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
+#include "supple/views/envelope_lane.h"
 
 namespace supple::views {
 namespace {
@@ -111,6 +112,33 @@ class Ghost : public ui::Node {
                 c.fillRect(st.marquee, t.color("selection").withAlpha(0.3f));
                 c.strokeRect(st.marquee, t.color("focus"));
                 break;
+            case ItemGestures::Drag::EnvPoint: {
+                const auto row = st.env ? v.trackLayout().indexOfEnv(*st.env) : std::nullopt;
+                const model::Envelope* env = st.env ? s.envelopes.find(*st.env) : nullptr;
+                const auto scale = env ? envScale(*env) : std::nullopt;
+                if (!row || !scale) break;
+                model::Envelope draft = *env;
+                draft.points = st.envDraft;
+                const ui::Rect area = Lanes::envArea(v.rowRect(*row));
+                auto yOf = [&](double value) {
+                    return area.bottom() - static_cast<float>(scale->toNorm(value)) * area.h;
+                };
+                ui::Point prev{};
+                for (float x = lanes.x; x <= lanes.right(); x += 3) {
+                    const double beat = s.timeMap->beatAt(std::max(0.0, v.timeAt(x)));
+                    const ui::Point p{x, yOf(envValueAt(draft, beat, 0.0))};
+                    if (x > lanes.x) c.line(prev, p, t.color("focus"), 2);
+                    prev = p;
+                }
+                if (st.envIndex < st.envDraft.size()) {
+                    const model::EnvPoint& pt = st.envDraft[st.envIndex];
+                    const ui::Point at{v.xAt(s.timeMap->secondsAt(pt.pos)), yOf(pt.value)};
+                    c.fillRect({at.x - 4, at.y - 4, 8, 8}, t.color("focus"));
+                    c.text({at.x + 8, at.y - 16, 120, 14}, scale->text(pt.value), ui::Font::Mono,
+                           t.type("caption"), t.color("ink"));
+                }
+                break;
+            }
             case ItemGestures::Drag::None:
                 break;
         }
@@ -179,7 +207,7 @@ std::optional<std::size_t> ItemGestures::rowAt(float y) const {
 std::optional<ItemGestures::Hit> ItemGestures::hit(ui::Point p) const {
     if (!view_.lanesRect().contains(p)) return std::nullopt;
     const auto row = rowAt(p.y);
-    if (!row) return std::nullopt;
+    if (!row || view_.trackLayout().rows()[*row].env) return std::nullopt;  // a lane has no items
     const model::Session& s = view_.session();
     const model::Id track = view_.trackLayout().rows()[*row].track;
     std::optional<Hit> best;
@@ -223,6 +251,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         free_ = (e.mods & ui::kShift) != 0;
         copy_ = (e.mods & ui::kCtrl) != 0;
         state_ = State{};
+        if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env)
+            return e.button == 1 ? envPress(*lane, e) : true;
         const auto h = hit(e.pos);
         pressRow_ = rowAt(e.pos.y).value_or(0);
         if (e.button == 3 || !h) {  // a marquee (right-drag anywhere, or from empty space)
@@ -244,6 +274,12 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             if (state_.drag == Drag::Move && (e.mods & ui::kAlt)) state_.drag = Drag::Slip;
         }
         if (root_) root_->capture(&view_);
+        return true;
+    }
+    if (e.type == T::Move && state_.drag == Drag::EnvPoint) {
+        moved_ = moved_ || std::abs(e.pos.x - press_.x) + std::abs(e.pos.y - press_.y) > 3;
+        envDrag(e);
+        if (root_) root_->requestAnimationFrame();
         return true;
     }
     if (e.type == T::Move && state_.drag != Drag::None) {
@@ -269,7 +305,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                     ok = ok && target >= 0 &&
                          static_cast<std::size_t>(target) < view_.trackLayout().rowCount() &&
                          view_.trackLayout().rows()[static_cast<std::size_t>(target)].type ==
-                             model::StripType::Channel;
+                             model::StripType::Channel &&
+                         !view_.trackLayout().rows()[static_cast<std::size_t>(target)].env;
                 }
                 state_.deltaRows = ok ? dr : 0;
                 break;
@@ -306,6 +343,7 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                                   std::abs(e.pos.x - press_.x), std::abs(e.pos.y - press_.y)};
                 selection_ = state_.marqueeBase;
                 for (std::size_t r = 0; r < view_.trackLayout().rowCount(); ++r) {
+                    if (view_.trackLayout().rows()[r].env) continue;
                     const model::Id track = view_.trackLayout().rows()[r].track;
                     for (const auto& item : s.items) {
                         if (item.value->track != track) continue;
@@ -318,6 +356,7 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 }
                 break;
             }
+            case Drag::EnvPoint:
             case Drag::None:
                 break;
         }
@@ -342,6 +381,11 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         if (steps.empty() || !run) return;
         if (auto r = run(label, steps); !r && onError) onError(r.error());
     };
+    if (state_.drag == Drag::EnvPoint) {
+        if (moved_ || state_.envCreated)
+            commitEnv(state_.envCreated ? "Add envelope point" : "Move envelope point");
+        return;
+    }
     if (!moved_) {  // a click
         if (state_.drag == Drag::Marquee) {
             if (e.button == 1 && state_.marqueeBase.empty()) {
@@ -491,9 +535,117 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                      {{"item.set", std::move(args)}});
             return;
         }
+        case Drag::EnvPoint:
         case Drag::None:
             return;
     }
+}
+
+namespace {
+const char* shapeName(model::PointShape shape) {
+    switch (shape) {
+        case model::PointShape::Linear:
+            return "linear";
+        case model::PointShape::Square:
+            return "square";
+        case model::PointShape::Slow:
+            return "slow";
+        case model::PointShape::FastStart:
+            return "fast_start";
+        case model::PointShape::FastEnd:
+            return "fast_end";
+        case model::PointShape::Bezier:
+            return "bezier";
+    }
+    return "linear";
+}
+}  // namespace
+
+bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
+    const model::Session& s = view_.session();
+    const model::Id envId = *view_.trackLayout().rows()[row].env;
+    const model::Envelope* env = s.envelopes.find(envId);
+    const auto scale = env ? envScale(*env) : std::nullopt;
+    if (!scale) return true;
+    const ui::Rect area = Lanes::envArea(view_.rowRect(row));
+    state_.drag = Drag::EnvPoint;
+    state_.env = envId;
+    state_.envDraft = env->points;
+    std::optional<std::size_t> nearest;
+    float reach = 7;
+    for (std::size_t i = 0; i < env->points.size(); ++i) {
+        const model::EnvPoint& pt = env->points[i];
+        const float x = view_.xAt(s.timeMap->secondsAt(pt.pos));
+        const float y = area.bottom() - static_cast<float>(scale->toNorm(pt.value)) * area.h;
+        const float d = std::max(std::abs(x - e.pos.x), std::abs(y - e.pos.y));
+        if (d < reach) {
+            reach = d;
+            nearest = i;
+        }
+    }
+    if (nearest && (e.mods & ui::kAlt)) {  // delete it
+        state_.envDraft.erase(state_.envDraft.begin() + static_cast<std::ptrdiff_t>(*nearest));
+        commitEnv("Delete envelope point");
+        state_ = State{};
+        return true;
+    }
+    if (nearest) {
+        state_.envIndex = *nearest;
+    } else {  // a new point under the pointer
+        model::EnvPoint pt;
+        pt.pos = std::max(0.0, snap(beatAtX(e.pos.x), free_));
+        pt.value = scale->fromNorm(static_cast<double>((area.bottom() - e.pos.y) / area.h));
+        const auto at =
+            std::upper_bound(state_.envDraft.begin(), state_.envDraft.end(), pt.pos,
+                             [](double b, const model::EnvPoint& p) { return b < p.pos; });
+        state_.envIndex = static_cast<std::size_t>(at - state_.envDraft.begin());
+        state_.envDraft.insert(at, pt);
+        state_.envCreated = true;
+    }
+    state_.envOrigPos = state_.envDraft[state_.envIndex].pos;
+    if (root_) {
+        root_->capture(&view_);
+        root_->requestAnimationFrame();
+    }
+    return true;
+}
+
+void ItemGestures::envDrag(const ui::PointerEvent& e) {
+    const model::Session& s = view_.session();
+    const auto row = view_.trackLayout().indexOfEnv(*state_.env);
+    const model::Envelope* env = s.envelopes.find(*state_.env);
+    const auto scale = env ? envScale(*env) : std::nullopt;
+    if (!row || !scale || state_.envIndex >= state_.envDraft.size()) return;
+    const ui::Rect area = Lanes::envArea(view_.rowRect(*row));
+    auto& pts = state_.envDraft;
+    model::EnvPoint& pt = pts[state_.envIndex];
+    // A mostly vertical drag keeps the point's time (snapping would move it).
+    if (std::abs(e.pos.x - press_.x) >= 4) {
+        const double lo = state_.envIndex > 0 ? pts[state_.envIndex - 1].pos : 0.0;
+        const double hi = state_.envIndex + 1 < pts.size() ? pts[state_.envIndex + 1].pos : 1e12;
+        const double raw = state_.envOrigPos + beatAtX(e.pos.x) - beatAtX(press_.x);
+        pt.pos = std::clamp(snap(raw, free_), lo, hi);
+    } else {
+        pt.pos = state_.envOrigPos;
+    }
+    pt.value = scale->fromNorm(static_cast<double>((area.bottom() - e.pos.y) / area.h));
+}
+
+void ItemGestures::commitEnv(const std::string& label) {
+    if (!run || !state_.env) return;
+    json::Value args = json::Value::object(), points = json::Value::array();
+    args["env"] = state_.env->str();
+    for (const model::EnvPoint& pt : state_.envDraft) {
+        json::Value p = json::Value::object();
+        p["beat"] = pt.pos;
+        p["value"] = pt.value;
+        p["shape"] = shapeName(pt.shape);
+        if (pt.tension != 0) p["tension"] = pt.tension;
+        points.push_back(std::move(p));
+    }
+    args["points"] = std::move(points);
+    if (auto r = run(label, {{"env.points.set", std::move(args)}}); !r && onError)
+        onError(r.error());
 }
 
 Status ItemGestures::drop(const std::vector<std::filesystem::path>& files, ui::Point at) {
