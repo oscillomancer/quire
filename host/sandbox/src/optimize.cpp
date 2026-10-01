@@ -525,7 +525,9 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             const auto noteOff =
                 W.input.seconds;  // explicit length, else the notes' end (unknown here)
             std::optional<Error> firstError;
+            int failedCandidates = 0;  // set/render/analyze failures, for the result
             auto failed = [&](Error error) {
+                ++failedCandidates;
                 if (!firstError) firstError = std::move(error);
                 return kInf;
             };
@@ -606,6 +608,7 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             loss["terms"] = std::move(terms);
             result["loss"] = std::move(loss);
             result["evaluations"] = o.evaluations;
+            result["failed"] = failedCandidates;
             result["seconds"] = roundTo(o.seconds, 2);
             result["stopped"] = std::string(opt::stopName(o.stopped));
             json::Value patch = json::Value::object(), changes = json::Value::array();

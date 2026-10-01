@@ -126,7 +126,7 @@ can outlast a tool call. The command bus gains a generic job facility:
   "status": "done",
   "result": {
     "loss": {"initial": 14.2, "best": 1.7, "terms": {"ltas": 0.6, "envelope": 0.4, "bands": 0.3, "centroid": 0.2, "harmonics": 0.2}},
-    "evaluations": 280, "seconds": 21.4, "stopped": "stagnation",
+    "evaluations": 280, "failed": 0, "seconds": 21.4, "stopped": "stagnation",
     "patch": {"filters": {"filter1": {"cutoff": 1840.0, "resonance": 31.0}}, "envelopes": {"env2": {"decay": 212.0}}},
     "changes": [{"key": "filter1.cutoff", "from": 1200.0, "to": 1840.0, "unit": "Hz"}, …],
     "render": "rd_12",

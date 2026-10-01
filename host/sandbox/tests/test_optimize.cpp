@@ -103,6 +103,7 @@ TEST_CASE("optimize recovers a hidden patch from its render") {
     REQUIRE(done["status"].asString() == "done");
     json::Value result = done["result"];
     CHECK(result["loss"]["best"].asDouble() < 0.25 * result["loss"]["initial"].asDouble());
+    CHECK(result["failed"].asInt() == 0);
     json::Value p = result["patch"]["params"];
     // Within 10 % of each hidden value in the normalized domain.
     CHECK(std::fabs(normalizedLog(p["filter1.cutoff"].asDouble(), 20, 20000) -
