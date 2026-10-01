@@ -112,17 +112,26 @@ Acceptance (build prompt Phase 4), as of 2026-09-27:
 | P4.20 | the model-thread service tick (engine.md §6) | **done** (json-9, Hermes; reviewed by the orchestrator: buffered MCP stdin, timer teardown, autosave back-off): `ModelLoop::every` timers and an MCP pump that ticks while idle; every 100 ms plans are freed, `fx.failed` is emitted unasked, a device change restarts the engine (`engine.restarting`, back-off, `engine.error` after 30 s; position and loop kept), autosave to `<file>-data/autosave-<n>.json` (newest 5; `autosave_available` on open) |
 | — | review round 14 (transport seqlock, VST3, commands) | **fixed** (reviewer, Hermes, on the orchestrator's decisions): the renderer's transport read is bounded; a VST3's controller is never called on the audio thread (plain automation lanes compile into the normalized domain; `Instance::paramsNormalized/normalizedParam/plainParam`, bridged); settled VST3 bus widths, reset() ends sounding notes; render path symlink check; `track.move`; checked ids; item.set conflicts |
 
-## Team (Codex workers via Herdr)
+## Team (Codex workers via Herdr; Hermes next)
 
 Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Four Codex
 workers (`gpt-6.1-sol`), one worktree each, take well-specified
 implementation; the orchestrator designs, reviews every branch and
-integrates. Hermes is retired.
+integrates. Codex's weekly budget is nearly spent (2026-09-30): these are
+their last tasks, and the orchestrator finishes any that run out.
 
-- **contour** — EQ (landed), reverb (in progress).
-- **margin** — analyzer, gate, delay (landed); `libs/console9` (in progress).
-- **press** — compressor/limiter, transient shaper (landed); one display-name definition per plugin (in progress).
-- **trim** — utility, saturation (landed); automated REAPER load/render/automation check (in progress).
+- **contour** — EQ, reverb (landed); LLM eval harness with the Hermes runner (in progress, `p3-eval`).
+- **margin** — analyzer, gate, delay, `libs/console9` (landed); Orrery performance (in progress, `p3-orrery-perf`).
+- **press** — compressor/limiter, transient shaper, display-name cleanup (landed); Console 9 typed strips (in progress, `p4-strips`).
+- **trim** — utility, saturation, REAPER check (landed); B1/B2 benchmark tooling (in progress, `p4-bench`).
+
+Hermes, two profiles (models per Nate, 2026-09-30; his default profile is never edited):
+`quire-work` — `deepseek/deepseek-v4.1-flash` via OpenRouter, for hermes-team
+work agents (`herdr agent start <name> --kind hermes --pane <id> -- -p quire-work`);
+`quire-eval` — `meta/muse-spark-1.3-contributor` via OpenRouter, the model
+under test. The eval harness reads only its model identity and key reference
+from it and runs every task in a fresh isolated Hermes home, so evaluations
+and work agents can run at the same time.
 
 Test labels: `slow` (dev/gcc/asan only), `tsan-skip` (AGENTS.md). Local CI
 is ~25 min per full run and grows with the optimizer/analysis suites.

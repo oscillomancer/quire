@@ -64,26 +64,13 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check (5 minutes)
-Your EP note found a synth bug, not a recipe problem: an FM modulator's
-level knob and envelope did not scale its modulation, so every FM patch
-modulated at full depth all the time. Fixed (508a229): the EP's energy
-above 4 kHz fell from 74 % to 5 % of the total (spectral centroid
-5039 → 699 Hz), and the bell's centroid went 4077 → 1939 Hz. `digital` is now
-a coarse stepped, bit-reduced table (16 → 6 steps, 5 → 3 bits across the
-position). It measures about 4 dB from a saw, where it used to be almost the same as
-`harmonic ramp`. Renders:
-`renders/listening/orrery-recipes-2026-09-30b/` (all ten recipes, plus
-`wavetable-{digital,harmonic_ramp}-pos{000,050,100}.wav`). The rebuilt
-Orrery is in `~/.clap` (reload it in REAPER). Questions: is the EP soft
-enough now? Is the bell still a bell? Do `digital` and `harmonic ramp` now
-sound distinct?
-*Meanwhile:* nothing waits on this.
-
 ## Resolved
 
+### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check
+**Answer (2026-09-30):** the new bell and electric piano sound much better; the wavetables sound good; no issues. (FM depth now follows the modulator's level, 508a229; `digital` is a coarse stepped, bit-reduced table.)
+
 ### 8. Which models and budget for automated LLM evaluations — decision
-**Answer (2026-09-30):** use Hermes agents (`hermes-team`) with their default model — cheap and capable enough; as many runs as useful. *Follow-up:* the harness gets a Hermes runner and the first runs (STATUS P3.4).
+**Answer (2026-09-30):** use Hermes agents (`hermes-team`) with their default model — cheap and capable enough; as many runs as useful. **Refined (2026-09-30):** evaluations use `meta/muse-spark-1.3-contributor` via OpenRouter (Hermes profile `quire-eval`); work agents use `deepseek/deepseek-v4.1-flash` (profile `quire-work`). *Follow-up:* the harness gets a Hermes runner and the first runs (STATUS P3.4).
 
 ### 10. Listen to Orrery — listening check (15 minutes, when convenient)
 **Answer (2026-09-30):** very impressed — the recipes sound production-ready and fit their descriptions; using Orrery in REAPER feels good and makes nice sounds easy for a non-synthesist. Two notes: the FM electric piano is harsher in the highs than an electric piano should be (likely the recipe, not the synth), and the `digital` and `harmonic ramp` wavetables sound the same. *Follow-up:* darker EP recipe; make the two tables distinct or merge them.
