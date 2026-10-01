@@ -182,9 +182,9 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
             auto* slider = &control.emplace<Slider>(
                 "fx.param." + d.key,
                 [spec_keep, key, setPhysical](double normalized) {
-                    const double physical = params::clampPhysical(
+                    const double value = params::clampPhysical(
                         spec_keep->spec, params::fromNormalized(spec_keep->spec, normalized));
-                    setPhysical(physical, true);
+                    setPhysical(value, true);
                 },
                 [this, key] { gesture_ = "fx.param:" + idText(fx_) + ":" + key; },
                 [this] { gesture_.clear(); });
