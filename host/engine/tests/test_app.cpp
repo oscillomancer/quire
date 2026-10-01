@@ -1707,3 +1707,38 @@ TEST_CASE("log.list: who did what, queries left out, since, origin filter, bound
     for (int i = 0; i < 2100; ++i) (void)d.execute({"project.get", j("{}"), kTest});
     CHECK(app->records().size() == engine::EngineApp::kMaxRecords);
 }
+
+TEST_CASE("track.set parent_send: off, a loop it would close is refused, back on") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto ok = [&](const char* command, const std::string& args) {
+        auto r = d.execute({command, j(args), kTest});
+        INFO(command << " " << args << ": " << (r ? std::string() : r.error().toString()));
+        REQUIRE(r);
+        return *r;
+    };
+    const std::string a = ok("track.add", R"({"type":"buss","name":"A"})")["track"].asString();
+    const std::string b = ok("track.add", R"({"type":"buss","name":"B"})")["track"].asString();
+    ok("track.move", R"({"track":")" + b + R"(","parent":")" + a + R"("})");
+    // With B -> A as the parent send, A -> B would loop.
+    CHECK_FALSE(
+        d.execute({"route.add", j(R"({"from":")" + a + R"(","to":")" + b + R"("})"), kTest}));
+    ok("track.set", R"({"track":")" + b + R"(","parent_send":false})");
+    CHECK_FALSE(app->head().tracks.find(*model::Id::parse(b))->parentSend.enabled);
+    const std::string send =
+        ok("route.add", R"({"from":")" + a + R"(","to":")" + b + R"("})")["id"].asString();
+    auto loop =
+        d.execute({"track.set", j(R"({"track":")" + b + R"(","parent_send":true})"), kTest});
+    REQUIRE_FALSE(loop);
+    CHECK(loop.error().code == "route.cycle");
+    CHECK_FALSE(app->head().tracks.find(*model::Id::parse(b))->parentSend.enabled);  // unchanged
+    ok("route.remove", R"({"route":")" + send + R"("})");
+    ok("track.set", R"({"track":")" + b + R"(","parent_send":true})");
+    CHECK(app->head().tracks.find(*model::Id::parse(b))->parentSend.enabled);
+    auto master = d.execute({"track.set", j(R"({"track":"tr_0","parent_send":false})"), kTest});
+    REQUIRE_FALSE(master);
+    CHECK(master.error().code == "track.parent_send");
+}

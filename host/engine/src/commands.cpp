@@ -425,6 +425,7 @@ struct TrackSetArgs {
     std::optional<std::int64_t> midiChannel;
     std::optional<model::RecordMode> recordMode;
     std::optional<model::Monitor> monitor;
+    std::optional<bool> parentSend;
 };
 struct TrackEntry {
     std::string id, name, parent;
@@ -1138,8 +1139,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "track.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary =
-            "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.";
+        c.summary = "Set track fields: type, name, volume, pan, mute, solo, parent send, arming.";
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
@@ -1179,6 +1179,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                        schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
                                                             {model::Monitor::On, "on"},
                                                             {model::Monitor::Auto, "auto"}}))
+                .field("parent_send", &TrackSetArgs::parentSend,
+                       schema::boolean().doc("The implicit send to the parent buss/master "
+                                             "(off: only explicit sends leave the strip)"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1186,6 +1189,8 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"track": "tr_1", "volume_db": "-4 dB", "pan": -15})"), obj("{}"), "song"},
             {"Arm for recording from inputs 1 and 2",
              obj(R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})"), obj("{}"), "song"},
+            {"Feed the parent only through explicit sends",
+             obj(R"({"track": "tr_1", "parent_send": false})"), obj("{}"), "song"},
             {"Play and record a MIDI keyboard (any device, channel 1)",
              obj(R"({"track": "tr_1", "armed": true, "record_midi": "*", "midi_channel": 1, "monitor": "auto"})"),
              obj("{}"), "song"}};
@@ -1225,6 +1230,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.recordInput && a.recordMidi)
                 return Error("track.record_input", "record audio or MIDI, not both",
                              "/record_midi");
+            if (a.parentSend && !s.tracks.find(*id)->parent)
+                return Error("track.parent_send", "a master has no parent", "/parent_send",
+                             "masters feed hardware outputs and renders");
             // The record input is a route from the device inputs (hw_input).
             std::optional<Id> input = s.tracks.find(*id)->record.input;
             if (a.recordInput) {
@@ -1277,12 +1285,18 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.volumeDb) t.volumeDb = *a.volumeDb;
                 if (a.pan) t.pan = *a.pan;
                 if (a.mute) t.mute = *a.mute;
+                if (a.parentSend) t.parentSend.enabled = *a.parentSend;
                 if (a.solo)
                     t.solo = *a.solo == "on"         ? model::Solo::On
                              : *a.solo == "in_place" ? model::Solo::InPlace
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            if (a.parentSend && *a.parentSend && !s.tracks.find(*id)->parentSend.enabled)
+                if (auto valid = model::checkInvariants(app.view()); !valid)
+                    return Error(
+                        "route.cycle", "the parent send would feed back: " + valid.error().message,
+                        "/parent_send", "remove the send from the parent to this strip first");
             if (a.type && *a.type != s.tracks.find(*id)->type) {
                 SUPPLE_TRY(model::validateStripRules(app.view()));
                 auto valid = model::checkInvariants(app.view());

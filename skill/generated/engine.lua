@@ -691,6 +691,7 @@ q = nil
 ---@field midi_channel? integer
 ---@field record_mode? "input"|"midi_overdub"|"midi_replace"
 ---@field monitor? "off"|"on"|"auto"
+---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 
 ---@class Quire.transport_get_result
 ---@field playing boolean
@@ -928,7 +929,7 @@ q = nil
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
----@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
+---@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
 
 ---@class Quire.transport
 ---@field get fun(): Quire.transport_get_result The play position and whether it is playing.

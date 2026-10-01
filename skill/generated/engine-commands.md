@@ -5733,7 +5733,7 @@ Result:
 
 ## `track.set@1`
 
-Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
+Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
 
 Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace.
 
@@ -5758,6 +5758,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `midi_channel` | integer |  | 0.0..16.0 |  |  |
 | `record_mode` | string |  |  |  |  |
 | `monitor` | string |  |  |  |  |
+| `parent_send` | boolean |  |  |  | The implicit send to the parent buss/master (off: only explicit sends leave the strip) |
 
 ### Result
 
@@ -5798,6 +5799,23 @@ Result:
   "track": "tr_1",
   "armed": true,
   "record_input": [1, 2]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Feed the parent only through explicit sends** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "parent_send": false
 }
 
 ```

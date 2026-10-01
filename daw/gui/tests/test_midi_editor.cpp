@@ -344,6 +344,11 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     f.exec("route.add", R"({"from":")" + keys + R"(","to":")" + verb + R"("})");
     matrix.sync();
     CHECK(m.sendsAt(row(keys), col(verb)).size() == 1);
+    // The parent's cell toggles the parent send.
+    REQUIRE(matrix.clickCell(row(keys), col("tr_0")));
+    CHECK_FALSE(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
+    REQUIRE(matrix.clickCell(row(keys), col("tr_0")));
+    CHECK(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
     REQUIRE(f.root->click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
 }
