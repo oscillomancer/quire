@@ -1037,7 +1037,28 @@ that exactly duplicates structuredContent is shown once.
         "_elided_array_count": 18
       },
       "ltas_rms_db": 7.6,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed)."
+      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed).",
+      "loss": {
+        "total": 80.02242822637236,
+        "terms": {
+          "bands": 13.927780952907444,
+          "centroid": 1.9728069446151983,
+          "envelope.attack": 0.04940556564455911,
+          "envelope.decay20": 0.0,
+          "envelope.release": 0.0,
+          "flatness": 1.7710817273509294e-09,
+          "flux": 0.0003809824389487001,
+          "harmonics": 0.4600659524039537,
+          "inharmonicity": 4.93573075383492e-09,
+          "ltas": 6.403592280292119,
+          "stereo": 0.0,
+          "trajectory": 57.208395541363316
+        },
+        "note_off_s": {
+          "reference": 1.9999999999999998,
+          "test": 1.9999999999999998
+        }
+      }
     }
   }
 }
@@ -2527,7 +2548,28 @@ that exactly duplicates structuredContent is shown once.
         "_elided_array_count": 18
       },
       "ltas_rms_db": 7.6,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed)."
+      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed).",
+      "loss": {
+        "total": 80.02242822637236,
+        "terms": {
+          "bands": 13.927780952907444,
+          "centroid": 1.9728069446151983,
+          "envelope.attack": 0.04940556564455911,
+          "envelope.decay20": 0.0,
+          "envelope.release": 0.0,
+          "flatness": 1.7710817273509294e-09,
+          "flux": 0.0003809824389487001,
+          "harmonics": 0.4600659524039537,
+          "inharmonicity": 4.93573075383492e-09,
+          "ltas": 6.403592280292119,
+          "stereo": 0.0,
+          "trajectory": 57.208395541363316
+        },
+        "note_off_s": {
+          "reference": 1.9999999999999998,
+          "test": 1.9999999999999998
+        }
+      }
     }
   }
 }

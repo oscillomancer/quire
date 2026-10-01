@@ -111,7 +111,7 @@ Result:
 
 Compare two renders or files: notable descriptor changes and timbre distance.
 
-Notable changes use fixed thresholds (loudness 1 LU, centroid 10 %, band levels 1.5 dB, harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the 1/3-octave spectra after removing the level offset: a pure gain change reads 0.
+Notable changes use fixed thresholds (loudness 1 LU, centroid 10 %, band levels 1.5 dB, harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the 1/3-octave spectra after removing the level offset: a pure gain change reads 0. loss is the score the optimizer minimizes and the evaluation scorer judges: the test is loudness-matched to the reference, both are analyzed at their note-off times (note_off_s reports them), and loss.total is the number to get down. A render's note-off is its own input end; give reference_note_off_s / test_note_off_s for files, and one unknown side borrows the other's (note_off_assumed).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -121,6 +121,8 @@ Kind: `query`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `reference` | string |  |  |  | A render id (rd_1) or an audio file path. |
 | `test` | string |  |  |  | A render id (rd_1) or an audio file path. |
+| `reference_note_off_s` | number |  | 0.0..3600.0 |  | The reference's note-off; defaults to a render's input end. |
+| `test_note_off_s` | number |  | 0.0..3600.0 |  | The test's note-off; defaults to a render's input end. |
 
 ### Result
 
@@ -135,9 +137,12 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "summary": {
       "type": "string"
+    },
+    "loss": {
+      "description": "The score the optimizer minimizes: total, per-term contributions, and the note-off_s used per side."
     }
   },
-  "required": ["notable", "ltas_rms_db", "summary"],
+  "required": ["notable", "ltas_rms_db", "summary", "loss"],
   "additionalProperties": false
 }
 
@@ -161,7 +166,15 @@ Result:
 {
   "notable": [],
   "ltas_rms_db": 0.0,
-  "summary": "<any>"
+  "summary": "<any>",
+  "loss": {
+    "total": "<any>",
+    "terms": "<any>",
+    "note_off_s": {
+      "reference": "<any>",
+      "test": "<any>"
+    }
+  }
 }
 
 ```
@@ -354,7 +367,7 @@ Result:
 
 Wait for a job.
 
-Wait for a job.
+Wait for a job. Blocks for up to timeout_s seconds (default 30) until the job finishes; a larger timeout_s is accepted and clamped to 30, and the result then carries "timeout_clamped_s": 30. Otherwise the result is what job.status returns.
 
 Kind: `query`. Exposure: `mcp-exec`.
 
@@ -363,7 +376,7 @@ Kind: `query`. Exposure: `mcp-exec`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `job` | string |  |  |  |  |
-| `timeout_s` | number |  |  |  |  |
+| `timeout_s` | number |  | 0.0.. |  | Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s. |
 
 ### Result
 
