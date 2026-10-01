@@ -130,7 +130,8 @@ class Lfo {
         prev_ = hold_;
         next_ = rng_.uniform(-1.0, 1.0);
     }
-    double advance(double dt, double sampleRate, const LfoParams& p) SUPPLE_RT {
+    double advance(double dt, double sampleRate, const LfoParams& p,
+                   bool evaluate = true) SUPPLE_RT {
         phase_ += p.hz * dt / sampleRate;
         age_ += dt;
         while (phase_ >= 1.0) {
@@ -139,6 +140,9 @@ class Lfo {
             hold_ = next_;
             next_ = rng_.uniform(-1.0, 1.0);
         }
+        // Muted drift still advances phase and RNG: later automation hears
+        // exactly the same state, without evaluating an inaudible cosine.
+        if (!evaluate) return 0.0;
         double v = 0.0;
         switch (p.wave) {
             case LfoWave::Sine:

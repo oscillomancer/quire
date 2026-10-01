@@ -22,4 +22,19 @@ if(SUPPLE_BUILD_TESTS)
   add_executable(orrery-bench bench/orrery_bench.cpp)
   target_link_libraries(orrery-bench PRIVATE supple::orrery-engine)
   supple_target_defaults(orrery-bench)
+
+  # Optional DSP snapshot from git archive for repeatable numerical/CPU
+  # comparisons. Use the current capture harness with the unchanged old core.
+  if(SUPPLE_ORRERY_BASELINE_DIR)
+    add_executable(orrery-reference-bench bench/orrery_bench.cpp)
+    foreach(source params patch engine fx oversampling wavetables)
+      target_sources(orrery-reference-bench PRIVATE
+        "${SUPPLE_ORRERY_BASELINE_DIR}/src/${source}.cpp")
+    endforeach()
+    target_include_directories(orrery-reference-bench PRIVATE
+      "${SUPPLE_ORRERY_BASELINE_DIR}/include" "${SUPPLE_ORRERY_BASELINE_DIR}/src")
+    target_link_libraries(orrery-reference-bench PRIVATE
+      supple::core-base supple::core-json supple::core-params supple::core-patch supple::core-dsp)
+    supple_target_defaults(orrery-reference-bench)
+  endif()
 endif()

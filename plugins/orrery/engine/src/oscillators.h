@@ -18,16 +18,21 @@ inline double saw(double t, double dt) SUPPLE_RT { return 2.0 * t - 1.0 - dsp::p
 
 inline double pulse(double t, double dt, double w) SUPPLE_RT {
     const double naive = t < w ? 1.0 : -1.0;
-    return naive + dsp::polyBlep(t, dt) - dsp::polyBlep(dsp::wrap01(t - w), dt);
+    const double shifted = t - w;
+    return naive + dsp::polyBlep(t, dt) -
+           dsp::polyBlep(shifted < 0.0 ? shifted + 1.0 : shifted, dt);
 }
 
 inline double triangle(double t, double dt) SUPPLE_RT {
     const double naive = t < 0.5 ? 4.0 * t - 1.0 : 3.0 - 4.0 * t;
     // Slope changes of +8 (at 0) and -8 (at 1/2) per cycle.
-    return naive + 8.0 * dt * (dsp::polyBlamp(t, dt) - dsp::polyBlamp(dsp::wrap01(t - 0.5), dt));
+    const double shifted = t - 0.5;
+    return naive + 8.0 * dt *
+                       (dsp::polyBlamp(t, dt) -
+                        dsp::polyBlamp(shifted < 0.0 ? shifted + 1.0 : shifted, dt));
 }
 
-inline double sine(double t) SUPPLE_RT { return dsp::sin2pi(t); }
+inline double sine(double t) SUPPLE_RT { return dsp::sinCycle(t); }
 
 inline double classic(Wave w, double t, double dt, double width) SUPPLE_RT {
     switch (w) {
@@ -65,6 +70,29 @@ class VaOsc {
         return v;
     }
 
+    // Common staged case: no morph, phase modulation or sync. Resolve the
+    // waveform once, while retaining the exact per-sample phase/ramp order.
+    void runClassic(Wave w, dsp::Lerp& inc, dsp::Lerp& width, double* out,
+                    std::uint32_t n) SUPPLE_RT {
+        switch (w) {
+            case Wave::Saw:
+                run<Wave::Saw>(inc, width, out, n);
+                break;
+            case Wave::Square:
+                run<Wave::Square>(inc, width, out, n);
+                break;
+            case Wave::Pulse:
+                run<Wave::Pulse>(inc, width, out, n);
+                break;
+            case Wave::Triangle:
+                run<Wave::Triangle>(inc, width, out, n);
+                break;
+            default:
+                run<Wave::Sine>(inc, width, out, n);
+                break;
+        }
+    }
+
     // Returns the fraction of the sample after the wrap (0 < f <= 1) if the
     // phase wrapped during the last advance, else 0 — the hard-sync signal.
     double wrapped() const { return wrapFrac_; }
@@ -72,11 +100,20 @@ class VaOsc {
     void syncTo(double frac, double dt) SUPPLE_RT { phase_ = dsp::wrap01(frac * dt); }
 
   private:
+    template <Wave W>
+    void run(dsp::Lerp& inc, dsp::Lerp& width, double* out, std::uint32_t n) SUPPLE_RT {
+        for (std::uint32_t s = 0; s < n; ++s) {
+            const double dt = inc.next();
+            out[s] = wave::classic(W, phase_, dt, width.next());
+            advance(dt);
+        }
+    }
+
     void advance(double dt) SUPPLE_RT {
         phase_ += dt;
         wrapFrac_ = 0.0;
         if (phase_ >= 1.0) {
-            phase_ -= std::floor(phase_);
+            phase_ -= 1.0;  // dt is clamped below 0.5, so at most one wrap
             wrapFrac_ = dt > 0.0 ? phase_ / dt : 0.0;
         }
     }

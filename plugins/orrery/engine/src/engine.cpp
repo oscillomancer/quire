@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <vector>
 
@@ -218,6 +219,29 @@ struct Targets {
 };
 
 struct Voice {
+    struct PitchCache {
+        double pitch = std::numeric_limits<double>::infinity(), hz = 0.0;
+        double get(double p) SUPPLE_RT {
+            if (p != pitch) {
+                pitch = p;
+                hz = dsp::pitchToHz(p);
+            }
+            return hz;
+        }
+    };
+    struct CutoffCache {
+        double cutoff = 0.0, rate = 0.0, g = 0.0;
+        double get(double hz, double fs) SUPPLE_RT {
+            if (hz != cutoff || fs != rate) {
+                cutoff = hz;
+                rate = fs;
+                g = tptG(hz, fs);
+            }
+            return g;
+        }
+    };
+    std::array<PitchCache, kOscCount> pitches;
+    std::array<CutoffCache, kFilterCount> cutoffs;
     enum class State : std::uint8_t { Free, Active, Fading };
     State state = State::Free;
     int key = 60, channel = 0;
@@ -281,6 +305,32 @@ struct StageBuf {
 constexpr int kGroupMax = 8;  // unison voices of one note rendered together
 
 struct Engine::Impl {
+    Impl() {
+        for (std::size_t s = 0; s < slotBase.size(); ++s)
+            slotBase[s] = orrery::index(static_cast<Slot>(s), std::uint16_t{0});
+    }
+
+    // Resolve the table's starts once on the main thread; index() otherwise
+    // crosses a translation unit and checks its static table on every lookup.
+    std::array<std::size_t, kSlotCount> slotBase{};
+    template <class F>
+    std::size_t index(Slot slot, F field) const SUPPLE_RT {
+        return slotBase[slot] + static_cast<std::uint16_t>(field);
+    }
+    struct GainCache {
+        double db = std::numeric_limits<double>::infinity();
+        double value = 0.0;
+    };
+    std::vector<GainCache> gains;
+    double gain(std::size_t i, double db) SUPPLE_RT {
+        GainCache& c = gains[i];
+        if (c.db != db) {
+            c.db = db;
+            c.value = dsp::levelGain(db);
+        }
+        return c.value;
+    }
+
     double sr = 48000.0;
     std::uint32_t maxBlock = 0;
     RtHandoff<Program> handoff;
@@ -546,9 +596,10 @@ struct Engine::Impl {
         }
         const double drift = eff(v, index(kVoice, VoiceF::drift), te, f) / 100.0;
         LfoParams dp{LfoWave::SmoothRandom, 0.3, 0.0, 0.0, false};
-        const double driftCt = drift * 5.0 * v.driftPitch.advance(dt, sr, dp);
+        const double driftCt = drift * 5.0 * v.driftPitch.advance(dt, sr, dp, drift != 0.0);
         dp.hz = 0.23;
-        const double driftCut = 1.0 + drift * 0.03 * v.driftCutoff.advance(dt, sr, dp);
+        const double driftCut =
+            1.0 + drift * 0.03 * v.driftCutoff.advance(dt, sr, dp, drift != 0.0);
 
         const double fs = sr * P.os;
         const double pitch = notePitch(v, te, f) + driftCt / 100.0;
@@ -565,7 +616,8 @@ struct Engine::Impl {
             double hz = 0.0;
             switch (*type) {
                 case OscType::Sub:
-                    hz = dsp::pitchToHz(pitch + 12.0 * get(OscF::octave) + pmod);
+                    hz = v.pitches[static_cast<std::size_t>(o)].get(
+                        pitch + 12.0 * get(OscF::octave) + pmod);
                     break;
                 case OscType::Fm: {
                     const auto mode = static_cast<RatioMode>(get(OscF::ratio_mode));
@@ -576,17 +628,19 @@ struct Engine::Impl {
                         double ratio = get(OscF::ratio);
                         if (mode == RatioMode::Harmonic)
                             ratio = std::max(0.25, std::round(ratio * 4.0) / 4.0);
-                        hz = dsp::pitchToHz(pitch + tune) * ratio;
+                        hz = v.pitches[static_cast<std::size_t>(o)].get(pitch + tune) * ratio;
                     }
                     break;
                 }
                 default:
-                    hz = dsp::pitchToHz(pitch + get(OscF::coarse) + get(OscF::fine) / 100.0 + pmod);
+                    hz = v.pitches[static_cast<std::size_t>(o)].get(pitch + get(OscF::coarse) +
+                                                                    get(OscF::fine) / 100.0 + pmod);
             }
             out.inc[static_cast<std::size_t>(o)] = std::min(hz / fs, 0.49);
             const auto pg = dsp::pan(get(OscF::pan) / 100.0);
-            const double lvl = dsp::levelGain(get(OscF::level)) * std::numbers::sqrt2;
-            out.modGain[static_cast<std::size_t>(o)] = dsp::levelGain(get(OscF::level));
+            const double level = gain(index(s, OscF::level), get(OscF::level));
+            const double lvl = level * std::numbers::sqrt2;
+            out.modGain[static_cast<std::size_t>(o)] = level;
             out.gainL[static_cast<std::size_t>(o)] = lvl * pg.l;
             out.gainR[static_cast<std::size_t>(o)] = lvl * pg.r;
             out.width[static_cast<std::size_t>(o)] = get(OscF::width) / 100.0;
@@ -605,15 +659,15 @@ struct Engine::Impl {
             const double cutoff = std::clamp(
                 get(FilterF::cutoff) * std::exp2(keyOct * track) * driftCut, 20.0, 20000.0);
             const auto u = static_cast<std::size_t>(fi);
-            out.g[u] = tptG(cutoff, fs);
+            out.g[u] = v.cutoffs[u].get(cutoff, fs);
             const double res = get(FilterF::resonance) / 100.0;
             // Ladder: feedback 0..4 (self-oscillation at 4). SVF: damping
             // k = 2(1-r)² — perceptual (40 % ≈ Q 1.4, 70 % ≈ Q 5.6, 100 % rings).
             out.k[u] = *type == FilterType::Ladder
                            ? 4.0 * res
                            : std::max(0.005, 2.0 * (1.0 - res) * (1.0 - res));
-            out.drive[u] = dsp::dbToGain(get(FilterF::drive));
-            out.level[u] = dsp::levelGain(get(FilterF::level));
+            out.drive[u] = gain(index(s, FilterF::drive), get(FilterF::drive));
+            out.level[u] = gain(index(s, FilterF::level), get(FilterF::level));
             out.delay[u] = fs / cutoff;
             out.feedback[u] = get(FilterF::feedback) / 100.0;
             out.damping[u] = get(FilterF::damping) / 100.0;
@@ -625,7 +679,8 @@ struct Engine::Impl {
         out.bal1 = std::min(1.0, 1.0 - bal);
         out.bal2 = std::min(1.0, 1.0 + bal);
         if (P.st.drive != DriveType::Off) {
-            out.driveGain = dsp::dbToGain(eff(v, index(kDrive, DriveF::amount), te, f));
+            out.driveGain =
+                gain(index(kDrive, DriveF::amount), eff(v, index(kDrive, DriveF::amount), te, f));
             out.driveBias = eff(v, index(kDrive, DriveF::bias), te, f) / 100.0;
             out.driveMix = eff(v, index(kDrive, DriveF::mix), te, f) / 100.0;
             out.driveComp = 1.0 / std::sqrt(std::max(1.0, out.driveGain));
@@ -633,8 +688,9 @@ struct Engine::Impl {
         // Amp: envelope × level × velocity, pan with unison spread.
         const double sens = eff(v, index(kAmp, AmpF::velocity), te, f) / 100.0;
         const double velDb = -(1.0 - v.velocity) * 40.0 * sens;
-        const double amp =
-            src[0] * dsp::levelGain(eff(v, index(kAmp, AmpF::level), te, f)) * dsp::dbToGain(velDb);
+        const double amp = src[0] *
+                           gain(index(kAmp, AmpF::level), eff(v, index(kAmp, AmpF::level), te, f)) *
+                           gain(index(kAmp, AmpF::velocity), velDb);
         double p = eff(v, index(kAmp, AmpF::pan), te, f) / 100.0;
         if (v.unisonCount > 1)
             p += eff(v, index(kVoice, VoiceF::unison_spread), te, f) / 100.0 *
@@ -815,8 +871,7 @@ struct Engine::Impl {
         double mg[kOscCount][kSeg];
         double wrap[kSeg];
         for (std::size_t o = 0; o < kOscCount; ++o)
-            if (P.st.osc[o])
-                for (std::uint32_t s = 0; s < n; ++s) mg[o][s] = v.modGain[o].next();
+            if (P.st.osc[o]) v.modGain[o].fill(mg[o], n);
         for (int oi = 0; oi < kOscCount; ++oi) {
             const int o = P.order[static_cast<std::size_t>(oi)];
             const auto uo = static_cast<std::size_t>(o);
@@ -841,6 +896,10 @@ struct Engine::Impl {
                 case OscType::Va: {
                     const auto wave = static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
                     const bool sync = o != 0 && sync1 && ramps[index(osc(o), OscF::sync)].to > 0.5;
+                    if (fmN == 0 && !sync && v.shape[uo].value == 0.0 && v.shape[uo].step == 0.0) {
+                        v.va[uo].runClassic(wave, v.inc[uo], v.width[uo], dst, n);
+                        break;
+                    }
                     for (std::uint32_t s = 0; s < n; ++s) {
                         const double pm = pmAt(s);
                         const double inc = v.inc[uo].next();
@@ -880,6 +939,12 @@ struct Engine::Impl {
                 }
                 case OscType::Sub: {
                     const auto wave = static_cast<Wave>(ramps[index(osc(o), OscF::wave)].to);
+                    if (fmN == 0) {
+                        dsp::Lerp width;
+                        width.snap(0.5);
+                        v.va[uo].runClassic(wave, v.inc[uo], width, dst, n);
+                        break;
+                    }
                     for (std::uint32_t s = 0; s < n; ++s) {
                         const double pm = pmAt(s);
                         const double inc = v.inc[uo].next();
@@ -922,25 +987,29 @@ struct Engine::Impl {
                 if (to == OscTarget::Both) in2[0][s] += l, in2[1][s] += r;
             }
         }
-        for (std::uint32_t s = 0; s < n; ++s) sb.b1[s] = v.bal1.next(), sb.b2[s] = v.bal2.next();
+        v.bal1.fill(sb.b1, n);
+        v.bal2.fill(sb.b2, n);
 
         // Filters: coefficients as the Lerps give them, then each filter over the buffer.
         auto& co = sb.co;
         for (std::size_t fi = 0; fi < kFilterCount; ++fi) {
             if (!P.st.filter[fi]) continue;
-            for (std::uint32_t s = 0; s < n; ++s) {
-                co[fi][0][s] = v.g[fi].next(), co[fi][1][s] = v.k[fi].next();
-                co[fi][2][s] = v.drive[fi].next(), co[fi][3][s] = v.level[fi].next();
-                co[fi][4][s] = v.delay[fi].next(), co[fi][5][s] = v.feedback[fi].next();
-                co[fi][6][s] = v.damping[fi].next();
-            }
+            v.g[fi].fill(co[fi][0], n);
+            v.k[fi].fill(co[fi][1], n);
+            v.drive[fi].fill(co[fi][2], n);
+            v.level[fi].fill(co[fi][3], n);
+            v.delay[fi].fill(co[fi][4], n);
+            v.feedback[fi].fill(co[fi][5], n);
+            v.damping[fi].fill(co[fi][6], n);
         }
-        if (P.st.drive != DriveType::Off)
-            for (std::uint32_t s = 0; s < n; ++s) {
-                sb.dg[s] = v.driveGain.next(), sb.db[s] = v.driveBias.next();
-                sb.dm[s] = v.driveMix.next(), sb.dc[s] = v.driveComp.next();
-            }
-        for (std::uint32_t s = 0; s < n; ++s) sb.al[s] = v.ampL.next(), sb.ar[s] = v.ampR.next();
+        if (P.st.drive != DriveType::Off) {
+            v.driveGain.fill(sb.dg, n);
+            v.driveBias.fill(sb.db, n);
+            v.driveMix.fill(sb.dm, n);
+            v.driveComp.fill(sb.dc, n);
+        }
+        v.ampL.fill(sb.al, n);
+        v.ampR.fill(sb.ar, n);
     }
 
     // One filter over the buffers of `count` voices of one program, the
@@ -959,13 +1028,16 @@ struct Engine::Impl {
             case FilterType::Ladder: {
                 const bool db24 =
                     static_cast<Slope>(ramps[index(filter(fi), FilterF::slope)].to) == Slope::Db24;
-                for (std::uint32_t s = 0; s < n; ++s)
-                    for (int j = 0; j < count; ++j) {
-                        const auto& co = bs[j]->co[fi];
-                        y[j][s] =
-                            vs[j]->ladder[u][c].next(x[j][s], co[0][s], co[1][s], co[2][s], db24) *
-                            co[3][s];
+                for (int first = 0; first < count; first += 4) {
+                    const auto m = static_cast<std::size_t>(std::min(4, count - first));
+                    Ladder::Lane lanes[4];
+                    for (std::size_t j = 0; j < m; ++j) {
+                        const auto i = static_cast<std::size_t>(first) + j;
+                        const auto& co = bs[i]->co[fi];
+                        lanes[j] = {&vs[i]->ladder[u][c], x[i], y[i], co[0], co[1], co[2], co[3]};
                     }
+                    Ladder::runGroup<4>(lanes, m, n, db24);
+                }
                 break;
             }
             case FilterType::Svf: {
@@ -1049,10 +1121,12 @@ struct Engine::Impl {
         const auto driveCurve = static_cast<DriveCurve>(static_cast<int>(P.st.drive) - 1);
         if (P.st.drive != DriveType::Off)
             for (int ch = 0; ch < sb.channels; ++ch) {
-                double* yc = sb.y[ch];
-                for (std::uint32_t s = 0; s < n; ++s)
-                    yc[s] +=
-                        (drive(yc[s], driveCurve, sb.dg[s], sb.db[s], sb.dc[s]) - yc[s]) * sb.dm[s];
+                // Bias comes from one monotone Lerp segment, so zero endpoints
+                // mean all samples are zero. Elide the redundant DC curve.
+                if (sb.db[0] == 0.0 && sb.db[n - 1] == 0.0)
+                    driveBlock<true>(driveCurve, sb.y[ch], n, sb.dg, sb.db, sb.dc, sb.dm);
+                else
+                    driveBlock<false>(driveCurve, sb.y[ch], n, sb.dg, sb.db, sb.dc, sb.dm);
             }
         if (sb.mono) std::copy_n(sb.y[0], n, sb.y[1]);
         const bool fading = v.state == Voice::State::Fading;
@@ -1735,6 +1809,7 @@ void Engine::prepare(double sampleRate, std::uint32_t maxBlock) {
     m.sr = sampleRate;
     m.maxBlock = maxBlock;
     m.ramps.assign(paramCount(), Ramp{});
+    m.gains.assign(paramCount(), Impl::GainCache{});
     for (std::size_t i = 0; i < m.ramps.size(); ++i) m.ramps[i].snap(table()[i].def);
     m.frames.assign(maxBlock / kTick + 3, Frame{});
     const std::size_t busSize = static_cast<std::size_t>(maxBlock) * 4;

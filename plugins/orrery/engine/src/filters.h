@@ -61,30 +61,91 @@ class Svf {
 // in closed form (zero delay), input saturation. 12 dB taps stage 2.
 class Ladder {
   public:
-    void reset() SUPPLE_RT { s_.fill(0.0); }
+    void reset() SUPPLE_RT { s_.fill(0.0f); }
     // k = 0..4 (self-oscillation near 4); drive = input gain (linear).
-    double next(double x, double g, double k, double drive, bool db24) SUPPLE_RT {
-        const double G = g / (1.0 + g), B = 1.0 / (1.0 + g);
-        const double S = G * G * G * B * s_[0] + G * G * B * s_[1] + G * B * s_[2] + B * s_[3];
-        const double G4 = G * G * G * G;
-        const double y4 = (G4 * x * drive + S) / (1.0 + k * G4);
-        double u = dsp::fastTanh(x * drive - k * y4);
-        double out2 = 0.0, out4 = 0.0;
+    double next(double input, double coef, double feedback, double gain, bool db24) SUPPLE_RT {
+        const float x = static_cast<float>(input), g = static_cast<float>(coef),
+                    k = static_cast<float>(feedback), drive = static_cast<float>(gain);
+        const float G = g / (1.0f + g), B = 1.0f / (1.0f + g);
+        const float S = G * G * G * B * s_[0] + G * G * B * s_[1] + G * B * s_[2] + B * s_[3];
+        const float G4 = G * G * G * G;
+        const float y4 = (G4 * x * drive + S) / (1.0f + k * G4);
+        float u = saturate(x * drive - k * y4);
+        float out2 = 0.0f;
         for (std::size_t i = 0; i < 4; ++i) {
-            const double v = (u - s_[i]) * G;
-            const double y = v + s_[i];
+            const float v = (u - s_[i]) * G;
+            const float y = v + s_[i];
             s_[i] = y + v;
             u = y;
             if (i == 1) out2 = y;
-            if (i == 3) out4 = y;
         }
-        // Passband gain drops with resonance; compensate half of it.
-        const double comp = 1.0 + 0.5 * k;
-        return (db24 ? out4 : out2) * comp / std::max(1.0, drive * 0.5 + 0.5);
+        return static_cast<double>((db24 ? u : out2) * (1.0f + 0.5f * k) /
+                                   std::max(1.0f, drive * 0.5f + 0.5f));
+    }
+
+    struct Lane {
+        Ladder* filter;
+        const double* input;
+        double* output;
+        const double *g, *k, *drive, *level;
+    };
+
+    // Phase and coefficient ramps remain double precision. Filter recursions
+    // use float in both paths, so a group/segment boundary never rounds state
+    // differently. Transpose only at segment boundaries; independent lanes
+    // let the compiler emit baseline SIMD with a portable scalar fallback.
+    template <std::size_t N>
+    static void runGroup(const Lane* lanes, std::size_t count, std::uint32_t frames,
+                         bool db24) SUPPLE_RT {
+        float state[4][N]{};
+        for (std::size_t j = 0; j < count; ++j)
+            for (std::size_t i = 0; i < 4; ++i) state[i][j] = lanes[j].filter->s_[i];
+        for (std::uint32_t s = 0; s < frames; ++s) {
+            float x[N], g[N], k[N], d[N], out[N];
+            for (std::size_t j = 0; j < N; ++j) {
+                const Lane& l = lanes[j < count ? j : 0];
+                x[j] = static_cast<float>(l.input[s]);
+                g[j] = static_cast<float>(l.g[s]);
+                k[j] = static_cast<float>(l.k[s]);
+                d[j] = static_cast<float>(l.drive[s]);
+            }
+#if defined(__clang__) && !defined(SUPPLE_RTSAN_ENABLED)
+#pragma clang loop vectorize(enable) vectorize_width(4) interleave_count(1) unroll(disable)
+#endif
+            for (std::size_t j = 0; j < N; ++j) {
+                const float G = g[j] / (1.0f + g[j]), B = 1.0f / (1.0f + g[j]);
+                const float S = G * G * G * B * state[0][j] + G * G * B * state[1][j] +
+                                G * B * state[2][j] + B * state[3][j];
+                const float G4 = G * G * G * G;
+                const float y4 = (G4 * x[j] * d[j] + S) / (1.0f + k[j] * G4);
+                float u = saturate(x[j] * d[j] - k[j] * y4);
+                float out2 = 0.0f;
+                for (std::size_t i = 0; i < 4; ++i) {
+                    const float v = (u - state[i][j]) * G;
+                    const float y = v + state[i][j];
+                    state[i][j] = y + v;
+                    u = y;
+                    if (i == 1) out2 = y;
+                }
+                out[j] =
+                    (db24 ? u : out2) * (1.0f + 0.5f * k[j]) / std::max(1.0f, d[j] * 0.5f + 0.5f);
+            }
+            for (std::size_t j = 0; j < count; ++j)
+                lanes[j].output[s] = static_cast<double>(out[j]) * lanes[j].level[s];
+        }
+        for (std::size_t j = 0; j < count; ++j)
+            for (std::size_t i = 0; i < 4; ++i) lanes[j].filter->s_[i] = state[i][j];
     }
 
   private:
-    std::array<double, 4> s_{};
+    static float saturate(float x) SUPPLE_RT {
+        if (x > 4.97f) return 1.0f;
+        if (x < -4.97f) return -1.0f;
+        const float x2 = x * x;
+        return x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2))) /
+               (135135.0f + x2 * (62370.0f + x2 * (3150.0f + 28.0f * x2)));
+    }
+    std::array<float, 4> s_{};
 };
 
 // Feedback comb with damping in the loop and a fractional delay.
@@ -172,7 +233,8 @@ class Formant {
 // Waveshaping drive (synth.md §4.4); gain-compensated, bias for asymmetry.
 enum class DriveCurve : std::uint8_t { Soft, Tape, Fold, Hard };
 // `comp` = the output gain compensation, 1/sqrt(max(1, gain)).
-inline double drive(double x, DriveCurve curve, double gain, double bias, double comp) SUPPLE_RT {
+[[gnu::always_inline]] inline double drive(double x, DriveCurve curve, double gain, double bias,
+                                           double comp) SUPPLE_RT {
     const double u = x * gain;
     double y = 0.0;
     switch (curve) {
@@ -194,6 +256,41 @@ inline double drive(double x, DriveCurve curve, double gain, double bias, double
             break;
     }
     return y * comp;
+}
+
+template <DriveCurve C, bool ZeroBias>
+inline void driveBlock(double* y, std::uint32_t n, const double* gain, const double* bias,
+                       const double* comp, const double* mix) SUPPLE_RT {
+    if constexpr (C == DriveCurve::Fold) {
+        // Baseline SSE2 lacks vector floor for the fold's phase reduction.
+        for (std::uint32_t s = 0; s < n; ++s)
+            y[s] += (drive(y[s], C, gain[s], ZeroBias ? 0.0 : bias[s], comp[s]) - y[s]) * mix[s];
+    } else {
+#if defined(__clang__) && !defined(SUPPLE_RTSAN_ENABLED)
+#pragma clang loop vectorize(enable) vectorize_width(2) interleave_count(1)
+#endif
+        for (std::uint32_t s = 0; s < n; ++s)
+            y[s] += (drive(y[s], C, gain[s], ZeroBias ? 0.0 : bias[s], comp[s]) - y[s]) * mix[s];
+    }
+}
+
+template <bool ZeroBias>
+inline void driveBlock(DriveCurve curve, double* y, std::uint32_t n, const double* gain,
+                       const double* bias, const double* comp, const double* mix) SUPPLE_RT {
+    switch (curve) {
+        case DriveCurve::Soft:
+            driveBlock<DriveCurve::Soft, ZeroBias>(y, n, gain, bias, comp, mix);
+            break;
+        case DriveCurve::Tape:
+            driveBlock<DriveCurve::Tape, ZeroBias>(y, n, gain, bias, comp, mix);
+            break;
+        case DriveCurve::Fold:
+            driveBlock<DriveCurve::Fold, ZeroBias>(y, n, gain, bias, comp, mix);
+            break;
+        case DriveCurve::Hard:
+            driveBlock<DriveCurve::Hard, ZeroBias>(y, n, gain, bias, comp, mix);
+            break;
+    }
 }
 
 }  // namespace supple::orrery
