@@ -19,7 +19,9 @@ voice bass ch 1 vel 100
 - `voice NAME` starts an independent line of music (`ch` MIDI channel 1–16,
   `vel` default velocity 1–127). Several voices can share a channel.
 - `N:` starts bar N. **Write every bar's events so they add up to the
-  meter.** `|` starts the next bar on the same line: `1: C4:w | D4:w`.
+  meter.** `|` starts the next bar on the same line: `1: C4:w | D4:w`. Writing
+  the new bar's number right after `|` is also accepted (`1: C4:w | 2: D4:w`);
+  a number that is not the next bar is an error.
 - `5-8 = 1-4` copies bars; `9-16 = 1-4` repeats them (twice).
 - `#` starts a comment. `;` can replace a newline.
 

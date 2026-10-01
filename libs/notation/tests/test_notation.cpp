@@ -123,6 +123,42 @@ TEST_CASE("numbered bar outside a voice suggests a voice declaration") {
     CHECK(result.error().hint.find("voice NAME") != std::string::npos);
 }
 
+TEST_CASE("a bar number after a pipe is accepted when it is the next bar") {
+    const std::string numbered =
+        "notation 1\nmeter 3/4\n"
+        "1: C4:q E4:q G4:q | 2: A4:q G4:q E4:q | 3: F4:q A4:q C5:q | 4: G4:q E4:q C4:q\n";
+    const std::string byLine =
+        "notation 1\nmeter 3/4\n"
+        "1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q\n";
+    auto withNumbers = compile(numbered);
+    REQUIRE(withNumbers.ok());
+    auto withNewlines = compile(byLine);
+    REQUIRE(withNewlines.ok());
+    CHECK(withNumbers->sequence == withNewlines->sequence);
+}
+
+TEST_CASE("a pipe number that is not the next bar is an error") {
+    auto result = compile("voice lead\n1: C4:w | 3: D4:w\n");
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.error().code == "notation.bar_after_pipe");
+    REQUIRE(result.error().loc.has_value());
+    CHECK(result.error().loc->line == 2);
+    CHECK(result.error().loc->column == 11);
+    CHECK(result.error().message.find("Bar 3 follows a pipe where bar 2 comes next") !=
+          std::string::npos);
+    CHECK(result.error().hint.find("new line") != std::string::npos);
+}
+
+TEST_CASE("a pipe without a number still continues the next bar") {
+    auto result = compile("voice lead\n1: C4:w | D4:w\n");
+    REQUIRE(result.ok());
+    REQUIRE(result->sequence.notes.size() == 2);
+    CHECK(result->sequence.length == 7680);
+    auto numbered = compile("voice lead\n1: C4:w | 2: D4:w\n");
+    REQUIRE(numbered.ok());
+    CHECK(numbered->sequence == result->sequence);
+}
+
 TEST_CASE("exact item length and repeated lane point") {
     auto result = compile("notation 1\nppq 960\nlength 0+1t\nlane cc 1\n1.1 10\n1.1 20\n");
     REQUIRE(result.ok());

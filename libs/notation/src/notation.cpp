@@ -629,12 +629,23 @@ class Compiler {
                             currentVoice->bars[bar].line = t[0].line;
                             row.clear();
                             ++bar;
-                        } else if (i > 1 && t[i - 1].text == "|" && t[i].text.ends_with(':') &&
-                                   internal::integer(std::string_view(t[i].text).substr(
-                                       0, t[i].text.size() - 1))) {
-                            add("bar_after_pipe", "Bar number follows a pipe.", t[i],
-                                "After `|` the next bar continues without a number: `... | D3:h "
-                                "A2:h`, or start a new line `2: ...`.");
+                        } else if (i > 1 && t[i - 1].text == "|" && t[i].text.ends_with(':')) {
+                            // A number right after `|` is tolerated when it names the
+                            // bar the pipe starts, so `1: ... | 2: ...` reads naturally.
+                            const auto written = internal::integer(
+                                std::string_view(t[i].text).substr(0, t[i].text.size() - 1));
+                            if (written && *written == bar) continue;
+                            if (written)
+                                add("bar_after_pipe",
+                                    "Bar " + std::to_string(*written) +
+                                        " follows a pipe where bar " + std::to_string(bar) +
+                                        " comes next.",
+                                    t[i],
+                                    "Drop the number after `|` (bar " + std::to_string(bar) +
+                                        " continues there), or start a new line `" +
+                                        std::to_string(*written) + ": ...`.");
+                            else
+                                row.push_back(t[i]);
                         } else
                             row.push_back(t[i]);
                     }
