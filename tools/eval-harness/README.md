@@ -51,7 +51,11 @@ Hermes CLI performs inference and session export. For a managed Hermes install
 whose standard launcher wants to write installation locks, use its **existing**
 venv interpreter with `--hermes-python /path/to/existing/venv/bin/python`; this
 runs `-I -B -m hermes_cli.main` and disables lazy installs. No package manager,
-installation, or default-profile edit is performed. `--hermes-bin` selects a
+installation, or default-profile edit is performed. Before any model call the
+runner checks that the CLI starts under an isolated home (`config path`) and
+stops with this hint if it does not (on this workstation:
+`--hermes-python ~/.hermes/hermes-agent/venv/bin/python`). A run in which no
+attempt reached the model publishes nothing. `--hermes-bin` selects a
 normal CLI executable on other installations.
 
 `relay.py` launches the product-slug-derived sandbox binary with `--mcp

@@ -129,6 +129,30 @@ def isolated_config(task, directory, seed, model, credentials, binary=None, star
     return home, env
 
 
+def hermes_command(options):
+    return ([options.hermes_python, "-I", "-B", "-m", "hermes_cli.main"]
+            if options.hermes_python else [options.hermes_bin])
+
+
+def preflight(options, directory):
+    """Fail before any model call if the CLI cannot start under an isolated HERMES_HOME.
+
+    `--version` succeeds even when the dependencies do not load; `config path`
+    imports the configuration stack that every real attempt needs.
+    """
+    home = Path(directory).resolve() / "preflight-home"
+    home.mkdir(parents=True, mode=0o700)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("HERMES_")}
+    env.update(HERMES_HOME=str(home), HERMES_DISABLE_LAZY_INSTALLS="1", PYTHONDONTWRITEBYTECODE="1")
+    done = subprocess.run(hermes_command(options) + ["config", "path"], env=env, cwd=directory,
+                          capture_output=True, text=True, timeout=60)
+    if done.returncode:
+        last = ((done.stderr or done.stdout).strip().splitlines() or ["no output"])[-1]
+        raise RuntimeError(f"Hermes cannot start under an isolated HERMES_HOME ({last}); a managed "
+                           "install's launcher finds its dependencies through the default home, so "
+                           "pass --hermes-python with the install's existing venv interpreter")
+
+
 def hermes(task, directory, seed, options, reference=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -136,8 +160,7 @@ def hermes(task, directory, seed, options, reference=None):
     model = default_model(source)
     _, env = isolated_config(task, directory, seed, model, options.credentials, options.sandbox,
                              task.get("starting_patch"))
-    command = ([options.hermes_python, "-I", "-B", "-m", "hermes_cli.main"]
-               if options.hermes_python else [options.hermes_bin])
+    command = hermes_command(options)
     version = subprocess.run(command + ["--version"], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=30, check=True).stdout.strip()
     prompt = preamble(task, reference, seed)
