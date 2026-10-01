@@ -113,6 +113,8 @@ struct PluginArgs {
 struct PluginEntry {
     std::string id, name, vendor, format;
     bool instrument = false, semantic = false;
+    std::string path;
+    std::optional<bool> shadowed;  // an earlier location on the plugin path has this id
 };
 struct PluginList {
     std::vector<PluginEntry> plugins;
@@ -900,6 +902,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
                 .field("instrument", &PluginEntry::instrument, schema::boolean())
                 .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .field("path", &PluginEntry::path, schema::string())
+                .field("shadowed", &PluginEntry::shadowed,
+                       schema::boolean().doc("Another location earlier on the plugin path has the "
+                                             "same id; fx.add by id uses that one"))
                 .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
@@ -910,12 +916,16 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto found = app(ctx).plugins();
             if (!found) return std::move(found).error();
             PluginList out;
-            for (const auto& p : *found) {
+            for (std::size_t i = 0; i < found->size(); ++i) {
+                const auto& p = (*found)[i];
                 if (a.filter && p.id.find(*a.filter) == std::string::npos &&
                     p.name.find(*a.filter) == std::string::npos &&
                     p.vendor.find(*a.filter) == std::string::npos)
                     continue;
-                out.plugins.push_back({p.id, p.name, p.vendor, p.format, p.instrument, p.semantic});
+                PluginEntry e{p.id,         p.name,     p.vendor,        p.format,
+                              p.instrument, p.semantic, p.path.string(), {}};
+                if (host::shadowed(*found, i)) e.shadowed = true;
+                out.plugins.push_back(std::move(e));
             }
             return out;
         };
@@ -937,6 +947,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
                 .field("instrument", &PluginEntry::instrument, schema::boolean())
                 .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .field("path", &PluginEntry::path, schema::string())
+                .field("shadowed", &PluginEntry::shadowed, schema::boolean())
                 .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
@@ -946,8 +958,13 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto found = app(ctx).plugins(true);
             if (!found) return std::move(found).error();
             PluginList out;
-            for (const auto& p : *found)
-                out.plugins.push_back({p.id, p.name, p.vendor, p.format, p.instrument, p.semantic});
+            for (std::size_t i = 0; i < found->size(); ++i) {
+                const auto& p = (*found)[i];
+                PluginEntry e{p.id,         p.name,     p.vendor,        p.format,
+                              p.instrument, p.semantic, p.path.string(), {}};
+                if (host::shadowed(*found, i)) e.shadowed = true;
+                out.plugins.push_back(std::move(e));
+            }
             return out;
         };
         registry.add(std::move(c));

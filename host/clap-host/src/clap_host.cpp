@@ -474,23 +474,40 @@ std::vector<fs::path> defaultSearchPath() {
     return out;
 }
 
+void orderCatalogue(std::vector<PluginInfo>& list) {
+    // Stable: scan() returns plugins in search-path order, which is the priority.
+    std::stable_sort(list.begin(), list.end(),
+                     [](const PluginInfo& a, const PluginInfo& b) { return a.id < b.id; });
+}
+
+bool shadowed(std::span<const PluginInfo> catalogue, std::size_t index) {
+    return index > 0 && index < catalogue.size() && catalogue[index - 1].id == catalogue[index].id;
+}
+
 Result<std::vector<PluginInfo>> scan(std::span<const fs::path> dirsOrFiles) {
+    // Search-path order is the priority (orderCatalogue keeps it): roots in
+    // the order given, each root's files sorted (directory order is arbitrary),
+    // a file reached twice kept once.
     std::vector<fs::path> files;
     for (const auto& root : dirsOrFiles) {
         std::error_code ec;
+        std::vector<fs::path> found;
         if (fs::is_regular_file(root, ec)) {
-            files.push_back(root);
+            found.push_back(root);
         } else if (fs::is_directory(root, ec) && root.extension() != ".vst3") {
             for (auto it = fs::recursive_directory_iterator(
                      root, fs::directory_options::skip_permission_denied, ec);
                  it != fs::recursive_directory_iterator(); it.increment(ec)) {
                 if (ec) break;
                 if (it->path().extension() == ".clap" && it->is_regular_file(ec))
-                    files.push_back(it->path());
+                    found.push_back(it->path());
             }
         }
+        std::sort(found.begin(), found.end());
+        for (auto& f : found)
+            if (std::find(files.begin(), files.end(), f) == files.end())
+                files.push_back(std::move(f));
     }
-    std::sort(files.begin(), files.end());
     std::vector<PluginInfo> out;
     for (const auto& file : files) {
         auto lib = Library::open(file);

@@ -3171,9 +3171,16 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "semantic": {
             "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "shadowed": {
+            "type": "boolean",
+            "description": "Another location earlier on the plugin path has the same id; fx.add by id uses that one"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
     }
@@ -3248,9 +3255,15 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "semantic": {
             "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "shadowed": {
+            "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
     }
