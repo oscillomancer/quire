@@ -31,8 +31,11 @@ SUPPLE_AUDIO_DEVICE_TEST=1 python3 tools/bench/run.py b2 --engine build/release/
 
 Both real modes require `SUPPLE_AUDIO_DEVICE_TEST` equal to exactly `1`.
 Unset, empty, `0`, `01`, and all other values refuse before opening a device.
-B1 uses JACK with `forceBufferSize`: it prints before requesting 64 frames
-for the PipeWire graph, affecting other clients while it runs. B2 records JACK
+B1 uses JACK with `forceBufferSize` and sets `PIPEWIRE_QUANTUM=64/48000` in its
+own environment (a user `jack.conf` with `node.force-quantum` otherwise wins:
+on this workstation it forces 128, and the first real run was rejected as
+invalid); it prints before requesting 64 frames for the PipeWire graph,
+affecting other clients while it runs. B2 records JACK
 only in a fresh private REAPER config and requests `PIPEWIRE_QUANTUM=64/48000`
 in that child's environment only. Both validate the **granted** 48 kHz/64
 settings; a different grant, server loss or processing error invalidates the

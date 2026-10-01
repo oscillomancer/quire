@@ -230,10 +230,15 @@ int main(int argc, char** argv) {
     Backend* backend = &paced;
     if (device == "jack") {
         std::fprintf(stderr,
-                     "JACK benchmark: request 48 kHz/64 and call jack_set_buffer_size(64); "
-                     "this changes PipeWire's graph quantum for all clients during the run. "
-                     "Physical stereo capture/playback ports will be connected.\n");
+                     "JACK benchmark: request 48 kHz/64 (PIPEWIRE_QUANTUM=64/48000 for this "
+                     "process, then jack_set_buffer_size(64)); this changes PipeWire's graph "
+                     "quantum for all clients during the run. Physical stereo capture/playback "
+                     "ports will be connected.\n");
         std::fflush(stderr);
+        // A user jack.conf may force every JACK client's quantum (node.force-quantum);
+        // pipewire-jack lets this process's environment override it, as B2 does for
+        // REAPER. Set before libjack opens the client; nothing outside the process changes.
+        setenv("PIPEWIRE_QUANTUM", "64/48000", 1);
         jack = std::make_unique<JackBackend>(
             JackOptions{.clientName = "supple-capacity-bench", .forceBufferSize = true});
         backend = jack.get();
