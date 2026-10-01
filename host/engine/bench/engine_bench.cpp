@@ -19,6 +19,7 @@
 #include <thread>
 #include <vector>
 
+#include "plan.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
 
@@ -167,9 +168,67 @@ double offlineFactor(const model::Session& s, InstancePool& pool, unsigned threa
     return seconds / spent;  // > 1: faster than real time
 }
 
+int stripBench() {
+    using namespace supple::engine::detail;
+    std::printf("Console 9 engine strips, stereo, 48 kHz, block 512, 2097152 frames/row\n");
+    std::printf("| strip | mode | ns/frame | one 48 kHz strip, %% core |\n|---|---|---:|---:|\n");
+    for (bool on : {false, true})
+        for (bool buss : {false, true}) {
+            model::EditTxn edit(model::Session::create({.console9 = on, .seed = 6789}), 1);
+            model::Track t;
+            t.parent = kMaster;
+            if (buss) t.type = model::StripType::Buss;
+            const Id target = edit.create(t);
+            edit.modify<model::Track>(kMaster, [&](auto& m) { m.children.push_back(target); });
+            if (buss) {
+                model::Track ch;
+                ch.parent = target;
+                const Id source = edit.create(ch);
+                edit.modify<model::Track>(target, [&](auto& b) { b.children.push_back(source); });
+            }
+            auto session = edit.commit();
+            if (!session) return 1;
+            InstancePool pool([](const model::PluginRef&) -> Result<host::PluginInfo> {
+                return Error("bench.plugin", "strip benchmark uses no plugins");
+            });
+            auto compiled = compile(*session, pool, 0, 512);
+            if (!compiled || !prepare(*compiled, *session)) return 1;
+            auto& p = *compiled;
+            const auto at = static_cast<std::size_t>(
+                std::find_if(p.nodes.begin(), p.nodes.end(),
+                             [&](const auto& n) { return n.id == target; }) -
+                p.nodes.begin());
+            // A channel's device input, or an already encoded upstream signal for a buss.
+            std::vector<float> input(512, .01f);
+            const float* in[] = {input.data()};
+            p.deviceIn = in;
+            p.deviceInChannels = 1;
+            if (buss) {
+                for (auto& n : p.nodes)
+                    if (n.type == model::StripType::Channel) {
+                        std::fill(n.post.l.begin(), n.post.l.end(), .0054f);
+                        std::fill(n.post.r.begin(), n.post.r.end(), .0054f);
+                    }
+            } else
+                p.nodes[at].monitorInputs = {0};
+            const auto transport = transportAt(p, 0);
+            for (int i = 0; i < 32; ++i) processNode(p, at, 0, 512, transport);
+            const auto begin = std::chrono::steady_clock::now();
+            for (int i = 0; i < 4096; ++i) processNode(p, at, i * 512, 512, transport);
+            const double ns =
+                std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin)
+                    .count() /
+                2097152;
+            std::printf("| %s | %s | %.2f | %.3f |\n", buss ? "buss" : "channel",
+                        on ? "on" : "linear", ns, ns * 48000 / 1e7);
+        }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--strips") return stripBench();
     if (argc < 2) {
         std::fprintf(stderr,
                      "usage: %s <orrery-headless.clap> [--tracks 4,8] [--seconds 5] [--block 64]\n",

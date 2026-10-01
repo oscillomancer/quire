@@ -8,7 +8,7 @@ supple_add_library(engine
           src/render_commands.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
-       supple::core-dsp supple::signalsmith-stretch
+       supple::core-dsp supple::signalsmith-stretch supple::console9
   PRIVATE_DEPS supple::product-info ${CMAKE_DL_LIBS})
 
 if(SUPPLE_BUILD_TESTS)
@@ -21,7 +21,7 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_options(engine-fake-jack PRIVATE $<$<CXX_COMPILER_ID:Clang>:-fno-sanitize=function>)
 
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
-                   tests/test_commands.cpp tests/test_scripts.cpp
+                   tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
                    tests/test_jack.cpp tests/test_workers.cpp LABELS rt)
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
@@ -31,11 +31,14 @@ if(SUPPLE_BUILD_TESTS)
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
+  add_test(NAME engine.strips-fuzz COMMAND engine.tests "-tc=engine.strips-fuzz*")
+  set_tests_properties(engine.strips-fuzz PROPERTIES LABELS "engine;rt")
 endif()
 
 # Capacity benchmark (engine.md §7 B1, preliminary): engine-bench <orrery-headless.clap>.
 add_executable(engine-bench bench/engine_bench.cpp)
 target_link_libraries(engine-bench PRIVATE supple::engine)
+target_include_directories(engine-bench PRIVATE src)
 supple_target_defaults(engine-bench)
 
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).

@@ -39,7 +39,8 @@ inline Status historySequence(engine::EngineApp& app, cmd::Dispatcher& bus,
             case 0:
                 command = "track.add";
                 args["name"] = "Track " + std::to_string(i);
-                if (byte & 0x20) args["parent"] = ids(s.tracks, byte >> 2);
+                args["type"] = (byte & 0x80) ? "master" : (byte & 0x40) ? "buss" : "channel";
+                if ((byte & 0x20) && !(byte & 0x80)) args["parent"] = ids(s.tracks, byte >> 2);
                 break;
             case 1:
                 command = "track.set";

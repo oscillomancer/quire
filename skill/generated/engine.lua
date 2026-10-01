@@ -361,6 +361,7 @@ q = nil
 ---@field version integer
 ---@field recoverable integer
 ---@field autosave_available boolean
+---@field warnings? table[]
 
 ---@class Quire.project_open_args
 ---@field path? string
@@ -375,6 +376,7 @@ q = nil
 ---@field version integer
 ---@field recoverable integer
 ---@field autosave_available boolean
+---@field warnings? table[]
 
 ---@class Quire.project_recover_args
 ---@field files? string[]
@@ -397,7 +399,7 @@ q = nil
 ---@field title? string
 ---@field author? string
 ---@field notes? string
----@field pan_law_db? number|string Quantity strings are range-checked by the server.
+---@field console9? boolean
 ---@field render? any
 
 ---@class Quire.region_add_args
@@ -431,6 +433,7 @@ q = nil
 ---@field text? string
 
 ---@class Quire.render_dry_run_args
+---@field master? string
 ---@field branch? string
 ---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
 ---@field name? string A fixed file name instead of a pattern
@@ -452,6 +455,7 @@ q = nil
 ---@field job? boolean (default: false)
 
 ---@class Quire.render_mix_args
+---@field master? string Master output (default tr_0) id, e.g. "tr_1".
 ---@field start_beat? number
 ---@field end_beat? number
 ---@field tail_s? number
@@ -478,6 +482,7 @@ q = nil
 ---@field status? string
 
 ---@class Quire.render_regions_args
+---@field master? string
 ---@field branch? string
 ---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
 ---@field name? string A fixed file name instead of a pattern
@@ -499,6 +504,7 @@ q = nil
 ---@field job? boolean (default: false)
 
 ---@class Quire.render_stems_args
+---@field master? string
 ---@field branch? string
 ---@field pattern? string File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}"
 ---@field name? string A fixed file name instead of a pattern
@@ -525,7 +531,7 @@ q = nil
 ---@field fx? string Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx"
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
----@field pan? number|string Quantity strings are range-checked by the server.
+---@field pan? string|table
 ---@field mute? boolean
 
 ---@class Quire.route_add_result
@@ -544,7 +550,7 @@ q = nil
 ---@field fx? string Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx"
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
----@field pan? number|string Quantity strings are range-checked by the server.
+---@field pan? string|table
 ---@field mute? boolean
 
 ---@class Quire.script_run_args
@@ -614,6 +620,7 @@ q = nil
 ---@field meter string
 
 ---@class Quire.track_add_args
+---@field type? "channel"|"buss"|"master" (default: "channel")
 ---@field name? string
 ---@field parent? string Parent track id, e.g. "tr_1".
 ---@field index? integer
@@ -635,14 +642,13 @@ q = nil
 
 ---@class Quire.track_set_args
 ---@field track string Track id, e.g. "tr_1".
+---@field type? "channel"|"buss"|"master"
 ---@field name? string
 ---@field color? string
 ---@field notes? string
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? number|string Quantity strings are range-checked by the server.
----@field width? number|string Quantity strings are range-checked by the server.
 ---@field mute? boolean
----@field phase_invert? boolean
 ---@field solo? string
 ---@field armed? boolean
 ---@field record_input? integer[]
@@ -830,7 +836,7 @@ q = nil
 ---@field recover fun(args?: Quire.project_recover_args): Quire.project_recover_result Put recordings a crash left out back into the project (one undo step).
 ---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.
 ---@field save fun(args?: Quire.project_save_args): Quire.project_save_result Save the project (canonical JSON) to its file or a new path.
----@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, pan law).
+---@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, Console 9).
 
 ---@class Quire.region
 ---@field add fun(args?: Quire.region_add_args): Quire.region_add_result Add a named region in beats.
@@ -876,11 +882,11 @@ q = nil
 ---@field set fun(args: Quire.timesig_set_args): table Set the meter from a bar on, e.g. {"bar": 9, "meter": "3/4"}.
 
 ---@class Quire.track
----@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a track (under the master, or inside a folder track) and return its id.
+---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a channel, buss or master strip and return its id.
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
----@field set fun(args: Quire.track_set_args): table Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
+---@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
 
 ---@class Quire.transport
 ---@field get fun(): Quire.transport_get_result The play position and whether it is playing.

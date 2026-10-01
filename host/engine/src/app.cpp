@@ -194,6 +194,7 @@ fs::path EngineApp::resolve(const fs::path& path) const {
 
 Status EngineApp::save(const fs::path& where) {
     const fs::path path = resolve(where);
+    SUPPLE_TRY(model::checkInvariants(head()));
     SUPPLE_TRY(writeFileAtomic(path, model::serializeProject(head())));
     projectPath_ = path;
     autosaveMarked_ = true;  // the file itself is the newest copy
@@ -202,11 +203,11 @@ Status EngineApp::save(const fs::path& where) {
     return okStatus();
 }
 
-Status EngineApp::open(const fs::path& where) {
+Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warnings) {
     const fs::path path = resolve(where);
     auto text = readTextFile(path, std::size_t(1) << 30);
     if (!text) return std::move(text).error();
-    auto s = model::parseProject(*text);
+    auto s = model::parseProject(*text, warnings);
     if (!s) return std::move(s).error();
     versions_ = std::make_unique<model::VersionStore>(std::move(*s));
     projectPath_ = path;
@@ -249,6 +250,11 @@ Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const m
     model::Replayed out;
     out.changes = txn_->changes();
     out.created = txn_->created();
+    auto validation = model::validateStripRules(txn_->preview());
+    if (!validation) {
+        restore();
+        return std::move(validation).error();
+    }
     auto s = txn_->commit();
     restore();
     if (!s) return std::move(s).error();
@@ -1116,6 +1122,9 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
             return Error("recover.no_track",
                          r->file + " was recorded on " + t.track.str() + ", which is gone",
                          "/track", "give a track to put it on");
+        if (s.tracks.find(t.track)->type != model::StripType::Channel)
+            return Error("track.strip_type", "recover recordings onto a channel", "/track",
+                         "choose a child channel instead of a buss/master");
         t.startSample = side->startSample;
         t.sampleRate = side->sampleRate;
         t.segments = side->segments;  // loop passes, when the recording ended normally
@@ -1169,6 +1178,7 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
     if (changes.empty() && !t->projectChanged() && t->created().empty())
         return okStatus();  // nothing to record
     auto created = t->created();
+    SUPPLE_TRY(model::validateStripRules(t->preview()));
     auto s = t->commit();
     if (!s) return std::move(s).error();
     auto v = versions_->commit(std::move(*s), std::move(record_), std::move(changes),

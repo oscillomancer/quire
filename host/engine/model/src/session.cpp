@@ -48,6 +48,7 @@ Session Session::create(Project project) {
     EditTxn txn(s, 0);
     Track master;
     master.name = "Master";
+    master.type = StripType::Master;
     txn.insert(kMaster, std::move(master));  // the master is tr_0
     txn.create(TempoPointObj{0.0, 120.0, false});
     txn.create(MeterObj{1, 4, 4});
@@ -231,7 +232,7 @@ struct Checker {
         if (master->parent) fail(at("tracks", kMaster, "parent"), "the master has no parent");
         for (const auto& e : s.tracks) {
             const Track& t = *e.value;
-            if (e.id != kMaster) {
+            if (t.type != StripType::Master) {
                 if (!t.parent) {
                     fail(at("tracks", e.id, "parent"), e.id.str() + " has no parent");
                 } else if (const Track* p = s.tracks.find(*t.parent); !p) {
@@ -252,16 +253,17 @@ struct Checker {
                 else if (child->parent != e.id)
                     fail(at("tracks", e.id, "children"), c.str() + " names another parent");
             }
-            // Walk to the root: a cycle never reaches tr_0.
+            // Walk to a master root, with a bound to reject parent cycles.
             std::size_t steps = 0;
             std::optional<Id> cur = e.id;
-            while (cur && *cur != kMaster && steps <= s.tracks.size()) {
+            while (cur && steps <= s.tracks.size()) {
                 const Track* x = s.tracks.find(*cur);
+                if (x && x->type == StripType::Master) break;
                 cur = x ? x->parent : std::nullopt;
                 ++steps;
             }
-            if (e.id != kMaster && (!cur || *cur != kMaster))
-                fail(at("tracks", e.id, "parent"), e.id.str() + " is not under the master");
+            if (!cur || steps > s.tracks.size())
+                fail(at("tracks", e.id, "parent"), e.id.str() + " is not under a master");
             if (t.record.input && !s.routes.contains(*t.record.input))
                 fail(at("tracks", e.id, "record"),
                      "record input " + t.record.input->str() + " does not exist");
@@ -409,6 +411,11 @@ Status checkInvariants(const Session& s) {
     Checker c{s, {}};
     if (!(s.project->sampleRate >= 8000 && s.project->sampleRate <= 384000))
         c.fail("/project/sample_rate", "sample rate out of range");
+    if (auto strips = validateStripRules(s); !strips) {
+        Error error = std::move(strips).error();
+        error.code = "model.invariant";
+        return error;
+    }
     c.counters();
     c.tracks();
     c.itemsAndTakes();

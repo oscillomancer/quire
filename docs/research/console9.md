@@ -56,8 +56,9 @@ otherwise identical (encode gain ×0.7639, decode gain ×2).
   single encoded signal decoded by a buss comes back as a pure gain (plus
   dither); the curves only clip beyond |u| ≥ 1 (an input about 6.5 dB over
   full scale at unity). The Console 9 character is in the **summing**: a buss
-  decodes the *sum of encoded* signals, D(Σ E(uᵢ)) ≠ Σ uᵢ — louder coincident
-  peaks are softened relative to linear summing.
+  decodes the *sum of encoded* signals, D(Σ E(uᵢ)) ≠ Σ uᵢ — coincident
+  encoded peaks expand relative to linear summing before the decode clips
+  (D is convex for positive inputs).
 - **Gain staging at native unity** (both faders B = 0.5, both pans centred):
   channel = 0.7639 × 0.7071 = 0.540 (−5.35 dB); buss = 0.618 × 2 × 0.7071 =
   0.874 (−1.17 dB); channel → buss small-signal gain = 0.472 (−6.52 dB).

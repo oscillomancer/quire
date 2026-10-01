@@ -1,0 +1,144 @@
+{
+  "schema": "supple.project/1.0",
+  "project": {
+    "next_ids": {
+      "tr": 4,
+      "it": 2,
+      "tk": 2,
+      "md": 2,
+      "mi": 1,
+      "fx": 1,
+      "sd": 4,
+      "en": 2,
+      "ai": 1,
+      "mk": 1,
+      "rg": 1,
+      "tp": 2,
+      "ts": 2,
+      "gr": 1,
+      "ln": 1,
+      "rj": 1
+    },
+    "pan_law_db": -3
+  },
+  "tempo": {
+    "points": {
+      "tp_1": {
+        "beat": 0.0,
+        "bpm": 120.0
+      }
+    },
+    "meters": {
+      "ts_1": {
+        "bar": 1,
+        "numerator": 4,
+        "denominator": 4
+      }
+    }
+  },
+  "rulers": {
+    "markers": {},
+    "regions": {}
+  },
+  "tracks": {
+    "tr_0": {
+      "name": "Master",
+      "children": [
+        "tr_1",
+        "tr_3"
+      ]
+    },
+    "tr_1": {
+      "name": "Folder",
+      "parent": "tr_0",
+      "children": [
+        "tr_2"
+      ],
+      "width": 50,
+      "phase_invert": true,
+      "record": {
+        "armed": true,
+        "input": "sd_2",
+        "monitor": "on",
+        "mode": "input"
+      }
+    },
+    "tr_2": {
+      "name": "Source",
+      "parent": "tr_1"
+    },
+    "tr_3": {
+      "name": "Receive",
+      "parent": "tr_0"
+    }
+  },
+  "items": {
+    "it_1": {
+      "track": "tr_1",
+      "position": 0.0,
+      "length": 2.0,
+      "takes": [
+        "tk_1"
+      ],
+      "active_take": "tk_1"
+    }
+  },
+  "takes": {
+    "tk_1": {
+      "source": "md_1"
+    }
+  },
+  "fx": {},
+  "sources": {
+    "media": {
+      "md_1": {
+        "path": "missing.wav",
+        "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "format": "wav",
+        "sample_rate": 48000.0,
+        "channels": 1,
+        "frames": 48000
+      }
+    },
+    "midi": {}
+  },
+  "routes": {
+    "sd_1": {
+      "from": {
+        "track": "tr_2"
+      },
+      "to": {
+        "track": "tr_3"
+      }
+    },
+    "sd_2": {
+      "from": {
+        "hw_channels": [
+          1,
+          2
+        ]
+      },
+      "to": {
+        "track": "tr_1"
+      }
+    },
+    "sd_3": {
+      "from": {
+        "track": "tr_0"
+      },
+      "to": {
+        "track": "tr_3"
+      }
+    }
+  },
+  "envelopes": {
+    "en_1": {
+      "target": {
+        "object": "tr_1",
+        "param": "width"
+      }
+    }
+  },
+  "groups": {},
+  "blobs": {}
+}

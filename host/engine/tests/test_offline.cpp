@@ -30,9 +30,11 @@ InstancePool makePool() {
     });
 }
 
-Id addTrack(model::EditTxn& t, std::string name, Id parent = kMaster) {
+Id addTrack(model::EditTxn& t, std::string name, Id parent = kMaster,
+            model::StripType type = model::StripType::Channel) {
     model::Track tr;
     tr.name = std::move(name);
+    tr.type = type;
     tr.parent = parent;
     const Id id = t.create(tr);
     t.modify<model::Track>(parent, [&](model::Track& p) { p.children.push_back(id); });
@@ -103,7 +105,9 @@ OfflineResult render(const model::Session& s, InstancePool& pool, double seconds
     return std::move(*r);
 }
 
-constexpr double kCentre = 0.70710678118654752;  // -3 dB pan law at the centre
+constexpr double kCentre = 0.70710678118654752;  // keys
+constexpr double kStrip = 0.472135955;           // neutral Channel -> Buss, ADR-0019
+constexpr double kHardStrip = kStrip * 1.4142135623730951;
 
 }  // namespace
 
@@ -120,7 +124,7 @@ TEST_CASE("pan law gains") {
 
 TEST_CASE("shared bridge accepts a new effect after its last instance is removed") {
     host::setBridgeExecutable(BRIDGE_PATH);
-    model::EditTxn initial(model::Session::create(), 1);
+    model::EditTxn initial(model::Session::create({.console9 = false}), 1);
     const Id track = addTrack(initial, "Synth");
     addFx(initial, track, kSine);
     addNote(initial, track, 0.0, 1.0);
@@ -156,7 +160,7 @@ TEST_CASE("shared bridge accepts a new effect after its last instance is removed
 TEST_CASE("an instrument track plays its MIDI item at the right samples" *
           doctest::description("rt")) {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "Synth");
     addFx(t, tr, kSine);
     addNote(t, tr, 1.0, 1.0);  // beat 1..2 at 120 BPM = 0.5 s .. 1.0 s
@@ -166,7 +170,7 @@ TEST_CASE("an instrument track plays its MIDI item at the right samples" *
     CHECK(r.outputLatency == 0);
     const auto& L = r.audio.channels[0];
     CHECK(firstNonZero(L) == 24001);  // phase 0 at the note-on sample
-    CHECK(peak(L, 24000, 48000) == doctest::Approx(0.25 * kCentre).epsilon(1e-4));
+    CHECK(peak(L, 24000, 48000) == doctest::Approx(0.25 * kStrip).epsilon(1e-4));
     CHECK(peak(L, 48000) == 0.0);  // the fixture stops at note off
     // Deterministic.
     auto again = render(s, pool, 2.0);
@@ -175,8 +179,8 @@ TEST_CASE("an instrument track plays its MIDI item at the right samples" *
 
 TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
     const Id a = addTrack(t, "A", folder);
     addFx(t, a, kSine);
     addNote(t, a, 0.0, 1.0);
@@ -184,14 +188,14 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     t.modify<model::Track>(folder, [](model::Track& x) { x.pan = -100.0; });
     auto s = commit(t);
     auto r = render(s, pool, 0.5);
-    // A at -6 dB, centred (0.707), then the folder hard left (1.0 / 0.0).
-    const double expect = 0.25 * std::pow(10.0, -6.0 / 20.0) * kCentre;
+    // Two encode/decode pairs; the folder hard left is sqrt(2) above centre.
+    const double expect = 0.25 * std::pow(10.0, -6.0 / 20.0) * kStrip * kHardStrip;
     CHECK(peak(r.audio.channels[0]) == doctest::Approx(expect).epsilon(1e-4));
     CHECK(peak(r.audio.channels[1]) < 1e-9);
 
     // Mute A but send it pre-fader to a bus: the bus still hears it.
     model::EditTxn t2(s, 2);
-    const Id bus = addTrack(t2, "Bus");
+    const Id bus = addTrack(t2, "Bus", kMaster, model::StripType::Buss);
     t2.modify<model::Track>(a, [](model::Track& x) { x.mute = true; });
     model::Route send;
     send.from.track = a;
@@ -200,14 +204,14 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     t2.create(send);
     auto s2 = commit(t2);
     auto r2 = render(s2, pool, 0.5);
-    // Pre-fader: no -6 dB; the route pans centre (0.707), the bus centre (0.707).
-    CHECK(peak(r2.audio.channels[0]) == doctest::Approx(0.25 * kCentre * kCentre).epsilon(1e-4));
+    // Pre-fader: no -6 dB; send -> buss and buss -> master are neutral pairs.
+    CHECK(peak(r2.audio.channels[0]) == doctest::Approx(0.25 * kStrip * kStrip).epsilon(1e-4));
 }
 
 TEST_CASE("latency compensation keeps parallel paths aligned") {
     auto pool = makePool();
     auto build = [](bool withLatent) {
-        model::EditTxn t(model::Session::create(), 1);
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
         const Id b = addTrack(t, "Plain");
         addFx(t, b, kSine);
         addNote(t, b, 0.0, 1.0);
@@ -240,7 +244,7 @@ TEST_CASE("latency compensation keeps parallel paths aligned") {
 
 TEST_CASE("the tempo map places notes") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     t.create(model::TempoPointObj{4.0, 60.0, false});  // 120 BPM for 4 beats (2 s), then 60
     const Id tr = addTrack(t, "Synth");
     addFx(t, tr, kSine);
@@ -252,7 +256,7 @@ TEST_CASE("the tempo map places notes") {
 
 TEST_CASE("a missing plugin passes audio through with a warning") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "Synth");
     addFx(t, tr, kSine);
     addFx(t, tr, "org.example.not-installed");
@@ -261,7 +265,7 @@ TEST_CASE("a missing plugin passes audio through with a warning") {
     auto r = render(s, pool, 0.5);
     REQUIRE(r.warnings.size() == 1);
     CHECK(r.warnings[0].find("org.example.not-installed") != std::string::npos);
-    CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kCentre).epsilon(1e-4));
+    CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kStrip).epsilon(1e-4));
     CHECK(renderOffline(s, pool, {.startSeconds = 1.0, .endSeconds = 1.0}).error().code ==
           "engine.range");
 }
@@ -279,9 +283,11 @@ double windowPeak(const std::vector<float>& v, std::size_t centre) {
 }
 }  // namespace
 
-TEST_CASE("mixer automation: volume in dB, square mute on the exact sample, route mute") {
+TEST_CASE(
+    "mixer automation: volume in dB, square mute starts its 10 ms ramp on the exact sample, route "
+    "mute") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "Synth");
     addFx(t, tr, kSine);
     addNote(t, tr, 0.0, 8.0);
@@ -291,12 +297,12 @@ TEST_CASE("mixer automation: volume in dB, square mute on the exact sample, rout
     auto r = render(s, pool, 2.0);
     REQUIRE(r.warnings.empty());
     const auto& L = r.audio.channels[0];
-    const double base = 0.25 * kCentre;
+    const double base = 0.25 * kStrip;
     CHECK(windowPeak(L, 24000) / base ==
           doctest::Approx(std::pow(10.0, -6.0 / 20.0)).epsilon(0.01));
     CHECK(windowPeak(L, 60000) / base ==
           doctest::Approx(std::pow(10.0, -12.0 / 20.0)).epsilon(0.01));
-    CHECK(peak(L, 72000) == 0.0);  // muted from beat 3 = 1.5 s
+    CHECK(peak(L, 72480) == 0.0);  // fully muted 10 ms after beat 3 = 1.5 s
     CHECK(peak(L, 71800, 72000) > 0.0);
 
     // Through a latent chain the mute still lands on beat 3 of the output.
@@ -306,18 +312,18 @@ TEST_CASE("mixer automation: volume in dB, square mute on the exact sample, rout
               .value());
     auto r2 = render(commit(t2), pool, 2.0);
     CHECK(r2.outputLatency == 64);
-    CHECK(peak(r2.audio.channels[0], 72000) == 0.0);
+    CHECK(peak(r2.audio.channels[0], 72480) == 0.0);
     CHECK(peak(r2.audio.channels[0], 71800, 72000) > 0.0);
 }
 
 TEST_CASE("route automation") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id src = addTrack(t, "Src");
     addFx(t, src, kSine);
     addNote(t, src, 0.0, 4.0);
     t.modify<model::Track>(src, [](model::Track& x) { x.mute = true; });
-    const Id bus = addTrack(t, "Bus");
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
     model::Route send;
     send.from.track = src;
     send.to.track = bus;
@@ -325,14 +331,14 @@ TEST_CASE("route automation") {
     const Id sd = t.create(send);
     addEnvelope(t, sd, "mute", {{0.0, 0.0, model::PointShape::Square}, {1.0, 1.0}});
     auto r = render(commit(t), pool, 1.0);
-    CHECK(peak(r.audio.channels[0], 0, 24000) > 0.1);
-    CHECK(peak(r.audio.channels[0], 24000) == 0.0);
+    CHECK(peak(r.audio.channels[0], 0, 24000) > 0.05);
+    CHECK(peak(r.audio.channels[0], 24480) == 0.0);
 }
 
 TEST_CASE("solo: soloed tracks and their signal path stay audible") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
     const Id a = addTrack(t, "A", folder);
     const Id b = addTrack(t, "B");
     addFx(t, a, kSine);
@@ -342,12 +348,12 @@ TEST_CASE("solo: soloed tracks and their signal path stay audible") {
     t.modify<model::Track>(a, [](model::Track& x) { x.solo = model::Solo::On; });
     auto s = commit(t);
     auto r = render(s, pool, 0.5);
-    // Only A (through its folder) is heard: one sine at the -3 dB law, twice.
-    CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kCentre * kCentre).epsilon(1e-4));
+    // Only A (through its folder) is heard: two neutral Console 9 pairs.
+    CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kStrip * kStrip).epsilon(1e-4));
     model::EditTxn t2(s, 2);
     t2.modify<model::Track>(b, [](model::Track& x) { x.solo = model::Solo::Defeat; });
     auto r2 = render(commit(t2), pool, 0.5);
-    CHECK(peak(r2.audio.channels[0]) > 0.25 * kCentre * kCentre * 1.2);  // B is back
+    CHECK(peak(r2.audio.channels[0]) > 0.25 * kStrip * kStrip * 1.2);  // B is back
 }
 
 TEST_CASE("audio items: position, take offset, fade, channel mode, offline media") {
@@ -365,7 +371,7 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
     ramp.sampleRate = 44100;
     REQUIRE(audio::writeWav(dir / "media" / "slow.wav", ramp).ok());
 
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "Audio");
     const Id md = t.create(model::MediaSource{"ramp.wav", "", "wav", 48000, 2, 48000});
     model::Take take;
@@ -396,11 +402,11 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
     for (int k : {480, 1000, 11999}) {
         const auto i = static_cast<std::size_t>(24000 + k);
         const double src = (4800.0 + k) / 48000.0;
-        CHECK(double(L[i]) == doctest::Approx(src * kCentre).epsilon(1e-5));
-        CHECK(double(R[i]) == doctest::Approx(-src * kCentre).epsilon(1e-5));
+        CHECK(double(L[i]) == doctest::Approx(src * kStrip).epsilon(1e-5));
+        CHECK(double(R[i]) == doctest::Approx(-src * kStrip).epsilon(1e-5));
     }
     CHECK(double(L[24000 + 240]) ==
-          doctest::Approx(0.5 * (4800.0 + 240) / 48000.0 * kCentre).epsilon(1e-5));
+          doctest::Approx(0.5 * (4800.0 + 240) / 48000.0 * kStrip).epsilon(1e-5));
     CHECK(media.size() == 1);
 
     model::EditTxn t2(s, 2);
@@ -425,8 +431,8 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
     for (int k : {480, 1000, 11999}) {
         const auto i = static_cast<std::size_t>(24000 + k);
         const double src = (4410.0 + k * 44100.0 / 48000.0) / 48000.0;
-        CHECK(double(r3->audio.channels[0][i]) == doctest::Approx(src * kCentre).epsilon(1e-3));
-        CHECK(double(r3->audio.channels[1][i]) == doctest::Approx(-src * kCentre).epsilon(1e-3));
+        CHECK(double(r3->audio.channels[0][i]) == doctest::Approx(src * kStrip).epsilon(1e-3));
+        CHECK(double(r3->audio.channels[1][i]) == doctest::Approx(-src * kStrip).epsilon(1e-3));
     }
     CHECK(media.size() == 2);
     auto again =
@@ -458,7 +464,7 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
     // An item of `beats` (0.5 s each at 120 BPM) starting at 0.5 s.
     auto build = [&](const char* file, double playrate, bool preservePitch, double pitch,
                      const char* mode, double beats, std::uint64_t rev = 1) {
-        model::EditTxn t(model::Session::create(), rev);
+        model::EditTxn t(model::Session::create({.console9 = false}), rev);
         const Id tr = addTrack(t, "Audio");
         const Id md = t.create(model::MediaSource{file, "", "wav", 48000, 2, 48000});
         model::Take take;
@@ -486,7 +492,7 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
         REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
         return std::move(*r);
     };
-    constexpr double kTone = 0.5 * kCentre;
+    constexpr double kTone = 0.5 * kStrip;
 
     // Varispeed: 2x halves the take's source time — its 1 s source fills a
     // 0.5 s item — and doubles the pitch. The old "time stretching is not
@@ -508,7 +514,7 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
         CHECK(r.warnings.empty());
         const auto& L = r.audio.channels[0];
         CHECK(peak(L, 0, 24000) == 0.0);
-        CHECK(peak(L, 72000) == 0.0);
+        CHECK(peak(L, 72480) == 0.0);
         CHECK(peak(L, 24000, 72000) > 0.9 * kTone);
         CHECK(frequency(L, 34000, 69000) == doctest::Approx(440.0).epsilon(0.03));
         CHECK(media.size() == 2);
@@ -553,10 +559,10 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
 
 TEST_CASE("offline renders are bit-identical for any thread count (B4)") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
-    const Id folder = addTrack(t, "Folder");
-    const Id busA = addTrack(t, "Bus A");
-    const Id busB = addTrack(t, "Bus B");
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id folder = addTrack(t, "Folder", kMaster, model::StripType::Buss);
+    const Id busA = addTrack(t, "Bus A", kMaster, model::StripType::Buss);
+    const Id busB = addTrack(t, "Bus B", kMaster, model::StripType::Buss);
     addFx(t, busB, kGain,
           json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
               .value());
@@ -597,7 +603,7 @@ TEST_CASE("offline renders are bit-identical for any thread count (B4)") {
 
 TEST_CASE("the pool retires replaced instances until no plan can use them (review round 6)") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "T");
     const Id fx = addFx(t, tr, kGain);
     const auto s1 = commit(t);
@@ -635,7 +641,7 @@ TEST_CASE("the pool retires replaced instances until no plan can use them (revie
 
 TEST_CASE("a new state blob for a processing instance goes to a fresh instance (review round 6)") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "T");
     const Id fx = addFx(t, tr, "com.suppleaudio.test.edge");
     t.modify<model::FxInstance>(fx, [](model::FxInstance& f) { f.state = "sha256:one"; });
@@ -667,7 +673,7 @@ TEST_CASE("a new state blob for a processing instance goes to a fresh instance (
 TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curve domain") {
     auto pool = makePool();
     auto build = [](std::string param, std::vector<model::EnvPoint> points) {
-        model::EditTxn t(model::Session::create(), 1);
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
         const Id tr = addTrack(t, "Lead");
         addFx(t, tr, kSine);
         const Id g = addFx(t, tr, kGain);
@@ -715,7 +721,7 @@ TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curv
 }
 
 TEST_CASE("plugins see the transport loop (CLAP loop flags)") {
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     addTrack(t, "Track");
     const model::Session s = commit(t);
     auto pool = makePool();
@@ -747,7 +753,7 @@ TEST_CASE("a key route feeds a plug-in's sidechain, aligned with its stage (ADR-
     for (int layout = 0; layout < 4; ++layout) {
         CAPTURE(layout);
         auto pool = makePool();
-        model::EditTxn t(model::Session::create(), 1);
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
         const Id a = addTrack(t, "A");
         const Id b = addTrack(t, "B");
         addFx(t, a, kSine);
@@ -803,7 +809,7 @@ TEST_CASE("a key route feeds a plug-in's sidechain, aligned with its stage (ADR-
 
 TEST_CASE("key routes: a plug-in without a sidechain is warned about; cycles are invalid") {
     auto pool = makePool();
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id a = addTrack(t, "A");
     const Id b = addTrack(t, "B");
     addFx(t, a, kSine);
@@ -824,4 +830,36 @@ TEST_CASE("key routes: a plug-in without a sidechain is warned about; cycles are
     back.to.fx = aGain;
     t2.create(back);
     CHECK_FALSE(t2.commit());
+}
+
+TEST_CASE("Console 9 stems decode channel and buss outputs without promising exact summation") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create({.seed = 42}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    const Id a = addTrack(t, "A", bus), b = addTrack(t, "B", bus);
+    for (Id ch : {a, b}) {
+        addFx(t, ch, kSine);
+        addNote(t, ch, 0, 1);
+    }
+    const auto s = commit(t);
+    auto mix = render(s, pool, .5);
+    auto aStem = renderOffline(s, pool, {.endSeconds = .5, .track = a});
+    auto bStem = renderOffline(s, pool, {.endSeconds = .5, .track = b});
+    auto busStem = renderOffline(s, pool, {.endSeconds = .5, .track = bus});
+    REQUIRE(aStem);
+    REQUIRE(bStem);
+    REQUIRE(busStem);
+    CHECK(peak(aStem->audio.channels[0]) == doctest::Approx(.25 * kStrip).epsilon(1e-5));
+    CHECK(peak(busStem->audio.channels[0]) ==
+          doctest::Approx(peak(mix.audio.channels[0])).epsilon(1e-5));
+    double difference = 0;
+    for (std::size_t i = 0; i < mix.audio.frames(); ++i)
+        difference = std::max(
+            difference, std::abs(static_cast<double>(mix.audio.channels[0][i]) -
+                                 kStrip * (static_cast<double>(aStem->audio.channels[0][i]) +
+                                           static_cast<double>(bStem->audio.channels[0][i]))));
+    CHECK(difference > .001);
+    auto again = renderOffline(s, pool, {.endSeconds = .5, .blockSize = 37, .track = bus});
+    REQUIRE(again);
+    CHECK(again->audio.channels == busStem->audio.channels);
 }

@@ -1,5 +1,5 @@
 // JSON forms of the session objects (core-schema) and the project file
-// `supple.project/1.0` (session-model §5). Fields equal to their defaults are
+// `supple.project/2.0` (session-model §5). Fields equal to their defaults are
 // omitted, so files and diffs stay small; decoding fills them back in.
 #pragma once
 
@@ -11,6 +11,8 @@
 
 namespace supple::model {
 
+schema::Schema<StripType> stripTypeSchema();
+schema::Schema<RoutePan> routePanSchema();
 schema::Schema<Id> idSchema();  // "tr_3"
 template <class T>
 const schema::Schema<T>& schemaOf();  // specialized for every object type
@@ -20,14 +22,16 @@ json::Value toJson(const T& object) {
     return schemaOf<T>().encode(object);
 }
 
-inline constexpr std::string_view kProjectSchema = "supple.project/1.0";
+inline constexpr std::string_view kProjectSchema = "supple.project/2.0";
 
 // The whole session as the canonical project document (members in the
 // spec's order, objects keyed by ID in ID order).
 json::Value projectToJson(const Session& s);
 std::string serializeProject(const Session& s);  // canonical text + "\n"
 // Decodes and validates (schema errors with paths, then invariants).
-Result<Session> projectFromJson(const json::Value& doc);
-Result<Session> parseProject(std::string_view text);
+Result<Session> projectFromJson(const json::Value& doc,
+                                std::vector<schema::Warning>* warnings = nullptr);
+Result<Session> parseProject(std::string_view text,
+                             std::vector<schema::Warning>* warnings = nullptr);
 
 }  // namespace supple::model

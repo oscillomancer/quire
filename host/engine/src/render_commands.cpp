@@ -25,7 +25,7 @@ using cmd::Kind;
 namespace fs = std::filesystem;
 
 struct Args {
-    std::optional<std::string> branch, pattern, name, mode, tap, format, operation;
+    std::optional<std::string> branch, pattern, name, mode, tap, format, operation, master;
     std::optional<json::Value> normalize;
     std::optional<std::vector<std::string>> tracks, regions;
     std::optional<double> startBeat, endBeat, tailS, target, limitTruePeakDb;
@@ -259,7 +259,17 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
                                  : 0.0);
         if (task.settings.tailSeconds < 0 || task.settings.tailSeconds > 600)
             return Error("render.tail", "invalid tail", "/tail_s");
-        if (track) {
+        if (!track && a.master) {
+            auto id = trackId(s, *a.master);
+            if (!id) return std::move(id).error();
+            if (s.tracks.find(*id)->type != model::StripType::Master)
+                return Error("track.strip_type", "mix output must be a master", "/master",
+                             "choose a master id from track.list");
+            task.settings.master = *id;
+        }
+        if (track && s.tracks.find(*track)->type == model::StripType::Master) {
+            task.settings.master = *track;
+        } else if (track) {
             if (mode == "through_master")
                 task.settings.throughMaster = track;
             else
@@ -392,11 +402,9 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         if (projectRow && projectRow->isArray() && !a.regions) {
             for (const auto& cell : projectRow->asArray()) {
                 if (!cell.isString())
-                    return Error("render.matrix", "matrix entries must be ids or master",
+                    return Error("render.matrix", "matrix entries must be track or master ids",
                                  "/matrix");
-                if (cell.asString() == "master")
-                    SUPPLE_TRY(add({}, {}, 0, 0));
-                else {
+                {
                     auto tr = trackId(s, cell.asString());
                     if (!tr) return std::move(tr).error();
                     SUPPLE_TRY(add(*tr, {}, 0, 0));
@@ -411,11 +419,9 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
             if (row && row->isArray()) {
                 for (const auto& cell : row->asArray()) {
                     if (!cell.isString())
-                        return Error("render.matrix", "matrix entries must be ids or master",
+                        return Error("render.matrix", "matrix entries must be track or master ids",
                                      "/matrix");
-                    if (cell.asString() == "master")
-                        SUPPLE_TRY(add({}, id, 0, n));
-                    else {
+                    {
                         auto tr = trackId(s, cell.asString());
                         if (!tr) return std::move(tr).error();
                         SUPPLE_TRY(add(*tr, id, 0, n));
@@ -495,6 +501,7 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
 
 schema::Schema<Args> argsSchema() {
     return schema::object<Args>("render_args")
+        .field("master", &Args::master, schema::string().pattern("^tr_[0-9]+$", "master id"))
         .field("branch", &Args::branch, schema::string())
         .field("pattern", &Args::pattern,
                schema::string().doc("File name pattern (session-model §7.3), e.g. "

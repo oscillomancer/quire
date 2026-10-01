@@ -1,6 +1,7 @@
 #include "plan.h"
 
 #include <atomic>
+#include <cassert>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -274,6 +275,7 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
                      double rate) {
     Plan p;
+    p.linearConsole = !s.project->console9;
     p.rate = rate > 0 ? rate : s.project->sampleRate;
     p.smoothFrames = static_cast<std::uint32_t>(std::max(1.0, std::round(0.010 * p.rate)));
     p.block = block;
@@ -283,28 +285,23 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     if (!order) return std::move(order).error();
     std::map<Id, std::size_t> index;
     for (std::size_t i = 0; i < order->size(); ++i) index[(*order)[i]] = i;
-    // The master must be last so its output is final (it has no outputs).
-    if (order->back() != model::kMaster)
-        return Error("engine.topology", "the master is not the last track");
+    p.mainMaster = index.at(model::kMaster);
     p.nodes.resize(order->size());
     for (std::size_t i = 0; i < order->size(); ++i) {
         Node& n = p.nodes[i];
         n.id = (*order)[i];
         const model::Track& t = *s.tracks.find(n.id);
-        n.volume = dbToGain(t.volumeDb);
         n.volumeDb = t.volumeDb;
         n.pan = t.pan;
-        n.panLawDb = s.project->panLawDb;
-        n.master = n.id == model::kMaster;
-        n.width = t.width / 100.0;
-        if (n.id == model::kMaster) {
-            // The master pans as a balance control: no attenuation at the centre.
-            const double b = std::clamp(t.pan / 100.0, -1.0, 1.0);
-            n.panL = b <= 0 ? 1.0 : 1.0 - b;
-            n.panR = b >= 0 ? 1.0 : 1.0 + b;
-        } else {
-            std::tie(n.panL, n.panR) = panGains(t.pan / 100.0, s.project->panLawDb);
-        }
+        n.type = t.type;
+        n.master = t.type == model::StripType::Master;
+        n.decodeInput = t.type != model::StripType::Channel;
+        n.staticGain = n.master                          ? dbToGain(t.volumeDb)
+                       : t.volumeDb <= model::kSilenceDb ? 0.0
+                                                         : console9::faderGain(t.volumeDb);
+        n.staticPan = console9::nativePan(t.pan);
+        n.encoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 1), p.linearConsole);
+        n.decoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 2), p.linearConsole);
         n.mute = t.mute;
         for (Id fxId : t.chain) {
             const model::FxInstance& fx = *s.fx.find(fxId);
@@ -348,7 +345,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     for (const auto& e : s.routes) {
         const model::Route& r = *e.value;
         const std::optional<Id> toTrack = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
-        if (!r.from.track || !toTrack || r.mute) continue;
+        if (!r.from.track || !toTrack) continue;
         Edge ed;
         ed.from = index.at(*r.from.track);
         ed.route = e.id;
@@ -366,9 +363,11 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         }
         ed.tap = r.tap;
         ed.volumeDb = r.volumeDb;
-        ed.pan = r.pan;
+        ed.followPan = !r.pan.percent;
+        ed.muted = r.mute;
+        ed.pan = r.pan.resolve(s.tracks.find(*r.from.track)->pan);
         const double g = dbToGain(r.volumeDb);
-        auto [pl, pr] = panGains(r.pan / 100.0, s.project->panLawDb);
+        auto [pl, pr] = panGains(ed.pan / 100.0, -3.0);
         ed.gainL = g * pl;
         ed.gainR = g * pr;
         ed.mono = r.mono;
@@ -444,12 +443,10 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         Automation* slot = nullptr;
         if (o.kind == Kind::Track && index.count(o)) {
             Node& n = p.nodes[index.at(o)];
-            slot = param == "volume"  ? &n.autoVolume
-                   : param == "trim"  ? &n.autoTrim
-                   : param == "pan"   ? &n.autoPan
-                   : param == "width" ? &n.autoWidth
-                   : param == "mute"  ? &n.autoMute
-                                      : nullptr;
+            slot = param == "volume" ? &n.autoVolume
+                   : param == "pan"  ? &n.autoPan
+                   : param == "mute" ? &n.autoMute
+                                     : nullptr;
         } else if (o.kind == Kind::Route) {
             for (Edge& ed : p.edges)
                 if (ed.route == o)
@@ -516,7 +513,36 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     }
     // The master is the output: live whenever anything is (even a monitored
     // track that feeds nothing).
-    if (p.anyLive) p.nodes.back().live = true;
+    if (p.anyLive) {
+        p.nodes[p.mainMaster].live = true;
+        // A main-master key may feed later strips, which must stay with the live executor.
+        for (Node& n : p.nodes)
+            for (std::size_t edge : n.in) n.live = n.live || p.nodes[p.edges[edge].from].live;
+    }
+    for (Edge& e : p.edges) {
+        if (e.stage >= 0) {
+            e.stripPan = p.nodes[e.from].autoPan;
+            continue;
+        }
+        e.encode = e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan || e.mono ||
+                   e.invert || e.muted || e.autoVolume.active() || e.autoPan.active() ||
+                   e.autoMute.active();
+        if (!e.encode) continue;
+        Node& source = p.nodes[e.from];
+        source.out.push_back(static_cast<std::size_t>(&e - p.edges.data()));
+        e.stripVolume = source.autoVolume;
+        e.stripPan = source.autoPan;
+        e.stripMute = source.autoMute;
+        const double db = e.volumeDb <= model::kSilenceDb || (e.tap == model::Tap::PostFader &&
+                                                              source.volumeDb <= model::kSilenceDb)
+                              ? model::kSilenceDb
+                              : e.volumeDb + (e.tap == model::Tap::PostFader ? source.volumeDb : 0);
+        e.staticGain = db <= model::kSilenceDb ? 0.0 : console9::faderGain(db);
+        e.staticPan = console9::nativePan(e.pan);
+        const auto salt = std::rotl(source.id.n, 32) ^ ((e.route->n << 3) | 3);
+        e.encoder.init(console9::seedsFor(s.project->seed, salt), p.linearConsole);
+    }
+    SUPPLE_TRY(checkStrips(p));
     return p;
 }
 
@@ -582,21 +608,26 @@ Status prepare(Plan& p, const Session& s) {
             Edge& ed = p.edges[e];
             ed.delay.init(n.latIn + at(ed) - latTap(p.nodes[ed.from], ed.tap));
             ed.tmp.init(block);
+            if (ed.encode) ed.encoded.init(block);
         }
-        n.soloGain.assign(block, 1.0f);
     }
-    const Node& master = p.nodes.back();
+    const Node& master = p.nodes[p.mainMaster];
     p.outputLatency = master.latIn + master.latChain;
     // Automation lines up with the signal where it is applied: the fader sees
     // the track's input and chain latency, a route's gain its target's input.
     for (Node& n : p.nodes) {
         const std::int64_t at = n.latIn + n.latChain;
-        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
-            a->shift(at);
-        for (std::size_t ei : n.in)
-            for (Automation* a :
-                 {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
-                a->shift(n.latIn);
+        for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->shift(at);
+        for (std::size_t ei : n.in) {
+            Edge& e = p.edges[ei];
+            auto shift = e.encode ? latTap(p.nodes[e.from], e.tap) : n.latIn;
+            if (e.stage >= 0)
+                for (int k = 0; k < e.stage; ++k)
+                    shift += n.chain[static_cast<std::size_t>(k)].latency;
+            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
+                                  &e.stripPan, &e.stripMute})
+                a->shift(shift);
+        }
         // A plugin's parameters: its input is the track's, delayed by the
         // stages before it.
         std::int64_t before = n.latIn;
@@ -659,9 +690,8 @@ Status prepare(Plan& p, const Session& s) {
             c.mode = take->channelMode;
             const double g =
                 dbToGain(it.gainDb) * dbToGain(take->gainDb) * (take->phaseInvert ? -1.0 : 1.0);
-            const auto [pl, pr] = take->pan == 0.0
-                                      ? std::pair{1.0, 1.0}
-                                      : panGains(take->pan / 100.0, s.project->panLawDb);
+            const auto [pl, pr] =
+                take->pan == 0.0 ? std::pair{1.0, 1.0} : panGains(take->pan / 100.0, -3.0);
             c.gainL = g * pl;
             c.gainR = g * pr;
             c.fadeIn = time::samplesAt(it.fadeIn.length, p.rate);
@@ -768,44 +798,70 @@ host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange*
     return t;
 }
 
+Status checkStrips(const Plan& p) {
+    for (std::size_t i = 0; i < p.nodes.size(); ++i) {
+        const Node& n = p.nodes[i];
+        if (n.decodeInput != (n.type != model::StripType::Channel) ||
+            n.master != (n.type == model::StripType::Master))
+            return Error("engine.strip_order", "implicit strip stages disagree with its type");
+        for (std::size_t ei : n.in) {
+            if (ei >= p.edges.size()) return Error("engine.strip_edge", "missing input edge");
+            const Edge& e = p.edges[ei];
+            if (e.from >= i)
+                return Error("engine.strip_edge", "input is not topologically ordered");
+            if (e.stage >= 0) {
+                if (static_cast<std::size_t>(e.stage) >= n.chain.size() || e.encode)
+                    return Error("engine.strip_edge", "key routes must bypass send encoders");
+                continue;
+            }
+            if (e.encode &&
+                std::count(p.nodes[e.from].out.begin(), p.nodes[e.from].out.end(), ei) != 1)
+                return Error("engine.strip_edge", "send encoder is not owned by its source");
+            if (!n.decodeInput || p.nodes[e.from].master ||
+                (!e.encode && (e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan ||
+                               e.mono || e.invert || e.muted || e.autoVolume.active() ||
+                               e.autoPan.active() || e.autoMute.active())))
+                return Error("engine.strip_edge",
+                             "summing inputs require an unmodified Channel output");
+        }
+    }
+    return okStatus();
+}
+
+const Stereo& edgeSignal(const Plan& p, const Edge& e) SUPPLE_RT {
+    if (e.encode) return e.encoded;
+    const Node& src = p.nodes[e.from];
+    return e.tap == model::Tap::PreFx      ? src.preFx
+           : e.tap == model::Tap::PreFader ? src.preFader
+                                           : src.post;
+}
+
 namespace {
-// Adds one edge into `into`: its source's tap (with the source's solo gain
-// unless it is a key, ADR-0018), compensation-delayed, with the edge's gains
-// and automation.
+// Audio edges carry only the encoded signal and PDC; key controls are conventional.
 void addEdge(Plan& p, Edge& e, double panLawDb, Stereo& into, std::int64_t pos,
              std::uint32_t n) SUPPLE_RT {
-    const Node& src = p.nodes[e.from];
-    const bool viaRing = p.split && e.frontier;  // the renderer applied the solo gain
-    const Stereo& tap = viaRing                         ? e.frontierBuf
-                        : e.tap == model::Tap::PreFx    ? src.preFx
-                        : e.tap == model::Tap::PreFader ? src.preFader
-                                                        : src.post;
+    const Stereo& tap = p.split && e.frontier ? e.frontierBuf : edgeSignal(p, e);
     e.tmp.copyFrom(tap, n);
-    if (e.stage < 0 && !viaRing && !src.soloUnity)
-        for (std::uint32_t i = 0; i < n; ++i) {
-            e.tmp.l[i] *= src.soloGain[i];
-            e.tmp.r[i] *= src.soloGain[i];
-        }
     e.delay.process(e.tmp.l.data(), e.tmp.r.data(), n);
-    const bool automated = e.autoVolume.active() || e.autoPan.active() || e.autoMute.active();
-    const double sign = e.invert ? -1.0 : 1.0;
-    float gl = static_cast<float>(sign * e.gainL), gr = static_cast<float>(sign * e.gainR);
     for (std::uint32_t i = 0; i < n; ++i) {
-        if (automated) {
-            const std::int64_t at = pos + i;
-            const double g =
-                (e.autoMute.active() && e.autoMute.at(at) >= 0.5)
-                    ? 0.0
-                    : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
-            const auto [pl, pr] =
-                panGains((e.autoPan.active() ? e.autoPan.at(at) : e.pan) / 100.0, panLawDb);
-            gl = static_cast<float>(sign * g * pl);
-            gr = static_cast<float>(sign * g * pr);
-        }
         float l = e.tmp.l[i], r = e.tmp.r[i];
-        if (e.mono) l = r = 0.5f * (l + r);
-        into.l[i] += l * gl;
-        into.r[i] += r * gr;
+        if (e.stage >= 0) {
+            const auto at = pos + i;
+            const bool muted = e.autoMute.active() ? e.autoMute.at(at) >= .5 : e.muted;
+            const double g =
+                muted ? 0 : dbToGain(e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb);
+            const auto [pl, pr] = panGains((e.autoPan.active()                   ? e.autoPan.at(at)
+                                            : e.followPan && e.stripPan.active() ? e.stripPan.at(at)
+                                                                                 : e.pan) /
+                                               100,
+                                           panLawDb);
+            if (e.mono) l = r = .5f * (l + r);
+            const double sign = e.invert ? -1 : 1;
+            l *= static_cast<float>(sign * g * pl);
+            r *= static_cast<float>(sign * g * pr);
+        }
+        into.l[i] += l;
+        into.r[i] += r;
     }
 }
 }  // namespace
@@ -817,7 +873,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // 1. Sum the inputs (fixed order), each through its compensation delay.
     node.sum.clear(n);
     for (std::size_t ei : node.in)
-        if (p.edges[ei].stage < 0) addEdge(p, p.edges[ei], node.panLawDb, node.sum, pos, n);
+        if (p.edges[ei].stage < 0) addEdge(p, p.edges[ei], -3.0, node.sum, pos, n);
     // Monitored device input enters with the inputs (spec §1.1).
     if (!node.monitorInputs.empty() && p.deviceIn) {
         const auto channel = [&](std::size_t k) -> const float* {
@@ -830,6 +886,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         if (const float* r = channel(1))
             for (std::uint32_t i = 0; i < n; ++i) node.sum.r[i] += r[i];
     }
+    if (node.decodeInput)
+        for (std::uint32_t i = 0; i < n; ++i)
+            node.decoder.sample(node.sum.l[i], node.sum.r[i], node.sum.l[i], node.sum.r[i]);
     node.preFx.copyFrom(node.sum, n);
     // Audio items play after the pre-FX tap, before the chain (not when stopped).
     for (const Clip& c : node.clips) {
@@ -1001,8 +1060,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             const int stageIndex = static_cast<int>(&st - node.chain.data());
             st.key.clear(n);
             for (std::size_t ei : node.in)
-                if (p.edges[ei].stage == stageIndex)
-                    addEdge(p, p.edges[ei], node.panLawDb, st.key, pos, n);
+                if (p.edges[ei].stage == stageIndex) addEdge(p, p.edges[ei], -3.0, st.key, pos, n);
             if (st.keyChannels == 1)
                 for (std::uint32_t i = 0; i < n; ++i)
                     st.key.l[i] = 0.5f * (st.key.l[i] + st.key.r[i]);
@@ -1077,82 +1135,75 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         }
     }
     node.preFader.copyFrom(node.sum, n);
-    // 4. Width, volume, pan, mute (and solo). A changed static value ramps
-    // from the one last applied (carried across plan swaps).
-    float w = static_cast<float>(node.width);
-    const bool silent = node.mute;  // solo acts on the edges (below)
-    float gl = silent ? 0.0f : static_cast<float>(node.volume * node.panL);
-    float gr = silent ? 0.0f : static_cast<float>(node.volume * node.panR);
-    const bool automated = node.automated();
-    if (!automated) {
-        const Node::Mix target{gl, gr, w};
-        if (!node.mixValid) {
-            node.applied = target;
-            node.mixValid = true;
-        }
-        if (!(target == node.applied) && !(node.rampLeft > 0 && target == node.rampTo)) {
-            node.rampFrom = node.applied;
-            node.rampTo = target;
-            node.rampLeft = p.smoothFrames;
-        }
-    } else {
-        node.rampLeft = 0;  // the envelope decides
-    }
-    const float span = static_cast<float>(p.smoothFrames);
+    // Fader controls and mute act before the channel encode; masters balance decoded audio.
     for (std::uint32_t i = 0; i < n; ++i) {
-        if (!automated && node.rampLeft > 0) {
-            const float t = 1.0f - static_cast<float>(node.rampLeft) / span;
-            gl = node.rampFrom.gl + (node.rampTo.gl - node.rampFrom.gl) * t;
-            gr = node.rampFrom.gr + (node.rampTo.gr - node.rampFrom.gr) * t;
-            w = node.rampFrom.w + (node.rampTo.w - node.rampFrom.w) * t;
-            if (--node.rampLeft == 0) {
-                gl = node.rampTo.gl;
-                gr = node.rampTo.gr;
-                w = node.rampTo.w;
-            }
-        } else if (automated) {
-            const std::int64_t at = pos + i;
-            const bool muted = node.autoMute.active() ? node.autoMute.at(at) >= 0.5 : node.mute;
-            const double db = (node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb) +
-                              (node.autoTrim.active() ? node.autoTrim.at(at) : 0.0);
-            double pl = node.panL, pr = node.panR;
-            if (node.autoPan.active()) {
-                const double pan = std::clamp(node.autoPan.at(at) / 100.0, -1.0, 1.0);
-                if (node.master) {
-                    pl = pan <= 0 ? 1.0 : 1.0 - pan;
-                    pr = pan >= 0 ? 1.0 : 1.0 + pan;
-                } else {
-                    std::tie(pl, pr) = panGains(pan, node.panLawDb);
-                }
-            }
-            const double g = muted ? 0.0 : dbToGain(db);
-            gl = static_cast<float>(g * pl);
-            gr = static_cast<float>(g * pr);
-            if (node.autoWidth.active()) w = static_cast<float>(node.autoWidth.at(at) / 100.0);
+        const auto at = pos + i;
+        const double db = node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb;
+        const double pan = node.autoPan.active() ? node.autoPan.at(at) : node.pan;
+        const bool muted =
+            node.soloSilenced || (node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute);
+        const double g = node.autoVolume.active()
+                             ? (node.master               ? dbToGain(db)
+                                : db <= model::kSilenceDb ? 0.0
+                                                          : console9::faderGain(db))
+                             : node.staticGain;
+        node.fader.set(g, node.autoPan.active() ? console9::nativePan(pan) : node.staticPan, muted,
+                       node.autoVolume.active() || node.autoPan.active(), p.smoothFrames);
+        const double gain = node.fader.gain.next() * node.fader.gate.next();
+        const double nativePan = node.fader.pan.next();
+        if (node.master) {
+            const double balance = nativePan * 2 - 1;
+            const double l = balance <= 0 ? 1 : std::cos(balance * std::numbers::pi / 2);
+            const double r = balance >= 0 ? 1 : std::cos(balance * std::numbers::pi / 2);
+            node.post.l[i] = node.sum.l[i] * static_cast<float>(gain * l);
+            node.post.r[i] = node.sum.r[i] * static_cast<float>(gain * r);
+        } else {
+            node.encoder.sample(node.sum.l[i], node.sum.r[i], node.post.l[i], node.post.r[i], gain,
+                                nativePan);
         }
-        const float mid = 0.5f * (node.sum.l[i] + node.sum.r[i]);
-        const float side = 0.5f * (node.sum.l[i] - node.sum.r[i]) * w;
-        node.post.l[i] = (mid + side) * gl;
-        node.post.r[i] = (mid - side) * gr;
     }
-    node.applied = {gl, gr, w};
-    node.mixValid = true;
-    // 5. Solo: a silenced node is processed (plugin state continues) but what
-    // it sends fades out over smoothFrames — every tap, except into keys.
-    const float soloTarget = node.soloSilenced ? 0.0f : 1.0f;
-    if (!node.soloValid) {
-        node.soloApplied = soloTarget;
-        node.soloValid = true;
-    }
-    node.soloUnity = soloTarget == 1.0f && node.soloApplied == 1.0f;
-    if (!node.soloUnity) {
-        const float step = 1.0f / static_cast<float>(std::max<std::uint32_t>(p.smoothFrames, 1));
-        float g = node.soloApplied;
+    // Independent encoders run at the source, before PDC and frontier publication.
+    for (std::size_t ei : node.out) {
+        Edge& e = p.edges[ei];
+        const Stereo& input = e.tap == model::Tap::PreFx ? node.preFx : node.preFader;
         for (std::uint32_t i = 0; i < n; ++i) {
-            g = g < soloTarget ? std::min(soloTarget, g + step) : std::max(soloTarget, g - step);
-            node.soloGain[i] = g;
+            const auto at = pos + i;
+            const bool post = e.tap == model::Tap::PostFader;
+            const double sourceDb = e.stripVolume.active() ? e.stripVolume.at(at) : node.volumeDb;
+            const double routeDb = e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb;
+            const double sourcePan = e.stripPan.active() ? e.stripPan.at(at) : node.pan;
+            const double pan = e.autoPan.active() ? e.autoPan.at(at)
+                               : e.followPan      ? sourcePan
+                                                  : e.pan;
+            const bool muted =
+                node.soloSilenced ||
+                (post && (e.stripMute.active() ? e.stripMute.at(at) >= .5 : node.mute)) ||
+                (e.autoMute.active() ? e.autoMute.at(at) >= .5 : e.muted);
+            // -inf plus a send boost remains -inf.
+            const double db =
+                (routeDb <= model::kSilenceDb || (post && sourceDb <= model::kSilenceDb))
+                    ? model::kSilenceDb
+                    : routeDb + (post ? sourceDb : 0);
+            const double g = e.autoVolume.active() || (post && e.stripVolume.active())
+                                 ? db <= model::kSilenceDb ? 0.0 : console9::faderGain(db)
+                                 : e.staticGain;
+            const double nativePan = e.autoPan.active() || (e.followPan && e.stripPan.active())
+                                         ? console9::nativePan(pan)
+                                         : e.staticPan;
+            e.fader.set(g, nativePan, muted,
+                        e.autoVolume.active() || e.autoPan.active() ||
+                            (post && e.stripVolume.active()) ||
+                            (e.followPan && e.stripPan.active()),
+                        p.smoothFrames);
+            float l = input.l[i], r = input.r[i];
+            if (e.mono) l = r = .5f * (l + r);
+            if (e.invert) {
+                l = -l;
+                r = -r;
+            }
+            e.encoder.sample(l, r, e.encoded.l[i], e.encoded.r[i],
+                             e.fader.gain.next() * e.fader.gate.next(), e.fader.pan.next());
         }
-        node.soloApplied = g;
     }
     return true;
 }
@@ -1197,16 +1248,30 @@ bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint
     return run.ok.load(std::memory_order_relaxed);
 }
 
-void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT {
+void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPPLE_RT {
     for (Node& n : p.nodes) {
         if (n.live != live) continue;
         auto it =
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        if (restartConsole) {
+            n.encoder.reset();
+            n.decoder.reset();
+            n.fader.reset();
+        }
+        for (std::size_t ei : n.out) {
+            Edge& e = p.edges[ei];
+            if (restartConsole) {
+                e.encoder.reset();
+                e.fader.reset();
+            }
+            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
+                                  &e.stripPan, &e.stripMute})
+                a->cursor = 0;
+        }
         if (!n.releaseHeld) n.held.fill(0);
-        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
-            a->cursor = 0;
+        for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
             if (!st.preserveDryOnLocate) st.dry.clear();
             st.preserveDryOnLocate = false;
@@ -1218,7 +1283,9 @@ void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT {
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
             e.delay.clear();
-            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute}) a->cursor = 0;
+            if (!e.encode)
+                for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan})
+                    a->cursor = 0;
         }
     }
 }
@@ -1230,15 +1297,29 @@ bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t n
     return run.ok.load(std::memory_order_relaxed);
 }
 
-void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
+void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
     for (Node& n : p.nodes) {
         auto it =
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        if (restartConsole) {
+            n.encoder.reset();
+            n.decoder.reset();
+            n.fader.reset();
+        }
+        for (std::size_t ei : n.out) {
+            Edge& e = p.edges[ei];
+            if (restartConsole) {
+                e.encoder.reset();
+                e.fader.reset();
+            }
+            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
+                                  &e.stripPan, &e.stripMute})
+                a->cursor = 0;
+        }
         if (!n.releaseHeld) n.held.fill(0);
-        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
-            a->cursor = 0;
+        for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
             if (!st.preserveDryOnLocate) st.dry.clear();
             st.preserveDryOnLocate = false;
@@ -1250,7 +1331,7 @@ void locate(Plan& p, std::int64_t pos) SUPPLE_RT {
     }
     for (Edge& e : p.edges) {
         e.delay.clear();
-        for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute}) a->cursor = 0;
+        for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan}) a->cursor = 0;
     }
 }
 
@@ -1261,18 +1342,27 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.encoder.reset();
+        n.decoder.reset();
+        for (std::size_t ei : n.out) {
+            Edge& e = p.edges[ei];
+            e.encoder.reset();
+            for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
+                                  &e.stripPan, &e.stripMute})
+                a->cursor = 0;
+        }
         n.releaseHeld = true;
-        for (Automation* a : {&n.autoVolume, &n.autoTrim, &n.autoPan, &n.autoWidth, &n.autoMute})
-            a->cursor = 0;
+        for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain)
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
                 ln.lastSent = std::numeric_limits<double>::quiet_NaN();  // the loop start's value
             }
         for (std::size_t ei : n.in)
-            for (Automation* a :
-                 {&p.edges[ei].autoVolume, &p.edges[ei].autoPan, &p.edges[ei].autoMute})
-                a->cursor = 0;
+            if (!p.edges[ei].encode)
+                for (Automation* a : {&p.edges[ei].autoVolume, &p.edges[ei].autoPan,
+                                      &p.edges[ei].autoMute, &p.edges[ei].stripPan})
+                    a->cursor = 0;
     }
 }
 
@@ -1308,13 +1398,21 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
             if (old.id != n.id) continue;
             // Only what this executor processed (the other one writes the rest).
             if (liveClass >= 0 && old.live != (liveClass == 1)) break;
-            n.applied = old.applied;
-            n.mixValid = old.mixValid;
-            n.rampFrom = old.rampFrom;
-            n.rampTo = old.rampTo;
-            n.rampLeft = old.rampLeft;
-            n.soloApplied = old.soloApplied;
-            n.soloValid = old.soloValid;
+            if (n.type == old.type) {
+                n.fader = old.fader;
+                n.encoder.carry(old.encoder, to.smoothFrames);
+                n.decoder.carry(old.decoder, to.smoothFrames);
+                for (std::size_t ei : n.out)
+                    for (std::size_t oi : old.out) {
+                        Edge& e = to.edges[ei];
+                        const Edge& oe = from.edges[oi];
+                        if (e.route == oe.route && e.tap == oe.tap) {
+                            e.fader = oe.fader;
+                            e.encoder.carry(oe.encoder, to.smoothFrames);
+                            break;
+                        }
+                    }
+            }
             for (Stage& st : n.chain)
                 for (Stage& os : old.chain)
                     if (st.instance && os.instance == st.instance) {

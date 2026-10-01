@@ -4,7 +4,7 @@
 //
 // Units: positions and lengths are in the domain their timebase implies
 // (seconds for `time`, beats = quarter notes for `beats`); levels in dB
-// (kSilenceDb = -inf), pan/width in percent, pitch in semitones.
+// (kSilenceDb = -inf), pan in percent, pitch in semitones.
 #pragma once
 
 #include <array>
@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "supple/json/json.h"
@@ -32,7 +33,8 @@ struct Project {
     int ppq = 960;
     Timebase timebase = Timebase::Beats;
     std::string mediaDir = "media";
-    double panLawDb = -3.0;  // 0, -3, -4.5, -6
+    bool console9 = true;
+    std::vector<Id> masters{kMaster};
     std::uint64_t seed = 0;
     json::Value render = json::Value::object();  // render.* defaults and matrix
 };
@@ -63,17 +65,19 @@ struct RecordSettings {
     RecordMode mode = RecordMode::Input;
 };
 
+enum class StripType : std::uint8_t { Channel, Buss, Master };
+std::string_view stripTypeName(StripType);
+
 struct Track {
+    StripType type = StripType::Channel;
     std::string name, color, notes;
-    std::optional<Id> parent;  // empty only for tr_0 (master)
+    std::optional<Id> parent;  // empty exactly for masters
     std::vector<Id> children;
     int channels = 2;
     double volumeDb = 0.0;
-    double pan = 0.0;      // % -100..100
-    double width = 100.0;  // % -100..100
+    double pan = 0.0;  // % -100..100
     bool mute = false;
     Solo solo = Solo::Off;
-    bool phaseInvert = false;
     ParentSend parentSend;
     RecordSettings record;
     TrackTimebase timebase = TrackTimebase::Project;
@@ -189,10 +193,19 @@ struct MidiRouting {
     int toChannel = 0;    // 0 = original
 };
 
+// A send follows its source strip's pan unless explicitly positioned.
+struct RoutePan {
+    std::optional<double> percent;
+    RoutePan() = default;
+    RoutePan(double value) : percent(value) {}
+    double resolve(double stripPan) const { return percent.value_or(stripPan); }
+};
+
 struct Route {
     RouteEnd from, to;
     Tap tap = Tap::PostFader;
-    double volumeDb = 0.0, pan = 0.0;
+    double volumeDb = 0.0;
+    RoutePan pan;
     bool mute = false, phaseInvert = false, mono = false;
     ChannelMap channels;
     std::optional<MidiRouting> midi;  // empty = audio only
@@ -209,7 +222,7 @@ struct EnvPoint {
 
 struct EnvTarget {
     Id object = kMaster;  // tr_*, sd_*, fx_* or tk_*
-    std::string param;    // volume|pan|width|mute|trim, or a plugin key / CLAP id
+    std::string param;    // volume|pan|mute (pitch for takes), or a plugin key / CLAP id
 };
 
 struct Envelope {

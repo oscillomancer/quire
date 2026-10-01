@@ -41,7 +41,7 @@ Use `plugin.list` to find an FX id, `plugin.scan` to refresh the catalogue, `fx.
 `render.stems {mode: "isolated", tap: "post_fader"}` writes each top-level
 track before master processing. Use `mode: "through_master"` to hear one stem
 at a time through the master chain. `render.regions` writes named regions; a
-project's `render.matrix` can select tracks or `"master"` for each region.
+project's `render.matrix` can select tracks or master ids for each region.
 `render.dry-run {operation: "regions"}` lists the files and lengths first.
 Patterns such as `{project}-{region_number:02}-{region|replace(" ","_")}`
 name the files; names that escape the renders directory are rejected.
@@ -89,7 +89,7 @@ env.add {"track": "tr_2", "param": "volume",
          "points": [{"bar": 16, "value": 0}, {"bar": 17, "value": "-60 dB"}]}
 ```
 
-Mixer targets: track `volume`, `trim` (dB), `pan`, `width` (%), `mute`;
+Mixer targets: track `volume` (dB), `pan` (%), `mute`;
 route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 `fx.describe` lists (values in their unit; a cutoff sweep moves evenly in
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
@@ -104,3 +104,40 @@ Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with r
 For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).
 For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).
 Use [Nave, the stock reverb](reverb.md) for room/hall ambience, predelay and frequency-dependent tails; use 100% wet on a send return.
+
+## Strip types and Console 9 gain staging
+
+Every strip has a type. Channels play items, instruments and monitored inputs;
+create a buss for groups and returns (`track.add {type: "buss"}`), and put
+its processing in its insert chain. Masters are terminal roots; they feed
+hardware outputs and renders. `render.mix {master: "tr_0"}` selects the main
+master; other master ids select independent mixes. Channels cannot receive
+other strips or have children. Audio sends target busses or masters; keys may
+target a plug-in on any strip.
+
+The implicit summing stages use **Airwindows Console 9, by Chris Johnson**.
+Channels encode after inserts; busses decode their input sum before inserts
+and re-encode after their fader; masters decode before their insert chain and
+finish with a plain fader and balance. The channel/buss fader and pan are the
+Console 9 controls. A centred unity channel into a centred neutral master
+has approximately **−6.52 dB** gain. Each extra neutral buss adds another
+−6.52 dB at small signals. Stage levels deliberately follow Console 9; use
+measured levels when setting insert drive and gain compensation.
+
+`project.set {console9: false}` keeps these gains and pan laws and makes the
+stages linear, omitting the curves, denormal noise and dither. Small signals
+remain level-matched. Switching takes 10 ms. With Console 9 on, correlated
+signals summed before decoding can increase peaks relative to linear summing
+before the decode saturates; leave headroom and measure true peaks.
+
+A unity post-fader send with `pan: "follow"` shares the strip's encoded output.
+Other audio sends have their own encoder: pre-fader/pre-FX sends use the send
+level, while post-fader sends combine strip and send levels (clamped to
++12.04 dB) and follow strip mute. Send polarity and mono conversion happen
+before encoding. Mute and solo ramp the fader before encoding over 10 ms;
+pre-fader keys still hear the signal, while post-fader keys hear the encoded
+fader output. Noise from silent Console 9 stages is near −150 dBFS.
+
+Isolated post-fader channel and buss stems decode through a neutral Buss.
+They describe each strip's contribution and do **not** sum exactly to a mix
+with nonlinear Console 9 enabled. Use a master render for the final mix.

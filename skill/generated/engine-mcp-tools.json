@@ -2170,6 +2170,26 @@
         },
         "autosave_available": {
           "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "load_warning",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message", "path"],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -2235,6 +2255,26 @@
         },
         "autosave_available": {
           "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "load_warning",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message", "path"],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -2410,8 +2450,8 @@
   },
   {
     "name": "project_set",
-    "title": "Change project metadata (name, title, author, notes, pan law).",
-    "description": "Change project metadata (name, title, author, notes, pan law).  See describe for errors and examples.",
+    "title": "Change project metadata (name, title, author, notes, Console 9).",
+    "description": "Change project metadata (name, title, author, notes, Console 9).  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "project_set_args",
@@ -2428,21 +2468,8 @@
         "notes": {
           "type": "string"
         },
-        "pan_law_db": {
-          "anyOf": [
-            {
-              "type": "number",
-              "minimum": -6.0,
-              "maximum": 0.0
-            },
-            {
-              "type": "string",
-              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
-            }
-          ],
-          "x-unit": "dB",
-          "x-unit-strings": true,
-          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        "console9": {
+          "type": "boolean"
         },
         "render": {}
       },
@@ -2633,6 +2660,10 @@
       "type": "object",
       "title": "render_args",
       "properties": {
+        "master": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
         "branch": {
           "type": "string"
         },
@@ -2733,6 +2764,11 @@
       "type": "object",
       "title": "render_mix_args",
       "properties": {
+        "master": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$",
+          "description": "Master output (default tr_0) id, e.g. \"tr_1\"."
+        },
         "start_beat": {
           "type": "number",
           "minimum": 0.0
@@ -2835,6 +2871,10 @@
       "type": "object",
       "title": "render_args",
       "properties": {
+        "master": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
         "branch": {
           "type": "string"
         },
@@ -2935,6 +2975,10 @@
       "type": "object",
       "title": "render_args",
       "properties": {
+        "master": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
         "branch": {
           "type": "string"
         },
@@ -3069,20 +3113,27 @@
           "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
         },
         "pan": {
-          "anyOf": [
+          "oneOf": [
             {
-              "type": "number",
-              "minimum": -100.0,
-              "maximum": 100.0
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -100.0,
+                  "maximum": 100.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+                }
+              ],
+              "x-unit": "%",
+              "x-unit-strings": true,
+              "description": "Quantity strings are range-checked by the server."
             },
             {
-              "type": "string",
-              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+              "const": "follow"
             }
-          ],
-          "x-unit": "%",
-          "x-unit-strings": true,
-          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+          ]
         },
         "mute": {
           "type": "boolean"
@@ -3147,7 +3198,27 @@
                 "type": "number"
               },
               "pan": {
-                "type": "number"
+                "oneOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": -100.0,
+                        "maximum": 100.0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+                      }
+                    ],
+                    "x-unit": "%",
+                    "x-unit-strings": true,
+                    "description": "Quantity strings are range-checked by the server."
+                  },
+                  {
+                    "const": "follow"
+                  }
+                ]
               },
               "mute": {
                 "type": "boolean"
@@ -3241,20 +3312,27 @@
           "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
         },
         "pan": {
-          "anyOf": [
+          "oneOf": [
             {
-              "type": "number",
-              "minimum": -100.0,
-              "maximum": 100.0
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -100.0,
+                  "maximum": 100.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+                }
+              ],
+              "x-unit": "%",
+              "x-unit-strings": true,
+              "description": "Quantity strings are range-checked by the server."
             },
             {
-              "type": "string",
-              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+              "const": "follow"
             }
-          ],
-          "x-unit": "%",
-          "x-unit-strings": true,
-          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
+          ]
         },
         "mute": {
           "type": "boolean"
@@ -3741,12 +3819,17 @@
   },
   {
     "name": "track_add",
-    "title": "Add a track (under the master, or inside a folder track) and return its id.",
-    "description": "Add a track (under the master, or inside a folder track) and return its id. parent: a track id to nest under (it becomes a folder); index: position among its siblings. See describe for errors and examples.",
+    "title": "Add a channel, buss or master strip and return its id.",
+    "description": "Add a channel, buss or master strip and return its id. parent: a buss/master id (default tr_0); masters have no parent; index: position among its siblings. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_add_args",
       "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["channel", "buss", "master"],
+          "default": "channel"
+        },
         "name": {
           "type": "string"
         },
@@ -3762,7 +3845,7 @@
         "channels": {
           "type": "integer",
           "minimum": 1.0,
-          "maximum": 64.0
+          "maximum": 2.0
         }
       },
       "additionalProperties": false
@@ -3810,6 +3893,10 @@
               "name": {
                 "type": "string"
               },
+              "type": {
+                "type": "string",
+                "enum": ["channel", "buss", "master"]
+              },
               "parent": {
                 "type": "string"
               },
@@ -3841,6 +3928,7 @@
             "required": [
               "id",
               "name",
+              "type",
               "parent",
               "depth",
               "volume_db",
@@ -3929,8 +4017,8 @@
   },
   {
     "name": "track_set",
-    "title": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.",
-    "description": "Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. See describe for errors and examples.",
+    "title": "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.",
+    "description": "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_set_args",
@@ -3939,6 +4027,10 @@
           "type": "string",
           "pattern": "^tr_[0-9]+$",
           "description": "Track id, e.g. \"tr_1\"."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["channel", "buss", "master"]
         },
         "name": {
           "type": "string"
@@ -3981,26 +4073,7 @@
           "x-unit-strings": true,
           "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
         },
-        "width": {
-          "anyOf": [
-            {
-              "type": "number",
-              "minimum": -100.0,
-              "maximum": 100.0
-            },
-            {
-              "type": "string",
-              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
-            }
-          ],
-          "x-unit": "%",
-          "x-unit-strings": true,
-          "description": "Quantity strings are range-checked by the server. (%; accepts quantity strings)"
-        },
         "mute": {
-          "type": "boolean"
-        },
-        "phase_invert": {
           "type": "boolean"
         },
         "solo": {

@@ -121,7 +121,8 @@ class EngineApp : public cmd::Host {
 
     // --- project files ------------------------------------------------------------
     Status save(const std::filesystem::path& path);  // atomic; becomes the project path
-    Status open(const std::filesystem::path& path);  // replaces the history
+    Status open(const std::filesystem::path& path,
+                std::vector<schema::Warning>* warnings = nullptr);  // replaces the history
     void newProject(model::Project project);
 
     // --- branches ------------------------------------------------------------------

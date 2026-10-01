@@ -3133,6 +3133,26 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "autosave_available": {
       "type": "boolean"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "load_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -3224,6 +3244,26 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "autosave_available": {
       "type": "boolean"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "load_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -3522,7 +3562,7 @@ Result:
 
 ## `project.set@1`
 
-Change project metadata (name, title, author, notes, pan law).
+Change project metadata (name, title, author, notes, Console 9).
 
 
 
@@ -3536,7 +3576,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `title` | string |  |  |  |  |
 | `author` | string |  |  |  |  |
 | `notes` | string |  |  |  |  |
-| `pan_law_db` | value | dB | -6.0..0.0 |  | Quantity strings are range-checked by the server. |
+| `console9` | boolean |  |  |  |  |
 | `render` | value |  |  |  |  |
 
 ### Result
@@ -3944,6 +3984,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `master` | string |  |  |  |  |
 | `branch` | string |  |  |  |  |
 | `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
@@ -4004,6 +4045,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `master` | string |  |  |  | Master output (default tr_0) id, e.g. "tr_1". |
 | `start_beat` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  |  |  |  |
 | `tail_s` | number |  | 0.0..60.0 |  |  |
@@ -4095,6 +4137,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `master` | string |  |  |  |  |
 | `branch` | string |  |  |  |  |
 | `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
@@ -4155,6 +4198,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `master` | string |  |  |  |  |
 | `branch` | string |  |  |  |  |
 | `pattern` | string |  |  |  | File name pattern (session-model §7.3), e.g. "{project}-{track_number:02}-{track|lower}" |
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
@@ -4220,7 +4264,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `fx` | string |  |  |  | Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out |
 | `tap` | string |  |  |  |  |
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
-| `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
+| `pan` | value |  |  |  |  |
 | `mute` | boolean |  |  |  |  |
 
 ### Result
@@ -4332,7 +4376,27 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "number"
           },
           "pan": {
-            "type": "number"
+            "oneOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -100.0,
+                    "maximum": 100.0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*%)?\\s*$"
+                  }
+                ],
+                "x-unit": "%",
+                "x-unit-strings": true,
+                "description": "Quantity strings are range-checked by the server."
+              },
+              {
+                "const": "follow"
+              }
+            ]
           },
           "mute": {
             "type": "boolean"
@@ -4429,7 +4493,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `fx` | string |  |  |  | Feed this plug-in's sidechain (key) input instead of a track's input; `to` may be left out |
 | `tap` | string |  |  |  |  |
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
-| `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
+| `pan` | value |  |  |  |  |
 | `mute` | boolean |  |  |  |  |
 
 ### Result
@@ -5104,9 +5168,9 @@ Result:
 
 ## `track.add@1`
 
-Add a track (under the master, or inside a folder track) and return its id.
+Add a channel, buss or master strip and return its id.
 
-parent: a track id to nest under (it becomes a folder); index: position among its siblings.
+parent: a buss/master id (default tr_0); masters have no parent; index: position among its siblings.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -5114,10 +5178,11 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `type` | string |  |  | "channel" |  |
 | `name` | string |  |  |  |  |
 | `parent` | string |  |  |  | Parent track id, e.g. "tr_1". |
 | `index` | integer |  | 0.0.. |  |  |
-| `channels` | integer |  | 1.0..64.0 |  |  |
+| `channels` | integer |  | 1.0..2.0 |  |  |
 
 ### Result
 
@@ -5188,6 +5253,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "name": {
             "type": "string"
           },
+          "type": {
+            "type": "string",
+            "enum": ["channel", "buss", "master"]
+          },
           "parent": {
             "type": "string"
           },
@@ -5216,7 +5285,18 @@ Kind: `query`. Exposure: `mcp-tool`.
             }
           }
         },
-        "required": ["id", "name", "parent", "depth", "volume_db", "mute", "solo", "fx", "items"],
+        "required": [
+          "id",
+          "name",
+          "type",
+          "parent",
+          "depth",
+          "volume_db",
+          "mute",
+          "solo",
+          "fx",
+          "items"
+        ],
         "additionalProperties": false
       }
     }
@@ -5342,7 +5422,7 @@ Result:
 
 ## `track.set@1`
 
-Set track fields: name, volume_db, pan, width, mute, solo, color, notes, arming.
+Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
 
 Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace.
 
@@ -5353,14 +5433,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
+| `type` | string |  |  |  |  |
 | `name` | string |  |  |  |  |
 | `color` | string |  |  |  |  |
 | `notes` | string |  |  |  |  |
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
-| `width` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `mute` | boolean |  |  |  |  |
-| `phase_invert` | boolean |  |  |  |  |
 | `solo` | string |  |  |  |  |
 | `armed` | boolean |  |  |  |  |
 | `record_input` | array |  |  |  |  |
