@@ -2618,6 +2618,51 @@ Result:
 
 ```
 
+## `log.list@1`
+
+Recent commands with origin, arguments and outcome (the command log).
+
+Newest last. Who did what: origin is gui, agent:<client>/<model>, mcp:<client>, lua:<script>, rpc. queries: include read-only commands (left out by default). since: only entries after this seq (poll with the last seq seen). origin: entries whose origin starts with this. The log keeps the last 2000 commands.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `limit` | integer |  | 1.0..2000.0 |  |  |
+| `since` | integer |  | 0.0.. |  |  |
+| `queries` | boolean |  |  | false |  |
+| `origin` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**The last commands** (`song`)
+
+```json
+{
+  "limit": 5
+}
+
+```
+
+Result:
+
+```json
+{
+  "entries": "<any>",
+  "last_seq": "<any>"
+}
+
+```
+
 ## `marker.add@1`
 
 Add a named marker in beats.

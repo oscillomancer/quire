@@ -1199,7 +1199,11 @@ void EngineApp::rollbackTransaction(std::uint64_t id) {
     if (id == txnId_) txn_.reset();
 }
 
-void EngineApp::log(const cmd::LogRecord& record) { records_.push_back(record); }
+void EngineApp::log(const cmd::LogRecord& record) {
+    if (record.command == "log.list") return;  // reading the log is not news
+    records_.push_back(record);
+    while (records_.size() > kMaxRecords) records_.pop_front();
+}
 
 void EngineApp::emit(std::string_view topic, json::Value payload) {
     // Scripts see the event once the emitting command has finished

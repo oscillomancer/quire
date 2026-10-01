@@ -313,6 +313,12 @@ q = nil
 ---@field job string
 ---@field timeout_s? number Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s.
 
+---@class Quire.log_list_args
+---@field limit? integer
+---@field since? integer
+---@field queries? boolean (default: false)
+---@field origin? string
+
 ---@class Quire.marker_add_args
 ---@field pos? number
 ---@field name? string
@@ -844,6 +850,9 @@ q = nil
 ---@field status fun(args: Quire.job_status_args): table Get a job's status.
 ---@field wait fun(args: Quire.job_wait_args): table Wait for a job.
 
+---@class Quire.log
+---@field list fun(args?: Quire.log_list_args): table Recent commands with origin, arguments and outcome (the command log).
+
 ---@class Quire.marker
 ---@field add fun(args?: Quire.marker_add_args): Quire.marker_add_result Add a named marker in beats.
 ---@field list fun(): Quire.marker_list_result List rulers in this project.
@@ -939,6 +948,7 @@ q = nil
 ---@field history Quire.history Commands named history.*
 ---@field item Quire.item Commands named item.*
 ---@field job Quire.job Commands named job.*
+---@field log Quire.log Commands named log.*
 ---@field marker Quire.marker Commands named marker.*
 ---@field midi Quire.midi Commands named midi.*
 ---@field plugin Quire.plugin Commands named plugin.*

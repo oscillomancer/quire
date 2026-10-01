@@ -13,6 +13,7 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -236,7 +237,9 @@ class EngineApp : public cmd::Host {
     std::filesystem::path resolve(const std::filesystem::path& path) const;
 
     // Tests and tools.
-    const std::vector<cmd::LogRecord>& records() const { return records_; }
+    // The command log (log.list): the most recent kMaxRecords invocations.
+    const std::deque<cmd::LogRecord>& records() const { return records_; }
+    static constexpr std::size_t kMaxRecords = 2000;
     std::vector<std::pair<std::string, json::Value>> takeEvents();
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
@@ -282,7 +285,7 @@ class EngineApp : public cmd::Host {
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;
     std::unique_ptr<lua::Runtime> scripts_;
-    std::vector<cmd::LogRecord> records_;
+    std::deque<cmd::LogRecord> records_;
     std::vector<std::pair<std::string, json::Value>> events_;
     std::uint64_t fixedClock_ = 0;
 

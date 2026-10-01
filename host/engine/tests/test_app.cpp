@@ -1675,3 +1675,35 @@ TEST_CASE("route.matrix: type rules, cycles and existing sends") {
     REQUIRE_FALSE(refused);
     CHECK(refused.error().code == "route.cycle");
 }
+
+TEST_CASE("log.list: who did what, queries left out, since, origin filter, bounded") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    const cmd::Origin gui{cmd::Origin::Type::Ui, "gui", {}};
+    const cmd::Origin agent{cmd::Origin::Type::Agent, "panel", "claude-x"};
+    REQUIRE(d.execute({"track.add", j(R"({"name":"A"})"), gui}));
+    REQUIRE(d.execute({"track.list", j("{}"), gui}));  // a query
+    REQUIRE(d.execute({"track.add", j(R"({"name":"B"})"), agent}));
+    REQUIRE_FALSE(d.execute({"track.set", j(R"({"track":"tr_99","mute":true})"), agent}));
+    auto log = d.execute({"log.list", j("{}"), kTest});
+    REQUIRE(log);
+    const auto& e = *log->find("entries");
+    REQUIRE(e.size() == 3);  // the query and log.list itself are left out
+    CHECK(e.at(0).find("origin")->asString() == "ui:gui");
+    CHECK(e.at(1).find("origin")->asString() == "agent:panel/claude-x");
+    CHECK(e.at(2).find("ok")->asBool() == false);
+    CHECK(e.at(2).find("error")->asString() == "tr.unknown");
+    // since, origin, queries.
+    const auto seq = e.at(1).find("seq")->asInt();
+    json::Value since = json::Value::object();
+    since["since"] = seq;
+    CHECK(d.execute({"log.list", since, kTest})->find("entries")->size() == 1);
+    CHECK(d.execute({"log.list", j(R"({"origin":"agent"})"), kTest})->find("entries")->size() == 2);
+    CHECK(d.execute({"log.list", j(R"({"queries":true})"), kTest})->find("entries")->size() == 4);
+    // Bounded.
+    for (int i = 0; i < 2100; ++i) (void)d.execute({"project.get", j("{}"), kTest});
+    CHECK(app->records().size() == engine::EngineApp::kMaxRecords);
+}

@@ -1800,6 +1800,40 @@
     }
   },
   {
+    "name": "log_list",
+    "title": "Recent commands with origin, arguments and outcome (the command log).",
+    "description": "Recent commands with origin, arguments and outcome (the command log). Newest last. Who did what: origin is gui, agent:<client>/<model>, mcp:<client>, lua:<script>, rpc. queries: include read-only commands (left out by default). since: only entries after this seq (poll with the last seq seen). origin: entries whose origin starts with this. The log keeps the last 2000 commands. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "log_list_args",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 2000.0
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "queries": {
+          "type": "boolean",
+          "default": false
+        },
+        "origin": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "marker_add",
     "title": "Add a named marker in beats.",
     "description": "Add a named marker in beats.  See describe for errors and examples.",
