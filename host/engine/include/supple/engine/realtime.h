@@ -39,6 +39,8 @@ class Workers;
 class Recorder;
 }  // namespace detail
 
+class MeterBank;  // meters.h: per-strip peak/RMS telemetry (P5.3c)
+
 // Recording (ADR-0014): one armed track's input.
 struct RecordTarget {
     model::Id track;
@@ -306,6 +308,23 @@ class Engine {
 
     std::uint32_t outputLatency() const { return outputLatency_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
+
+    // --- meters (P5.3c, engine.md §2.3) --------------------------------------------
+    // The bank the GUI's meters read. Created with the backend and kept across
+    // plan swaps; null while the engine is stopped (and for offline renders,
+    // which do not meter). The audio threads write it; read it from the main
+    // thread — see EngineApp::meters().
+    std::shared_ptr<MeterBank> meterBank() const { return meters_; }
+    // What the audio callback has played, as a meter may report it: the
+    // transport epoch, and the frames of that epoch the listener has heard —
+    // the frames the callback played, minus the device's output latency. While
+    // the transport is stopped nothing is rendered ahead of the listener, so
+    // everything already processed counts as heard.
+    struct MeterClock {
+        std::uint64_t epoch = 0;
+        std::int64_t heardStream = 0;
+    };
+    MeterClock meterClock() const;
     std::uint64_t processErrors() const { return processErrors_.load(); }
     // Audio cycles run since start (the main thread's way to see a request acted on).
     std::uint64_t cycles() const { return cycles_.load(std::memory_order_acquire); }
@@ -405,6 +424,9 @@ class Engine {
     bool prunePending_ = false;
     std::uint32_t outputLatency_ = 0;
     std::vector<std::string> warnings_;
+    // The meter bank (P5.3c): created by start(), kept across plan swaps, and
+    // written by the renderer and the callback.
+    std::shared_ptr<MeterBank> meters_;
 
     // Audio-thread state. The previous plan is handed back to the main thread
     // the moment a new one is acquired, so the audio thread keeps its own list

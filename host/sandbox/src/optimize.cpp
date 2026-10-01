@@ -4,6 +4,7 @@
 // the instance; the best candidate's render joins the session afterwards.
 #include "optimize_commands.h"
 #include "optimize_loss.h"
+#include "optimize_range.h"
 
 #include "schema_params.h"
 
@@ -32,6 +33,10 @@ Session& S(Context& ctx) { return ctx.service<Session>(); }
 
 constexpr int kMaxParams = 32;
 constexpr double kInf = std::numeric_limits<double>::infinity();
+// Initial step size of a search against a reference (normalized domain). The
+// start is the agent's own structure, already close to the answer; see the note
+// where the options are built.
+constexpr double kReferenceSigma = 0.05;  // measured: docs/benchmarks/optimizer/
 
 struct OptimizeArgs {
     std::string instance;
@@ -86,7 +91,9 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
         return Error("optimize.not_semantic", "the plugin publishes no parameter schema",
                      "/instance", "optimize needs a plugin with the semantic-params extension");
     std::vector<std::pair<std::string, json::Value>> wanted;  // key, request entry
+    bool windowed = false;  // "auto": narrow each range around the current value
     if (request.isString() && request.asString() == "auto") {
+        windowed = true;
         // "auto" leaves out performance and placement parameters: voice.*,
         // pans, envelope curves/delay/hold, velocity sensitivity, LFO fades
         // and the output level (loudness is matched, not optimized).
@@ -175,6 +182,15 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
         if (!hi) return std::move(hi).error();
         t.lo = std::min(*lo, *hi);
         t.hi = std::max(*lo, *hi);
+        if (windowed) {
+            // "auto" searches around the current value: the agent's patch is the
+            // starting point, not a random draw (optimize_range.h).
+            const auto [wlo, whi] = detail::autoWindow(t.spec, t.initial);
+            if (whi > wlo) {
+                t.lo = wlo;
+                t.hi = whi;
+            }
+        }
         out.push_back(std::move(t));
     }
     return out;
@@ -347,12 +363,17 @@ void registerOptimizeCommands(cmd::Registry& registry) {
     c.summary = "Tune continuous parameters toward a reference sound or a profile (a job).";
     c.description =
         "You choose the structure (patch) and which knobs matter; CMA-ES tunes the numbers. "
-        "params: \"auto\" (continuous parameters of slots present, max 32) or keys, optionally "
-        "{key, min, max} to narrow the search. target: {\"reference\": rd_<n> or file} and/or "
-        "{\"profile\": supple.analysis-profile document}. phrase: notation rendered per candidate "
-        "(default \"1: C3:w\"; use the reference's phrase when matching a reference). Returns a "
-        "job: "
-        "poll job.wait; the result has the best loss per term, changes, a merge patch "
+        "params: \"auto\" (continuous parameters of the modules present, max 32) or keys, "
+        "optionally {key, min, max} to narrow the search. \"auto\" searches around each "
+        "parameter's current value (±2 octaves for frequency, time and pitch-interval "
+        "quantities, ±25 % of the range otherwise): name keys with min/max when the answer may "
+        "be far from the current patch. target: {\"reference\": rd_<n> or file} and/or "
+        "{\"profile\": supple.analysis-profile document}; a reference target starts from a "
+        "smaller initial step than a profile, because the patch is already close. phrase: "
+        "notation rendered per candidate (default \"1: C3:w\"; use the reference's phrase when "
+        "matching a reference). Returns a job: "
+        "poll job.wait; the result has the best loss per term, the failed-candidate count, "
+        "changes, a merge patch "
         "({\"params\": {...}}) for patch.merge, and the best candidate's render.";
     c.tags = {"optimize"};
     c.args =
@@ -443,6 +464,12 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         options.seed = static_cast<std::uint64_t>(a.seed);
         options.maxEvaluations = static_cast<int>(a.evaluations.value_or(300));
         options.maxSeconds = a.maxSeconds.value_or(60.0);
+        // A reference search starts from the agent's structure, already close:
+        // at the default σ = 0.2 of a parameter's full range a single standard
+        // step is a factor of ~8 on a log-scaled time, so the population lands
+        // far from the start and the run stagnates without ever improving on it
+        // (docs/benchmarks/optimizer/2026-10-01-baseline.md, campaign finding 3).
+        if (referenceFile) options.sigma = kReferenceSigma;
         JobStarted out{job, "running", {}, best.id};
         for (const auto& t : *tuned) out.params.push_back(t.key);
 
@@ -525,7 +552,9 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             const auto noteOff =
                 W.input.seconds;  // explicit length, else the notes' end (unknown here)
             std::optional<Error> firstError;
+            int failedCandidates = 0;  // set/render/analyze failures, for the result
             auto failed = [&](Error error) {
+                ++failedCandidates;
                 if (!firstError) firstError = std::move(error);
                 return kInf;
             };
@@ -606,6 +635,7 @@ void registerOptimizeCommands(cmd::Registry& registry) {
             loss["terms"] = std::move(terms);
             result["loss"] = std::move(loss);
             result["evaluations"] = o.evaluations;
+            result["failed"] = failedCandidates;
             result["seconds"] = roundTo(o.seconds, 2);
             result["stopped"] = std::string(opt::stopName(o.stopped));
             json::Value patch = json::Value::object(), changes = json::Value::array();

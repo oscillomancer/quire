@@ -5,12 +5,43 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
+#include "meters.h"
 #include "plan.h"
 #include "recording.h"
 #include "workers.h"
 
 namespace supple::engine {
+
+namespace {
+
+// Metering (P5.3c): the executor pushes what it just measured. `renderer`
+// selects the ring — the renderer thread's or the audio callback's — and this
+// is called from the executor thread only, never from a worker task.
+void pushMeters(MeterBank& bank, const detail::Plan& plan, const std::vector<std::size_t>& nodes,
+                std::uint64_t epoch, std::int64_t stream, std::uint32_t frames,
+                bool renderer) SUPPLE_RT {
+    for (std::size_t i : nodes) {
+        const detail::Node& node = plan.nodes[i];
+        if (node.meterSlot == MeterBank::kNoSlot) continue;
+        MeterEntry entry;
+        entry.epoch = epoch;
+        entry.stream = stream;
+        entry.frames = frames;
+        entry.slot = node.meterSlot;
+        for (int c = 0; c < 2; ++c) {
+            entry.peak[c] = node.meterPeak[c];
+            entry.sumSq[c] = node.meterSumSq[c];
+        }
+        if (renderer)
+            bank.pushRenderer(entry);
+        else
+            bank.pushCallback(entry);
+    }
+}
+
+}  // namespace
 
 std::uint64_t midiPortMask(const std::vector<std::string>& ports, std::string_view device) {
     auto lower = [](std::string_view v) {
@@ -124,6 +155,9 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         return Error("engine.config", "the engine needs a block size and two outputs");
     shutDown_ = false;
     shutdownRequested_ = false;
+    // Before the backend starts: its callbacks push meter entries at once.
+    // Kept across plan swaps; slots for a plan's strips are assigned in load().
+    meters_ = std::make_shared<MeterBank>();
     if (options_.anticipative) {
         // Allocated before the backend starts: its callbacks read the ring at
         // once. Room for the render-ahead amount at up to 192 kHz.
@@ -291,6 +325,24 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     }
     outputLatency_ = static_cast<std::uint32_t>(plan->outputLatency);
     warnings_ = plan->warnings;
+    // Metering (P5.3c): every strip of this plan gets its bank slot here, on
+    // the main thread — never while an audio side reads it — and the lists the
+    // executors iterate are built from the slots.
+    if (meters_) {
+        meters_->beginPlan();
+        for (detail::Node& node : plan->nodes) node.meterSlot = meters_->slotFor(node.id);
+        meters_->endPlan();
+        detail::Plan& p = *plan;
+        p.meterNodes.clear();
+        p.rendererMeterNodes.clear();
+        p.liveMeterNodes.clear();
+        for (std::size_t i = 0; i < p.nodes.size(); ++i)
+            if (p.nodes[i].meterSlot != MeterBank::kNoSlot) p.meterNodes.push_back(i);
+        for (std::size_t i : p.rendererNodes)
+            if (p.nodes[i].meterSlot != MeterBank::kNoSlot) p.rendererMeterNodes.push_back(i);
+        for (std::size_t i : p.liveNodes)
+            if (p.nodes[i].meterSlot != MeterBank::kNoSlot) p.liveMeterNodes.push_back(i);
+    }
     latest_ = std::make_shared<const model::Session>(session);
     prunePending_ = true;
     plan->generation = ++publishedGen_;
@@ -375,6 +427,22 @@ TransportState Engine::transport() const {
     t.seconds = static_cast<double>(t.sample) / config_.sampleRate;
     t.loop = readLoop();
     return t;
+}
+
+Engine::MeterClock Engine::meterClock() const {
+    MeterClock clock;
+    clock.epoch = epoch_.load(std::memory_order_acquire);
+    if (!wantPlaying_.load(std::memory_order_acquire)) {
+        // Stopped: the renderer renders nothing ahead, and what the callback
+        // plays is monitored input, heard as it is produced.
+        clock.heardStream = std::numeric_limits<std::int64_t>::max();
+        return clock;
+    }
+    const std::int64_t played = playedStream(clock.epoch);
+    const std::int64_t latency =
+        backend_ ? static_cast<std::int64_t>(backend_->status().outputLatency) : 0;
+    clock.heardStream = std::max<std::int64_t>(0, played - latency);
+    return clock;
 }
 
 void Engine::awaitTransport(double timeoutSeconds) {
@@ -585,6 +653,14 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         xportSeen_ = xportSeq;
         loopC_ = xport.loop;
     }
+    if (xportNew && xport.epoch != rtEpoch_) {
+        // The callback's own meter coordinates (P5.3c). With no anticipation it
+        // is both renderer and player, so what it processes is what is heard;
+        // the anticipative path keeps these in pullAhead/liveRender.
+        rtEpoch_ = xport.epoch;
+        rtStream_.store(0, std::memory_order_relaxed);
+        rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
+    }
     if (plan) {
         startFree(processing_, &plan->instances, &processing_);  // any refused, retried
         // For monitored inputs (audio and MIDI).
@@ -599,6 +675,11 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             const detail::Node& master = plan->nodes[plan->mainMaster];
             std::copy_n(master.post.l.begin(), frames, out[0]);
             std::copy_n(master.post.r.begin(), frames, out[1]);
+            // Metering (P5.3c): monitored input is heard as it is produced —
+            // there is no play position ahead of it to wait for.
+            if (meters_)
+                pushMeters(*meters_, *plan, plan->meterNodes, rtEpoch_,
+                           rtStream_.load(std::memory_order_relaxed), frames, false);
         } else {
             processErrors_.fetch_add(1);
             std::fill_n(out[0], frames, 0.0f);
@@ -612,6 +693,9 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
     const bool run = plan && playing_ && !shutDown_.load() && frames <= plan->block;
     bool ok = run;
     std::array<const float*, 64> inAt{};
+    // The callback's meter stream (P5.3c): the frames it has played in
+    // rtEpoch_. It is the only writer here, so a plain local then one store.
+    std::int64_t meterStream = rtStream_.load(std::memory_order_relaxed);
     for (std::uint32_t done = 0; ok && done < frames;) {
         const std::uint32_t k = loopC_.until(pos_, frames - done);  // split at a loop wrap
         for (std::uint32_t c = 0; c < deviceInputs_ && c < inAt.size(); ++c)
@@ -630,6 +714,10 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             r->capture(ins, deviceInputs_, k, pos_);
             r->captureMidi(plan->deviceMidi, done, k, pos_);
         }
+        // Metering (P5.3c): no anticipation here, so the callback renders and
+        // plays in step; its own stream is the position a reader aligns to.
+        if (meters_) pushMeters(*meters_, *plan, plan->meterNodes, rtEpoch_, meterStream, k, false);
+        meterStream += k;
         const std::int64_t next = loopC_.next(pos_, pos_ + k);
         if (next != pos_ + k) detail::wrapTo(*plan, next, -1);
         pos_ = next;
@@ -639,6 +727,11 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         if (run) processErrors_.fetch_add(1);
         std::fill_n(out[0], frames, 0.0f);
         std::fill_n(out[1], frames, 0.0f);
+    }
+    if (ok && run) {
+        rtPos_.store(pos_, std::memory_order_relaxed);
+        rtStream_.store(meterStream, std::memory_order_relaxed);
+        rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
     }
     reportedPos_.store(pos_);
     reportedPlaying_.store(playing_);
@@ -855,6 +948,11 @@ void Engine::rendererLoop(std::uint64_t seen) {
             fill(ring_->slot(), plan_->nodes[plan_->mainMaster].post);
             ring_->publish();
         }
+        // Metering (P5.3c): the renderer publishes what it just rendered, at
+        // the same coordinates as the chunk it just handed over. The reader
+        // holds these back until the callback has played them.
+        if (ok && meters_)
+            pushMeters(*meters_, *plan_, plan_->rendererMeterNodes, seen, streamLocal_, n, true);
         const std::int64_t next = loopR_.next(pos_, pos_ + n);
         if (next != pos_ + n) detail::wrapTo(*plan_, next, 0);
         pos_ = next;
@@ -996,6 +1094,11 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     bool ok = true;
     for (std::size_t i : p.liveNodes) ok = detail::processNode(p, i, livePos_, k, t, self) && ok;
     if (!ok) processErrors_.fetch_add(1);
+    // Metering (P5.3c): the callback measures the live nodes it just played, at
+    // the position it played them from. While the transport is stopped nothing
+    // is rendered ahead, so a monitored input is heard as it is produced.
+    if (meters_ && (playing || !wantPlaying_))
+        pushMeters(*meters_, p, p.liveMeterNodes, rtEpoch_, liveStream_, k, false);
     const detail::Node& master = p.nodes[p.mainMaster];
     std::copy_n(master.post.l.begin(), k, out[0]);
     std::copy_n(master.post.r.begin(), k, out[1]);

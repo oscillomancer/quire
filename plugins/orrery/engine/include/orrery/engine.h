@@ -72,6 +72,12 @@ class Engine {
     // Audio thread. Writes `frames` samples (≤ maxBlock) to left/right.
     void process(std::span<const Event> events, const Transport& transport, float* left,
                  float* right, std::uint32_t frames) SUPPLE_RT;
+    // Audio thread, while active but not processing (the audio-thread half of
+    // clap_plugin_params.flush, which cannot compile a program): the values the
+    // plugin's store holds now, one per table parameter. A running engine glides
+    // to them like any other parameter move; after prepare()/reset() the next
+    // block adopts them and snaps, with a fresh instance's seeding.
+    void setValues(std::span<const double> values) SUPPLE_RT;
 
     // Audio thread (or when stopped): voices sounding, and whether the output
     // is silent with no voices and no FX tail (the plugin may sleep).

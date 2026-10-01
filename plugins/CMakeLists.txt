@@ -70,6 +70,12 @@ if(SUPPLE_BUILD_PLUGINS)
         set_tests_properties(plugin.${dir}.unload PROPERTIES
           LABELS "rt;plugin-unload" TIMEOUT 30)
       endif()
+      # A render after reset() must depend only on the state set for it: the
+      # sandbox and the engine reuse one instance across renders.
+      add_test(NAME plugin.${dir}.reset COMMAND clap-reset-check
+        "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
+      set_tests_properties(plugin.${dir}.reset PROPERTIES
+        LABELS "rt;plugin-reset" TIMEOUT 180)
       if(NOT SUPPLE_SANITIZE)
         add_test(NAME plugin.${dir}.validator
           COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
