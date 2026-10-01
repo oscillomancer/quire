@@ -13,10 +13,12 @@
 #include "chrome.h"
 #include "fake_llm.h"
 #include "file_actions.h"
+#include "shell.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
+#include "supple/peaks/peaks.h"
 #include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
@@ -489,4 +491,128 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     CHECK(off < image.rgba.size() / 4 / 200);
     if (auto stopped = a.dispatcher->execute({"engine.stop", json::Value::object(), ui}); !stopped)
         MESSAGE("engine.stop: " << stopped.error().message);
+}
+
+// A control's rect as it is laid out (the toolkit arranges a container's
+// children in the container's own space, so this is the point to press).
+void pressAt(ui::Root& root, const ui::Node& node) {
+    const ui::Rect b = node.bounds();
+    const ui::Point at{b.x + b.w / 2, b.y + b.h / 2};
+    root.pointer({ui::PointerEvent::Type::Move, at});
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
+}
+
+TEST_CASE("the TCP's input menu lists the device's ports and picks one (P5.13)") {
+    App a;
+    if (!a.ok) {
+        MESSAGE("skipped: no offscreen GL in this environment");
+        return;
+    }
+    // What engine.inputs answers: three capture ports and two MIDI devices,
+    // named the way PipeWire's JACK reports them; empty while stopped.
+    bool running = true;
+    auto inputs = [&running] {
+        json::Value v = json::Value::object();
+        v["running"] = running;
+        v["backend"] = "stub";
+        json::Value audio = json::Value::array();
+        json::Value midi = json::Value::array();
+        if (running) {
+            for (int ch = 1; ch <= 3; ++ch) {
+                json::Value e = json::Value::object();
+                e["channel"] = static_cast<std::int64_t>(ch);
+                e["port"] = "M Series Pro:capture_AUX" + std::to_string(ch - 1);
+                audio.push_back(std::move(e));
+            }
+            midi.push_back(json::Value("Keystation"));
+            midi.push_back(json::Value("Launchpad"));
+        }
+        v["audio"] = std::move(audio);
+        v["midi"] = std::move(midi);
+        return v;
+    };
+    peaks::PeakService peaks(peaks::defaultCacheDir("quire-test"),
+                             [](std::function<void()> f) { f(); });
+    gui::MeterFeed meters;
+    gui::Shell shell(*a.app, *a.dispatcher, a.ui, "", peaks, meters, inputs);
+    a.root->setContent(shell.build(*a.root, *a.actions));
+    const cmd::Origin ui{cmd::Origin::Type::Ui, "gui-test", {}};
+    json::Value add = json::Value::object();
+    add["name"] = "Gtr";
+    auto created = a.dispatcher->execute({"track.add", std::move(add), ui});
+    REQUIRE(created);
+    const std::string track = (*created)["track"].asString();
+    const model::Id id = *model::Id::parse(track);
+    shell.sync();
+    a.root->frame(false);
+    // The TCP pools its rows, so the control is re-fetched after every change.
+    auto inputButton = [&]() -> ui::Node* {
+        return shell.arrange()->tcpPanel().controlNode(id, "input");
+    };
+    // The menu lives in the popup on the overlay: take the list out of it.
+    auto openMenu = [&]() -> ui::List* {
+        ui::Node* button = inputButton();
+        REQUIRE(button);
+        pressAt(*a.root, *button);
+        a.root->frame(false);
+        ui::Node* frame = a.root->find("popup");
+        if (!frame) return nullptr;
+        for (const auto& child : frame->children())
+            if (auto* list = dynamic_cast<ui::List*>(child.get())) return list;
+        return nullptr;
+    };
+    REQUIRE(inputButton());
+    CHECK(inputButton()->valueText() == "in \u2014");  // nothing chosen yet
+    // The strip shows the port names; a narrow strip clips the tail, so the
+    // name is a prefix (the menu shows them whole).
+    ui::List* menu = openMenu();
+    REQUIRE(menu);
+    CHECK(menu->count() == 9);
+    menu->onActivate(1);                      // "in 2" -> record_input [2]
+    CHECK(a.root->find("popup") == nullptr);  // it closed
+    shell.sync();
+    a.root->frame(false);
+    REQUIRE(inputButton());
+    CHECK(inputButton()->valueText().rfind("AUX1", 0) == 0);
+    // A stereo pair is one entry ([n, n+1]).
+    menu = openMenu();
+    REQUIRE(menu);
+    menu->onActivate(3);  // stereo 1-2
+    shell.sync();
+    a.root->frame(false);
+    REQUIRE(inputButton());
+    CHECK(inputButton()->valueText().rfind("AUX0", 0) == 0);
+    // A MIDI device: the strip shows the device, and the engine clears the
+    // audio channels for it.
+    menu = openMenu();
+    REQUIRE(menu);
+    menu->onActivate(7);  // the first device (Keystation)
+    shell.sync();
+    a.root->frame(false);
+    REQUIRE(inputButton());
+    CHECK(inputButton()->valueText().rfind("Keystat", 0) == 0);
+    const model::Track* tr = a.app->head().tracks.find(id);
+    REQUIRE(tr);
+    REQUIRE(tr->record.input);
+    const model::Route* route = a.app->head().routes.find(*tr->record.input);
+    REQUIRE(route);
+    CHECK(route->from.midiDevice.value_or("") == "Keystation");
+    CHECK_FALSE(route->from.hwChannels.has_value());
+    // While the engine is stopped the device reports nothing: one disabled
+    // entry, and picking it changes nothing.
+    running = false;
+    menu = openMenu();
+    REQUIRE(menu);
+    CHECK(menu->count() == 1);
+    menu->onActivate(0);
+    shell.sync();
+    a.root->frame(false);
+    REQUIRE(inputButton());
+    CHECK(inputButton()->valueText().rfind("Keystat", 0) == 0);  // unchanged
+    // Detach the shell's tree while the shell (and the meter feed it holds a
+    // reference to) is still alive: its rows release their meters on the way
+    // out.
+    a.root->closePopups();
+    a.root->setContent(std::make_unique<ui::Node>("detached"));
 }

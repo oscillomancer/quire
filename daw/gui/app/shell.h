@@ -12,7 +12,9 @@
 #include "app_actions.h"
 #include "meter_feed.h"
 #include "supple/engine/app.h"
+#include "supple/json/value.h"
 #include "supple/peaks/peaks.h"
+#include "supple/ui/geometry.h"
 #include "supple/ui/node.h"
 #include "supple/views/arrange.h"
 
@@ -27,8 +29,13 @@ class TransportBar;
 
 class Shell {
   public:
+    // The device's record inputs (the shape of `engine.inputs`: running, audio
+    // [{channel, port}], midi [names]). The app passes the engine's; a test
+    // passes a stub. Empty: the shell asks the bus.
+    using InputsSource = std::function<json::Value()>;
+
     Shell(engine::EngineApp& app, cmd::Dispatcher& dispatcher, UiState& ui, std::string status,
-          peaks::PeakService& peaks, MeterFeed& meters);
+          peaks::PeakService& peaks, MeterFeed& meters, InputsSource inputs = {});
     ~Shell();
     // The tree to hand to ui::Root::setContent (the shell keeps pointers into
     // it). Needs the root (the transport bar's forms are popups) and the
@@ -44,6 +51,9 @@ class Shell {
     // and polls once per frame. Shared with the mixer: one feed, one poll.
     MeterFeed& meters() { return meters_; }
     UiState& selection() { return ui_; }
+    // The engine's record inputs, refreshed at most twice a second (force asks
+    // now — the picker does, so it lists what the device has right now).
+    const json::Value& inputs(bool force = false);
     // Shown by the app's status line when a command fails.
     std::function<void(const std::string&)> onError;
 
@@ -51,6 +61,10 @@ class Shell {
     bool isSelected(const model::Id& track) const;
     void selectTrack(const model::Id& track, unsigned mods);
     void commit(std::string_view command, json::Value args, std::string gesture);
+    // What the strip's input button says: the port names when the engine's list
+    // is at hand, the channel numbers otherwise.
+    std::string inputText(const model::Id& track, const std::string& channels) const;
+    void openInputMenu(const model::Id& track, const ui::Rect& anchor);
 
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
@@ -62,6 +76,10 @@ class Shell {
     views::ArrangeView* arrange_ = nullptr;
     std::unique_ptr<TransportBar> transport_;
     MeterFeed& meters_;
+    InputsSource inputsSource_;
+    json::Value inputs_;
+    double inputsAtMs_ = -1e9;
+    ui::Root* root_ = nullptr;
     std::optional<std::string> selectAnchor_;  // Shift+click extends from here
 };
 

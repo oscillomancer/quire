@@ -16,6 +16,17 @@
 namespace supple::views {
 namespace {
 
+// The node's rect in window coordinates: a popup anchors against these, and
+// every node's bounds are relative to its parent (root.h's popups).
+ui::Rect absoluteRect(const ui::Node& node) {
+    ui::Rect r = node.bounds();
+    for (const ui::Node* p = node.parent(); p; p = p->parent()) {
+        r.x += p->bounds().x;
+        r.y += p->bounds().y;
+    }
+    return r;
+}
+
 std::string_view typeToken(model::StripType t) {
     switch (t) {
         case model::StripType::Channel:
@@ -104,7 +115,8 @@ class TcpPanel::Row : public ui::Node {
     ui::PanControl* pan_ = nullptr;
     ui::Meter* meter_ = nullptr;
     ui::Label* fx_ = nullptr;
-    ui::Label* input_ = nullptr;
+    ui::Button* input_ = nullptr;
+    std::string inputText_;  // the full label; arrange() clips it to fit
 };
 
 TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
@@ -183,7 +195,10 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
     };
     meter_ = &emplace<ui::Meter>(id + ".meter", true);
     fx_ = &emplace<ui::Label>(id + ".fx", "", ui::Font::Mono, "caption", "ink-quiet");
-    input_ = &emplace<ui::Label>(id + ".input", "", ui::Font::Mono, "caption", "ink-quiet");
+    input_ = &emplace<ui::Button>(id + ".input", "in \u2014", [this] {
+        if (!track_ || !panel_.cb_.pickInput) return;
+        panel_.cb_.pickInput(*track_, absoluteRect(*input_));
+    });
 }
 
 TcpPanel::Row::~Row() = default;
@@ -224,16 +239,17 @@ void TcpPanel::Row::refresh(const model::Session& session) {
     if (bypassed) fxText += " byp";
     if (offline) fxText += " off";
     fx_->setText(fxText);
-    // The assigned record input (choosing one needs an input picker: follow-up).
-    std::string in = "in \u2014";
+    // The record input: the view knows the channels, the app knows the device's
+    // port names (engine.inputs), so the app writes the label.
+    std::string channels;
     if (tr->record.input)
-        if (const model::Route* r = session.routes.find(*tr->record.input);
-            r && r->from.hwChannels) {
-            in = "in ";
+        if (const model::Route* r = session.routes.find(*tr->record.input); r && r->from.hwChannels)
             for (std::size_t i = 0; i < r->from.hwChannels->size(); ++i)
-                in += (i ? "/" : "") + std::to_string((*r->from.hwChannels)[i]);
-        }
-    input_->setText(in);
+                channels += (i ? "/" : "") + std::to_string((*r->from.hwChannels)[i]);
+    const std::string inputText =
+        panel_.cb_.inputText ? panel_.cb_.inputText(*track_, channels)
+                             : (channels.empty() ? std::string("in \u2014") : "in " + channels);
+    if (input_->valueText() != inputText) input_->setText(inputText);
 }
 
 void TcpPanel::Row::unbind() {
@@ -283,8 +299,10 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         tx += wide ? 30.0f : 21.0f;
     }
     if (input_->visible) {
-        input_->arrange(canvas, {tx, ty, 46, 14});
-        tx += 48;
+        // The input names the device's ports; the strip has room for a short
+        // one and the picker's menu shows them whole.
+        input_->arrange(canvas, {tx, ty, 58, 14});
+        tx += 60;
     }
     if (fx_->visible) fx_->arrange(canvas, {tx, ty, std::max(20.0f, right - tx - 8), 14});
     fader_->visible = big;

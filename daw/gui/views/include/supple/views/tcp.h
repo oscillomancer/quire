@@ -16,6 +16,7 @@
 #include "supple/json/value.h"
 #include "supple/model/session.h"
 #include "supple/ui/controls.h"
+#include "supple/ui/geometry.h"
 #include "supple/ui/node.h"
 #include "supple/views/track_layout.h"
 
@@ -39,6 +40,11 @@ struct TcpCallbacks {
     // attaches a shown meter to its feed and detaches it before it is reused.
     std::function<void(const std::string& track, ui::Meter* meter)> meterShown;
     std::function<void(ui::Meter* meter)> meterHidden;
+    // The strip's input button: what to write on it (the app knows the device's
+    // port names; `channels` is the view's "1/2"), and the picker. The view
+    // hands the button's window rect so the app can anchor its menu there.
+    std::function<std::string(const model::Id& track, const std::string& channels)> inputText;
+    std::function<void(const model::Id& track, const ui::Rect& anchor)> pickInput;
 };
 
 class TcpPanel : public ui::Node {

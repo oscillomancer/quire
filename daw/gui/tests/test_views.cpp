@@ -610,6 +610,8 @@ struct TcpHarness {
     std::optional<std::string> anchor;
     gui::MeterFeed* feed = nullptr;
     views::ArrangeView* view = nullptr;
+    std::string pickedTrack;  // the input button was clicked for this strip
+    ui::Rect pickedAnchor{};  // and it handed this window rect to the app
 
     views::ArrangeView* mount(ui::Root& root, Session& s, gui::MeterFeed* meters = nullptr) {
         session = &s;
@@ -641,6 +643,22 @@ struct TcpHarness {
             }
             selected = {(*r)["track"].asString()};  // the new strip is selected
             anchor = selected.front();
+        };
+        // The app names the ports (engine.inputs); these tests stand in for it.
+        cb.inputText = [](const model::Id&, const std::string& channels) {
+            std::string out;
+            for (std::size_t i = 0; i < channels.size();) {
+                std::size_t j = channels.find('/', i);
+                if (j == std::string::npos) j = channels.size();
+                out += (out.empty() ? "" : "+") +
+                       ("AUX" + std::to_string(std::stoi(channels.substr(i, j - i)) - 1));
+                i = j + 1;
+            }
+            return out.empty() ? std::string("in \u2014") : out;
+        };
+        cb.pickInput = [this](const model::Id& id, const ui::Rect& rect) {
+            pickedTrack = id.str();
+            pickedAnchor = rect;
         };
         if (meters) {
             cb.meterShown = [meters](const std::string& track, ui::Meter* meter) {
@@ -704,6 +722,16 @@ void press(ui::Root& root, ui::Node* node, int clicks = 1, unsigned mods = 0) {
     const ui::Point at{b.x + b.w / 2, b.y + b.h / 2};
     root.pointer({ui::PointerEvent::Type::Down, at, 1, clicks, mods});
     root.pointer({ui::PointerEvent::Type::Up, at, 1, clicks, mods});
+}
+
+// A control's rect as it is laid out (the toolkit arranges a container's
+// children in the container's own space, so this is the point to press).
+void pressAt(ui::Root& root, const ui::Node& node) {
+    const ui::Rect b = node.bounds();
+    const ui::Point at{b.x + b.w / 2, b.y + b.h / 2};
+    root.pointer({ui::PointerEvent::Type::Move, at});
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
 }
 
 double trackDb(Session& s, const char* id) {
@@ -915,6 +943,13 @@ TEST_CASE("golden: the TCP with one strip of each type") {
     solo["track"] = child;
     solo["solo"] = "on";
     run("track.set", std::move(solo));
+    // A record input on the child: its button names the device's port (the app
+    // supplies them from engine.inputs), not just the channel number.
+    json::Value rec = json::Value::object();
+    rec["track"] = child;
+    rec["record_input"] = json::Value::array();
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(2)));
+    run("track.set", std::move(rec));
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
     TcpHarness tcp;
     views::ArrangeView* arrange = tcp.mount(root, s);
@@ -1031,4 +1066,42 @@ TEST_CASE("the meters repaint only themselves, not the arrange content") {
     CHECK(root.stats().repaintedArea - area > 0.0);
     (void)repaints;
     (void)meterRect;
+}
+
+TEST_CASE("the strip's input button names the ports and hands the anchor to the app (P5.13)") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    const cmd::Origin test{cmd::Origin::Type::Test, "gui-test", {}};
+    json::Value add = json::Value::object();
+    add["name"] = "Rec";
+    auto created = s.dispatcher->execute({"track.add", std::move(add), test});
+    REQUIRE(created);
+    const std::string track = (*created)["track"].asString();
+    json::Value rec = json::Value::object();
+    rec["track"] = track;
+    rec["record_input"] = json::Value::array();
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(1)));
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(2)));
+    REQUIRE(s.dispatcher->execute({"track.set", std::move(rec), test}));
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    views::Viewport v;
+    v.pixelsPerSecond = 40;
+    v.scrollY = 1e6f;  // the new strip is the last row
+    arrange->setViewport(v);
+    root.damageAll();
+    root.frame(false);
+    ui::Node* button = arrange->tcpPanel().controlNode(*model::Id::parse(track), "input");
+    REQUIRE(button);
+    // The strip shows the port names; a narrow strip clips the tail, so the
+    // name is a prefix (the menu shows them whole).
+    CHECK(button->valueText().rfind("AUX0", 0) == 0);
+    pressAt(root, *button);  // and the app is asked to pick
+    CHECK(tcp.pickedTrack == track);
+    CHECK(tcp.pickedAnchor.w > 0);
+    CHECK(tcp.pickedAnchor.x > 0);
+    CHECK(tcp.pickedAnchor.y > 0);
 }

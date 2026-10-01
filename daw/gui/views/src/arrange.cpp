@@ -347,6 +347,14 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     forward.meterHidden = [this](ui::Meter* meter) {
         if (tcpCallbacks_.meterHidden) tcpCallbacks_.meterHidden(meter);
     };
+    // The input button's two: what to write on it, and the picker (both are the
+    // app's, since it owns the engine's input list and the popup).
+    forward.inputText = [this](const model::Id& id, const std::string& channels) {
+        return tcpCallbacks_.inputText ? tcpCallbacks_.inputText(id, channels) : std::string{};
+    };
+    forward.pickInput = [this](const model::Id& id, const ui::Rect& anchor) {
+        if (tcpCallbacks_.pickInput) tcpCallbacks_.pickInput(id, anchor);
+    };
     tcp_ = &body.emplace<TcpPanel>(layout_, view_, std::move(forward));
     tcp_->layout.width = ui::SizeRule::fixed(kTcpWidth);
     auto& lanesCol = body.emplace<Node>("lanes-column");
