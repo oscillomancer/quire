@@ -6,6 +6,7 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/app.h>
 #include <supple/model/schemas.h>
 
@@ -476,4 +477,56 @@ TEST_CASE("project.open returns migration warnings in its load report") {
     REQUIRE(loaded.find("warnings"));
     CHECK(loaded["warnings"].size() == 2);
     CHECK(loaded["warnings"].at(1).find("path")->asString() == "/project/console9");
+}
+
+TEST_CASE("item.add hashes the file, reads its header, and adds one source per file") {
+    Workdir dir;
+    audio::AudioData source;
+    source.sampleRate = 48000;
+    source.channels.assign(2, std::vector<float>(48000));  // 1 s stereo
+    for (std::size_t i = 0; i < source.frames(); ++i)
+        source.channels[0][i] = source.channels[1][i] =
+            static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
+    const fs::path file = dir.path / "source.wav";
+    REQUIRE(audio::writeWav(file, source).ok());
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Audio"})");
+    const std::string add =
+        "{\"track\":\"tr_1\",\"audio_file\":" + json::writeCompact(json::Value(file.string())) +
+        "}";
+
+    audio::resetDecodeCountForTests();
+    const auto first = run(bus, "item.add", add);
+    CHECK(first.find("source")->asString() == "md_1");
+    for (int i = 0; i < 100; ++i) run(bus, "item.add", add);
+    // One source for one file, and no decode to learn its metadata.
+    CHECK(app->head().media.size() == 1);
+    CHECK(app->head().items.size() == 101);
+    CHECK(audio::decodeCountForTests() == 0);
+    const auto* md = app->head().media.find(model::Id{model::Kind::Media, 1});
+    REQUIRE(md != nullptr);
+    CHECK(md->hash == sha256File(file).value());
+    CHECK(md->sampleRate == 48000);
+    CHECK(md->channels == 2);
+    CHECK(md->frames == 48000);
+    CHECK(md->format == "wav");
+    // The item's length came from the header (1 s at 120 bpm = 2 beats), and
+    // every add used the same source.
+    const auto* item = app->head().items.find(model::Id{model::Kind::Item, 1});
+    REQUIRE(item != nullptr);
+    CHECK(item->length == doctest::Approx(2.0));
+
+    // The hash survives a save/open round trip: the schema accepts the hashed
+    // form (and the empty form old projects carry — see the fuzz corpus).
+    const std::string save =
+        "{\"path\":" + json::writeCompact(json::Value((dir.path / "project.json").string())) + "}";
+    run(bus, "project.save", save);
+    auto reopened = makeApp(dir.path / "reopened");
+    REQUIRE(reopened->open(dir.path / "project.json").ok());
+    const auto* again = reopened->head().media.find(model::Id{model::Kind::Media, 1});
+    REQUIRE(again != nullptr);
+    CHECK(again->hash == md->hash);
 }

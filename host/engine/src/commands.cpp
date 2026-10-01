@@ -10,6 +10,7 @@
 #include "analysis_commands.h"
 #include "render_commands.h"
 #include "supple/audio/audio_file.h"
+#include "supple/base/sha256.h"
 #include "supple/engine/app.h"
 #include "supple/model/schemas.h"
 #include "supple/notation/notation.h"
@@ -607,6 +608,22 @@ struct HistoryList {
     std::vector<HistoryEntry> versions;
     bool canUndo = false, canRedo = false;
 };
+
+// The model's name for a container ("wav"/"flac"/"mp3"): the detected one, not
+// the file's extension.
+const char* formatName(audio::Container container) {
+    switch (container) {
+        case audio::Container::Wav:
+            return "wav";
+        case audio::Container::Flac:
+            return "flac";
+        case audio::Container::Mp3:
+            return "mp3";
+        case audio::Container::Unknown:
+            return "";
+    }
+    return "";
+}
 
 // Compiles notation into a MIDI source; the length in beats is the item's.
 Result<std::pair<model::MidiSource, double>> compileNotation(const model::Session& s,
@@ -1379,21 +1396,35 @@ void registerEngineCommands(cmd::Registry& registry) {
                 take.source = mi;
                 r.source = mi.str();
             } else if (a.audioFile) {
-                auto data = audio::readAudio(*a.audioFile);
-                if (!data) return std::move(data).error().at("/audio_file");
-                model::MediaSource md;
-                md.path = fs::absolute(*a.audioFile).string();
-                md.format = fs::path(*a.audioFile).extension().string().substr(1);
-                md.sampleRate = data->sampleRate;
-                md.channels = static_cast<int>(data->channelCount());
-                md.frames = static_cast<std::int64_t>(data->frames());
-                if (!a.length) {
-                    const double secs = data->seconds();
+                // The header, not a decode: the media model needs only the rate,
+                // the channel count and the length, and adding one file to many
+                // items must not decode it many times. The hash is the source's
+                // identity, so a second add of the same bytes reuses the md_*.
+                auto info = audio::inspect(*a.audioFile);
+                if (!info) return std::move(info).error().at("/audio_file");
+                auto hash = sha256File(*a.audioFile);
+                if (!hash) return std::move(hash).error().at("/audio_file");
+                if (!a.length && info->sampleRate > 0) {
+                    const double secs = static_cast<double>(info->frames) / info->sampleRate;
                     length = s.timeMap->beatAt(s.timeMap->secondsAt(pos) + secs) - pos;
                 }
-                const Id md_ = t.create(std::move(md));
-                take.source = md_;
-                r.source = md_.str();
+                // The same bytes are one media source: a second add of the same
+                // file reuses the source it already has.
+                if (const auto known = model::mediaSourceWithHash(s, *hash)) {
+                    take.source = *known;
+                    r.source = known->str();
+                } else {
+                    model::MediaSource md;
+                    md.path = fs::absolute(*a.audioFile).string();
+                    md.hash = *hash;
+                    md.format = formatName(info->container);
+                    md.sampleRate = info->sampleRate;
+                    md.channels = info->channels;
+                    md.frames = info->frames;
+                    const Id md_ = t.create(std::move(md));
+                    take.source = md_;
+                    r.source = md_.str();
+                }
             }
             const Id tk = t.create(std::move(take));
             model::Item item;

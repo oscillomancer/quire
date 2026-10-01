@@ -1,5 +1,5 @@
 supple_add_library(audio-file
-  SOURCES src/audio_file.cpp src/resample.cpp src/wav_stream.cpp src/dr_impl.c
+  SOURCES src/audio_file.cpp src/resample.cpp src/wav_stream.cpp src/inspect.cpp src/dr_impl.c
   DEPS supple::core-base supple::core-dsp
   PRIVATE_DEPS supple::dr-libs)
 # Third-party code: no warnings for the dr_libs translation unit.

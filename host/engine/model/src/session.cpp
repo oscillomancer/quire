@@ -493,6 +493,13 @@ std::optional<Id> trackOfFx(const Session& s, Id fx) {
     return std::nullopt;
 }
 
+std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash) {
+    if (hash.empty()) return std::nullopt;  // an unhashed source is not an identity
+    for (const auto& e : s.media)
+        if (e.value->hash == hash) return e.id;
+    return std::nullopt;
+}
+
 }  // namespace supple::model
 
 namespace supple::model {

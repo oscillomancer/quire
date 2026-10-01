@@ -10,6 +10,7 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/app.h>
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
@@ -541,6 +542,11 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     CHECK(take.find("lost_frames")->asInt() == 0);
     CHECK(fs::exists(take.find("file")->asString()));
     CHECK(app->head().items.size() == 1);
+    // The committed source carries the recording's hash: the recorder took the
+    // bytes when it closed the take, so the commit read nothing back.
+    REQUIRE(app->head().media.size() == 1);
+    CHECK(app->head().media.begin()->value->hash ==
+          sha256File(fs::path(take.find("file")->asString())).value());
     app->stopEngine();
 
     // The take plays back in a render: the sine, centred (-3 dB).

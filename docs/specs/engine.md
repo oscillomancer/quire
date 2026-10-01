@@ -232,6 +232,15 @@ preset's engine tests (with the dummy backend).
   1200 ms like REAPER's media buffer).
 - **Peaks**: min/max pyramids built on I/O threads, cached by content hash,
   never in project diffs.
+- **Content hash**: `MediaSource.hash` is `"sha256:<hex>"` of a file's bytes —
+  read with the file when it is imported (`item.add`, media import) and by the
+  recorder's I/O thread as it closes each take, so a commit never reads a
+  recording back. Adding the same bytes again reuses the media source it already
+  has. Metadata for an import comes from the container's header
+  (`audio::inspect`), never a decode: adding one file to many items costs one
+  header read at a time. Projects saved before the hash existed keep their empty
+  hashes (the peak cache falls back to path + size + mtime); a file is hashed
+  when it is next imported or recorded.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last
