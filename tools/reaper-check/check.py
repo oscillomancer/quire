@@ -182,7 +182,7 @@ def private_config(directory, plugin_dir, user_config, *, block=256, device="dum
     # Fresh allowlist, not a copy of the user's devices, projects, caches or paths.
     ini = cfg / "reaper.ini"
     ini.write_text(f"""[reaper]
-linux_audio_mode={3 if device == "dummy" else 1}
+linux_audio_mode={2 if device == "dummy" else 0}
 linux_audio_srate=48000
 linux_audio_bsize={block}
 linux_audio_nch_in={0 if device == "dummy" else 2}

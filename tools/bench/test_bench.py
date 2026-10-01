@@ -106,7 +106,7 @@ class Bench(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 directory = Path(tmp)
                 ini = bench.check.private_config(directory, directory, directory, block=64, device="jack")
-                self.assertIn("linux_audio_mode=1", ini.read_text())
+                self.assertIn("linux_audio_mode=0", ini.read_text())
                 self.assertIn("linux_audio_bsize=64", ini.read_text())
                 self.assertIn("linux_audio_nch_in=2", ini.read_text())
 
