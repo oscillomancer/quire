@@ -14,6 +14,7 @@
 #include <supple/host/clap_host.h>
 
 #include "fake_jack.h"
+#include "meters.h"
 #include "plan.h"
 
 using namespace supple;
@@ -1123,6 +1124,10 @@ TEST_CASE("anticipative monitoring: live input and rendered playback, identical 
     s = mode.commit().value();
     constexpr std::int64_t kCycles = 400;  // 102400 frames at 256
     audio::AudioData reference;
+    std::optional<Id> vocalTrack;
+    for (const auto& e : s.tracks)
+        if (e.value->name == "Vocal") vocalTrack = e.id;
+    REQUIRE(vocalTrack.has_value());
     for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
         INFO("anticipative " << options.anticipative);
         auto pool = makePool();
@@ -1139,6 +1144,17 @@ TEST_CASE("anticipative monitoring: live input and rendered playback, identical 
         CHECK(engine.anticipationMisses() == 0);
         CHECK(engine.processErrors() == 0);
         CHECK(engine.transport().sample == kCycles * 256);
+        // The live strip's meter reports the monitored input it has heard —
+        // pushed by the callback in both modes (P5.3c).
+        const auto bank = engine.meterBank();
+        REQUIRE(bank != nullptr);
+        const Engine::MeterClock clock = engine.meterClock();
+        double vocal = 0.0;
+        for (const MeterReading& r : bank->read(clock.epoch, clock.heardStream))
+            if (r.track == *vocalTrack)
+                vocal = std::max(
+                    {vocal, static_cast<double>(r.peak[0]), static_cast<double>(r.peak[1])});
+        CHECK(vocal > 0.05);
         engine.stop();
         CHECK(engine.lastStopOnAudioThread());
         const auto& cap = backend.capture();
@@ -1994,4 +2010,148 @@ TEST_CASE("a master key is legal and its downstream node follows the live execut
                               [&](const auto& n) { return n.id == root; });
     REQUIRE(other != plan->nodes.end());
     CHECK(other->live);
+}
+
+// The meters (P5.3c, engine.md §2.3): a strip's reading covers what the
+// listener has *heard*. With anticipation the renderer is up to `render_ahead`
+// ahead of the playhead, so its numbers must be held back until the callback
+// has played them.
+TEST_CASE("meters report what has been heard, not what has been rendered" *
+          doctest::description("rt")) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-meters-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    // A -6 dBFS sine item (amplitude 0.5) on one track, a silent track beside it.
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(96000));
+    for (std::size_t i = 0; i < tone.channels[0].size(); ++i) {
+        const double s = 0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000.0);
+        tone.channels[0][i] = static_cast<float>(s);
+        tone.channels[1][i] = static_cast<float>(s);
+    }
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    model::Track sine;
+    sine.name = "Sine";
+    sine.parent = kMaster;
+    const Id sineTrack = t.create(sine);
+    model::Track quiet;
+    quiet.name = "Quiet";
+    quiet.parent = kMaster;
+    const Id quietTrack = t.create(quiet);
+    t.modify<model::Track>(kMaster, [&](model::Track& m) {
+        m.children.push_back(sineTrack);
+        m.children.push_back(quietTrack);
+    });
+    const Id md = t.create(model::MediaSource{"tone.wav", "", "wav", 48000, 2, 96000});
+    model::Take take;
+    take.source = md;
+    const Id tk = t.create(take);
+    model::Item item;
+    item.track = sineTrack;
+    item.length = 2.0;
+    item.takes = {tk};
+    item.activeTake = tk;
+    t.create(item);
+    const model::Session session = t.commit().value();
+
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
+    Engine engine(pool, media, EngineOptions{.workers = 0});  // anticipative
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(session, dir).ok());
+    const auto bank = engine.meterBank();
+    REQUIRE(bank != nullptr);
+    const Id master = kMaster;
+    // One read per call is one GUI frame: the readings cover the audio heard
+    // since the previous frame, so a test must not read twice and expect both.
+    struct Levels {
+        double peak = -1.0, rms = -1.0;
+    };
+    auto frame = [&] {
+        const Engine::MeterClock clock = engine.meterClock();
+        return bank->read(clock.epoch, clock.heardStream);
+    };
+    auto levelOf = [](const std::vector<MeterReading>& readings, model::Id which) {
+        Levels out;
+        for (const MeterReading& r : readings)
+            if (r.track == which) {
+                out.peak = std::max(static_cast<double>(r.peak[0]), static_cast<double>(r.peak[1]));
+                out.rms = std::max(static_cast<double>(r.rms[0]), static_cast<double>(r.rms[1]));
+            }
+        return out;
+    };
+
+    engine.play();
+    // The renderer is 200 ms ahead of the playhead and the callback has pulled
+    // nothing, so nothing has been heard yet: every meter is silent.
+    REQUIRE(engine.awaitRendered(9600));
+    CHECK(engine.cycles() == 0);
+    const auto before = frame();
+    CHECK(levelOf(before, sineTrack).peak == 0.0);
+    CHECK(levelOf(before, quietTrack).peak == 0.0);
+    CHECK(levelOf(before, master).peak == 0.0);
+
+    // The callback pulls 200 ms: the sine is heard, the silent strip is not.
+    runAhead(engine, backend, 9600 / 128, 128);
+    CHECK(engine.cycles() >= 9600 / 128);
+    const auto after = frame();
+    CHECK(levelOf(after, quietTrack).peak == 0.0);
+    CHECK(levelOf(after, quietTrack).rms == 0.0);
+    CHECK(levelOf(after, sineTrack).peak > 0.2);
+    // A steady sine: the RMS is the peak over √2, so a strip's peak and energy
+    // are of the same signal (a strip's post is its encoded Channel level; the
+    // master's is the decoded mix).
+    CHECK(levelOf(after, sineTrack).rms * std::sqrt(2.0) ==
+          doctest::Approx(levelOf(after, sineTrack).peak).epsilon(0.01));
+    // What is heard: the master's meter is exactly the level an offline render
+    // of the same span writes — metering never touches the signal.
+    auto offline =
+        renderOffline(session, pool, {.startSeconds = 0, .endSeconds = 0.2, .projectDir = dir});
+    REQUIRE(offline);
+    double offlinePeak = 0.0;
+    for (float sample : offline->audio.channels[0])
+        offlinePeak = std::max(offlinePeak, std::fabs(static_cast<double>(sample)));
+    CHECK(levelOf(after, master).peak == doctest::Approx(offlinePeak).epsilon(1e-6));
+    CHECK_FALSE(bank->droppedRenderer());  // the reader kept up
+    engine.stop();
+    std::filesystem::remove_all(dir);
+}
+
+// A monitored input is heard while the transport is stopped (nothing is
+// rendered ahead of it, so there is no play position to wait for): its meter
+// shows it, and the master's meter is exactly what the device was given.
+TEST_CASE("meters show a monitored input while the transport is stopped" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(constantInput(4096));
+    Engine engine(pool, media, kInCallback);  // no anticipation: the callback meters
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206))).ok());  // its track monitors 1-2
+    backend.run(4);                                                // stopped: input only
+
+    const auto bank = engine.meterBank();
+    REQUIRE(bank != nullptr);
+    const Engine::MeterClock clock = engine.meterClock();
+    const auto readings = bank->read(clock.epoch, clock.heardStream);
+    double monitorPeak = -1.0, masterPeak = -1.0;
+    for (const MeterReading& r : readings) {
+        const double peak =
+            std::max(static_cast<double>(r.peak[0]), static_cast<double>(r.peak[1]));
+        if (r.track == kMaster)
+            masterPeak = peak;
+        else
+            monitorPeak = std::max(monitorPeak, peak);
+    }
+    CHECK(monitorPeak > 0.0);  // the monitored input reached the strip
+    const auto& cap = backend.capture();
+    double devicePeak = 0.0;
+    for (float sample : cap.channels[0])
+        devicePeak = std::max(devicePeak, std::fabs(static_cast<double>(sample)));
+    CHECK(masterPeak == doctest::Approx(devicePeak).epsilon(1e-6));
+    engine.stop();
 }
