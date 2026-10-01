@@ -10,4 +10,11 @@ endif()
 supple_add_tests(core-analysis SOURCES tests/test_loudness.cpp tests/test_analysis.cpp tests/test_live.cpp LABELS rt tsan-skip)
 if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(core-analysis.tests PRIVATE SUPPLE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  # A sanitized build of these suites is several times slower than a plain one:
+  # the preset's 600 s default was reached at 612 s under UBSan on a loaded
+  # machine, which reads as a failure. Give them room whenever ASan or UBSan is
+  # on (the test's own TIMEOUT wins over the preset's default).
+  if(SUPPLE_SANITIZE STREQUAL "address" OR SUPPLE_SANITIZE STREQUAL "undefined")
+    set_tests_properties(core-analysis.tests PROPERTIES TIMEOUT 1800)
+  endif()
 endif()
