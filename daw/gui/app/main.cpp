@@ -28,6 +28,7 @@
 #include "chrome.h"
 #include "file_actions.h"
 #include "generate.h"
+#include "midi_editor.h"
 #include "plugin_windows.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
@@ -287,6 +288,7 @@ int main(int argc, char** argv) {
         agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
@@ -309,7 +311,11 @@ int main(int argc, char** argv) {
                                    chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults()));
         auto& body = frame->emplace<ui::Node>("main");
         body.layout.dir = ui::Layout::Dir::Row;
-        body.add(shell.build());
+        auto& center = body.emplace<ui::Node>("center");
+        center.layout.dir = ui::Layout::Dir::Column;
+        center.layout.width = ui::SizeRule::fraction();
+        center.add(shell.build());
+        center.add(midiEditor.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
@@ -424,6 +430,7 @@ int main(int argc, char** argv) {
             longestTaskMs = std::max(longestTaskMs, ms);
         }
         shell.sync();
+        midiEditor.sync();
         uiFile.tick((*app)->projectPath());
         if (o.script && warm) {
             views::Lanes& lanes = *shell.lanes();
@@ -472,6 +479,7 @@ int main(int argc, char** argv) {
         while (wallMs() - w0 < o.idleSeconds * 1000) {
             const int next = loop.pump();
             shell.sync();
+            midiEditor.sync();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
@@ -488,6 +496,7 @@ int main(int argc, char** argv) {
     (void)uiFile.flush((*app)->projectPath());
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
         shell.sync();
+        midiEditor.sync();
         root.damageAll();
         root.frame(false);
         auto written = gui::writePng(o.snapshot, root.readBack());

@@ -19,6 +19,10 @@ TEST_CASE("the stock plugins offer embeddable X11 editors (no display needed)") 
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
     auto plugins = host::scan(std::span<const std::filesystem::path>(&dir, 1));
     REQUIRE(plugins);
+    if (plugins->empty()) {  // a partial build (the plugins build with ALL)
+        MESSAGE("skipped: no stock plugins in " << dir.string());
+        return;
+    }
     int withEditor = 0;
     for (const host::PluginInfo& info : *plugins) {
         auto instance =

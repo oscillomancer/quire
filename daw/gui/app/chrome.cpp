@@ -68,7 +68,7 @@ ChromeLayout ChromeLayout::defaults() {
         {"Edit", {"history.undo", "history.redo", "-", "ui.actions"}},
         {"View", {"ui.actions", "ui.agent"}},
         {"Track", {"track.add:channel", "track.add:buss", "track.add:master"}},
-        {"Item", {"item.split:playhead", "item.remove:selected"}},
+        {"Item", {"item.split:playhead", "item.remove:selected", "-", "ui.midi.edit"}},
         {"Transport",
          {"transport.toggle", "transport.record", "transport.loop.toggle", "-",
           "transport.seek:start", "transport.seek:end"}},

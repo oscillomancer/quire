@@ -445,8 +445,8 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     }
     if (s.controller) s.controller->setComponentHandler(s.handler);
     // Editor edits reach the processor through the same queue as setParam().
-    s.handler->edit = [state = &s](vst::ParamID id, vst::ParamValue normalized) {
-        return state->changes.push({id, normalized});
+    s.handler->edit = [state = &s](vst::ParamID param, vst::ParamValue normalized) {
+        return state->changes.push({param, normalized});
     };
     for (auto& channel : s.midiParams) channel.fill(vst::kNoParamId);
     if (s.controller) {

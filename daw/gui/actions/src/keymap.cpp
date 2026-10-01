@@ -110,6 +110,7 @@ Keymap Keymap::defaults() {
     add({"Ctrl+O"}, "global", "ui.file.open");
     add({"Ctrl+N"}, "global", "ui.file.new");
     add({"Ctrl+I"}, "global", "ui.file.import");
+    add({"Ctrl+E"}, "global", "ui.midi.edit");
     add({"Ctrl+T"}, "global", "track.add:channel");
     add({"Ctrl+Alt+T"}, "global", "track.add:buss");
     add({"Shift+/"}, "global", "ui.actions");
