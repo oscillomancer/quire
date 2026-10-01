@@ -425,7 +425,7 @@ class VelocityLane : public ui::Node {
     VelocityLane(RollState& s, MidiEditor& editor, ui::Node*& roll)
         : Node("midi.velocity"), s_(s), editor_(editor), roll_(roll) {
         interactive = true;
-        layout.height = ui::SizeRule::fixed(72);
+        layout.height = ui::SizeRule::fixed(60);
     }
     ui::Rect area() const {  // aligned with the roll
         const ui::Rect b = bounds();
@@ -520,6 +520,134 @@ class VelocityLane : public ui::Node {
     ui::Node*& roll_;
 };
 
+// ----------------------------------------------------------------- CC lane
+
+// One controller's values over time: a step line (a CC holds until the next
+// value). Drag to draw (a point per grid step), Alt- or right-drag to erase;
+// one midi.edit on release.
+class CcLane : public ui::Node {
+  public:
+    CcLane(RollState& s, MidiEditor& editor, ui::Node*& roll)
+        : Node("midi.cc"), s_(s), editor_(editor), roll_(roll) {
+        interactive = true;
+        layout.height = ui::SizeRule::fixed(52);
+    }
+    ui::Rect area() const {
+        const ui::Rect b = bounds();
+        return {b.x + kKeysWidth, b.y + 4, std::max(0.0f, b.w - kKeysWidth), b.h - 8};
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const ui::Rect b = bounds();
+        c.fillRect(b, t.color("panel"));
+        c.fillRect({b.x, b.y, b.w, 1}, t.color("rule"));
+        c.text({b.x + 4, b.y, kKeysWidth - 6, b.h}, "CC " + std::to_string(s_.ccNumber),
+               ui::Font::Ui, t.type("caption"), t.color("ink-quiet"));
+        const ui::Rect a = area();
+        const Geometry g{s_, roll_ ? roll_->bounds() : a};
+        auto yOf = [&](int v) { return a.bottom() - a.h * static_cast<float>(v) / 127.0f; };
+        // Committed points outside the drag's span, the draft inside it.
+        const bool dragging = !s_.ccDraft.empty() || s_.ccErasing;
+        std::vector<CcPoint> shown;
+        for (const CcPoint& p : s_.cc)
+            if (!dragging || p.beat < s_.ccFrom || p.beat >= s_.ccTo) shown.push_back(p);
+        if (!s_.ccErasing) shown.insert(shown.end(), s_.ccDraft.begin(), s_.ccDraft.end());
+        std::sort(shown.begin(), shown.end(),
+                  [](const CcPoint& x, const CcPoint& y) { return x.beat < y.beat; });
+        c.save();
+        c.clip(a);
+        for (std::size_t i = 0; i < shown.size(); ++i) {
+            const float x0 = g.xOf(shown[i].beat);
+            const float x1 = i + 1 < shown.size() ? g.xOf(shown[i + 1].beat) : a.right();
+            const float y = yOf(shown[i].value);
+            c.fillRect({x0, y, std::max(1.0f, x1 - x0), a.bottom() - y},
+                       t.color("accent").withAlpha(0.25f));
+            c.fillRect({x0, y - 1, std::max(1.0f, x1 - x0), 2}, t.color("accent"));
+            c.fillRound({x0 - 2, y - 3, 5, 5}, 2, t.color("focus"));
+        }
+        if (s_.ccErasing)
+            c.fillRect({g.xOf(s_.ccFrom), a.y, g.xOf(s_.ccTo) - g.xOf(s_.ccFrom), a.h},
+                       t.color("clip").withAlpha(0.2f));
+        c.restore();
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        using T = ui::PointerEvent::Type;
+        const ui::Rect a = area();
+        const Geometry g{s_, roll_ ? roll_->bounds() : a};
+        auto valueAt = [&](float y) {
+            return std::clamp(static_cast<int>(std::lround((a.bottom() - y) / a.h * 127.0f)), 0,
+                              127);
+        };
+        const double step = s_.grid > 0 ? s_.grid : 0.25;
+        auto stepBeat = [&](float x) {  // the grid step under the pointer
+            const double beat = g.beatOf(x);
+            if (!s_.snap) return beat;
+            return std::floor((s_.itemPosition + beat) / step + 1e-9) * step - s_.itemPosition;
+        };
+        const bool drawing = !s_.ccDraft.empty() || s_.ccErasing;
+        if (e.type == T::Down && (e.button == 1 || e.button == 3)) {
+            s_.ccErasing = e.button == 3 || (e.mods & ui::kAlt);
+            pressBeat_ = std::max(0.0, stepBeat(e.pos.x));
+            s_.ccFrom = pressBeat_;
+            s_.ccTo = pressBeat_ + step;
+            s_.ccDraft.clear();
+            if (!s_.ccErasing) s_.ccDraft.push_back({pressBeat_, valueAt(e.pos.y)});
+            if (ui::Root* r = root()) r->capture(this);
+            invalidate();
+            return true;
+        }
+        if (e.type == T::Move && drawing) {
+            const double beat = std::max(0.0, stepBeat(e.pos.x));
+            s_.ccFrom = std::min(pressBeat_, beat);
+            s_.ccTo = std::max(pressBeat_, beat) + step;
+            if (!s_.ccErasing) {
+                std::erase_if(s_.ccDraft,
+                              [&](const CcPoint& p) { return std::abs(p.beat - beat) < 1e-9; });
+                s_.ccDraft.push_back({beat, valueAt(e.pos.y)});
+                std::sort(s_.ccDraft.begin(), s_.ccDraft.end(),
+                          [](const CcPoint& x, const CcPoint& y) { return x.beat < y.beat; });
+            }
+            invalidate();
+            return true;
+        }
+        if (e.type == T::Up && drawing) {
+            if (ui::Root* r = root()) r->capture(nullptr);
+            json::Value ops = json::Value::array();
+            json::Value clear = json::Value::object();
+            clear["op"] = "cc.clear";
+            clear["number"] = s_.ccNumber;
+            clear["from"] = s_.ccFrom;
+            clear["to"] = s_.ccTo;
+            ops.push_back(std::move(clear));
+            if (!s_.ccErasing) {
+                json::Value set = json::Value::object(), pts = json::Value::array();
+                set["op"] = "cc.set";
+                set["number"] = s_.ccNumber;
+                for (const CcPoint& p : s_.ccDraft) {
+                    json::Value v = json::Value::object();
+                    v["beat"] = p.beat;
+                    v["value"] = p.value;
+                    pts.push_back(std::move(v));
+                }
+                set["points"] = std::move(pts);
+                ops.push_back(std::move(set));
+            }
+            s_.ccDraft.clear();
+            s_.ccErasing = false;
+            (void)editor_.edit(std::move(ops));
+            invalidate();
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    RollState& s_;
+    MidiEditor& editor_;
+    ui::Node*& roll_;
+    double pressBeat_ = 0;
+};
+
 // ----------------------------------------------------------------- playhead (overlay)
 
 class RollPlayhead : public ui::Node {
@@ -569,7 +697,7 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     auto panel = std::make_unique<ui::Node>("midi.editor");
     panel_ = panel.get();
     panel->layout.dir = ui::Layout::Dir::Column;
-    panel->layout.height = ui::SizeRule::fixed(320);
+    panel->layout.height = ui::SizeRule::fixed(420);
     panel->visible = false;
     auto& header = panel->emplace<ui::Node>("midi.header");
     header.layout.dir = ui::Layout::Dir::Row;
@@ -597,6 +725,17 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
         refreshTitle();
     });
     header.emplace<ui::Button>("midi.quantize", "Quantize", [this] { quantize(); });
+    ccButton_ = &header.emplace<ui::Button>("midi.cc.number", "CC 1 mod", [this] {
+        // The common controllers in turn: mod wheel, volume, pan, expression, sustain.
+        static constexpr std::pair<int, const char*> kCcs[] = {
+            {1, "mod"}, {7, "volume"}, {10, "pan"}, {11, "expression"}, {64, "sustain"}};
+        std::size_t next = 0;
+        for (std::size_t i = 0; i < std::size(kCcs); ++i)
+            if (kCcs[i].first == state_.ccNumber) next = (i + 1) % std::size(kCcs);
+        state_.ccNumber = kCcs[next].first;
+        ccButton_->setText("CC " + std::to_string(kCcs[next].first) + " " + kCcs[next].second);
+        (void)reload();
+    });
     header.emplace<ui::Button>("midi.notation.toggle", "Notation", [this] {
         if (!notationPane_) return;
         notationPane_->visible = !notationPane_->visible;
@@ -620,10 +759,12 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     roll_ = &roll;
     auto& vel = left.emplace<VelocityLane>(state_, *this, roll_);
     velocity_ = &vel;
+    ccLane_ = &left.emplace<CcLane>(state_, *this, roll_);
     auto repaint = [this] {
         if (roll_) roll_->invalidate();
         if (keys_) keys_->invalidate();
         if (velocity_) velocity_->invalidate();
+        if (ccLane_) ccLane_->invalidate();
     };
     roll.repaintAll = repaint;
     vel.repaintAll = repaint;
@@ -724,6 +865,13 @@ Status MidiEditor::reload() {
         state_.notes.push_back(note);
     }
     std::erase_if(state_.selected, [&](std::size_t i) { return i >= state_.notes.size(); });
+    state_.cc.clear();
+    for (const json::Value& c : (*r)["cc"].asArray()) {
+        if (c.find("number")->asInt() != state_.ccNumber || c.find("channel"))
+            continue;  // channel 1
+        state_.cc.push_back(
+            {c.find("beat")->asDouble(), static_cast<int>(c.find("value")->asInt())});
+    }
     // Bars in a generous window around the item.
     state_.barLines.clear();
     const auto& map = *app_.head().timeMap;
@@ -746,6 +894,7 @@ Status MidiEditor::reload() {
     if (roll_) roll_->invalidate();
     if (keys_) keys_->invalidate();
     if (velocity_) velocity_->invalidate();
+    if (ccLane_) ccLane_->invalidate();
     return {};
 }
 

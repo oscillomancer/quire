@@ -41,7 +41,7 @@ branch) · **gap** (not started).
 | 22 | Take FX, item/take envelopes | partial — commands (`env.*` on takes, take chains in the model); no UI |
 | 23 | Tempo ramps and meter changes on the timeline | partial — drawn in the ruler; edited only through `tempo.set` |
 | 24 | Markers/regions: create, rename, navigate | partial — drawn; `marker.*`/`region.*` commands; no create/rename gestures |
-| 25 | Piano roll, velocity and CC lanes | partial — MIDI editor with velocity lane and notation panel; CC lane UI missing (`midi.edit` cc ops exist) |
+| 25 | Piano roll, velocity and CC lanes | done — MIDI editor: piano roll, velocity lane, CC lane (mod, volume, pan, expression, sustain; draw/erase), notation panel |
 | 26 | MIDI event list and notation views | partial — notation panel done; event list missing |
 | 27 | Track automation lanes, read/write modes | gap (UI) — `env.*` commands exist and the engine plays them (P5.14, after p5-edit) |
 | 28 | Automation items with pooled identity | gap — modelled (`ai_*`), no commands |
@@ -73,5 +73,5 @@ branch) · **gap** (not started).
   existing `ChannelMap`.
 - Stretch gesture (#12) and take-lane comping (#21): after p5-edit.
 - Automation lanes (#27): P5.14, after p5-edit.
-- CC lane (#25), event list (#26), marker/region and tempo gestures (#23, #24):
-  queued for the MIDI editor and arrange follow-ups.
+- Event list (#26), marker/region and tempo gestures (#23, #24): queued for
+  the MIDI editor and arrange follow-ups. The CC lane (#25) is done.
