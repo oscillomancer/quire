@@ -1,5 +1,7 @@
 # synth-descriptive — hermes / meta/muse-spark-1.3-contributor
 
+Superseded default-profile probe; the acceptance smoke run must use `quire-eval`.
+
 Run `20260930T213159630301Z-synth-descriptive-hermes`; git `508a229fd677e845a8adc3b3d68e0c2b572acb59`; skill `73b852df9eb97f84eae9d0ba7ac733fad3c7f8e5e60910287f9cf03defe0b52b`.
 
 Pass rate: 100.0%. Median loss: 0.0.

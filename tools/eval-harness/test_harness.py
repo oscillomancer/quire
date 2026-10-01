@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import HERE, ROOT, Mcp, capture, load_tasks, read_json, sandbox_command, setup, validate_task, write_json
+from common import HERE, ROOT, Mcp, capture, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble
 from run import render_patch, score_final
@@ -83,6 +83,12 @@ class Scoring(unittest.TestCase):
 
 
 class Isolation(unittest.TestCase):
+    def test_dedicated_profile_without_default_fallback(self):
+        self.assertEqual(evaluation_profile(), Path.home() / ".hermes/profiles" / (slug() + "-eval"))
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+            with self.assertRaises(FileNotFoundError):
+                default_model(Path(directory) / "missing/config.yaml")
+
     def test_default_identity_excludes_secrets_and_other_config(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
             path = Path(directory) / "source.yaml"

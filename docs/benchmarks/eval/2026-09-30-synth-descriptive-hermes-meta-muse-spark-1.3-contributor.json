@@ -1,5 +1,6 @@
 {
   "git_hash": "508a229fd677e845a8adc3b3d68e0c2b572acb59",
+  "hermes_profile": "default",
   "listening_audio": "docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes",
   "median_loss": 0.0,
   "model": "meta/muse-spark-1.3-contributor",
@@ -13,6 +14,8 @@
   "skill_hash": "73b852df9eb97f84eae9d0ba7ac733fad3c7f8e5e60910287f9cf03defe0b52b",
   "started_utc": "2026-09-30T21:31:59.630301+00:00",
   "suite": "synth-descriptive",
+  "superseded_reason": "The required model identity is now sourced from the dedicated quire-eval profile; this earlier default-profile probe does not satisfy that acceptance check.",
+  "superseded_smoke": true,
   "task_hashes": {
     "synth.sub-bass": "2f2cd08b436c0bdc722700ad5490b017cb0b0594a2387ae5805c4016835780f4"
   },

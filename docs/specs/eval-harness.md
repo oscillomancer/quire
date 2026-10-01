@@ -2,8 +2,8 @@
 
 **Status:** Implemented for P3.4 (2026-09-30), orchestrator review pending.
 **Code:** `tools/eval-harness/`, Python 3 standard library tooling (ADR-0003).
-**Model decision:** HUMAN_REVIEW #8, resolved: Hermes with its configured default
-model; the orchestrator chooses run counts. Other model adapters and the Phase 6
+**Model decision:** HUMAN_REVIEW #8, resolved: Hermes with the dedicated `quire-eval` profile
+(2026-09-30 steering amendment); the orchestrator chooses run counts. Other model adapters and the Phase 6
 mixing/session suites are deferred.
 
 The harness measures whether an agent can program plugins and write notation.
@@ -103,10 +103,14 @@ Hermes executable/venv overrides are documented in the tooling README.
 
 Hermes: one isolated `HERMES_HOME` per attempt under ignored `build/eval/`;
 minimal JSON-as-YAML config, only the `sandbox` MCP toolset/server. Read only
-nonsecret model identity from Nate's config (or a supplied identity file).
-Reference API-key `.env` credentials through a symlink; do not copy tokens,
+nonsecret model identity from `~/.hermes/profiles/quire-eval/config.yaml`
+(or an explicitly supplied identity file). Default credentials are
+`~/.hermes/profiles/quire-eval/.env`, referenced through a symlink; do not copy tokens,
 Nate's config, sessions, memory, skills, plugins or OAuth state into a run.
-Clear inherited `HERMES_*` overrides. Disable memory/compression, ignore private
+The profile name `quire-eval` is recorded in suite and attempt metadata. The
+expected identity is `meta/muse-spark-1.3-contributor` via `openrouter`. Missing
+profile files fail; there is **no fallback** to `~/.hermes/config.yaml`. Paths
+are formed from the product slug plus `-eval`. Clear inherited `HERMES_*` overrides. Disable memory/compression, ignore private
 rules, and disable lazy installation. No profile-create/use commands, shell,
 filesystem, web or delegation tools are available to the evaluated agent.
 
@@ -196,6 +200,7 @@ infrastructure evidence rather than model quality.
 Local transcripts, isolated profiles, usage, prompts, capture/audit files and
 intermediate renders live in `build/eval/<run>/`, separate from sanitizer trees.
 Retain/archive them together with listening WAVs when sharing reports. The single
-P3.4 smoke run used Hermes's configured default; full-suite inference and repeat
+P3.4 acceptance smoke run uses the pinned `quire-eval` profile; the earlier
+default-profile probe is explicitly marked as superseded. Full-suite inference and repeat
 counts are left to the orchestrator. Phase 6 adds mixing/session tasks after the
 corresponding project-model operations exist.

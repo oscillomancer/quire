@@ -32,6 +32,10 @@ def slug():
     return re.search(r'set\(PRODUCT_SLUG\s+"([a-z0-9-]+)"\)', text)[1]
 
 
+def evaluation_profile():
+    return Path.home() / ".hermes/profiles" / (slug() + "-eval")
+
+
 def skill_hash():
     digest = hashlib.sha256()
     for path in sorted((ROOT / "skill").rglob("*")):

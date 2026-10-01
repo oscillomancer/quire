@@ -64,7 +64,7 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 14. Evaluation listening — 20260930T213159630301Z-synth-descriptive-hermes
+### 14. Superseded default-profile evaluation listening — 20260930T213159630301Z-synth-descriptive-hermes
 Suite: synth-descriptive, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
 
 - `synth.sub-bass`: `docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20260930T213159630301Z-synth-descriptive-hermes/synth.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
@@ -105,6 +105,11 @@ Suite: notation, runner/model: dry/scripted. Do the renders fit these descriptio
 - `notation.drums`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.drums-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.drums-worst.wav` — Does the rhythm and register fit the requested phrase?
 - `notation.triplet-lead`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.triplet-lead-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.triplet-lead-worst.wav` — Does the rhythm and register fit the requested phrase?
 - `notation.waltz`: `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.waltz-best.wav`, `docs/benchmarks/eval/audio/20260930T214717085143Z-notation-dry/notation.waltz-worst.wav` — Does the rhythm and register fit the requested phrase?
+
+### 18. Evaluation listening — 20261001T020859326736Z-synth-descriptive-hermes
+Suite: synth-descriptive, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `synth.sub-bass`: `docs/benchmarks/eval/audio/20261001T020859326736Z-synth-descriptive-hermes/synth.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T020859326736Z-synth-descriptive-hermes/synth.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
 
 ## Resolved
 

@@ -12,7 +12,7 @@ import statistics
 import subprocess
 import time
 
-from common import HERE, ROOT, Mcp, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
+from common import HERE, ROOT, Mcp, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
 import runners
 from scoring import notation_score, transcript_metrics
 
@@ -152,8 +152,10 @@ def main(argv=None):
     parser.add_argument("--sandbox", type=Path)
     parser.add_argument("--hermes-bin", default="hermes")
     parser.add_argument("--hermes-python", help="Existing Hermes venv Python; invokes the same CLI without managing the user's install")
-    parser.add_argument("--model-config", help="Default: read only the model identity from ~/.hermes/config.yaml")
-    parser.add_argument("--credentials", default=str(Path.home() / ".hermes/.env"), help="Credential .env to reference; never copied")
+    parser.add_argument("--model-config", default=str(evaluation_profile() / "config.yaml"),
+                        help="Dedicated evaluation profile model config; no default-profile fallback")
+    parser.add_argument("--credentials", default=str(evaluation_profile() / ".env"),
+                        help="Dedicated evaluation profile credential .env to reference; never copied")
     parser.add_argument("--publish", action="store_true", help="Write benchmarks and one listening queue item; default for real Hermes runs")
     options = parser.parse_args(argv)
     if not 1 <= options.repeat <= 100 or not 0 <= options.seed <= 1000000000:
@@ -170,6 +172,9 @@ def main(argv=None):
               "git_hash": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "working_tree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)),
               "skill_hash": skill_hash(), "task_hashes": {}, "tasks": [], "run_directory": str(run_dir.relative_to(ROOT))}
+    if runner == "hermes":
+        report["hermes_profile"] = Path(options.model_config).expanduser().parent.name
+        report["model_config"] = str(Path(options.model_config).expanduser())
     usage_totals = {"total_tokens": 0, "estimated_cost_usd": 0.0, "cost_known": True}
     for task in tasks:
         report["task_hashes"][task["id"]] = hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()

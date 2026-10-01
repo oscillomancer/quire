@@ -33,11 +33,14 @@ The orchestrator chooses real run counts. No model-quality conclusion should
 be drawn from the smoke run or from the dry runner.
 
 Hermes gets an isolated `HERMES_HOME` for every attempt. The harness reads only
-the default model/provider identity from `~/.hermes/config.yaml` and references
-`~/.hermes/.env` with a symlink; it never copies credentials. Override these
+the pinned model/provider identity from
+`~/.hermes/profiles/quire-eval/config.yaml` and references
+`~/.hermes/profiles/quire-eval/.env` with a symlink; it never copies credentials. Override these
 sources with `--model-config` and `--credentials`. The model mapping may be
 simple YAML or JSON; no other source-profile settings or MCP servers are
-inherited. OAuth credential stores are not copied or refreshed by the harness;
+inherited. The profile name `quire-eval` is recorded; missing profile files fail
+without falling back to `~/.hermes/config.yaml`. The expected pinned identity is
+`meta/muse-spark-1.3-contributor` via `openrouter`. OAuth credential stores are not copied or refreshed by the harness;
 use environment/API-key credentials for this runner. Process-environment
 `HERMES_*` overrides are removed before the isolated settings are applied.
 

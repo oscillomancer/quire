@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from common import HERE, ROOT, Mcp, capture, recipe_patch, sandbox_command, setup, stop_group, write_json
+from common import HERE, ROOT, Mcp, capture, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
 from relay import Recorder
 
 
@@ -132,7 +132,7 @@ def isolated_config(task, directory, seed, model, credentials, binary=None, star
 def hermes(task, directory, seed, options, reference=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    source = Path(options.model_config or Path.home() / ".hermes/config.yaml")
+    source = Path(options.model_config or evaluation_profile() / "config.yaml")
     model = default_model(source)
     _, env = isolated_config(task, directory, seed, model, options.credentials, options.sandbox,
                              task.get("starting_patch"))
@@ -162,4 +162,6 @@ def hermes(task, directory, seed, options, reference=None):
         raise RuntimeError("Hermes transcript export failed; see export.log")
     return {"exit_code": process.returncode, "timed_out": timed_out, "model": model["default"],
             "provider": model["provider"], "hermes_version": version,
-            "wall_seconds": time.monotonic() - started, "skill_loading": "task-preamble"}
+            "wall_seconds": time.monotonic() - started, "skill_loading": "task-preamble",
+            "hermes_profile": source.parent.name, "model_config": str(source),
+            "credentials_reference": str(Path(options.credentials).expanduser().resolve())}
