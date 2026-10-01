@@ -39,7 +39,7 @@ target_include_directories(gui-actions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/action
 # Views (gui.md §4): the arrange view (ruler, lanes, TCP column) now; mixer,
 # editors follow.
 supple_add_library(gui-views SOURCES views/src/lanes.cpp views/src/track_layout.cpp
-                                        views/src/arrange.cpp
+                                        views/src/arrange.cpp views/src/item_gestures.cpp
   DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline SDL3::SDL3)
 target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
 
@@ -75,7 +75,7 @@ if(SUPPLE_BUILD_TESTS)
   set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-actions SOURCES tests/test_actions.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
   # The app driven by keys and clicks, asserting on the session (gui.md §10).
-  supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp
+  supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp tests/test_gestures.cpp
                    tests/test_midi_editor.cpp tests/test_fx_render.cpp LABELS gui tsan-skip)
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
                              SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"

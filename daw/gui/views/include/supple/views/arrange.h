@@ -19,6 +19,7 @@
 #include "supple/ui/geometry.h"
 #include "supple/ui/list.h"
 #include "supple/ui/node.h"
+#include "supple/views/item_gestures.h"
 #include "supple/views/lanes.h"
 #include "supple/views/track_layout.h"
 
@@ -97,6 +98,7 @@ class ArrangeView : public ui::Node {
     bool installOverlay(ui::Root& root);  // the playhead node; false if none
 
     Lanes& lanes() { return *lanes_; }
+    ItemGestures& gestures() { return *gestures_; }  // P5.6: editing gestures
     ui::Node& tcp();
     ui::Node& ruler();
     // Row rectangles: the lanes' and the TCP's x, the same y and height
@@ -136,6 +138,7 @@ class ArrangeView : public ui::Node {
     TcpList* tcp_ = nullptr;
     Ruler* ruler_ = nullptr;
     TcpHeader* header_ = nullptr;
+    std::unique_ptr<ItemGestures> gestures_;
     ui::ScrollBar* hbar_ = nullptr;
     ui::ScrollBar* vbar_ = nullptr;
     double lastPollMs_ = -1e9;
