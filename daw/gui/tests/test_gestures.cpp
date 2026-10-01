@@ -405,3 +405,30 @@ TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length an
     CHECK(take.playrate == doctest::Approx(len0 / len1));  // one tempo: beats scale as seconds
     CHECK(f.steps() == steps + 1);
 }
+
+TEST_CASE("arrange gestures: a move that overlaps another item crossfades both over the overlap") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id audio = f.itemOnRow(0), midi = f.itemOnRow(0, true);
+    const double audioEnd = f.item(audio).position + f.item(audio).length;
+    REQUIRE(f.item(midi).position > audioEnd);
+    // Drag the later item back so it starts 4 beats before the earlier one ends.
+    const double target = audioEnd - 4;
+    const ui::Rect r = f.rectOf(midi);
+    const float dx = static_cast<float>(target - f.item(midi).position) * f.beatPx();
+    auto steps = f.steps();
+    f.drag({r.x + 20, r.y + r.h / 2}, {r.x + 20 + dx, r.y + r.h / 2});
+    REQUIRE(f.item(midi).position == doctest::Approx(target));
+    const model::Session& s = f.app->head();
+    const double overlap = s.timeMap->secondsAt(audioEnd) - s.timeMap->secondsAt(target);
+    CHECK(f.item(audio).fadeOut.length == doctest::Approx(overlap));
+    CHECK(f.item(midi).fadeIn.length == doctest::Approx(overlap));
+    CHECK(f.steps() == steps + 1);  // the move and both fades: one undo step
+    // Off: a move makes no fades.
+    f.view->gestures().autoCrossfade = false;
+    const ui::Rect r2 = f.rectOf(midi);
+    f.drag({r2.x + 20, r2.y + r2.h / 2},
+           {r2.x + 20 - 2 * f.beatPx() * static_cast<float>(f.view->gestures().gridBeats()),
+            r2.y + r2.h / 2});
+    CHECK(f.item(audio).fadeOut.length == doctest::Approx(overlap));  // unchanged
+}

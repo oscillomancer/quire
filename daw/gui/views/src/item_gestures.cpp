@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 
 #include "supple/ui/canvas.h"
 #include "supple/ui/root.h"
@@ -21,6 +22,52 @@ const model::Take* activeTake(const model::Session& s, const model::Item& it) {
     return it.activeTake ? s.takes.find(*it.activeTake) : nullptr;
 }
 bool isMidi(const model::Take* t) { return t && t->source && t->source->kind == model::Kind::Midi; }
+
+// Where a gesture puts an item: its reference in the steps (an id, or
+// "$stepN.id" for a copy made by an earlier step), its track and beats.
+struct Placed {
+    std::string ref;
+    std::optional<model::Id> id;
+    model::Id track;
+    double start = 0, end = 0;
+};
+
+// Crossfades for the overlaps the placed items make with the items they do
+// not move: the earlier item fades out and the later fades in over the
+// overlap (seconds). An item inside another is left alone.
+void addCrossfades(const model::Session& s, const std::vector<Placed>& placed,
+                   std::vector<EditStep>& steps) {
+    std::map<std::string, std::pair<std::optional<double>, std::optional<double>>> fades;
+    auto moving = [&](model::Id id) {
+        return std::any_of(placed.begin(), placed.end(),
+                           [&](const Placed& p) { return p.id == id; });
+    };
+    auto seconds = [&](double a, double b) {
+        return s.timeMap->secondsAt(b) - s.timeMap->secondsAt(a);
+    };
+    for (const Placed& p : placed)
+        for (const auto& e : s.items) {
+            const model::Item& o = *e.value;
+            if (o.track != p.track || moving(e.id)) continue;
+            const double os = o.position, oe = o.position + o.length;
+            if (os < p.start && p.start < oe && oe < p.end) {  // o, then p
+                const double len = seconds(p.start, oe);
+                fades[e.id.str()].second = len;
+                fades[p.ref].first = len;
+            } else if (p.start < os && os < p.end && p.end < oe) {  // p, then o
+                const double len = seconds(os, p.end);
+                fades[p.ref].second = len;
+                fades[e.id.str()].first = len;
+            }
+        }
+    for (const auto& [ref, fade] : fades) {
+        json::Value args = json::Value::object();
+        args["item"] = ref;
+        if (fade.first) args["fade_in"] = *fade.first;
+        if (fade.second) args["fade_out"] = *fade.second;
+        steps.push_back({"item.set", std::move(args)});
+    }
+}
 
 // The ghost and selection layer on the root's overlay: repainted every frame,
 // so a drag never damages the cached content.
@@ -452,6 +499,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             std::vector<model::Id> items = selection_;
             if (copy_ && !isSelected(state_.anchor)) items.push_back(state_.anchor);
             std::vector<EditStep> steps;
+            std::vector<Placed> placed;
             for (model::Id id : items) {
                 const model::Item* it = itemOf(s, id);
                 if (!it || (it->locked && !copy_)) continue;
@@ -468,6 +516,10 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                     dup["item"] = id.str();
                     dup["to"] = it->position + state_.deltaBeats;
                     steps.push_back({"item.duplicate", std::move(dup)});
+                    placed.push_back({"$step" + std::to_string(steps.size() - 1) + ".id",
+                                      std::nullopt, track.value_or(it->track),
+                                      it->position + state_.deltaBeats,
+                                      it->position + state_.deltaBeats + it->length});
                     if (!track) continue;
                     json::Value mv = json::Value::object();
                     mv["item"] = "$step" + std::to_string(steps.size() - 1) + ".id";
@@ -480,11 +532,16 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 args["position"] = it->position + state_.deltaBeats;
                 if (track) args["track"] = track->str();
                 steps.push_back({"item.move", std::move(args)});
+                placed.push_back({id.str(), id, track.value_or(it->track),
+                                  it->position + state_.deltaBeats,
+                                  it->position + state_.deltaBeats + it->length});
             }
+            const std::size_t edits = steps.size();
+            if (autoCrossfade) addCrossfades(s, placed, steps);
             if (copy_)
                 runSteps(items.size() == 1 ? "Copy item" : "Copy items", steps);
             else
-                runSteps(steps.size() == 1 ? "Move item" : "Move items", steps);
+                runSteps(edits == 1 ? "Move item" : "Move items", steps);
             return;
         }
         case Drag::TrimLeft: {
@@ -521,6 +578,11 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             args["position"] = anchor->position + d;
             args["length"] = anchor->length - d;
             steps.insert(steps.begin(), {"item.set", std::move(args)});
+            if (autoCrossfade)
+                addCrossfades(s,
+                              {{state_.anchor.str(), state_.anchor, anchor->track,
+                                anchor->position + d, anchor->position + anchor->length}},
+                              steps);
             runSteps("Trim item start", steps);
             return;
         }
@@ -534,11 +596,24 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 json::Value rate = json::Value::object();
                 rate["take"] = anchor->activeTake->str();
                 rate["playrate"] = stretchRate(*anchor, *take, state_.deltaBeats);
-                runSteps("Stretch item",
-                         {{"item.set", std::move(args)}, {"take.set", std::move(rate)}});
+                std::vector<EditStep> steps = {{"item.set", std::move(args)},
+                                               {"take.set", std::move(rate)}};
+                if (autoCrossfade)
+                    addCrossfades(
+                        s,
+                        {{state_.anchor.str(), state_.anchor, anchor->track, anchor->position,
+                          anchor->position + anchor->length + state_.deltaBeats}},
+                        steps);
+                runSteps("Stretch item", steps);
                 return;
             }
-            runSteps("Trim item end", {{"item.set", std::move(args)}});
+            std::vector<EditStep> steps = {{"item.set", std::move(args)}};
+            if (autoCrossfade)
+                addCrossfades(s,
+                              {{state_.anchor.str(), state_.anchor, anchor->track, anchor->position,
+                                anchor->position + anchor->length + state_.deltaBeats}},
+                              steps);
+            runSteps("Trim item end", steps);
             return;
         }
         case Drag::Slip: {
@@ -573,6 +648,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
 }
 
 namespace {
+
 const char* shapeName(model::PointShape shape) {
     switch (shape) {
         case model::PointShape::Linear:

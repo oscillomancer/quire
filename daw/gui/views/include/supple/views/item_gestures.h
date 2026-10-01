@@ -51,6 +51,9 @@ class ItemGestures {
     std::function<void(model::Id item)> onOpenMidi;                  // double-click on a MIDI item
     std::function<void(double seconds)> onSeek;                      // a click on empty space
     std::function<void(const Error&)> onError;  // a refused gesture (status line)
+    // REAPER's default: a move, copy or trim that makes two items overlap on a
+    // track fades both over the overlap (in the same transaction).
+    bool autoCrossfade = true;
 
     const std::vector<model::Id>& selection() const { return selection_; }
     void setSelection(std::vector<model::Id> items);  // no onSelection call
