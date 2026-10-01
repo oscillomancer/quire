@@ -28,7 +28,9 @@
 #include "chrome.h"
 #include "file_actions.h"
 #include "generate.h"
+#include "meter_feed.h"
 #include "midi_editor.h"
+#include "mixer.h"
 #include "plugin_windows.h"
 #include "routing_matrix.h"
 #include "shell.h"
@@ -291,6 +293,8 @@ int main(int argc, char** argv) {
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
+    gui::MeterFeed meterFeed;
+    gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
@@ -318,6 +322,7 @@ int main(int argc, char** argv) {
         center.layout.width = ui::SizeRule::fraction();
         center.add(shell.build());
         center.add(midiEditor.build());
+        center.add(mixer.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
@@ -365,11 +370,14 @@ int main(int argc, char** argv) {
         [&] {
             json::Value v = json::Value::object();
             v["agent"] = agentPanel.visible();
+            v["mixer"] = mixer.visible();
             return v;
         },
         [&](const json::Value& v) {
             if (const json::Value* a = v.find("agent"); a && a->isBool())
                 agentPanel.setVisible(a->asBool());
+            if (const json::Value* m = v.find("mixer"); m && m->isBool())
+                mixer.setVisible(m->asBool());
         });
     uiFile.add(
         "window",
@@ -452,6 +460,8 @@ int main(int argc, char** argv) {
         shell.sync();
         midiEditor.sync();
         routing.sync();
+        mixer.sync();
+        meterFeed.poll();
         uiFile.tick((*app)->projectPath());
         const bool moved = shell.arrange()->poll();
         if (moved) root.requestAnimationFrame();
@@ -507,6 +517,8 @@ int main(int argc, char** argv) {
             shell.sync();
             midiEditor.sync();
             routing.sync();
+            mixer.sync();
+            meterFeed.poll();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
@@ -525,6 +537,8 @@ int main(int argc, char** argv) {
         shell.sync();
         midiEditor.sync();
         routing.sync();
+        mixer.sync();
+        meterFeed.poll();
         root.damageAll();
         root.frame(false);
         auto written = gui::writePng(o.snapshot, root.readBack());

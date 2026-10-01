@@ -10,9 +10,11 @@
 
 #include "app_actions.h"
 #include "midi_editor.h"
+#include "mixer.h"
 #include "routing_matrix.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
 
 using namespace supple;
@@ -343,4 +345,90 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     CHECK(m.sendsAt(row(keys), col(verb)).size() == 1);
     REQUIRE(f.root->click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
+}
+
+TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, Console 9, meters") {
+    Fixture f;
+    if (!f.ok) return;
+    const std::string buss =
+        f.exec("track.add", R"({"type":"buss","name":"Drums"})")["track"].asString();
+    std::vector<gui::StripReading> readings;
+    gui::MeterFeed feed([&] { return readings; });
+    gui::Mixer mixer(*f.root, *f.actions, *f.dispatcher, *f.app, feed);
+    // Swap the editor's dock for the mixer's in the fixture's window.
+    auto* window = f.root->content();
+    window->add(mixer.build());
+    f.editor->close();
+    mixer.setVisible(true);
+    f.root->frame(false);
+    const auto& strips = mixer.strips();
+    REQUIRE(strips.size() == 3);
+    CHECK(strips[0].type == "channel");  // channels, busses, masters
+    CHECK(strips[1].track == buss);
+    CHECK(strips[2].track == "tr_0");
+    CHECK(strips[0].arm != nullptr);
+    CHECK(strips[1].arm == nullptr);  // only channels arm
+    const std::string keys = strips[0].track;
+    auto track = [&](const std::string& id) {
+        return f.app->head().tracks.find(*model::Id::parse(id));
+    };
+
+    // A fader drag: many moves, one undo step; a second drag is another.
+    auto steps = [&] { return f.exec("history.list", "{}")["versions"].size(); };
+    const auto s0 = steps();
+    const ui::Rect fb = strips[0].fader->bounds();
+    REQUIRE(fb.h > 60);
+    const ui::Point cap{fb.x + fb.w / 2,
+                        fb.bottom() - 8 - static_cast<float>(ui::faderPosition(0)) * (fb.h - 16)};
+    f.pointer(ui::PointerEvent::Type::Down, cap);
+    for (int i = 1; i <= 10; ++i)
+        f.pointer(ui::PointerEvent::Type::Move, {cap.x, cap.y + static_cast<float>(i) * 3});
+    f.pointer(ui::PointerEvent::Type::Up, {cap.x, cap.y + 30});
+    mixer.sync();
+    CHECK(track(keys)->volumeDb < -3);
+    CHECK(steps() == s0 + 1);
+    const double dragged = track(keys)->volumeDb;
+    const ui::Point cap2{cap.x, cap.y + 30};
+    f.pointer(ui::PointerEvent::Type::Down, cap2);
+    for (int i = 1; i <= 5; ++i)
+        f.pointer(ui::PointerEvent::Type::Move, {cap2.x, cap2.y + static_cast<float>(i) * 3});
+    f.pointer(ui::PointerEvent::Type::Up, {cap2.x, cap2.y + 15});
+    CHECK(steps() == s0 + 2);
+    f.exec("history.undo", "{}");
+    CHECK(track(keys)->volumeDb == doctest::Approx(dragged));  // only the second drag undone
+    mixer.sync();
+    // Double-click: unity, its own step.
+    f.pointer(ui::PointerEvent::Type::Down, cap2, 2);
+    f.pointer(ui::PointerEvent::Type::Up, cap2);
+    CHECK(track(keys)->volumeDb == 0.0);
+    // Toggles.
+    REQUIRE(f.root->click("mixer.mute." + keys));
+    CHECK(track(keys)->mute);
+    REQUIRE(f.root->click("mixer.solo." + buss));
+    CHECK(track(buss)->solo == model::Solo::On);
+    REQUIRE(f.root->click("mixer.arm." + keys));
+    CHECK(track(keys)->record.armed);
+    REQUIRE(f.root->click("mixer.monitor." + keys));
+    CHECK(track(keys)->record.monitor == model::Monitor::On);
+    // Pan drag right.
+    const ui::Rect pb = strips[0].pan->bounds();
+    f.drag({pb.x + pb.w / 2, pb.y + 8}, {pb.right() - 2, pb.y + 8});
+    CHECK(track(keys)->pan > 50);
+    // Console 9 is a project toggle.
+    const bool c9 = f.app->head().project->console9;
+    REQUIRE(f.root->click("mixer.console9"));
+    CHECK(f.app->head().project->console9 == !c9);
+    // Changes from elsewhere reach the strips; a new track adds a strip.
+    f.exec("track.set", R"({"track":")" + keys + R"(","volume_db":-12})");
+    mixer.sync();
+    CHECK(strips[0].fader->value() == doctest::Approx(-12.0));
+    f.exec("track.add", R"({"name":"Bass"})");
+    mixer.sync();
+    CHECK(mixer.strips().size() == 4);
+    // Meters: readings land on the strip's meter.
+    readings = {{keys, {0.5f, 0.25f}, {0.3f, 0.1f}}};
+    feed.poll();
+    CHECK(mixer.strips()[0].meter->shownPeakDb(0) ==
+          doctest::Approx(20 * std::log10(0.5)).epsilon(0.02));
+    f.snapshot("mixer.png");
 }
