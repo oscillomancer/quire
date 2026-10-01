@@ -1,0 +1,120 @@
+{
+  "schema": "supple.capacity-session/1.0",
+  "sample_rate": 48000,
+  "block": 64,
+  "tempo": 120,
+  "loop_beats": 16,
+  "volume_db": -18,
+  "notation": "length 4; voice pad; 1: [C3 E3 G3 B3 D4 E4 G4 B4]:w:90 | [C3 E3 G3 B3 D4 E4 G4 B4]:w:90 | [C3 E3 G3 B3 D4 E4 G4 B4]:w:90 | [C3 E3 G3 B3 D4 E4 G4 B4]:w:90",
+  "chain": [
+    {
+      "plugin": "com.suppleaudio.orrery",
+      "patch": {
+        "schema": "supple.orrery-patch/1.0",
+        "voice": {
+          "polyphony": 8,
+          "unison": 3,
+          "unison_detune": "12 ct",
+          "unison_spread": "70 %",
+          "quality": "normal"
+        },
+        "oscillators": {
+          "osc1": {
+            "type": "va",
+            "wave": "saw",
+            "level": "-6 dB",
+            "to": "filter1"
+          },
+          "osc2": {
+            "type": "va",
+            "wave": "square",
+            "level": "-6 dB",
+            "fine": "+7 ct",
+            "to": "filter1"
+          },
+          "osc3": {
+            "type": "sub",
+            "wave": "sine",
+            "octave": -1,
+            "level": "-12 dB",
+            "to": "filter1"
+          }
+        },
+        "filters": {
+          "filter1": {
+            "type": "ladder",
+            "slope": "24 dB",
+            "cutoff": "1.2 kHz",
+            "resonance": "30 %"
+          }
+        },
+        "drive": {
+          "type": "tape",
+          "amount": "6 dB"
+        },
+        "envelopes": {
+          "amp": {
+            "attack": "10 ms",
+            "sustain": "80 %",
+            "release": "400 ms"
+          },
+          "env2": {
+            "attack": "200 ms",
+            "decay": "1 s",
+            "sustain": "20 %"
+          }
+        },
+        "lfos": {
+          "lfo1": {
+            "rate": "0.3 Hz"
+          }
+        },
+        "routes": {
+          "env2>filter1.cutoff": {
+            "amount": "+2 oct"
+          },
+          "lfo1>osc1.fine": {
+            "amount": "10 ct"
+          }
+        },
+        "fx": {
+          "chain": [
+            "chorus",
+            "reverb"
+          ]
+        }
+      }
+    },
+    {
+      "plugin": "com.suppleaudio.eq",
+      "patch": {
+        "schema": "supple.eq-patch/1.0",
+        "params": {
+          "band2.gain": -3,
+          "band3.gain": 2,
+          "band4.gain": -2
+        }
+      }
+    },
+    {
+      "plugin": "com.suppleaudio.comp",
+      "patch": {
+        "schema": "supple.comp-patch/1.0",
+        "params": {
+          "threshold": -18,
+          "ratio": 4
+        }
+      }
+    }
+  ],
+  "master": {
+    "plugin": "com.suppleaudio.comp",
+    "patch": {
+      "schema": "supple.comp-patch/1.0",
+      "params": {
+        "mode": "limiter",
+        "ceiling": -1
+      }
+    }
+  }
+}

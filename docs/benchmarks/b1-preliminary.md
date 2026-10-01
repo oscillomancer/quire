@@ -15,6 +15,11 @@ the device at 48 kHz / 64 frames.
 per core), Linux 7.2.7-zen1, cpufreq governor `powersave`, 30 GiB RAM.
 Worker pool: 7 helpers + the renderer (every core but two).
 
+The command above describes the historical tool at faf197c. The current
+stock-chain B1/B2 builder and search replace that CLI; see
+[the tooling guide](../../tools/bench/README.md). These preliminary numbers
+remain historical and are not stock-chain/device acceptance results.
+
 | tracks | offline × real time, 1 thread | offline × real time, pool | in the callback: late cycles | anticipative: misses |
 |---:|---:|---:|---:|---:|
 | 2 | 4.22 | 7.08 | 0 / 3749 | 0 / 3750 |

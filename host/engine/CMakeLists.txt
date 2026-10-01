@@ -33,10 +33,22 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
-# Capacity benchmark (engine.md §7 B1, preliminary): engine-bench <orrery-headless.clap>.
-add_executable(engine-bench bench/engine_bench.cpp)
+# Capacity benchmark (engine.md §7 B1), with a command-built shared session.
+add_executable(engine-bench bench/engine_bench.cpp bench/session.cpp)
 target_link_libraries(engine-bench PRIVATE supple::engine)
 supple_target_defaults(engine-bench)
+target_compile_definitions(engine-bench PRIVATE
+  BENCH_DRIVER="${PROJECT_SOURCE_DIR}/tools/bench/run.py"
+  BENCH_RECIPE="${CMAKE_CURRENT_SOURCE_DIR}/bench/session.json"
+  BENCH_PLUGINS="${CMAKE_BINARY_DIR}/plugins/clap")
+if(SUPPLE_BUILD_TESTS)
+  target_sources(engine.tests PRIVATE tests/test_bench.cpp bench/session.cpp)
+  target_include_directories(engine.tests PRIVATE bench)
+  target_compile_definitions(engine.tests PRIVATE BENCH_RECIPE="${CMAKE_CURRENT_SOURCE_DIR}/bench/session.json")
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME engine.bench-tooling COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${PROJECT_SOURCE_DIR}/tools/bench -p "test_*.py")
+endif()
 
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).
 add_executable(${PRODUCT_SLUG}-engine tools/engine_main.cpp)

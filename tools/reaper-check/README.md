@@ -37,6 +37,11 @@ No report or user license belongs in git.
 
 ## Isolation and lifetime
 
+The [B1/B2 capacity tool](../bench/README.md) reuses these isolation helpers.
+Its separate real JACK mode requires the exact `SUPPLE_AUDIO_DEVICE_TEST=1`
+opt-in before creating a device config or launching a process; this
+acceptance check's invocations continue to use the default Dummy configuration.
+
 Only a fresh allowlisted private `config/reaper.ini` and, when present, a copy
 of `~/.config/REAPER/reaper-license.rk` seed the resource directory. The license
 copy has mode 0600 and its parent has mode 0700. User devices, projects, plugin
