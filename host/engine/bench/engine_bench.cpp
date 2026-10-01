@@ -94,7 +94,8 @@ int stripBench() {
             t.parent = model::kMaster;
             if (buss) t.type = model::StripType::Buss;
             const Id target = edit.create(t);
-            edit.modify<model::Track>(model::kMaster, [&](auto& m) { m.children.push_back(target); });
+            edit.modify<model::Track>(model::kMaster,
+                                      [&](auto& m) { m.children.push_back(target); });
             if (buss) {
                 model::Track ch;
                 ch.parent = target;
