@@ -16,7 +16,8 @@
 #include <thread>
 #include <vector>
 
-#include "generate.h"
+#include "../app/generate.h"
+#include "meter_feed.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/model/session.h"
@@ -139,6 +140,10 @@ views::ArrangeView* mount(ui::Root& root) {
     return view;
 }
 
+// Golden images. The session is shared across the suite (and some tests edit
+// it: renames, mute/solo, faders), so regenerate goldens with a FULL run
+// (SUPPLE_UPDATE_GOLDEN=1, no -tc filter) — a single-test run would write them
+// from a different session state.
 void golden(ui::Root& root, const char* name) {
     const gui::Image image = root.readBack();
     const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / name;
@@ -589,4 +594,514 @@ TEST_CASE("golden: items with fades, muted items and multi-take items") {
     arrange->setViewport(v);
     settle(root, arrange->lanes());
     golden(root, "arrange-items.png");
+}
+
+// --- the track control panel (P5.5) -------------------------------------------------
+
+namespace {
+
+// Mounts an arrange view whose TCP commits through the fixture's bus, the way
+// the shell wires it (selection in a vector, Origin::Ui, drag gestures).
+struct TcpHarness {
+    Session* session = nullptr;
+    std::vector<std::string> selected;
+    std::string error;
+    std::vector<std::string> gestures;  // every commit's coalescing key (tests)
+    std::optional<std::string> anchor;
+    gui::MeterFeed* feed = nullptr;
+    views::ArrangeView* view = nullptr;
+    std::string pickedTrack;  // the input button was clicked for this strip
+    ui::Rect pickedAnchor{};  // and it handed this window rect to the app
+
+    views::ArrangeView* mount(ui::Root& root, Session& s, gui::MeterFeed* meters = nullptr) {
+        session = &s;
+        feed = meters;
+        auto arrange =
+            std::make_unique<views::ArrangeView>(*s.peaks, s.resolve(), views::TransportSource{});
+        views::TcpCallbacks cb;
+        cb.selected = [this](const model::Id& id) {
+            return std::find(selected.begin(), selected.end(), id.str()) != selected.end();
+        };
+        cb.select = [this](const model::Id& id, unsigned mods) { select(id, mods); };
+        cb.commit = [this](std::string_view command, json::Value args, std::string gesture) {
+            gestures.push_back(gesture);
+            cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+            origin.gesture = std::move(gesture);
+            auto r = session->dispatcher->execute(
+                {std::string(command), std::move(args), std::move(origin)});
+            if (!r) error = r.error().code;
+        };
+        cb.addStrip = [this](std::string_view type) {
+            json::Value args = json::Value::object();
+            args["type"] = std::string(type);
+            cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+            auto r =
+                session->dispatcher->execute({"track.add", std::move(args), std::move(origin)});
+            if (!r) {
+                error = r.error().code;
+                return;
+            }
+            selected = {(*r)["track"].asString()};  // the new strip is selected
+            anchor = selected.front();
+        };
+        // The app names the ports (engine.inputs); these tests stand in for it.
+        cb.inputText = [](const model::Id&, const std::string& channels) {
+            std::string out;
+            for (std::size_t i = 0; i < channels.size();) {
+                std::size_t j = channels.find('/', i);
+                if (j == std::string::npos) j = channels.size();
+                out += (out.empty() ? "" : "+") +
+                       ("AUX" + std::to_string(std::stoi(channels.substr(i, j - i)) - 1));
+                i = j + 1;
+            }
+            return out.empty() ? std::string("in \u2014") : out;
+        };
+        cb.pickInput = [this](const model::Id& id, const ui::Rect& rect) {
+            pickedTrack = id.str();
+            pickedAnchor = rect;
+        };
+        if (meters) {
+            cb.meterShown = [meters](const std::string& track, ui::Meter* meter) {
+                meters->attach(track, meter);
+            };
+            cb.meterHidden = [meters](ui::Meter* meter) { meters->detach(meter); };
+        }
+        arrange->setTcpCallbacks(std::move(cb));
+        arrange->show(s.app->head());
+        views::ArrangeView* view_ = arrange.get();
+        view = view_;
+        root.setContent(std::move(arrange));
+        return view_;
+    }
+
+    void select(const model::Id& id, unsigned mods) {
+        const std::string key = id.str();
+        if (mods & ui::kShift) {  // extend from the anchor, in row order
+            const auto& rows = view->trackLayout().rows();
+            auto index = [&](const std::string& want) {
+                for (std::size_t i = 0; i < rows.size(); ++i)
+                    if (rows[i].track.str() == want) return static_cast<int>(i);
+                return -1;
+            };
+            const std::string from = anchor.value_or(key);
+            const int a = index(from), b = index(key);
+            if (a >= 0 && b >= 0) {
+                selected.clear();
+                for (int i = std::min(a, b); i <= std::max(a, b); ++i)
+                    selected.push_back(rows[static_cast<std::size_t>(i)].track.str());
+            } else {
+                selected = {key};
+            }
+        } else if (mods & ui::kCtrl) {
+            const auto it = std::find(selected.begin(), selected.end(), key);
+            if (it == selected.end())
+                selected.push_back(key);
+            else
+                selected.erase(it);
+        } else {
+            selected = {key};
+        }
+        anchor = key;
+    }
+    // The number of versions on the branch (history.list), like the brief's
+    // "one undo step" check.
+    std::size_t versions() {
+        auto r = session->dispatcher->execute(
+            {"history.list", json::Value::object(), {cmd::Origin::Type::Test, "gui-test", {}}});
+        REQUIRE(r);
+        return (*r)["versions"].asArray().size();
+    }
+    bool is(const char* track) const {
+        return std::find(selected.begin(), selected.end(), std::string(track)) != selected.end();
+    }
+};
+
+// Clicks the middle of a node through the root (the same path SDL input takes).
+void press(ui::Root& root, ui::Node* node, int clicks = 1, unsigned mods = 0) {
+    const ui::Rect b = node->bounds();
+    const ui::Point at{b.x + b.w / 2, b.y + b.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, at, 1, clicks, mods});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1, clicks, mods});
+}
+
+// A control's rect as it is laid out (the toolkit arranges a container's
+// children in the container's own space, so this is the point to press).
+void pressAt(ui::Root& root, const ui::Node& node) {
+    const ui::Rect b = node.bounds();
+    const ui::Point at{b.x + b.w / 2, b.y + b.h / 2};
+    root.pointer({ui::PointerEvent::Type::Move, at});
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
+}
+
+double trackDb(Session& s, const char* id) {
+    return s.app->head().tracks.find(*model::Id::parse(id))->volumeDb;
+}
+
+}  // namespace
+
+TEST_CASE("the TCP renames a strip in place through the bus") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    views::Viewport v;
+    v.pixelsPerSecond = 40;
+    arrange->setViewport(v);
+    root.damageAll();
+    root.frame(false);
+    const model::Id tr1 = *model::Id::parse("tr_1");
+    ui::Node* row = arrange->tcpPanel().rowNode(tr1);
+    REQUIRE(row);
+    // Double-click the name: a text field appears, focused, with the old name.
+    const ui::Rect name = arrange->tcpPanel().controlNode(tr1, "rename")->bounds();
+    const ui::Point at{name.x + 8, name.y + name.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, at, 1, 2});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1, 2});
+    ui::Node* field = arrange->tcpPanel().controlNode(tr1, "rename");
+    REQUIRE(field);
+    CHECK(field->visible);
+    CHECK(root.focused() == field);
+    root.text("Bass");
+    root.key(SDLK_RETURN);
+    CHECK(tcp.error.empty());
+    CHECK(s.app->head().tracks.find(tr1)->name == "Bass");
+    CHECK_FALSE(arrange->tcpPanel().controlNode(tr1, "rename")->visible);
+}
+
+TEST_CASE("the TCP toggles mute, solo, arm and monitor on the strip") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    const model::Id tr2 = *model::Id::parse("tr_2");
+    auto* panel = &arrange->tcpPanel();
+    // The app's loop syncs the panel to the new version after every command.
+    auto sync = [&] {
+        arrange->show(s.app->head());
+        root.damageAll();
+        root.frame(false);
+    };
+    REQUIRE(panel->controlNode(tr2, "mute"));
+    press(root, panel->controlNode(tr2, "mute"));
+    CHECK(s.app->head().tracks.find(tr2)->mute);
+    sync();
+    press(root, panel->controlNode(tr2, "solo"));
+    CHECK(s.app->head().tracks.find(tr2)->solo == model::Solo::On);
+    sync();
+    press(root, panel->controlNode(tr2, "arm"));
+    CHECK(s.app->head().tracks.find(tr2)->record.armed);
+    sync();
+    press(root, panel->controlNode(tr2, "monitor"));  // Off -> On
+    CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::On);
+    sync();
+    press(root, panel->controlNode(tr2, "monitor"));  // On -> Auto
+    CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::Auto);
+    sync();
+    press(root, panel->controlNode(tr2, "monitor"));  // Auto -> Off
+    CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::Off);
+    CHECK(tcp.error.empty());
+    // A master has neither arm nor monitor.
+    const model::Id master = model::kMaster;
+    CHECK(panel->controlNode(master, "arm") == nullptr);  // the master is not a row
+}
+
+TEST_CASE("a fader drag is one undo step and lands on the moved value") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    const model::Id tr1 = *model::Id::parse("tr_1");
+    ui::Node* fader = arrange->tcpPanel().controlNode(tr1, "fader");
+    REQUIRE(fader);
+    const ui::Rect fb = fader->bounds();
+    const std::size_t before = tcp.versions();
+    const double startDb = trackDb(s, "tr_1");
+    const ui::Point at{fb.x + fb.w / 2, fb.y + fb.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    for (int i = 1; i <= 20; ++i)  // 20 moves of one drag
+        root.pointer({ui::PointerEvent::Type::Move, {at.x - static_cast<float>(i) * 2, at.y}});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
+    CHECK(tcp.error.empty());
+    const model::Id tr1b = tr1;
+    const double moved = s.app->head().tracks.find(tr1b)->volumeDb;
+    CHECK(moved < startDb);  // dragged left: quieter
+    // Every move of the drag carried the same coalescing key.
+    REQUIRE(tcp.gestures.size() == 20);
+    for (const std::string& key : tcp.gestures) CHECK(key == tcp.gestures.front());
+    CHECK(tcp.gestures.front().find("tcp.volume:tr_1:") == 0);
+    CHECK(tcp.versions() == before + 1);  // one undo step for the whole drag
+    // A second drag is a second step, not a continuation of the first.
+    const std::size_t afterFirst = tcp.versions();
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    root.pointer({ui::PointerEvent::Type::Move, {at.x - 4, at.y}});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
+    CHECK(tcp.versions() == afterFirst + 1);
+    // A double-click resets to unity, as its own edit.
+    root.pointer({ui::PointerEvent::Type::Down, at, 1, 2});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1, 2});
+    CHECK(trackDb(s, "tr_1") == doctest::Approx(0.0));
+    CHECK(tcp.versions() == afterFirst + 2);
+}
+
+TEST_CASE("a pan drag is one undo step") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    const model::Id tr3 = *model::Id::parse("tr_3");
+    ui::Node* pan = arrange->tcpPanel().controlNode(tr3, "pan");
+    REQUIRE(pan);
+    const ui::Rect pb = pan->bounds();
+    const std::size_t before = tcp.versions();
+    const ui::Point at{pb.x + pb.w / 2, pb.y + pb.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, at, 1});
+    for (int i = 1; i <= 6; ++i)
+        root.pointer({ui::PointerEvent::Type::Move, {at.x + static_cast<float>(i) * 3, at.y}});
+    root.pointer({ui::PointerEvent::Type::Up, at, 1});
+    CHECK(tcp.error.empty());
+    CHECK(s.app->head().tracks.find(tr3)->pan > 0.0);
+    CHECK(tcp.versions() == before + 1);
+}
+
+TEST_CASE("TCP selection follows click, Ctrl+click and Shift+click") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    auto* panel = &arrange->tcpPanel();
+    const model::Id tr1 = *model::Id::parse("tr_1");
+    const model::Id tr3 = *model::Id::parse("tr_3");
+    REQUIRE(panel->rowNode(tr1));
+    press(root, panel->rowNode(tr1));
+    CHECK(tcp.is("tr_1"));
+    CHECK(tcp.selected.size() == 1);
+    press(root, panel->rowNode(tr3), 1, ui::kCtrl);
+    CHECK(tcp.is("tr_1"));
+    CHECK(tcp.is("tr_3"));
+    press(root, panel->rowNode(tr3), 1, ui::kCtrl);  // toggles off
+    CHECK_FALSE(tcp.is("tr_3"));
+    press(root, panel->rowNode(tr1));
+    press(root, panel->rowNode(tr3), 1, ui::kShift);  // extends
+    CHECK(tcp.selected.size() == 3);                  // tr_1..tr_3
+    CHECK(tcp.error.empty());
+}
+
+TEST_CASE("golden: the TCP with one strip of each type") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    const cmd::Origin test{cmd::Origin::Type::Test, "gui-test", {}};
+    auto run = [&](const char* command, json::Value args) {
+        auto r = s.dispatcher->execute({command, std::move(args), test});
+        REQUIRE(r);
+        return *r;
+    };
+    // A buss with a channel under it: the parentage bar and indent show.
+    json::Value bussArgs = json::Value::object();
+    bussArgs["type"] = "buss";
+    bussArgs["name"] = "Drum bus";
+    const std::string buss = run("track.add", std::move(bussArgs))["track"].asString();
+    json::Value childArgs = json::Value::object();
+    childArgs["name"] = "Kick";
+    childArgs["parent"] = buss;
+    const std::string child = run("track.add", std::move(childArgs))["track"].asString();
+    // One muted strip, one soloed, one selected.
+    json::Value mute = json::Value::object();
+    mute["track"] = buss;
+    mute["mute"] = true;
+    run("track.set", std::move(mute));
+    json::Value solo = json::Value::object();
+    solo["track"] = child;
+    solo["solo"] = "on";
+    run("track.set", std::move(solo));
+    // A record input on the child: its button names the device's port (the app
+    // supplies them from engine.inputs), not just the channel number.
+    json::Value rec = json::Value::object();
+    rec["track"] = child;
+    rec["record_input"] = json::Value::array();
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(2)));
+    run("track.set", std::move(rec));
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    tcp.selected = {child};  // and the child is selected
+    views::Viewport v;
+    v.pixelsPerSecond = 40;
+    v.scrollY = 1e6f;  // the buss and its child are the last rows
+    arrange->setViewport(v);
+    root.damageAll();
+    root.frame(false);
+    golden(root, "tcp-strips.png");
+}
+
+TEST_CASE("the TCP's + offers exactly Channel, Buss and Master") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    REQUIRE(root.find("tcp.add"));
+    for (auto [index, type] : {std::pair{0, model::StripType::Channel},
+                               {1, model::StripType::Buss},
+                               {2, model::StripType::Master}}) {
+        press(root, root.find("tcp.add"));
+        auto* menu = static_cast<ui::List*>(root.find("tcp.addmenu"));
+        REQUIRE(menu);
+        CHECK(menu->count() == 3);  // exactly the three strip types
+        const std::size_t before = s.app->head().tracks.size();
+        menu->onActivate(static_cast<std::size_t>(index));
+        CHECK(s.app->head().tracks.size() == before + 1);
+        REQUIRE(tcp.selected.size() == 1);
+        const model::Track* created = s.app->head().tracks.find(*model::Id::parse(tcp.selected[0]));
+        REQUIRE(created);
+        CHECK(created->type == type);
+    }
+    CHECK(tcp.error.empty());
+}
+
+TEST_CASE("the TCP meters take readings from the feed and hold peaks") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    std::vector<gui::StripReading> readings;
+    gui::MeterFeed feed([&readings] { return readings; });
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s, &feed);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    const model::Id tr1 = *model::Id::parse("tr_1");
+    ui::Meter* meter = static_cast<ui::Meter*>(arrange->tcpPanel().controlNode(tr1, "meter"));
+    REQUIRE(meter);
+    // A reading for tr_1 (and one for a track the panel does not show).
+    gui::StripReading r;
+    r.track = "tr_1";
+    r.peak[0] = r.peak[1] = 0.5f;  // -6 dBFS
+    r.rms[0] = r.rms[1] = 0.25f;
+    readings = {r};
+    feed.poll();
+    CHECK(meter->shownPeakDb(0) == doctest::Approx(static_cast<double>(-6.02f)).epsilon(0.2));
+    // The hold keeps it for a while, then the decay ticks it down.
+    readings.clear();
+    feed.poll();
+    const float held = meter->shownPeakDb(0);
+    CHECK(held > -10.0f);
+    for (int i = 0; i < 30; ++i) feed.poll();
+    CHECK(meter->shownPeakDb(0) < held);
+    // A clip (a reading at or over full scale) latches until the meter is
+    // clicked, which also clears the hold.
+    gui::StripReading hot;
+    hot.track = "tr_1";
+    hot.peak[0] = hot.peak[1] = 1.2f;
+    hot.rms[0] = hot.rms[1] = 0.5f;
+    readings = {hot};
+    feed.poll();
+    CHECK(meter->clipped());
+    press(root, meter);
+    CHECK_FALSE(meter->clipped());
+}
+
+TEST_CASE("the meters repaint only themselves, not the arrange content") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    std::vector<gui::StripReading> readings;
+    gui::MeterFeed feed([&readings] { return readings; });
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s, &feed);
+    arrange->setViewport({0, 40, 0});
+    root.frame(false);
+    const std::uint64_t repaints = root.stats().repaints;
+    const double area = root.stats().repaintedArea;
+    const model::Id tr1 = *model::Id::parse("tr_1");
+    ui::Meter* meter = static_cast<ui::Meter*>(arrange->tcpPanel().controlNode(tr1, "meter"));
+    REQUIRE(meter);
+    ui::Rect meterRect = meter->bounds();
+    gui::StripReading r;
+    r.track = "tr_1";
+    r.peak[0] = r.peak[1] = 0.7f;
+    readings = {r};
+    feed.poll();
+    root.frame(false);
+    // Only the meter's own rectangle (or a little more) was repainted.
+    CHECK(root.stats().repaintedArea - area < 4000.0);
+    CHECK(root.stats().repaintedArea - area > 0.0);
+    (void)repaints;
+    (void)meterRect;
+}
+
+TEST_CASE("the strip's input button names the ports and hands the anchor to the app (P5.13)") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session& s = session6();
+    if (!s.app) return;
+    const cmd::Origin test{cmd::Origin::Type::Test, "gui-test", {}};
+    json::Value add = json::Value::object();
+    add["name"] = "Rec";
+    auto created = s.dispatcher->execute({"track.add", std::move(add), test});
+    REQUIRE(created);
+    const std::string track = (*created)["track"].asString();
+    json::Value rec = json::Value::object();
+    rec["track"] = track;
+    rec["record_input"] = json::Value::array();
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(1)));
+    rec["record_input"].push_back(json::Value(static_cast<std::int64_t>(2)));
+    REQUIRE(s.dispatcher->execute({"track.set", std::move(rec), test}));
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    views::Viewport v;
+    v.pixelsPerSecond = 40;
+    v.scrollY = 1e6f;  // the new strip is the last row
+    arrange->setViewport(v);
+    root.damageAll();
+    root.frame(false);
+    ui::Node* button = arrange->tcpPanel().controlNode(*model::Id::parse(track), "input");
+    REQUIRE(button);
+    // The strip shows the port names; a narrow strip clips the tail, so the
+    // name is a prefix (the menu shows them whole).
+    CHECK(button->valueText().rfind("AUX0", 0) == 0);
+    pressAt(root, *button);  // and the app is asked to pick
+    CHECK(tcp.pickedTrack == track);
+    CHECK(tcp.pickedAnchor.w > 0);
+    CHECK(tcp.pickedAnchor.x > 0);
+    CHECK(tcp.pickedAnchor.y > 0);
 }

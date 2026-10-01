@@ -455,19 +455,18 @@ void Meter::tick() {
     bool moving = false;
     for (int ch = 0; ch < 2; ++ch) {
         // Peaks fall at 26 dB/s, RMS at 20 dB/s; holds stay 1.5 s, then fall.
-        const float floor = -150;
-        if (peakDb_[ch] > kMeterFloor - 1) {
-            peakDb_[ch] = std::max(floor, peakDb_[ch] - 26.0f * dt);
+        // A meter already at the floor is at rest: nothing to draw and no
+        // animation frame to ask for (an idle meter must not cost anything).
+        auto fall = [&](float& value, float dbPerSecond) {
+            if (value <= kMeterFloor) return;
+            const float next = std::max(static_cast<float>(kMeterFloor), value - dbPerSecond * dt);
+            if (next == value) return;
+            value = next;
             moving = true;
-        }
-        if (rmsDb_[ch] > kMeterFloor - 1) {
-            rmsDb_[ch] = std::max(floor, rmsDb_[ch] - 20.0f * dt);
-            moving = true;
-        }
-        if (holdDb_[ch] > kMeterFloor - 1 && now - holdAt_[ch] > std::chrono::milliseconds(1500)) {
-            holdDb_[ch] = std::max(floor, holdDb_[ch] - 40.0f * dt);
-            moving = true;
-        }
+        };
+        fall(peakDb_[ch], 26.0f);
+        fall(rmsDb_[ch], 20.0f);
+        if (now - holdAt_[ch] > std::chrono::milliseconds(1500)) fall(holdDb_[ch], 40.0f);
     }
     if (moving) {
         invalidate();

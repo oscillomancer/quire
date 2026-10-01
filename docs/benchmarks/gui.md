@@ -1,18 +1,30 @@
 # GUI performance (ADR-0005 §5 gates)
 
 **Result (2026-10-01, release build, offscreen SDL3 driver on EGL, Mesa 26.2.3
-on Intel Arc B580, Core Ultra 5 225F, `powersave` governor, other workers and
-builds running — load average ~16 on 10 cores):**
+on Intel Arc B580, Core Ultra 5 225F, `powersave` governor, other workers'
+builds running — load average ~12 on 10 cores; P5.5 added the TCP rows and the
+transport bar):**
 
 | Gate | Target | Measured |
 |---|---|---|
-| Cold start to first presented frame | < 300 ms | **101–245 ms** (empty session, 10 runs, median 161) |
-| Frame time p95, 64-track session, scripted zoom/scroll | ≤ 8 ms | **0.59–0.62 ms** UI-thread CPU (max 1.24 ms, 3 × 600 frames) |
-| Idle CPU (no input, no model change, 10 s) | ≈ 0 | **0.25–0.51 %** (the 100 ms service tick) |
+| Cold start to first presented frame | < 300 ms | **157–378 ms under this load** (median 270; 100–112 ms measured on a quiet machine earlier, 8 runs) |
+| Frame time p95, 64-track session, scripted zoom/scroll | ≤ 8 ms | **0.45–0.60 ms** UI-thread CPU (p50 0.23–0.27, max 1.26 ms, 3 × 600 frames) |
+| Idle CPU (no input, no model change, 10 s) | ≈ 0 | **0.46–0.71 %** (see the note below) |
 | UI-thread tasks over 2 ms during the run | none | **0** |
 
-Debug (`dev`) build for comparison: p95 2.8 ms (max 3.4 ms; one 3.3 ms task —
-the first frame over the scripted sweep), cold start ~344 ms.
+Debug (`dev`) build for comparison: p95 1.4–2.8 ms (load-dependent), cold start
+~345 ms.
+
+**Idle note (open item).** With the arrange view, the TCP and the transport bar
+drawn, the idle-loop cost rose to ~3 % and is now **0.5–0.9 %** (≈ 5–9 ms per
+second) after three fixes found by measuring it: the transport bar only writes
+a label when its text actually changes, `Shell::sync()` skips the bar while no
+engine is running and the model is unchanged, and a `ui::Meter` at its floor no
+longer asks for an animation frame forever (that last one lives in
+`ui/src/controls.cpp` and also stops the mixer's idle meters from animating).
+The remaining cost is not yet attributed; the gate says "≈ 0" and the earlier
+0.25–0.51 % was measured against a much smaller shell, so this is recorded as
+an open item rather than a pass.
 
 ## How it is measured
 
@@ -36,10 +48,11 @@ quire --offscreen --no-socket --frames 1 --bench          # cold start
   run builds 8 pyramids in the background worker, ≈ 1 s; later runs load them
   from the disk cache). `--script` then changes the arrange viewport every
   frame: zoom sweeps over 8×–⅛× (5–320 px/s), horizontal pans and a full
-  vertical scroll, so a frame repaints the ruler, the track control panel and
-  the lanes area (waveform columns from the pyramid, item bodies, fades and
-  notes as instanced GL rectangles). The playhead sits on the root's overlay
-  and is not part of the counted cost.
+  vertical scroll, so a frame repaints the ruler, the track control panel (a
+  row per visible strip with its badge, name, toggles, fader, pan and meter)
+  and the lanes area (waveform columns from the pyramid, item bodies, fades and
+  notes as instanced GL rectangles), plus the transport bar above them. The
+  playhead sits on the root's overlay and is not part of the counted cost.
 - `frame_cpu_ms` is the UI thread's CPU time inside `Root::frame()` (layout,
   damage repaint into the cached framebuffer, GL submission, blit). It does
   not include GPU execution time; GL timer queries are a follow-up for the
@@ -50,7 +63,11 @@ quire --offscreen --no-socket --frames 1 --bench          # cold start
 ## Not covered yet
 
 - X11 on the desktop (same code path; measure when the machine is attended).
-- Meters (engine telemetry is P5.3c), automation lanes, editing drags (P5.6+).
+- Meters fed by a *running* engine end to end (the feed is wired to
+  `EngineApp::meters()` and the TCP's rows attach to it on show and detach on
+  rebuild; an unattended measurement needs the engine running and a signal on
+  the strips, which is the JACK device-test opt-in), automation lanes, editing
+  drags (P5.6+).
 - Playhead follow scrolling while the transport runs end to end (the overlay
   path is covered by `gui-views.tests`; a real-device run needs the JACK test
   opt-in).
