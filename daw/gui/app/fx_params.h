@@ -29,6 +29,9 @@ class ParamPanel {
 
   private:
     void setValue(const std::string& key, json::Value value, bool gesture);
+    // Shows the parameter's automation lane, creating the envelope (flat at
+    // the current value) when it has none (P5.14).
+    Status automate(const std::string& key, double physical);
 
     cmd::Dispatcher& dispatcher_;
     ui::Root& root_;

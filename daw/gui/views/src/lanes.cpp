@@ -184,9 +184,9 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
     c.fillRect(r, t.color("ground").withAlpha(0.6f));
     c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.4f));
     const model::Envelope* env = s.envelopes.find(*layout_.rows()[row].env);
-    const auto scale = env ? envScale(*env) : std::nullopt;
+    const auto scale = env ? layout_.scaleOf(*env) : std::nullopt;
     if (!env || !scale) return;
-    double fallback = 0;
+    double fallback = scale->reference();
     if (const model::Track* tr = s.tracks.find(env->target.object))
         fallback = env->target.param == "volume" ? tr->volumeDb
                    : env->target.param == "pan"  ? tr->pan
@@ -198,7 +198,7 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
     const ui::Color ink =
         t.color(typeToken(layout_.rows()[row].type)).withAlpha(env->active ? 1.0f : 0.35f);
     // The unity / centre line for orientation.
-    c.fillRect({a.x, yOf(0.0), a.w, 1}, t.color("rule").withAlpha(0.35f));
+    c.fillRect({a.x, yOf(scale->reference()), a.w, 1}, t.color("rule").withAlpha(0.35f));
     const float x0 = std::max(a.x, bounds().x), x1 = std::min(a.right(), bounds().right());
     ui::Point prev{};
     bool have = false;

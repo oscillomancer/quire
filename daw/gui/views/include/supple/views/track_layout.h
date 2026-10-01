@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "supple/model/session.h"
+#include "supple/views/envelope_lane.h"
 
 namespace supple::views {
 
@@ -61,6 +62,11 @@ class TrackLayout {
     float heightOf(std::size_t row) const { return rowHeights_[row]; }
     float yOf(std::size_t row) const { return yOffsets_[row]; }  // content space
     float contentHeight() const { return contentHeight_; }
+    // A plugin parameter envelope's scale (the app reads fx.describe); empty
+    // or nullopt: plugin lanes are not shown.
+    std::function<std::optional<EnvScale>(const model::Envelope&)> pluginScales;
+    // A lane's scale: a mixer parameter's, else the plugin's.
+    std::optional<EnvScale> scaleOf(const model::Envelope& env) const;
     // Called when the rows or a height changed (the view re-clamps its scroll,
     // refreshes its scroll bars and repaints).
     std::function<void()> onChanged;

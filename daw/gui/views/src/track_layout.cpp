@@ -28,8 +28,16 @@ bool TrackLayout::show(const model::Session& session) {
             rows_.push_back({id, t->type, depth, std::nullopt});
             // Its visible automation lanes (volume, pan, mute) right below it.
             std::vector<std::pair<int, model::Id>> lanes;
+            // Its own controls' envelopes, then its effects' (main and input chains).
+            auto owned = [&](model::Id object) {
+                if (object == id) return true;
+                if (object.kind != model::Kind::Fx) return false;
+                return std::find(t->chain.begin(), t->chain.end(), object) != t->chain.end() ||
+                       std::find(t->inputChain.begin(), t->inputChain.end(), object) !=
+                           t->inputChain.end();
+            };
             for (const auto& e : session_.envelopes)
-                if (e.value->target.object == id && e.value->visible && envScale(*e.value))
+                if (owned(e.value->target.object) && e.value->visible && scaleOf(*e.value))
                     lanes.emplace_back(envOrder(*e.value), e.id);
             std::sort(lanes.begin(), lanes.end());
             for (const auto& lane : lanes) rows_.push_back({id, t->type, depth, lane.second});
@@ -54,6 +62,12 @@ std::optional<std::size_t> TrackLayout::indexOf(model::Id track) const {
 std::optional<std::size_t> TrackLayout::indexOfEnv(model::Id env) const {
     for (std::size_t i = 0; i < rows_.size(); ++i)
         if (rows_[i].env == env) return i;
+    return std::nullopt;
+}
+
+std::optional<EnvScale> TrackLayout::scaleOf(const model::Envelope& env) const {
+    if (auto mixer = envScale(env)) return mixer;
+    if (env.target.object.kind == model::Kind::Fx && pluginScales) return pluginScales(env);
     return std::nullopt;
 }
 

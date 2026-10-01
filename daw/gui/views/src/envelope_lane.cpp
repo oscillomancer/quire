@@ -17,9 +17,13 @@ double EnvScale::toNorm(double value) const {
             return std::clamp((value + 100.0) / 200.0, 0.0, 1.0);
         case Kind::Mute:
             return value >= 0.5 ? 1.0 : 0.0;
+        case Kind::Plugin:
+            return param ? params::toNormalized(param->spec, value) : 0.0;
     }
     return 0.0;
 }
+
+double EnvScale::reference() const { return kind == Kind::Plugin && param ? param->spec.def : 0.0; }
 
 double EnvScale::fromNorm(double norm) const {
     const double n = std::clamp(norm, 0.0, 1.0);
@@ -30,6 +34,10 @@ double EnvScale::fromNorm(double norm) const {
             return std::round(n * 200.0 - 100.0);
         case Kind::Mute:
             return n >= 0.5 ? 1.0 : 0.0;
+        case Kind::Plugin:
+            return param
+                       ? params::clampPhysical(param->spec, params::fromNormalized(param->spec, n))
+                       : 0.0;
     }
     return 0.0;
 }
@@ -49,6 +57,8 @@ std::string EnvScale::text(double value) const {
         }
         case Kind::Mute:
             return value >= 0.5 ? "muted" : "on";
+        case Kind::Plugin:
+            return param ? params::format(param->spec, value) : std::string{};
     }
     return {};
 }

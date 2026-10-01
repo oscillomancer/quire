@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "generate.h"
+#include "plugin_scales.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/engine/app.h"
@@ -54,6 +55,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};  // the stock plugins only
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
         app = std::move(*a);
@@ -431,4 +433,76 @@ TEST_CASE("arrange gestures: a move that overlaps another item crossfades both o
            {r2.x + 20 - 2 * f.beatPx() * static_cast<float>(f.view->gestures().gridBeats()),
             r2.y + r2.h / 2});
     CHECK(f.item(audio).fadeOut.length == doctest::Approx(overlap));  // unchanged
+}
+
+TEST_CASE("automation lanes: a plugin parameter's lane uses the plugin's range and curve") {
+    Fixture f;
+    if (!f.ok) return;
+    auto listed = f.dispatcher->execute({"plugin.list", json::Value::object(), kUi});
+    REQUIRE(listed);
+    // A stock effect with a continuous semantic parameter (partial builds have none).
+    std::string fxId, key;
+    std::shared_ptr<params::DescribedParam> spec;
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    for (const json::Value& p : (*listed)["plugins"].asArray()) {
+        if (p.find("instrument") && p.find("instrument")->asBool()) continue;
+        auto added =
+            f.dispatcher->execute({"fx.add",
+                                   json::parse(R"({"track":")" + track.str() + R"(","plugin":")" +
+                                               p.find("id")->asString() + R"("})")
+                                       .value(),
+                                   kUi});
+        if (!added) continue;
+        const std::string id = (*added)["fx"].asString();
+        auto described = f.dispatcher->execute(
+            {"fx.describe", json::parse(R"({"fx":")" + id + R"(","full":true})").value(), kUi});
+        if (described)
+            if (const json::Value* ps = described->find("params"); ps && ps->isObject())
+                for (const auto& m : ps->asObject()) {
+                    auto d = params::fromDescription(m.key, m.value);
+                    if (!d || (*d)->spec.type != params::Type::Float ||
+                        ((*d)->spec.flags & (params::kReadonly | params::kHidden)))
+                        continue;
+                    fxId = id;
+                    key = m.key;
+                    spec = std::shared_ptr<params::DescribedParam>(std::move(*d));
+                    break;
+                }
+        if (spec) break;
+    }
+    if (!spec) {
+        MESSAGE("skipped: no stock effect with a continuous parameter (partial build)");
+        return;
+    }
+    const double high = params::fromNormalized(spec->spec, 0.9);
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"fx":")" + fxId + R"(","param":")" + key +
+                     R"(","points":[{"beat":0,"value":)" + std::to_string(spec->spec.def) +
+                     R"(},{"beat":16,"value":)" + std::to_string(high) + "}]}")
+             .value(),
+         kUi});
+    REQUIRE_MESSAGE(added, (added ? std::string() : added.error().toString()));
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    // Without the app's scale source the lane is not shown; with it, it is.
+    f.sync();
+    CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
+    auto scales = std::make_shared<gui::PluginScales>(*f.dispatcher);
+    f.view->trackLayout().pluginScales = [scales](const model::Envelope& e) {
+        return (*scales)(e);
+    };
+    (void)f.dispatcher->execute(
+        {"env.set", json::parse(R"({"env":")" + env.str() + R"(","visible":true})").value(), kUi});
+    f.sync();
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    CHECK(*lane == *f.view->trackLayout().indexOf(track) + 1);
+    // A click in the lane's upper quarter adds a value three quarters up the
+    // parameter's own curve.
+    const ui::Rect area = views::Lanes::envArea(f.view->rowRect(*lane));
+    const float x = f.view->xAt(f.app->head().timeMap->secondsAt(8)) + 1;
+    f.click({x, area.y + area.h * 0.25f});
+    const auto& pts = f.app->head().envelopes.find(env)->points;
+    REQUIRE(pts.size() == 3);
+    CHECK(params::toNormalized(spec->spec, pts[1].value) == doctest::Approx(0.75).epsilon(0.05));
 }

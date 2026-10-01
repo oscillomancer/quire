@@ -40,13 +40,13 @@ target_include_directories(gui-actions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/action
 # editors follow.
 supple_add_library(gui-views SOURCES views/src/lanes.cpp views/src/track_layout.cpp
                                         views/src/arrange.cpp views/src/item_gestures.cpp views/src/tcp.cpp views/src/envelope_lane.cpp
-  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline SDL3::SDL3)
+  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline supple::core-params SDL3::SDL3)
 target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
   app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
-  app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp)
+  app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp app/plugin_scales.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_link_libraries(gui-app PUBLIC supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
                       supple::engine supple::control-protocol supple::core-params supple::product-info SDL3::SDL3)

@@ -172,7 +172,7 @@ class Ghost : public ui::Node {
             case ItemGestures::Drag::EnvPoint: {
                 const auto row = st.env ? v.trackLayout().indexOfEnv(*st.env) : std::nullopt;
                 const model::Envelope* env = st.env ? s.envelopes.find(*st.env) : nullptr;
-                const auto scale = env ? envScale(*env) : std::nullopt;
+                const auto scale = env ? v.trackLayout().scaleOf(*env) : std::nullopt;
                 if (!row || !scale) break;
                 model::Envelope draft = *env;
                 draft.points = st.envDraft;
@@ -672,7 +672,7 @@ bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
     const model::Id envId = *view_.trackLayout().rows()[row].env;
     const model::Envelope* env = s.envelopes.find(envId);
-    const auto scale = env ? envScale(*env) : std::nullopt;
+    const auto scale = env ? view_.trackLayout().scaleOf(*env) : std::nullopt;
     if (!scale) return true;
     const ui::Rect area = Lanes::envArea(view_.rowRect(row));
     state_.drag = Drag::EnvPoint;
@@ -721,7 +721,7 @@ void ItemGestures::envDrag(const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
     const auto row = view_.trackLayout().indexOfEnv(*state_.env);
     const model::Envelope* env = s.envelopes.find(*state_.env);
-    const auto scale = env ? envScale(*env) : std::nullopt;
+    const auto scale = env ? view_.trackLayout().scaleOf(*env) : std::nullopt;
     if (!row || !scale || state_.envIndex >= state_.envDraft.size()) return;
     const ui::Rect area = Lanes::envArea(view_.rowRect(*row));
     auto& pts = state_.envDraft;

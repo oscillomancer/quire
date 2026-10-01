@@ -1,5 +1,7 @@
 #include "shell.h"
 
+#include "plugin_scales.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -143,6 +145,11 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
         openEnvelopeMenu(track, anchor);
     };
     arrange_->setTcpCallbacks(std::move(tcp));
+    // Plugin parameter lanes take their scale from the effect's description.
+    arrange_->trackLayout().pluginScales =
+        [scales = std::make_shared<PluginScales>(dispatcher_)](const model::Envelope& env) {
+            return (*scales)(env);
+        };
     counts_ = &shell->emplace<ui::Label>("status", status_, ui::Font::Mono, "small", "ink-quiet");
     counts_->layout.width = ui::SizeRule::fraction();
     counts_->layout.height = ui::SizeRule::fixed(26);
@@ -259,6 +266,39 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
             };
         }
         items.push_back(std::move(m));
+    }
+    // The strip's effects' automated parameters (created from the FX window).
+    bool firstPlugin = true;
+    for (const auto& e : s.envelopes) {
+        const model::Id target = e.value->target.object;
+        if (target.kind != model::Kind::Fx) continue;
+        const bool owned =
+            std::find(tr->chain.begin(), tr->chain.end(), target) != tr->chain.end() ||
+            std::find(tr->inputChain.begin(), tr->inputChain.end(), target) != tr->inputChain.end();
+        const model::FxInstance* fx = s.fx.find(target);
+        if (!owned || !fx) continue;
+        if (firstPlugin) items.push_back({"", "", {}, true, true});  // separator
+        firstPlugin = false;
+        const std::string name =
+            (fx->label.empty() ? fx->plugin.name : fx->label) + ": " + e.value->target.param;
+        ui::MenuItem m;
+        m.label = name;
+        m.checked = e.value->visible;
+        m.run = [this, id = e.id, shown = e.value->visible] {
+            json::Value args = json::Value::object();
+            args["env"] = id.str();
+            args["visible"] = !shown;
+            commit("env.set", std::move(args), {});
+        };
+        items.push_back(std::move(m));
+        ui::MenuItem remove;
+        remove.label = "Remove " + name;
+        remove.run = [this, id = e.id] {
+            json::Value args = json::Value::object();
+            args["env"] = id.str();
+            commit("env.remove", std::move(args), {});
+        };
+        removals.push_back(std::move(remove));
     }
     if (!removals.empty()) {
         items.push_back({"", "", {}, true, true});  // separator

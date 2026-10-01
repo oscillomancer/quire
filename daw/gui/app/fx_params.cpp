@@ -202,10 +202,43 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
         field.onSubmit = [this, key, spec_keep](const std::string& text) {
             setValue(key, json::Value(text), false);
         };
+        if (writable && spec.type != params::Type::Enum) {
+            auto& lane =
+                row.emplace<ui::Button>("fx.param.automate." + d.key, "env",
+                                        [this, key, physical] { (void)automate(key, physical); });
+            lane.layout.width = ui::SizeRule::fixed(34);
+        }
         ++shown;
     }
     (void)root_;
     return shown;
+}
+
+Status ParamPanel::automate(const std::string& key, double physical) {
+    json::Value listArgs = json::Value::object();
+    listArgs["object"] = idText(fx_);
+    auto listed = dispatcher_.execute({"env.list", std::move(listArgs), kUiOrigin});
+    if (!listed) return std::move(listed).error();
+    for (const json::Value& e : (*listed)["envelopes"].asArray()) {
+        if (e.find("param")->asString() != key) continue;
+        json::Value args = json::Value::object();
+        args["env"] = e.find("env")->asString();
+        args["visible"] = true;
+        auto shown = dispatcher_.execute({"env.set", std::move(args), kUiOrigin});
+        if (!shown) return std::move(shown).error();
+        return {};
+    }
+    json::Value args = json::Value::object(), points = json::Value::array(),
+                first = json::Value::object();
+    args["fx"] = idText(fx_);
+    args["param"] = key;
+    first["beat"] = 0.0;
+    first["value"] = physical;
+    points.push_back(std::move(first));
+    args["points"] = std::move(points);
+    auto added = dispatcher_.execute({"env.add", std::move(args), kUiOrigin});
+    if (!added) return std::move(added).error();
+    return {};
 }
 
 void ParamPanel::setValue(const std::string& key, json::Value value, bool gesture) {
