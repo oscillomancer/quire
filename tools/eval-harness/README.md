@@ -26,6 +26,11 @@ python3 tools/eval-harness/run.py --suite synth-descriptive --runner hermes \
   --tasks sub-bass --repeat 1
 ```
 
+`--jobs N` (1..16) runs attempts concurrently; each already has its own run
+directory, Hermes home and sandbox, and the report keeps task/repeat order.
+Reference attempts take minutes each, so use it for full suites. SIGINT/SIGTERM
+stop every live attempt's process group.
+
 `--tasks` accepts full ids or suffixes, separated by spaces or commas. Suites
 are `synth-descriptive` (10), `synth-reference` (10), and `notation` (5).
 `--dry-run` always forces the scripted runner, including with `--runner hermes`.

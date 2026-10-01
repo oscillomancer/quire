@@ -1,0 +1,3112 @@
+{
+  "git_hash": "065299898606d5e621161ad5ba2d18caf76cdf13",
+  "hermes_profile": "quire-eval",
+  "listening_audio": "docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes",
+  "median_loss": 0.0,
+  "model": "meta/muse-spark-1.3-contributor",
+  "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+  "pass_rate": 0.9333333333333333,
+  "provider": "openrouter",
+  "run_directory": "build/eval/20261001T030823264794Z-notation-hermes",
+  "run_id": "20261001T030823264794Z-notation-hermes",
+  "runner": "hermes",
+  "schema": "supple.eval-report/1.0",
+  "seed": 42,
+  "skill_hash": "20f78dfab8de9bf4a2c14556a2bb73456c79966e946bd42a7a6b1b9b7e359421",
+  "started_utc": "2026-10-01T03:08:23.264794+00:00",
+  "suite": "notation",
+  "task_hashes": {
+    "notation.bass-riff": "db13f29fcac03f54a482e5d907b73881cbde1532a3b318fcd0bfd1417ca9dde2",
+    "notation.chords": "12d54b552d667dce25d49c034c8800613dfcbea4f5490844b430bc2663052612",
+    "notation.drums": "e70d87c0bd712abe589f5b66fb3f7ced8d21935ba061f1d623b0debe0531c6c8",
+    "notation.triplet-lead": "75663790e687fb607636a5999fc95f060fe26ec4a84fca08e246698b81816249",
+    "notation.waltz": "fbfc54c80f7013577689428fa46ac45ecb155e4657f7d4b48bbd2eb7562f4133"
+  },
+  "tasks": [
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e Eb2:e G1:e Bb1:e r:e C2:e D2:e Eb2:e\n2: G1:e Ab1:e Bb1:e r:e C2:e Eb2:e D2:e C2:e"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 8
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e Eb2:e G1:e Bb1:e r:e C2:e D2:e Eb2:e\n2: G1:e Ab1:e Bb1:e r:e C2:e Eb2:e D2:e C2:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 3.0,
+            "attack_curve": 0.0,
+            "decay": 180.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 120.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 65.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": 0.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-1-score/renders/rd_1.wav",
+      "render_sha256": "d2a5eb548aa545383ab47d0e471495b45fa37a091a298ba1fbb0f96a1426c2f7",
+      "repeat": 1,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 55.37993001000723
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 7.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          31,
+          39
+        ]
+      },
+      "seed": 42,
+      "task": "notation.bass-riff",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 9,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 50169,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.016817637999999996,
+        "failed": false,
+        "input_tokens": 158237,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 4468,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 3099,
+        "service_tier": null,
+        "session_id": "20260930_220829_f44da2",
+        "total_including_auxiliary": {
+          "api_calls": 10,
+          "estimated_cost_usd": 0.016817637999999996,
+          "total_tokens": 213898
+        },
+        "total_tokens": 212874,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 58.937
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 1,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice bass ch 1 vel 100\n1: C2:e Eb2:e r:e C2:e D2:e C2:e Bb1:e G1:e\n2: Ab1:e Bb1:e r:e C2:e D2:e Eb2:e D2:e C2:e"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 9
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice bass ch 1 vel 100\n1: C2:e Eb2:e r:e C2:e D2:e C2:e Bb1:e G1:e\n2: Ab1:e Bb1:e r:e C2:e D2:e Eb2:e D2:e C2:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 3.0,
+            "attack_curve": 0.0,
+            "decay": 250.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 150.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 80.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 600.0,
+            "drive": 0.0,
+            "keytrack": 50.0,
+            "level": 0.0,
+            "resonance": 10.0,
+            "slope": "24 dB",
+            "type": "ladder"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": 0.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-2-score/renders/rd_1.wav",
+      "render_sha256": "cb9dcdddae9588a0bb2cce89a63dd326e35f3f95210a1cd2fed451e585254db1",
+      "repeat": 2,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 69.39665025001159
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 7.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          31,
+          39
+        ]
+      },
+      "seed": 42,
+      "task": "notation.bass-riff",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-2/transcript.jsonl",
+      "usage": {
+        "api_calls": 13,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 497,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 15,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 497,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 15,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 527
+        },
+        "cache_read_tokens": 48573,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.024269145999999995,
+        "failed": false,
+        "input_tokens": 230216,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 5752,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 3994,
+        "service_tier": null,
+        "session_id": "20260930_220929_aa6589",
+        "total_including_auxiliary": {
+          "api_calls": 14,
+          "estimated_cost_usd": 0.024269145999999995,
+          "total_tokens": 285068
+        },
+        "total_tokens": 284541,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 72.95
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 1,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e D2:e Eb2:e r:e G1:e Bb1:e C2:e Eb2:e | G1:e r:e Bb1:e C2:e D2:e Eb2:e D2:e C2:e"
+          }
+        ],
+        "patch_merges": 6,
+        "tool_calls": 12
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice bass ch 1\n1: C2:e D2:e Eb2:e r:e G1:e Bb1:e C2:e Eb2:e | G1:e r:e Bb1:e C2:e D2:e Eb2:e D2:e C2:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 180.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 120.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 85.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "filter1": {
+            "cutoff": 550.0,
+            "drive": 0.0,
+            "keytrack": 0.0,
+            "level": 0.0,
+            "resonance": 15.0,
+            "slope": "24 dB",
+            "type": "ladder"
+          },
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": 0.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          },
+          "osc2": {
+            "level": -6.0,
+            "octave": -1,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "to": "filter1",
+            "type": "sub",
+            "wave": "sine"
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "mono",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-3-score/renders/rd_1.wav",
+      "render_sha256": "a3a83fb7426ea1717bfaee4902b98740f36a315a1f3b3549c2bdafafa229010b",
+      "repeat": 3,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 83.91668565198779
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 7.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          31,
+          39
+        ]
+      },
+      "seed": 42,
+      "task": "notation.bass-riff",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.bass-riff-3/transcript.jsonl",
+      "usage": {
+        "api_calls": 17,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 497,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 15,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 497,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 15,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 527
+        },
+        "cache_read_tokens": 188673,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.018730145999999996,
+        "failed": false,
+        "input_tokens": 174580,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 4474,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2385,
+        "service_tier": null,
+        "session_id": "20260930_221041_7f10e3",
+        "total_including_auxiliary": {
+          "api_calls": 18,
+          "estimated_cost_usd": 0.018730145999999996,
+          "total_tokens": 368254
+        },
+        "total_tokens": 367727,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 87.487
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.chords-1-score/renders/rd_1.wav",
+      "render_sha256": "9c5574d515d2f63ffe6769daa276a9451d4b534b04cae77e15cbde5087fcb778",
+      "repeat": 1,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 33.758641735010315
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          69
+        ]
+      },
+      "seed": 42,
+      "task": "notation.chords",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.chords-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 30871,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.008978342,
+        "failed": false,
+        "input_tokens": 84700,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 2233,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 1416,
+        "service_tier": null,
+        "session_id": "20260930_221208_8a336e",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.008978342,
+          "total_tokens": 118828
+        },
+        "total_tokens": 117804,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 37.159
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 4
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.chords-2-score/renders/rd_1.wav",
+      "render_sha256": "9c5574d515d2f63ffe6769daa276a9451d4b534b04cae77e15cbde5087fcb778",
+      "repeat": 2,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 39.47410528600449
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          69
+        ]
+      },
+      "seed": 42,
+      "task": "notation.chords",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.chords-2/transcript.jsonl",
+      "usage": {
+        "api_calls": 8,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 80776,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.0043225519999999995,
+        "failed": false,
+        "input_tokens": 36174,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 2718,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 1858,
+        "service_tier": null,
+        "session_id": "20260930_221246_a8d5d8",
+        "total_including_auxiliary": {
+          "api_calls": 9,
+          "estimated_cost_usd": 0.0043225519999999995,
+          "total_tokens": 120692
+        },
+        "total_tokens": 119668,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 43.065
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: [C4 E4 G4]:w\n2: [C4 E4 A4]:w",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.chords-3-score/renders/rd_1.wav",
+      "render_sha256": "9c5574d515d2f63ffe6769daa276a9451d4b534b04cae77e15cbde5087fcb778",
+      "repeat": 3,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 43.3801827209827
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          69
+        ]
+      },
+      "seed": 42,
+      "task": "notation.chords",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.chords-3/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 532,
+              "reasoning_tokens": 501
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 532,
+          "reasoning_tokens": 501,
+          "total_tokens": 1044
+        },
+        "cache_read_tokens": 50455,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.005739510000000001,
+        "failed": false,
+        "input_tokens": 50312,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3037,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2180,
+        "service_tier": null,
+        "session_id": "20260930_221329_1415e3",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.005739510000000001,
+          "total_tokens": 104848
+        },
+        "total_tokens": 103804,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 46.823
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 10\n1: n38:e r:e n38:e r:e n38:e r:e n38:e r:e\n2: n38:e r:e n38:e r:e n38:e r:e n38:e r:e"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 10\n1: n38:e r:e n38:e r:e n38:e r:e n38:e r:e\n2: n38:e r:e n38:e r:e n38:e r:e n38:e r:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.drums-1-score/renders/rd_1.wav",
+      "render_sha256": "e0d7df2c67b134a9ad053a56ef012137e999d48c02f736b20f48b3359bfa27ec",
+      "repeat": 1,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 54.9134121669922
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 4.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          38,
+          38
+        ]
+      },
+      "seed": 42,
+      "task": "notation.drums",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.drums-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 35863,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.007986726,
+        "failed": false,
+        "input_tokens": 73260,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 2945,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2142,
+        "service_tier": null,
+        "session_id": "20260930_221416_328a51",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.007986726,
+          "total_tokens": 113092
+        },
+        "total_tokens": 112068,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 58.774
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice drums ch 10 grid e\n1: snare x.x.x.x.\n2: snare x.x.x.x."
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice drums ch 10 grid e\n1: snare x.x.x.x.\n2: snare x.x.x.x.",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.drums-2-score/renders/rd_1.wav",
+      "render_sha256": "e0d7df2c67b134a9ad053a56ef012137e999d48c02f736b20f48b3359bfa27ec",
+      "repeat": 2,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 462 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 53.07010149801499
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 4.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          38,
+          38
+        ]
+      },
+      "seed": 42,
+      "task": "notation.drums",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.drums-2/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 66839,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.004638878000000001,
+        "failed": false,
+        "input_tokens": 38062,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3495,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2658,
+        "service_tier": null,
+        "session_id": "20260930_221515_237f0f",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.004638878000000001,
+          "total_tokens": 109420
+        },
+        "total_tokens": 108396,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 56.762
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice drums ch 10\n1: n38:e r:e n38:e r:e n38:e r:e n38:e r:e\n2: n38:e r:e n38:e r:e n38:e r:e n38:e r:e"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 5
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice drums ch 10\n1: n38:e r:e n38:e r:e n38:e r:e n38:e r:e\n2: n38:e r:e n38:e r:e n38:e r:e n38:e r:e",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.drums-3-score/renders/rd_1.wav",
+      "render_sha256": "e0d7df2c67b134a9ad053a56ef012137e999d48c02f736b20f48b3359bfa27ec",
+      "repeat": 3,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 63.27950120501919
+      },
+      "score": {
+        "bars": 2.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 4.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          38,
+          38
+        ]
+      },
+      "seed": 42,
+      "task": "notation.drums",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.drums-3/transcript.jsonl",
+      "usage": {
+        "api_calls": 9,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 497,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 15,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 497,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 15,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 527
+        },
+        "cache_read_tokens": 77689,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.007772777999999999,
+        "failed": false,
+        "input_tokens": 69452,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3361,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2273,
+        "service_tier": null,
+        "session_id": "20260930_221611_17cf67",
+        "total_including_auxiliary": {
+          "api_calls": 10,
+          "estimated_cost_usd": 0.007772777999999999,
+          "total_tokens": 151029
+        },
+        "total_tokens": 150502,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 67.049
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3"
+          }
+        ],
+        "patch_merges": 1,
+        "tool_calls": 5
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-1-score/renders/rd_1.wav",
+      "render_sha256": "bdfb854121afb8dc77faa4aee7723953e714aa47eeba5e4b68b15c01610b71f5",
+      "repeat": 1,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 97.03728166400106
+      },
+      "score": {
+        "bars": 1.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 12.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          67
+        ]
+      },
+      "seed": 42,
+      "task": "notation.triplet-lead",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 10,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 78314,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.011855928,
+        "failed": false,
+        "input_tokens": 109037,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3978,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2892,
+        "service_tier": null,
+        "session_id": "20260930_221718_baa6c9",
+        "total_including_auxiliary": {
+          "api_calls": 11,
+          "estimated_cost_usd": 0.011855928,
+          "total_tokens": 192353
+        },
+        "total_tokens": 191329,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 100.69
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 4
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-2-score/renders/rd_1.wav",
+      "render_sha256": "bdfb854121afb8dc77faa4aee7723953e714aa47eeba5e4b68b15c01610b71f5",
+      "repeat": 2,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 82.4038241340022
+      },
+      "score": {
+        "bars": 1.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 12.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          67
+        ]
+      },
+      "seed": 42,
+      "task": "notation.triplet-lead",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-2/transcript.jsonl",
+      "usage": {
+        "api_calls": 7,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 32791,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.008890582000000001,
+        "failed": false,
+        "input_tokens": 78858,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 4696,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 3740,
+        "service_tier": null,
+        "session_id": "20260930_221859_63a442",
+        "total_including_auxiliary": {
+          "api_calls": 8,
+          "estimated_cost_usd": 0.008890582000000001,
+          "total_tokens": 117369
+        },
+        "total_tokens": 116345,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 85.694
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 3
+      },
+      "final_notation": "notation 1\nmeter 4/4\nvoice v ch 1\n1: C4:e3 D4:e3 E4:e3 F4:e3 G4:e3 F4:e3 E4:e3 D4:e3 C4:e3 D4:e3 E4:e3 G4:e3",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-3-score/renders/rd_1.wav",
+      "render_sha256": "bdfb854121afb8dc77faa4aee7723953e714aa47eeba5e4b68b15c01610b71f5",
+      "repeat": 3,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 52.12328758899821
+      },
+      "score": {
+        "bars": 1.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 12.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          67
+        ]
+      },
+      "seed": 42,
+      "task": "notation.triplet-lead",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.triplet-lead-3/transcript.jsonl",
+      "usage": {
+        "api_calls": 6,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 35878,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.006072256,
+        "failed": false,
+        "input_tokens": 54085,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 2960,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2209,
+        "service_tier": null,
+        "session_id": "20260930_222024_23efbd",
+        "total_including_auxiliary": {
+          "api_calls": 7,
+          "estimated_cost_usd": 0.006072256,
+          "total_tokens": 93947
+        },
+        "total_tokens": 92923,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 55.287
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q E4:q D4:q\n4: E4:q D4:q C4:q"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 4
+      },
+      "final_notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q E4:q D4:q\n4: E4:q D4:q C4:q",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-1-score/renders/rd_1.wav",
+      "render_sha256": "a11ce0648a6ca07bd00f53d87efa0ba6ff89a8e1cf5261f8ebd219751719463d",
+      "repeat": 1,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 29.93810725599178
+      },
+      "score": {
+        "bars": 4.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          69
+        ]
+      },
+      "seed": 42,
+      "task": "notation.waltz",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-1/transcript.jsonl",
+      "usage": {
+        "api_calls": 6,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 497,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 15,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 497,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 15,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 527
+        },
+        "cache_read_tokens": 36902,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.006252203999999999,
+        "failed": false,
+        "input_tokens": 58102,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 1841,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 1040,
+        "service_tier": null,
+        "session_id": "20260930_222120_aa99a9",
+        "total_including_auxiliary": {
+          "api_calls": 7,
+          "estimated_cost_usd": 0.006252203999999999,
+          "total_tokens": 97372
+        },
+        "total_tokens": 96845,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 33.729
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 0,
+        "notation_attempts": [
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 3/4\nvoice melody ch 1 vel 90\n1: C4:q E4:q G4:q\n2: A4:q G4:q C5:q\n3: B4:q A4:q G4:q\n4: E4:q D4:q C4:q"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 4
+      },
+      "final_notation": "notation 1\nmeter 3/4\nvoice melody ch 1 vel 90\n1: C4:q E4:q G4:q\n2: A4:q G4:q C5:q\n3: B4:q A4:q G4:q\n4: E4:q D4:q C4:q",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-2-score/renders/rd_1.wav",
+      "render_sha256": "71e6cba0a346aa9289d8acefa63bf338f547618c1bd7d4c3d47c4c42cec6026d",
+      "repeat": 2,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 62.35114735199022
+      },
+      "score": {
+        "bars": 4.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": true,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.0,
+        "notes_per_bar": 3.0,
+        "pass": true,
+        "pass_fraction": 1.0,
+        "pitch_range": [
+          60,
+          72
+        ]
+      },
+      "seed": 42,
+      "task": "notation.waltz",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-2/transcript.jsonl",
+      "usage": {
+        "api_calls": 8,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 497,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 15,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 497,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 15,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 527
+        },
+        "cache_read_tokens": 63496,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.007038492,
+        "failed": false,
+        "input_tokens": 62669,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3223,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2165,
+        "service_tier": null,
+        "session_id": "20260930_222153_7e6ccc",
+        "total_including_auxiliary": {
+          "api_calls": 9,
+          "estimated_cost_usd": 0.007038492,
+          "total_tokens": 129915
+        },
+        "total_tokens": 129388,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 65.81
+    },
+    {
+      "efficiency": {
+        "batches": 0,
+        "errors": 1,
+        "notation_attempts": [
+          {
+            "compiled": false,
+            "error": {
+              "code": "notation.invalid",
+              "details": [
+                {
+                  "code": "notation.bar_after_pipe",
+                  "column": 21,
+                  "hint": "After `|` the next bar continues without a number: `... | D3:h A2:h`, or start a new line `2: ...`.",
+                  "line": 4,
+                  "message": "Bar number follows a pipe.",
+                  "path": "4:21"
+                },
+                {
+                  "code": "notation.bar_after_pipe",
+                  "column": 41,
+                  "hint": "After `|` the next bar continues without a number: `... | D3:h A2:h`, or start a new line `2: ...`.",
+                  "line": 4,
+                  "message": "Bar number follows a pipe.",
+                  "path": "4:41"
+                },
+                {
+                  "code": "notation.bar_after_pipe",
+                  "column": 61,
+                  "hint": "After `|` the next bar continues without a number: `... | D3:h A2:h`, or start a new line `2: ...`.",
+                  "line": 4,
+                  "message": "Bar number follows a pipe.",
+                  "path": "4:61"
+                }
+              ],
+              "hint": "Fix each listed error and compile again.",
+              "message": "The notation has multiple errors.",
+              "path": "/args/notation"
+            },
+            "notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q | 2: A4:q G4:q E4:q | 3: F4:q A4:q C5:q | 4: G4:q E4:q C4:q"
+          },
+          {
+            "compiled": true,
+            "error": null,
+            "notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q"
+          }
+        ],
+        "patch_merges": 0,
+        "tool_calls": 5
+      },
+      "final_notation": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q",
+      "final_patch": {
+        "amp": {
+          "level": 0.0,
+          "pan": 0.0,
+          "velocity": 50.0
+        },
+        "envelopes": {
+          "amp": {
+            "attack": 5.0,
+            "attack_curve": 0.0,
+            "decay": 300.0,
+            "decay_curve": 50.0,
+            "delay": 0.0,
+            "hold": 0.0,
+            "release": 300.0,
+            "release_curve": 50.0,
+            "retrigger": "always",
+            "sustain": 70.0
+          }
+        },
+        "filters": {
+          "balance": 0.0,
+          "routing": "serial"
+        },
+        "fx": {
+          "chain": []
+        },
+        "lfos": {},
+        "macros": {
+          "macro1": {
+            "name": "Macro 1",
+            "value": 0.0
+          },
+          "macro2": {
+            "name": "Macro 2",
+            "value": 0.0
+          },
+          "macro3": {
+            "name": "Macro 3",
+            "value": 0.0
+          },
+          "macro4": {
+            "name": "Macro 4",
+            "value": 0.0
+          },
+          "macro5": {
+            "name": "Macro 5",
+            "value": 0.0
+          },
+          "macro6": {
+            "name": "Macro 6",
+            "value": 0.0
+          },
+          "macro7": {
+            "name": "Macro 7",
+            "value": 0.0
+          },
+          "macro8": {
+            "name": "Macro 8",
+            "value": 0.0
+          }
+        },
+        "oscillators": {
+          "osc1": {
+            "coarse": 0,
+            "fine": 0.0,
+            "level": -6.0,
+            "pan": 0.0,
+            "phase": 0.0,
+            "phase_mode": "free",
+            "shape": 0.0,
+            "to": "filter1",
+            "type": "va",
+            "wave": "saw",
+            "width": 50.0
+          }
+        },
+        "output": {
+          "level": 0.0
+        },
+        "routes": {},
+        "schema": "supple.orrery-patch/1.0",
+        "seed": 42,
+        "steps": {},
+        "voice": {
+          "bend_range": 2,
+          "drift": 0.0,
+          "glide": 0.0,
+          "glide_mode": "legato",
+          "mode": "poly",
+          "mpe": false,
+          "polyphony": 8,
+          "quality": "normal",
+          "unison": 1,
+          "unison_detune": 10.0,
+          "unison_spread": 50.0
+        }
+      },
+      "limits_exceeded": false,
+      "listening": "Does the rhythm and register fit the requested phrase?",
+      "render": "/home/nate/Projects/quire/build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-3-score/renders/rd_1.wav",
+      "render_sha256": "9b3adb6516a97c4c9d52caa59ba1d2972fb0414a9e10a44903a45f5e7512d642",
+      "repeat": 3,
+      "runner": {
+        "credentials_reference": "/home/nate/.hermes/profiles/quire-eval/.env",
+        "exit_code": 0,
+        "hermes_profile": "quire-eval",
+        "hermes_version": "Hermes Agent v0.21.5+4532.g30a8b53 (2026.9.24) \u00b7 upstream 30a8b539\nInstall directory: /home/nate/.hermes/hermes-agent\nInstall method: git\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 473 commits behind \u2014 run 'hermes update'",
+        "model": "meta/muse-spark-1.3-contributor",
+        "model_config": "/home/nate/.hermes/profiles/quire-eval/config.yaml",
+        "provider": "openrouter",
+        "skill_loading": "task-preamble",
+        "timed_out": false,
+        "wall_seconds": 88.70851446001325
+      },
+      "score": {
+        "bars": 4.0,
+        "checks": {
+          "bars": true,
+          "density": true,
+          "first_attempt": false,
+          "meter": true,
+          "pitch_range": true
+        },
+        "loss": 0.2,
+        "notes_per_bar": 3.0,
+        "pass": false,
+        "pass_fraction": 0.8,
+        "pitch_range": [
+          60,
+          72
+        ]
+      },
+      "seed": 42,
+      "task": "notation.waltz",
+      "transcript": "build/eval/20261001T030823264794Z-notation-hermes/notation.waltz-3/transcript.jsonl",
+      "usage": {
+        "api_calls": 9,
+        "auxiliary": {
+          "api_calls": 1,
+          "by_task": {
+            "title_generation": {
+              "api_calls": 1,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0,
+              "estimated_cost_usd": 0,
+              "input_tokens": 512,
+              "output_tokens": 512,
+              "reasoning_tokens": 509
+            }
+          },
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "estimated_cost_usd": 0,
+          "input_tokens": 512,
+          "output_tokens": 512,
+          "reasoning_tokens": 509,
+          "total_tokens": 1024
+        },
+        "cache_read_tokens": 69113,
+        "cache_write_tokens": 0,
+        "completed": true,
+        "cost_source": "provider_models_api",
+        "cost_status": "estimated",
+        "estimated_cost_usd": 0.009290726000000001,
+        "failed": false,
+        "input_tokens": 84309,
+        "interrupted": false,
+        "model": "meta/muse-spark-1.3-contributor",
+        "output_tokens": 3608,
+        "partial": false,
+        "provider": "openrouter",
+        "reasoning_tokens": 2466,
+        "service_tier": null,
+        "session_id": "20260930_222259_abb19f",
+        "total_including_auxiliary": {
+          "api_calls": 10,
+          "estimated_cost_usd": 0.009290726000000001,
+          "total_tokens": 158054
+        },
+        "total_tokens": 157030,
+        "turn_exit_reason": "text_response(finish_reason=stop)"
+      },
+      "valid_patch": true,
+      "wall_seconds": 92.43
+    }
+  ],
+  "usage_totals": {
+    "cost_known": true,
+    "estimated_cost_usd": 0.148655904,
+    "total_tokens": 2374139
+  },
+  "working_tree_dirty": false
+}

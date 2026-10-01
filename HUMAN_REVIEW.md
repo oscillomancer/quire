@@ -64,6 +64,15 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
+### 15. Evaluation listening — 20261001T030823264794Z-notation-hermes
+Suite: notation, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
+
+- `notation.bass-riff`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.bass-riff-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.bass-riff-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.chords`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.chords-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.chords-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.drums`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.drums-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.drums-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.triplet-lead`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.triplet-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.triplet-lead-worst.wav` — Does the rhythm and register fit the requested phrase?
+- `notation.waltz`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.waltz-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.waltz-worst.wav` — Does the rhythm and register fit the requested phrase?
+
 ## Resolved
 
 ### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check
