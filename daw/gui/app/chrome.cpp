@@ -64,10 +64,10 @@ ChromeLayout ChromeLayout::defaults() {
     l.menus = {
         {"File",
          {"ui.file.new", "ui.file.open", "ui.file.save", "ui.file.save_as", "-", "ui.file.import",
-          "-", "render.mix", "-", "ui.quit"}},
+          "-", "render.mix", "ui.render", "-", "ui.quit"}},
         {"Edit", {"history.undo", "history.redo", "-", "ui.actions"}},
         {"View", {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "ui.agent"}},
-        {"Track", {"track.add:channel", "track.add:buss", "track.add:master"}},
+        {"Track", {"track.add:channel", "track.add:buss", "track.add:master", "-", "ui.fx.chain"}},
         {"Item", {"item.split:playhead", "item.remove:selected", "-", "ui.midi.edit"}},
         {"Transport",
          {"transport.toggle", "transport.record", "transport.loop.toggle", "-",

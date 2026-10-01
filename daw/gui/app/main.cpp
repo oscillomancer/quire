@@ -27,12 +27,14 @@
 #include "app_actions.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "fx_window.h"
 #include "generate.h"
 #include "history_panel.h"
 #include "meter_feed.h"
 #include "midi_editor.h"
 #include "mixer.h"
 #include "plugin_windows.h"
+#include "render_dialog.h"
 #include "routing_matrix.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
@@ -317,6 +319,14 @@ int main(int argc, char** argv) {
         if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
         return pluginWindows.open(*id);
     });
+    gui::FxWindow fxWindow(**app, dispatcher, root, gui::FxWindow::Hooks{[&](model::Id id) {
+        return pluginWindows.open(id);
+    }},
+                           gui::Favourites::defaultFile(product::kSlug));
+    appActions.addUi("ui.fx.chain", "FX: chain…", "track",
+                     [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
+    gui::RenderDialog renderDialog(**app, dispatcher, root);
+    appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
@@ -482,6 +492,8 @@ int main(int argc, char** argv) {
         mixer.sync();
         history.sync();
         meterFeed.poll();
+        fxWindow.tick();
+        renderDialog.tick();
         uiFile.tick((*app)->projectPath());
         const bool moved = shell.arrange()->poll();
         if (moved) root.requestAnimationFrame();

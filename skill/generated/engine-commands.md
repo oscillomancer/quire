@@ -1373,6 +1373,10 @@ Kind: `query`. Exposure: `mcp-tool`.
       "type": "integer",
       "description": "The plug-in's key input: route.add {fx} feeds it"
     },
+    "latency_samples": {
+      "type": "integer",
+      "description": "The instance's reported latency, in samples"
+    },
     "params_total": {
       "type": "integer",
       "description": "Plain parameters matching; at most 512 are listed."
@@ -1401,7 +1405,8 @@ Result:
 {
   "plugin": "com.suppleaudio.test.gain",
   "name": "<any>",
-  "description": "<any>"
+  "description": "<any>",
+  "latency_samples": "<any>"
 }
 
 ```

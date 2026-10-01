@@ -174,6 +174,7 @@ q = nil
 ---@field params? any
 ---@field patch? any
 ---@field sidechain_channels? integer The plug-in's key input: route.add {fx} feeds it
+---@field latency_samples? integer The instance's reported latency, in samples
 ---@field params_total? integer Plain parameters matching; at most 512 are listed.
 
 ---@class Quire.fx_move_args
