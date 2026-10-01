@@ -64,6 +64,7 @@ ChromeLayout ChromeLayout::defaults() {
     l.menus = {
         {"File", {"project.save", "-", "render.mix", "-", "ui.quit"}},
         {"Edit", {"history.undo", "history.redo", "-", "ui.actions"}},
+        {"View", {"ui.actions", "ui.agent"}},
         {"Track", {"track.add:channel", "track.add:buss", "track.add:master"}},
         {"Item", {"item.split:playhead", "item.remove:selected"}},
         {"Transport",

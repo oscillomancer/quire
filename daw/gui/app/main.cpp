@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "actions_list.h"
+#include "agent_panel.h"
 #include "app_actions.h"
 #include "chrome.h"
 #include "generate.h"
@@ -267,6 +268,11 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.actions", "View: actions list",
                      [&] { gui::openActionsList(root, appActions); });
     appActions.addUi("ui.quit", "File: quit", [&] { quit = true; });
+    gui::AgentPanel agentPanel(
+        root, **app, registry, dispatcher,
+        [&](std::function<void()> f) { loop.post(std::move(f)); },
+        agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
+    appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
@@ -280,7 +286,10 @@ int main(int argc, char** argv) {
         frame->layout.dir = ui::Layout::Dir::Column;
         frame->add(gui::makeChrome(root, appActions,
                                    chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults()));
-        frame->add(shell.build());
+        auto& body = frame->emplace<ui::Node>("main");
+        body.layout.dir = ui::Layout::Dir::Row;
+        body.add(shell.build());
+        body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
     if (o.viewStart >= 0) {

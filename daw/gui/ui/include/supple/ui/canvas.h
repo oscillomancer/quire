@@ -3,6 +3,7 @@
 // P5.3, never this (ADR-0005 §3).
 #pragma once
 
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -44,6 +45,9 @@ class Canvas {
     void text(const Rect& box, std::string_view s, Font font, float size, Color c,
               int align = kLeft | kMiddle);
     float textWidth(std::string_view s, Font font, float size) const;
+    // `s` broken into lines no wider than `width` (at spaces where possible;
+    // explicit newlines break).
+    std::vector<std::string> wrap(std::string_view s, Font font, float size, float width) const;
     // The x of every caret position (each UTF-8 boundary, 0…size) of `s`
     // drawn left-aligned at `x0`: front.size() == number of boundaries.
     std::vector<std::pair<std::size_t, float>> carets(std::string_view s, Font font, float size,
