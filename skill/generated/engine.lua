@@ -310,7 +310,7 @@ q = nil
 
 ---@class Quire.job_wait_args
 ---@field job string
----@field timeout_s? number
+---@field timeout_s? number Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s.
 
 ---@class Quire.marker_add_args
 ---@field pos? number

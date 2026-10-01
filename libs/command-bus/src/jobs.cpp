@@ -141,8 +141,13 @@ Result<json::Value> JobManager::status(std::string_view id) const {
     return snapshot(it->second);
 }
 Result<json::Value> JobManager::wait(std::string_view id, double timeoutSeconds) {
-    if (!std::isfinite(timeoutSeconds) || timeoutSeconds < 0 || timeoutSeconds > 30)
-        return Error("job.timeout", "timeout_s must be between 0 and 30", "/timeout_s");
+    if (!std::isfinite(timeoutSeconds) || timeoutSeconds < 0)
+        return Error("job.timeout", "timeout_s must be a nonnegative number of seconds",
+                     "/timeout_s", "0 returns at once, 30 waits for up to 30 seconds");
+    // A longer request is clamped, not rejected: an agent that asks for 300 s
+    // wants "as long as it takes", and losing the call teaches it nothing.
+    const bool clamped = timeoutSeconds > kMaxWaitSeconds;
+    if (clamped) timeoutSeconds = kMaxWaitSeconds;
     std::unique_lock lock(mutex_);
     auto key = std::string(id);
     auto it = jobs_.find(key);
@@ -153,7 +158,9 @@ Result<json::Value> JobManager::wait(std::string_view id, double timeoutSeconds)
     });
     it = jobs_.find(key);
     if (it == jobs_.end()) return Error("job.unknown", "job expired", "/job", "use job.list");
-    return snapshot(it->second);
+    json::Value result = snapshot(it->second);
+    if (clamped) result["timeout_clamped_s"] = kMaxWaitSeconds;
+    return result;
 }
 json::Value JobManager::list() const {
     std::lock_guard lock(mutex_);

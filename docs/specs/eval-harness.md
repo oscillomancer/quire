@@ -173,6 +173,9 @@ new frozen command schema or MCP tool. No optimizer search runs during scoring.
 The note-off metadata matters: treating a reference file's release as unknown
 while measuring the candidate's release otherwise falsely penalizes identity
 matches. The helper only reads WAVs/analyzes offline; it opens no audio device.
+That same scored comparison is what the MCP `compare` command reports as
+`loss.total`, so a reference attempt is scored by the `loss.total` it can read
+against the reference and passes at ≤ the task's `max_loss`.
 
 Compiler metadata decision: opt-in `--record-midi` writes
 `renders/<id>.midi.json` (`supple.render-midi/1.0`) beside successful synchronous

@@ -180,7 +180,59 @@ TEST_CASE("curve metadata rejects invalid exponents without throwing") {
     CHECK(bad.error().path.find("/params/0") != std::string::npos);
 }
 
-TEST_CASE("reference envelope loss squares each descriptor distance") {
+TEST_CASE("compare reports the scored loss the optimizer minimizes") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    h.call("patch.set", kPatch);
+    const std::string render = R"({"notation": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3})";
+    json::Value first = h.call("render", render);
+    h.call("param.set", R"({"instance": "in_1", "values": {"filter1.cutoff": 6000}})");
+    h.call("render", render);
+
+    // Identical renders: a zero loss, both note-offs taken from the renders.
+    json::Value same = h.call("compare", R"({"reference": "rd_1", "test": "rd_1"})");
+    INFO(json::writeCompact(same));
+    CHECK(same["loss"]["total"].asDouble() == doctest::Approx(0.0));
+    CHECK(same["loss"]["note_off_s"]["reference"].asDouble() == doctest::Approx(1.0));
+    CHECK(same["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(1.0));
+    CHECK(same["loss"].find("note_off_assumed") == nullptr);
+
+    // A different cutoff: a non-zero loss, with the terms that explain it.
+    json::Value other = h.call("compare", R"({"reference": "rd_1", "test": "rd_2"})");
+    INFO(json::writeCompact(other));
+    CHECK(other["loss"]["total"].asDouble() > 1.0);
+    CHECK(other["loss"]["terms"].find("ltas") != nullptr);
+
+    // A quieter copy of the reference is the same sound: loudness matching
+    // cancels the gain, so the scored loss stays at zero.
+    auto quietAudio = audio::readAudio(first["path"].asString());
+    REQUIRE(quietAudio);
+    for (auto& channel : quietAudio->channels)
+        for (float& sample : channel) sample *= 0.5f;
+    const fs::path quiet = h.root.path / "quiet.wav";
+    REQUIRE(audio::writeWav(quiet, *quietAudio, {}).ok());
+    json::Value matched = h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.string() +
+                                                R"(", "test_note_off_s": 1.0})");
+    INFO(json::writeCompact(matched));
+    CHECK(matched["loss"]["total"].asDouble() < 1e-6);
+    CHECK(matched["loss"].find("note_off_assumed") == nullptr);
+
+    // Without that argument the file borrows the render's note-off, and says so.
+    json::Value assumed =
+        h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.string() + R"("})");
+    INFO(json::writeCompact(assumed));
+    CHECK(assumed["loss"].find("note_off_assumed") != nullptr);
+    CHECK(assumed["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(1.0));
+    // Settling on the same note-off is the same score, to analysis precision.
+    CHECK(std::fabs(assumed["loss"]["total"].asDouble() - matched["loss"]["total"].asDouble()) <
+          1e-9);
+    // A wrong note-off is visible in the result, and changes the loss.
+    json::Value shifted = h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.string() +
+                                                R"(", "test_note_off_s": 0.5})");
+    CHECK(shifted["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(0.5));
+}
+
+TEST_CASE("reference envelope loss uses a log-time distance") {
     analysis::Report ref, cand;
     ref.envelope.emplace();
     cand.envelope.emplace();
@@ -189,10 +241,54 @@ TEST_CASE("reference envelope loss squares each descriptor distance") {
     ref.envelope->decay20Ms = cand.envelope->decay20Ms = 200.0;
     ref.envelope->releaseMs = cand.envelope->releaseMs = 300.0;
     const auto loss = detail::referenceLoss(ref, cand);
-    CHECK(loss.terms.at("envelope.attack") == doctest::Approx(4.0));
+    // |log2((160 + 10) / (100 + 10))| / 0.43, squared. The old
+    // |c − r| / max(10 ms, r) / 0.3 term scored 4.0 for the same pair.
+    CHECK(loss.terms.at("envelope.attack") == doctest::Approx(2.13317));
     CHECK(loss.terms.at("envelope.decay20") == doctest::Approx(0.0));
     CHECK(loss.terms.at("envelope.release") == doctest::Approx(0.0));
-    CHECK(loss.total == doctest::Approx(4.0));
+    CHECK(loss.total == doctest::Approx(2.13317));
+}
+
+TEST_CASE("envelope time terms are bounded, logarithmic and keep the one-sided penalty") {
+    auto attackTerm = [](double attackMs, double referenceMs) {
+        analysis::Report ref, cand;
+        ref.envelope.emplace();
+        cand.envelope.emplace();
+        ref.envelope->attackMs = referenceMs;
+        cand.envelope->attackMs = attackMs;
+        return detail::referenceLoss(ref, cand).terms.at("envelope.attack");
+    };
+    CHECK(attackTerm(50.0, 50.0) == doctest::Approx(0.0));
+    // 0 ms against 230 ms: |log2(240 / 10)| / 0.43, squared. The old term was
+    // unbounded and scored 5877 for the same pair.
+    CHECK(attackTerm(0.0, 230.0) == doctest::Approx(113.693));
+    CHECK(attackTerm(230.0, 0.0) == doctest::Approx(113.693));
+    // Tiny values are bounded too: 0 ms against 0.5 ms is not a huge distance.
+    CHECK(attackTerm(0.0, 0.5) < 113.693);
+    // For references well above the 10 ms offset the term matches the old one
+    // (whose denominator was max(10 ms, reference)) within 15 %.
+    const double old1010 = std::pow((1010.0 - 1000.0) / 1000.0 / 0.3, 2.0);
+    CHECK(attackTerm(1010.0, 1000.0) == doctest::Approx(old1010).epsilon(0.15));
+    const double old110 = std::pow((110.0 - 100.0) / 110.0 / 0.3, 2.0);
+    CHECK(attackTerm(100.0, 110.0) == doctest::Approx(old110).epsilon(0.15));
+    // Near the offset the new term is the smaller of the two: the +10 ms
+    // denominator is larger than the old max(10 ms, reference).
+    const double old100 = std::pow((110.0 - 100.0) / 100.0 / 0.3, 2.0);
+    CHECK(attackTerm(110.0, 100.0) < old100);
+    CHECK(attackTerm(110.0, 100.0) == doctest::Approx(0.0852245));
+    // A value present on one side only keeps its old contribution: distance
+    // 1.43 / scale 0.43, squared ≈ 11.1.
+    analysis::Report ref, cand;
+    ref.envelope.emplace();
+    cand.envelope.emplace();
+    ref.envelope->attackMs = cand.envelope->attackMs = 20.0;
+    ref.envelope->releaseMs = 200.0;
+    const auto oneSidedRelease = detail::referenceLoss(ref, cand);
+    CHECK(oneSidedRelease.terms.at("envelope.release") == doctest::Approx(11.0595));
+    cand.envelope->releaseMs = 200.0;
+    ref.envelope->decay20Ms = 200.0;
+    const auto oneSidedDecay = detail::referenceLoss(ref, cand);
+    CHECK(oneSidedDecay.terms.at("envelope.decay20") == doctest::Approx(11.0595));
 }
 
 TEST_CASE("reference read and analysis run on the job worker after optimize.start returns") {

@@ -235,7 +235,7 @@ Result:
 
 Wait for a job.
 
-Wait for a job.
+Wait for a job. Blocks for up to timeout_s seconds (default 30) until the job finishes; a larger timeout_s is accepted and clamped to 30, and the result then carries "timeout_clamped_s": 30. Otherwise the result is what job.status returns.
 
 Kind: `query`. Exposure: `mcp-exec`.
 
@@ -244,7 +244,7 @@ Kind: `query`. Exposure: `mcp-exec`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `job` | string |  |  |  |  |
-| `timeout_s` | number |  |  |  |  |
+| `timeout_s` | number |  | 0.0.. |  | Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s. |
 
 ### Result
 

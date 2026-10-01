@@ -269,8 +269,12 @@ Registry::Registry() {
         addInfo(std::move(info));
     };
     auto string = typeSchema("string");
-    auto number = typeSchema("number");
     auto anyObject = typeSchema("object");
+    auto waitTimeout = typeSchema("number");
+    waitTimeout["minimum"] = 0.0;
+    waitTimeout["description"] =
+        "Seconds to block (default 30). A larger value is clamped to 30 and reported as "
+        "timeout_clamped_s.";
     addMeta(
         "registry.list", Kind::Query, Exposure::McpExec, "List available commands.",
         objectSchema({{"tag", string}, {"kind", string}, {"text", string}}), anyObject,
@@ -363,20 +367,20 @@ Registry::Registry() {
         {"Get render job", json::Value::object(), json::Value::object(), "job_running"});
     addMeta(
         "job.wait", Kind::Query, Exposure::McpExec, "Wait for a job.",
-        objectSchema({{"job", string}, {"timeout_s", number}}, {"job"}), anyObject,
+        objectSchema({{"job", string}, {"timeout_s", waitTimeout}}, {"job"}), anyObject,
         [](const json::Value& args) -> Status {
             SUPPLE_TRY(validateFields(args, {"job"}, {"job", "timeout_s"}));
             if (auto* timeout = args.find("timeout_s");
-                timeout &&
-                (!timeout->isNumber() || timeout->asDouble() < 0 || timeout->asDouble() > 30))
-                return Error("schema.out_of_range", "timeout_s must be between 0 and 30",
-                             "/timeout_s");
+                timeout && (!timeout->isNumber() || timeout->asDouble() < 0))
+                return Error("schema.out_of_range",
+                             "timeout_s must be a nonnegative number of seconds", "/timeout_s",
+                             "a value above 30 is clamped to 30");
             return {};
         },
         [](const json::Value& args, Context& ctx) {
             auto* timeout = args.find("timeout_s");
             return ctx.service<JobManager>().wait(stringField(args, "job"),
-                                                  timeout ? timeout->asDouble() : 30.0);
+                                                  timeout ? timeout->asDouble() : kMaxWaitSeconds);
         },
         {"Wait for job", json::Value::object(), json::Value::object(), "job_running"});
     addMeta(
@@ -423,6 +427,11 @@ Registry::Registry() {
         ex.result["progress"]["message"] = "";
         if (name == std::string_view("job.wait")) ex.args["timeout_s"] = 0;
     }
+    // job.wait says what a large timeout_s does (the arg is clamped, not rejected).
+    commands_.at({"job.wait", 1}).description =
+        "Wait for a job. Blocks for up to timeout_s seconds (default 30) until the job finishes; "
+        "a larger timeout_s is accepted and clamped to 30, and the result then carries "
+        "\"timeout_clamped_s\": 30. Otherwise the result is what job.status returns.";
     commands_.at({"job.list", 1}).examples.front().result["jobs"] = json::Value::array();
 }
 void Registry::addInfo(CommandInfo info) {

@@ -20,11 +20,14 @@ q = nil
 ---@class Quire.compare_args
 ---@field reference string A render id (rd_1) or an audio file path.
 ---@field test string A render id (rd_1) or an audio file path.
+---@field reference_note_off_s? number The reference's note-off; defaults to a render's input end.
+---@field test_note_off_s? number The test's note-off; defaults to a render's input end.
 
 ---@class Quire.compare_result
 ---@field notable any
 ---@field ltas_rms_db number
 ---@field summary string
+---@field loss any The score the optimizer minimizes: total, per-term contributions, and the note-off_s used per side.
 
 ---@class Quire.job_cancel_args
 ---@field job string
@@ -37,7 +40,7 @@ q = nil
 
 ---@class Quire.job_wait_args
 ---@field job string
----@field timeout_s? number
+---@field timeout_s? number Seconds to block (default 30). A larger value is clamped to 30 and reported as timeout_clamped_s.
 
 ---@class Quire.masking_args
 ---@field masker string A render id (rd_1) or an audio file path.

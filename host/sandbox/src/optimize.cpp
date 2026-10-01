@@ -192,6 +192,23 @@ void term(Loss& l, const std::string& name, double d, double weight, double scal
     l.total += c;
 }
 
+// |log2((c + 10 ms) / (r + 10 ms))|: envelope times are heard as ratios, so
+// the distance is logarithmic instead of |c − r| / r, which is unbounded
+// (an attack of 23 ms against a 0 ms reference scored 5877). The 10 ms offset
+// keeps a 0 ms value inside the domain and bounds the term for tiny
+// references. Non-finite when a side is at or below −10 ms; term() drops it.
+double logTimeDistance(double c, double r) {
+    const double a = c + 10.0, b = r + 10.0;
+    if (a <= 0.0 || b <= 0.0) return std::numeric_limits<double>::quiet_NaN();
+    return std::fabs(std::log2(a / b));
+}
+
+// Envelope scale: 0.43 ≈ 0.3 / ln 2, so for references well above 10 ms the
+// term matches the old ratio distance. A value present on one side only keeps
+// its old contribution (≈ 11.1) as distance 1.43 at that scale.
+constexpr double kEnvelopeScale = 0.43;
+constexpr double kOneSidedDistance = 1.43;
+
 Loss referenceLoss(const analysis::Report& ref, const analysis::Report& cand) {
     Loss l;
     l.total = 0.0;
@@ -224,24 +241,20 @@ Loss referenceLoss(const analysis::Report& ref, const analysis::Report& cand) {
              0.02);
     }
     if (ref.envelope && cand.envelope) {
-        term(l, "envelope.attack",
-             std::fabs(cand.envelope->attackMs - ref.envelope->attackMs) /
-                 std::max(10.0, ref.envelope->attackMs),
-             1.0, 0.3);
+        term(l, "envelope.attack", logTimeDistance(cand.envelope->attackMs, ref.envelope->attackMs),
+             1.0, kEnvelopeScale);
         if (ref.envelope->decay20Ms && cand.envelope->decay20Ms)
             term(l, "envelope.decay20",
-                 std::fabs(*cand.envelope->decay20Ms - *ref.envelope->decay20Ms) /
-                     std::max(10.0, *ref.envelope->decay20Ms),
-                 1.0, 0.3);
+                 logTimeDistance(*cand.envelope->decay20Ms, *ref.envelope->decay20Ms), 1.0,
+                 kEnvelopeScale);
         else if (ref.envelope->decay20Ms.has_value() != cand.envelope->decay20Ms.has_value())
-            term(l, "envelope.decay20", 1.0, 1.0, 0.3);
+            term(l, "envelope.decay20", kOneSidedDistance, 1.0, kEnvelopeScale);
         if (ref.envelope->releaseMs && cand.envelope->releaseMs)
             term(l, "envelope.release",
-                 std::fabs(*cand.envelope->releaseMs - *ref.envelope->releaseMs) /
-                     std::max(10.0, *ref.envelope->releaseMs),
-                 1.0, 0.3);
+                 logTimeDistance(*cand.envelope->releaseMs, *ref.envelope->releaseMs), 1.0,
+                 kEnvelopeScale);
         else if (ref.envelope->releaseMs.has_value() != cand.envelope->releaseMs.has_value())
-            term(l, "envelope.release", 1.0, 1.0, 0.3);
+            term(l, "envelope.release", kOneSidedDistance, 1.0, kEnvelopeScale);
     }
     if (ref.harmonic && cand.harmonic && ref.harmonic->pitched && cand.harmonic->pitched) {
         double sq = 0.0;
@@ -292,6 +305,23 @@ Result<analysis::Report> analyzeMatched(const audio::AudioData& a, std::optional
     std::vector<const float*> sp;
     for (const auto& c : scaled) sp.push_back(c.data());
     return analysis::analyze(signal(sp), o);
+}
+
+Result<ReferenceScore> referenceScore(const audio::AudioData& reference,
+                                      std::optional<double> referenceNoteOff,
+                                      const audio::AudioData& test,
+                                      std::optional<double> testNoteOff) {
+    auto ref = analyzeMatched(reference, std::nullopt, referenceNoteOff);
+    if (!ref) return std::move(ref).error();
+    std::optional<double> target;
+    if (ref->loudness && std::isfinite(ref->loudness->integrated))
+        target = ref->loudness->integrated;
+    auto cand = analyzeMatched(test, target, testNoteOff);
+    if (!cand) return std::move(cand).error();
+    ReferenceScore out;
+    out.loss = referenceLoss(*ref, *cand);
+    out.ltasRmsDb = analysis::compare(*ref, *cand).ltasRmsDb;
+    return out;
 }
 
 }  // namespace detail

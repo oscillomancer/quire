@@ -187,6 +187,11 @@ struct LogRecord {
 
 // Workers update jobs through this thread-safe store. Events are queued until
 // drainEvents() is called on the model thread, so Host::emit stays model-thread only.
+//
+// The longest `wait` blocks; a longer timeout_s is clamped to this, not
+// rejected (the result then carries timeout_clamped_s).
+inline constexpr double kMaxWaitSeconds = 30.0;
+
 class JobManager {
   public:
     std::string create();

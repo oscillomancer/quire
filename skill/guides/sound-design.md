@@ -55,7 +55,9 @@ Omitted fields take their defaults. A patch only needs what you care about.
 2. `render` a phrase that exercises the sound (a held chord for pads, repeated
    short notes for basses and plucks) with `"analyze": "summary"`.
 3. Change **one idea** at a time with `patch_merge`, render, and `compare`
-   with the previous render.
+   with the previous render. `compare` also reports `loss.total` — the score
+   `optimize_start` minimizes (lower is better), so it measures how close you
+   are to a reference, not just what changed.
 4. When the structure is right, run `optimize_start` with the 3–8 parameters
    that matter (flat keys like `filter1.cutoff`, `env2.decay`) and a target:
    a reference render/file, or a profile of descriptor ranges. `job_wait`,

@@ -321,6 +321,22 @@ TEST_CASE("job lifecycle, cancellation, timeout and event throttling") {
     CHECK(done->find("status")->asString() == "done");
     CHECK(done->find("result")->find("count")->asInt() == 7);
     CHECK(host.events.back() == "job.done");
+    // A too-long timeout is clamped, not rejected, and says so; the wait above
+    // returned on time, so it carries no clamp field.
+    CHECK(timed->find("timeout_clamped_s") == nullptr);
+    auto clamped = call(dispatcher, "job.wait", obj("{\"job\":\"jb_1\",\"timeout_s\":300}"));
+    REQUIRE(clamped);
+    CHECK(clamped->find("status")->asString() == "done");
+    CHECK(clamped->find("timeout_clamped_s")->asDouble() == kMaxWaitSeconds);
+    auto negative = call(dispatcher, "job.wait", obj("{\"job\":\"jb_1\",\"timeout_s\":-1}"));
+    REQUIRE_FALSE(negative);
+    // The dispatcher wraps argument validation; the cause is in the details.
+    CHECK(negative.error().code == "command.invalid_args");
+    REQUIRE(negative.error().details.size() == 1);
+    CHECK(negative.error().details.front().code == "schema.out_of_range");
+    CHECK_FALSE(call(dispatcher, "job.wait", obj("{\"job\":\"jb_1\",\"timeout_s\":\"soon\"}")));
+    CHECK(dispatcher.jobs().wait("jb_1", 1e9)->find("timeout_clamped_s")->asDouble() == 30.0);
+    CHECK_FALSE(dispatcher.jobs().wait("jb_1", -1.0));
     auto second = dispatcher.jobs().create();
     CHECK(call(dispatcher, "job.cancel", obj("{\"job\":\"jb_2\"}")));
     CHECK(dispatcher.jobs().cancelled(second));
