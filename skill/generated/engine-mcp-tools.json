@@ -464,6 +464,23 @@
     }
   },
   {
+    "name": "engine_inputs",
+    "title": "The device inputs a track can record: audio channels and MIDI devices.",
+    "description": "The device inputs a track can record: audio channels and MIDI devices. audio: one entry per input channel (channel, the 1-based number track.set record_input takes, and the device port it is connected to). midi: the MIDI devices (names track.set record_midi matches). While the engine is stopped: running false and empty lists (engine.start opens the device). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "engine_start",
     "title": "Start real-time playback on the audio device (jack) or without one (dummy).",
     "description": "Start real-time playback on the audio device (jack) or without one (dummy). backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). See describe for errors and examples.",
@@ -979,7 +996,7 @@
   {
     "name": "fx_add",
     "title": "Insert a plugin into a track's FX chain and return its id.",
-    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. See describe for errors and examples.",
+    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_add_args",
@@ -997,7 +1014,11 @@
           "type": "integer",
           "minimum": 0.0
         },
-        "patch": {}
+        "patch": {},
+        "chain": {
+          "type": "string",
+          "pattern": "^(main|input)$"
+        }
       },
       "required": ["track", "plugin"],
       "additionalProperties": false
@@ -1096,7 +1117,7 @@
   {
     "name": "fx_move",
     "title": "Move a plugin within a track chain or to another track.",
-    "description": "Move a plugin within a track chain or to another track.  See describe for errors and examples.",
+    "description": "Move a plugin within a track chain or to another track. Works on the track's chain and on its input chain (an input-chain effect stays on its track). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_move_args",
@@ -2292,9 +2313,16 @@
               },
               "semantic": {
                 "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "shadowed": {
+                "type": "boolean",
+                "description": "Another location earlier on the plugin path has the same id; fx.add by id uses that one"
               }
             },
-            "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+            "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
             "additionalProperties": false
           }
         }
@@ -2346,9 +2374,15 @@
               },
               "semantic": {
                 "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "shadowed": {
+                "type": "boolean"
               }
             },
-            "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+            "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
             "additionalProperties": false
           }
         }
@@ -4282,8 +4316,8 @@
   },
   {
     "name": "track_set",
-    "title": "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.",
-    "description": "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. See describe for errors and examples.",
+    "title": "Set track fields: type, name, volume, pan, mute, solo, parent send, arming.",
+    "description": "Set track fields: type, name, volume, pan, mute, solo, parent send, arming. Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, \"*\" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "track_set_args",
@@ -4371,6 +4405,10 @@
         "monitor": {
           "type": "string",
           "enum": ["off", "on", "auto"]
+        },
+        "parent_send": {
+          "type": "boolean",
+          "description": "The implicit send to the parent buss/master (off: only explicit sends leave the strip)"
         }
       },
       "required": ["track"],

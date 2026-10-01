@@ -280,6 +280,8 @@ int main(int argc, char** argv) {
     peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
     bool quit = false;
+    std::vector<std::filesystem::path> dropped;  // files of a drop in progress
+    ui::Point dropAt{};
     gui::AppActions appActions(registry, dispatcher, **app, uiState,
                                actions::Keymap::defaultFile(product::kSlug));
     appActions.onError = [](const std::string& message) {
@@ -351,6 +353,53 @@ int main(int argc, char** argv) {
         body.add(history.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
+    }
+    // Arrange editing gestures (P5.6): one transaction per gesture; a later
+    // step may use an earlier one's result ("$step0.track").
+    {
+        views::ItemGestures& g = shell.arrange()->gestures();
+        const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
+        g.run = [&dispatcher, ui](
+                    const std::string& label,
+                    const std::vector<views::EditStep>& steps) -> Result<json::Value> {
+            return dispatcher.transact(label, ui, [&]() -> Result<json::Value> {
+                std::vector<json::Value> results;
+                for (views::EditStep step : steps) {
+                    if (step.args.isObject())
+                        for (auto& [key, value] : step.args.asObject()) {
+                            if (!value.isString() || value.asString().rfind("$step", 0) != 0)
+                                continue;
+                            const std::string ref = value.asString().substr(5);
+                            const auto dot = ref.find('.');
+                            const std::size_t at =
+                                static_cast<std::size_t>(std::stoul(ref.substr(0, dot)));
+                            if (at < results.size())
+                                if (const json::Value* v = results[at].find(ref.substr(dot + 1)))
+                                    value = *v;
+                        }
+                    auto r = dispatcher.execute({step.command, step.args, ui});
+                    if (!r) return r;
+                    results.push_back(std::move(*r));
+                }
+                return json::Value::object();
+            });
+        };
+        g.onSelection = [&](const std::vector<model::Id>& items) {
+            uiState.selectedItems.clear();
+            for (model::Id id : items) uiState.selectedItems.push_back(id.str());
+        };
+        g.onOpenMidi = [&](model::Id item) {
+            if (auto r = midiEditor.open(item.str()); !r)
+                std::fprintf(stderr, "midi: %s\n", r.error().toString().c_str());
+        };
+        g.onError = [](const Error& e) {
+            std::fprintf(stderr, "edit refused: %s\n", e.toString().c_str());
+        };
+        g.onSeek = [&dispatcher, ui](double seconds) {
+            json::Value args = json::Value::object();
+            args["seconds"] = seconds;
+            (void)dispatcher.execute({"transport.seek", std::move(args), ui});
+        };
     }
     // The audio engine: the device for interactive use, nothing offscreen.
     const std::string audioMode =
@@ -526,6 +575,14 @@ int main(int argc, char** argv) {
                 if (o.frames == 0) ++drawn;
             }
         }
+        // Selection changed by actions (or the history) reaches the gesture layer.
+        if (auto& g = shell.arrange()->gestures();
+            g.selection().size() != uiState.selectedItems.size()) {
+            std::vector<model::Id> ids;
+            for (const auto& s : uiState.selectedItems)
+                if (auto id = model::Id::parse(s)) ids.push_back(*id);
+            g.setSelection(std::move(ids));
+        }
         SDL_Event e;
         int wait = next;
         if (o.frames == 0 && shell.arrange()->playing() && (wait < 0 || wait > 16)) wait = 16;
@@ -537,6 +594,13 @@ int main(int argc, char** argv) {
                     quit = true;
                 else if (!root.popupOpen())
                     fileActions.confirmDiscard("Quit?", [&] { quit = true; });
+            } else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
+                dropped.emplace_back(e.drop.data);
+                dropAt = {e.drop.x, e.drop.y};
+            } else if (e.type == SDL_EVENT_DROP_COMPLETE) {
+                if (auto r = shell.arrange()->gestures().drop(dropped, dropAt); !r)
+                    std::fprintf(stderr, "drop: %s\n", r.error().toString().c_str());
+                dropped.clear();
             } else
                 root.handle(e);  // the wake event is ignored: it only interrupts the wait
         }

@@ -1,0 +1,320 @@
+// The arrange view's editing gestures (P5.6), driven like a user: pointer
+// events through the root; the model read back; one history entry each.
+#include <doctest/doctest.h>
+#include <unistd.h>
+
+#include <filesystem>
+#include <mutex>
+
+#include "generate.h"
+#include "supple/audio/audio_file.h"
+#include "supple/base/files.h"
+#include "supple/engine/app.h"
+#include "supple/gui/window.h"
+#include "supple/peaks/peaks.h"
+#include "supple/ui/root.h"
+#include "supple/views/arrange.h"
+
+using namespace supple;
+
+namespace {
+
+const cmd::Origin kUi{cmd::Origin::Type::Ui, "gui", {}};
+
+struct Fixture {
+    std::filesystem::path dir;
+    std::unique_ptr<gui::Platform> platform;
+    std::unique_ptr<gui::Window> window;
+    gui::Fonts fonts;
+    std::unique_ptr<engine::EngineApp> app;
+    cmd::Registry registry;
+    std::unique_ptr<cmd::Dispatcher> dispatcher;
+    std::unique_ptr<peaks::PeakService> peaks;
+    std::unique_ptr<ui::Root> root;
+    views::ArrangeView* view = nullptr;
+    std::vector<model::Id> opened;
+    std::vector<double> seeks;
+    bool ok = false;
+
+    Fixture() {
+        dir = std::filesystem::temp_directory_path() /
+              ("supple-gesture-test-" + std::to_string(::getpid()));
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+        if (!p) return;
+        platform = std::move(*p);
+        auto w = gui::Window::open(*platform, {"gesture-test", 1100, 600, true});
+        if (!w) return;
+        window = std::move(*w);
+        auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+        if (!f) return;
+        fonts = *f;
+        engine::AppOptions options;
+        options.workdir = dir;
+        auto a = engine::EngineApp::create(options);
+        REQUIRE(a);
+        app = std::move(*a);
+        engine::registerEngineCommands(registry);
+        dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
+        app->attachCommands(*dispatcher);
+        REQUIRE(gui::generateSession(*dispatcher, app->mediaDir(), 6));
+        peaks = std::make_unique<peaks::PeakService>(dir / "cache", [](std::function<void()>) {});
+        root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
+        auto arrange = std::make_unique<views::ArrangeView>(
+            *peaks,
+            [this](const model::MediaSource& src) {
+                const std::filesystem::path path(src.path);
+                return path.is_absolute() ? path : app->mediaDir() / path;
+            },
+            views::TransportSource{});
+        view = arrange.get();
+        root->setContent(std::move(arrange));
+        view->installOverlay(*root);
+        auto& g = view->gestures();
+        g.run = [this](const std::string& label, const std::vector<views::EditStep>& steps) {
+            return dispatcher->transact(label, kUi, [&]() -> Result<json::Value> {
+                std::vector<json::Value> results;
+                for (views::EditStep step : steps) {
+                    for (auto& [key, value] : step.args.asObject())
+                        if (value.isString() && value.asString().rfind("$step", 0) == 0) {
+                            const std::string ref = value.asString().substr(5);
+                            const auto dot = ref.find('.');
+                            value =
+                                *results[std::stoul(ref.substr(0, dot))].find(ref.substr(dot + 1));
+                        }
+                    auto r = dispatcher->execute({step.command, step.args, kUi});
+                    if (!r) return r;
+                    results.push_back(*r);
+                }
+                return json::Value::object();
+            });
+        };
+        g.onOpenMidi = [this](model::Id id) { opened.push_back(id); };
+        g.onSeek = [this](double s) { seeks.push_back(s); };
+        g.onError = [](const Error& e) { MESSAGE("gesture refused: " << e.toString()); };
+        views::Viewport v = view->viewport();
+        v.pixelsPerSecond = 16;  // the audio items and the MIDI items at bar 21 both visible
+        view->setViewport(v);
+        sync();
+        ok = true;
+    }
+    ~Fixture() {
+        view = nullptr;
+        root.reset();
+        peaks.reset();
+        dispatcher.reset();
+        app.reset();
+        std::filesystem::remove_all(dir);
+    }
+    void sync() {
+        view->show(app->head());
+        root->frame(false);
+    }
+    std::size_t steps() {
+        auto r = dispatcher->execute({"history.list", json::Value::object(), kUi});
+        return r->find("versions")->size();
+    }
+    const model::Item& item(model::Id id) { return *app->head().items.find(id); }
+    // The first item on a row whose active take is audio (or MIDI).
+    model::Id itemOnRow(std::size_t row, bool midi = false) {
+        const model::Session& s = app->head();
+        const model::Id track = view->trackLayout().rows()[row].track;
+        std::optional<model::Id> best;
+        double bestPos = 1e300;
+        for (const auto& e : s.items) {
+            if (e.value->track != track) continue;
+            const model::Take* t =
+                e.value->activeTake ? s.takes.find(*e.value->activeTake) : nullptr;
+            const bool isMidi = t && t->source && t->source->kind == model::Kind::Midi;
+            if (isMidi != midi || e.value->position >= bestPos) continue;
+            best = e.id;
+            bestPos = e.value->position;
+        }
+        REQUIRE(best);
+        return *best;
+    }
+    ui::Rect rectOf(model::Id id) {
+        const model::Item& it = item(id);
+        return view->lanes().itemRect(*view->trackLayout().indexOf(it.track), it);
+    }
+    float beatPx() {
+        const model::Session& s = app->head();
+        return static_cast<float>((s.timeMap->secondsAt(1) - s.timeMap->secondsAt(0)) *
+                                  view->viewport().pixelsPerSecond);
+    }
+    void pointer(ui::PointerEvent::Type type, ui::Point p, int button = 1, int clicks = 1,
+                 unsigned mods = 0) {
+        ui::PointerEvent e;
+        e.type = type;
+        e.pos = p;
+        e.button = button;
+        e.clicks = clicks;
+        e.mods = mods;
+        root->pointer(e);
+    }
+    void drag(ui::Point from, ui::Point to, unsigned mods = 0, int button = 1) {
+        pointer(ui::PointerEvent::Type::Down, from, button, 1, mods);
+        pointer(ui::PointerEvent::Type::Move, {(from.x + to.x) / 2, (from.y + to.y) / 2}, button, 1,
+                mods);
+        pointer(ui::PointerEvent::Type::Move, to, button, 1, mods);
+        pointer(ui::PointerEvent::Type::Up, to, button, 1, mods);
+        sync();
+    }
+    void click(ui::Point p, unsigned mods = 0) {
+        pointer(ui::PointerEvent::Type::Down, p, 1, 1, mods);
+        pointer(ui::PointerEvent::Type::Up, p, 1, 1, mods);
+        sync();
+    }
+};
+
+}  // namespace
+
+TEST_CASE("arrange gestures: select, move (snapped, free, across tracks), trim, slip, fades") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    auto& g = f.view->gestures();
+    const model::Id a = f.itemOnRow(0), b = f.itemOnRow(1);
+    const ui::Rect ra = f.rectOf(a);
+    REQUIRE(ra.w > 40);
+    // Click selects; Shift adds; Ctrl toggles.
+    f.click({ra.x + ra.w / 2, ra.y + ra.h / 2});
+    REQUIRE(g.selection() == std::vector<model::Id>{a});
+    const ui::Rect rb = f.rectOf(b);
+    f.click({rb.x + rb.w / 2, rb.y + rb.h / 2}, ui::kShift);
+    CHECK(g.selection().size() == 2);
+    f.click({rb.x + rb.w / 2, rb.y + rb.h / 2}, ui::kCtrl);
+    CHECK(g.selection() == std::vector<model::Id>{a});
+
+    // Move one item two beats later: snapped to the grid, one history entry.
+    const double grid = g.gridBeats();
+    const double posA = f.item(a).position;
+    auto s0 = f.steps();
+    const ui::Point mid{ra.x + ra.w / 2, ra.y + ra.h / 2};
+    f.drag(mid, {mid.x + 2 * f.beatPx() + 1, mid.y});
+    CHECK(f.steps() == s0 + 1);
+    const double moved = f.item(a).position - posA;
+    CHECK(moved > 0);
+    CHECK(std::abs(std::round(f.item(a).position / grid) * grid - f.item(a).position) <
+          1e-9);  // on the grid
+
+    // Trim the end two grid steps shorter, then the start later (the take's
+    // offset follows so the audio stays where it was).
+    const ui::Rect rt = f.rectOf(a);
+    const double len0 = f.item(a).length;
+    const float step = static_cast<float>(grid) * f.beatPx();
+    f.drag({rt.right() - 2, rt.y + rt.h / 2}, {rt.right() - 2 - 2 * step, rt.y + rt.h / 2});
+    CHECK(f.item(a).length == doctest::Approx(len0 - 2 * grid));
+    const ui::Rect rl = f.rectOf(a);
+    const model::Take& take0 = *f.app->head().takes.find(*f.item(a).activeTake);
+    const double offset0 = take0.startOffset, pos0 = f.item(a).position, len1 = f.item(a).length;
+    s0 = f.steps();
+    f.drag({rl.x + 2, rl.y + rl.h / 2}, {rl.x + 2 + step, rl.y + rl.h / 2});
+    CHECK(f.steps() == s0 + 1);  // item.set and take.set together
+    const double d = f.item(a).position - pos0;
+    CHECK(d > 0);
+    CHECK(f.item(a).length == doctest::Approx(len1 - d));
+    const model::Session& sn = f.app->head();
+    const double seconds = sn.timeMap->secondsAt(f.item(a).position) - sn.timeMap->secondsAt(pos0);
+    CHECK(sn.takes.find(*f.item(a).activeTake)->startOffset == doctest::Approx(offset0 + seconds));
+
+    // Slip: Alt-drag moves the source under the item, not the item (right:
+    // earlier material comes into view, the offset shrinks; not snapped).
+    const ui::Rect rs = f.rectOf(a);
+    const double posS = f.item(a).position;
+    const double offS = f.app->head().takes.find(*f.item(a).activeTake)->startOffset;
+    REQUIRE(offS > 0.4);
+    f.drag({rs.x + rs.w / 2, rs.y + rs.h / 2}, {rs.x + rs.w / 2 + f.beatPx() / 2, rs.y + rs.h / 2},
+           ui::kAlt);
+    CHECK(f.item(a).position == posS);
+    CHECK(f.app->head().takes.find(*f.item(a).activeTake)->startOffset ==
+          doctest::Approx(offS - 0.25));
+
+    // Fade in from the top-left handle.
+    const ui::Rect rf = f.rectOf(a);
+    f.drag({rf.x + 3, rf.y + 3}, {rf.x + 3 + 2 * f.beatPx(), rf.y + 3});
+    CHECK(f.item(a).fadeIn.length > 0.3);
+
+    // Ctrl-drag copies the item two grid steps later, on the same track; the
+    // original stays (one undo step).
+    {
+        const std::size_t count = f.app->head().items.size();
+        const ui::Rect rc = f.rectOf(a);
+        const double posC = f.item(a).position;
+        auto s1 = f.steps();
+        f.drag({rc.x + rc.w / 2, rc.y + rc.h / 2}, {rc.x + rc.w / 2 + 2 * step, rc.y + rc.h / 2},
+               ui::kCtrl);
+        CHECK(f.app->head().items.size() == count + 1);
+        CHECK(f.item(a).position == posC);
+        CHECK(f.steps() == s1 + 1);
+    }
+
+    // Down one row (last: row 1 has items of its own over this one) (row 1 is a channel), the item
+    // lands on that track.
+    const model::Id trackB = f.item(b).track;
+    const ui::Rect ra2 = f.rectOf(a);
+    const ui::Rect row1 = f.view->rowRect(1);
+    f.drag({ra2.x + 14, ra2.y + ra2.h / 2}, {ra2.x + 14, row1.y + row1.h / 2});  // left of the copy
+    CHECK(f.item(a).track == trackB);
+
+    // A locked item does not move.
+    REQUIRE(f.dispatcher->execute(
+        {"item.set", json::parse(R"({"item":")" + b.str() + R"(","locked":true})").value(), kUi}));
+    f.sync();
+    const ui::Rect rlk = f.rectOf(b);
+    const double posB = f.item(b).position;
+    f.drag({rlk.x + rlk.w / 2, rlk.y + rlk.h / 2},
+           {rlk.x + rlk.w / 2 + 3 * f.beatPx(), rlk.y + rlk.h / 2});
+    CHECK(f.item(b).position == posB);
+}
+
+TEST_CASE("arrange gestures: marquee, click to seek, take badge, double-click MIDI, file drop") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    // A right-drag marquee over the first two rows selects their items.
+    const ui::Rect lanes = f.view->lanesRect();
+    const ui::Rect r0 = f.view->rowRect(0), r1 = f.view->rowRect(1);
+    f.drag({lanes.x + 4, r0.y + 4}, {lanes.x + 200, r1.bottom() - 4}, 0, 3);
+    CHECK(g.selection().size() >= 2);
+    // A click on empty space clears the selection and seeks there.
+    const model::Id midi = f.itemOnRow(0, true);
+    const ui::Rect rm = f.rectOf(midi);
+    const ui::Point empty{rm.x - 20, rm.y + rm.h / 2};  // between the audio item and the MIDI item
+    REQUIRE_FALSE(g.hit(empty));
+    f.click(empty);
+    CHECK(g.selection().empty());
+    REQUIRE(f.seeks.size() == 1);
+    CHECK(f.seeks[0] == doctest::Approx(f.view->timeAt(empty.x)));
+    // Double-click on a MIDI item asks to open it.
+    f.pointer(ui::PointerEvent::Type::Down, {rm.x + rm.w / 2, rm.y + rm.h / 2}, 1, 2);
+    f.pointer(ui::PointerEvent::Type::Up, {rm.x + rm.w / 2, rm.y + rm.h / 2});
+    REQUIRE(f.opened.size() == 1);
+    CHECK(f.opened[0] == midi);
+    // The take badge cycles the active take.
+    std::optional<model::Id> twoTakes;
+    for (const auto& e : f.app->head().items)
+        if (e.value->takes.size() > 1) twoTakes = e.id;
+    REQUIRE(twoTakes);
+    const model::Id before = *f.item(*twoTakes).activeTake;
+    const ui::Rect rt = f.rectOf(*twoTakes);
+    auto s0 = f.steps();
+    f.click({rt.right() - 16, rt.y + 8});
+    CHECK(*f.item(*twoTakes).activeTake != before);
+    CHECK(f.steps() == s0 + 1);
+    // Files dropped: the first on the channel under the point, the next on a new track.
+    audio::AudioData tone;
+    tone.channels.assign(2, std::vector<float>(24000, 0.2f));
+    for (const char* name : {"x.wav", "y.wav"})
+        REQUIRE(
+            writeFileAtomic(f.dir / name, std::span<const std::uint8_t>(*audio::encodeWav(tone))));
+    const std::size_t items = f.app->head().items.size(), tracks = f.app->head().tracks.size();
+    s0 = f.steps();
+    REQUIRE(g.drop({f.dir / "x.wav", f.dir / "y.wav"}, {lanes.x + 300, r1.y + r1.h / 2}));
+    CHECK(f.app->head().items.size() == items + 2);
+    CHECK(f.app->head().tracks.size() == tracks + 1);
+    CHECK(f.steps() == s0 + 1);  // one undo step
+}

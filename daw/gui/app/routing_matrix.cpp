@@ -141,10 +141,14 @@ class Grid : public ui::Node {
                     if (sel)
                         c.strokeRound({r.x + 1, r.y + 1, r.w - 2, r.h - 2}, 3, t.color("focus"), 2);
                 }
-                // The implicit parent send, outlined.
+                // The implicit parent send: outlined when on, a faint corner mark when off.
                 if (m_.destinations[col].kind == "track" &&
-                    m_.sources[row].parent == m_.destinations[col].id && m_.sources[row].parentSend)
-                    c.strokeRect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, t.color("ink-quiet"));
+                    m_.sources[row].parent == m_.destinations[col].id) {
+                    if (m_.sources[row].parentSend)
+                        c.strokeRect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, t.color("ink-quiet"));
+                    else
+                        c.fillRect({r.x + 2, r.y + 2, 4, 4}, t.color("ink-faint"));
+                }
             }
         }
         c.restore();
@@ -310,11 +314,10 @@ void RoutingMatrix::open() {
             else if (const std::string why = model_.blocked(cell->first, cell->second);
                      !why.empty())
                 status_->setText(pair + ": not allowed — " + why);
-            else if (d.kind == "track" && s.parent == d.id && s.parentSend)
-                status_->setText(
-                    pair +
-                    ": the parent send (outlined; track.move changes the parent) — click to "
-                    "add a separate send");
+            else if (d.kind == "track" && s.parent == d.id)
+                status_->setText(pair + (s.parentSend
+                                             ? ": the parent send, on — click to turn it off"
+                                             : ": the parent send, off — click to turn it on"));
             else
                 status_->setText(pair + ": click to send");
         },
@@ -421,6 +424,16 @@ Status RoutingMatrix::clickCell(std::size_t row, std::size_t col) {
     if (!sends.empty()) {
         select(sends.front()->id);
         return {};
+    }
+    // The parent's cell is the implicit parent send: a click turns it on or off.
+    if (model_.destinations[col].kind == "track" &&
+        model_.sources[row].parent == model_.destinations[col].id) {
+        json::Value args = json::Value::object();
+        args["track"] = model_.sources[row].id;
+        args["parent_send"] = !model_.sources[row].parentSend;
+        auto r = exec("track.set", std::move(args));
+        if (!r) return std::move(r).error();
+        return reload();
     }
     if (const std::string why = model_.blocked(row, col); !why.empty()) {
         if (status_) status_->setText("Not allowed: " + why);

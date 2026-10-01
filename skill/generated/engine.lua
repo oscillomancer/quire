@@ -157,6 +157,7 @@ q = nil
 ---@field plugin string
 ---@field index? integer
 ---@field patch? any
+---@field chain? string
 
 ---@class Quire.fx_add_result
 ---@field fx string
@@ -693,6 +694,7 @@ q = nil
 ---@field midi_channel? integer
 ---@field record_mode? "input"|"midi_overdub"|"midi_replace"
 ---@field monitor? "off"|"on"|"auto"
+---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 
 ---@class Quire.transport_get_result
 ---@field playing boolean
@@ -803,6 +805,7 @@ q = nil
 ---@field switch fun(args: Quire.branch_switch_args): Quire.branch_switch_result Make another branch current (edits, undo and playback follow it).
 
 ---@class Quire.engine
+---@field inputs fun(): table The device inputs a track can record: audio channels and MIDI devices.
 ---@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start real-time playback on the audio device (jack) or without one (dummy).
 ---@field status fun(): Quire.engine_status_result Real-time engine state: backend, rate, block, device period, latency, xruns.
 ---@field stop fun(): table Stop real-time playback and release the audio device.
@@ -930,7 +933,7 @@ q = nil
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
----@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
+---@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
 
 ---@class Quire.transport
 ---@field get fun(): Quire.transport_get_result The play position and whether it is playing.

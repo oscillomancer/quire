@@ -5,7 +5,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
-
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
@@ -43,8 +42,59 @@ std::string baseName(const std::string& path) {
 
 }  // namespace
 
-RenderDialog::RenderDialog(engine::EngineApp&, cmd::Dispatcher& dispatcher, ui::Root& root)
-    : dispatcher_(dispatcher), root_(root) {}
+RenderDialog::RenderDialog(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root)
+    : app_(app), dispatcher_(dispatcher), root_(root) {}
+
+std::string RenderDialog::defaultFor(std::string_view key) const {
+    const model::Session& s = app_.head();
+    const json::Value& defaults = s.project->render;
+    const auto setting = [&](std::string_view k) -> const json::Value* {
+        return defaults.isObject() ? defaults.find(k) : nullptr;
+    };
+    const auto number = [](const json::Value* v, double fallback) {
+        return v && v->isNumber() ? v->asDouble() : fallback;
+    };
+    char buf[64];
+    if (key == "end_beat") {
+        double last = 0;
+        for (const auto& e : s.items) last = std::max(last, e.value->position + e.value->length);
+        std::snprintf(buf, sizeof buf, "last item end (%.2f)", last);
+        return buf;
+    }
+    if (key == "tail_s") {
+        std::snprintf(buf, sizeof buf, "%g", number(setting("tail_ms"), 0.0) / 1000.0);
+        return buf;
+    }
+    if (key == "sample_rate") {
+        std::snprintf(buf, sizeof buf, "%d",
+                      static_cast<int>(number(setting("sample_rate"), s.project->sampleRate)));
+        return buf;
+    }
+    if (key == "bit_depth") {
+        const json::Value* format = setting("format");
+        const json::Value* depth =
+            format && format->isObject() ? format->find("bit_depth") : setting("bit_depth");
+        std::snprintf(buf, sizeof buf, "%d", static_cast<int>(number(depth, 32)));
+        return buf;
+    }
+    if (key == "channels") {
+        std::snprintf(buf, sizeof buf, "%d", static_cast<int>(number(setting("channels"), 2)));
+        return buf;
+    }
+    if (key == "normalize") {
+        const json::Value* n = setting("normalize");
+        if (n && n->isString()) return n->asString();
+        if (n && n->isObject())
+            if (const json::Value* mode = n->find("mode"); mode && mode->isString())
+                return mode->asString();
+        return "none";
+    }
+    if (key == "target") {
+        std::snprintf(buf, sizeof buf, "%g", number(setting("target"), -14.0));
+        return buf;
+    }
+    return {};
+}
 
 RenderDialog::~RenderDialog() = default;
 
@@ -81,6 +131,7 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     sourceLabel_->layout.width = ui::SizeRule::fraction();
 
     auto field = [&](const char* label, const char* id, const std::string& value, float width,
+                     const std::string& placeholder,
                      std::function<void(const std::string&)> onChange) -> ui::TextField& {
         auto& cell = page->emplace<ui::Node>(std::string(id) + ".cell");
         cell.layout.dir = ui::Layout::Dir::Row;
@@ -90,7 +141,7 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
         auto& l = cell.emplace<ui::Label>(std::string(id) + ".label", label, ui::Font::Ui,
                                           "caption", "ink-quiet");
         l.layout.width = ui::SizeRule::fixed(90);
-        auto& f = cell.emplace<ui::TextField>(id, value);
+        auto& f = cell.emplace<ui::TextField>(id, value, placeholder);
         f.layout.width = ui::SizeRule::fixed(width);
         f.onChange = [this, onChange = std::move(onChange)](const std::string& text) {
             onChange(text);
@@ -99,21 +150,26 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
         f.onSubmit = [this](const std::string&) { refreshPreview(); };
         return f;
     };
-    field("Pattern", "render.pattern", pattern_, 300,
+    field("Pattern", "render.pattern", pattern_, 300, "",
           [this](const std::string& t) { pattern_ = t; });
-    field("Start beat", "render.start", start_, 70, [this](const std::string& t) { start_ = t; });
-    field("End beat", "render.end", end_, 70, [this](const std::string& t) { end_ = t; });
-    field("Tail (s)", "render.tail", tail_, 70, [this](const std::string& t) { tail_ = t; });
-    field("Sample rate", "render.sample_rate", sampleRate_, 90,
+    field("Start beat", "render.start", start_, 70, "0",
+          [this](const std::string& t) { start_ = t; });
+    field("End beat", "render.end", end_, 70, defaultFor("end_beat"),
+          [this](const std::string& t) { end_ = t; });
+    field("Tail (s)", "render.tail", tail_, 70, defaultFor("tail_s"),
+          [this](const std::string& t) { tail_ = t; });
+    field("Sample rate", "render.sample_rate", sampleRate_, 90, defaultFor("sample_rate"),
           [this](const std::string& t) { sampleRate_ = t; });
-    field("Bit depth", "render.bit_depth", bitDepth_, 70,
+    field("Bit depth", "render.bit_depth", bitDepth_, 70, defaultFor("bit_depth"),
           [this](const std::string& t) { bitDepth_ = t; });
-    field("Channels", "render.channels", channels_, 70,
+    field("Channels", "render.channels", channels_, 70, defaultFor("channels"),
           [this](const std::string& t) { channels_ = t; });
-    field("Normalize", "render.normalize", normalize_, 110,
+    field("Normalize", "render.normalize", normalize_, 110, defaultFor("normalize"),
           [this](const std::string& t) { normalize_ = t; });
-    field("Target", "render.target", target_, 80, [this](const std::string& t) { target_ = t; });
-    field("Limit dBTP", "render.limit", limit_, 80, [this](const std::string& t) { limit_ = t; });
+    field("Target", "render.target", target_, 80, defaultFor("target"),
+          [this](const std::string& t) { target_ = t; });
+    field("Limit dBTP", "render.limit", limit_, 80, "-1",
+          [this](const std::string& t) { limit_ = t; });
 
     // Stems-only: how each track is rendered.
     auto& stems = page->emplace<ui::Node>("render.stems.row");

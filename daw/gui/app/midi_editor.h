@@ -17,6 +17,7 @@
 #include "supple/ui/text_area.h"
 
 namespace supple::ui {
+class Button;
 class Label;
 class TextBlock;
 }  // namespace supple::ui
@@ -30,12 +31,23 @@ struct RollNote {
 };
 
 // What the roll, keyboard and velocity lane share.
+struct CcPoint {
+    double beat = 0;  // from the item's start
+    int value = 0;    // 0..127
+};
+
 struct RollState {
     std::string item;         // "it_3"; empty: closed
     double itemPosition = 0;  // project beats
     double itemLength = 4;    // beats
     std::vector<RollNote> notes;
     std::set<std::size_t> selected;
+    // The CC lane: one controller at a time (channel 1).
+    int ccNumber = 1;
+    std::vector<CcPoint> cc;
+    std::vector<CcPoint> ccDraft;  // a drag in progress (drawn, not yet committed)
+    bool ccErasing = false;
+    double ccFrom = 0, ccTo = 0;  // the drag's span (beats)
     // View: beats from the item start at the left edge, the pitch at the top
     // edge, zoom.
     double scrollBeat = -0.5, pixelsPerBeat = 80;
@@ -98,6 +110,8 @@ class MidiEditor {
     ui::Node* roll_ = nullptr;
     ui::Node* keys_ = nullptr;
     ui::Node* velocity_ = nullptr;
+    ui::Node* ccLane_ = nullptr;
+    ui::Button* ccButton_ = nullptr;
     ui::Node* notationPane_ = nullptr;
     ui::Label* title_ = nullptr;
     ui::TextArea* text_ = nullptr;

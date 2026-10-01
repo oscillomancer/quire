@@ -23,6 +23,7 @@ class TextField : public Node {
     bool secret = false;  // show dots (API keys); copy and cut are disabled
 
     const std::string& text() const { return text_; }
+    const std::string& placeholder() const { return placeholder_; }
     void setText(std::string text);  // does not call onChange
     void selectAll();
     std::pair<std::size_t, std::size_t> selection() const {

@@ -627,6 +627,46 @@ Result:
 
 ```
 
+## `engine.inputs@1`
+
+The device inputs a track can record: audio channels and MIDI devices.
+
+audio: one entry per input channel (channel, the 1-based number track.set record_input takes, and the device port it is connected to). midi: the MIDI devices (names track.set record_midi matches). While the engine is stopped: running false and empty lists (engine.start opens the device).
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Stopped** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "running": false,
+  "audio": [],
+  "midi": []
+}
+
+```
+
 ## `engine.start@1`
 
 Start real-time playback on the audio device (jack) or without one (dummy).
@@ -1303,7 +1343,7 @@ Result:
 
 Insert a plugin into a track's FX chain and return its id.
 
-plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins.
+plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1315,6 +1355,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `plugin` | string |  |  |  |  |
 | `index` | integer |  | 0.0.. |  |  |
 | `patch` | value |  |  |  |  |
+| `chain` | string |  |  |  |  |
 
 ### Result
 
@@ -1368,6 +1409,29 @@ Result:
   "fx": "fx_1",
   "name": "Test Sine",
   "semantic": false,
+  "chain": ["fx_1"]
+}
+
+```
+
+**An effect in the track's input chain** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "plugin": "com.suppleaudio.test.gain",
+  "chain": "input"
+}
+
+```
+
+Result:
+
+```json
+{
+  "fx": "fx_1",
+  "name": "<any>",
+  "semantic": "<any>",
   "chain": ["fx_1"]
 }
 
@@ -1453,7 +1517,7 @@ Result:
 
 Move a plugin within a track chain or to another track.
 
-
+Works on the track's chain and on its input chain (an input-chain effect stays on its track).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3169,9 +3233,16 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "semantic": {
             "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "shadowed": {
+            "type": "boolean",
+            "description": "Another location earlier on the plugin path has the same id; fx.add by id uses that one"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
     }
@@ -3246,9 +3317,15 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "semantic": {
             "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "shadowed": {
+            "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
     }
@@ -5771,7 +5848,7 @@ Result:
 
 ## `track.set@1`
 
-Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.
+Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
 
 Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace.
 
@@ -5796,6 +5873,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `midi_channel` | integer |  | 0.0..16.0 |  |  |
 | `record_mode` | string |  |  |  |  |
 | `monitor` | string |  |  |  |  |
+| `parent_send` | boolean |  |  |  | The implicit send to the parent buss/master (off: only explicit sends leave the strip) |
 
 ### Result
 
@@ -5836,6 +5914,23 @@ Result:
   "track": "tr_1",
   "armed": true,
   "record_input": [1, 2]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Feed the parent only through explicit sends** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "parent_send": false
 }
 
 ```

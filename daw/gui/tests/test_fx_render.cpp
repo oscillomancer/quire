@@ -197,6 +197,12 @@ struct Fixture {
         stbi_image_free(data);
         CHECK(off < image.rgba.size() / 4 / 200);
     }
+    // The stock plugins build with ALL: a partial build has none, and the FX
+    // tests skip rather than fail.
+    bool stockPlugins() {
+        auto r = run("plugin.list", json::Value::object());
+        return r && !(*r)["plugins"].asArray().empty();
+    }
     // Finds a stock plugin id by display name (the scan ordering varies).
     std::string pluginId(const char* name) {
         auto r = run("plugin.list", json::Value::object());
@@ -216,6 +222,10 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     Fixture f;
     if (!f.ok) {
         MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
         return;
     }
     const model::Id track = f.addTrack("Guitar");
@@ -268,16 +278,16 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.app->head().fx.find(fx1)->offline);
     CHECK(f.app->head().fx.find(fx2)->bypass == false);
 
-    // A wet/dry drag is one undo step too.
+    // A wet/dry drag is one undo step too (the cap sits at 100 %: drag left).
     ui::Node* wet = f.root->find("fx.wet." + fx1.str());
     REQUIRE(wet);
     const std::size_t wetBefore = f.historyCount();
     const float wetY = wet->bounds().y + wet->bounds().h / 2;
-    f.root->pointer({ui::PointerEvent::Type::Down, {wet->bounds().x + 12, wetY}, 1});
+    const float wetX = wet->bounds().x + wet->bounds().w - 12;
+    f.root->pointer({ui::PointerEvent::Type::Down, {wetX, wetY}, 1});
     for (int i = 1; i <= 20; ++i)
-        f.root->pointer(
-            {ui::PointerEvent::Type::Move, {wet->bounds().x + 12.0f + i * 6.0f, wetY}, 1});
-    f.root->pointer({ui::PointerEvent::Type::Up, {wet->bounds().x + 12, wetY}, 1});
+        f.root->pointer({ui::PointerEvent::Type::Move, {wetX - i * 6.0f, wetY}, 1});
+    f.root->pointer({ui::PointerEvent::Type::Up, {wetX - 140.0f, wetY}, 1});
     CHECK(f.historyCount() == wetBefore + 1);
     CHECK(f.app->head().fx.find(fx1)->wet < 100.0);
 
@@ -329,6 +339,21 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.key("Escape");  // close the browser
     CHECK_FALSE(f.fx->browser().isOpen());
 
+    // The input chain: add one from here (fx.add {chain:"input"}), and its
+    // rows use the same controls (ifx. ids).
+    f.click("fx.tab.chain");
+    f.click("fx.add.input");
+    REQUIRE(f.fx->browser().isOpen());
+    f.type("Plumb");
+    f.key("Return");
+    CHECK(f.fx->inputChain().size() == 1);
+    CHECK(f.fx->chain().size() == 2);  // the main chain is untouched
+    const model::Id inputFx = f.fx->inputChain()[0];
+    CHECK(f.app->head().fx.find(inputFx)->plugin.name == "Plumb");
+    CHECK(f.root->find("ifx.row." + inputFx.str()) != nullptr);
+    f.click("ifx.remove." + inputFx.str());
+    CHECK(f.fx->inputChain().empty());
+
     // Remove (from the chain tab: the rows live there).
     f.click("fx.tab.chain");
     f.click("fx.remove." + fx1.str());
@@ -339,6 +364,10 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
 TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {
     Fixture f;
     if (!f.ok) return;
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 2));
     const model::Id track = f.firstChannel();
 
@@ -385,6 +414,18 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
 
     f.render->open();
     f.render->setField("render.end", "8");  // a short render: fast and load-insensitive
+    // An empty field explains the default the engine would use.
+    const auto placeholder = [&](const char* id) {
+        auto* field = dynamic_cast<ui::TextField*>(f.root->find(id));
+        REQUIRE(field);
+        return field->placeholder();
+    };
+    CHECK(placeholder("render.end").find("last item end") == 0);
+    CHECK(placeholder("render.sample_rate") == "48000");
+    CHECK(placeholder("render.bit_depth") == "32");
+    CHECK(placeholder("render.channels") == "2");
+    CHECK(placeholder("render.tail") == "0");
+    CHECK(placeholder("render.normalize") == "none");
     f.render->setField("render.pattern", "preview-{counter:02}");
     f.render->refreshPreview();
 

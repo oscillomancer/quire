@@ -64,6 +64,10 @@ class JackBackend : public Backend {
     BackendStatus status() const override;
     std::span<const MidiInputEvent> midiInput() const override;
     std::vector<std::string> midiPorts() const override;
+    std::vector<std::string> inputNames() const override;
+    // The device's physical capture ports, in order, from a short-lived
+    // client (no activation): how many inputs start() should open.
+    static Result<std::vector<std::string>> captureNames(const Options& options = {});
 
     // Whether libjack can be loaded and has every symbol we use. Does not
     // contact a server.

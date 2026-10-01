@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <unistd.h>
 
 #include <dlfcn.h>
 
@@ -752,4 +753,38 @@ TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolat
             CHECK(r[0] == doctest::Approx(active ? 0.75 : 0.25));
             CHECK(r[2] == doctest::Approx(0.25));
         }
+}
+
+TEST_CASE("a plugin found in two places resolves to the first on the search path") {
+    // The same id in an explicit path and in ~/.clap (an older install): the
+    // explicit one must win however the paths sort (they used to sort by name).
+    namespace fs = std::filesystem;
+    const fs::path base =
+        fs::temp_directory_path() / ("supple-shadow-" + std::to_string(::getpid()));
+    const fs::path first = base / "zz-explicit", second = base / "aa-installed";
+    fs::create_directories(first);
+    fs::create_directories(second);
+    fs::copy_file(FIXTURE_CLAP_PATH, first / "fixture.clap", fs::copy_options::overwrite_existing);
+    fs::copy_file(FIXTURE_CLAP_PATH, second / "fixture.clap", fs::copy_options::overwrite_existing);
+    const std::vector<fs::path> path = {first, second};
+    auto list = host::scan(path);
+    REQUIRE(list);
+    host::orderCatalogue(*list);
+    std::optional<std::size_t> at;
+    for (std::size_t i = 0; i < list->size(); ++i)
+        if (!at && (*list)[i].path.parent_path() == first) at = i;
+    REQUIRE(at);
+    const std::string id = (*list)[*at].id;
+    std::size_t firstOfId = list->size();
+    for (std::size_t i = 0; i < list->size(); ++i)
+        if ((*list)[i].id == id) {
+            firstOfId = i;
+            break;
+        }
+    CHECK((*list)[firstOfId].path.parent_path() == first);  // what a lookup by id takes
+    CHECK_FALSE(host::shadowed(*list, firstOfId));
+    REQUIRE(firstOfId + 1 < list->size());
+    CHECK((*list)[firstOfId + 1].path.parent_path() == second);
+    CHECK(host::shadowed(*list, firstOfId + 1));
+    fs::remove_all(base);
 }

@@ -161,6 +161,9 @@ class Backend {
     virtual std::span<const MidiInputEvent> midiInput() const { return {}; }
     // The MIDI input ports, named after their devices (fixed while running).
     virtual std::vector<std::string> midiPorts() const { return {}; }
+    // What each audio input channel is connected to (index 0 = channel 1;
+    // "" when unconnected), fixed while running. Main thread.
+    virtual std::vector<std::string> inputNames() const { return {}; }
 };
 
 // No device. `Manual` runs cycles on the caller's thread (deterministic

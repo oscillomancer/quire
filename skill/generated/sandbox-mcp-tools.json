@@ -547,9 +547,28 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "path": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "shadowed": {
+                "type": "boolean",
+                "description": "Not loadable by id: an earlier location on the plugin path has the same id (load it by path)"
               }
             },
-            "required": ["id", "name", "vendor", "instrument", "semantic", "features"],
+            "required": [
+              "id",
+              "name",
+              "vendor",
+              "instrument",
+              "semantic",
+              "features",
+              "path",
+              "version"
+            ],
             "additionalProperties": false
           }
         }

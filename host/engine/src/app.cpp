@@ -86,9 +86,7 @@ Result<std::span<const host::PluginInfo>> EngineApp::plugins(bool rescan) {
             options_.pluginPath.empty() ? host::defaultSearchPath() : options_.pluginPath;
         auto list = host::scan(path);
         if (!list) return std::move(list).error();
-        std::sort(list->begin(), list->end(), [](const auto& a, const auto& b) {
-            return a.id != b.id ? a.id < b.id : a.path < b.path;
-        });
+        host::orderCatalogue(*list);  // the first location on the path wins an id
         catalogue_ = std::move(*list);
     }
     return std::span<const host::PluginInfo>(*catalogue_);
@@ -407,12 +405,17 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     BackendConfig config;
     config.sampleRate = view().project->sampleRate;
     config.blockSize = block;
-    config.inputs = 2;         // the device's first stereo pair, for recording
+    config.inputs = 2;         // at least the device's first stereo pair, for recording
     config.midiInputs = true;  // its MIDI inputs, for MIDI tracks (ADR-0016)
     if (backend == "jack") {
         JackOptions o;
         o.clientName = std::string(product::kSlug);
         o.library = options_.jackLibrary;
+        // One input per physical capture port (at least the first pair, at
+        // most 32), so any device input can feed a track.
+        if (auto names = JackBackend::captureNames(o); names && !names->empty())
+            config.inputs =
+                static_cast<std::uint32_t>(std::clamp<std::size_t>(names->size(), 2, 32));
         ownedBackend_ = std::make_unique<JackBackend>(o);
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(

@@ -366,6 +366,7 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
       peaks_(peaks),
       resolve_(std::move(resolve)),
       transportSource_(std::move(transport)) {
+    gestures_ = std::make_unique<ItemGestures>(*this);
     interactive = true;
     focusable = true;
     layout.dir = ui::Layout::Dir::Column;
@@ -533,6 +534,7 @@ void ArrangeView::applyFollow() {
 
 bool ArrangeView::installOverlay(ui::Root& root) {
     root.overlay().add(std::make_unique<Playhead>(*this));
+    gestures_->installOverlay(root);
     return true;
 }
 
@@ -549,7 +551,7 @@ ui::Rect ArrangeView::tcpRowRect(std::size_t row) const {
 }
 
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
-    if (e.type != ui::PointerEvent::Type::Wheel) return false;
+    if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
     if (ctrl && shift) {  // vertical zoom: the global row height

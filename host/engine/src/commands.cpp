@@ -434,6 +434,7 @@ struct TrackSetArgs {
     std::optional<std::int64_t> midiChannel;
     std::optional<model::RecordMode> recordMode;
     std::optional<model::Monitor> monitor;
+    std::optional<bool> parentSend;
 };
 struct TrackEntry {
     std::string id, name, parent;
@@ -487,6 +488,7 @@ struct FxAddArgs {
     std::string track, plugin;
     std::optional<std::int64_t> index;
     std::optional<json::Value> patch;
+    std::optional<std::string> chain;  // "main" (default) or "input"
 };
 struct FxAddResult {
     std::string fx, name;
@@ -1191,8 +1193,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "track.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary =
-            "Set track fields: type, name, volume_db, pan, mute, solo, color, notes, arming.";
+        c.summary = "Set track fields: type, name, volume, pan, mute, solo, parent send, arming.";
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
@@ -1232,6 +1233,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                        schema::enumeration<model::Monitor>({{model::Monitor::Off, "off"},
                                                             {model::Monitor::On, "on"},
                                                             {model::Monitor::Auto, "auto"}}))
+                .field("parent_send", &TrackSetArgs::parentSend,
+                       schema::boolean().doc("The implicit send to the parent buss/master "
+                                             "(off: only explicit sends leave the strip)"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1239,6 +1243,8 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"track": "tr_1", "volume_db": "-4 dB", "pan": -15})"), obj("{}"), "song"},
             {"Arm for recording from inputs 1 and 2",
              obj(R"({"track": "tr_1", "armed": true, "record_input": [1, 2]})"), obj("{}"), "song"},
+            {"Feed the parent only through explicit sends",
+             obj(R"({"track": "tr_1", "parent_send": false})"), obj("{}"), "song"},
             {"Play and record a MIDI keyboard (any device, channel 1)",
              obj(R"({"track": "tr_1", "armed": true, "record_midi": "*", "midi_channel": 1, "monitor": "auto"})"),
              obj("{}"), "song"}};
@@ -1278,6 +1284,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.recordInput && a.recordMidi)
                 return Error("track.record_input", "record audio or MIDI, not both",
                              "/record_midi");
+            if (a.parentSend && !s.tracks.find(*id)->parent)
+                return Error("track.parent_send", "a master has no parent", "/parent_send",
+                             "masters feed hardware outputs and renders");
             // The record input is a route from the device inputs (hw_input).
             std::optional<Id> input = s.tracks.find(*id)->record.input;
             if (a.recordInput) {
@@ -1330,12 +1339,18 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.volumeDb) t.volumeDb = *a.volumeDb;
                 if (a.pan) t.pan = *a.pan;
                 if (a.mute) t.mute = *a.mute;
+                if (a.parentSend) t.parentSend.enabled = *a.parentSend;
                 if (a.solo)
                     t.solo = *a.solo == "on"         ? model::Solo::On
                              : *a.solo == "in_place" ? model::Solo::InPlace
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            if (a.parentSend && *a.parentSend && !s.tracks.find(*id)->parentSend.enabled)
+                if (auto valid = model::checkInvariants(app.view()); !valid)
+                    return Error(
+                        "route.cycle", "the parent send would feed back: " + valid.error().message,
+                        "/parent_send", "remove the send from the parent to this strip first");
             if (a.type && *a.type != s.tracks.find(*id)->type) {
                 SUPPLE_TRY(model::validateStripRules(app.view()));
                 auto valid = model::checkInvariants(app.view());
@@ -1690,13 +1705,16 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Insert a plugin into a track's FX chain and return its id.";
         c.description =
             "plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic "
-            "plugins.";
+            "plugins. chain: main (default; the track's effects) or input (the recorded-input "
+            "chain).";
         c.tags = {"fx"};
         c.args = schema::object<FxAddArgs>("fx_add_args")
                      .field("track", &FxAddArgs::track, idArg("tr", "Track"))
                      .field("plugin", &FxAddArgs::plugin, schema::string().minLength(1))
                      .field("index", &FxAddArgs::index, schema::integer().min(0))
                      .field("patch", &FxAddArgs::patch, schema::any())
+                     .field("chain", &FxAddArgs::chain,
+                            schema::string().pattern("^(main|input)$", "main or input"))
                      .build();
         c.result = schema::object<FxAddResult>("fx_add")
                        .field("fx", &FxAddResult::fx, schema::string())
@@ -1710,6 +1728,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"An instrument on the bass track",
              obj(R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})"),
              obj(R"({"fx": "fx_1", "name": "Test Sine", "semantic": false, "chain": ["fx_1"]})"),
+             "song"},
+            {"An effect in the track's input chain",
+             obj(R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain", "chain": "input"})"),
+             obj(R"({"fx": "fx_1", "name": "<any>", "semantic": "<any>", "chain": ["fx_1"]})"),
              "song"}};
         c.run = [](const FxAddArgs& a, Context& ctx) -> Result<FxAddResult> {
             EngineApp& app = A(ctx);
@@ -1729,15 +1751,21 @@ void registerEngineCommands(cmd::Registry& registry) {
                 }
                 fx.patch = std::move(*merged);
             }
+            const bool input = a.chain && *a.chain == "input";
             model::EditTxn& t = app.txn();
             const Id id = t.create(std::move(fx));
-            std::vector<Id> chain = s.tracks.find(*track)->chain;
+            const model::Track* strip = s.tracks.find(*track);
+            std::vector<Id> chain = input ? strip->inputChain : strip->chain;
             std::size_t at =
                 a.index ? std::min<std::size_t>(static_cast<std::size_t>(*a.index), chain.size())
                         : chain.size();
-            if (info->instrument && !a.index) at = 0;
+            // An instrument goes to the front of the track's chain unless the
+            // caller said where; the input chain keeps the caller's order.
+            if (!input && info->instrument && !a.index) at = 0;
             chain.insert(chain.begin() + static_cast<std::ptrdiff_t>(at), id);
-            t.modify<model::Track>(*track, [&](model::Track& tr) { tr.chain = chain; });
+            t.modify<model::Track>(*track, [&](model::Track& modified) {
+                (input ? modified.inputChain : modified.chain) = chain;
+            });
             FxAddResult r{id.str(), info->name, info->semantic, {}};
             for (Id f : chain) r.chain.push_back(f.str());
             return r;
@@ -2768,6 +2796,48 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const NoArgs&, Context& ctx) -> Result<Empty> {
             A(ctx).stopEngine();
             return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<NoArgs, json::Value> c;
+        c.name = "engine.inputs";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "The device inputs a track can record: audio channels and MIDI devices.";
+        c.description =
+            "audio: one entry per input channel (channel, the 1-based number track.set "
+            "record_input takes, and the device port it is connected to). midi: the MIDI devices "
+            "(names track.set record_midi matches). While the engine is stopped: running false and "
+            "empty lists (engine.start opens the device).";
+        c.tags = {"engine", "record"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = schema::any();
+        c.examples = {
+            {"Stopped", obj("{}"), obj(R"({"running": false, "audio": [], "midi": []})"), "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<json::Value> {
+            EngineApp& app = A(ctx);
+            const Backend* backend = app.backend();
+            json::Value out = json::Value::object();
+            out["running"] = backend != nullptr;
+            out["audio"] = json::Value::array();
+            out["midi"] = json::Value::array();
+            if (!backend) return out;
+            json::Value audio = json::Value::array();
+            const auto names = backend->inputNames();
+            const std::uint32_t count = backend->config().inputs;
+            for (std::uint32_t ch = 0; ch < count; ++ch) {
+                json::Value e = json::Value::object();
+                e["channel"] = static_cast<std::int64_t>(ch + 1);
+                e["port"] = ch < names.size() ? names[ch] : std::string();
+                audio.push_back(std::move(e));
+            }
+            json::Value midi = json::Value::array();
+            for (const std::string& name : backend->midiPorts()) midi.push_back(name);
+            out["backend"] = backend->name();
+            out["audio"] = std::move(audio);
+            out["midi"] = std::move(midi);
+            return out;
         };
         registry.add(std::move(c));
     }

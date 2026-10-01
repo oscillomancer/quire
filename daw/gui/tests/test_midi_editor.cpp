@@ -224,6 +224,58 @@ TEST_CASE("MIDI editor: open, draw, select, move, resize, transpose, delete, vel
     f.snapshot("midi-editor-edited.png");
 }
 
+TEST_CASE("MIDI editor: the CC lane draws a ramp in one step, erases, and switches controllers") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& s = f.editor->state();
+    s.grid = 0.5;
+    auto cc = [&](int number) {
+        std::vector<std::pair<double, int>> out;
+        const json::Value all = f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"];
+        for (const auto& c : all.asArray())
+            if (c.find("number")->asInt() == number)
+                out.emplace_back(c.find("beat")->asDouble(),
+                                 static_cast<int>(c.find("value")->asInt()));
+        return out;
+    };
+    auto steps = [&] { return f.exec("history.list", "{}")["versions"].size(); };
+    const ui::Rect lane = f.root->find("midi.cc")->bounds();
+    REQUIRE(lane.h > 20);
+    const auto xAt = [&](double beat) { return f.at(beat, 60).x + 1; };
+    const auto s0 = steps();
+    // Draw from beat 0 (low) to beat 2 (high).
+    f.pointer(ui::PointerEvent::Type::Down, {xAt(0.0), lane.bottom() - 8});
+    f.pointer(ui::PointerEvent::Type::Move, {xAt(1.0), lane.y + lane.h / 2});
+    f.pointer(ui::PointerEvent::Type::Move, {xAt(2.0), lane.y + 6});
+    f.pointer(ui::PointerEvent::Type::Up, {xAt(2.0), lane.y + 6});
+    auto drawn = cc(1);
+    REQUIRE(drawn.size() == 3);  // one per grid step the pointer visited
+    CHECK(drawn.front().first == doctest::Approx(0.0));
+    CHECK(drawn.back().first == doctest::Approx(2.0));
+    CHECK(drawn.front().second < 30);
+    CHECK(drawn.back().second > 100);
+    CHECK(steps() == s0 + 1);
+    // Right-drag erases the span.
+    ui::PointerEvent down{ui::PointerEvent::Type::Down, {xAt(0.9), lane.y + 10}, 3};
+    f.root->pointer(down);
+    f.pointer(ui::PointerEvent::Type::Move, {xAt(2.2), lane.y + 10});
+    ui::PointerEvent up{ui::PointerEvent::Type::Up, {xAt(2.2), lane.y + 10}, 3};
+    f.root->pointer(up);
+    f.frame();
+    CHECK(cc(1).size() == 1);  // the point at 0 stays
+    // The next controller (7, volume) has its own lane.
+    REQUIRE(f.root->click("midi.cc.number"));
+    CHECK(s.ccNumber == 7);
+    CHECK(s.cc.empty());
+    f.pointer(ui::PointerEvent::Type::Down, {xAt(1.0), lane.y + 10});
+    f.pointer(ui::PointerEvent::Type::Up, {xAt(1.0), lane.y + 10});
+    CHECK(cc(7).size() == 1);
+    CHECK(cc(1).size() == 1);
+    f.snapshot("midi-editor-cc.png");
+}
+
 TEST_CASE("MIDI editor: the notation panel compiles live, writes back, and follows the roll") {
     Fixture f;
     if (!f.ok) return;
@@ -344,6 +396,11 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     f.exec("route.add", R"({"from":")" + keys + R"(","to":")" + verb + R"("})");
     matrix.sync();
     CHECK(m.sendsAt(row(keys), col(verb)).size() == 1);
+    // The parent's cell toggles the parent send.
+    REQUIRE(matrix.clickCell(row(keys), col("tr_0")));
+    CHECK_FALSE(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
+    REQUIRE(matrix.clickCell(row(keys), col("tr_0")));
+    CHECK(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
     REQUIRE(f.root->click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
 }
