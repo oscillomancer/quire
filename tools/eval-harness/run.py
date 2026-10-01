@@ -10,6 +10,7 @@ import re
 import shutil
 import statistics
 import subprocess
+import sys
 import time
 
 from common import HERE, ROOT, Mcp, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
@@ -177,6 +178,12 @@ def main(argv=None):
     if runner == "hermes":
         report["hermes_profile"] = Path(options.model_config).expanduser().parent.name
         report["model_config"] = str(Path(options.model_config).expanduser())
+    if runner == "hermes":
+        try:
+            runners.preflight(options, run_dir)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+            print("error:", error, file=sys.stderr)
+            return 2
     usage_totals = {"total_tokens": 0, "estimated_cost_usd": 0.0, "cost_known": True}
     for task in tasks:
         report["task_hashes"][task["id"]] = hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()
@@ -222,6 +229,10 @@ def main(argv=None):
     losses = [r["score"]["loss"] for r in report["tasks"] if r.get("score")]
     report["median_loss"] = statistics.median(losses) if losses else None
     write_json(run_dir / "report.json", report)
+    if runner == "hermes" and not usage_totals["total_tokens"]:
+        # Nothing reached the model: an infrastructure failure, not an evaluation result.
+        print("error: no attempt reached the model; nothing published. See", run_dir, file=sys.stderr)
+        return 2
     if runner == "hermes" or options.publish:
         path = publish(report)
         print("Report:", path.relative_to(ROOT))

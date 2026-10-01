@@ -12,7 +12,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import HERE, ROOT, Mcp, capture, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
-from runners import default_model, dry, isolated_config, preamble
+from runners import default_model, dry, isolated_config, preamble, preflight
 from run import render_patch, score_final
 from scoring import notation_score, transcript_metrics
 
@@ -113,6 +113,19 @@ class Isolation(unittest.TestCase):
             self.assertNotIn("HERMES_INFERENCE_MODEL", env)
             self.assertEqual(credential.read_text(), "OPENROUTER_API_KEY=FAKE-UNIT-TEST\n")
             self.assertNotIn("hidden_patch", (root / "run/relay.json").read_text())
+
+
+    def test_preflight_rejects_a_cli_that_cannot_load_under_an_isolated_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "hermes"
+            fake.write_text("#!/bin/sh\n[ \"$1\" = config ] && { echo 'No module named ruamel' >&2; exit 1; }\n"
+                            "test -n \"$HERMES_HOME\" || exit 3\nexit 0\n")
+            fake.chmod(0o755)
+            options = mock.Mock(hermes_python=None, hermes_bin=str(fake))
+            with self.assertRaisesRegex(RuntimeError, "ruamel.*--hermes-python"):
+                preflight(options, Path(tmp) / "a")
+            fake.write_text("#!/bin/sh\ntest -d \"$HERMES_HOME\" || exit 3\nexit 0\n")
+            preflight(options, Path(tmp) / "b")
 
 
 @unittest.skipUnless(os.environ.get("SUPPLE_EVAL_INTEGRATION") == "1", "opt-in real sandbox checks")
