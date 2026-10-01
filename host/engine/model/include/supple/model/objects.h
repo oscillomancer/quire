@@ -138,7 +138,7 @@ struct Take {
 
 struct MediaSource {
     std::string path;    // relative to the project's media_dir when inside it
-    std::string hash;    // "sha256:<hex>" of the file bytes
+    std::string hash;    // "sha256:<hex>" of the file bytes; empty in older projects
     std::string format;  // "wav", "flac", "mp3"
     double sampleRate = 0.0;
     int channels = 0;

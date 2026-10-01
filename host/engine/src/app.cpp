@@ -1002,18 +1002,27 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             if (!r.midi.empty()) commitMidiTake(txn(), s, r, runs, items, rate, out);
             continue;
         }
-        model::MediaSource md;
-        std::error_code ec;
-        const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
-        md.path = !ec && !rel.empty() && *rel.begin() != ".." ? rel.string() : r.file.string();
-        md.format = "wav";
-        md.sampleRate = rate;  // the device's (resampled to the plan's rate on playback)
-        md.channels = 0;
-        if (auto head = audio::inspectWavStream(r.file))
-            md.channels = static_cast<int>(head->channels);
-        md.frames = r.frames;
+        // The recorder hashed the take's file when it closed it (realtime.h
+        // RecordedTake::hash), so a re-recorded or recovered file with the same
+        // bytes reuses the source the session already has.
         model::EditTxn& t = txn();
-        const Id source = t.create(std::move(md));
+        Id source;
+        if (const auto known = model::mediaSourceWithHash(s, r.hash)) {
+            source = *known;
+        } else {
+            model::MediaSource md;
+            std::error_code ec;
+            const fs::path rel = media.empty() ? fs::path() : fs::relative(r.file, media, ec);
+            md.path = !ec && !rel.empty() && *rel.begin() != ".." ? rel.string() : r.file.string();
+            md.hash = r.hash;
+            md.format = "wav";
+            md.sampleRate = rate;  // the device's (resampled to the plan's rate on playback)
+            md.channels = 0;
+            if (auto head = audio::inspectWavStream(r.file))
+                md.channels = static_cast<int>(head->channels);
+            md.frames = r.frames;
+            source = t.create(std::move(md));
+        }
         for (const ItemPlan& ip : items) {
             model::Item item;
             item.track = r.track;

@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <supple/audio/audio_file.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
 #include <supple/host/clap_host.h>
@@ -964,6 +965,10 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
             if (audio->channels[1][i] != -audio->channels[0][i]) ++breaks;
         }
         CHECK(breaks == 0);  // contiguous: nothing lost, nothing doubled
+        // The recorder hashed the file it closed, so the commit never reads the
+        // recording back and the hash names the bytes on disk.
+        CHECK(t.hash == sha256File(t.file).value());
+        CHECK(t.hash.size() == 7 + 64);
         engine.stop();
         std::filesystem::remove_all(dir);
     }

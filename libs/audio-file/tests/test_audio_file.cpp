@@ -256,3 +256,72 @@ TEST_CASE("repairing a streamed WAV recovers the frames written after the last h
     std::filesystem::remove(path);
     std::filesystem::remove(other);
 }
+
+TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") {
+    // The fixtures: FLAC and MP3 metadata must equal what the decoders report.
+    auto flac = inspect(kData / "sine440.flac");
+    REQUIRE(flac);
+    auto flacRef = readAudio(kData / "sine440.flac");
+    REQUIRE(flacRef);
+    CHECK(flac->container == Container::Flac);
+    CHECK(flac->sampleRate == flacRef->sampleRate);
+    CHECK(flac->channels == static_cast<int>(flacRef->channelCount()));
+    CHECK(flac->frames == static_cast<std::int64_t>(flacRef->frames()));
+
+    auto mp3 = inspect(kData / "sine440.mp3");
+    REQUIRE(mp3);
+    auto mp3Ref = readAudio(kData / "sine440.mp3");
+    REQUIRE(mp3Ref);
+    CHECK(mp3->container == Container::Mp3);
+    CHECK(mp3->sampleRate == mp3Ref->sampleRate);
+    CHECK(mp3->channels == static_cast<int>(mp3Ref->channelCount()));
+    // A Xing header (or the frame walk when there is none) must land on the
+    // decoder's own frame count.
+    CHECK(mp3->frames == static_cast<std::int64_t>(mp3Ref->frames()));
+
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-inspect-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    // WAV: float32 (what the recorder writes) and PCM 24.
+    AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(12345));
+    for (std::size_t i = 0; i < tone.frames(); ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
+    REQUIRE(writeWav(dir / "float.wav", tone).ok());
+    auto wav = inspect(dir / "float.wav");
+    REQUIRE(wav);
+    CHECK(wav->container == Container::Wav);
+    CHECK(wav->sampleRate == 48000);
+    CHECK(wav->channels == 2);
+    CHECK(wav->frames == 12345);
+    CHECK_FALSE(wav->truncated);
+    WavOptions pcm;
+    pcm.format = SampleFormat::Pcm24;
+    REQUIRE(writeWav(dir / "pcm.wav", tone, pcm).ok());
+    auto pcmInfo = inspect(dir / "pcm.wav");
+    REQUIRE(pcmInfo);
+    CHECK(pcmInfo->frames == 12345);
+    CHECK(pcmInfo->sampleRate == 48000);
+    CHECK(pcmInfo->channels == 2);
+
+    // An interrupted file: the data chunk is shorter than it declares.
+    const auto bytes = encodeWav(tone, pcm).value();
+    auto shortBytes = bytes;
+    shortBytes.resize(shortBytes.size() - 1000);
+    REQUIRE(supple::writeFileAtomic(dir / "short.wav", shortBytes).ok());
+    auto shortInfo = inspect(dir / "short.wav");
+    REQUIRE(shortInfo);
+    CHECK(shortInfo->truncated);
+    CHECK(shortInfo->frames == 12345 - (1000 + 5) / 6);  // 24-bit: 6 bytes a frame
+
+    // Errors: an unknown container, and a file that is not there.
+    REQUIRE(
+        supple::writeFileAtomic(dir / "junk.bin", std::string_view("definitely not audio")).ok());
+    CHECK(inspect(dir / "junk.bin").error().code == "audio.format");
+    CHECK(inspect(dir / "missing.wav").error().code == "audio.open");
+    std::filesystem::remove_all(dir);
+}

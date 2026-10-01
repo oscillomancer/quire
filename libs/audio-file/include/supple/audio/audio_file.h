@@ -39,10 +39,30 @@ struct AudioData {
 enum class Container { Wav, Flac, Mp3, Unknown };
 Container detect(std::span<const std::uint8_t> head);  // from the first bytes
 
+// What a file's header says, without decoding it: the media model's
+// MediaSource needs exactly this (rate, channels, frames). The container is
+// detected by content, like readAudio. `truncated` mirrors AudioData: the data
+// chunk holds less audio than it declares. Error codes: "audio.open",
+// "audio.read", "audio.format".
+struct FileInfo {
+    Container container = Container::Unknown;
+    double sampleRate = 0;
+    int channels = 0;
+    std::int64_t frames = 0;
+    bool truncated = false;
+};
+Result<FileInfo> inspect(const std::filesystem::path& path);
+
 Result<AudioData> resample(const AudioData& data, double targetRate);
 
 Result<AudioData> readAudio(const std::filesystem::path& path);
 Result<AudioData> readAudio(std::span<const std::uint8_t> bytes);
+
+// Tests: how many whole-file decodes readAudio() has performed (the path
+// overload goes through the byte overload, which counts once). The media model
+// must read a file's header — inspect() — never decode it to learn metadata.
+std::uint64_t decodeCountForTests();
+void resetDecodeCountForTests();
 
 enum class SampleFormat { Pcm16, Pcm24, Float32 };
 struct WavOptions {
