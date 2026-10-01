@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "../src/optimize_loss.h"
+#include "../src/optimize_range.h"
 #include "../src/schema_params.h"
 #include "supple/audio/audio_file.h"
 #include "supple/sandbox/commands.h"
@@ -231,6 +232,49 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     json::Value shifted = h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.string() +
                                                 R"(", "test_note_off_s": 0.5})");
     CHECK(shifted["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(0.5));
+}
+
+TEST_CASE("auto search windows follow the parameter's shape") {
+    params::ParamSpec cutoff;  // 20 Hz .. 20 kHz, log
+    cutoff.unit = params::Unit::Hz;
+    cutoff.min = 20.0;
+    cutoff.max = 20000.0;
+    cutoff.curve = params::Curve{params::CurveKind::Log, 1.0};
+    // A ratio-perceived quantity gets ±2 octaves (×4 / ÷4).
+    const auto hz = detail::autoWindow(cutoff, 1200.0);
+    CHECK(params::fromNormalized(cutoff, hz.first) == doctest::Approx(300.0).epsilon(0.01));
+    CHECK(params::fromNormalized(cutoff, hz.second) == doctest::Approx(4800.0).epsilon(0.01));
+
+    params::ParamSpec release;  // 1 ms .. 30 s, pow:3
+    release.unit = params::Unit::ms;
+    release.min = 1.0;
+    release.max = 30000.0;
+    release.curve = params::Curve{params::CurveKind::Pow, 3.0};
+    const auto ms = detail::autoWindow(release, 300.0);
+    // The window covers ÷4 and ×4 and stays inside the parameter's range: on a
+    // pow curve the wider side sets the width.
+    CHECK(params::fromNormalized(release, ms.first) <= 75.0);
+    CHECK(params::fromNormalized(release, ms.first) >= 1.0);
+    CHECK(params::fromNormalized(release, ms.second) >= 1200.0);
+    CHECK(params::fromNormalized(release, ms.second) <= 30000.0);
+
+    params::ParamSpec level;  // −60 .. +6 dB, linear: ±25 % of the range
+    level.unit = params::Unit::dB;
+    level.min = -60.0;
+    level.max = 6.0;
+    const auto db = detail::autoWindow(level, -30.0);
+    CHECK(params::fromNormalized(level, db.first) == doctest::Approx(-46.5));
+    CHECK(params::fromNormalized(level, db.second) == doctest::Approx(-13.5));
+
+    // At the edge of the range the window is one-sided, never outside it.
+    const auto atMin = detail::autoWindow(cutoff, 20.0);
+    CHECK(atMin.first == doctest::Approx(0.0));
+    CHECK(atMin.second > 0.0);
+    CHECK(atMin.second < 1.0);
+    const auto atMax = detail::autoWindow(level, 6.0);
+    CHECK(atMax.second == doctest::Approx(1.0));
+    CHECK(atMax.first > 0.0);
+    CHECK(atMax.first < 1.0);
 }
 
 TEST_CASE("reference envelope loss uses a log-time distance") {

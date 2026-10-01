@@ -25,7 +25,9 @@ loss is good at exactly that.
 - **Search space**: every parameter is mapped to its **normalized** domain
   [0, 1] (core-params curves, ADR-0010), so a log-frequency and a linear
   percentage are equally easy to search. Initial mean = current values;
-  initial σ = 0.2 (option); bounds handled by mirroring into [0, 1]
+  initial σ = 0.2, or **0.05 when the target is a reference** (the agent's
+  patch is already close to the answer — measured in
+  `docs/benchmarks/optimizer/`); bounds handled by mirroring into [0, 1]
   (reflect; the unmirrored genotype stays in the distribution). Integer and
   enum parameters are **not** optimized (structure belongs to the LLM); ints
   may be opted in and are rounded after mirroring.
@@ -52,7 +54,7 @@ loss is good at exactly that.
 | field | meaning |
 |---|---|
 | `instance` | the plugin instance (semantic extension required) |
-| `params` | list of parameter keys, each optionally `{key, min, max}` to narrow the search range (physical units, converted to normalized sub-ranges); or `"auto"`: all continuous, modulatable, non-readonly params **of the modules present in the patch**, excluding output level (so the optimizer cannot "win" by getting louder) |
+| `params` | list of parameter keys, each optionally `{key, min, max}` to narrow the search range (physical units, converted to normalized sub-ranges); or `"auto"`: all continuous, modulatable, non-readonly params **of the modules present in the patch**, excluding output level (so the optimizer cannot "win" by getting louder). `"auto"` searches a **window around each parameter's current value** — ±2 octaves for frequency, time and pitch-interval quantities, ±25 % of the range otherwise — because the agent's patch is the starting point, not a random draw; an explicit `{key, min, max}` keeps exactly the range you give, and an explicit key without bounds keeps the whole range |
 | `target` | one of: `{reference: <render id or file>}`, `{profile: <supple.analysis-profile document>}`, or both (profile terms added to the reference terms) |
 | `phrase` | notation text rendered for every candidate (default: a single `C3:w` for 2 s + tail); must be identical to the one the reference was rendered with when matching a reference |
 | `render` | `{seconds?, tail_s?, sample_rate?}` (defaults: session settings, tail 1 s) |
@@ -235,3 +237,63 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
 - `job.wait` accepts any nonnegative `timeout_s` and clamps the block to 30 s
   (reporting `"timeout_clamped_s": 30`) instead of rejecting the call
   (campaign issue 5).
+
+## Amendments (2026-10-01, reference-search tuning — P3.4c)
+
+- **A benchmark measures the search itself** (`tools/optimize-bench/`, reports
+  in `docs/benchmarks/optimizer/`): for every synth-reference task, set the
+  task's `starting_patch`, render the hidden patch as the reference, and run
+  `optimize.start` with 300 evaluations for three seeds in two modes — `"auto"`,
+  and the changed modules' share of that list. On the merged code
+  (`2026-10-01-baseline.md`) `"auto"` never improved on the start (median best
+  21.8, 0 of 21 runs at or below `max_loss`) while the changed modules'
+  parameters found the answer 9 times (median 3.0): the campaign's finding 3,
+  reproduced and quantified. The search is deterministic — the same
+  configuration and seed are bit-identical across runs — but its trajectory
+  depends on the **order** of the requested `params` (the CMA stream is drawn
+  per coordinate), so the benchmark records the order with every run.
+- **Initial σ = 0.05 when the target is a reference** (0.2 for profile-only
+  targets, unchanged). A σ sweep (`2026-10-01-sigma-0.1.md`,
+  `2026-10-01-sigma-0.05.md`, `2026-10-01-sigma-0.02.md`): the `"auto"` median
+  best falls 21.8 → 8.8 → 4.4 → 3.2 and the changed modules' median 3.0 → 2.9
+  → 1.1 → 2.2 for σ = 0.2 / 0.1 / 0.05 / 0.02, with passes 0 → 1 → 1 → 3 and
+  9 → 9 → 10 → 10 of 21. 0.05 keeps the best median for the well-posed
+  (changed-modules) search and is within one pass of σ = 0.02, which is why it
+  is the reference default: one σ = 0.2 of a full range is a factor of ~8 on a
+  log-scaled time, and the agent's patch is not a random draw.
+- **`"auto"` searches a window around each parameter's current value**
+  (`optimize_range.h`): ±2 octaves (×4 / ÷4) for frequency, time and
+  pitch-interval quantities — the quantities a musician moves by a factor, and
+  the ones the campaign's failures were about — and ±25 % of the range for
+  everything else, clamped to the parameter's own range. On its own (σ = 0.2,
+  `2026-10-01-window.md`) it takes the `"auto"` median from 21.8 to 7.3; with
+  the σ change (`2026-10-01-window-sigma-0.05.md`) it reaches 3.3 with 3 of 21
+  runs at or below `max_loss`, where σ alone reached 4.4 with 1 of 21. The
+  changed-modules mode is untouched by it (explicit keys keep their range,
+  which is also the escape hatch for an answer far outside the window).
+- Tried and **not** kept, each measured (tables in the same directory):
+  - *a restart with σ/2 from the best point when a run does not improve on its
+    start*: 0 of 42 runs reached the trigger once σ and the window were in
+    place, and every loss was identical to the run without it
+    (`2026-10-01-restart.md`). The stagnation it targets is what the two
+    changes above already fix; re-adding it is a one-line decision if a future
+    target class stagnates.
+  - *evaluating every candidate from the start state (re-loading the clone's
+    state before each merge)*: all 42 losses were bit-identical to the
+    accumulated-merge search and no candidate failed in any run
+    (`2026-10-01-fresh-state.md`). That rules out the hypothesized
+    slot-removal failure mode for these tasks: candidate renders were already
+    order-independent (`resetBeforeRender` plus the P3.4a reset fix).
+  - *rescaling the `trajectory` term (0.1 → 0.2)*: it dominated the residual of
+    failing runs (26–40 % of the loss) and rescaling it raised the pass count
+    (13 → 16) and lowered the `"auto"` median (3.3 → 1.9,
+    `2026-10-01-trajectory-0.2.md`), but it made the search's *relative*
+    progress worse (best/initial: `"auto"` 0.134 → 0.191, changed modules 0.035
+    → 0.053, worse on 15 of 21 runs). The apparent win is a re-calibration of
+    the score — the tasks' `max_loss = 1.0` is measured in this loss's units —
+    not a better search, so the term keeps its scale. Rescaling it (or
+    compressing its large distances) belongs with a re-calibration of the
+    reference suite, which the orchestrator owns.
+- `optimize.start`'s result also reports `"failed"` (candidates whose set,
+  render or analysis failed), so a search that loses candidates is visible
+  rather than looking like a badly scoring one.

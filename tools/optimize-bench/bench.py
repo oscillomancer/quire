@@ -87,7 +87,7 @@ def run_one(client, task, starting_patch, params, seed, options, mode):
     record.update({"initial": result["loss"]["initial"], "best": result["loss"]["best"],
                    "terms": result["loss"]["terms"], "evaluations": result["evaluations"],
                    "search_seconds": result["seconds"], "stopped": result["stopped"],
-                   "failed": result.get("failed"),
+                   "failed": result.get("failed"), "restarts": result.get("restarts"),
                    "max_loss": task["score"]["max_loss"],
                    "pass": result["loss"]["best"] <= task["score"]["max_loss"]})
     return record

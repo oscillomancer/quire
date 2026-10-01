@@ -61,3 +61,20 @@ the comparison table the brief asks for.
 The tool imports the evaluation harness's helpers (`tools/eval-harness/common.py`)
 rather than duplicating a sandbox client, and it never publishes eval reports:
 everything lands under `build/` except the JSON/Markdown it is asked to write.
+
+## Notes from building it
+
+- **The optimizer is the authority on which parameters are tunable.** The
+  benchmark reads the `"auto"` key list back from a one-generation probe run
+  instead of deriving it from `plugin.describe`: describe's `active` flags are
+  the schema captured at *load* and do not follow a patch that adds a module
+  (`filter1.cutoff` still reads `active: false` after `filters.filter1` is set,
+  while the optimizer, which reads the instance's live schema, accepts it).
+- **Runs are deterministic, their trajectory is order-sensitive.** The same
+  configuration and seed give bit-identical losses (verified three times), but
+  the CMA stream is drawn per coordinate, so reordering the `params` list changes
+  the search. Reports record the key order with every run.
+- **A mode can be skipped, not failed:** a task whose changed modules have no
+  tunable parameters records a skip, and tier-3 tasks (empty `starting_patch`)
+  are not applicable at all.
+- Timing is machine-dependent; compare *losses* between reports, not seconds.
