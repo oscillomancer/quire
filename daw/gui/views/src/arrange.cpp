@@ -13,6 +13,7 @@
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
 #include "supple/ui/theme.h"
 
 namespace supple::views {
@@ -87,7 +88,31 @@ double timeStepFor(const ui::Canvas& c, double pps, float fontSize) {
 
 class Ruler : public ui::Node {
   public:
-    explicit Ruler(ArrangeView& view) : Node("ruler", ui::Role::Custom), view_(view) {}
+    explicit Ruler(ArrangeView& view) : Node("ruler", ui::Role::Custom), view_(view) {
+        interactive = true;
+        focusable = true;
+    }
+    RulerCallbacks callbacks;
+    void addMarker() {
+        json::Value args = json::Value::object();
+        args["pos"] = view_.session().timeMap->beatAt(view_.playhead());
+        execute("marker.add", std::move(args));
+    }
+    void addRegion() {
+        if (view_.loopEnd() <= view_.loopStart()) return;
+        json::Value args = json::Value::object();
+        args["start"] = view_.session().timeMap->beatAt(view_.loopStart());
+        args["end"] = view_.session().timeMap->beatAt(view_.loopEnd());
+        execute("region.add", std::move(args));
+    }
+    bool onPointer(const ui::PointerEvent& e) override;
+    bool onKey(const ui::KeyEvent& e) override {
+        if (e.key != SDLK_ESCAPE || drag_ == Drag::None) return false;
+        drag_ = Drag::None;
+        if (root()) root()->capture(nullptr);
+        invalidate();
+        return true;
+    }
     RulerStats stats;
     void paint(ui::Canvas& c) override {
         stats = {};
@@ -113,12 +138,15 @@ class Ruler : public ui::Node {
         const double t0 = view_.timeAt(x0), t1 = view_.timeAt(x1);
 
         // The loop range shades the whole ruler, with a bar along the top.
-        if (view_.loopEnabled() && view_.loopEnd() > view_.loopStart()) {
-            const float lx0 = std::max(x0, view_.xAt(view_.loopStart()));
-            const float lx1 = std::min(x1, view_.xAt(view_.loopEnd()));
+        const bool loopDrag = isLoop();
+        const double loopStart = loopDrag && moved_ ? tm.secondsAt(draftStart_) : view_.loopStart();
+        const double loopEnd = loopDrag && moved_ ? tm.secondsAt(draftEnd_) : view_.loopEnd();
+        if (loopEnd > loopStart) {
+            const float lx0 = std::max(x0, view_.xAt(loopStart));
+            const float lx1 = std::min(x1, view_.xAt(loopEnd));
             if (lx1 > lx0) {
                 c.fillRect({lx0, bounds().y, lx1 - lx0, bounds().h},
-                           t.color("accent").withAlpha(0.12f));
+                           t.color("accent").withAlpha(view_.loopEnabled() ? 0.12f : 0.06f));
                 c.fillRect({lx0, bounds().y, lx1 - lx0, 3}, t.color("accent"));
             }
         }
@@ -225,11 +253,13 @@ class Ruler : public ui::Node {
         // Regions on their own row, markers below it.
         for (const auto& e : s.regions) {
             const model::Region& rg = *e.value;
-            const double a = atSeconds(tm, rg.start, rg.timebase);
-            const double b = atSeconds(tm, rg.end, rg.timebase);
+            const bool ghost = isRegion() && moved_ && id_ == e.id;
+            const double a = atSeconds(tm, ghost ? draftStart_ : rg.start, rg.timebase);
+            const double b = atSeconds(tm, ghost ? draftEnd_ : rg.end, rg.timebase);
             const float rx0 = std::max(x0, view_.xAt(a)), rx1 = std::min(x1, view_.xAt(b));
             if (rx1 <= rx0) continue;
-            const ui::Color col = parseColor(rg.color, t.color("selection"));
+            const ui::Color col =
+                parseColor(rg.color, t.color("selection")).withAlpha(ghost ? 0.6f : 1.0f);
             c.fillRect({rx0, regionRow.y, rx1 - rx0, regionRow.h}, col.withAlpha(0.35f));
             c.fillRect({rx0, regionRow.bottom() - 2, rx1 - rx0, 2}, col);
             if (rx1 - rx0 > 24)
@@ -238,9 +268,11 @@ class Ruler : public ui::Node {
         }
         for (const auto& e : s.markers) {
             const model::Marker& mk = *e.value;
-            const float x = view_.xAt(atSeconds(tm, mk.pos, mk.timebase));
+            const bool ghost = drag_ == Drag::Marker && moved_ && id_ == e.id;
+            const float x = view_.xAt(atSeconds(tm, ghost ? draftStart_ : mk.pos, mk.timebase));
             if (x < x0 - 1 || x > x1) continue;
-            const ui::Color col = parseColor(mk.color, t.color("accent"));
+            const ui::Color col =
+                parseColor(mk.color, t.color("accent")).withAlpha(ghost ? 0.6f : 1.0f);
             c.fillRect({x, markRow.y + 1, 1, markRow.h - 2}, col);
             c.fillRect({x, markRow.y + 1, 6, 6}, col);
             c.text({x + 8, markRow.y, 90, markRow.h}, mk.name, ui::Font::Ui, t.type("caption"),
@@ -249,8 +281,281 @@ class Ruler : public ui::Node {
     }
 
   private:
+    enum class Drag {
+        None,
+        LoopNew,
+        LoopMove,
+        LoopLeft,
+        LoopRight,
+        Marker,
+        RegionMove,
+        RegionLeft,
+        RegionRight
+    };
+    bool isLoop() const {
+        return drag_ == Drag::LoopNew || drag_ == Drag::LoopMove || drag_ == Drag::LoopLeft ||
+               drag_ == Drag::LoopRight;
+    }
+    bool isRegion() const {
+        return drag_ == Drag::RegionMove || drag_ == Drag::RegionLeft || drag_ == Drag::RegionRight;
+    }
+    double position(float x, bool free) const {
+        const auto& tm = *view_.session().timeMap;
+        double beat = tm.beatAt(std::max(0.0, view_.timeAt(x)));
+        if (!free) {
+            const double grid = view_.gestures().gridBeats();
+            beat = std::round(beat / grid) * grid;
+        }
+        return timebase_ == model::Timebase::Time ? tm.secondsAt(beat) : beat;
+    }
+    bool execute(const std::string& command, json::Value args) {
+        if (!callbacks.run) return false;
+        auto result = callbacks.run(command, std::move(args));
+        if (!result && callbacks.onError) callbacks.onError(result.error());
+        return static_cast<bool>(result);
+    }
+    void rename(const std::string& stem, model::Id id, const std::string& name, ui::Point at) {
+        if (!root()) return;
+        auto field = std::make_unique<ui::TextField>("ruler-name", name);
+        field->layout.width = ui::SizeRule::fixed(240);
+        field->selectAll();
+        field->onSubmit = [this, stem, id](const std::string& text) {
+            json::Value args = json::Value::object();
+            args["id"] = id.str();
+            args["name"] = text;
+            if (execute(stem + ".set", std::move(args))) root()->closePopup();
+        };
+        root()->openPopup(std::move(field), {at.x, at.y, 1, 1});
+    }
+    bool tempo(double beat, double bpm) {
+        // Inserting into a ramp splits it without changing its trajectory.
+        bool ramp = false;
+        for (const auto& p : view_.session().timeMap->tempo()) {
+            if (p.beat > beat) break;
+            ramp = p.shape == time::TempoShape::Ramp;
+        }
+        json::Value points = json::Value::array();
+        bool inserted = false;
+        for (const auto& p : view_.session().timeMap->tempo()) {
+            if (!inserted && p.beat >= beat) {
+                json::Value point = json::Value::object();
+                point["beat"] = beat;
+                point["bpm"] = bpm;
+                point["ramp"] = ramp;
+                points.push_back(std::move(point));
+                inserted = true;
+            }
+            if (p.beat == beat) continue;
+            json::Value point = json::Value::object();
+            point["beat"] = p.beat;
+            point["bpm"] = p.bpm;
+            point["ramp"] = p.shape == time::TempoShape::Ramp;
+            points.push_back(std::move(point));
+        }
+        if (!inserted) {
+            json::Value point = json::Value::object();
+            point["beat"] = beat;
+            point["bpm"] = bpm;
+            point["ramp"] = ramp;
+            points.push_back(std::move(point));
+        }
+        json::Value args = json::Value::object();
+        args["points"] = std::move(points);
+        return execute("tempo.set", std::move(args));
+    }
     ArrangeView& view_;
+    Drag drag_ = Drag::None;
+    model::Id id_{};
+    model::Timebase timebase_ = model::Timebase::Beats;
+    ui::Point press_{};
+    double originalStart_ = 0, originalEnd_ = 0, draftStart_ = 0, draftEnd_ = 0;
+    bool moved_ = false, loopEnabled_ = false;
 };
+
+bool Ruler::onPointer(const ui::PointerEvent& e) {
+    if (e.type == ui::PointerEvent::Type::Wheel) return false;
+    if (e.type == ui::PointerEvent::Type::Down) {
+        if (e.button != 1 || !bounds().contains(e.pos)) return false;
+        press_ = e.pos;
+        moved_ = false;
+        drag_ = Drag::None;
+        timebase_ = model::Timebase::Beats;
+        const auto& s = view_.session();
+        const auto& tm = *s.timeMap;
+        const float y = e.pos.y - bounds().y;
+        const bool free = (e.mods & ui::kShift) != 0;
+        if (y < kBeatRowH + kTimeRowH) {
+            originalStart_ = tm.beatAt(view_.loopStart());
+            originalEnd_ = tm.beatAt(view_.loopEnd());
+            loopEnabled_ = view_.loopEnabled();
+            const float left = view_.xAt(view_.loopStart()), right = view_.xAt(view_.loopEnd());
+            drag_ = Drag::LoopNew;
+            if (originalEnd_ > originalStart_) {
+                if (std::abs(e.pos.x - left) <= 5)
+                    drag_ = Drag::LoopLeft;
+                else if (std::abs(e.pos.x - right) <= 5)
+                    drag_ = Drag::LoopRight;
+                else if (e.pos.x > left && e.pos.x < right)
+                    drag_ = Drag::LoopMove;
+            }
+            if (drag_ == Drag::LoopNew) originalStart_ = originalEnd_ = position(e.pos.x, free);
+        } else if (y < kBeatRowH + kTimeRowH + kTempoRowH) {
+            if (e.clicks != 2) return true;
+            const time::TempoPoint* hit = nullptr;
+            float distance = 1e9f;
+            for (const auto& p : tm.tempo()) {
+                const float x = view_.xAt(tm.secondsAt(p.beat));
+                const float d = std::abs(e.pos.x - x);
+                if (e.pos.x >= x - 5 && e.pos.x <= x + 57 && d < distance) {
+                    hit = &p;
+                    distance = d;
+                }
+            }
+            if (hit) {
+                if (!root()) return true;
+                auto field =
+                    std::make_unique<ui::TextField>("ruler-bpm", json::formatDouble(hit->bpm));
+                field->layout.width = ui::SizeRule::fixed(140);
+                field->selectAll();
+                field->onSubmit = [this, beat = hit->beat](const std::string& text) {
+                    char* end = nullptr;
+                    const double bpm = std::strtod(text.c_str(), &end);
+                    while (end && std::isspace(static_cast<unsigned char>(*end))) ++end;
+                    if (end == text.c_str() || (end && *end) || !std::isfinite(bpm) || bpm < 1 ||
+                        bpm > 1000) {
+                        if (callbacks.onError)
+                            callbacks.onError(Error("tempo.bpm", "BPM must be between 1 and 1000",
+                                                    "/bpm", "enter a number"));
+                        return;
+                    }
+                    if (tempo(beat, bpm)) root()->closePopup();
+                };
+                root()->openPopup(std::move(field), {e.pos.x, e.pos.y, 1, 1});
+                return true;
+            }
+            const double beat = position(e.pos.x, free);
+            tempo(beat, tm.bpmAt(beat));
+            return true;
+        } else if (y < kBeatRowH + kTimeRowH + kTempoRowH + kRegionRowH) {
+            for (const auto& entry : s.regions) {
+                const auto& rg = *entry.value;
+                const float left = view_.xAt(atSeconds(tm, rg.start, rg.timebase));
+                const float right = view_.xAt(atSeconds(tm, rg.end, rg.timebase));
+                if (e.pos.x < left - 5 || e.pos.x > right + 5) continue;
+                id_ = entry.id;
+                if (e.mods & ui::kAlt) {
+                    json::Value args = json::Value::object();
+                    args["id"] = id_.str();
+                    execute("region.remove", std::move(args));
+                    return true;
+                }
+                if (e.clicks == 2) {
+                    rename("region", id_, rg.name, e.pos);
+                    return true;
+                }
+                timebase_ = rg.timebase;
+                originalStart_ = rg.start;
+                originalEnd_ = rg.end;
+                drag_ = std::abs(e.pos.x - left) <= 5    ? Drag::RegionLeft
+                        : std::abs(e.pos.x - right) <= 5 ? Drag::RegionRight
+                                                         : Drag::RegionMove;
+                break;
+            }
+        } else {
+            const model::Marker* hit = nullptr;
+            float distance = 1e9f;
+            for (const auto& entry : s.markers) {
+                const auto& mk = *entry.value;
+                const float x = view_.xAt(atSeconds(tm, mk.pos, mk.timebase));
+                const float d = std::abs(e.pos.x - x);
+                if (e.pos.x >= x - 5 && e.pos.x <= x + 98 && d < distance) {
+                    id_ = entry.id;
+                    hit = &mk;
+                    distance = d;
+                }
+            }
+            if (hit) {
+                const auto& mk = *hit;
+                if (e.mods & ui::kAlt) {
+                    json::Value args = json::Value::object();
+                    args["id"] = id_.str();
+                    execute("marker.remove", std::move(args));
+                    return true;
+                }
+                if (e.clicks == 2) {
+                    rename("marker", id_, mk.name, e.pos);
+                    return true;
+                }
+                timebase_ = mk.timebase;
+                originalStart_ = originalEnd_ = mk.pos;
+                drag_ = Drag::Marker;
+            }
+        }
+        draftStart_ = originalStart_;
+        draftEnd_ = originalEnd_;
+        return true;
+    }
+    if (drag_ == Drag::None) return false;
+    if (e.type == ui::PointerEvent::Type::Move || e.type == ui::PointerEvent::Type::Up) {
+        moved_ = moved_ || std::abs(e.pos.x - press_.x) >= 3;
+        if (moved_) {
+            const bool free = (e.mods & ui::kShift) != 0;
+            const double at = position(e.pos.x, free);
+            const double raw = position(e.pos.x, true) - position(press_.x, true);
+            draftStart_ = originalStart_;
+            draftEnd_ = originalEnd_;
+            if (drag_ == Drag::LoopNew) {
+                draftStart_ = std::min(originalStart_, at);
+                draftEnd_ = std::max(originalStart_, at);
+            } else if (drag_ == Drag::LoopLeft || drag_ == Drag::RegionLeft) {
+                draftStart_ = std::min(at, originalEnd_ - std::min(1e-6, originalEnd_ / 2));
+            } else if (drag_ == Drag::LoopRight || drag_ == Drag::RegionRight) {
+                draftEnd_ = std::max(at, originalStart_ + 1e-6);
+            } else {
+                const auto& tm = *view_.session().timeMap;
+                double start = std::max(0.0, originalStart_ + raw);
+                if (!free) {
+                    const double grid = view_.gestures().gridBeats();
+                    double beat = timebase_ == model::Timebase::Time ? tm.beatAt(start) : start;
+                    beat = std::round(beat / grid) * grid;
+                    start = timebase_ == model::Timebase::Time ? tm.secondsAt(beat) : beat;
+                }
+                draftStart_ = start;
+                draftEnd_ = start + originalEnd_ - originalStart_;
+            }
+            invalidate();
+        }
+        if (e.type == ui::PointerEvent::Type::Up && e.button == 1) {
+            json::Value args = json::Value::object();
+            if (!moved_ && isLoop()) {
+                args["seconds"] = std::max(0.0, view_.timeAt(e.pos.x));
+                execute("transport.seek", std::move(args));
+            } else if (moved_ && isLoop() && draftEnd_ > draftStart_) {
+                const auto& tm = *view_.session().timeMap;
+                const double start = tm.secondsAt(draftStart_), end = tm.secondsAt(draftEnd_);
+                args["start_seconds"] = start;
+                args["end_seconds"] = end;
+                args["enabled"] = loopEnabled_;
+                if (execute("transport.loop", std::move(args)))
+                    view_.setLoopRange(start, end, loopEnabled_);
+            } else if (moved_ && (drag_ == Drag::Marker || isRegion()) &&
+                       (draftStart_ != originalStart_ || draftEnd_ != originalEnd_)) {
+                args["id"] = id_.str();
+                if (drag_ == Drag::Marker)
+                    args["pos"] = draftStart_;
+                else {
+                    args["start"] = draftStart_;
+                    args["end"] = draftEnd_;
+                }
+                execute(drag_ == Drag::Marker ? "marker.set" : "region.set", std::move(args));
+            }
+            drag_ = Drag::None;
+            invalidate();
+        }
+        return true;
+    }
+    return false;
+}
 
 // --- the track control panel (placeholder: name and type badge) ---------------------
 
@@ -521,6 +826,11 @@ bool ArrangeView::installOverlay(ui::Root& root) {
 
 ui::Node& ArrangeView::tcp() { return *tcp_; }
 ui::Node& ArrangeView::ruler() { return *ruler_; }
+void ArrangeView::setRulerCallbacks(RulerCallbacks callbacks) {
+    ruler_->callbacks = std::move(callbacks);
+}
+void ArrangeView::addMarker() { ruler_->addMarker(); }
+void ArrangeView::addRegion() { ruler_->addRegion(); }
 const RulerStats& ArrangeView::rulerStats() const { return ruler_->stats; }
 
 ui::Rect ArrangeView::rowRect(std::size_t row) const {

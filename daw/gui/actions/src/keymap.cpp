@@ -121,6 +121,8 @@ Keymap Keymap::defaults() {
     add({"Ctrl+Shift+P"}, "global", "ui.actions");
     add({"Ctrl+Shift+A"}, "global", "ui.agent");
     add({"S"}, "arrange", "item.split:playhead");
+    add({"M"}, "arrange", "ui.marker.add");
+    add({"Shift+R"}, "arrange", "ui.region.add");
     add({"Delete"}, "arrange", "item.remove:selected");
     k.defaults_ = k.bindings_;
     return k;
