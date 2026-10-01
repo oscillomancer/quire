@@ -10,7 +10,7 @@
 #include <functional>
 #include <thread>
 
-#include "../app/generate.h"
+#include "generate.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/ui/root.h"

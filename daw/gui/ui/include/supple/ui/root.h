@@ -66,6 +66,9 @@ class Root {
     void pointer(PointerEvent e);
     bool click(std::string_view id, int button = 1);
     void key(int keycode, unsigned mods = 0);
+    // Keys no focused node used, while no popup is open (shortcuts, §6);
+    // true when consumed.
+    std::function<bool(const KeyEvent&)> onUnhandledKey;
     void text(std::string_view utf8);
     void composition(std::string_view utf8, int cursor);
     // Where the focused text field's caret is (design units), for the IME

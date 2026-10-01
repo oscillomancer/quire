@@ -21,6 +21,9 @@
 #include <string>
 #include <vector>
 
+#include "actions_list.h"
+#include "app_actions.h"
+#include "chrome.h"
 #include "generate.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
@@ -209,6 +212,8 @@ int main(int argc, char** argv) {
     }
     cmd::Registry registry;
     engine::registerEngineCommands(registry);
+    gui::UiState uiState;
+    gui::registerGuiCommands(registry, uiState);
     cmd::Dispatcher dispatcher(registry, **app);
     (*app)->attachCommands(dispatcher);
     if (o.generate > 0) {
@@ -253,14 +258,37 @@ int main(int argc, char** argv) {
     gui::Shell shell(**app, status, peaks);
     peaks.onReady = [&](const std::string&) { shell.lanes()->invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
-    root.setContent(shell.build());
+    bool quit = false;
+    gui::AppActions appActions(registry, dispatcher, **app, uiState,
+                               actions::Keymap::defaultFile(product::kSlug));
+    appActions.onError = [](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+    };
+    appActions.addUi("ui.actions", "View: actions list",
+                     [&] { gui::openActionsList(root, appActions); });
+    appActions.addUi("ui.quit", "File: quit", [&] { quit = true; });
+    root.onUnhandledKey = [&](const ui::KeyEvent& e) {
+        const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
+        return appActions.key(e.key, e.mods, typing);
+    };
+    auto chromeLayout = gui::ChromeLayout::load(gui::ChromeLayout::defaultFile(product::kSlug));
+    if (!chromeLayout)
+        std::fprintf(stderr, "menus: %s (using the defaults)\n",
+                     chromeLayout.error().toString().c_str());
+    {
+        auto frame = std::make_unique<ui::Node>("window");
+        frame->layout.dir = ui::Layout::Dir::Column;
+        frame->add(gui::makeChrome(root, appActions,
+                                   chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults()));
+        frame->add(shell.build());
+        root.setContent(std::move(frame));
+    }
     if (o.viewStart >= 0) {
         views::Viewport v;
         v.startSeconds = o.viewStart;
         v.pixelsPerSecond = o.viewPps;
         shell.lanes()->setViewport(v);
     }
-    bool quit = false;
     int drawn = 0, longTasks = 0;
     double coldStartMs = -1, longestTaskMs = 0;
     std::vector<double> frameCpu;

@@ -300,6 +300,7 @@ void Root::key(int keycode, unsigned mods) {
         closePopup();
         return;
     }
+    if (popups_.empty() && onUnhandledKey && onUnhandledKey(e)) return;
     if (keycode == SDLK_TAB) {  // focus traversal
         std::vector<Node*> order;
         collectFocusable(*overlay_, order);

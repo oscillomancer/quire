@@ -30,14 +30,26 @@ supple_add_library(gui-ui
   PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
 target_include_directories(gui-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui/include)
 
+# Actions, keymaps, macros (gui.md §6): no GL, testable without a window.
+supple_add_library(gui-actions SOURCES actions/src/actions.cpp actions/src/keymap.cpp
+  DEPS supple::command-bus supple::core-json supple::core-base
+  PRIVATE_DEPS SDL3::SDL3)
+target_include_directories(gui-actions PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/actions/include)
+
 # Views (gui.md §4): the track lanes now; arrange, mixer, editors follow.
 supple_add_library(gui-views SOURCES views/src/lanes.cpp
   DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline)
 target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
 
-add_executable(${PRODUCT_SLUG} app/main.cpp app/shell.cpp app/generate.cpp)
-target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-views supple::gui-ui supple::gui-platform supple::engine
-                      supple::control-protocol supple::product-info SDL3::SDL3)
+# The app's pieces (shell, generator, actions UI, chrome), shared with tests.
+add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp)
+target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
+target_link_libraries(gui-app PUBLIC supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
+                      supple::engine supple::control-protocol supple::product-info SDL3::SDL3)
+supple_target_defaults(gui-app)
+
+add_executable(${PRODUCT_SLUG} app/main.cpp)
+target_link_libraries(${PRODUCT_SLUG} PRIVATE gui-app)
 target_compile_definitions(${PRODUCT_SLUG} PRIVATE
   SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
 supple_target_defaults(${PRODUCT_SLUG})
@@ -51,12 +63,16 @@ if(SUPPLE_BUILD_TESTS)
   # report the GL driver.
   set_tests_properties(gui-platform.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-peaks SOURCES tests/test_peaks.cpp LABELS gui)
-  supple_add_tests(gui-views SOURCES tests/test_views.cpp app/generate.cpp
-                   DEPS supple::engine SDL3::SDL3 LABELS gui tsan-skip)
+  supple_add_tests(gui-views SOURCES tests/test_views.cpp DEPS gui-app LABELS gui tsan-skip)
   target_compile_definitions(gui-views.tests PRIVATE
     SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
     SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
   set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  supple_add_tests(gui-actions SOURCES tests/test_actions.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
+  # The app driven by keys and clicks, asserting on the session (gui.md §10).
+  supple_add_tests(gui-app SOURCES tests/test_app.cpp LABELS gui tsan-skip)
+  target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
+  set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)
   target_compile_definitions(gui-ui.tests PRIVATE
     SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
