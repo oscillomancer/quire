@@ -15,7 +15,7 @@ class ScrollBar : public Node {
     enum class Axis { Vertical, Horizontal };
     ScrollBar(std::string id, Axis axis);
     // Content and visible lengths in design units; the value is the offset.
-    void setRange(float content, float visible);
+    void setRange(float content, float shown);
     void setValue(float value);
     float value() const { return value_; }
     float maxValue() const { return std::max(0.0f, content_ - visible_); }

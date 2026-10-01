@@ -77,12 +77,12 @@ std::unique_ptr<Node> makeMenu(std::string id, std::vector<MenuItem> items,
 class PopupFrame : public Node {
   public:
     PopupFrame(std::unique_ptr<Node> content, Rect anchor, Placement placement,
-               std::function<void()> onClose, Node* restoreFocus)
+               std::function<void()> closed, Node* focusAfter)
         : Node("popup", Role::Menu),
           anchor_(anchor),
           placement_(placement),
-          onClose(std::move(onClose)),
-          restoreFocus(restoreFocus) {
+          onClose(std::move(closed)),
+          restoreFocus(focusAfter) {
         interactive = true;  // swallow clicks on the frame's padding
         content_ = &add(std::move(content));
     }
