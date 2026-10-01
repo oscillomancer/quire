@@ -34,7 +34,18 @@ class Vst3Instance {
     bool process(const ProcessBlock& block, OutputEvents* out) SUPPLE_RT;
     void flushParams() SUPPLE_RT;
     void reset() SUPPLE_RT;
-    bool serviceMainThread();
+    bool serviceMainThread();  // also runs the editor's due run-loop timers
+    // Editor (main thread): see Instance's editor API.
+    bool hasEditor();
+    Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);
+    Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    void closeEditor();
+    bool editorOpen() const;
+    Instance::EditorRequests takeEditorRequests();
+    std::vector<std::pair<int, std::uint32_t>> watchedFds() const;
+    void onFd(int fd);
+    int nextTimerMs() const;
+    bool takeEdited();  // the editor changed a parameter since the last call
     Instance::Notifications takeNotifications();
 
   private:

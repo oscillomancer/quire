@@ -1275,14 +1275,20 @@ bool Instance::serviceMainThread() {
 }
 
 bool Instance::hasEditor() const {
-    return plugin_ && !vst3_ && !remote_ && extGui_ &&
+    if (vst3_) return vst3_->hasEditor();
+    return plugin_ && !remote_ && extGui_ &&
            extGui_->is_api_supported(plugin_, CLAP_WINDOW_API_X11, false);
 }
 
 Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, double scale) {
-    if (vst3_ || remote_)
-        return Error("host.editor", "editors of VST3 and isolated plugins are not supported yet",
-                     "", "run the plugin in-process to open its editor");
+    if (vst3_) {
+        auto size = vst3_->openEditor(x11Parent, scale);
+        if (size) editorOpen_ = true;
+        return size;
+    }
+    if (remote_)
+        return Error("host.editor", "editors of isolated plugins are not supported yet", "",
+                     "run the plugin in-process to open its editor");
     if (!hasEditor()) return Error("host.editor", "this plugin has no embeddable X11 editor");
     if (editorOpen_) closeEditor();
     if (!extGui_->create(plugin_, CLAP_WINDOW_API_X11, false))
@@ -1307,6 +1313,7 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
 
 Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {
     if (!editorOpen_) return Error("host.editor", "no editor is open");
+    if (vst3_) return vst3_->resizeEditor(width, height);
     EditorSize size{width, height, extGui_->can_resize(plugin_)};
     if (size.resizable) {
         (void)extGui_->adjust_size(plugin_, &size.width, &size.height);
@@ -1318,12 +1325,18 @@ Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::ui
 
 void Instance::closeEditor() {
     if (!editorOpen_) return;
+    if (vst3_) {
+        vst3_->closeEditor();
+        editorOpen_ = false;
+        return;
+    }
     (void)extGui_->hide(plugin_);
     extGui_->destroy(plugin_);
     editorOpen_ = false;
 }
 
 Instance::EditorRequests Instance::takeEditorRequests() {
+    if (vst3_) return vst3_->takeEditorRequests();
     EditorRequests r;
     if (!hostState_) return r;
     HostState& h = *hostState_;
@@ -1343,14 +1356,17 @@ Instance::EditorRequests Instance::takeEditorRequests() {
 }
 
 std::vector<std::pair<int, std::uint32_t>> Instance::watchedFds() const {
+    if (vst3_) return vst3_->watchedFds();
     return hostState_ ? hostState_->fds : std::vector<std::pair<int, std::uint32_t>>{};
 }
 
 void Instance::onFd(int fd, std::uint32_t flags) {
+    if (vst3_) return vst3_->onFd(fd);
     if (extFd_ && plugin_) extFd_->on_fd(plugin_, fd, flags);
 }
 
 int Instance::nextTimerMs() const {
+    if (vst3_) return vst3_->nextTimerMs();
     if (!hostState_ || !extTimer_ || hostState_->timers.empty()) return -1;
     const auto now = std::chrono::steady_clock::now();
     auto next = hostState_->timers.front().next;
