@@ -2837,6 +2837,61 @@ Result:
 
 ```
 
+## `midi.edit@1`
+
+Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.
+
+ops run in order and are one undo step. notes: indices into midi.notes' list as it was before this command (every op refers to that list, so later ops are not affected by earlier removals). Beats are from the item's start. add {pitch, start, length, velocity?, channel?}; remove {notes}; move {notes, beats?, semitones?}; resize {notes, length? | length_delta? | start_delta?}; velocity {notes, velocity? and/or velocity_delta?}; quantize {notes? (all), grid (beats, on the project's grid), strength? 0-1, ends?}; cc.set {number, points [{beat, value}], channel?}; cc.clear {number, from?, to?}. Returns the new indices of the notes the ops added or changed (to keep a selection).
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `ops` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Add a note and move the first one up an octave** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "ops": [
+    {
+      "op": "add",
+      "pitch": 64,
+      "start": 0.5,
+      "length": 0.5
+    },
+    {
+      "op": "move",
+      "notes": [0],
+      "semitones": 12
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "notes": "<any>"
+}
+
+```
+
 ## `midi.get@1`
 
 Read an item's MIDI as notation.
@@ -2884,6 +2939,52 @@ Result:
 ```json
 {
   "text": "<any>"
+}
+
+```
+
+## `midi.notes@1`
+
+List a MIDI item's notes and CC points (beats from the item's start).
+
+Notes are in a fixed order (by start, then pitch); midi.edit refers to them by their position in this list. start/length/beat are in beats from the item's start; channel is 1-16 (omitted for 1). pooled: other items share this MIDI, and edits change them too. For writing whole phrases, midi.write with notation is usually better.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Notes of a MIDI item** (`song_with_item`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "item": "it_1",
+  "ppq": 960,
+  "length": "<any>",
+  "position": "<any>",
+  "notes": "<any>",
+  "cc": "<any>"
 }
 
 ```

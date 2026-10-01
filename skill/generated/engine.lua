@@ -332,11 +332,18 @@ q = nil
 ---@field name? string
 ---@field color? string
 
+---@class Quire.midi_edit_args
+---@field item string
+---@field ops table[]
+
 ---@class Quire.midi_get_args
 ---@field item string Item id, e.g. "it_1".
 
 ---@class Quire.midi_get_result
 ---@field text string
+
+---@class Quire.midi_notes_args
+---@field item string
 
 ---@class Quire.midi_write_args
 ---@field item string Item id, e.g. "it_1".
@@ -843,7 +850,9 @@ q = nil
 ---@field set fun(args: Quire.marker_set_args): table Edit a ruler's position, name, or color.
 
 ---@class Quire.midi
+---@field edit fun(args: Quire.midi_edit_args): table Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.
 ---@field get fun(args: Quire.midi_get_args): Quire.midi_get_result Read an item's MIDI as notation.
+---@field notes fun(args: Quire.midi_notes_args): table List a MIDI item's notes and CC points (beats from the item's start).
 ---@field write fun(args: Quire.midi_write_args): table Replace an item's MIDI with notation (the item keeps its position and length).
 
 ---@class Quire.plugin

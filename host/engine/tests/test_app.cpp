@@ -1540,3 +1540,88 @@ TEST_CASE("a UI gesture is one undo step: edits with the same gesture coalesce")
     run("history.undo", j("{}"), kTest);
     CHECK(app->head().tracks.find(*model::Id::parse(track))->volumeDb == doctest::Approx(0.0));
 }
+
+TEST_CASE("midi.notes / midi.edit: ops by original index, one undo step, selection kept") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    REQUIRE(
+        d.execute({"midi.write",
+                   j(R"({"item":"it_1","notation":"voice v; 1: C4:q D4:q E4:q F4:q"})"), kTest}));
+    auto notes = [&] {
+        auto r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+        REQUIRE(r);
+        return *r->find("notes");
+    };
+    auto n0 = notes();
+    REQUIRE(n0.size() == 4);
+    CHECK(n0.at(0).find("pitch")->asInt() == 60);
+    CHECK(n0.at(1).find("start")->asDouble() == doctest::Approx(1.0));
+    CHECK(n0.at(1).find("length")->asDouble() == doctest::Approx(1.0));
+    const auto before = app->head().version;
+
+    // Remove D (1), move E (2) up an octave and later, add a note at 0.5: all
+    // indices refer to the list before the command.
+    auto edit = d.execute({"midi.edit", j(R"({"item":"it_1","ops":[
+        {"op":"remove","notes":[1]},
+        {"op":"move","notes":[2],"semitones":12,"beats":0.25},
+        {"op":"add","pitch":67,"start":0.5,"length":0.5,"velocity":80},
+        {"op":"velocity","notes":[0],"velocity_delta":-127}]})"),
+                           kTest});
+    INFO((edit ? std::string() : edit.error().toString()));
+    REQUIRE(edit);
+    auto n1 = notes();
+    REQUIRE(n1.size() == 4);  // C, G (added), E' (moved), F
+    CHECK(n1.at(0).find("pitch")->asInt() == 60);
+    CHECK(n1.at(0).find("velocity")->asInt() == 1);  // clamped
+    CHECK(n1.at(1).find("pitch")->asInt() == 67);
+    CHECK(n1.at(2).find("pitch")->asInt() == 76);
+    CHECK(n1.at(2).find("start")->asDouble() == doctest::Approx(2.25));
+    // The touched notes' new indices: C (velocity), G (added), E' (moved).
+    const auto& sel = *edit->find("notes");
+    REQUIRE(sel.size() == 3);
+    CHECK(sel.at(0).asInt() == 0);
+    CHECK(sel.at(1).asInt() == 1);
+    CHECK(sel.at(2).asInt() == 2);
+    CHECK(app->head().version == before + 1);  // one undo step
+
+    // Quantize to the beat: E' at 2.25 snaps to 2.
+    REQUIRE(
+        d.execute({"midi.edit",
+                   j(R"({"item":"it_1","ops":[{"op":"quantize","notes":[2],"grid":1}]})"), kTest}));
+    CHECK(notes().at(2).find("start")->asDouble() == doctest::Approx(2.0));
+    // Resize the end and the start.
+    REQUIRE(d.execute(
+        {"midi.edit",
+         j(R"({"item":"it_1","ops":[{"op":"resize","notes":[3],"length_delta":1},{"op":"resize","notes":[0],"start_delta":0.5}]})"),
+         kTest}));
+    auto n2 = notes();
+    CHECK(n2.at(3).find("length")->asDouble() == doctest::Approx(2.0));
+    // CC points in and out.
+    REQUIRE(d.execute(
+        {"midi.edit",
+         j(R"({"item":"it_1","ops":[{"op":"cc.set","number":1,"points":[{"beat":0,"value":10},{"beat":2,"value":100}]}]})"),
+         kTest}));
+    auto r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    REQUIRE(r->find("cc")->size() == 2);
+    REQUIRE(
+        d.execute({"midi.edit",
+                   j(R"({"item":"it_1","ops":[{"op":"cc.clear","number":1,"from":1}]})"), kTest}));
+    r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    CHECK(r->find("cc")->size() == 1);
+
+    // Errors are structured and change nothing.
+    const auto v = app->head().version;
+    auto bad = d.execute(
+        {"midi.edit", j(R"({"item":"it_1","ops":[{"op":"move","notes":[9],"beats":1}]})"), kTest});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "midi.note_index");
+    CHECK(bad.error().path == "/args/ops/0/notes");
+    CHECK(app->head().version == v);
+    REQUIRE(d.execute({"history.undo", json::Value::object(), kTest}));  // the cc.clear
+    r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    CHECK(r->find("cc")->size() == 2);
+}
