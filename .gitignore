@@ -5,3 +5,4 @@ compile_commands.json
 __pycache__/
 *.pyc
 /renders/
+/docs/benchmarks/eval/audio/

@@ -284,6 +284,7 @@ Result<RenderInput> renderInput(Session& s, const RenderArgs& a,
             meter = compiled->barMeters.front();
             in.meter = meter;
         }
+        in.barMeters = std::move(compiled->barMeters);
         in.notes = std::move(compiled->sequence);
     }
     if (a.midiFile) {

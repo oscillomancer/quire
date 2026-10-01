@@ -1,0 +1,45 @@
+{
+  "id": "notation.waltz",
+  "limits": {
+    "minutes": 4,
+    "tool_calls": 20
+  },
+  "listening": "Does the rhythm and register fit the requested phrase?",
+  "phrase": "notation 1\nmeter 3/4\nvoice melody ch 1\n1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q",
+  "prompt": "Write four bars of a 3/4 waltz melody, C4 through C5, exactly three quarter-note attacks per bar.",
+  "recipe_index": 4,
+  "render": {
+    "tail_s": 0
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "structure": {
+      "bars": 4,
+      "meter": "3/4",
+      "notes_per_bar": [
+        3,
+        3
+      ],
+      "pitch_range": [
+        60,
+        72
+      ]
+    }
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "3/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 0,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "suite": "notation"
+}

@@ -1,0 +1,120 @@
+{
+  "changed_modules": [
+    "filters.filter1"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "5 ms",
+        "release": "250 ms",
+        "sustain": "90 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "4 kHz",
+        "mode": "lowpass",
+        "resonance": "10 %",
+        "type": "svf"
+      }
+    },
+    "fx": {
+      "chain": [
+        "delay",
+        "reverb"
+      ],
+      "delay": {
+        "mix": "20 %"
+      },
+      "reverb": {
+        "mix": "15 %"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "type": "va",
+        "wave": "saw"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "unison": 7,
+      "unison_detune": "25 ct",
+      "unison_spread": "80 %"
+    }
+  },
+  "id": "reference.supersaw-lead",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Is this a bright, playable lead with a stable wide image?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 5,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "5 ms",
+        "release": "250 ms",
+        "sustain": "90 %"
+      }
+    },
+    "filters": {
+      "filter1": {
+        "cutoff": "6 kHz",
+        "mode": "lowpass",
+        "resonance": "10 %",
+        "type": "svf"
+      }
+    },
+    "fx": {
+      "chain": [
+        "delay",
+        "reverb"
+      ],
+      "delay": {
+        "mix": "20 %"
+      },
+      "reverb": {
+        "mix": "15 %"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "type": "va",
+        "wave": "saw"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "unison": 7,
+      "unison_detune": "25 ct",
+      "unison_spread": "80 %"
+    }
+  },
+  "suite": "synth-reference",
+  "tier": 1
+}

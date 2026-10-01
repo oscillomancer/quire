@@ -1,0 +1,80 @@
+{
+  "changed_modules": [
+    "envelopes.amp"
+  ],
+  "hidden_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "3 ms",
+        "release": "160 ms",
+        "sustain": "100 %"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "to": "direct",
+        "type": "va",
+        "wave": "sine"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "glide": "20 ms",
+      "mode": "mono"
+    }
+  },
+  "id": "reference.sub-bass",
+  "limits": {
+    "minutes": 10,
+    "tool_calls": 80
+  },
+  "listening": "Is the sub clean and solid, free of clicks or harsh upper harmonics?",
+  "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
+  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "recipe_index": 4,
+  "render": {
+    "tail_s": 2
+  },
+  "schema": "supple.eval-task/1.0",
+  "score": {
+    "max_loss": 1.0
+  },
+  "settings": {
+    "block_size": 256,
+    "meter": "4/4",
+    "sample_rate": 48000,
+    "tail_limit_s": 2,
+    "tempo": 120
+  },
+  "setup": [
+    {
+      "args": {
+        "plugin": "com.suppleaudio.orrery"
+      },
+      "command": "plugin.load"
+    }
+  ],
+  "starting_patch": {
+    "envelopes": {
+      "amp": {
+        "attack": "3 ms",
+        "release": "80 ms",
+        "sustain": "100 %"
+      }
+    },
+    "oscillators": {
+      "osc1": {
+        "to": "direct",
+        "type": "va",
+        "wave": "sine"
+      }
+    },
+    "schema": "supple.orrery-patch/1.0",
+    "voice": {
+      "glide": "20 ms",
+      "mode": "mono"
+    }
+  },
+  "suite": "synth-reference",
+  "tier": 1
+}

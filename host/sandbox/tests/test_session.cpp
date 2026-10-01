@@ -49,6 +49,61 @@ midi::Sequence twoNotes() {
 
 }  // namespace
 
+TEST_CASE("evaluation MIDI sidecars retain compiler note data and follow render lifetime") {
+    TempDir dir("eval-midi");
+    SessionOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {kFixture};
+    options.recordMidi = true;
+    auto opened = Session::open(options);
+    REQUIRE(opened);
+    auto& session = **opened;
+    REQUIRE(session.load(kSine));
+    RenderInput input;
+    input.notes = twoNotes();
+    input.notes->length = 2880;
+    input.meter = midi::Meter{3, 4};
+    input.barMeters = {{3, 4}};
+    input.tailSeconds = 0;
+    auto render = session.render(input);
+    REQUIRE(render);
+    auto sidecar = (*render)->path;
+    sidecar.replace_extension(".midi.json");
+    auto text = readTextFile(sidecar);
+    REQUIRE(text);
+    auto parsed = json::parse(*text);
+    REQUIRE(parsed);
+    CHECK(parsed->find("schema")->asString() == "supple.render-midi/1.0");
+    CHECK(parsed->find("ppq")->asInt() == 960);
+    CHECK(parsed->find("length_ticks")->asInt() == 2880);
+    CHECK(parsed->find("meter")->asString() == "3/4");
+    CHECK(parsed->find("bar_meters")->at(0).asString() == "3/4");
+    CHECK(parsed->find("notes")->size() == 2);
+    CHECK(parsed->find("notes")->at(1).find("pitch")->asInt() == 76);
+    CHECK(parsed->find("notes")->at(1).find("start")->asInt() == 960);
+    REQUIRE(session.begin());
+    auto rolledBack = session.render(input);
+    REQUIRE(rolledBack);
+    auto rolledSidecar = (*rolledBack)->path;
+    rolledSidecar.replace_extension(".midi.json");
+    REQUIRE(fs::exists(rolledSidecar));
+    session.rollback();
+    CHECK_FALSE(fs::exists(rolledSidecar));
+    CHECK(fs::exists(sidecar));
+    session.reset();
+    CHECK_FALSE(fs::exists(sidecar));
+
+    options.recordMidi = false;
+    auto ordinary = Session::open(options);
+    REQUIRE(ordinary);
+    REQUIRE((*ordinary)->load(kSine));
+    auto unrecorded = (*ordinary)->render(input);
+    REQUIRE(unrecorded);
+    auto absent = (*unrecorded)->path;
+    absent.replace_extension(".midi.json");
+    CHECK_FALSE(fs::exists(absent));
+}
+
 TEST_CASE("plugins: catalogue, lookup by id, case-insensitive id and path") {
     TempDir dir("plugins");
     auto s = openSession(dir);

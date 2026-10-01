@@ -16,6 +16,7 @@
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -24,6 +25,7 @@
 
 #include <supple/product.h>
 
+#include "../src/optimize_loss.h"
 #include "supple/sandbox/commands.h"
 
 using namespace supple;
@@ -32,16 +34,19 @@ namespace fs = std::filesystem;
 namespace {
 
 int usage() {
-    std::fprintf(stderr,
-                 "usage: %.*s-sandbox exec '<json>' [--workdir DIR] [--plugin-path P]...\n"
-                 "       %.*s-sandbox registry [--markdown | --mcp-tools | --lua]\n"
-                 "       %.*s-sandbox --mcp [--workdir DIR] [--plugin-path P]...\n"
-                 "       %.*s-sandbox serve [--workdir DIR] [--plugin-path P]... "
-                 "[--instance NAME] [--socket PATH]\n",
-                 static_cast<int>(product::kSlug.size()), product::kSlug.data(),
-                 static_cast<int>(product::kSlug.size()), product::kSlug.data(),
-                 static_cast<int>(product::kSlug.size()), product::kSlug.data(),
-                 static_cast<int>(product::kSlug.size()), product::kSlug.data());
+    std::fprintf(
+        stderr,
+        "usage: %.*s-sandbox exec '<json>' [--workdir DIR] [--record-midi] [--plugin-path P]...\n"
+        "       %.*s-sandbox registry [--markdown | --mcp-tools | --lua]\n"
+        "       %.*s-sandbox --mcp [--workdir DIR] [--record-midi] [--plugin-path P]...\n"
+        "       %.*s-sandbox serve [--workdir DIR] [--plugin-path P]... "
+        "[--instance NAME] [--socket PATH]\n"
+        "       %.*s-sandbox eval-reference '<json>'\n",
+        static_cast<int>(product::kSlug.size()), product::kSlug.data(),
+        static_cast<int>(product::kSlug.size()), product::kSlug.data(),
+        static_cast<int>(product::kSlug.size()), product::kSlug.data(),
+        static_cast<int>(product::kSlug.size()), product::kSlug.data(),
+        static_cast<int>(product::kSlug.size()), product::kSlug.data());
     return 2;
 }
 
@@ -85,6 +90,50 @@ void print(const json::Value& v) {
 int main(int argc, char** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) return usage();
+    // Offline evaluation tooling, outside the frozen command/MCP registry.
+    if (args[0] == "eval-reference") {
+        if (args.size() != 2) return usage();
+        auto request = json::parse(args[1]);
+        if (!request || !request->isObject()) {
+            print(errorJson(Error("eval.arguments", "expected an object", {},
+                                  "reference, test, reference_note_off_s, test_note_off_s")));
+            return 1;
+        }
+        auto analyze = [&](std::string_view fileKey, std::string_view endKey,
+                           std::optional<double> target) -> Result<analysis::Report> {
+            const auto* file = request->find(fileKey);
+            const auto* end = request->find(endKey);
+            if (!file || !file->isString() || !end || !end->isNumber() ||
+                !std::isfinite(end->asDouble()) || end->asDouble() < 0)
+                return Error("eval.arguments", "expected a WAV path and a nonnegative note-off",
+                             "/" + std::string(fileKey),
+                             "give both reference and test note-off times");
+            auto audio = audio::readAudio(file->asString());
+            if (!audio) return std::move(audio).error();
+            return sandbox::detail::analyzeMatched(*audio, target, end->asDouble());
+        };
+        auto reference = analyze("reference", "reference_note_off_s", {});
+        if (!reference) {
+            print(errorJson(reference.error()));
+            return 1;
+        }
+        std::optional<double> target;
+        if (reference->loudness && std::isfinite(reference->loudness->integrated))
+            target = reference->loudness->integrated;
+        auto test = analyze("test", "test_note_off_s", target);
+        if (!test) {
+            print(errorJson(test.error()));
+            return 1;
+        }
+        const auto loss = sandbox::detail::referenceLoss(*reference, *test);
+        json::Value result = json::Value::object();
+        result["loss"] = loss.total;
+        result["terms"] = json::Value::object();
+        for (const auto& [key, value] : loss.terms) result["terms"][key] = value;
+        result["ltas_rms_db"] = analysis::compare(*reference, *test).ltasRmsDb;
+        print(result);
+        return 0;
+    }
     cmd::Registry registry;
     sandbox::registerCommands(registry);
 
@@ -99,6 +148,8 @@ int main(int argc, char** argv) {
         for (std::size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--workdir" && i + 1 < args.size())
                 options.workdir = args[++i];
+            else if (args[i] == "--record-midi")
+                options.recordMidi = true;
             else if (args[i] == "--plugin-path" && i + 1 < args.size())
                 options.pluginPath.emplace_back(args[++i]);
             else if (rpcMode && args[i] == "--instance" && i + 1 < args.size())
@@ -188,6 +239,8 @@ int main(int argc, char** argv) {
         for (std::size_t i = 2; i < args.size(); ++i) {
             if (args[i] == "--workdir" && i + 1 < args.size())
                 options.workdir = args[++i];
+            else if (args[i] == "--record-midi")
+                options.recordMidi = true;
             else if (args[i] == "--plugin-path" && i + 1 < args.size())
                 options.pluginPath.emplace_back(args[++i]);
             else

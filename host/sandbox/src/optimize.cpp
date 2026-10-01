@@ -262,13 +262,6 @@ Loss referenceLoss(const analysis::Report& ref, const analysis::Report& cand) {
     return l;
 }
 
-}  // namespace detail
-
-namespace {
-using detail::Loss;
-using detail::referenceLoss;
-using detail::term;
-
 // Loudness-matches the candidate to `targetLufs` (a gain on the analysis
 // input only) and analyzes it.
 Result<analysis::Report> analyzeMatched(const audio::AudioData& a, std::optional<double> targetLufs,
@@ -300,6 +293,14 @@ Result<analysis::Report> analyzeMatched(const audio::AudioData& a, std::optional
     for (const auto& c : scaled) sp.push_back(c.data());
     return analysis::analyze(signal(sp), o);
 }
+
+}  // namespace detail
+
+namespace {
+using detail::analyzeMatched;
+using detail::Loss;
+using detail::referenceLoss;
+using detail::term;
 
 json::Value roundTo(double v, int decimals) {
     const double s = std::pow(10.0, decimals);

@@ -45,6 +45,8 @@ struct SessionOptions {
     std::vector<std::filesystem::path> pluginPath;
     std::filesystem::path presetDir;  // empty = <workdir>/presets
     host::HostIdentity identity;
+    // Evaluation tooling: save compiler-produced note data beside each WAV.
+    bool recordMidi = false;
     // Non-RT diagnostic hook for observing reference preparation in tests.
     // Called on the job worker before the file read and after analysis.
     std::function<void(std::string_view)> referencePreparationHook;
@@ -61,6 +63,7 @@ struct RenderInput {
     std::optional<double> seconds;          // overrides the musical length
     std::optional<double> tempo;            // this render only
     std::optional<midi::Meter> meter;       // transport meter, this render only
+    std::vector<midi::Meter> barMeters;     // notation compiler output for evaluation sidecars
     std::optional<double> tailSeconds;      // this render only (<= 60)
     std::string name;                       // free label kept with the render
 };
