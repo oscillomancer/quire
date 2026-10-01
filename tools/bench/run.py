@@ -248,11 +248,21 @@ local ok,err = xpcall(function()
     if key == 'SRATE' then assert(tonumber(value) == 48000, 'granted rate must be 48 kHz') end
   end
   say('version',reaper.GetAppVersion())
-  reaper.GetSetRepeat(1)
-  reaper.OnPlayButton()
-  baseline = reaper.time_precise() + 1
-  deadline = baseline + {seconds:.17g}
-  reaper.defer(poll)
+  -- Play pressed right after Audio_Init is stopped again by the device's own
+  -- startup (probed: state 1, then 0 within 20 ms); let it settle first.
+  local settle = reaper.time_precise() + 1
+  local function start()
+    local ok2,err2 = xpcall(function()
+      if reaper.time_precise() < settle then reaper.defer(start); return end
+      reaper.GetSetRepeat(1)
+      reaper.OnPlayButton()
+      baseline = reaper.time_precise() + 1
+      deadline = baseline + {seconds:.17g}
+      reaper.defer(poll)
+    end,debug.traceback)
+    if not ok2 then finish(err2) end
+  end
+  reaper.defer(start)
 end,debug.traceback)
 if not ok then finish(err) end
 """
