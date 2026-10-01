@@ -33,4 +33,10 @@ if(SUPPLE_BUILD_TESTS)
     set_tests_properties(plugin.orrery-headless.unload PROPERTIES
       LABELS "rt;plugin-unload" TIMEOUT 30)
   endif()
+  # The module the sandbox and the engine load: same reset contract as the
+  # plugin (see stock-effects.md §0).
+  add_test(NAME plugin.orrery-headless.reset COMMAND clap-reset-check
+    $<TARGET_FILE:orrery-headless>)
+  set_tests_properties(plugin.orrery-headless.reset PROPERTIES
+    LABELS "rt;plugin-reset" TIMEOUT 180)
 endif()

@@ -494,3 +494,30 @@ std::optional<Id> trackOfFx(const Session& s, Id fx) {
 }
 
 }  // namespace supple::model
+
+namespace supple::model {
+
+ItemSpan itemSpan(const Session& s, const Item& it) {
+    const time::TimeMap& tm = *s.timeMap;
+    const Track* tr = s.tracks.find(it.track);
+    Timebase tb = s.project->timebase;
+    if (it.timebase == ItemTimebase::Time)
+        tb = Timebase::Time;
+    else if (it.timebase == ItemTimebase::Beats)
+        tb = Timebase::Beats;
+    else if (it.timebase == ItemTimebase::BeatsPosition)
+        tb = Timebase::BeatsPosition;
+    else if (tr && tr->timebase == TrackTimebase::Time)
+        tb = Timebase::Time;
+    else if (tr && tr->timebase == TrackTimebase::Beats)
+        tb = Timebase::Beats;
+    else if (tr && tr->timebase == TrackTimebase::BeatsPosition)
+        tb = Timebase::BeatsPosition;
+    if (tb == Timebase::Time) return {tm.beatAt(it.position), it.position, it.position + it.length};
+    const double startSec = tm.secondsAt(it.position);
+    if (tb == Timebase::Beats)
+        return {it.position, startSec, tm.secondsAt(it.position + it.length)};
+    return {it.position, startSec, startSec + it.length};  // beats position, seconds length
+}
+
+}  // namespace supple::model

@@ -16,6 +16,7 @@
 #include "supple/model/schemas.h"
 #include "supple/product.h"
 
+#include "meters.h"
 #include "recording.h"
 
 namespace supple::engine {
@@ -31,7 +32,8 @@ bool iequals(std::string_view a, std::string_view b) {
            });
 }
 std::string originText(const cmd::Origin& o) {
-    static constexpr const char* kTypes[] = {"ui", "lua", "mcp", "rpc", "test", "internal"};
+    static constexpr const char* kTypes[] = {"ui",   "lua",      "mcp",  "rpc",
+                                             "test", "internal", "agent"};
     std::string s = kTypes[static_cast<int>(o.type)];
     if (!o.client.empty()) s += ":" + o.client;
     if (!o.agent.empty()) s += "/" + o.agent;
@@ -621,6 +623,14 @@ EngineStatus EngineApp::engineStatus() {
     st.anticipative = engine_->options().anticipative;
     st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());
     return st;
+}
+
+std::vector<MeterReading> EngineApp::meters() {
+    if (!engine_) return {};
+    const std::shared_ptr<MeterBank> bank = engine_->meterBank();
+    if (!bank) return {};
+    const Engine::MeterClock clock = engine_->meterClock();
+    return bank->read(clock.epoch, clock.heardStream);
 }
 
 Result<TransportInfo> EngineApp::transport(std::string_view action, std::optional<double> seconds) {

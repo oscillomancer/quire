@@ -468,7 +468,7 @@ Result:
 
 Tune continuous parameters toward a reference sound or a profile (a job).
 
-You choose the structure (patch) and which knobs matter; CMA-ES tunes the numbers. params: "auto" (continuous parameters of slots present, max 32) or keys, optionally {key, min, max} to narrow the search. target: {"reference": rd_<n> or file} and/or {"profile": supple.analysis-profile document}. phrase: notation rendered per candidate (default "1: C3:w"; use the reference's phrase when matching a reference). Returns a job: poll job.wait; the result has the best loss per term, changes, a merge patch ({"params": {...}}) for patch.merge, and the best candidate's render.
+You choose the structure (patch) and which knobs matter; CMA-ES tunes the numbers. params: "auto" (continuous parameters of the modules present, max 32) or keys, optionally {key, min, max} to narrow the search. "auto" searches around each parameter's current value (±2 octaves for frequency, time and pitch-interval quantities, ±25 % of the range otherwise): name keys with min/max when the answer may be far from the current patch. target: {"reference": rd_<n> or file} and/or {"profile": supple.analysis-profile document}; a reference target starts from a smaller initial step than a profile, because the patch is already close. phrase: notation rendered per candidate (default "1: C3:w"; use the reference's phrase when matching a reference). Returns a job: poll job.wait; the result has the best loss per term, the failed-candidate count, changes, a merge patch ({"params": {...}}) for patch.merge, and the best candidate's render.
 
 Kind: `action`. Exposure: `mcp-tool`.
 

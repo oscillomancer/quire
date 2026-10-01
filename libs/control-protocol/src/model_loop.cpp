@@ -36,6 +36,7 @@ void detail::Wake::notify() const {
     if (writeFd < 0) return;
     char byte = 1;
     (void)::write(writeFd, &byte, 1);
+    if (waker) waker();
 }
 
 void Timer::cancel() {
@@ -166,6 +167,18 @@ void ModelLoop::post(std::function<void()> task) {
     }
     impl_->wake->notify();
 }
+
+void ModelLoop::setWaker(std::function<void()> waker) { impl_->wake->waker = std::move(waker); }
+
+int ModelLoop::pump() {
+    impl_->drainWake();
+    impl_->runDueTimers();
+    impl_->drainTasks();
+    std::lock_guard lock(impl_->mutex);
+    return impl_->nextTimeoutMs();
+}
+
+bool ModelLoop::stopRequested() const { return stopping.load(std::memory_order_relaxed); }
 
 void ModelLoop::run() {
     while (true) {

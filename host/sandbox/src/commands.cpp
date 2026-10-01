@@ -1003,7 +1003,8 @@ void SandboxHost::rollbackTransaction(std::uint64_t id) {
 }
 
 json::Value toJson(const cmd::LogRecord& r) {
-    static constexpr const char* kOrigins[] = {"ui", "lua", "mcp", "rpc", "test", "internal"};
+    static constexpr const char* kOrigins[] = {"ui",   "lua",      "mcp",  "rpc",
+                                               "test", "internal", "agent"};
     json::Value v = json::Value::object();
     v["seq"] = r.seq;
     v["time_ms"] = r.time_ms;

@@ -211,6 +211,14 @@ Status validateStripRules(const Session& s);
 // The track whose FX chain holds `fx` (not input chains or take FX), if any.
 std::optional<Id> trackOfFx(const Session& s, Id fx);
 
+// Where an item sits after resolving its timebase (item, then track, then
+// project): its start in beats and seconds and its end in seconds. The
+// engine plays and the GUI draws items through this one mapping.
+struct ItemSpan {
+    double startBeat = 0, startSec = 0, endSec = 0;
+};
+ItemSpan itemSpan(const Session& s, const Item& item);
+
 // Object-level differences, deterministic order (kind, then ID). `fields`
 // lists the changed top-level fields of updated objects (JSON member names).
 struct ObjectDiff {

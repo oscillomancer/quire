@@ -1,0 +1,190 @@
+#include <doctest/doctest.h>
+
+#include <unistd.h>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <functional>
+#include <mutex>
+#include <numbers>
+#include <thread>
+#include <vector>
+
+#include "supple/audio/audio_file.h"
+#include "supple/base/files.h"
+#include "supple/peaks/peaks.h"
+
+using namespace supple;
+
+namespace {
+
+audio::AudioData tone(std::size_t frames, double rate = 48000.0) {
+    audio::AudioData a;
+    a.sampleRate = rate;
+    a.channels.assign(2, std::vector<float>(frames));
+    for (std::size_t i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / rate;
+        a.channels[0][i] = static_cast<float>(0.5 * std::sin(2 * std::numbers::pi * 440 * t));
+        // Right: silence, then a half-scale DC step in the second half.
+        a.channels[1][i] = i < frames / 2 ? 0.0f : 0.25f;
+    }
+    return a;
+}
+
+std::filesystem::path scratch(const char* name) {
+    auto dir = std::filesystem::temp_directory_path() /
+               ("supple-peaks-test-" + std::to_string(::getpid())) / name;
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+}  // namespace
+
+TEST_CASE("a pyramid has every level with exact min, max and RMS") {
+    const auto audio = tone(100000);
+    const auto p = peaks::Pyramid::build(audio);
+    REQUIRE(p.levels().size() == peaks::kSamplesPerBucket.size());
+    CHECK(p.channels() == 2);
+    CHECK(p.frames() == 100000);
+    CHECK(p.levels()[0].count == (100000 + 63) / 64);
+    CHECK(p.levels()[4].count == (100000 + 16383) / 16384);
+    // The whole file from the coarsest level.
+    const auto& top = p.levels().back();
+    const auto left = p.range(top, 0, 0, 100000);
+    CHECK(left.max == doctest::Approx(0.5).epsilon(0.001));
+    CHECK(left.min == doctest::Approx(-0.5).epsilon(0.001));
+    CHECK(left.rms == doctest::Approx(0.5 / std::sqrt(2.0)).epsilon(0.01));
+    // The right channel's first half is silent, its second a 0.25 step.
+    const auto& fine = p.levels().front();
+    const auto quiet = p.range(fine, 1, 0, 49000);
+    CHECK(quiet.min == 0.0f);
+    CHECK(quiet.max == 0.0f);
+    const auto step = p.range(fine, 1, 51000, 99000);
+    CHECK(step.min == doctest::Approx(0.25).epsilon(0.001));
+    CHECK(step.rms == doctest::Approx(0.25).epsilon(0.001));
+    // Coarse levels agree with fine ones over the same span.
+    const auto viaFine = p.range(fine, 0, 0, 65536);
+    const auto viaCoarse = p.range(p.levels()[3], 0, 0, 65536);
+    CHECK(viaFine.max == viaCoarse.max);
+    CHECK(viaFine.rms == doctest::Approx(static_cast<double>(viaCoarse.rms)).epsilon(0.001));
+}
+
+TEST_CASE("pick chooses the coarsest level with at least one bucket per column") {
+    const auto p = peaks::Pyramid::build(tone(50000));
+    CHECK(p.pick(10).samplesPerBucket == 64);  // zoomed past the finest level
+    CHECK(p.pick(64).samplesPerBucket == 64);
+    CHECK(p.pick(1000).samplesPerBucket == 256);
+    CHECK(p.pick(5000).samplesPerBucket == 4096);
+    CHECK(p.pick(1e9).samplesPerBucket == 16384);
+    // Out-of-range spans are empty, not errors.
+    const auto none = p.range(p.levels()[0], 0, 1e7, 2e7);
+    CHECK(none.max == 0.0f);
+    CHECK(p.range(p.levels()[0], 5, 0, 100).max == 0.0f);
+}
+
+TEST_CASE("pyramids serialize exactly and reject foreign or truncated files") {
+    const auto p = peaks::Pyramid::build(tone(30000));
+    const auto bytes = p.serialize();
+    auto back = peaks::Pyramid::deserialize(bytes);
+    REQUIRE(back);
+    CHECK(back->frames() == p.frames());
+    CHECK(back->serialize() == bytes);
+    auto truncated = bytes;
+    truncated.resize(truncated.size() - 7);
+    CHECK_FALSE(peaks::Pyramid::deserialize(truncated));
+    std::vector<std::uint8_t> junk(64, 0x41);
+    CHECK_FALSE(peaks::Pyramid::deserialize(junk));
+}
+
+TEST_CASE("the peak service builds once off-thread, caches on disk and loads the cache") {
+    const auto dir = scratch("service");
+    const auto wav = dir / "tone.wav";
+    REQUIRE(writeFileAtomic(wav, std::span<const std::uint8_t>(*audio::encodeWav(tone(48000)))));
+    const std::string hash = "sha256:00ff00ff";
+
+    // The owner's loop: posted tasks run when the test drains them.
+    std::mutex m;
+    std::vector<std::function<void()>> posted;
+    auto post = [&](std::function<void()> f) {
+        std::lock_guard lock(m);
+        posted.push_back(std::move(f));
+    };
+    auto drainUntil = [&](auto done) {
+        for (int i = 0; i < 500 && !done(); ++i) {
+            std::vector<std::function<void()>> now;
+            {
+                std::lock_guard lock(m);
+                now.swap(posted);
+            }
+            for (auto& f : now) f();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return done();
+    };
+
+    {
+        peaks::PeakService service(dir / "cache", post);
+        std::vector<std::string> ready;
+        service.onReady = [&](const std::string& h) { ready.push_back(h); };
+        CHECK(service.get(hash, wav) == nullptr);  // queued, never blocks
+        CHECK(service.get(hash, wav) == nullptr);  // queued once
+        REQUIRE(drainUntil([&] { return !ready.empty(); }));
+        CHECK(ready == std::vector<std::string>{hash});
+        auto p = service.get(hash, wav);
+        REQUIRE(p);
+        CHECK(p->frames() == 48000);
+        CHECK(service.stats().built == 1);
+        CHECK(std::filesystem::exists(dir / "cache" / "00ff00ff.peaks"));
+    }
+    {
+        peaks::PeakService service(dir / "cache", post);
+        bool ready = false;
+        service.onReady = [&](const std::string&) { ready = true; };
+        CHECK(service.get(hash, wav) == nullptr);
+        REQUIRE(drainUntil([&] { return ready; }));
+        CHECK(service.stats().loaded == 1);  // from the cache, not rebuilt
+        CHECK(service.stats().built == 0);
+    }
+    {
+        peaks::PeakService service(dir / "cache", post);
+        bool ready = false;
+        service.onReady = [&](const std::string&) { ready = true; };
+        CHECK(service.get("sha256:abcd", dir / "missing.wav") == nullptr);
+        REQUIRE(drainUntil([&] { return ready; }));
+        CHECK(service.failure("sha256:abcd", dir / "missing.wav").has_value());
+        CHECK(service.get("sha256:abcd", dir / "missing.wav") == nullptr);  // no retry loop
+        CHECK(service.stats().failed == 1);
+    }
+    // Without a content hash the path keys it, and distinct files stay distinct.
+    {
+        const auto other = dir / "other.wav";
+        REQUIRE(
+            writeFileAtomic(other, std::span<const std::uint8_t>(*audio::encodeWav(tone(24000)))));
+        peaks::PeakService service(dir / "cache", post);
+        int ready = 0;
+        service.onReady = [&](const std::string&) { ++ready; };
+        service.get("", wav);
+        service.get("", other);
+        REQUIRE(drainUntil([&] { return ready == 2; }));
+        REQUIRE(service.get("", wav));
+        REQUIRE(service.get("", other));
+        CHECK(service.get("", wav)->frames() == 48000);
+        CHECK(service.get("", other)->frames() == 24000);
+        int named = 0;
+        for (const auto& f : std::filesystem::directory_iterator(dir / "cache"))
+            named += f.path().filename().string().starts_with("p-");
+        CHECK(named == 2);
+    }
+    // A notification still queued after its service is gone is dropped safely.
+    {
+        auto service = std::make_unique<peaks::PeakService>(dir / "cache", post);
+        service->onReady = [](const std::string&) { FAIL("called after destruction"); };
+        service->get(hash, wav);
+        for (int i = 0; i < 200 && service->stats().loaded == 0; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        service.reset();
+        drainUntil([] { return false; });
+    }
+    std::filesystem::remove_all(dir.parent_path());
+}

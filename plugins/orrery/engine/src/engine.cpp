@@ -338,6 +338,11 @@ struct Engine::Impl {
     params::Table tbl = table();
 
     std::vector<Ramp> ramps;
+    // Parameter values a host flushed while the plugin was not processing:
+    // newer than any published program, so an adoption takes them (see
+    // setValues() and the adoption in process()).
+    std::vector<double> flushValues;
+    std::atomic<bool> flushValuesSet{false};
     Ramp modwheel, breath, expression, slide, pitchbend, aftertouch;
     bool sustainPedal = false;
     std::int64_t now = 0;
@@ -1740,11 +1745,13 @@ struct Engine::Impl {
 
     // --- program adoption
     // --------------------------------------------------------------------------
-    void adopt(Program* next, Program* previous) SUPPLE_RT {
-        const bool first = previous == nullptr;
-        for (std::size_t i = 0; i < ramps.size(); ++i) {
-            const double v = next->values[i];
-            if (first) {
+    // The parameter ramps follow `values`: they snap (a fresh state, after
+    // prepare()/reset()) or glide over the parameters' smoothing times (a
+    // change while running).
+    void follow(std::span<const double> values, bool snap) SUPPLE_RT {
+        for (std::size_t i = 0; i < ramps.size() && i < values.size(); ++i) {
+            const double v = values[i];
+            if (snap) {
                 ramps[i].snap(v);
             } else if (ramps[i].to != v) {
                 const ParamSpec& p = tbl[i];
@@ -1752,6 +1759,11 @@ struct Engine::Impl {
                              p.type == params::Type::Float ? p.smoothingMs * 1e-3 * sr : 0.0);
             }
         }
+    }
+
+    void adopt(Program* next, Program* previous) SUPPLE_RT {
+        const bool first = previous == nullptr;
+        follow(next->values, first);
         if (first || next->os != decFactor) {
             // Quality changed: sounding voices restart their DSP at the new
             // rate (envelopes, gate and pitch continue), decimators reset.
@@ -1810,6 +1822,8 @@ void Engine::prepare(double sampleRate, std::uint32_t maxBlock) {
     m.maxBlock = maxBlock;
     m.ramps.assign(paramCount(), Ramp{});
     m.gains.assign(paramCount(), Impl::GainCache{});
+    m.flushValues.assign(paramCount(), 0.0);
+    m.flushValuesSet.store(false, std::memory_order_relaxed);
     for (std::size_t i = 0; i < m.ramps.size(); ++i) m.ramps[i].snap(table()[i].def);
     m.frames.assign(maxBlock / kTick + 3, Frame{});
     const std::size_t busSize = static_cast<std::size_t>(maxBlock) * 4;
@@ -1838,7 +1852,24 @@ void Engine::prepare(double sampleRate, std::uint32_t maxBlock) {
     m.prog = nullptr;
 }
 
-void Engine::setPatch(const Patch& patch) { impl_->handoff.publish(compileProgram(patch)); }
+void Engine::setPatch(const Patch& patch) {
+    // A whole patch supersedes values flushed while the plugin was stopped.
+    impl_->flushValuesSet.store(false, std::memory_order_release);
+    impl_->handoff.publish(compileProgram(patch));
+}
+
+void Engine::setValues(std::span<const double> values) {
+    Impl& m = *impl_;
+    const std::size_t n = std::min(values.size(), m.flushValues.size());
+    if (n == 0) return;
+    std::copy_n(values.begin(), n, m.flushValues.begin());
+    m.flushValuesSet.store(true, std::memory_order_release);
+    // A running engine takes them now, as an ordinary parameter move (they
+    // glide). After prepare()/reset() (m.prog == nullptr) the next block adopts
+    // a program and snaps to them, with the seeding a fresh instance gets —
+    // the values ride along on the adoption so it cannot undo this.
+    if (m.prog) m.follow(m.flushValues, false);
+}
 
 void Engine::collect() { impl_->handoff.collect(); }
 
@@ -1897,6 +1928,14 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
     if (next != previous) {
         m.prog = next;
         if (next) {
+            // Values a host flushed while the plugin was stopped (params.flush
+            // on the audio thread) are newer than this program: they must
+            // survive the adoption, or a render after reset() would play the
+            // previous render's state.
+            if (m.flushValuesSet.exchange(false, std::memory_order_acq_rel)) {
+                const std::size_t n = std::min(m.flushValues.size(), next->values.size());
+                std::copy_n(m.flushValues.begin(), n, next->values.begin());
+            }
             if (!previous) {
                 // First program: seed the global modulators.
                 for (std::size_t l = 0; l < kLfoCount; ++l) {

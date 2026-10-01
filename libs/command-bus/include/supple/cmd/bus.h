@@ -31,7 +31,15 @@ struct Example {
     std::string fixture;
 };
 struct Origin {
-    enum class Type : std::uint8_t { Ui, Lua, Mcp, Rpc, Test, Internal } type = Type::Internal;
+    enum class Type : std::uint8_t {
+        Ui,
+        Lua,
+        Mcp,
+        Rpc,
+        Test,
+        Internal,
+        Agent
+    } type = Type::Internal;
     std::string client, agent;
 };
 using Warning = schema::Warning;

@@ -31,6 +31,15 @@ except for the decisions recorded there.
 - **Latency-changing parameters** (lookahead, oversampling, linear phase)
   are stepped, not automatable, and follow the template's restart contract
   (`request_restart`, reactivate with the new latency).
+- **`reset()` clears processing state and keeps the parameter values** (CLAP's
+  contract). The sandbox and the engine reuse one instance across renders and
+  across seeks, so a render must depend only on the state set for it:
+  smoothers snap to their targets on the first block after `reset()`,
+  delay/time lines start at their value, and nothing of the previous render
+  survives. `clap-reset-check` (`plugins/common/tools/clap_reset_check.cpp`,
+  registered as `plugin.<id>.reset` for every stock plugin and Orrery) renders
+  state S1, then S2 after `reset()`, and requires that S2 render to be
+  bit-identical to a fresh instance holding S2 — at block 256 and again at 64.
 - **Readonly telemetry parameters** (gain reduction, levels) exist for
   generic hosts; the GUI uses the telemetry ring.
 - **Tests beyond the template's:** frequency/phase response against analytic
