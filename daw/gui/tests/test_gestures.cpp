@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "generate.h"
+#include "plugin_scales.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/engine/app.h"
@@ -14,6 +15,8 @@
 #include "supple/peaks/peaks.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
+#include "supple/views/envelope_lane.h"
+#include "supple/views/tcp.h"
 
 using namespace supple;
 
@@ -52,6 +55,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};  // the stock plugins only
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
         app = std::move(*a);
@@ -317,4 +321,188 @@ TEST_CASE("arrange gestures: marquee, click to seek, take badge, double-click MI
     CHECK(f.app->head().items.size() == items + 2);
     CHECK(f.app->head().tracks.size() == tracks + 1);
     CHECK(f.steps() == s0 + 1);  // one undo step
+}
+
+TEST_CASE("automation lanes: shown under their strip, points added, moved and deleted, modes") {
+    Fixture f;
+    if (!f.ok) return;
+    std::vector<std::pair<std::string, json::Value>> committed;
+    views::TcpCallbacks cb;
+    cb.commit = [&](std::string_view command, json::Value args, std::string) {
+        committed.emplace_back(std::string(command), args);
+        REQUIRE(f.dispatcher->execute({std::string(command), std::move(args), kUi}));
+    };
+    f.view->setTcpCallbacks(std::move(cb));
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(
+             R"({"track":")" + track.str() +
+             R"(","param":"volume","points":[{"beat":0,"value":0},{"beat":16,"value":-12}]})")
+             .value(),
+         kUi});
+    REQUIRE(added);
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    f.sync();
+    // The lane is the row right under its strip, shorter, with no items on it.
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    CHECK(*lane == *f.view->trackLayout().indexOf(track) + 1);
+    CHECK(f.view->trackLayout().heightOf(*lane) < f.view->trackLayout().heightOf(*lane - 1));
+    const ui::Rect laneRect = f.view->rowRect(*lane);
+    auto& g = f.view->gestures();
+    CHECK_FALSE(g.hit({laneRect.x + 30, laneRect.y + laneRect.h / 2}));
+    // Its header in the TCP.
+    REQUIRE(f.view->tcpPanel().envControl(env, "mode"));
+    CHECK(f.view->tcpPanel().envControl(env, "mode")->visible);
+
+    auto points = [&] { return f.app->head().envelopes.find(env)->points; };
+    const ui::Rect area = views::Lanes::envArea(laneRect);
+    const model::Session& s0 = f.app->head();
+    auto xOfBeat = [&](double beat) { return f.view->xAt(f.app->head().timeMap->secondsAt(beat)); };
+    (void)s0;
+    // A click on the lane adds a point there (snapped to the grid), one undo step.
+    auto steps = f.steps();
+    f.click({xOfBeat(8) + 1, area.y + area.h * 0.25f});
+    REQUIRE(points().size() == 3);
+    CHECK(points()[1].pos == doctest::Approx(8));
+    CHECK(points()[1].value > 0);  // the upper quarter is above unity
+    CHECK(f.steps() == steps + 1);
+    // Dragging the last point up raises it.
+    const double before = points()[2].value;
+    const float yLast =
+        area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(before)) * area.h;
+    f.drag({xOfBeat(16), yLast}, {xOfBeat(16), yLast - 12});
+    REQUIRE(points().size() == 3);
+    CHECK(points()[2].value > before);
+    CHECK(points()[2].pos == doctest::Approx(16));  // a vertical drag keeps the time
+    // Alt+click deletes the first point.
+    const float yFirst = area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(0.0)) * area.h;
+    f.click({xOfBeat(0) + 1, yFirst}, ui::kAlt);
+    CHECK(points().size() == 2);
+    // The header's mode button cycles read -> touch; "hide" hides the lane.
+    f.root->click(f.view->tcpPanel().envControl(env, "mode")->id());
+    CHECK(f.app->head().envelopes.find(env)->mode == model::EnvMode::Touch);
+    f.sync();
+    f.root->click(f.view->tcpPanel().envControl(env, "hide")->id());
+    f.sync();
+    CHECK_FALSE(f.app->head().envelopes.find(env)->visible);
+    CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
+}
+
+TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length and play rate)") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id a = f.itemOnRow(0);
+    const ui::Rect r = f.rectOf(a);
+    const double len0 = f.item(a).length;
+    const float step = static_cast<float>(g.gridBeats()) * f.beatPx();
+    auto steps = f.steps();
+    // Longer by two grid steps: the take plays slower so its material fills it.
+    f.drag({r.right() - 2, r.y + r.h / 2}, {r.right() - 2 + 2 * step, r.y + r.h / 2}, ui::kAlt);
+    const double len1 = f.item(a).length;
+    CHECK(len1 == doctest::Approx(len0 + 2 * g.gridBeats()));
+    const model::Take& take = *f.app->head().takes.find(*f.item(a).activeTake);
+    CHECK(take.playrate == doctest::Approx(len0 / len1));  // one tempo: beats scale as seconds
+    CHECK(f.steps() == steps + 1);
+}
+
+TEST_CASE("arrange gestures: a move that overlaps another item crossfades both over the overlap") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id audio = f.itemOnRow(0), midi = f.itemOnRow(0, true);
+    const double audioEnd = f.item(audio).position + f.item(audio).length;
+    REQUIRE(f.item(midi).position > audioEnd);
+    // Drag the later item back so it starts 4 beats before the earlier one ends.
+    const double target = audioEnd - 4;
+    const ui::Rect r = f.rectOf(midi);
+    const float dx = static_cast<float>(target - f.item(midi).position) * f.beatPx();
+    auto steps = f.steps();
+    f.drag({r.x + 20, r.y + r.h / 2}, {r.x + 20 + dx, r.y + r.h / 2});
+    REQUIRE(f.item(midi).position == doctest::Approx(target));
+    const model::Session& s = f.app->head();
+    const double overlap = s.timeMap->secondsAt(audioEnd) - s.timeMap->secondsAt(target);
+    CHECK(f.item(audio).fadeOut.length == doctest::Approx(overlap));
+    CHECK(f.item(midi).fadeIn.length == doctest::Approx(overlap));
+    CHECK(f.steps() == steps + 1);  // the move and both fades: one undo step
+    // Off: a move makes no fades.
+    f.view->gestures().autoCrossfade = false;
+    const ui::Rect r2 = f.rectOf(midi);
+    f.drag({r2.x + 20, r2.y + r2.h / 2},
+           {r2.x + 20 - 2 * f.beatPx() * static_cast<float>(f.view->gestures().gridBeats()),
+            r2.y + r2.h / 2});
+    CHECK(f.item(audio).fadeOut.length == doctest::Approx(overlap));  // unchanged
+}
+
+TEST_CASE("automation lanes: a plugin parameter's lane uses the plugin's range and curve") {
+    Fixture f;
+    if (!f.ok) return;
+    auto listed = f.dispatcher->execute({"plugin.list", json::Value::object(), kUi});
+    REQUIRE(listed);
+    // A stock effect with a continuous semantic parameter (partial builds have none).
+    std::string fxId, key;
+    std::shared_ptr<params::DescribedParam> spec;
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    for (const json::Value& p : (*listed)["plugins"].asArray()) {
+        if (p.find("instrument") && p.find("instrument")->asBool()) continue;
+        auto added =
+            f.dispatcher->execute({"fx.add",
+                                   json::parse(R"({"track":")" + track.str() + R"(","plugin":")" +
+                                               p.find("id")->asString() + R"("})")
+                                       .value(),
+                                   kUi});
+        if (!added) continue;
+        const std::string id = (*added)["fx"].asString();
+        auto described = f.dispatcher->execute(
+            {"fx.describe", json::parse(R"({"fx":")" + id + R"(","full":true})").value(), kUi});
+        if (described)
+            if (const json::Value* ps = described->find("params"); ps && ps->isObject())
+                for (const auto& m : ps->asObject()) {
+                    auto d = params::fromDescription(m.key, m.value);
+                    if (!d || (*d)->spec.type != params::Type::Float ||
+                        ((*d)->spec.flags & (params::kReadonly | params::kHidden)))
+                        continue;
+                    fxId = id;
+                    key = m.key;
+                    spec = std::shared_ptr<params::DescribedParam>(std::move(*d));
+                    break;
+                }
+        if (spec) break;
+    }
+    if (!spec) {
+        MESSAGE("skipped: no stock effect with a continuous parameter (partial build)");
+        return;
+    }
+    const double high = params::fromNormalized(spec->spec, 0.9);
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"fx":")" + fxId + R"(","param":")" + key +
+                     R"(","points":[{"beat":0,"value":)" + std::to_string(spec->spec.def) +
+                     R"(},{"beat":16,"value":)" + std::to_string(high) + "}]}")
+             .value(),
+         kUi});
+    REQUIRE_MESSAGE(added, (added ? std::string() : added.error().toString()));
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    // Without the app's scale source the lane is not shown; with it, it is.
+    f.sync();
+    CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
+    auto scales = std::make_shared<gui::PluginScales>(*f.dispatcher);
+    f.view->trackLayout().pluginScales = [scales](const model::Envelope& e) {
+        return (*scales)(e);
+    };
+    (void)f.dispatcher->execute(
+        {"env.set", json::parse(R"({"env":")" + env.str() + R"(","visible":true})").value(), kUi});
+    f.sync();
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    CHECK(*lane == *f.view->trackLayout().indexOf(track) + 1);
+    // A click in the lane's upper quarter adds a value three quarters up the
+    // parameter's own curve.
+    const ui::Rect area = views::Lanes::envArea(f.view->rowRect(*lane));
+    const float x = f.view->xAt(f.app->head().timeMap->secondsAt(8)) + 1;
+    f.click({x, area.y + area.h * 0.25f});
+    const auto& pts = f.app->head().envelopes.find(env)->points;
+    REQUIRE(pts.size() == 3);
+    CHECK(params::toNormalized(spec->spec, pts[1].value) == doctest::Approx(0.75).epsilon(0.05));
 }

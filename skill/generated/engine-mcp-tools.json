@@ -835,11 +835,14 @@
               "active": {
                 "type": "boolean"
               },
+              "visible": {
+                "type": "boolean"
+              },
               "mode": {
                 "type": "string"
               }
             },
-            "required": ["env", "target", "param", "points", "active", "mode"],
+            "required": ["env", "target", "param", "points", "active", "visible", "mode"],
             "additionalProperties": false
           }
         }
@@ -960,7 +963,7 @@
   {
     "name": "env_set",
     "title": "Set an envelope's options: active (heard), mode (read, touch, latch, write).",
-    "description": "Set an envelope's options: active (heard), mode (read, touch, latch, write).  See describe for errors and examples.",
+    "description": "Set an envelope's options: active (heard), mode (read, touch, latch, write). visible shows or hides the envelope's lane in the arrange view (a hidden envelope still plays while active). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "env_set_args",
@@ -971,6 +974,9 @@
           "description": "Envelope id, e.g. \"en_1\"."
         },
         "active": {
+          "type": "boolean"
+        },
+        "visible": {
           "type": "boolean"
         },
         "mode": {

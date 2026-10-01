@@ -410,6 +410,10 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto r = buildRoute(edits, s, app(ctx), s.routes.find(*id), *id);
             if (!r) return std::move(r).error();
             app(ctx).txn().put<model::Route>(*id, std::move(*r));
+            // Touch/latch/write envelopes record the change while playing.
+            if (a.volumeDb) app(ctx).recordAutomation(*id, "volume", *a.volumeDb);
+            if (a.pan && a.pan->percent) app(ctx).recordAutomation(*id, "pan", *a.pan->percent);
+            if (a.mute) app(ctx).recordAutomation(*id, "mute", *a.mute ? 1.0 : 0.0);
             return Empty{};
         };
         registry.add(std::move(c));

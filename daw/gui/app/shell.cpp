@@ -1,5 +1,7 @@
 #include "shell.h"
 
+#include "plugin_scales.h"
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -139,7 +141,15 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.pickInput = [this](const model::Id& track, const ui::Rect& anchor) {
         openInputMenu(track, anchor);
     };
+    tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
+        openEnvelopeMenu(track, anchor);
+    };
     arrange_->setTcpCallbacks(std::move(tcp));
+    // Plugin parameter lanes take their scale from the effect's description.
+    arrange_->trackLayout().pluginScales =
+        [scales = std::make_shared<PluginScales>(dispatcher_)](const model::Envelope& env) {
+            return (*scales)(env);
+        };
     counts_ = &shell->emplace<ui::Label>("status", status_, ui::Font::Mono, "small", "ink-quiet");
     counts_->layout.width = ui::SizeRule::fraction();
     counts_->layout.height = ui::SizeRule::fixed(26);
@@ -201,6 +211,102 @@ std::string Shell::inputText(const model::Id& track, const std::string& channels
         out += name;
     }
     return out.empty() ? ("in " + channels) : out;
+}
+
+void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
+    if (!root_) return;
+    const model::Session& s = app_.head();
+    const model::Track* tr = s.tracks.find(track);
+    if (!tr) return;
+    std::vector<ui::MenuItem> items, removals;
+    for (const char* param : {"volume", "pan", "mute"}) {
+        std::optional<model::Id> env;
+        bool shown = false;
+        for (const auto& e : s.envelopes)
+            if (e.value->target.object == track && e.value->target.param == param) {
+                env = e.id;
+                shown = e.value->visible;
+            }
+        ui::MenuItem m;
+        m.label = std::string(param == std::string_view("volume") ? "Volume"
+                              : param == std::string_view("pan")  ? "Pan"
+                                                                  : "Mute") +
+                  " envelope";
+        m.checked = env && shown;
+        if (env) {
+            m.run = [this, id = *env, shown] {
+                json::Value args = json::Value::object();
+                args["env"] = id.str();
+                args["visible"] = !shown;
+                commit("env.set", std::move(args), {});
+            };
+            ui::MenuItem remove;
+            remove.label = "Remove " + std::string(param) + " envelope";
+            remove.run = [this, id = *env] {
+                json::Value args = json::Value::object();
+                args["env"] = id.str();
+                commit("env.remove", std::move(args), {});
+            };
+            removals.push_back(std::move(remove));
+        } else {
+            // A new envelope starts flat at the strip's current value.
+            const double value = param == std::string_view("volume") ? tr->volumeDb
+                                 : param == std::string_view("pan")  ? tr->pan
+                                                                     : (tr->mute ? 1.0 : 0.0);
+            m.run = [this, track, param = std::string(param), value] {
+                json::Value args = json::Value::object(), points = json::Value::array(),
+                            first = json::Value::object();
+                args["track"] = track.str();
+                args["param"] = param;
+                first["beat"] = 0.0;
+                first["value"] = value;
+                points.push_back(std::move(first));
+                args["points"] = std::move(points);
+                commit("env.add", std::move(args), {});
+            };
+        }
+        items.push_back(std::move(m));
+    }
+    // The strip's effects' automated parameters (created from the FX window).
+    bool firstPlugin = true;
+    for (const auto& e : s.envelopes) {
+        const model::Id target = e.value->target.object;
+        if (target.kind != model::Kind::Fx) continue;
+        const bool owned =
+            std::find(tr->chain.begin(), tr->chain.end(), target) != tr->chain.end() ||
+            std::find(tr->inputChain.begin(), tr->inputChain.end(), target) != tr->inputChain.end();
+        const model::FxInstance* fx = s.fx.find(target);
+        if (!owned || !fx) continue;
+        if (firstPlugin) items.push_back({"", "", {}, true, true});  // separator
+        firstPlugin = false;
+        const std::string name =
+            (fx->label.empty() ? fx->plugin.name : fx->label) + ": " + e.value->target.param;
+        ui::MenuItem m;
+        m.label = name;
+        m.checked = e.value->visible;
+        m.run = [this, id = e.id, shown = e.value->visible] {
+            json::Value args = json::Value::object();
+            args["env"] = id.str();
+            args["visible"] = !shown;
+            commit("env.set", std::move(args), {});
+        };
+        items.push_back(std::move(m));
+        ui::MenuItem remove;
+        remove.label = "Remove " + name;
+        remove.run = [this, id = e.id] {
+            json::Value args = json::Value::object();
+            args["env"] = id.str();
+            commit("env.remove", std::move(args), {});
+        };
+        removals.push_back(std::move(remove));
+    }
+    if (!removals.empty()) {
+        items.push_back({"", "", {}, true, true});  // separator
+        for (auto& r : removals) items.push_back(std::move(r));
+    }
+    root_->openPopup(
+        ui::makeMenu("tcp.env." + track.str(), std::move(items), [this] { root_->closePopup(); }),
+        anchor);
 }
 
 void Shell::openInputMenu(const model::Id& track, const ui::Rect& anchor) {

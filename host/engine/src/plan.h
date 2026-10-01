@@ -20,6 +20,7 @@
 #include "strip.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
+#include "supple/model/env_shape.h"
 #include "supple/params/params.h"
 #include "supple/time/timeline.h"
 #include "workers.h"
@@ -79,23 +80,7 @@ struct Stereo {
     }
 };
 
-inline double shapeCurve(model::PointShape shape, double tension, double t) {
-    switch (shape) {
-        case model::PointShape::Linear:
-            return t;
-        case model::PointShape::Square:
-            return 0.0;  // holds until the next point
-        case model::PointShape::Slow:
-            return t * t * (3.0 - 2.0 * t);
-        case model::PointShape::FastStart:
-            return 1.0 - (1.0 - t) * (1.0 - t);
-        case model::PointShape::FastEnd:
-            return t * t;
-        case model::PointShape::Bezier:
-            return t + std::clamp(tension, -1.0, 1.0) * t * (1.0 - t);
-    }
-    return t;
-}
+using model::shapeCurve;  // supple/model/env_shape.h: shared with the GUI
 
 // A compiled envelope: points at samples from the render start (already
 // shifted by the latency at the point of application), values in the

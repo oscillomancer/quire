@@ -248,7 +248,7 @@ struct EnvRef {
 };
 struct EnvSetArgs {
     std::string env;
-    std::optional<bool> active;
+    std::optional<bool> active, visible;
     std::optional<model::EnvMode> mode;
 };
 struct EnvListArgs {
@@ -257,7 +257,7 @@ struct EnvListArgs {
 struct EnvEntry {
     std::string env, target, param, mode;
     std::int64_t points = 0;
-    bool active = true;
+    bool active = true, visible = true;
 };
 struct EnvList {
     std::vector<EnvEntry> envelopes;
@@ -1346,6 +1346,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            // Touch/latch/write envelopes record the change while the transport plays.
+            if (a.volumeDb) app.recordAutomation(*id, "volume", *a.volumeDb);
+            if (a.pan) app.recordAutomation(*id, "pan", *a.pan);
+            if (a.mute) app.recordAutomation(*id, "mute", *a.mute ? 1.0 : 0.0);
             if (a.parentSend && *a.parentSend && !s.tracks.find(*id)->parentSend.enabled)
                 if (auto valid = model::checkInvariants(app.view()); !valid)
                     return Error(
@@ -1961,7 +1965,21 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [mergeRun](const FxParamSetArgs& a, Context& ctx) -> Result<MergeResult> {
             json::Value patch = json::Value::object();
             patch["params"] = a.values;
-            return mergeRun(A(ctx), a.fx, patch, "/values");
+            auto merged = mergeRun(A(ctx), a.fx, patch, "/values");
+            if (!merged || !a.values.isObject()) return merged;
+            // Touch/latch/write envelopes of these parameters record the change
+            // while the transport plays (values in the parameter's unit).
+            const auto fx = model::Id::parse(a.fx);
+            if (!fx) return merged;
+            for (const auto& m : a.values.asObject()) {
+                if (!A(ctx).writesAutomation(*fx, m.key)) continue;
+                const model::EnvTarget target{*fx, m.key};
+                auto domain = envDomain(A(ctx), A(ctx).view(), target, "/values");
+                if (!domain) continue;
+                if (auto v = envValue(*domain, m.value, "/values/" + m.key); v)
+                    A(ctx).recordAutomation(*fx, m.key, *v);
+            }
+            return merged;
         };
         registry.add(std::move(c));
     }
@@ -2656,10 +2674,14 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Set an envelope's options: active (heard), mode (read, touch, latch, write).";
+        c.description =
+            "visible shows or hides the envelope's lane in the arrange view (a hidden envelope "
+            "still plays while active).";
         c.tags = {"automation"};
         c.args = schema::object<EnvSetArgs>("env_set_args")
                      .field("env", &EnvSetArgs::env, idArg("en", "Envelope"))
                      .field("active", &EnvSetArgs::active, schema::boolean())
+                     .field("visible", &EnvSetArgs::visible, schema::boolean())
                      .field("mode", &EnvSetArgs::mode, envModeSchema())
                      .build();
         c.result = emptySchema();
@@ -2671,6 +2693,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             app.txn().modify<model::Envelope>(*id, [&](model::Envelope& e) {
                 if (a.active) e.active = *a.active;
+                if (a.visible) e.visible = *a.visible;
                 if (a.mode) e.mode = *a.mode;
             });
             return Empty{};
@@ -2714,6 +2737,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                          .field("param", &EnvEntry::param, schema::string())
                          .field("points", &EnvEntry::points, schema::integer())
                          .field("active", &EnvEntry::active, schema::boolean())
+                         .field("visible", &EnvEntry::visible, schema::boolean())
                          .field("mode", &EnvEntry::mode, schema::string())
                          .build();
         c.result = schema::object<EnvList>("env_list")
@@ -2721,7 +2745,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        .build();
         c.examples = {
             {"All", obj("{}"),
-             obj(R"({"envelopes": [{"env": "en_1", "target": "fx_2", "param": "gain", "points": 2, "active": true, "mode": "read"}]})"),
+             obj(R"({"envelopes": [{"env": "en_1", "target": "fx_2", "param": "gain", "points": 2, "active": true, "visible": true, "mode": "read"}]})"),
              "song_with_env"}};
         c.run = [](const EnvListArgs& a, Context& ctx) -> Result<EnvList> {
             const model::Session s = A(ctx).view();
@@ -2733,7 +2757,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.object && env.target.object.str() != *a.object) continue;
                 out.envelopes.push_back({e.id.str(), env.target.object.str(), env.target.param,
                                          kModes[static_cast<int>(env.mode)],
-                                         static_cast<std::int64_t>(env.points.size()), env.active});
+                                         static_cast<std::int64_t>(env.points.size()), env.active,
+                                         env.visible});
             }
             return out;
         };

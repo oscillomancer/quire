@@ -1,5 +1,7 @@
 #include "supple/views/lanes.h"
 
+#include "supple/views/envelope_lane.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -81,6 +83,12 @@ class LaneLabels : public ui::Node {
                     item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
                 std::string name = take ? take->name : std::string();
                 if (name.empty()) name = id.str();
+                if (take && std::abs(take->playrate - 1.0) > 1e-6) {  // a stretched take says so
+                    char rate[48];
+                    std::snprintf(rate, sizeof rate, "  \u00b7 %.3gx%s", take->playrate,
+                                  take->preservePitch ? "" : " varispeed");
+                    name += rate;
+                }
                 const float alpha = item->mute ? 0.45f : 0.85f;
                 // Keep the label clear of the padlock an item may carry.
                 const float textX = item->locked ? r.x + 18.0f : r.x + 4.0f;
@@ -123,7 +131,7 @@ Lanes::Lanes(peaks::PeakService& peaks, Resolve resolve, const TrackLayout& rowL
 void Lanes::rebuild() {
     const model::Session& s = layout_.session();
     rowItems_.assign(layout_.rowCount(), {});
-    for (const auto& e : s.items) {
+    for (const auto& e : s.items) {  // indexOf: the track's own row, never its lanes
         if (auto row = layout_.indexOf(e.value->track)) rowItems_[*row].push_back(e.id);
     }
     for (auto& items : rowItems_)
@@ -159,9 +167,61 @@ void Lanes::paint(ui::Canvas& c) {
         const ui::Rect r = rowRect(i);
         if (r.bottom() < bounds().y) continue;
         if (r.y > bounds().bottom()) break;
+        if (layout_.rows()[i].env) {
+            drawEnvelope(c, i, r);
+            continue;
+        }
         if (i % 2) c.fillRect(r, t.color("panel").withAlpha(0.5f));
         c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.6f));
     }
+}
+
+// An automation lane: the envelope's curve sampled every few pixels (so the
+// segment shapes show as the engine plays them) and its points.
+void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
+    const ui::Theme& t = c.theme();
+    const model::Session& s = layout_.session();
+    c.fillRect(r, t.color("ground").withAlpha(0.6f));
+    c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.4f));
+    const model::Envelope* env = s.envelopes.find(*layout_.rows()[row].env);
+    const auto scale = env ? layout_.scaleOf(*env) : std::nullopt;
+    if (!env || !scale) return;
+    double fallback = scale->reference();
+    if (const model::Track* tr = s.tracks.find(env->target.object))
+        fallback = env->target.param == "volume" ? tr->volumeDb
+                   : env->target.param == "pan"  ? tr->pan
+                                                 : (tr->mute ? 1.0 : 0.0);
+    const ui::Rect a = envArea(r);
+    auto yOf = [&](double value) {
+        return a.bottom() - static_cast<float>(scale->toNorm(value)) * a.h;
+    };
+    const ui::Color ink =
+        t.color(typeToken(layout_.rows()[row].type)).withAlpha(env->active ? 1.0f : 0.35f);
+    // The unity / centre line for orientation.
+    c.fillRect({a.x, yOf(scale->reference()), a.w, 1}, t.color("rule").withAlpha(0.35f));
+    const float x0 = std::max(a.x, bounds().x), x1 = std::min(a.right(), bounds().right());
+    ui::Point prev{};
+    bool have = false;
+    for (float x = x0; x <= x1 + 3; x += 3) {
+        const float px = std::min(x, x1);
+        const double beat = s.timeMap->beatAt(std::max(0.0, timeAt(px)));
+        const ui::Point p{px, yOf(envValueAt(*env, beat, fallback))};
+        if (have) c.line(prev, p, ink, 1.5f);
+        prev = p;
+        have = true;
+        if (px >= x1) break;
+    }
+    for (const model::EnvPoint& pt : env->points) {
+        const float x = xAt(s.timeMap->secondsAt(pt.pos));
+        if (x < x0 - 4 || x > x1 + 4) continue;
+        c.fillRect({x - 3, yOf(pt.value) - 3, 6, 6}, ink);
+    }
+    c.text({r.x + 6, r.y, 200, 14}, envTitle(*env) + (env->active ? "" : " (off)"), ui::Font::Ui,
+           t.type("caption"), t.color("ink-quiet"));
+}
+
+ui::Rect Lanes::envArea(const ui::Rect& row) {
+    return {row.x, row.y + 4, row.w, std::max(1.0f, row.h - 8)};
 }
 
 void Lanes::paintGl(const ui::GlFrame& frame) {

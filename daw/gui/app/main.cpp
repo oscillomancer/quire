@@ -402,6 +402,18 @@ int main(int argc, char** argv) {
             (void)dispatcher.execute({"transport.seek", std::move(args), ui});
         };
     }
+    shell.arrange()->setRulerCallbacks(
+        {[&dispatcher](const std::string& command, json::Value args) {
+             return dispatcher.execute(
+                 {command, std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
+         },
+         [](const Error& e) {
+             std::fprintf(stderr, "ruler edit refused: %s\n", e.toString().c_str());
+         }});
+    appActions.addUi("ui.marker.add", "Marker: add at playhead",
+                     [&] { shell.arrange()->addMarker(); });
+    appActions.addUi("ui.region.add", "Region: add over loop range",
+                     [&] { shell.arrange()->addRegion(); });
     // The audio engine: the device for interactive use, nothing offscreen.
     const std::string audioMode =
         !o.audio.empty() ? o.audio : (o.offscreen || o.frames > 0 ? "none" : "jack");

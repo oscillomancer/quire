@@ -1,5 +1,7 @@
 #include "supple/views/tcp.h"
 
+#include "supple/views/envelope_lane.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -116,6 +118,7 @@ class TcpPanel::Row : public ui::Node {
     ui::Meter* meter_ = nullptr;
     ui::Label* fx_ = nullptr;
     ui::Button* input_ = nullptr;
+    ui::Button* env_ = nullptr;
     std::string inputText_;  // the full label; arrange() clips it to fit
 };
 
@@ -199,6 +202,10 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         if (!track_ || !panel_.cb_.pickInput) return;
         panel_.cb_.pickInput(*track_, absoluteRect(*input_));
     });
+    env_ = &emplace<ui::Button>(id + ".env", "env", [this] {
+        if (!track_ || !panel_.cb_.envelopes) return;
+        panel_.cb_.envelopes(*track_, absoluteRect(*env_));
+    });
 }
 
 TcpPanel::Row::~Row() = default;
@@ -259,6 +266,7 @@ void TcpPanel::Row::unbind() {
 
 ui::Node* TcpPanel::Row::control(std::string_view what) const {
     if (what == "name") return name_;
+    if (what == "env") return env_;
     if (what == "rename") return rename_;
     if (what == "mute") return mute_;
     if (what == "solo") return solo_;
@@ -290,6 +298,7 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     monitor_->visible = controls && channel_;
     input_->visible = controls && channel_;
     fx_->visible = controls;
+    env_->visible = controls;
     float tx = x + 26 + indent;
     for (ui::Node* n : {static_cast<ui::Node*>(mute_), static_cast<ui::Node*>(solo_),
                         static_cast<ui::Node*>(arm_), static_cast<ui::Node*>(monitor_)}) {
@@ -303,6 +312,10 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         // one and the picker's menu shows them whole.
         input_->arrange(canvas, {tx, ty, 58, 14});
         tx += 60;
+    }
+    if (env_->visible) {
+        env_->arrange(canvas, {tx, ty, 28, 14});
+        tx += 30;
     }
     if (fx_->visible) fx_->arrange(canvas, {tx, ty, std::max(20.0f, right - tx - 8), 14});
     fader_->visible = big;
@@ -403,10 +416,116 @@ ui::Meter* TcpPanel::meterOf(Row* row) const {
     return row ? static_cast<ui::Meter*>(row->control("meter")) : nullptr;
 }
 
+// ----------------------------------------------------------------- EnvRow
+
+// An automation lane's header, indented under its strip: the parameter, the
+// automation mode (click cycles read → touch → latch → write → trim), whether
+// the envelope is heard, and hiding the lane (the envelope keeps playing).
+class TcpPanel::EnvRow : public ui::Node {
+  public:
+    EnvRow(TcpPanel& panel, std::size_t slot)
+        : Node("tcp.env" + std::to_string(slot), ui::Role::Group), panel_(panel) {
+        const std::string id = this->id();
+        clipsChildren = true;
+        title_ = &emplace<ui::Label>(id + ".title", "", ui::Font::Ui, "small", "ink-quiet");
+        mode_ = &emplace<ui::Button>(id + ".mode", "read", [this] {
+            const model::Envelope* e = envelope();
+            if (!e) return;
+            static constexpr const char* kCycle[] = {"read", "touch", "latch", "write", "trim"};
+            const std::string now = modeName(e->mode);
+            std::size_t at = 0;
+            while (at < 5 && now != kCycle[at]) ++at;
+            set("mode", json::Value(std::string(kCycle[(at + 1) % 5])));
+        });
+        active_ = &emplace<ui::Toggle>(id + ".active", "on", "meter",
+                                       [this](bool on) { set("active", json::Value(on)); });
+        hide_ = &emplace<ui::Button>(id + ".hide", "hide",
+                                     [this] { set("visible", json::Value(false)); });
+    }
+    void bind(const model::Id& env, int depth, const model::Session& session) {
+        env_ = env;
+        depth_ = depth;
+        refresh(session);
+    }
+    void refresh(const model::Session& session) {
+        const model::Envelope* e = env_ ? session.envelopes.find(*env_) : nullptr;
+        if (!e) return;
+        title_->setText(envTitle(*e));
+        mode_->setText(modeName(e->mode));
+        active_->setOn(e->active);
+    }
+    void unbind() {
+        env_.reset();
+        visible = false;
+    }
+    bool bound() const { return env_.has_value(); }
+    const model::Id& env() const { return *env_; }
+    ui::Node* control(std::string_view what) const {
+        if (what == "title") return title_;
+        if (what == "mode") return mode_;
+        if (what == "active") return active_;
+        if (what == "hide") return hide_;
+        return nullptr;
+    }
+    void arrange(const ui::Canvas& canvas, const ui::Rect& r) override {
+        setBounds(r);
+        const float x = r.x + 26 + 14.0f * static_cast<float>(depth_ + 1);
+        const float y = r.y + std::max(2.0f, (r.h - 16) / 2);
+        title_->arrange(canvas, {x, y, 56, 16});
+        mode_->arrange(canvas, {x + 58, y + 1, 44, 14});
+        active_->arrange(canvas, {x + 104, y + 1, 22, 14});
+        hide_->arrange(canvas, {x + 128, y + 1, 34, 14});
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        c.fillRect(bounds(), t.color("ground").withAlpha(0.6f));
+        c.fillRect({bounds().x, bounds().bottom() - 1, bounds().w, 1},
+                   t.color("rule").withAlpha(0.4f));
+    }
+
+  private:
+    static std::string modeName(model::EnvMode m) {
+        switch (m) {
+            case model::EnvMode::Trim:
+                return "trim";
+            case model::EnvMode::Read:
+                return "read";
+            case model::EnvMode::Touch:
+                return "touch";
+            case model::EnvMode::Latch:
+                return "latch";
+            case model::EnvMode::LatchPreview:
+                return "preview";
+            case model::EnvMode::Write:
+                return "write";
+        }
+        return "read";
+    }
+    const model::Envelope* envelope() const {
+        return env_ ? panel_.session_.envelopes.find(*env_) : nullptr;
+    }
+    void set(const char* key, json::Value value) {
+        if (!env_ || !panel_.cb_.commit) return;
+        json::Value args = json::Value::object();
+        args["env"] = env_->str();
+        args[key] = std::move(value);
+        panel_.cb_.commit("env.set", std::move(args), {});
+    }
+    TcpPanel& panel_;
+    std::optional<model::Id> env_;
+    int depth_ = 0;
+    ui::Label* title_ = nullptr;
+    ui::Button* mode_ = nullptr;
+    ui::Toggle* active_ = nullptr;
+    ui::Button* hide_ = nullptr;
+};
+
 void TcpPanel::setSession(const model::Session& session) {
     session_ = session;
     bindRows();
     for (Row* row : rows_)
+        if (row->visible && row->bound()) row->refresh(session_);
+    for (EnvRow* row : envRows_)
         if (row->visible && row->bound()) row->refresh(session_);
     invalidate();
 }
@@ -414,16 +533,29 @@ void TcpPanel::setSession(const model::Session& session) {
 void TcpPanel::refresh() {
     for (Row* row : rows_)
         if (row->bound()) row->refresh(session_);
+    for (EnvRow* row : envRows_)
+        if (row->bound()) row->refresh(session_);
 }
 
 void TcpPanel::bindRows() {
     // The rows the current scroll shows; one pooled row each.
-    std::vector<std::size_t> shownRows;
+    std::vector<std::size_t> shownRows, shownLanes;
     for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
         const ui::Rect r = rowRect(i);
         if (r.bottom() <= bounds().y) continue;
         if (r.y >= bounds().bottom()) break;
-        shownRows.push_back(i);
+        (layout_.rows()[i].env ? shownLanes : shownRows).push_back(i);
+    }
+    while (envRows_.size() < shownLanes.size())
+        envRows_.push_back(&emplace<EnvRow>(*this, envRows_.size()));
+    for (std::size_t i = 0; i < envRows_.size(); ++i) {
+        if (i >= shownLanes.size()) {
+            envRows_[i]->unbind();
+            continue;
+        }
+        const TrackRow& spec = layout_.rows()[shownLanes[i]];
+        envRows_[i]->visible = true;
+        envRows_[i]->bind(*spec.env, spec.depth, session_);
     }
     while (rows_.size() < shownRows.size()) rows_.push_back(&emplace<Row>(*this, rows_.size()));
     for (std::size_t i = 0; i < rows_.size(); ++i) {
@@ -451,11 +583,15 @@ void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     bindRows();
     for (Row* row : rows_) {
         if (!row->visible || !row->bound()) continue;
-        const auto it =
-            std::find_if(layout_.rows().begin(), layout_.rows().end(),
-                         [&](const TrackRow& spec) { return spec.track == row->track(); });
+        const auto it = std::find_if(
+            layout_.rows().begin(), layout_.rows().end(),
+            [&](const TrackRow& spec) { return spec.track == row->track() && !spec.env; });
         if (it == layout_.rows().end()) continue;
         row->arrange(canvas, rowRect(static_cast<std::size_t>(it - layout_.rows().begin())));
+    }
+    for (EnvRow* row : envRows_) {
+        if (!row->visible || !row->bound()) continue;
+        if (const auto at = layout_.indexOfEnv(row->env())) row->arrange(canvas, rowRect(*at));
     }
     if (add_) add_->arrange(canvas, {r.right() - 62, r.bottom() - 22, 56, 18});  // the panel's foot
 }
@@ -470,6 +606,12 @@ ui::Node* TcpPanel::hitTest(ui::Point p) {
 ui::Node* TcpPanel::rowNode(const model::Id& track) const {
     for (Row* row : const_cast<TcpPanel*>(this)->rows_)
         if (row->visible && row->bound() && row->track() == track) return row;
+    return nullptr;
+}
+
+ui::Node* TcpPanel::envControl(const model::Id& env, std::string_view what) const {
+    for (EnvRow* row : const_cast<TcpPanel*>(this)->envRows_)
+        if (row->visible && row->bound() && row->env() == env) return row->control(what);
     return nullptr;
 }
 

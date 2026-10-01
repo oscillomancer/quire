@@ -150,6 +150,7 @@ q = nil
 ---@class Quire.env_set_args
 ---@field env string Envelope id, e.g. "en_1".
 ---@field active? boolean
+---@field visible? boolean
 ---@field mode? "trim"|"read"|"touch"|"latch"|"latch_preview"|"write"
 
 ---@class Quire.fx_add_args

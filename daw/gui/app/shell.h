@@ -65,6 +65,8 @@ class Shell {
     // is at hand, the channel numbers otherwise.
     std::string inputText(const model::Id& track, const std::string& channels) const;
     void openInputMenu(const model::Id& track, const ui::Rect& anchor);
+    // P5.14: the strip's automation lanes (show/hide; created when missing).
+    void openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor);
 
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;

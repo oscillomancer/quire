@@ -11,6 +11,7 @@
 #include "app_actions.h"
 #include "history_panel.h"
 #include "midi_editor.h"
+#include "midi_event_list.h"
 #include "mixer.h"
 #include "routing_matrix.h"
 #include "supple/gui/png.h"
@@ -534,4 +535,275 @@ TEST_CASE(
     CHECK(f.app->head().tracks.size() == tracks - 1);
     history.sync();
     CHECK(history.entries().back().command == "branch.switch");
+}
+
+namespace {
+
+void showEventList(Fixture& f) {
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    REQUIRE(f.root->click("midi.list.toggle"));
+    f.frame();
+    REQUIRE(f.root->find("midi.list")->visible);
+}
+
+ui::Point eventCell(Fixture& f, std::size_t row, gui::MidiEventList::Column column) {
+    const auto* list = f.editor->eventList()->list();
+    const auto b = list->bounds();
+    return {b.x + (static_cast<float>(column) + 0.5f) * (b.w - ui::ScrollBar::kThickness) / 6,
+            b.y + (static_cast<float>(row) + 0.5f) * list->rowHeight - list->scroll()};
+}
+
+void editEventCell(Fixture& f, std::size_t row, gui::MidiEventList::Column column,
+                   const std::string& text, bool commit = true) {
+    const auto p = eventCell(f, row, column);
+    f.pointer(ui::PointerEvent::Type::Down, p, 2);
+    f.pointer(ui::PointerEvent::Type::Up, p, 2);
+    REQUIRE(f.root->focused() == f.root->find("midi.list.edit"));
+    f.root->text(text);  // the inline field selects its old value
+    f.root->key(commit ? SDLK_RETURN : SDLK_ESCAPE);
+    f.frame();
+}
+
+std::size_t eventSteps(Fixture& f) { return f.exec("history.list", "{}")["versions"].size(); }
+
+json::Value eventCcs(Fixture& f) {
+    return f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"];
+}
+
+}  // namespace
+
+TEST_CASE("MIDI event list: toggle, ordered rows, formatting and shared selection") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[
+      {"op":"cc.set","number":64,"channel":2,"points":[{"beat":0,"value":127}]},
+      {"op":"cc.set","number":1,"points":[{"beat":0.5,"value":32}]}]})");
+    showEventList(f);
+    auto* events = f.editor->eventList();
+    REQUIRE(events->list()->count() == 6);
+    using Text = gui::MidiEventList::RowText;
+    CHECK(events->rowText(0) == Text{"2.1.0", "Note", "1.0", "C4", "96", "1"});
+    CHECK(events->rowText(1) == Text{"2.1.0", "CC 64", "", "64", "127", "2"});
+    CHECK(events->rowText(2) == Text{"2.1.480", "CC 1", "", "1", "32", "1"});
+    CHECK(events->rowText(3)[0] == "2.2.0");
+    CHECK(events->rowText(3)[3] == "E4");
+    CHECK_FALSE(f.root->find("midi.left")->visible);
+    CHECK(f.root->find("midi.notation")->visible);
+    f.pointer(ui::PointerEvent::Type::Down, eventCell(f, 3, gui::MidiEventList::Column::Pitch));
+    f.pointer(ui::PointerEvent::Type::Up, eventCell(f, 3, gui::MidiEventList::Column::Pitch));
+    CHECK(f.editor->state().selected == std::set<std::size_t>{1});
+    REQUIRE(f.root->click("midi.list.toggle"));
+    f.frame();
+    CHECK_FALSE(f.root->find("midi.list")->visible);
+    CHECK(f.root->find("midi.left")->visible);
+    CHECK(f.editor->roll()->visible);
+    CHECK(f.root->find("midi.notation")->visible);
+    CHECK(f.editor->state().selected == std::set<std::size_t>{1});
+    f.editor->state().selected = {2, 3};
+    REQUIRE(f.root->click("midi.list.toggle"));
+    f.frame();
+    CHECK(events->list()->selected() == 4);
+    f.snapshot("midi-event-list.png");
+}
+
+TEST_CASE(
+    "MIDI event list: text edits each commit one version, invalid input and Escape commit none") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    showEventList(f);
+    using Col = gui::MidiEventList::Column;
+    const auto initial = eventSteps(f);
+    editEventCell(f, 0, Col::Value, "110");
+    CHECK(f.notes().asArray()[0]["velocity"].asInt() == 110);
+    CHECK(eventSteps(f) == initial + 1);
+    editEventCell(f, 0, Col::Position, "2.1.480");
+    CHECK(f.notes().asArray()[0]["start"].asDouble() == doctest::Approx(0.5));
+    CHECK(eventSteps(f) == initial + 2);
+    editEventCell(f, 0, Col::Pitch, "C#4");
+    CHECK(f.notes().asArray()[0]["pitch"].asInt() == 61);
+    CHECK(eventSteps(f) == initial + 3);
+    editEventCell(f, 0, Col::Pitch, "62");
+    CHECK(f.notes().asArray()[0]["pitch"].asInt() == 62);
+    CHECK(eventSteps(f) == initial + 4);
+    editEventCell(f, 0, Col::Length, "1.240");
+    CHECK(f.notes().asArray()[0]["length"].asDouble() == doctest::Approx(1.25));
+    CHECK(eventSteps(f) == initial + 5);
+    for (const auto& bad : {std::pair{Col::Value, "128"},
+                            {Col::Value, "-1"},
+                            {Col::Position, "2.5.0"},
+                            {Col::Position, "2.1.960"},
+                            {Col::Position, "garbage"},
+                            {Col::Length, "0.0"},
+                            {Col::Pitch, "C#"},
+                            {Col::Pitch, "9999999999999999"}}) {
+        editEventCell(f, 0, bad.first, bad.second);
+        CHECK(eventSteps(f) == initial + 5);
+        CHECK_FALSE(f.root->find("midi.list.status")->valueText().empty());
+        f.root->key(SDLK_ESCAPE);
+        f.frame();
+    }
+    editEventCell(f, 0, Col::Value, "64", false);
+    CHECK(f.notes().asArray()[0]["velocity"].asInt() == 110);
+    CHECK(eventSteps(f) == initial + 5);
+    CHECK_FALSE(f.root->find("midi.list.edit")->visible);
+    f.exec("history.undo", "{}");
+    f.frame();
+    CHECK(f.editor->eventList()->rowText(0)[2] == "1.0");
+}
+
+TEST_CASE("MIDI event list: multi-row Delete and quarter-note addition") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[
+      {"op":"cc.set","number":1,"channel":2,"points":[{"beat":0.5,"value":32},{"beat":0.5010416667,"value":48}]},
+      {"op":"cc.set","number":1,"points":[{"beat":0.5,"value":64}]}]})");
+    showEventList(f);
+    const auto initial = eventSteps(f);
+    using Col = gui::MidiEventList::Column;
+    auto p = eventCell(f, 0, Col::Position);
+    f.pointer(ui::PointerEvent::Type::Down, p);
+    f.pointer(ui::PointerEvent::Type::Up, p);
+    p = eventCell(f, 2, Col::Position);  // channel 2 CC
+    f.pointer(ui::PointerEvent::Type::Down, p, 1, ui::kCtrl);
+    f.pointer(ui::PointerEvent::Type::Up, p, 1, ui::kCtrl);
+    f.root->key(SDLK_DELETE);
+    f.frame();
+    CHECK(f.notes().size() == 3);
+    REQUIRE(eventCcs(f).size() == 2);
+    CHECK(eventCcs(f).asArray()[0]["value"].asInt() == 64);
+    CHECK(eventCcs(f).asArray()[1]["value"].asInt() == 48);  // adjacent tick survived
+    CHECK(eventSteps(f) == initial + 1);
+    REQUIRE(f.root->click("midi.list.add"));
+    f.frame();
+    CHECK(f.notes().size() == 4);
+    CHECK(f.notes().asArray()[0]["start"].asDouble() == 0);
+    CHECK(f.notes().asArray()[0]["pitch"].asInt() == 60);
+    CHECK(f.notes().asArray()[0]["velocity"].asInt() == 96);
+    CHECK(f.notes().asArray()[0]["length"].asDouble() == 1);
+    CHECK(f.editor->state().selected == std::set<std::size_t>{0});
+    CHECK(eventSteps(f) == initial + 2);
+    // Add at a selected row, then delete all rows with a Shift selection.
+    p = eventCell(f, 4, Col::Position);
+    f.pointer(ui::PointerEvent::Type::Down, p);
+    f.pointer(ui::PointerEvent::Type::Up, p);
+    REQUIRE(f.root->click("midi.list.add"));
+    f.frame();
+    CHECK(f.notes().size() == 5);
+    CHECK(f.notes().asArray()[2]["pitch"].asInt() == 60);
+    CHECK(f.notes().asArray()[2]["start"].asDouble() == 2);
+    CHECK(eventSteps(f) == initial + 3);
+    f.root->key(SDLK_HOME);
+    f.root->key(SDLK_END, ui::kShift);
+    f.root->key(SDLK_DELETE);
+    f.frame();
+    CHECK(f.notes().size() == 0);
+    CHECK(eventCcs(f).size() == 0);
+    CHECK(eventSteps(f) == initial + 4);
+}
+
+TEST_CASE("MIDI event list: CC text edits preserve controller channels and neighbors") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[
+      {"op":"cc.set","number":11,"channel":3,"points":[{"beat":0.5,"value":32},{"beat":0.5010416667,"value":48}]}]})");
+    showEventList(f);
+    using Col = gui::MidiEventList::Column;
+    const auto initial = eventSteps(f);
+    editEventCell(f, 1, Col::Value, "0");
+    CHECK(eventCcs(f).asArray()[0]["value"].asInt() == 0);
+    CHECK(eventCcs(f).asArray()[0]["channel"].asInt() == 3);
+    CHECK(eventCcs(f).asArray()[1]["value"].asInt() == 48);
+    CHECK(eventSteps(f) == initial + 1);
+    editEventCell(f, 1, Col::Position, "2.2.480");
+    CHECK(eventCcs(f).asArray()[1]["beat"].asDouble() == doctest::Approx(1.5));
+    CHECK(eventCcs(f).asArray()[0]["value"].asInt() == 48);
+    CHECK(eventSteps(f) == initial + 2);
+    editEventCell(f, 3, Col::Pitch, "7");
+    CHECK(eventCcs(f).asArray()[1]["number"].asInt() == 7);
+    CHECK(eventCcs(f).asArray()[1]["channel"].asInt() == 3);
+    CHECK(eventSteps(f) == initial + 3);
+}
+
+TEST_CASE("MIDI event list: project meter, source offset and playrate, virtualization") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    f.exec("timesig.set", R"({"bar":2,"meter":"3/8"})");
+    auto take = f.app->head().items.find(*model::Id::parse(f.item))->activeTake;
+    REQUIRE(take);
+    f.exec("take.set", R"({"take":")" + take->str() + R"(","start_offset":0.5,"playrate":2})");
+    showEventList(f);
+    CHECK(f.editor->eventList()->rowText(1)[0] == "2.1.480");
+    CHECK(f.editor->eventList()->rowText(1)[2] == "0.480");
+    editEventCell(f, 1, gui::MidiEventList::Column::Position, "3.1.240");
+    CHECK(f.notes().asArray()[3]["start"].asDouble() == doctest::Approx(1.625));
+    CHECK(f.editor->state().selected == std::set<std::size_t>{3});
+    auto ops = json::Value::array();
+    for (int i = 0; i < 2000; ++i) {
+        auto op = json::Value::object();
+        op["op"] = "add";
+        op["pitch"] = i % 128;
+        op["start"] = 2.0 + i / 8.0;
+        op["length"] = 0.25;
+        ops.push_back(std::move(op));
+    }
+    REQUIRE(f.editor->edit(std::move(ops)));
+    f.frame();
+    const auto* list = f.editor->eventList()->list();
+    CHECK(list->count() == 2004);
+    CHECK(list->rowsPainted() < 20);
+    f.root->key(SDLK_END);
+    f.frame();
+    CHECK(list->selected() == 2003);
+    CHECK(list->scroll() > 1000);
+    CHECK(list->rowsPainted() < 20);
+}
+
+TEST_CASE("MIDI event list: stale inline edits and closing cannot target hidden rows") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    showEventList(f);
+    const auto p = eventCell(f, 0, gui::MidiEventList::Column::Value);
+    f.pointer(ui::PointerEvent::Type::Down, p, 2);
+    f.pointer(ui::PointerEvent::Type::Up, p, 2);
+    f.root->text("120");
+    const auto initial = eventSteps(f);
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"move","notes":[0],"beats":3.5}]})");
+    // Another client edited before the next UI sync: refuse the stale index.
+    f.root->key(SDLK_RETURN);
+    CHECK(eventSteps(f) == initial + 1);
+    CHECK(f.notes().asArray()[3]["velocity"].asInt() == 96);
+    CHECK_FALSE(f.root->find("midi.list.edit")->visible);
+    CHECK_FALSE(f.root->find("midi.list.status")->valueText().empty());
+    f.frame();
+    f.root->focus(f.editor->eventList()->list());
+    f.root->key(SDLK_HOME);
+    f.editor->close();
+    CHECK(f.root->focused() == nullptr);
+    CHECK(f.editor->eventList()->list()->count() == 0);
+    f.root->key(SDLK_DELETE);
+    CHECK(eventSteps(f) == initial + 1);
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    CHECK(f.editor->eventList()->list()->count() == 4);
+    CHECK(f.editor->state().selected.empty());
 }

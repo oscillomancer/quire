@@ -1137,11 +1137,14 @@ Kind: `query`. Exposure: `mcp-tool`.
           "active": {
             "type": "boolean"
           },
+          "visible": {
+            "type": "boolean"
+          },
           "mode": {
             "type": "string"
           }
         },
-        "required": ["env", "target", "param", "points", "active", "mode"],
+        "required": ["env", "target", "param", "points", "active", "visible", "mode"],
         "additionalProperties": false
       }
     }
@@ -1172,6 +1175,7 @@ Result:
       "param": "gain",
       "points": 2,
       "active": true,
+      "visible": true,
       "mode": "read"
     }
   ]
@@ -1296,7 +1300,7 @@ Result:
 
 Set an envelope's options: active (heard), mode (read, touch, latch, write).
 
-
+visible shows or hides the envelope's lane in the arrange view (a hidden envelope still plays while active).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1306,6 +1310,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `env` | string |  |  |  | Envelope id, e.g. "en_1". |
 | `active` | boolean |  |  |  |  |
+| `visible` | boolean |  |  |  |  |
 | `mode` | string |  |  |  |  |
 
 ### Result

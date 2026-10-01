@@ -2,11 +2,13 @@
 // reaper-ux.md 8-13): select (click, Shift add, Ctrl toggle, marquee on empty
 // space or a right-drag anywhere), move in time and across channels (snapped
 // to the grid at the current zoom; Shift moves freely; Ctrl-drag copies), trim either edge (the
-// left edge moves the take's source offset so the audio stays put), slip
+// left edge moves the take's source offset so the audio stays put; Alt on the
+// right edge stretches: the play rate follows the length), slip
 // (Alt-drag: the source moves under the item), fade handles at the top
 // corners, the take badge cycles takes, double-click opens a MIDI item, and
-// files dropped on the lanes. Each gesture previews as a ghost on the root's
-// overlay and commits ONE transaction on release.
+// files dropped on the lanes. On an automation lane: click adds a point, drag
+// moves one (snapped; Shift frees), Alt+click deletes one. Each gesture previews as a ghost on the
+// root's overlay and commits ONE transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -49,6 +51,9 @@ class ItemGestures {
     std::function<void(model::Id item)> onOpenMidi;                  // double-click on a MIDI item
     std::function<void(double seconds)> onSeek;                      // a click on empty space
     std::function<void(const Error&)> onError;  // a refused gesture (status line)
+    // REAPER's default: a move, copy or trim that makes two items overlap on a
+    // track fades both over the overlap (in the same transaction).
+    bool autoCrossfade = true;
 
     const std::vector<model::Id>& selection() const { return selection_; }
     void setSelection(std::vector<model::Id> items);  // no onSelection call
@@ -63,17 +68,28 @@ class ItemGestures {
 
     // The snap grid at the current zoom, in beats (1/16 .. 32).
     double gridBeats() const;
+    // The play rate that keeps a take's material filling the item when its
+    // end moves by `deltaBeats` (the stretch gesture).
+    double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
 
     // What a drag is doing (the overlay and tests read it).
-    enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee };
+    enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee, EnvPoint };
     struct State {
         Drag drag = Drag::None;
         model::Id anchor{};      // the item under the press
         double deltaBeats = 0;   // move / trim-left / trim-right / slip, snapped
         int deltaRows = 0;       // move
         double fadeSeconds = 0;  // fade in/out length being drawn
+        bool stretch = false;    // Alt on the right edge: length and play rate together
         ui::Rect marquee{};
         std::vector<model::Id> marqueeBase;
+        // An automation lane's point being added or dragged (P5.14): a click
+        // on the lane adds one, a drag moves it, Alt+click deletes one.
+        std::optional<model::Id> env;
+        std::vector<model::EnvPoint> envDraft;
+        std::size_t envIndex = 0;
+        double envOrigPos = 0;
+        bool envCreated = false;
     };
     const State& state() const { return state_; }
 
@@ -92,6 +108,9 @@ class ItemGestures {
 
   private:
     double beatAtX(float x) const;
+    bool envPress(std::size_t row, const ui::PointerEvent& e);
+    void envDrag(const ui::PointerEvent& e);
+    void commitEnv(const std::string& label);
     double snap(double beat, bool free) const;
     void commit(const ui::PointerEvent& e);
     void changed();

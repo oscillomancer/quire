@@ -41,6 +41,8 @@ class Lanes : public ui::Node {
     std::size_t rowCount() const { return layout_.rowCount(); }
     ui::Rect rowRect(std::size_t row) const;
     ui::Rect itemRect(std::size_t row, const model::Item& item) const;
+    // An automation lane's value area inside its row (gestures map y with it).
+    static ui::Rect envArea(const ui::Rect& row);
 
     void arrange(const ui::Canvas& canvas, const ui::Rect& bounds) override;
     void paint(ui::Canvas& canvas) override;
@@ -59,6 +61,7 @@ class Lanes : public ui::Node {
     void drawMidi(const ui::Rect& r, const model::Item& item, const model::Take& take,
                   const model::MidiSource& source, std::uint32_t rgba, std::uint32_t border);
     void drawFades(const ui::Rect& r, const model::Item& item, std::uint32_t rgba);
+    void drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r);
 
     peaks::PeakService& peaks_;
     Resolve resolve_;
