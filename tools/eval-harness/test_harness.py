@@ -10,10 +10,10 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import HERE, ROOT, Mcp, capture, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
+from common import HERE, ROOT, Mcp, PluginProvenanceError, capture, check_plugin_provenance, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble, preflight
-from run import render_patch, score_final
+from run import render_patch, score_final, unpublishable
 from scoring import notation_score, transcript_metrics
 
 
@@ -143,6 +143,56 @@ class Isolation(unittest.TestCase):
                 preflight(options, Path(tmp) / "a")
             fake.write_text("#!/bin/sh\ntest -d \"$HERMES_HOME\" || exit 3\nexit 0\n")
             preflight(options, Path(tmp) / "b")
+
+
+class PluginProvenance(unittest.TestCase):
+    """The harness must refuse to measure a plugin that is not the build's."""
+
+    class Stub:
+        def __init__(self, session, catalogue):
+            self.session = session
+            self.catalogue = catalogue
+
+        def call(self, name, arguments=None):
+            if name == "session.get":
+                return self.session
+            if name == "plugin.list":
+                return self.catalogue
+            raise AssertionError(name)
+
+    def client(self, path, shadowed=None):
+        entries = [{"id": "com.suppleaudio.orrery", "path": path, "version": "0.1.0"}]
+        for stale in shadowed or []:
+            entries.append({"id": "com.suppleaudio.orrery", "path": stale, "version": "0.1.0",
+                            "shadowed": True})
+        session = {"chain": ["in_1"], "instances": {"in_1": {"plugin": "com.suppleaudio.orrery"}}}
+        return self.Stub(session, {"plugins": entries})
+
+    def test_the_build_passes_and_a_stale_copy_fails(self):
+        build = ROOT / "build/dev/plugins/clap"
+        fresh = self.client(str(build / "Orrery.clap"), [str(Path.home() / ".clap/Orrery.clap")])
+        provenance = check_plugin_provenance(fresh, build, what="a test session")
+        self.assertEqual(provenance["in_1"]["path"], str(build / "Orrery.clap"))
+        self.assertEqual(provenance["in_1"]["shadowed"], [str(Path.home() / ".clap/Orrery.clap")])
+        # The path the sandbox prints may be relative to the harness's cwd.
+        relative = check_plugin_provenance(self.client("build/dev/plugins/clap/Orrery.clap"), build)
+        self.assertEqual(relative["in_1"]["path"], "build/dev/plugins/clap/Orrery.clap")
+        for bad in (str(Path.home() / ".clap/Orrery.clap"), "/tmp/Orrery.clap", None):
+            with self.subTest(path=bad):
+                with self.assertRaises(PluginProvenanceError):
+                    check_plugin_provenance(self.client(bad), build)
+
+
+class Publishing(unittest.TestCase):
+    def test_outages_are_not_measurements(self):
+        usage = {"total_tokens": 27367}
+        broken = {"usage_totals": usage, "tasks": [{"incomplete": True}, {"error": "HTTP 402"}]}
+        self.assertEqual(unpublishable("hermes", broken), "every attempt was incomplete")
+        silent = {"usage_totals": {"total_tokens": 0}, "tasks": [{"score": {"pass": True}}]}
+        self.assertEqual(unpublishable("hermes", silent), "no attempt reached the model")
+        partial = {"usage_totals": usage, "tasks": [{"incomplete": True}, {"score": {"pass": False}}]}
+        self.assertIsNone(unpublishable("hermes", partial))
+        self.assertIsNone(unpublishable("dry", broken))
 
 
 @unittest.skipUnless(os.environ.get("SUPPLE_EVAL_INTEGRATION") == "1", "opt-in real sandbox checks")
