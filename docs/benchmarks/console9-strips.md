@@ -1,7 +1,7 @@
 # Console 9 engine strip cost
 
 2026-09-30, Intel Core Ultra 5 225F, Clang release preset, stereo 48 kHz,
-512-frame blocks. The existing B1 tool now accepts `--strips`:
+512-frame blocks, engine revision `1dc7a67`. The existing B1 tool now accepts `--strips`:
 
 ```sh
 cmake --preset release
@@ -17,10 +17,10 @@ media, worker dispatch, audio device or hardware deadline measurement.
 
 | Strip | Console 9 | ns/stereo frame | One 48 kHz strip, % of one core |
 |---|---|---:|---:|
-| Channel | linear | 8.18 | 0.039 |
-| Buss | linear | 13.68 | 0.066 |
-| Channel | on | 38.34 | 0.184 |
-| Buss | on | 69.12 | 0.332 |
+| Channel | linear | 8.63 | 0.041 |
+| Buss | linear | 12.83 | 0.062 |
+| Channel | on | 37.96 | 0.182 |
+| Buss | on | 70.35 | 0.338 |
 
 These are local throughput measurements, not timing acceptance thresholds.
 A non-sharing audio send adds its own Channel encoder; a unity post-fader
