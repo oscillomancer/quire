@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -144,6 +145,27 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
     };
+    tcp.addSend = [this](const model::Id& from, const model::Id& to) {
+        json::Value args = json::Value::object();
+        args["from"] = from.str();
+        args["to"] = to.str();
+        return dispatcher_.execute(
+            {"route.add", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
+    };
+    tcp.onError = [this](const Error& error) {
+        if (onError)
+            onError(error.toString());
+        else
+            std::fprintf(stderr, "send refused: %s\n", error.toString().c_str());
+    };
+    tcp.routing = [this, &actions](const model::Id& track, const ui::Rect& anchor) {
+        if (onRouting)
+            onRouting(track, anchor);
+        else
+            (void)actions.run("ui.routing");
+    };
+    tcp.lanesRect = [this] { return arrange_->lanesRect(); };
+
     arrange_->setTcpCallbacks(std::move(tcp));
     // Plugin parameter lanes take their scale from the effect's description.
     arrange_->trackLayout().pluginScales =

@@ -9,6 +9,8 @@
 #pragma once
 
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,6 +50,12 @@ struct TcpCallbacks {
     // The strip's "env" button: the app's menu of its automation lanes
     // (show/hide volume, pan, mute; creating the envelope when missing).
     std::function<void(const model::Id& track, const ui::Rect& anchor)> envelopes;
+    // Output drags commit one send on release; a click opens the matrix.
+    std::function<Result<json::Value>(const model::Id& from, const model::Id& to)> addSend;
+    std::function<void(const Error&)> onError;
+    std::function<void(const model::Id& track, const ui::Rect& anchor)> routing;
+    // The arrange lanes accept drops too, with the TCP's shared row geometry.
+    std::function<ui::Rect()> lanesRect;
 };
 
 class TcpPanel : public ui::Node {
@@ -77,11 +85,16 @@ class TcpPanel : public ui::Node {
   private:
     class Row;
     class EnvRow;  // an automation lane's header (P5.14)
+    class OutButton;
+    class SendGhost;
     friend class Row;
     friend class EnvRow;
     void bindRows();
     void openAddMenu();
     ui::Meter* meterOf(Row* row) const;
+    bool sendPointer(const ui::PointerEvent& e, const model::Id& from, const ui::Rect& anchor);
+    void cancelSend();
+    std::optional<std::size_t> sendRowAt(ui::Point p) const;
 
     const TrackLayout& layout_;
     const Viewport& view_;
@@ -91,6 +104,11 @@ class TcpPanel : public ui::Node {
     std::vector<Row*> rows_;           // a pool: only visible rows exist
     std::vector<EnvRow*> envRows_;     // the same for automation lanes
     std::uint64_t gestureSerial_ = 0;  // unique per drag (coalescing key)
+    std::optional<model::Id> sendFrom_;
+    ui::Point sendPress_{}, sendPointer_{};
+    ui::Rect sendAnchor_{};
+    bool sendMoved_ = false, sendOverlay_ = false;
+    std::shared_ptr<TcpPanel*> alive_;
 };
 
 }  // namespace supple::views
