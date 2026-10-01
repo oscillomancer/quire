@@ -19,6 +19,8 @@ struct Wake {
     Wake& operator=(const Wake&) = delete;
     ~Wake();
     void notify() const;
+    // Called by notify() too, from any thread (ModelLoop::setWaker).
+    std::function<void()> waker;
 };
 struct TimerState {
     std::function<void()> fn;
@@ -63,6 +65,18 @@ class ModelLoop {
     Timer every(std::chrono::milliseconds interval, std::function<void()> fn);
     void post(std::function<void()> task);
     void run();  // blocks until SIGINT or SIGTERM
+
+    // Embedding in another event loop (the GUI's): `waker` is called, from any
+    // thread, whenever the loop has new work (a post, a timer change); it must
+    // only wake the owner (e.g. push an SDL event). Set it before other threads
+    // use the loop. Signals do not call it: the owner sees stopRequested() at
+    // its next wake-up, which the nearest timer bounds.
+    void setWaker(std::function<void()> waker);
+    // Runs the due timers and the posted tasks once, without blocking.
+    // Returns the milliseconds until the nearest timer, or -1 when there is none.
+    int pump();
+    // SIGINT or SIGTERM arrived.
+    bool stopRequested() const;
 
   private:
     struct Impl;
