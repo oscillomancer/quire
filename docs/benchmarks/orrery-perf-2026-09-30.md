@@ -155,5 +155,17 @@ tools/ci/format.sh --check
 
 Dev, Release, RTSan, and format check passed. RTSan uses scalar loops because
 its function-call instrumentation prevents vectorization; hints are disabled in
-that preset. The single full-CI result will be recorded below when complete. `STATUS.md` remains owned by the orchestrator; external review
+that preset. The single full-CI run also passed, as recorded below. `STATUS.md` remains owned by the orchestrator; external review
 is pending.
+
+
+Final verification: `tools/ci/run-all.sh` was run **once**, outside the socket-
+restricted sandbox, and exited 0: license (12 dependencies), format, dev, gcc,
+asan, ubsan, tsan, rtsan all **pass**. No CI logs were polled or read; no failed
+stage required investigation. The focused dev/Release/RTSan tests and all
+reference comparisons above passed. No audio device was opened for this task.
+
+After CI passed, removed `build/gcc`, `build/asan`, `build/ubsan`, `build/tsan`,
+`build/rtsan`; retained `build/dev` and Release benchmarks/captures. The 3%
+performance target remains unmet for the structural reasons above. No open
+questions; orchestrator review remains pending.
