@@ -87,11 +87,9 @@ Patch parse(std::string_view body) {
     return *p;
 }
 
-Audio render(const Patch& patch, const std::vector<Timed>& events, std::int64_t frames,
-             std::uint32_t block, double sr = 48000.0) {
-    Engine engine;
-    engine.prepare(sr, std::max<std::uint32_t>(block, 16));
-    engine.setPatch(patch);
+// One pass of `events` through an already prepared engine (reset first).
+Audio play(Engine& engine, const std::vector<Timed>& events, std::int64_t frames,
+           std::uint32_t block) {
     engine.reset();
     Audio out;
     out.l.resize(static_cast<std::size_t>(frames));
@@ -110,6 +108,14 @@ Audio render(const Patch& patch, const std::vector<Timed>& events, std::int64_t 
         engine.process(buf, Transport{}, out.l.data() + pos, out.r.data() + pos, n);
     }
     return out;
+}
+
+Audio render(const Patch& patch, const std::vector<Timed>& events, std::int64_t frames,
+             std::uint32_t block, double sr = 48000.0) {
+    Engine engine;
+    engine.prepare(sr, std::max<std::uint32_t>(block, 16));
+    engine.setPatch(patch);
+    return play(engine, events, frames, block);
 }
 
 constexpr std::string_view kPad = R"(
@@ -293,6 +299,35 @@ TEST_CASE("renders do not depend on the block size") {
                               std::fabs(static_cast<double>(a.r[i] - ref.r[i]))});
         CHECK(worst == 0.0);
     }
+}
+
+TEST_CASE("after reset a render depends only on the patch, not on the previous render") {
+    // A render in a reused instance (the sandbox renders this way) must equal
+    // a fresh engine's: after reset() parameter ramps snap to the current
+    // program, the FX delay time starts at its value and the output gain ramps
+    // in from 0, whatever the previous render left behind.
+    std::string ys(kPad);
+    for (auto [from, to] : {std::pair{"1.2 kHz", "400 Hz"}, std::pair{"\"3 dB\"", "\"9 dB\""},
+                            std::pair{"25 %", "70 %"}})
+        ys.replace(ys.find(from), std::string_view(from).size(), to);
+    const Patch x = parse(kPad), y = parse(ys);
+    const std::vector<Timed> ev = {note(0, 45, 0.9), noteOff(12000, 45)};
+    const std::int64_t frames = 30000;
+    Engine engine;
+    engine.prepare(48000.0, 256);
+    engine.setPatch(x);
+    auto maxDiff = [](const Audio& a, const Audio& b) {
+        double d = 0.0;
+        for (std::size_t i = 0; i < a.l.size(); ++i)
+            d = std::max({d, std::fabs(static_cast<double>(a.l[i]) - static_cast<double>(b.l[i])),
+                          std::fabs(static_cast<double>(a.r[i]) - static_cast<double>(b.r[i]))});
+        return d;
+    };
+    const Audio first = play(engine, ev, frames, 256);
+    CHECK(maxDiff(first, render(x, ev, frames, 256)) == 0.0);
+    CHECK(maxDiff(play(engine, ev, frames, 256), first) == 0.0);  // the same patch again
+    engine.setPatch(y);
+    CHECK(maxDiff(play(engine, ev, frames, 256), render(y, ev, frames, 256)) == 0.0);
 }
 
 TEST_CASE("the seed decides every random choice") {

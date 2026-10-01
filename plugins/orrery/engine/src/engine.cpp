@@ -1861,8 +1861,17 @@ void Engine::reset() {
     }
     for (std::size_t s = 0; s < kStepCount; ++s) m.monoStepRestart[s] = true;
     for (auto& f : m.frames) f = Frame{};
+    m.firstTick = 0;
+    m.lastFrameTick = -1;
+    m.outGain = dsp::Lerp{};  // the first tick ramps in from 0, as after construction
     m.now = 0;
     m.quiet = 0;
+    // CLAP reset keeps parameter values but nothing of the previous processing:
+    // re-adopt the newest program on the next block so every ramp snaps to it,
+    // as after prepare(). Without this a render in a reused instance glided from
+    // the last render's values (sandbox renders differed from a fresh instance
+    // of the same patch by up to 0.19 after a cutoff change).
+    m.prog = nullptr;
 }
 
 int Engine::activeVoices() const {

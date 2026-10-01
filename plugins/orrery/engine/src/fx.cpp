@@ -69,7 +69,7 @@ void FxRack::reset() {
     phaser_.phase = 0.0;
     for (auto& l : delay_.line) l.reset();
     delay_.lp = {};
-    delay_.samples = delay_.target;
+    delay_.snap = true;
     for (auto& l : reverb_.line) l.reset();
     for (auto& l : reverb_.pre) l.reset();
     reverb_.lp = {};
@@ -103,6 +103,10 @@ void FxRack::set(FxKind kind, std::span<const double> v, double tempo) {
                                   : noteQuarters(sync) * 60000.0 / std::max(1.0, tempo);
             delay_.target =
                 std::clamp(ms * 1e-3 * fs_, 1.0, static_cast<double>(delay_.line[0].capacity()));
+            // The first time after reset the time starts at its value; glides
+            // are for changes while running.
+            if (delay_.snap) delay_.samples = delay_.target;
+            delay_.snap = false;
             delay_.feedback = at(DelayF::feedback) / 100.0;
             delay_.pingPong = at(DelayF::ping_pong) > 0.5;
             delay_.damping = at(DelayF::damping) / 100.0;

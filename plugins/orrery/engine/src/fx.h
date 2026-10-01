@@ -85,6 +85,7 @@ class FxRack {
         std::array<double, 2> lp{};
         double samples = 0.0, target = 0.0, feedback = 0.35, damping = 0.3, mix = 0.25;
         bool pingPong = false;
+        bool snap = true;  // set() adopts the time without a glide (after reset)
     } delay_;
 
     struct Reverb {
