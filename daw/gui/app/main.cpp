@@ -382,7 +382,8 @@ int main(int argc, char** argv) {
                     if (!r) return r;
                     results.push_back(std::move(*r));
                 }
-                return json::Value::object();
+                return results.empty() ? json::Value::object()
+                                       : results.back();  // the last step's result
             });
         };
         g.onSelection = [&](const std::vector<model::Id>& items) {
@@ -410,6 +411,28 @@ int main(int argc, char** argv) {
          [](const Error& e) {
              std::fprintf(stderr, "ruler edit refused: %s\n", e.toString().c_str());
          }});
+    // A new, empty MIDI item on the selected channel (else the first), over the
+    // loop range when it is on, else one bar at the playhead; opened.
+    appActions.addUi("ui.midi.new", "Item: new MIDI item", [&] {
+        views::ArrangeView& a = *shell.arrange();
+        const model::Session& s = (*app)->head();
+        std::optional<model::Id> track;
+        for (const auto& t : uiState.selectedTracks)
+            if (auto id = model::Id::parse(t);
+                id && s.tracks.find(*id) && s.tracks.find(*id)->type == model::StripType::Channel) {
+                track = id;
+                break;
+            }
+        for (const auto& row : a.trackLayout().rows())
+            if (!track && !row.env && row.type == model::StripType::Channel) track = row.track;
+        if (!track) return;
+        const bool loop = a.loopEnabled() && a.loopEnd() > a.loopStart();
+        const double from = s.timeMap->beatAt(loop ? a.loopStart() : a.playhead());
+        const std::optional<double> to =
+            loop ? std::optional<double>(s.timeMap->beatAt(a.loopEnd())) : std::nullopt;
+        if (auto made = a.gestures().newMidiItem(*track, from, to); !made)
+            std::fprintf(stderr, "new MIDI item: %s\n", made.error().toString().c_str());
+    });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",

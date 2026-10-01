@@ -40,7 +40,8 @@ struct EditStep {
 
 class ItemGestures {
   public:
-    // Runs the steps as one transaction (one undo step) labelled `label`.
+    // Runs the steps as one transaction (one undo step) labelled `label`; the
+    // result is the last step's.
     using Runner = std::function<Result<json::Value>(const std::string& label,
                                                      const std::vector<EditStep>& steps)>;
     explicit ItemGestures(ArrangeView& view);
@@ -68,6 +69,11 @@ class ItemGestures {
 
     // The snap grid at the current zoom, in beats (1/16 .. 32).
     double gridBeats() const;
+    // An empty MIDI item on a channel from the start of the bar holding
+    // `fromBeat` to `toBeat` (at least that bar), selected and opened
+    // (onOpenMidi): one transaction. Also a double-click on empty lane space.
+    Result<model::Id> newMidiItem(model::Id track, double fromBeat,
+                                  std::optional<double> toBeat = {});
     // The play rate that keeps a take's material filling the item when its
     // end moves by `deltaBeats` (the stretch gesture).
     double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;

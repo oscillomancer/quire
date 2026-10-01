@@ -91,7 +91,8 @@ struct Fixture {
                     if (!r) return r;
                     results.push_back(*r);
                 }
-                return json::Value::object();
+                return results.empty() ? json::Value::object()
+                                       : results.back();  // the last step's result
             });
         };
         g.onOpenMidi = [this](model::Id id) { opened.push_back(id); };
@@ -505,4 +506,40 @@ TEST_CASE("automation lanes: a plugin parameter's lane uses the plugin's range a
     const auto& pts = f.app->head().envelopes.find(env)->points;
     REQUIRE(pts.size() == 3);
     CHECK(params::toNormalized(spec->spec, pts[1].value) == doctest::Approx(0.75).epsilon(0.05));
+}
+
+TEST_CASE(
+    "arrange gestures: a double-click on empty channel space makes an empty MIDI item there") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id audio = f.itemOnRow(0), midi = f.itemOnRow(0, true);
+    const ui::Rect ra = f.rectOf(audio), rm = f.rectOf(midi);
+    const ui::Point empty{(ra.right() + rm.x) / 2, rm.y + rm.h / 2};
+    REQUIRE_FALSE(g.hit(empty));
+    const std::size_t items = f.app->head().items.size();
+    auto steps = f.steps();
+    f.pointer(ui::PointerEvent::Type::Down, empty, 1, 2);
+    f.pointer(ui::PointerEvent::Type::Up, empty);
+    f.sync();
+    REQUIRE(f.app->head().items.size() == items + 1);
+    REQUIRE(f.opened.size() == 1);
+    const model::Item& made = f.item(f.opened[0]);
+    const model::Session& s = f.app->head();
+    const int bar = s.timeMap->barBeat(s.timeMap->beatAt(f.view->timeAt(empty.x))).bar;
+    CHECK(made.position == doctest::Approx(s.timeMap->beatOfBar(bar)));  // from the bar's start
+    CHECK(made.length ==
+          doctest::Approx(s.timeMap->beatOfBar(bar + 1) - s.timeMap->beatOfBar(bar)));
+    const model::Take* take = s.takes.find(*made.activeTake);
+    REQUIRE(take);
+    REQUIRE(take->source);
+    CHECK(take->source->kind == model::Kind::Midi);
+    CHECK(s.midi.find(*take->source)->sequence.notes.empty());
+    CHECK(g.selection() == std::vector<model::Id>{f.opened[0]});
+    CHECK(f.steps() == steps + 1);
+    // Over a range: from the start of the bar holding the start to the end.
+    auto ranged = g.newMidiItem(f.view->trackLayout().rows()[1].track, 5.0, 13.0);
+    REQUIRE(ranged);
+    CHECK(f.item(*ranged).position == doctest::Approx(4.0));
+    CHECK(f.item(*ranged).length == doctest::Approx(9.0));
 }

@@ -234,6 +234,31 @@ void ItemGestures::changed() {
     if (onSelection) onSelection(selection_);
 }
 
+Result<model::Id> ItemGestures::newMidiItem(model::Id track, double fromBeat,
+                                            std::optional<double> toBeat) {
+    if (!run) return Error("gui.unwired", "no command runner");
+    const model::Session& s = view_.session();
+    const int bar = s.timeMap->barBeat(std::max(0.0, fromBeat)).bar;
+    const double start = s.timeMap->beatOfBar(bar);
+    const double oneBar = s.timeMap->beatOfBar(bar + 1) - start;
+    const double length = std::max(oneBar, toBeat.value_or(0.0) - start);
+    json::Value args = json::Value::object();
+    args["track"] = track.str();
+    args["bar"] = static_cast<std::int64_t>(bar);
+    args["length"] = length;
+    args["notation"] = "voice midi; 1: r:*";  // an empty MIDI source (a bar of rest)
+    args["name"] = "MIDI";
+    auto r = run("New MIDI item", {{"item.add", std::move(args)}});
+    if (!r) return std::move(r).error();
+    const json::Value* item = r->find("item");
+    const auto id = item && item->isString() ? model::Id::parse(item->asString()) : std::nullopt;
+    if (!id) return Error("gui.new_midi", "item.add returned no item");
+    selection_ = {*id};
+    changed();
+    if (onOpenMidi) onOpenMidi(*id);
+    return *id;
+}
+
 double ItemGestures::stretchRate(const model::Item& item, const model::Take& take,
                                  double deltaBeats) const {
     const model::Session& s = view_.session();
@@ -322,6 +347,17 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             return e.button == 1 ? envPress(*lane, e) : true;
         const auto h = hit(e.pos);
         pressRow_ = rowAt(e.pos.y).value_or(0);
+        if (e.button == 1 && e.clicks >= 2 && !h) {  // empty space on a channel: a new MIDI item
+            if (const auto row = rowAt(e.pos.y)) {
+                const TrackRow& spec = view_.trackLayout().rows()[*row];
+                if (!spec.env && spec.type == model::StripType::Channel) {
+                    if (auto made = newMidiItem(spec.track, beatAtX(e.pos.x)); !made && onError)
+                        onError(made.error());
+                    state_ = State{};
+                    return true;
+                }
+            }
+        }
         if (e.button == 3 || !h) {  // a marquee (right-drag anywhere, or from empty space)
             state_.drag = Drag::Marquee;
             state_.marquee = {e.pos.x, e.pos.y, 0, 0};
