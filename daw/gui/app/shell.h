@@ -1,12 +1,16 @@
-// The shell: the arrange view in the window with a transport line above and a
-// status line below. It proves the window ↔ model ↔ toolkit wiring; the other
-// views (mixer, editors) follow (docs/specs/gui.md §11).
+// The shell: the arrange view in the window with a transport bar above and a
+// status line below. It also owns the wiring between the views and the app:
+// selection (UiState), commands (the bus, Origin::Ui) and the meter feed.
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "app_actions.h"
+#include "meter_feed.h"
 #include "supple/engine/app.h"
 #include "supple/peaks/peaks.h"
 #include "supple/ui/node.h"
@@ -19,25 +23,46 @@ class Root;
 
 namespace supple::gui {
 
+class TransportBar;
+
 class Shell {
   public:
-    Shell(engine::EngineApp& app, std::string status, peaks::PeakService& peaks);
-    // The tree to hand to ui::Root::setContent (the shell keeps pointers into it).
-    std::unique_ptr<ui::Node> build();
+    Shell(engine::EngineApp& app, cmd::Dispatcher& dispatcher, UiState& ui, std::string status,
+          peaks::PeakService& peaks, MeterFeed& meters);
+    ~Shell();
+    // The tree to hand to ui::Root::setContent (the shell keeps pointers into
+    // it). Needs the root (the transport bar's forms are popups) and the
+    // actions (its buttons run the same actions the keymap does).
+    std::unique_ptr<ui::Node> build(ui::Root& root, AppActions& actions);
     // The playhead lives on the root's overlay tree (§4.3): call after
     // setContent.
     void installOverlay(ui::Root& root);
     // Brings the view up to the model's head version; invalidates what changed.
     void sync();
     views::ArrangeView* arrange() const { return arrange_; }
+    // The meters the TCP shows; the app sets the source (EngineApp::meters())
+    // and polls once per frame. Shared with the mixer: one feed, one poll.
+    MeterFeed& meters() { return meters_; }
+    UiState& selection() { return ui_; }
+    // Shown by the app's status line when a command fails.
+    std::function<void(const std::string&)> onError;
 
   private:
+    bool isSelected(const model::Id& track) const;
+    void selectTrack(const model::Id& track, unsigned mods);
+    void commit(std::string_view command, json::Value args, std::string gesture);
+
     engine::EngineApp& app_;
+    cmd::Dispatcher& dispatcher_;
+    UiState& ui_;
     std::string status_;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};
     ui::Label* counts_ = nullptr;
     peaks::PeakService& peaks_;
     views::ArrangeView* arrange_ = nullptr;
+    std::unique_ptr<TransportBar> transport_;
+    MeterFeed& meters_;
+    std::optional<std::string> selectAnchor_;  // Shift+click extends from here
 };
 
 }  // namespace supple::gui

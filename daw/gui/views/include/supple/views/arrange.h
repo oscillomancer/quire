@@ -20,6 +20,7 @@
 #include "supple/ui/list.h"
 #include "supple/ui/node.h"
 #include "supple/views/lanes.h"
+#include "supple/views/tcp.h"
 #include "supple/views/track_layout.h"
 
 namespace supple::ui {
@@ -30,7 +31,6 @@ struct KeyEvent;
 
 namespace supple::views {
 
-class TcpList;
 class Ruler;
 class TcpHeader;
 
@@ -99,6 +99,10 @@ class ArrangeView : public ui::Node {
     Lanes& lanes() { return *lanes_; }
     ui::Node& tcp();
     ui::Node& ruler();
+    // What the panel needs from the app (selection, commands, meters). Call
+    // before build/insert; the panel keeps the callbacks.
+    void setTcpCallbacks(TcpCallbacks callbacks) { tcpCallbacks_ = std::move(callbacks); }
+    TcpPanel& tcpPanel() { return *tcp_; }
     // Row rectangles: the lanes' and the TCP's x, the same y and height
     // (the alignment guarantee of §4.3).
     ui::Rect rowRect(std::size_t row) const;
@@ -133,9 +137,10 @@ class ArrangeView : public ui::Node {
     double playhead_ = 0;
     Follow follow_ = Follow::Page;
     Lanes* lanes_ = nullptr;
-    TcpList* tcp_ = nullptr;
+    TcpPanel* tcp_ = nullptr;
     Ruler* ruler_ = nullptr;
     TcpHeader* header_ = nullptr;
+    TcpCallbacks tcpCallbacks_;
     ui::ScrollBar* hbar_ = nullptr;
     ui::ScrollBar* vbar_ = nullptr;
     double lastPollMs_ = -1e9;

@@ -81,18 +81,6 @@ double timeStepFor(const ui::Canvas& c, double pps, float fontSize) {
     return steps[sizeof(steps) / sizeof(steps[0]) - 1];
 }
 
-std::string_view typeToken(model::StripType t) {
-    switch (t) {
-        case model::StripType::Channel:
-            return "channel";
-        case model::StripType::Buss:
-            return "buss";
-        case model::StripType::Master:
-            return "master";
-    }
-    return "ink";
-}
-
 }  // namespace
 
 // --- the ruler -------------------------------------------------------------------
@@ -281,51 +269,6 @@ class TcpHeader : public ui::Node {
     ArrangeView& view_;
 };
 
-class TcpList : public ui::Node {
-  public:
-    explicit TcpList(ArrangeView& view) : Node("tcp", ui::Role::List), view_(view) {
-        clipsChildren = true;
-    }
-    ui::Rect rowRect(std::size_t row) const {
-        const Viewport& v = view_.viewport();
-        return {bounds().x, bounds().y + view_.trackLayout().yOf(row) - v.scrollY, bounds().w,
-                view_.trackLayout().heightOf(row)};
-    }
-    void paint(ui::Canvas& c) override {
-        const ui::Theme& t = c.theme();
-        const model::Session& s = view_.session();
-        c.fillRect(bounds(), t.color("panel"));
-        c.save();
-        c.clip(bounds());
-        for (std::size_t i = 0; i < view_.trackLayout().rowCount(); ++i) {
-            const ui::Rect r = rowRect(i);
-            if (r.bottom() < bounds().y) continue;
-            if (r.y > bounds().bottom()) break;
-            const model::Track* tr = s.tracks.find(view_.trackLayout().rows()[i].track);
-            if (!tr) continue;
-            c.fillRect(r, i % 2 ? t.color("ground").withAlpha(0.35f) : t.color("panel"));
-            c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.5f));
-            const float x =
-                r.x + 10 + 16.0f * static_cast<float>(view_.trackLayout().rows()[i].depth);
-            const ui::Rect badge{x, r.y + std::min(r.h, 26.0f) / 2 - 9, 20, 18};
-            c.fillRound(badge, t.radius("s"), t.color(typeToken(tr->type)));
-            c.text(badge,
-                   std::string(
-                       1, static_cast<char>(std::toupper(model::stripTypeName(tr->type).front()))),
-                   ui::Font::UiBold, t.type("caption"), t.color("panel"),
-                   ui::kCenter | ui::kMiddle);
-            if (r.h >= 20)
-                c.text({x + 28, r.y, r.right() - x - 34, r.h},
-                       tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name,
-                       ui::Font::Ui, t.type("small"), t.color("ink"), ui::kLeft | ui::kMiddle);
-        }
-        c.restore();
-    }
-
-  private:
-    ArrangeView& view_;
-};
-
 class Corner : public ui::Node {
   public:
     using Node::Node;
@@ -382,7 +325,29 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
 
     auto& body = emplace<Node>("arrange-body");
     body.layout.dir = ui::Layout::Dir::Row;
-    tcp_ = &body.emplace<TcpList>(*this);
+    // The panel's callbacks forward to the view's, so the app can install them
+    // after the tree is built.
+    TcpCallbacks forward;
+    forward.selected = [this](const model::Id& id) {
+        return tcpCallbacks_.selected && tcpCallbacks_.selected(id);
+    };
+    forward.select = [this](const model::Id& id, unsigned mods) {
+        if (tcpCallbacks_.select) tcpCallbacks_.select(id, mods);
+    };
+    forward.commit = [this](std::string_view command, json::Value args, std::string gesture) {
+        if (tcpCallbacks_.commit)
+            tcpCallbacks_.commit(command, std::move(args), std::move(gesture));
+    };
+    forward.addStrip = [this](std::string_view type) {
+        if (tcpCallbacks_.addStrip) tcpCallbacks_.addStrip(type);
+    };
+    forward.meterShown = [this](const std::string& track, ui::Meter* meter) {
+        if (tcpCallbacks_.meterShown) tcpCallbacks_.meterShown(track, meter);
+    };
+    forward.meterHidden = [this](ui::Meter* meter) {
+        if (tcpCallbacks_.meterHidden) tcpCallbacks_.meterHidden(meter);
+    };
+    tcp_ = &body.emplace<TcpPanel>(layout_, view_, std::move(forward));
     tcp_->layout.width = ui::SizeRule::fixed(kTcpWidth);
     auto& lanesCol = body.emplace<Node>("lanes-column");
     lanesCol.layout.dir = ui::Layout::Dir::Column;
@@ -418,7 +383,7 @@ ArrangeView::~ArrangeView() = default;
 void ArrangeView::show(const model::Session& session) {
     if (!layout_.show(session)) return;
     lanes_->rebuild();
-    tcp_->invalidate();
+    tcp_->setSession(session);
     header_->invalidate();
     clampScroll();
     syncScrollbars();
@@ -482,8 +447,13 @@ void ArrangeView::clampScroll() {
 }
 
 void ArrangeView::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
+    // Clamp before arranging: the rows the TCP binds must match the scroll the
+    // frame will actually paint with (the visible height is known from `r`).
+    const float visibleHeight = std::max(0.0f, r.h - kRulerHeight - ui::ScrollBar::kThickness);
+    view_.scrollY =
+        std::clamp(view_.scrollY, 0.0f, std::max(0.0f, layout_.contentHeight() - visibleHeight));
     ui::Node::arrange(canvas, r);
-    clampScroll();
+    clampScroll();  // exact, now that the children have their bounds
     syncScrollbars();
 }
 

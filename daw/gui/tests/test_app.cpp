@@ -21,7 +21,10 @@
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
+#include "transport_bar.h"
 #include "ui_persistence.h"
+
+#include <stb_image.h>
 
 using namespace supple;
 
@@ -356,4 +359,114 @@ TEST_CASE(
     CHECK_FALSE(files.dirty());
     CHECK(a.app->projectPath() == a.dir / "song.json");
     CHECK(a.app->head().items.size() == 0);  // saved before the imports
+}
+
+TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5)") {
+    App a;
+    if (!a.ok) {
+        MESSAGE("skipped: no offscreen GL in this environment");
+        return;
+    }
+    const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
+    json::Value start = json::Value::object();
+    start["backend"] = "dummy";  // no device: the transport still moves
+    start["block"] = 256;
+    REQUIRE(a.dispatcher->execute({"engine.start", std::move(start), ui}));
+    auto bar = std::make_unique<gui::TransportBar>(*a.app, *a.actions, *a.dispatcher, *a.root);
+    auto frame = std::make_unique<ui::Node>("frame");
+    frame->layout.dir = ui::Layout::Dir::Column;
+    frame->add(bar->build());
+    frame->emplace<ui::Node>("below").layout.height = ui::SizeRule::fixed(40);  // a rule below
+    a.root->setContent(std::move(frame));
+    bar->sync();
+    a.root->frame(false);
+    auto get = [&] {
+        auto r = a.dispatcher->execute({"transport.get", json::Value::object(), ui});
+        REQUIRE(r);
+        return *r;
+    };
+    CHECK_FALSE(get()["playing"].asBool());
+    bar->sync();
+    a.root->frame(false);
+    CHECK(a.root->find("transport.position")->valueText() == "1.1.000");
+    a.root->click("transport.play");
+    CHECK(get()["playing"].asBool());
+    // Recording needs an armed track with an input.
+    json::Value add = json::Value::object();
+    add["name"] = "Rec";
+    auto added = a.dispatcher->execute({"track.add", std::move(add), ui});
+    REQUIRE(added);
+    const std::string track = (*added)["track"].asString();
+    json::Value arm = json::Value::object();
+    arm["track"] = track;
+    arm["armed"] = true;
+    json::Value input = json::Value::array();
+    input.push_back(1);
+    input.push_back(2);
+    arm["record_input"] = std::move(input);
+    REQUIRE(a.dispatcher->execute({"track.set", std::move(arm), ui}));
+    a.root->click("transport.record");
+    CHECK(get()["recording"].asBool());
+    // Loop and punch need a range before they can be switched on (the bar only
+    // toggles them; the ruler drag that sets a range is P5.6).
+    json::Value loopRange = json::Value::object();
+    loopRange["start_seconds"] = 0;
+    loopRange["end_seconds"] = 4;
+    REQUIRE(a.dispatcher->execute({"transport.loop", std::move(loopRange), ui}));
+    const bool loopBefore = get()["loop"]["enabled"].asBool();
+    a.root->click("transport.loop");
+    CHECK(get()["loop"]["enabled"].asBool() != loopBefore);  // the button toggles
+    json::Value punchRange = json::Value::object();
+    punchRange["start_seconds"] = 0;
+    punchRange["end_seconds"] = 2;
+    REQUIRE(a.dispatcher->execute({"transport.punch", std::move(punchRange), ui}));
+    const bool punchBefore = get()["punch"]["enabled"].asBool();
+    a.root->click("transport.punch");
+    CHECK(get()["punch"]["enabled"].asBool() != punchBefore);
+    bar->sync();
+    a.root->frame(false);
+    // The tempo form: click the button, type, Set (the popup closes).
+    a.root->click("transport.tempo");
+    a.root->frame(false);  // the popup is arranged before anything in it is hit
+    auto* field = static_cast<ui::TextField*>(a.root->find("tempo.field"));
+    REQUIRE(field);
+    field->setText("90");
+    a.root->click("tempo.set");
+    REQUIRE(a.app->head().timeMap->tempo().size() == 1);
+    CHECK(a.app->head().timeMap->tempo()[0].bpm == doctest::Approx(90.0));
+    CHECK(a.root->find("tempo.field") == nullptr);  // closed
+    // The meter form, the same way.
+    a.root->click("transport.meter");
+    a.root->frame(false);
+    auto* mfield = static_cast<ui::TextField*>(a.root->find("meter.field"));
+    REQUIRE(mfield);
+    mfield->setText("3/4");
+    a.root->click("meter.set");
+    CHECK(a.app->head().timeMap->meterAt(1).numerator == 3);
+    bar->sync();
+    a.root->frame(false);
+    // Golden: the transport bar as it reads with the engine running.
+    const gui::Image image = a.root->readBack();
+    const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / "transport-bar.png";
+    if (std::getenv("SUPPLE_UPDATE_GOLDEN") || !std::filesystem::exists(path)) {
+        REQUIRE(gui::writePng(path, image));
+        MESSAGE("golden written: " << path.string());
+        return;
+    }
+    int w = 0, h = 0, n = 0;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
+    REQUIRE(data);
+    REQUIRE(w == image.width);
+    REQUIRE(h == image.height);
+    std::size_t off = 0;
+    for (std::size_t i = 0; i < image.rgba.size(); i += 4) {
+        int d = 0;
+        for (int c = 0; c < 3; ++c)
+            d = std::max(d, std::abs(int(image.rgba[i + c]) - int(data[i + c])));
+        off += d > 48;
+    }
+    stbi_image_free(data);
+    CHECK(off < image.rgba.size() / 4 / 200);
+    if (auto stopped = a.dispatcher->execute({"engine.stop", json::Value::object(), ui}); !stopped)
+        MESSAGE("engine.stop: " << stopped.error().message);
 }
