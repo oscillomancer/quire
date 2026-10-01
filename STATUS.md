@@ -79,13 +79,13 @@ Acceptance (build prompt Phase 4), as of 2026-09-27:
 
 | Criterion | State |
 |---|---|
-| Multi-track session with CLAP plugins in real time at 64-sample buffers without xruns under a defined load | **open**: preliminary B1 (docs/benchmarks/b1-preliminary.md: anticipative ≈96 Orrery tracks vs ≈4 in the callback, paced stand-in device); B1 proper needs the stock EQ/compressor (eq-1) and a run on the device at a forced 64-frame period (HUMAN_REVIEW: forcing the graph quantum affects every PipeWire client) |
+| Multi-track session with CLAP plugins in real time at 64-sample buffers without xruns under a defined load | **open**: B1 tooling done (Codex `trim`; `tools/bench`, `engine-bench --device jack --search`, dry-verified); the real-device run is next (Nate approved the quantum change, HUMAN_REVIEW #11) |
 | Offline render bit-identical across repeated renders; nulls against real-time capture | **passes** (engine.tests: RT ≡ offline in both modes, B4 determinism for any thread count, with loops, monitoring, automation) |
 | Undo/redo fuzz-tested | **passes** (p4-fuzz: history property fuzzer + seeded engine test; project-file fuzzer) |
 | A crashing plugin in isolation does not take down the engine | **passes** (P4.8; shared bridge in review) |
 | An LLM over MCP builds a small arrangement headlessly and renders it | **passes** (P4.14, engine.mcp-arrangement) |
-| Benchmarks vs REAPER recorded in docs/benchmarks/ | **open** (needs B1 proper) |
-| Console 9 invariants hold (strip-layout fuzz test; fader/pan drive C9 Channel or the master's plain stage) — added 2026-09-30 | **open**: designed (ADR-0019; session-model/engine amended); `libs/console9` done; typed strips in the model and plan in progress (Codex `press`, branch `p4-strips`) |
+| Benchmarks vs REAPER recorded in docs/benchmarks/ | **open**: B2 tooling done (generated RPP with the same session, REAPER private config, in-REAPER xrun polling; offline N = 2 render verified); real runs follow B1 |
+| Console 9 invariants hold (strip-layout fuzz test; fader/pan drive C9 Channel or the master's plain stage) — added 2026-09-30 | **passes** (Codex `press`, reviewed by the orchestrator; ADR-0019, `docs/benchmarks/console9-strips.md`): typed channel/buss/master strips (project format 2.0 with migration), implicit Channel/Buss stages, source-owned send encoders, pre-encode mute/solo ramps, level-matched linear mode with a crossfaded switch, seeded dither restarted at locate, decoded stems; plan checker + strip fuzz tests; unity channel → master −6.52 dB, silence peak −152 dBFS; 38/70 ns per frame for a channel/buss strip (release) |
 
 | ID | Task | State |
 |---|---|---|
@@ -122,8 +122,8 @@ their last tasks, and the orchestrator finishes any that run out.
 
 - **contour** — EQ, reverb, LLM eval harness (landed). Done.
 - **margin** — analyzer, gate, delay, `libs/console9`, Orrery performance pass (landed). Done.
-- **press** — compressor/limiter, transient shaper, display-name cleanup (landed); Console 9 typed strips (in progress, `p4-strips`).
-- **trim** — utility, saturation, REAPER check (landed); B1/B2 benchmark tooling (done, `p4-bench`; merges after the strips). Done.
+- **press** — compressor/limiter, transient shaper, display-name cleanup, Console 9 typed strips (landed). Done.
+- **trim** — utility, saturation, REAPER check, B1/B2 benchmark tooling (landed). Done.
 
 Hermes, two profiles (models per Nate, 2026-09-30; his default profile is never edited):
 `quire-work` — `deepseek/deepseek-v4.1-flash` via OpenRouter, for hermes-team
