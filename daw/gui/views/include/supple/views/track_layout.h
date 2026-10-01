@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <vector>
@@ -51,9 +52,14 @@ class TrackLayout {
     // Per-track height in design units; <= 0 clears the override.
     void setTrackHeight(model::Id track, float h);
     bool hasTrackHeight(model::Id track) const { return heights_.count(track) != 0; }
+    // The explicit per-track overrides, by track (saving UI state).
+    const std::map<model::Id, float>& heights() const { return heights_; }
     float heightOf(std::size_t row) const { return rowHeights_[row]; }
     float yOf(std::size_t row) const { return yOffsets_[row]; }  // content space
     float contentHeight() const { return contentHeight_; }
+    // Called when the rows or a height changed (the view re-clamps its scroll,
+    // refreshes its scroll bars and repaints).
+    std::function<void()> onChanged;
 
   private:
     float baseHeight(model::Id track) const;

@@ -11,10 +11,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string_view>
 
 #include "supple/model/session.h"
 #include "supple/peaks/peaks.h"
 #include "supple/ui/geometry.h"
+#include "supple/ui/list.h"
 #include "supple/ui/node.h"
 #include "supple/views/lanes.h"
 #include "supple/views/track_layout.h"
@@ -29,8 +32,6 @@ namespace supple::views {
 
 class TcpList;
 class Ruler;
-class HScrollBar;
-class VScrollBar;
 class TcpHeader;
 
 // Transport state the arrange view reads (gui.md §3.3: telemetry, not
@@ -48,10 +49,18 @@ using TransportSource = std::function<Transport()>;
 // continuously (centred).
 enum class Follow { Off, Page, Continuous };
 
+// The UI file stores the follow mode by name (gui.md §1.2).
+std::string_view followName(Follow f);
+std::optional<Follow> followFrom(std::string_view name);
+
 // What the ruler's last paint produced (tests: tick density, label overlap).
+// `minBarSlack` / `minTimeSlack` are the smallest gap between two labels minus
+// the previous label's width and the 12-unit breathing space: < 0 would mean
+// labels can touch.
 struct RulerStats {
     int barLabels = 0, beatLabels = 0, subTicks = 0, timeLabels = 0;
     float minBarLabelGap = 1e9f, minTimeLabelGap = 1e9f;  // design units
+    float minBarSlack = 1e9f, minTimeSlack = 1e9f;
 };
 
 class ArrangeView : public ui::Node {
@@ -113,6 +122,7 @@ class ArrangeView : public ui::Node {
     void damageViews();
     void clampScroll();
     void applyFollow();
+    void syncScrollbars();
 
     peaks::PeakService& peaks_;
     Resolve resolve_;
@@ -126,8 +136,8 @@ class ArrangeView : public ui::Node {
     TcpList* tcp_ = nullptr;
     Ruler* ruler_ = nullptr;
     TcpHeader* header_ = nullptr;
-    HScrollBar* hbar_ = nullptr;
-    VScrollBar* vbar_ = nullptr;
+    ui::ScrollBar* hbar_ = nullptr;
+    ui::ScrollBar* vbar_ = nullptr;
     double lastPollMs_ = -1e9;
 };
 

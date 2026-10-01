@@ -229,12 +229,16 @@ TEST_CASE("the ruler adapts its tick density to the zoom without overlapping lab
     CHECK(bars.barLabels > 2);
     CHECK(beats.beatLabels > 0);
     CHECK(subs.subTicks > beats.subTicks);
-    // No two labels ever overlap: the drawn gaps stay above the thresholds.
-    CHECK(bars.minBarLabelGap >= 40.0f);
-    CHECK(beats.minBarLabelGap >= 40.0f);
-    CHECK(subs.minBarLabelGap >= 40.0f);
-    CHECK(bars.minTimeLabelGap >= 55.0f);
-    CHECK(subs.minTimeLabelGap >= 55.0f);
+    // No two labels can touch: every gap clears the previous label's width by
+    // at least the 12-unit gap the ruler enforces.
+    CHECK(bars.minBarSlack >= 0.0f);
+    CHECK(beats.minBarSlack >= 0.0f);
+    CHECK(subs.minBarSlack >= 0.0f);
+    CHECK(bars.minTimeSlack >= 0.0f);
+    CHECK(beats.minTimeSlack >= 0.0f);
+    CHECK(subs.minTimeSlack >= 0.0f);
+    CHECK(bars.minTimeLabelGap > 30.0f);
+    CHECK(subs.minTimeLabelGap > 30.0f);
 }
 
 TEST_CASE("the ruler shows the tempo and meter changes the session carries") {
@@ -303,6 +307,63 @@ TEST_CASE("the TCP column and the lanes stay aligned through scroll and height c
     CHECK(arrange->rowRect(0).h == doctest::Approx(48));
 }
 
+TEST_CASE("the scrollbars move the view") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    views::ArrangeView* arrange = mount(root);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    ui::Node* hbar = root.find("hscroll");
+    ui::Node* vbar = root.find("vscroll");
+    REQUIRE(hbar);
+    REQUIRE(vbar);
+    // The generated session is longer than the view: the horizontal bar is live.
+    const ui::Rect hb = hbar->bounds();
+    const double start = arrange->viewport().startSeconds;
+    const ui::Point hmid{hb.x + 4, hb.y + hb.h / 2};
+    const ui::Point hend{hb.right() - 4, hb.y + hb.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, hmid, 1});
+    root.pointer({ui::PointerEvent::Type::Move, hend});
+    root.pointer({ui::PointerEvent::Type::Up, hend, 1});
+    CHECK(arrange->viewport().startSeconds > start);
+    // Taller rows overflow the view: the vertical bar scrolls them.
+    arrange->trackLayout().setGlobalHeight(150);
+    root.damageAll();
+    root.frame(false);
+    CHECK(arrange->trackLayout().contentHeight() > arrange->lanesRect().h);
+    const ui::Rect vb = vbar->bounds();
+    const ui::Point vtop{vb.x + vb.w / 2, vb.y + 4};
+    const ui::Point vbottom{vb.x + vb.w / 2, vb.bottom() - 4};
+    root.pointer({ui::PointerEvent::Type::Down, vtop, 1});
+    root.pointer({ui::PointerEvent::Type::Move, vbottom});
+    root.pointer({ui::PointerEvent::Type::Up, vbottom, 1});
+    CHECK(arrange->viewport().scrollY > 0);
+}
+
+TEST_CASE("the arrange view's saved UI state round-trips") {
+    // What the per-project UI file stores (gui.md §1.2): the follow mode by
+    // name and the per-track height overrides.
+    for (views::Follow mode :
+         {views::Follow::Off, views::Follow::Page, views::Follow::Continuous}) {
+        const auto name = std::string(views::followName(mode));
+        REQUIRE(views::followFrom(name).has_value());
+        CHECK(*views::followFrom(name) == mode);
+    }
+    CHECK_FALSE(views::followFrom("sideways").has_value());
+    views::TrackLayout layout;
+    layout.setGlobalHeight(48);
+    model::Id track{model::Kind::Track, 1};
+    layout.setTrackHeight(track, 120);
+    REQUIRE(layout.heights().size() == 1);
+    CHECK(layout.heights().at(track) == doctest::Approx(120));
+    views::TrackLayout restored;
+    restored.setGlobalHeight(48);
+    for (const auto& [id, h] : layout.heights()) restored.setTrackHeight(id, h);
+    CHECK(restored.heights() == layout.heights());
+}
+
 TEST_CASE("the playhead overlay moves without damaging the content") {
     Gl& g = gl();
     if (!g.ok) return;
@@ -329,7 +390,7 @@ TEST_CASE("the playhead overlay moves without damaging the content") {
     CHECK(arrange->playhead() == doctest::Approx(7.5));
 }
 
-TEST_CASE("keyboard zoom keeps the playhead's time in place; Home and End scroll") {
+TEST_CASE("keyboard zoom keeps the playhead's time in place; Home and End belong to the keymap") {
     Gl& g = gl();
     if (!g.ok) return;
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
@@ -341,10 +402,11 @@ TEST_CASE("keyboard zoom keeps the playhead's time in place; Home and End scroll
     root.key(SDLK_PLUS);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(50));
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(x)));
-    root.key(SDLK_HOME);
-    CHECK(arrange->viewport().startSeconds == doctest::Approx(0));
-    root.key(SDLK_END);
-    CHECK(arrange->viewport().startSeconds > 0);
+    root.key(SDLK_MINUS);
+    CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(40));
+    // The view does not take Home/End: the keymap's transport.seek:start/end
+    // keep them, so they must reach Root::onUnhandledKey.
+    for (int key : {SDLK_HOME, SDLK_END}) CHECK_FALSE(arrange->onKey(ui::KeyEvent{key, 0, false}));
 }
 
 TEST_CASE("the arrangement renders a frame with 1000 generated tracks") {

@@ -75,6 +75,7 @@ void TrackLayout::rebuildGeometry() {
         y += h;
     }
     contentHeight_ = y;
+    if (onChanged) onChanged();
 }
 
 }  // namespace supple::views

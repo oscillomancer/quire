@@ -82,8 +82,10 @@ class LaneLabels : public ui::Node {
                 std::string name = take ? take->name : std::string();
                 if (name.empty()) name = id.str();
                 const float alpha = item->mute ? 0.45f : 0.85f;
-                const float textW = r.w - 30.0f;
-                c.text({r.x + 4, r.y + 1, textW, 14}, name, ui::Font::Ui, t.type("caption"),
+                // Keep the label clear of the padlock an item may carry.
+                const float textX = item->locked ? r.x + 18.0f : r.x + 4.0f;
+                const float textW = std::max(0.0f, r.right() - textX - 26.0f);
+                c.text({textX, r.y + 1, textW, 14}, name, ui::Font::Ui, t.type("caption"),
                        t.color("ink").withAlpha(alpha));
                 // A badge when the item carries more than one take.
                 if (item->takes.size() > 1) {

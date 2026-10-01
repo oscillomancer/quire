@@ -90,6 +90,7 @@ Status generateSession(cmd::Dispatcher& dispatcher, const std::filesystem::path&
             fade["fade_in"] = 0.5;
             fade["fade_out"] = 0.75;
             if (i % 3 == 1) fade["mute"] = true;
+            if (i % 7 == 3) fade["locked"] = true;  // the arrange view draws the padlock
             if (auto r = run("item.set", std::move(fade)); !r) return std::move(r).error();
             if (i % 3 == 2) {
                 json::Value take = json::Value::object();

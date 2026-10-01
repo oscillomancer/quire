@@ -19,7 +19,6 @@ namespace supple::views {
 namespace {
 
 constexpr float kTcpWidth = 220;
-constexpr float kScrollbarWidth = 12;
 constexpr float kBeatRowH = 22;    // bars | beats
 constexpr float kTimeRowH = 15;    // m:ss.mmm
 constexpr float kTempoRowH = 20;   // tempo and meter flags
@@ -27,9 +26,9 @@ constexpr float kRegionRowH = 15;  // regions
 constexpr float kMarkerRowH = 16;  // markers
 constexpr float kRulerHeight = kBeatRowH + kTimeRowH + kTempoRowH + kRegionRowH + kMarkerRowH;
 
-constexpr float kMinBarLabelPx = 44;
 constexpr float kMinBeatLabelPx = 62;
-constexpr float kMinTimeLabelPx = 58;
+// The breathing space every pair of ruler labels keeps (design units).
+constexpr float kLabelGap = 12;
 
 double steadyMs() {
     using namespace std::chrono;
@@ -42,12 +41,18 @@ double atSeconds(const time::TimeMap& tm, double pos, model::Timebase tb) {
     return tb == model::Timebase::Time ? pos : tm.secondsAt(pos);
 }
 
-std::string formatTime(double seconds) {
+// m:ss (decimals 0) or m:ss.s (decimals 1): the format coarsens with the
+// step, so a label always states exactly where its tick is.
+std::string formatTime(double seconds, int decimals) {
     if (seconds < 0) seconds = 0;
-    const int totalMs = static_cast<int>(std::llround(seconds * 1000.0));
-    const int minutes = totalMs / 60000, rem = totalMs % 60000;
+    const auto totalMs = std::llround(seconds * 1000.0);
+    const int minutes = static_cast<int>(totalMs / 60000);
+    const int rest = static_cast<int>(totalMs % 60000);
     char buf[32];
-    std::snprintf(buf, sizeof buf, "%d:%02d.%03d", minutes, rem / 1000, rem % 1000);
+    if (decimals <= 0)
+        std::snprintf(buf, sizeof buf, "%d:%02d", minutes, rest / 1000);
+    else
+        std::snprintf(buf, sizeof buf, "%d:%02d.%d", minutes, rest / 1000, (rest % 1000) / 100);
     return buf;
 }
 
@@ -65,11 +70,14 @@ ui::Color parseColor(const std::string& text, ui::Color fallback) {
     return ui::Color::hex(static_cast<std::uint32_t>(rgb));
 }
 
-// The finest nice time interval whose labels do not overlap at `pps`.
-double timeStepFor(double pps) {
-    static const double steps[] = {0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800};
-    for (double s : steps)
-        if (s * pps >= static_cast<double>(kMinTimeLabelPx)) return s;
+// The finest nice time interval whose labels clear the previous one by the
+// label's own width plus the gap at `pps`.
+double timeStepFor(const ui::Canvas& c, double pps, float fontSize) {
+    static const double steps[] = {0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800};
+    for (double s : steps) {
+        const float w = c.textWidth(formatTime(0, s >= 1.0 ? 0 : 1), ui::Font::Mono, fontSize);
+        if (s * pps >= static_cast<double>(w + kLabelGap)) return s;
+    }
     return steps[sizeof(steps) / sizeof(steps[0]) - 1];
 }
 
@@ -127,11 +135,28 @@ class Ruler : public ui::Node {
             }
         }
 
-        // Bars and beats.
+        // Bars and beats. Bar and beat labels share one row, so they share one
+        // "last label" tracker: a label is placed only when the previous one's
+        // width plus the gap has passed (never two labels touching).
+        const float captionSize = t.type("caption");
         const double pxPerBeat = 60.0 / tm.bpmAt(tm.beatAt(t0)) * pps;
         const int subdivisions = pxPerBeat >= 110 ? 4 : pxPerBeat >= 52 ? 2 : 1;
         const bool beatLabels = pxPerBeat >= static_cast<double>(kMinBeatLabelPx);
-        float lastBarLabel = -1e9;
+        float lastLabelX = -1e9f, lastLabelW = 0;
+        auto placeLabel = [&](float x, const std::string& text, ui::Color colour, bool isBar) {
+            const float w = c.textWidth(text, ui::Font::Mono, captionSize);
+            if (lastLabelX > -1e8f && x - lastLabelX < lastLabelW + kLabelGap) return;
+            c.text({x + 3, beatRow.y, w + 4, kBeatRowH}, text, ui::Font::Mono, captionSize, colour,
+                   ui::kLeft | ui::kMiddle);
+            if (lastLabelX > -1e8f) {
+                const float gap = x - lastLabelX;
+                stats.minBarLabelGap = std::min(stats.minBarLabelGap, gap);
+                stats.minBarSlack = std::min(stats.minBarSlack, gap - lastLabelW - kLabelGap);
+            }
+            ++(isBar ? stats.barLabels : stats.beatLabels);
+            lastLabelX = x;
+            lastLabelW = w;
+        };
         const int firstBar = tm.barBeat(tm.beatAt(std::max(0.0, t0))).bar;
         int bar = std::max(1, firstBar);
         for (int guard = 0; guard < 20000; ++guard, ++bar) {
@@ -140,15 +165,9 @@ class Ruler : public ui::Node {
             const double beatQuarters = 4.0 / static_cast<double>(meter.denominator);
             const float barX = view_.xAt(tm.secondsAt(barBeat));
             if (barX > x1 + 80) break;
-            if (barX >= x0 - 80 && (lastBarLabel < 0 || barX - lastBarLabel >= kMinBarLabelPx)) {
+            if (barX >= x0 - 80) {
                 const time::BarBeat bb = tm.barBeat(barBeat);
-                c.text({barX + 3, beatRow.y, 60, kBeatRowH},
-                       std::to_string(bb.bar) + "." + std::to_string(bb.beat), ui::Font::Mono,
-                       t.type("caption"), ink, ui::kLeft | ui::kMiddle);
-                ++stats.barLabels;
-                if (lastBarLabel > -1e8f)
-                    stats.minBarLabelGap = std::min(stats.minBarLabelGap, barX - lastBarLabel);
-                lastBarLabel = barX;
+                placeLabel(barX, std::to_string(bb.bar) + "." + std::to_string(bb.beat), ink, true);
             }
             for (int b = 0; b < meter.numerator; ++b) {
                 const double beat = barBeat + b * beatQuarters;
@@ -159,10 +178,8 @@ class Ruler : public ui::Node {
                 c.fillRect({x, beatRow.bottom() - th, 1, th}, b == 0 ? ink : quiet);
                 if (beatLabels && b > 0) {
                     const time::BarBeat bb = tm.barBeat(beat);
-                    c.text({x + 3, beatRow.y, 60, kBeatRowH},
-                           std::to_string(bb.bar) + "." + std::to_string(bb.beat), ui::Font::Mono,
-                           t.type("caption"), quiet, ui::kLeft | ui::kMiddle);
-                    ++stats.beatLabels;
+                    placeLabel(x, std::to_string(bb.bar) + "." + std::to_string(bb.beat), quiet,
+                               false);
                 }
                 for (int k = 1; k < subdivisions; ++k) {
                     const double sub = beat + beatQuarters * k / subdivisions;
@@ -174,20 +191,29 @@ class Ruler : public ui::Node {
             }
         }
 
-        // Time.
-        const double step = timeStepFor(pps);
-        float lastTimeX = -1e9f;
+        // Time. The step coarsens as the zoom goes out and the format follows
+        // it (m:ss from 1 s up, m:ss.s below), so no two labels can touch.
+        const double step = timeStepFor(c, pps, captionSize);
+        const int decimals = step >= 1.0 ? 0 : 1;
+        float lastTimeX = -1e9f, lastTimeW = 0;
         for (double ts = std::floor(t0 / step) * step; ts <= t1; ts += step) {
             const float x = view_.xAt(ts);
             if (x < x0 - 1) continue;
             if (x > x1) break;
+            const std::string label = formatTime(ts, decimals);
+            const float w = c.textWidth(label, ui::Font::Mono, captionSize);
+            if (lastTimeX > -1e8f && x - lastTimeX < lastTimeW + kLabelGap) continue;
             c.fillRect({x, timeRow.bottom() - 5, 1, 5}, quiet);
-            c.text({x + 3, timeRow.y, 66, kTimeRowH}, formatTime(ts), ui::Font::Mono,
-                   t.type("caption"), quiet, ui::kLeft | ui::kMiddle);
+            c.text({x + 3, timeRow.y, w + 4, kTimeRowH}, label, ui::Font::Mono, captionSize, quiet,
+                   ui::kLeft | ui::kMiddle);
             ++stats.timeLabels;
-            if (lastTimeX > -1e8f)
-                stats.minTimeLabelGap = std::min(stats.minTimeLabelGap, x - lastTimeX);
+            if (lastTimeX > -1e8f) {
+                const float gap = x - lastTimeX;
+                stats.minTimeLabelGap = std::min(stats.minTimeLabelGap, gap);
+                stats.minTimeSlack = std::min(stats.minTimeSlack, gap - lastTimeW - kLabelGap);
+            }
             lastTimeX = x;
+            lastTimeW = w;
         }
 
         // Tempo points and meter changes as flags.
@@ -333,130 +359,6 @@ class Playhead : public ui::Node {
     ArrangeView& view_;
 };
 
-// --- scrollbars (private to the arrange view until ui::ScrollBar lands) ---------------
-
-class HScrollBar : public ui::Node {
-  public:
-    HScrollBar(ArrangeView& view) : Node("hscroll", ui::Role::Slider), view_(view) {
-        interactive = true;
-    }
-    void paint(ui::Canvas& c) override {
-        const ui::Theme& t = c.theme();
-        c.fillRect(bounds(), t.color("panel"));
-        const double total = std::max(1e-6, view_.totalSeconds());
-        const double shown = std::min(total, view_.viewWidthSeconds());
-        const float frac = static_cast<float>(shown / total);
-        const float thumbW = std::max(16.0f, bounds().w * frac);
-        const float thumbX =
-            bounds().x +
-            static_cast<float>(view_.viewport().startSeconds / total) * (bounds().w - thumbW);
-        c.fillRound({thumbX, bounds().y + 3, thumbW, bounds().h - 6}, t.radius("s"),
-                    dragging_ ? t.color("focus") : t.color("raised"));
-    }
-    bool onPointer(const ui::PointerEvent& e) override {
-        const double total = std::max(1e-6, view_.totalSeconds());
-        if (e.type == ui::PointerEvent::Type::Down) {
-            const double shown = std::min(total, view_.viewWidthSeconds());
-            const float thumbW = std::max(16.0f, bounds().w * static_cast<float>(shown / total));
-            const float thumbX =
-                bounds().x +
-                static_cast<float>(view_.viewport().startSeconds / total) * (bounds().w - thumbW);
-            if (e.pos.x >= thumbX && e.pos.x <= thumbX + thumbW) {
-                grab_ = e.pos.x - thumbX;
-            } else {
-                grab_ = thumbW / 2;
-                dragTo(e.pos.x);
-            }
-            dragging_ = true;
-            invalidate();
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Move && dragging_) {
-            dragTo(e.pos.x);
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Up) {
-            dragging_ = false;
-            invalidate();
-            return true;
-        }
-        return false;
-    }
-
-  private:
-    void dragTo(float x) {
-        const double total = std::max(1e-6, view_.totalSeconds());
-        const double shown = std::min(total, view_.viewWidthSeconds());
-        const float thumbW = std::max(16.0f, bounds().w * static_cast<float>(shown / total));
-        const float usable = std::max(1.0f, bounds().w - thumbW);
-        Viewport v = view_.viewport();
-        const float frac = std::clamp((x - grab_ - bounds().x) / usable, 0.0f, 1.0f);
-        v.startSeconds = static_cast<double>(frac) * total;
-        view_.setViewport(v);
-    }
-    ArrangeView& view_;
-    bool dragging_ = false;
-    float grab_ = 0;
-};
-
-class VScrollBar : public ui::Node {
-  public:
-    VScrollBar(ArrangeView& view) : Node("vscroll", ui::Role::Slider), view_(view) {
-        interactive = true;
-    }
-    void paint(ui::Canvas& c) override {
-        const ui::Theme& t = c.theme();
-        c.fillRect(bounds(), t.color("panel"));
-        const float content = std::max(1.0f, view_.trackLayout().contentHeight());
-        const float shown = std::min(content, std::max(1.0f, view_.lanesRect().h));
-        const float thumbH = std::max(16.0f, bounds().h * (shown / content));
-        const float thumbY =
-            bounds().y + (view_.viewport().scrollY / content) * (bounds().h - thumbH);
-        c.fillRound({bounds().x + 3, thumbY, bounds().w - 6, thumbH}, t.radius("s"),
-                    dragging_ ? t.color("focus") : t.color("raised"));
-    }
-    bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type == ui::PointerEvent::Type::Down) {
-            dragging_ = true;
-            grab_ = e.pos.y - thumbY();
-            dragTo(e.pos.y);
-            invalidate();
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Move && dragging_) {
-            dragTo(e.pos.y);
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Up) {
-            dragging_ = false;
-            invalidate();
-            return true;
-        }
-        return false;
-    }
-
-  private:
-    float thumbH() const {
-        const float content = std::max(1.0f, view_.trackLayout().contentHeight());
-        const float shown = std::min(content, std::max(1.0f, view_.lanesRect().h));
-        return std::max(16.0f, bounds().h * (shown / content));
-    }
-    float thumbY() const {
-        const float content = std::max(1.0f, view_.trackLayout().contentHeight());
-        return bounds().y + (view_.viewport().scrollY / content) * (bounds().h - thumbH());
-    }
-    void dragTo(float y) {
-        const float content = std::max(1.0f, view_.trackLayout().contentHeight());
-        const float usable = std::max(1.0f, bounds().h - thumbH());
-        Viewport v = view_.viewport();
-        v.scrollY = std::clamp((y - grab_ - bounds().y) / usable, 0.0f, 1.0f) * content;
-        view_.setViewport(v);
-    }
-    ArrangeView& view_;
-    bool dragging_ = false;
-    float grab_ = 0;
-};
-
 // --- the view ----------------------------------------------------------------------
 
 ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSource transport)
@@ -476,7 +378,7 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     ruler_ = &header.emplace<Ruler>(*this);
     ruler_->layout.width = ui::SizeRule::fraction();
     auto& corner = header.emplace<Corner>("arrange-corner");
-    corner.layout.width = ui::SizeRule::fixed(kScrollbarWidth);
+    corner.layout.width = ui::SizeRule::fixed(ui::ScrollBar::kThickness);
 
     auto& body = emplace<Node>("arrange-body");
     body.layout.dir = ui::Layout::Dir::Row;
@@ -487,10 +389,28 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     lanesCol.layout.width = ui::SizeRule::fraction();
     lanes_ = &lanesCol.emplace<Lanes>(peaks_, resolve_, layout_, view_);
     lanes_->layout.height = ui::SizeRule::fraction();
-    hbar_ = &lanesCol.emplace<HScrollBar>(*this);
-    hbar_->layout.height = ui::SizeRule::fixed(kScrollbarWidth);
-    vbar_ = &body.emplace<VScrollBar>(*this);
-    vbar_->layout.width = ui::SizeRule::fixed(kScrollbarWidth);
+    hbar_ = &lanesCol.emplace<ui::ScrollBar>("hscroll", ui::ScrollBar::Axis::Horizontal);
+    hbar_->layout.height = ui::SizeRule::fixed(ui::ScrollBar::kThickness);
+    hbar_->onScroll = [this](float v) {
+        Viewport nv = view_;
+        nv.startSeconds = static_cast<double>(v);
+        setViewport(nv);
+    };
+    vbar_ = &body.emplace<ui::ScrollBar>("vscroll", ui::ScrollBar::Axis::Vertical);
+    vbar_->layout.width = ui::SizeRule::fixed(ui::ScrollBar::kThickness);
+    vbar_->onScroll = [this](float v) {
+        Viewport nv = view_;
+        nv.scrollY = v;
+        setViewport(nv);
+    };
+    // Any row-geometry change (a new session, per-track heights, vertical zoom)
+    // re-clamps the scroll and refreshes both bars.
+    layout_.onChanged = [this] {
+        clampScroll();
+        syncScrollbars();
+        if (tcp_) tcp_->invalidate();
+        damageViews();
+    };
 }
 
 ArrangeView::~ArrangeView() = default;
@@ -501,6 +421,7 @@ void ArrangeView::show(const model::Session& session) {
     tcp_->invalidate();
     header_->invalidate();
     clampScroll();
+    syncScrollbars();
     damageViews();
 }
 
@@ -540,7 +461,17 @@ void ArrangeView::setViewport(const Viewport& v) {
     view_.pixelsPerSecond = std::clamp(view_.pixelsPerSecond, 0.01, 200000.0);
     view_.startSeconds = std::max(0.0, view_.startSeconds);
     clampScroll();
+    syncScrollbars();
     damageViews();
+}
+
+void ArrangeView::syncScrollbars() {
+    if (!hbar_ || !vbar_) return;
+    hbar_->setRange(static_cast<float>(totalSeconds()), static_cast<float>(viewWidthSeconds()));
+    hbar_->setValue(static_cast<float>(view_.startSeconds));
+    const float shown = lanes_ ? lanes_->bounds().h : 0.0f;
+    vbar_->setRange(layout_.contentHeight(), shown);
+    vbar_->setValue(view_.scrollY);
 }
 
 void ArrangeView::clampScroll() {
@@ -553,6 +484,7 @@ void ArrangeView::clampScroll() {
 void ArrangeView::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     ui::Node::arrange(canvas, r);
     clampScroll();
+    syncScrollbars();
 }
 
 double ArrangeView::viewWidthSeconds() const {
@@ -623,9 +555,6 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (ctrl && shift) {  // vertical zoom: the global row height
         layout_.setGlobalHeight(static_cast<float>(static_cast<double>(layout_.globalHeight()) *
                                                    std::pow(1.25, static_cast<double>(e.wheelY))));
-        clampScroll();
-        tcp_->invalidate();
-        damageViews();
         return true;
     }
     if (ctrl) {  // horizontal zoom around the pointer
@@ -645,21 +574,11 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     return true;
 }
 
+// Only the view's own zoom; Home/End belong to the keymap
+// (transport.seek:start/end), which the app routes through Root::onUnhandledKey.
 bool ArrangeView::onKey(const ui::KeyEvent& e) {
     const double zoom = 1.25;
     switch (e.key) {
-        case SDLK_HOME: {
-            Viewport v = view_;
-            v.startSeconds = 0;
-            setViewport(v);
-            return true;
-        }
-        case SDLK_END: {
-            Viewport v = view_;
-            v.startSeconds = std::max(0.0, totalSeconds() - viewWidthSeconds());
-            setViewport(v);
-            return true;
-        }
         case SDLK_PLUS:
         case SDLK_EQUALS:
         case SDLK_KP_PLUS: {
@@ -684,6 +603,25 @@ bool ArrangeView::onKey(const ui::KeyEvent& e) {
         default:
             return false;
     }
+}
+
+std::string_view followName(Follow f) {
+    switch (f) {
+        case Follow::Off:
+            return "off";
+        case Follow::Page:
+            return "page";
+        case Follow::Continuous:
+            return "continuous";
+    }
+    return "page";
+}
+
+std::optional<Follow> followFrom(std::string_view name) {
+    if (name == "off") return Follow::Off;
+    if (name == "page") return Follow::Page;
+    if (name == "continuous") return Follow::Continuous;
+    return std::nullopt;
 }
 
 }  // namespace supple::views
