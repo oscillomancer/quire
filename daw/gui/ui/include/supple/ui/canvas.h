@@ -4,6 +4,8 @@
 #pragma once
 
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "supple/gui/window.h"
 #include "supple/ui/geometry.h"
@@ -42,6 +44,10 @@ class Canvas {
     void text(const Rect& box, std::string_view s, Font font, float size, Color c,
               int align = kLeft | kMiddle);
     float textWidth(std::string_view s, Font font, float size) const;
+    // The x of every caret position (each UTF-8 boundary, 0…size) of `s`
+    // drawn left-aligned at `x0`: front.size() == number of boundaries.
+    std::vector<std::pair<std::size_t, float>> carets(std::string_view s, Font font, float size,
+                                                      float x0) const;
 
     // Scissor stack: clip() intersects with the current clip.
     void save();

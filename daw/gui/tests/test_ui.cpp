@@ -7,7 +7,10 @@
 
 #include "supple/gui/png.h"
 #include "supple/json/parse.h"
+#include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 
 using namespace supple;
@@ -231,4 +234,142 @@ TEST_CASE("golden image: a small panel in the dark theme") {
     stbi_image_free(data);
     // Antialiasing may differ by driver; layout or colour regressions do not.
     CHECK(pixelDistance(image, expected) <= 48);
+}
+
+TEST_CASE("a text field edits by UTF-8 character and word, with selection and clipboard") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Column;
+    content->layout.padding = Insets::all(8);
+    auto& field = content->emplace<TextField>("field", "", "Search");
+    std::string submitted;
+    int changes = 0;
+    field.onChange = [&](const std::string&) { ++changes; };
+    field.onSubmit = [&](const std::string& s) { submitted = s; };
+    root.setContent(std::move(content));
+    root.frame(false);
+    CHECK(root.click("field"));
+    CHECK(root.focused() == &field);
+    root.text("héllo wörld");
+    CHECK(field.text() == "héllo wörld");
+    CHECK(changes == 1);
+    root.key(SDLK_BACKSPACE);  // one character, two bytes
+    CHECK(field.text() == "héllo wörl");
+    root.key(SDLK_BACKSPACE, kCtrl);  // a word
+    CHECK(field.text() == "héllo ");
+    root.key(SDLK_HOME);
+    root.key(SDLK_RIGHT);
+    root.key(SDLK_RIGHT, kShift);  // select "é"
+    CHECK(field.selection() == std::pair<std::size_t, std::size_t>{1, 3});
+    root.text("e");
+    CHECK(field.text() == "hello ");
+    root.key(SDLK_A, kCtrl);
+    root.key(SDLK_C, kCtrl);
+    root.key(SDLK_END);
+    root.key(SDLK_V, kCtrl);
+    CHECK(field.text() == "hello hello ");
+    root.key(SDLK_RETURN);
+    CHECK(submitted == "hello hello ");
+    // IME: composition shows inline and does not change the text until committed.
+    root.composition("にほ", 2);
+    CHECK(field.composition() == "にほ");
+    CHECK(field.text() == "hello hello ");
+    root.frame(false);  // paints with the composition
+    root.text("日本");
+    CHECK(field.composition().empty());
+    CHECK(field.text() == "hello hello 日本");
+}
+
+TEST_CASE("a list paints only visible rows and navigates by keys") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Column;
+    auto& list = content->emplace<List>("list");
+    list.rowHeight = 20;
+    std::size_t activated = 99999;
+    list.onActivate = [&](std::size_t i) { activated = i; };
+    list.paintRow = [](Canvas& c, std::size_t i, const Rect& r, bool) {
+        c.text(r, "row " + std::to_string(i), Font::Ui, 12, c.theme().color("ink"));
+    };
+    list.setCount(100000);
+    root.setContent(std::move(content));
+    root.frame(false);
+    CHECK(list.rowsPainted() == 10);  // 200 units tall / 20
+    root.click("list");
+    CHECK(list.selected() == std::optional<std::size_t>(5));  // the centre row of 10
+    root.key(SDLK_END);
+    CHECK(list.selected() == std::optional<std::size_t>(99999));
+    CHECK(list.scroll() == doctest::Approx(100000.0 * 20 - 200));
+    root.key(SDLK_PAGEUP);
+    CHECK(*list.selected() < 99999);
+    root.key(SDLK_RETURN);
+    CHECK(activated == *list.selected());
+    root.frame(false);
+    CHECK(list.rowsPainted() <= 11);
+}
+
+TEST_CASE("popups: menus run items, outside clicks and Escape close them, focus returns") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    auto& button = content->emplace<Button>("open", "Open");
+    root.setContent(std::move(content));
+    root.frame(false);
+    root.click("open");
+    CHECK(root.focused() == &button);
+    int ran = 0;
+    std::vector<MenuItem> items = {{"First", "Ctrl+1", [&] { ran = 1; }},
+                                   {"", "", {}, true, true},
+                                   {"Disabled", "", [&] { ran = 2; }, false},
+                                   {"Third", "", [&] { ran = 3; }}};
+    Node& menu =
+        root.openPopup(makeMenu("menu", items, [&] { root.closePopup(); }), button.bounds());
+    root.frame(false);
+    CHECK(root.popupOpen());
+    CHECK(root.focused() == &menu);
+    CHECK(menu.bounds().y >= button.bounds().bottom());  // below its anchor
+    root.key(SDLK_DOWN);  // First (index 0) → separator is skipped by keys? select moves to 1
+    root.key(SDLK_END);
+    root.key(SDLK_RETURN);
+    CHECK(ran == 3);
+    CHECK_FALSE(root.popupOpen());
+    CHECK(root.focused() == &button);  // focus came back
+    // Outside click closes without reaching what is under it.
+    root.openPopup(makeMenu("menu2", items, [&] { root.closePopup(); }), button.bounds());
+    root.frame(false);
+    int clicked = 0;
+    button.onClick = [&] { ++clicked; };
+    root.click("open");
+    CHECK_FALSE(root.popupOpen());
+    CHECK(clicked == 0);
+    root.openPopup(makeMenu("menu3", items, [&] { root.closePopup(); }), button.bounds());
+    root.key(SDLK_ESCAPE);
+    CHECK_FALSE(root.popupOpen());
+}
+
+TEST_CASE("a scroll bar pages on track clicks and reports drags") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    auto& bar = content->emplace<ScrollBar>("bar", ScrollBar::Axis::Vertical);
+    bar.layout.width = SizeRule::fixed(ScrollBar::kThickness);
+    float last = -1;
+    bar.onScroll = [&](float v) { last = v; };
+    root.setContent(std::move(content));
+    root.frame(false);
+    bar.setRange(1000, 200);
+    CHECK(bar.needed());
+    const Rect b = bar.bounds();
+    root.pointer({PointerEvent::Type::Down, {b.x + 5, b.bottom() - 5}, 1});
+    root.pointer({PointerEvent::Type::Up, {b.x + 5, b.bottom() - 5}, 1});
+    CHECK(last == doctest::Approx(200));  // one page
+    bar.setValue(0);
+    root.pointer({PointerEvent::Type::Down, {b.x + 5, b.y + 5}, 1});  // on the thumb
+    root.pointer({PointerEvent::Type::Move, {b.x + 5, b.y + 5 + (b.h - 40) / 2}});
+    root.pointer({PointerEvent::Type::Up, {b.x + 5, b.y + 5 + (b.h - 40) / 2}, 1});
+    CHECK(last == doctest::Approx(400).epsilon(0.02));  // half the travel of an 800-unit range
 }

@@ -130,6 +130,13 @@ class Node {
         (void)e;
         return false;
     }
+    // IME composition (preedit): the text being composed and the cursor in it
+    // (bytes); empty text ends composition.
+    virtual bool onComposition(std::string_view text, int cursor) {
+        (void)text;
+        (void)cursor;
+        return false;
+    }
     virtual bool onText(std::string_view text) {
         (void)text;
         return false;

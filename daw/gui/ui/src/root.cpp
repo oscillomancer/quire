@@ -109,7 +109,11 @@ void Root::damageAll() {
 void Root::layoutNow(const Canvas& canvas) {
     const Rect full{0, 0, window_.width(), window_.height()};
     if (content_) content_->arrange(canvas, full);
-    overlay_->arrange(canvas, full);
+    overlay_->setBounds(full);
+    for (const auto& c : overlay_->children()) {
+        const bool popup = std::find(popups_.begin(), popups_.end(), c.get()) != popups_.end();
+        c->arrange(canvas, popup ? full : c->bounds());  // popups place themselves in the window
+    }
     laidOut_ = {full.w, full.h};
     layoutPending_ = false;
     damageAll();  // positions may have moved anywhere
@@ -243,6 +247,15 @@ void Root::forget(Node* node) {
 }
 
 void Root::pointer(PointerEvent e) {
+    // A press outside every popup closes them and goes no further.
+    if (e.type == PointerEvent::Type::Down && !popups_.empty() && !captured_) {
+        const bool inside = std::any_of(popups_.begin(), popups_.end(),
+                                        [&](const Node* p) { return p->bounds().contains(e.pos); });
+        if (!inside) {
+            closePopups();
+            return;
+        }
+    }
     Node* target = captured_;
     if (!target) {
         target = overlay_->hitTest(e.pos);
@@ -283,6 +296,10 @@ void Root::key(int keycode, unsigned mods) {
     const KeyEvent e{keycode, mods, false};
     for (Node* n = focused_; n; n = n->parent())
         if (n->enabled && n->onKey(e)) return;
+    if (keycode == SDLK_ESCAPE && !popups_.empty()) {
+        closePopup();
+        return;
+    }
     if (keycode == SDLK_TAB) {  // focus traversal
         std::vector<Node*> order;
         collectFocusable(*overlay_, order);
@@ -299,6 +316,26 @@ void Root::key(int keycode, unsigned mods) {
 void Root::text(std::string_view utf8) {
     if (focused_ && focused_->enabled) focused_->onText(utf8);
 }
+
+void Root::composition(std::string_view utf8, int cursor) {
+    if (focused_ && focused_->enabled) focused_->onComposition(utf8, cursor);
+}
+
+void Root::setTextInputArea(const Rect& caret) {
+    const SDL_Rect r{static_cast<int>(caret.x), static_cast<int>(caret.y),
+                     std::max(1, static_cast<int>(caret.w)),
+                     std::max(1, static_cast<int>(caret.h))};
+    SDL_SetTextInputArea(window_.sdl(), &r, 0);
+}
+
+std::string Root::clipboard() const {
+    char* text = SDL_GetClipboardText();
+    std::string out = text ? text : "";
+    SDL_free(text);
+    return out;
+}
+
+void Root::setClipboard(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 
 void Root::handle(const SDL_Event& e) {
     switch (e.type) {
@@ -338,6 +375,9 @@ void Root::handle(const SDL_Event& e) {
             break;
         case SDL_EVENT_TEXT_INPUT:
             text(e.text.text);
+            break;
+        case SDL_EVENT_TEXT_EDITING:
+            composition(e.edit.text ? e.edit.text : "", e.edit.start);
             break;
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

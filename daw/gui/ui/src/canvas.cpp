@@ -3,6 +3,7 @@
 #include <nanovg.h>
 
 #include <string>
+#include <vector>
 
 namespace supple::ui {
 namespace {
@@ -67,6 +68,26 @@ float Canvas::textWidth(std::string_view s, Font font, float size) const {
     nvgFontFaceId(vg_, face(font));
     nvgFontSize(vg_, size);
     return nvgTextBounds(vg_, 0, 0, s.data(), s.data() + s.size(), nullptr);
+}
+
+std::vector<std::pair<std::size_t, float>> Canvas::carets(std::string_view s, Font font, float size,
+                                                          float x0) const {
+    std::vector<std::pair<std::size_t, float>> out;
+    out.emplace_back(0, x0);
+    if (s.empty()) return out;
+    nvgFontFaceId(vg_, face(font));
+    nvgFontSize(vg_, size);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    std::vector<NVGglyphPosition> glyphs(s.size());
+    const int n = nvgTextGlyphPositions(vg_, x0, 0, s.data(), s.data() + s.size(), glyphs.data(),
+                                        static_cast<int>(glyphs.size()));
+    for (int i = 0; i < n; ++i) {
+        const auto end = static_cast<std::size_t>(
+            (i + 1 < n ? glyphs[static_cast<std::size_t>(i) + 1].str : s.data() + s.size()) -
+            s.data());
+        out.emplace_back(end, glyphs[static_cast<std::size_t>(i)].maxx);
+    }
+    return out;
 }
 
 void Canvas::text(const Rect& box, std::string_view s, Font font, float size, Color c, int align) {

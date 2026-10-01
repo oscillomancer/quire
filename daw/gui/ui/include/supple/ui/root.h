@@ -6,12 +6,15 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "supple/gui/window.h"
 #include "supple/ui/node.h"
+#include "supple/ui/popup.h"
 
 union SDL_Event;
 
@@ -52,11 +55,25 @@ class Root {
     void capture(Node* node) { captured_ = node; }
     void forget(Node* node);  // a node is going away
 
+    // --- popups (popup.h): returns the content node, now owned by the overlay
+    Node& openPopup(std::unique_ptr<Node> content, const Rect& anchor,
+                    Placement placement = Placement::Below, std::function<void()> onClose = {});
+    void closePopup();  // the topmost
+    void closePopups();
+    bool popupOpen() const { return !popups_.empty(); }
+
     // --- driving the UI from tests and scripts (same paths as SDL input)
     void pointer(PointerEvent e);
     bool click(std::string_view id, int button = 1);
     void key(int keycode, unsigned mods = 0);
     void text(std::string_view utf8);
+    void composition(std::string_view utf8, int cursor);
+    // Where the focused text field's caret is (design units), for the IME
+    // candidate window.
+    void setTextInputArea(const Rect& caret);
+    // Clipboard (the system's; tests may run without one).
+    std::string clipboard() const;
+    void setClipboard(const std::string& text);
 
     struct Stats {
         std::uint64_t frames = 0, repaints = 0;
@@ -83,6 +100,7 @@ class Root {
     struct Cache;
     std::unique_ptr<Cache> cache_;
     Stats stats_;
+    std::vector<Node*> popups_;  // PopupFrames owned by overlay_, topmost last
 };
 
 }  // namespace supple::ui
