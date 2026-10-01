@@ -317,6 +317,12 @@ struct Node {
     std::array<std::uint8_t, 16 * 128> liveHeld{};  // device notes sounding (per channel/key)
     bool live = false;
     Automation autoVolume, autoPan, autoMute;
+    // Metering (engine.md §2.3, P5.3c): the bank slot this strip's post signal
+    // is measured into (0xFFFF: unmetered), and the last block's measurements,
+    // written by processNode on whichever executor processed it.
+    std::uint16_t meterSlot = 0xffff;
+    float meterPeak[2] = {0.0f, 0.0f};
+    float meterSumSq[2] = {0.0f, 0.0f};
 };
 
 struct Plan {
@@ -345,6 +351,10 @@ struct Plan {
     std::vector<std::size_t> rendererNodes, liveNodes;
     std::unique_ptr<TaskGraph> rendererGraph;
     std::vector<host::Instance*> rendererInstances, liveInstances;
+    // Metering (P5.3c): the metered nodes each executor measures, filled with
+    // the slots by the engine's load() on the main thread, so an executor
+    // iterates a list after a block instead of scanning every node.
+    std::vector<std::size_t> rendererMeterNodes, liveMeterNodes, meterNodes;
     std::vector<std::size_t> frontier;
     std::vector<std::unique_ptr<ChunkRing>> frontierRings;  // allocated by the engine
     // Set by the renderer when it adopts the plan, read by the callback after

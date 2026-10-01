@@ -1132,6 +1132,22 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                                 nativePan);
         }
     }
+    // Metering (P5.3c): the post signal is what a meter shows. Unmetered
+    // nodes pay one comparison; a metered one pays one pass over the block.
+    if (node.meterSlot != 0xffff) {
+        float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const float l = node.post.l[i], r = node.post.r[i];
+            peakL = std::max(peakL, std::fabs(l));
+            peakR = std::max(peakR, std::fabs(r));
+            sumL += l * l;
+            sumR += r * r;
+        }
+        node.meterPeak[0] = peakL;
+        node.meterPeak[1] = peakR;
+        node.meterSumSq[0] = sumL;
+        node.meterSumSq[1] = sumR;
+    }
     // Independent encoders run at the source, before PDC and frontier publication.
     for (std::size_t ei : node.out) {
         Edge& e = p.edges[ei];

@@ -85,6 +85,16 @@ struct TransportInfo {
     std::optional<std::vector<RecordedInfo>> recorded;  // takes a stop/pause just committed
 };
 
+// One strip's meter reading (P5.3c): the peak and RMS of the audio of that
+// strip's post signal (post-fader, post-pan) that has been *heard* since the
+// last call. The engine does no decay or peak hold — the GUI does. A strip
+// with no heard audio reports zeros. `track` is the strip's track id.
+struct MeterReading {
+    model::Id track;
+    float peak[2] = {0.0f, 0.0f};
+    float rms[2] = {0.0f, 0.0f};
+};
+
 class EngineApp : public cmd::Host {
   public:
     static Result<std::unique_ptr<EngineApp>> create(AppOptions options,
@@ -156,6 +166,11 @@ class EngineApp : public cmd::Host {
     void stopEngine();
     Engine* engine() { return engine_.get(); }
     EngineStatus engineStatus();
+    // The meters (P5.3c): one reading per strip of the newest plan, covering
+    // the audio heard since the last call. Call it from this (the model)
+    // thread, the way the GUI's tick does; empty when the engine is stopped.
+    // Main-thread work only: it drains the engine's meter rings.
+    std::vector<MeterReading> meters();
     // fx.restart: the next plan gets a new instance of `fx` (the failed one is
     // freed once no plan uses it).
     void restartFx(model::Id fx);
