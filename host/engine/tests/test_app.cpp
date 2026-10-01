@@ -1448,3 +1448,43 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
     CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
     fake.reset();
 }
+
+TEST_CASE("a UI gesture is one undo step: edits with the same gesture coalesce") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, *app);
+    app->attachCommands(dispatcher);
+    auto run = [&](const char* command, json::Value args, cmd::Origin origin) {
+        auto r = dispatcher.execute({command, std::move(args), std::move(origin)});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    const std::string track = run("track.add", j(R"({"name": "Bass"})"), kTest)["track"].asString();
+    const auto versions = [&] {
+        return run("history.list", j("{}"), kTest)["versions"].asArray().size();
+    };
+    const std::size_t before = versions();
+    cmd::Origin drag{cmd::Origin::Type::Ui, "gui", "", "fader:" + track + ":1"};
+    for (double db : {-1.0, -2.5, -4.0, -6.0}) {
+        json::Value args = json::Value::object();
+        args["track"] = track;
+        args["volume_db"] = db;
+        run("track.set", std::move(args), drag);
+    }
+    CHECK(versions() == before + 1);  // four edits, one step
+    CHECK(app->head().tracks.find(*model::Id::parse(track))->volumeDb == doctest::Approx(-6.0));
+    // A new gesture is a new step; another origin's same key does not merge.
+    drag.gesture = "fader:" + track + ":2";
+    run("track.set", j(R"({"track": ")" + track + R"(", "volume_db": -3})"), drag);
+    CHECK(versions() == before + 2);
+    cmd::Origin other{cmd::Origin::Type::Mcp, "agent", "", drag.gesture};
+    run("track.set", j(R"({"track": ")" + track + R"(", "volume_db": -9})"), other);
+    CHECK(versions() == before + 3);
+    // Undo removes the whole gesture.
+    run("history.undo", j("{}"), kTest);
+    run("history.undo", j("{}"), kTest);
+    run("history.undo", j("{}"), kTest);
+    CHECK(app->head().tracks.find(*model::Id::parse(track))->volumeDb == doctest::Approx(0.0));
+}

@@ -41,6 +41,10 @@ struct Origin {
         Agent
     } type = Type::Internal;
     std::string client, agent;
+    // A continuous UI gesture (a fader drag): consecutive committed edits from
+    // the same origin with the same non-empty gesture replace the head instead
+    // of stacking — one undo step per gesture (session-model §6.2).
+    std::string gesture = {};
 };
 using Warning = schema::Warning;
 
