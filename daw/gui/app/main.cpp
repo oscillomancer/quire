@@ -6,6 +6,7 @@
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
+//          [--audio jack|dummy|none]
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <unistd.h>
@@ -54,6 +55,7 @@ struct Options {
     int generate = 0;                            // tracks of a generated session
     double idleSeconds = 0;                      // measure idle CPU after the frames
     double viewStart = -1, viewPps = 0;          // initial lanes viewport
+    std::string audio;  // jack | dummy | none; default: jack (none offscreen)
 };
 
 int usage() {
@@ -61,7 +63,8 @@ int usage() {
                  "usage: %s [PROJECT] [--offscreen] [--size WxH] [--frames N] [--snapshot PNG]\n"
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
                  "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
-                 "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n",
+                 "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n"
+                 "       [--audio jack|dummy|none]\n",
                  std::string(product::kSlug).c_str());
     return 2;
 }
@@ -78,7 +81,13 @@ bool parse(int argc, char** argv, Options& o) {
             o.serve = false;
         else if (a == "--script")
             o.script = true;
-        else if (a == "--view") {
+        else if (a == "--audio") {
+            const char* v = value();
+            if (!v ||
+                (std::string(v) != "jack" && std::string(v) != "dummy" && std::string(v) != "none"))
+                return false;
+            o.audio = v;
+        } else if (a == "--view") {
             const char* v = value();
             if (!v || std::sscanf(v, "%lf,%lf", &o.viewStart, &o.viewPps) != 2) return false;
         } else if (a == "--generate") {
@@ -303,6 +312,21 @@ int main(int argc, char** argv) {
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
+    // The audio engine: the device for interactive use, nothing offscreen.
+    const std::string audioMode =
+        !o.audio.empty() ? o.audio : (o.offscreen || o.frames > 0 ? "none" : "jack");
+    if (audioMode != "none") {
+        json::Value args = json::Value::object();
+        args["backend"] = audioMode;
+        if (auto started = dispatcher.execute(
+                {"engine.start", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
+            !started)
+            std::fprintf(
+                stderr,
+                "audio: %s (run engine.start from the actions list when the device is ready)\n",
+                started.error().toString().c_str());
+    }
+
     // Per-project UI state (gui.md §1.2).
     gui::UiPersistence uiFile;
     uiFile.add(
