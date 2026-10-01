@@ -197,6 +197,12 @@ struct Fixture {
         stbi_image_free(data);
         CHECK(off < image.rgba.size() / 4 / 200);
     }
+    // The stock plugins build with ALL: a partial build has none, and the FX
+    // tests skip rather than fail.
+    bool stockPlugins() {
+        auto r = run("plugin.list", json::Value::object());
+        return r && !(*r)["plugins"].asArray().empty();
+    }
     // Finds a stock plugin id by display name (the scan ordering varies).
     std::string pluginId(const char* name) {
         auto r = run("plugin.list", json::Value::object());
@@ -216,6 +222,10 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     Fixture f;
     if (!f.ok) {
         MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
         return;
     }
     const model::Id track = f.addTrack("Guitar");
@@ -339,6 +349,10 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
 TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {
     Fixture f;
     if (!f.ok) return;
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 2));
     const model::Id track = f.firstChannel();
 
