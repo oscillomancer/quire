@@ -101,7 +101,9 @@ struct Plugin final : EditorBridge {
     clapx::SemanticAdapter adapter{
         model,
         {kDescriptor.id, kDescriptor.name, kDescriptor.version, std::string(kDocs), kStateMagic}};
-    std::vector<Event> events;              // audio thread; reserved at activation
+    std::vector<Event> events;  // audio thread; reserved at activation
+    std::vector<double> valueScratch =
+        std::vector<double>(paramCount());  // audio thread, params.flush
     std::vector<float> scratchL, scratchR;  // 64-bit or mono hosts: render here, then convert
     bool mono = false;                      // the selected audio-ports config (inactive only)
     std::array<std::int16_t, 2600> indexOfId{};
@@ -447,11 +449,19 @@ const clap_plugin_params_t kParams = {
             s->translate(in);
             s->engine.process(s->events, Transport{}, nullptr, nullptr, 0);
         } else {
-            // [main thread] the store already holds editor values; they and
-            // the host's reach the engine with the next program.
+            // [audio thread while active; main thread before that] CLAP calls
+            // flush on the audio thread whenever the plugin is active, so this
+            // path must not allocate either — and compiling a program
+            // (Engine::setPatch) is a control-thread job. The store takes the
+            // values either way; an active engine is told about them here.
             const bool edited = s->drainEdits(out, false);
-            if ((s->applyHostEvents(in) || edited) && s->active)
-                s->engine.setPatch(s->model.current());
+            const bool changed = s->applyHostEvents(in) || edited;
+            if (!changed || !s->active) return;
+            if (s->store.readAll(s->valueScratch)) {
+                s->engine.setValues(s->valueScratch);
+            } else if (!s->retryFlush.exchange(true) && s->host->request_callback) {
+                s->host->request_callback(s->host);  // mid-assign: apply on the next flush
+            }
         }
     }};
 
