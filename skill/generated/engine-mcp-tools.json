@@ -4631,6 +4631,56 @@
     }
   },
   {
+    "name": "transport_metronome",
+    "title": "Turn the metronome on or off and set its level; returns the settings.",
+    "description": "Turn the metronome on or off and set its level; returns the settings. A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. Transport state: not an undo step, not saved in the project. No arguments: the current settings. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "metronome_args",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -60.0,
+              "maximum": 6.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "metronome",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "volume_db": {
+          "type": "number"
+        }
+      },
+      "required": ["enabled", "volume_db"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "transport_pause",
     "title": "Pause playback where it is (ends a recording).",
     "description": "Pause playback where it is (ends a recording).  See describe for errors and examples.",

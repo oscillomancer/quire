@@ -396,6 +396,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     playStart_ = 0.0;
     if (loop_.enabled || loop_.end > loop_.start)
         engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
+    engine_->setMetronome(metronome_.enabled, metronome_.volumeDb);
     return engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
 }
 
@@ -868,6 +869,11 @@ Status EngineApp::finishAutomationPass(double stopBeat) {
             insertPoint(env.points, stopBeat, w.lastValue);
         });
     return commitTransaction(*txnId);
+}
+
+void EngineApp::setMetronome(const MetronomeSettings& m) {
+    metronome_ = m;
+    if (engine_) engine_->setMetronome(m.enabled, m.volumeDb);
 }
 
 void EngineApp::setLoop(const TransportRange& loop) {

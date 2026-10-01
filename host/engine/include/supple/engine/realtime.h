@@ -272,6 +272,10 @@ class Engine {
     // re-renders what was rendered ahead, like a seek to where the listener is.
     void setLoop(double startSeconds, double endSeconds, bool on);
     LoopRange loop() const { return readLoop(); }
+    // The metronome: a click on every beat of the meter while the transport
+    // plays, the bar's first accented. Live output only (renders and
+    // recordings never hear it); any thread.
+    void setMetronome(bool on, double gainDb);
     // The backend's MIDI input ports (ADR-0016); empty when stopped.
     std::vector<std::string> midiPorts() const {
         return backend_ ? backend_->midiPorts() : std::vector<std::string>{};
@@ -344,6 +348,16 @@ class Engine {
                            std::uint32_t frames) SUPPLE_RT;
     // Returns the frames rendered (fewer than asked at a loop wrap).
     // `offset`: where this part starts in the cycle (for the device MIDI).
+    // Mixes the metronome into device output: `k` frames at `out[c] + offset`
+    // that play timeline frames from `pos`. Audio thread.
+    void addClicks(const detail::Plan& p, float* const* out, std::uint32_t offset, std::int64_t pos,
+                   std::uint32_t k) SUPPLE_RT;
+    std::atomic<bool> metroOn_{false};
+    std::atomic<float> metroGain_{0.5f};
+    // The click sounding now (audio thread only).
+    std::int64_t clickAge_ = -1, clickLength_ = 0;
+    double clickPhase_ = 0, clickStep_ = 0;
+    float clickAmp_ = 0, clickEnv_ = 0, clickDecay_ = 0;
     std::uint32_t liveRender(const float* const* in, float* const* out, std::uint32_t frames,
                              std::uint32_t offset) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;

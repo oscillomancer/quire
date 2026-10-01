@@ -2900,6 +2900,43 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    {
+        struct MetronomeArgs {
+            std::optional<bool> enabled;
+            std::optional<double> volumeDb;
+        };
+        Command<MetronomeArgs, MetronomeSettings> c;
+        c.name = "transport.metronome";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Turn the metronome on or off and set its level; returns the settings.";
+        c.description =
+            "A click on every beat of the meter while the transport plays (the bar's first "
+            "accented), in the live output only: renders and recordings never contain it. "
+            "Transport state: not an undo step, not saved in the project. No arguments: the "
+            "current settings.";
+        c.tags = {"transport", "recording"};
+        c.args = schema::object<MetronomeArgs>("metronome_args")
+                     .field("enabled", &MetronomeArgs::enabled, schema::boolean())
+                     .field("volume_db", &MetronomeArgs::volumeDb,
+                            schema::number().range(-60, 6).unit(units::Unit::dB))
+                     .build();
+        c.result = schema::object<MetronomeSettings>("metronome")
+                       .field("enabled", &MetronomeSettings::enabled, schema::boolean())
+                       .field("volume_db", &MetronomeSettings::volumeDb, schema::number())
+                       .build();
+        c.examples = {{"On", obj(R"({"enabled": true})"),
+                       obj(R"({"enabled": true, "volume_db": -6.0})"), "empty"}};
+        c.run = [](const MetronomeArgs& a, Context& ctx) -> Result<MetronomeSettings> {
+            EngineApp& app = A(ctx);
+            MetronomeSettings m = app.metronome();
+            if (a.enabled) m.enabled = *a.enabled;
+            if (a.volumeDb) m.volumeDb = *a.volumeDb;
+            app.setMetronome(m);
+            return m;
+        };
+        registry.add(std::move(c));
+    }
     for (const bool loop : {true, false}) {
         Command<RangeArgs, TransportRange> c;
         c.name = loop ? "transport.loop" : "transport.punch";

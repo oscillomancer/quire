@@ -68,6 +68,12 @@ struct TransportRange {
     double start = 0, end = 0;
 };
 
+// The metronome (transport state like the loop: not versioned, not saved).
+struct MetronomeSettings {
+    bool enabled = false;
+    double volumeDb = -6.0;
+};
+
 // A recording no version of the session uses (after a crash: a take that
 // was never committed, or committed but never saved), and where its sidecar
 // says it belongs.
@@ -219,6 +225,8 @@ class EngineApp : public cmd::Host {
     void setLoop(const TransportRange& loop);
     void setPunch(const TransportRange& punch) { punch_ = punch; }
     const TransportRange& loop() const { return loop_; }
+    const MetronomeSettings& metronome() const { return metronome_; }
+    void setMetronome(const MetronomeSettings& m);  // reaches the engine now and on every start
     const TransportRange& punch() const { return punch_; }
 
     // --- periodic service (the servers' tick, every 100 ms on the model thread) ------
@@ -317,6 +325,7 @@ class EngineApp : public cmd::Host {
     void beginAutomationPass(double beat);
     Status finishAutomationPass(double stopBeat);
     TransportRange loop_, punch_;  // kept across engine restarts (not in the session)
+    MetronomeSettings metronome_;
     std::vector<std::filesystem::path> recordingFiles_;  // while recording
     std::set<model::Id> reportedFailures_;
     std::filesystem::path projectPath_;

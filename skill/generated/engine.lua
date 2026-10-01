@@ -726,6 +726,14 @@ q = nil
 ---@field start_seconds number
 ---@field end_seconds number
 
+---@class Quire.transport_metronome_args
+---@field enabled? boolean
+---@field volume_db? number|string Quantity strings are range-checked by the server.
+
+---@class Quire.transport_metronome_result
+---@field enabled boolean
+---@field volume_db number
+
 ---@class Quire.transport_pause_result
 ---@field playing boolean
 ---@field recording boolean
@@ -945,6 +953,7 @@ q = nil
 ---@class Quire.transport
 ---@field get fun(): Quire.transport_get_result The play position and whether it is playing.
 ---@field loop fun(args?: Quire.transport_loop_args): Quire.transport_loop_result Set or toggle the loop range: playback reaching its end repeats it.
+---@field metronome fun(args?: Quire.transport_metronome_args): Quire.transport_metronome_result Turn the metronome on or off and set its level; returns the settings.
 ---@field pause fun(): Quire.transport_pause_result Pause playback where it is (ends a recording).
 ---@field play fun(): Quire.transport_play_result Start playback from the current position.
 ---@field punch fun(args?: Quire.transport_punch_args): Quire.transport_punch_result Set or toggle the punch range: recordings keep only that range.

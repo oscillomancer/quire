@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 #include "meters.h"
 #include "plan.h"
@@ -710,6 +711,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         const detail::Node& master = plan->nodes[plan->mainMaster];
         std::copy_n(master.post.l.begin(), k, out[0] + done);
         std::copy_n(master.post.r.begin(), k, out[1] + done);
+        addClicks(*plan, out, done, pos_, k);
         if (detail::Recorder* r = recorder_.load()) {
             r->capture(ins, deviceInputs_, k, pos_);
             r->captureMidi(plan->deviceMidi, done, k, pos_);
@@ -739,6 +741,64 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
 }
 
 // --- anticipation (ADR-0012) -----------------------------------------------------------------
+
+// --- metronome --------------------------------------------------------------------------------
+
+void Engine::setMetronome(bool on, double gainDb) {
+    metroGain_.store(static_cast<float>(std::pow(10.0, gainDb / 20.0)), std::memory_order_relaxed);
+    metroOn_.store(on, std::memory_order_release);
+}
+
+void Engine::addClicks(const detail::Plan& p, float* const* out, std::uint32_t offset,
+                       std::int64_t pos, std::uint32_t k) SUPPLE_RT {
+    const bool on = metroOn_.load(std::memory_order_acquire);
+    if ((!on && clickAge_ < 0) || k == 0 || !p.timeMap) return;
+    const time::TimeMap& tm = *p.timeMap;
+    const double s0 = p.startSeconds + static_cast<double>(pos) / p.rate;
+    const double s1 = p.startSeconds + static_cast<double>(pos + k) / p.rate;
+    const double b0 = tm.beatAt(s0), b1 = tm.beatAt(s1);
+    // The meter's beats in [b0, b1): frame offsets, accented on a bar's first.
+    std::array<std::uint32_t, 16> starts{};
+    std::array<bool, 16> accents{};
+    std::size_t n = 0;
+    for (double cursor = b0; on && n < starts.size();) {
+        const time::BarBeat bb = tm.barBeat(cursor);
+        const time::MeterChange m = tm.meterAt(bb.bar);
+        const double barStart = tm.beatOfBar(bb.bar);
+        const double unit = 4.0 / static_cast<double>(m.denominator);
+        const double index = std::ceil((cursor - barStart) / unit - 1e-9);
+        const bool nextBar = index >= m.numerator;
+        const double beat = nextBar ? tm.beatOfBar(bb.bar + 1) : barStart + index * unit;
+        if (beat >= b1) break;
+        const double at = (tm.secondsAt(beat) - s0) * p.rate;
+        starts[n] = static_cast<std::uint32_t>(
+            std::clamp(std::llround(at), 0LL, static_cast<long long>(k) - 1));
+        accents[n] = nextBar || index == 0;
+        ++n;
+        cursor = beat + 1e-7;  // past this beat: the next ceil finds the next one
+    }
+    const float gain = metroGain_.load(std::memory_order_relaxed);
+    std::size_t next = 0;
+    for (std::uint32_t i = 0; i < k; ++i) {
+        for (; next < n && starts[next] == i; ++next) {  // a 40 ms decaying sine
+            const bool accent = accents[next];
+            clickAge_ = 0;
+            clickLength_ = static_cast<std::int64_t>(0.04 * p.rate);
+            clickPhase_ = 0;
+            clickStep_ = 2.0 * std::numbers::pi * (accent ? 1600.0 : 1100.0) / p.rate;
+            clickAmp_ = accent ? 1.0f : 0.6f;
+            clickEnv_ = 1.0f;
+            clickDecay_ = static_cast<float>(std::exp(-1.0 / (0.008 * p.rate)));
+        }
+        if (clickAge_ < 0) continue;
+        const float v = gain * clickAmp_ * clickEnv_ * static_cast<float>(std::sin(clickPhase_));
+        out[0][offset + i] += v;
+        out[1][offset + i] += v;
+        clickPhase_ += clickStep_;
+        clickEnv_ *= clickDecay_;
+        if (++clickAge_ >= clickLength_) clickAge_ = -1;
+    }
+}
 
 Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
     std::int64_t first = kNothingPlayed;
@@ -1030,6 +1090,8 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         } else {
             const Pulled played = pullAhead(outAt, k);
             if (played.wrapped) k = played.frames;  // the rest continues at the loop start
+            if (played.first != kNothingPlayed && livePlan_)
+                addClicks(*livePlan_, outAt, 0, played.first, played.frames);
             // Only input that went with played audio is recorded; what came
             // during a dropout had no timeline position and counts as lost.
             if (detail::Recorder* r = recorder_.load()) {
@@ -1102,6 +1164,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     const detail::Node& master = p.nodes[p.mainMaster];
     std::copy_n(master.post.l.begin(), k, out[0]);
     std::copy_n(master.post.r.begin(), k, out[1]);
+    if (playing) addClicks(p, out, 0, livePos_, k);
     if (playing) {
         if (detail::Recorder* r = recorder_.load()) {
             r->capture(in, deviceInputs_, k, livePos_);

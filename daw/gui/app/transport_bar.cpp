@@ -97,6 +97,15 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     });
     punch_->layout.width = ui::SizeRule::fixed(52);
     punch_->layout.height = ui::SizeRule::fixed(24);
+    click_ = &bar->emplace<ui::Button>("transport.metronome", "click", [this] {
+        json::Value args = json::Value::object();
+        args["enabled"] = !app_.metronome().enabled;
+        auto r = dispatcher_.execute({"transport.metronome", std::move(args), kOrigin});
+        if (!r && actions_.onError) actions_.onError(r.error().message);
+        sync();
+    });
+    click_->layout.width = ui::SizeRule::fixed(56);
+    click_->layout.height = ui::SizeRule::fixed(24);
     bar->emplace<ui::Node>("transport.gap").layout.width = ui::SizeRule::fixed(10);
     position_ = &bar->emplace<ui::Label>("transport.position", "1.1.000", ui::Font::MonoBold,
                                          "title", "ink");
@@ -125,6 +134,7 @@ void TransportBar::sync() {
     if (play_) setIfChanged(play_, info.playing ? "stop" : "play");
     if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
+    if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
     const double now = nowMs();
     if (engine_ && now - lastStatusMs_ >= 250.0) {  // ≤ 4 Hz
         lastStatusMs_ = now;

@@ -40,6 +40,7 @@ class TransportBar {
     ui::Button* record_ = nullptr;
     ui::Button* loop_ = nullptr;
     ui::Button* punch_ = nullptr;
+    ui::Button* click_ = nullptr;  // the metronome
     ui::Button* tempo_ = nullptr;
     ui::Button* meter_ = nullptr;
     ui::Label* position_ = nullptr;

@@ -2155,3 +2155,47 @@ TEST_CASE("meters show a monitored input while the transport is stopped" *
     CHECK(masterPeak == doctest::Approx(devicePeak).epsilon(1e-6));
     engine.stop();
 }
+
+TEST_CASE("the metronome clicks every beat in the live output, accented on the bar" *
+          doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        const model::Session s = model::Session::create({.console9 = false});  // 120 BPM, 4/4
+        auto rtPool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2});
+        Engine engine(rtPool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.setMetronome(true, 0.0);
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 48000 * 2 / 128, 128);
+        else
+            backend.run(48000 * 2 / 128);
+        engine.stop();
+        const auto& l = backend.capture().channels[0];
+        const auto& r = backend.capture().channels[1];
+        REQUIRE(l.size() >= 96000);
+        // Find the clicks: the first sample louder than 0.05 after silence.
+        std::vector<std::size_t> onsets;
+        for (std::size_t i = 0; i < 96000; ++i)
+            if (std::fabs(l[i]) > 0.05f && (onsets.empty() || i > onsets.back() + 4000))
+                onsets.push_back(i);
+        REQUIRE(onsets.size() == 4);  // beats 1-4 of bar 1 in two seconds
+        for (std::size_t b = 1; b < onsets.size(); ++b)
+            CHECK(static_cast<double>(onsets[b] - onsets[b - 1]) ==
+                  doctest::Approx(24000).epsilon(0.002));
+        auto peak = [&](std::size_t from) {
+            float p = 0;
+            for (std::size_t i = from; i < from + 1920 && i < l.size(); ++i)
+                p = std::max(p, std::fabs(l[i]));
+            return p;
+        };
+        CHECK(peak(onsets[0]) > 0.9f);  // the bar's first beat
+        CHECK(peak(onsets[1]) < 0.7f);  // the others, softer
+        CHECK(peak(onsets[1]) > 0.4f);
+        CHECK(std::fabs(l[onsets[1] + 6000]) == 0.0f);    // silence between clicks
+        CHECK(l[onsets[2] + 100] == r[onsets[2] + 100]);  // centred
+    }
+}

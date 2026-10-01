@@ -6207,6 +6207,62 @@ Result:
 
 ```
 
+## `transport.metronome@1`
+
+Turn the metronome on or off and set its level; returns the settings.
+
+A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. Transport state: not an undo step, not saved in the project. No arguments: the current settings.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | boolean |  |  |  |  |
+| `volume_db` | value | dB | -60.0..6.0 |  | Quantity strings are range-checked by the server. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "metronome",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "volume_db": {
+      "type": "number"
+    }
+  },
+  "required": ["enabled", "volume_db"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**On** (`empty`)
+
+```json
+{
+  "enabled": true
+}
+
+```
+
+Result:
+
+```json
+{
+  "enabled": true,
+  "volume_db": -6.0
+}
+
+```
+
 ## `transport.pause@1`
 
 Pause playback where it is (ends a recording).
