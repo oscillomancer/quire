@@ -40,6 +40,8 @@ struct PluginEntry {
     std::string id, name, vendor;
     bool instrument = false, semantic = false;
     std::vector<std::string> features;
+    std::string path, version;
+    std::optional<bool> shadowed;  // another location earlier on the path has this id
 };
 struct PluginListResult {
     std::vector<PluginEntry> plugins;
@@ -350,14 +352,20 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                      .field("rescan", &PluginListArgs::rescan, schema::boolean())
                      .defaultValue(false)
                      .build();
-        auto entry = schema::object<PluginEntry>("plugin")
-                         .field("id", &PluginEntry::id, schema::string())
-                         .field("name", &PluginEntry::name, schema::string())
-                         .field("vendor", &PluginEntry::vendor, schema::string())
-                         .field("instrument", &PluginEntry::instrument, schema::boolean())
-                         .field("semantic", &PluginEntry::semantic, schema::boolean())
-                         .field("features", &PluginEntry::features, stringList())
-                         .build();
+        auto entry =
+            schema::object<PluginEntry>("plugin")
+                .field("id", &PluginEntry::id, schema::string())
+                .field("name", &PluginEntry::name, schema::string())
+                .field("vendor", &PluginEntry::vendor, schema::string())
+                .field("instrument", &PluginEntry::instrument, schema::boolean())
+                .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .field("features", &PluginEntry::features, stringList())
+                .field("path", &PluginEntry::path, schema::string())
+                .field("version", &PluginEntry::version, schema::string())
+                .field("shadowed", &PluginEntry::shadowed,
+                       schema::boolean().doc("Not loadable by id: an earlier location on the "
+                                             "plugin path has the same id (load it by path)"))
+                .build();
         c.result = schema::object<PluginListResult>("plugin_list")
                        .field("plugins", &PluginListResult::plugins, schema::arrayOf(entry))
                        .build();
@@ -373,11 +381,16 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
             };
             const std::string f = lower(a.filter.value_or(""));
             PluginListResult r;
-            for (const auto& p : *list) {
+            for (std::size_t i = 0; i < list->size(); ++i) {
+                const auto& p = (*list)[i];
                 if (!f.empty() && lower(p.id).find(f) == std::string::npos &&
                     lower(p.name).find(f) == std::string::npos)
                     continue;
-                r.plugins.push_back({p.id, p.name, p.vendor, p.instrument, p.semantic, p.features});
+                PluginEntry e{p.id,       p.name,     p.vendor,        p.instrument,
+                              p.semantic, p.features, p.path.string(), p.version,
+                              {}};
+                if (host::shadowed(*list, i)) e.shadowed = true;
+                r.plugins.push_back(std::move(e));
             }
             return r;
         };

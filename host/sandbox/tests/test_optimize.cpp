@@ -491,3 +491,48 @@ TEST_CASE("job.cancel stops a generation after the current candidate") {
     CHECK_FALSE(fs::exists(h.root.path / "renders" / (started["render"].asString() + ".wav")));
     dlclose(library);
 }
+
+TEST_CASE("a flat params merge renders the same whether or not the session rendered before") {
+    // The eval harness's sequence (reference.sub-bass), from an MCP origin: the
+    // starting patch, optionally a render, then one flat merge of the amp
+    // envelope + level. (What the harness saw was a stale Orrery in ~/.clap
+    // shadowing the built one — fixed in the catalogue order, see clap-host's
+    // test; this pins the sandbox side.)
+    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
+        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
+        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
+        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}}}})";
+    const std::string merge = R"({"instance": "in_1", "patch": {"params": {"amp.attack": 0.001042,
+        "amp.decay": 256.198095, "amp.sustain": 99.997281, "amp.release": 198.32985, "amp.level": 0.82515}}})";
+    const std::string render =
+        R"({"notation": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*", "tail_s": 2})";
+    const cmd::Origin mcp{cmd::Origin::Type::Mcp, "supple-eval", {}};
+    auto run = [&](bool pre) {
+        Harness h;
+        auto call = [&](const char* command, const std::string& args) {
+            auto r = h.d->execute({command, j(args), mcp});
+            REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+            return *r;
+        };
+        call(
+            "session.set",
+            R"({"block_size": 256, "meter": "4/4", "sample_rate": 48000, "tail_limit_s": 2, "tempo": 120})");
+        call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+        call("patch.merge", R"({"instance": "in_1", "patch": {"seed": 42}})");
+        call("patch.set", start);
+        if (pre) call("render", render);
+        call("patch.merge", merge);
+        json::Value r = call("render", render);
+        auto a = audio::readAudio(r["path"].asString());
+        REQUIRE(a);
+        return a->channels[0];
+    };
+    const auto fresh = run(false), after = run(true);
+    REQUIRE(fresh.size() == after.size());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < fresh.size(); ++i)
+        worst = std::max(worst,
+                         std::fabs(static_cast<double>(fresh[i]) - static_cast<double>(after[i])));
+    INFO("worst sample difference: " << worst);
+    CHECK(worst == 0.0);
+}

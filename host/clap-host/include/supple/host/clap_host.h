@@ -42,6 +42,11 @@ struct PluginInfo {
 Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);
 // CLAP and VST3 standard search paths, plus CLAP_PATH/VST3_PATH (existing only).
 std::vector<std::filesystem::path> defaultSearchPath();
+// Orders a scan result as a catalogue: by id, and within one id in search-path
+// order, so a lookup by id takes the first location that has it (an explicit
+// --plugin-path before ~/.clap). `shadowed` marks the later copies.
+void orderCatalogue(std::vector<PluginInfo>& list);
+bool shadowed(std::span<const PluginInfo> catalogue, std::size_t index);
 
 struct HostIdentity {
     std::string name = "supple-host";  // callers pass the product name
