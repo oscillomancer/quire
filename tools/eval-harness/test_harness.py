@@ -47,6 +47,14 @@ class Tasks(unittest.TestCase):
         self.assertNotIn("NEVER-EXPOSE-THIS", preamble(task, "/render/reference.wav"))
         self.assertNotIn("hidden_patch", preamble(task))
 
+    def test_blind_hides_descriptor_targets_only(self):
+        task = load_tasks("synth-descriptive", ["pad"])[0]
+        self.assertIn("Descriptor targets", preamble(task))
+        blind = preamble(task, blind=True)
+        self.assertNotIn("Descriptor targets", blind)
+        self.assertNotIn("supple.analysis-profile", blind)
+        self.assertIn(task["prompt"], blind)
+
 
 class Scoring(unittest.TestCase):
     def midi(self):
