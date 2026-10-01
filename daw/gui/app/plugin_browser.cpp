@@ -1,0 +1,274 @@
+#include "plugin_browser.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+
+#include "supple/base/files.h"
+#include "supple/json/parse.h"
+#include "supple/json/write.h"
+#include "supple/product.h"
+#include "supple/ui/list.h"
+#include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
+#include "supple/ui/widgets.h"
+
+namespace supple::gui {
+namespace {
+
+const cmd::Origin kUiOrigin{cmd::Origin::Type::Ui, "gui", {}};
+
+std::string lower(std::string_view s) {
+    std::string out(s);
+    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+bool contains(std::string_view haystack, std::string_view needle) {
+    return lower(haystack).find(lower(needle)) != std::string::npos;
+}
+
+const char* kFavMark = "*";  // ASCII: Inter has no visible U+2605
+
+}  // namespace
+
+// --- Favourites -----------------------------------------------------------------
+
+std::filesystem::path Favourites::defaultFile(std::string_view slug) {
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
+        return std::filesystem::path(xdg) / slug / "favourites.json";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".config" / slug / "favourites.json";
+    return {};
+}
+
+Result<Favourites> Favourites::load(const std::filesystem::path& file) {
+    Favourites out;
+    if (file.empty() || !std::filesystem::exists(file)) return out;
+    auto bytes = readFile(file);
+    if (!bytes) return std::move(bytes).error();
+    auto doc =
+        json::parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+    if (!doc) return std::move(doc).error();
+    const json::Value* schema = doc->isObject() ? doc->find("schema") : nullptr;
+    if (!schema || !schema->isString() || schema->asString() != "supple.favourites/1.0")
+        return Error("favourites.schema", file.string() + " is not a supple.favourites/1.0 document",
+                     "/schema");
+    const json::Value* list = doc->find("favourites");
+    if (!list) return out;
+    if (!list->isArray())
+        return Error("favourites.list", "favourites must be an array of plugin ids", "/favourites");
+    for (const json::Value& id : list->asArray()) {
+        if (!id.isString())
+            return Error("favourites.id", "every favourite is a plugin id", "/favourites");
+        out.ids.push_back(id.asString());
+    }
+    return out;
+}
+
+Status Favourites::save(const std::filesystem::path& file) const {
+    json::Value doc = json::Value::object();
+    doc["schema"] = "supple.favourites/1.0";
+    json::Value list = json::Value::array();
+    for (const std::string& id : ids) list.push_back(id);
+    doc["favourites"] = std::move(list);
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    return writeFileAtomic(file, json::writeCanonical(doc) + "\n");
+}
+
+bool Favourites::has(std::string_view id) const {
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+bool Favourites::toggle(std::string_view id) {
+    auto it = std::find(ids.begin(), ids.end(), id);
+    if (it != ids.end()) {
+        ids.erase(it);
+        return false;
+    }
+    ids.emplace_back(id);
+    return true;
+}
+
+// --- PluginBrowser --------------------------------------------------------------
+
+PluginBrowser::PluginBrowser(engine::EngineApp&, cmd::Dispatcher& dispatcher, ui::Root& root,
+                             std::filesystem::path favouritesFile)
+    : dispatcher_(dispatcher),
+      root_(root),
+      favouritesFile_(std::move(favouritesFile)) {
+    if (auto loaded = Favourites::load(favouritesFile_))
+        favourites_ = std::move(*loaded);
+    else
+        std::fprintf(stderr, "favourites: %s\n", loaded.error().toString().c_str());
+}
+
+std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
+    auto page = std::make_unique<ui::Node>("browser");
+    page_ = page.get();
+    page->layout.dir = ui::Layout::Dir::Column;
+    page->layout.width = ui::SizeRule::fixed(560);
+    page->layout.height = ui::SizeRule::fixed(440);
+    page->layout.padding = ui::Insets::all(12);
+    page->layout.gap = 8;
+    page->emplace<ui::Label>("browser.title", "Add plugin", ui::Font::UiBold, "body");
+    search_ = &page->emplace<ui::TextField>("browser.search", "", "Search plugins…");
+    search_->layout.height = ui::SizeRule::fixed(26);
+    list_ = &page->emplace<ui::List>("browser.results");
+    list_->rowHeight = 30;
+    list_->paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
+        if (i >= rows_.size()) return;
+        const ui::Theme& t = c.theme();
+        const Entry& e = *rows_[i].entry;
+        const std::string name = (rows_[i].favourite ? std::string(kFavMark) + " " : "") + e.name;
+        const float w = c.textWidth(name, ui::Font::Ui, t.type("small"));
+        c.text({r.x + 10, r.y, r.w - 20, r.h}, name, ui::Font::Ui, t.type("small"),
+               t.color("ink"));
+        c.text({r.x + 20 + w, r.y, std::max(0.0f, r.w - 32 - w), r.h},
+               lower(e.vendor) == lower(product::kVendor) ? "stock" : e.vendor, ui::Font::Mono,
+               t.type("caption"), t.color("ink-faint"));
+        c.text({r.x, r.y, r.w - 12, r.h}, e.id, ui::Font::Mono, t.type("caption"),
+               t.color("ink-quiet"), ui::kRight | ui::kMiddle);
+    };
+    search_->onChange = [this](const std::string&) { sortAndFilter(); };
+    search_->onSubmit = [this](const std::string&) { activate(list_->selected().value_or(0)); };
+    search_->onOtherKey = [this](const ui::KeyEvent& e) { return list_->onKey(e); };
+    list_->onActivate = [this](std::size_t row) { activate(row); };
+    auto& footer = page->emplace<ui::Node>("browser.footer");
+    footer.layout.dir = ui::Layout::Dir::Row;
+    footer.layout.height = ui::SizeRule::fixed(28);
+    footer.layout.gap = 6;
+    footer.emplace<ui::Button>("browser.rescan", "Rescan", [this] {
+        // Paint "Scanning…" now; the scan runs on the next frame (tick), so the
+        // click never blocks inside the event.
+        scanPending_ = true;
+        setStatus("Scanning…");
+        root_.damageAll();
+    });
+    footer.emplace<ui::Button>("browser.fav", "Favourite", [this] {
+        const auto row = list_->selected();
+        if (!row || *row >= rows_.size()) return;
+        const std::string id = rows_[*row].entry->id;
+        const bool now = favourites_.toggle(id);
+        if (auto saved = favourites_.save(favouritesFile_); !saved)
+            setStatus("favourites: " + saved.error().message);
+        else
+            setStatus(now ? "Added to favourites" : "Removed from favourites");
+        sortAndFilter();
+        root_.damageAll();
+    });
+    footer.emplace<ui::Button>("browser.add", "Add",
+                               [this] { activate(list_->selected().value_or(0)); });
+    status_ = &footer.emplace<ui::Label>("browser.status", "", ui::Font::Ui, "caption", "ink-quiet");
+    status_->layout.width = ui::SizeRule::fraction();
+    refresh();
+    return page;
+}
+
+void PluginBrowser::open(std::function<void(const std::string&)> onAdd) {
+    onAdd_ = std::move(onAdd);
+    if (page_) {  // already open: raise it
+        refresh();
+        return;
+    }
+    auto page = buildPage();
+    root_.openPopup(std::move(page), {}, ui::Placement::Center, [this] {
+        page_ = nullptr;
+        search_ = nullptr;
+        list_ = nullptr;
+        status_ = nullptr;
+    });
+}
+
+void PluginBrowser::close() {
+    if (page_) root_.closePopup();
+}
+
+void PluginBrowser::setStatus(std::string message) {
+    if (status_) status_->setText(std::move(message));
+}
+
+void PluginBrowser::tick() {
+    if (scanPending_ && page_) {
+        scanPending_ = false;
+        runScan();
+    }
+}
+
+void PluginBrowser::runScan() {
+    // plugin.scan probes plugins with main-thread CLAP calls and cannot move to
+    // a worker (the catalogue lives on the model thread); run it synchronously
+    // and repaint the result. Background scanning is engine work (logged).
+    auto result = dispatcher_.execute({"plugin.scan", json::Value::object(), kUiOrigin});
+    if (!result) {
+        setStatus(result.error().message);
+        return;
+    }
+    refresh();
+    setStatus("Rescan complete");
+}
+
+void PluginBrowser::refresh() {
+    auto result = dispatcher_.execute({"plugin.list", json::Value::object(), kUiOrigin});
+    if (!result) {
+        setStatus(result.error().message);
+        return;
+    }
+    all_.clear();
+    const json::Value* plugins = result->isObject() ? result->find("plugins") : nullptr;
+    if (plugins && plugins->isArray())
+        for (const json::Value& p : plugins->asArray()) {
+            Entry e;
+            const auto str = [&](const char* key) {
+                const json::Value* v = p.find(key);
+                return v && v->isString() ? v->asString() : std::string();
+            };
+            e.id = str("id");
+            e.name = str("name");
+            e.vendor = str("vendor");
+            e.format = str("format");
+            e.instrument = p.find("instrument") && p.find("instrument")->asBool();
+            e.semantic = p.find("semantic") && p.find("semantic")->asBool();
+            all_.push_back(std::move(e));
+        }
+    sortAndFilter();
+    root_.damageAll();
+}
+
+void PluginBrowser::sortAndFilter() {
+    const std::string query = search_ ? search_->text() : std::string();
+    rows_.clear();
+    for (const Entry& e : all_) {
+        if (!query.empty() && !contains(e.id, query) && !contains(e.name, query) &&
+            !contains(e.vendor, query))
+            continue;
+        rows_.push_back(Row{&e, favourites_.has(e.id)});
+    }
+    auto rank = [&](const Row& r) {
+        const bool stock = lower(r.entry->vendor) == lower(product::kVendor);
+        return std::pair{r.favourite ? 0 : 1, stock ? 0 : 1};
+    };
+    std::stable_sort(rows_.begin(), rows_.end(), [&](const Row& a, const Row& b) {
+        if (rank(a) != rank(b)) return rank(a) < rank(b);
+        const int byName = lower(a.entry->name).compare(lower(b.entry->name));
+        return byName != 0 ? byName < 0 : a.entry->id < b.entry->id;
+    });
+    shown_.clear();
+    for (const Row& r : rows_) shown_.push_back(r.entry->id);
+    if (list_) {
+        list_->setCount(rows_.size());
+        list_->select(rows_.empty() ? std::nullopt : std::optional<std::size_t>(0));
+        list_->invalidate();
+    }
+}
+
+void PluginBrowser::activate(std::size_t row) {
+    if (row >= rows_.size()) return;
+    const std::string id = rows_[row].entry->id;
+    auto add = onAdd_;
+    close();  // the popup is destroyed here
+    if (add) add(id);
+}
+
+}  // namespace supple::gui

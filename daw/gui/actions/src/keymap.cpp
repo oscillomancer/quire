@@ -113,6 +113,7 @@ Keymap Keymap::defaults() {
     add({"Ctrl+E"}, "global", "ui.midi.edit");
     add({"Alt+R"}, "global", "ui.routing");
     add({"Ctrl+M"}, "global", "ui.mixer");
+    add({"Ctrl+Alt+R"}, "global", "ui.render");
     add({"Ctrl+T"}, "global", "track.add:channel");
     add({"Ctrl+Alt+T"}, "global", "track.add:buss");
     add({"Shift+/"}, "global", "ui.actions");
