@@ -140,6 +140,17 @@ struct ItemDuplicateArgs {
     std::string item;
     std::optional<double> to;
 };
+struct PastePlacement {
+    std::string item, track;
+    double position = 0;
+};
+struct ItemPasteArgs {
+    std::optional<std::int64_t> version;
+    std::vector<PastePlacement> items;
+};
+struct ItemPasteResult {
+    std::vector<std::string> items;
+};
 struct ItemSplitArgs {
     std::string item;
     double at = 0;
@@ -1111,6 +1122,106 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
             }
             return IdResult{txn.create(std::move(copy)).str()};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<ItemPasteArgs, ItemPasteResult> c;
+        c.name = "item.paste";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Copy items as they were in a version (a clipboard) to tracks and beats.";
+        c.description =
+            "version: where the items are read (default: now) — a GUI copy or cut remembers the "
+            "version, so a paste reproduces the items as copied even after they were removed or "
+            "edited. items: [{item, track, position}] (beats; channels only). Takes, fades, "
+            "take FX and MIDI are copied; an audio source the project no longer has is restored.";
+        c.tags = {"item"};
+        auto placement = schema::object<PastePlacement>("paste_placement")
+                             .field("item", &PastePlacement::item, idSchema("it"))
+                             .field("track", &PastePlacement::track, idSchema("tr"))
+                             .field("position", &PastePlacement::position, schema::number().min(0))
+                             .build();
+        c.args = schema::object<ItemPasteArgs>("item_paste_args")
+                     .field("version", &ItemPasteArgs::version, schema::integer().min(1))
+                     .field("items", &ItemPasteArgs::items, schema::arrayOf(placement))
+                     .build();
+        c.result = schema::object<ItemPasteResult>("item_paste_result")
+                       .field("items", &ItemPasteResult::items, schema::arrayOf(schema::string()))
+                       .build();
+        c.examples = {{"Paste after itself",
+                       j(R"({"items":[{"item":"it_1","track":"tr_1","position":16}]})"),
+                       j(R"({"items":["it_2"]})"), "song_with_item"}};
+        c.run = [](const ItemPasteArgs& a, Context& ctx) -> Result<ItemPasteResult> {
+            EngineApp& eng = app(ctx);
+            const auto now = eng.view();
+            std::shared_ptr<const model::Session> from;
+            if (a.version) {
+                const model::Version* v =
+                    eng.versions().version(static_cast<std::uint64_t>(*a.version));
+                if (!v || !v->session)
+                    return Error("history.version", "no version " + std::to_string(*a.version),
+                                 "/version", "history.list shows the versions");
+                from = v->session;
+            } else {
+                from = std::make_shared<const model::Session>(now);
+            }
+            const model::Session& s = *from;
+            auto& txn = eng.txn();
+            std::map<Id, Id> restored;  // audio sources brought back, by their old id
+            ItemPasteResult out;
+            for (std::size_t i = 0; i < a.items.size(); ++i) {
+                const PastePlacement& p = a.items[i];
+                const std::string at = "/items/" + std::to_string(i);
+                auto item = require<model::Item>(s, p.item, at + "/item");
+                if (!item) return std::move(item).error();
+                auto track = require<model::Track>(now, p.track, at + "/track");
+                if (!track) return std::move(track).error();
+                if (now.tracks.find(*track)->type != model::StripType::Channel)
+                    return Error("track.strip_type", "only channels hold items", at + "/track",
+                                 "paste onto a channel");
+                const model::Item& original = *s.items.find(*item);
+                model::Item copy = original;
+                copy.position = p.position;
+                copy.track = *track;
+                copy.takes.clear();
+                copy.activeTake.reset();
+                for (Id oldId : original.takes) {
+                    auto old = dangling<model::Take>(s, oldId, at + "/item");
+                    if (!old) return std::move(old).error();
+                    model::Take tk = **old;
+                    if (tk.source && tk.source->kind == model::Kind::Media &&
+                        !now.media.find(*tk.source)) {
+                        auto it = restored.find(*tk.source);
+                        if (it == restored.end()) {
+                            const model::MediaSource* md = s.media.find(*tk.source);
+                            if (!md) return Error("item.source", "the copied audio is gone", at);
+                            it = restored.emplace(*tk.source, txn.create(*md)).first;
+                        }
+                        tk.source = it->second;
+                    } else if (tk.source && tk.source->kind == model::Kind::Midi &&
+                               !now.midi.find(*tk.source)) {
+                        const model::MidiSource* mi = s.midi.find(*tk.source);
+                        if (!mi) return Error("item.source", "the copied MIDI is gone", at);
+                        model::MidiSource fresh = *mi;
+                        fresh.pooled = false;
+                        tk.source = txn.create(std::move(fresh));
+                    } else {
+                        unpoolCopiedSource(tk, s, txn);
+                    }
+                    tk.chain.clear();
+                    for (Id fx : (*old)->chain) {
+                        auto chained = dangling<model::FxInstance>(s, fx, at + "/item");
+                        if (!chained) return std::move(chained).error();
+                        tk.chain.push_back(txn.create(**chained));
+                    }
+                    const Id fresh = txn.create(std::move(tk));
+                    copy.takes.push_back(fresh);
+                    if (original.activeTake == oldId) copy.activeTake = fresh;
+                }
+                out.items.push_back(txn.create(std::move(copy)).str());
+            }
+            return out;
         };
         registry.add(std::move(c));
     }

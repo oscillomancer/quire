@@ -2301,6 +2301,67 @@ Result:
 
 ```
 
+## `item.paste@1`
+
+Copy items as they were in a version (a clipboard) to tracks and beats.
+
+version: where the items are read (default: now) — a GUI copy or cut remembers the version, so a paste reproduces the items as copied even after they were removed or edited. items: [{item, track, position}] (beats; channels only). Takes, fades, take FX and MIDI are copied; an audio source the project no longer has is restored.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `version` | integer |  | 1.0.. |  |  |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "item_paste_result",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["items"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Paste after itself** (`song_with_item`)
+
+```json
+{
+  "items": [
+    {
+      "item": "it_1",
+      "track": "tr_1",
+      "position": 16
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "items": ["it_2"]
+}
+
+```
+
 ## `item.remove@1`
 
 Remove an item with its takes (unpooled sources go too).

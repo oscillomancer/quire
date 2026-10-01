@@ -1682,6 +1682,65 @@
     }
   },
   {
+    "name": "item_paste",
+    "title": "Copy items as they were in a version (a clipboard) to tracks and beats.",
+    "description": "Copy items as they were in a version (a clipboard) to tracks and beats. version: where the items are read (default: now) — a GUI copy or cut remembers the version, so a paste reproduces the items as copied even after they were removed or edited. items: [{item, track, position}] (beats; channels only). Takes, fades, take FX and MIDI are copied; an audio source the project no longer has is restored. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_paste_args",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "paste_placement",
+            "properties": {
+              "item": {
+                "type": "string",
+                "pattern": "^it_[0-9]+$"
+              },
+              "track": {
+                "type": "string",
+                "pattern": "^tr_[0-9]+$"
+              },
+              "position": {
+                "type": "number",
+                "minimum": 0.0
+              }
+            },
+            "required": ["item", "track", "position"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "item_paste_result",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "item_remove",
     "title": "Remove an item with its takes (unpooled sources go too).",
     "description": "Remove an item with its takes (unpooled sources go too).  See describe for errors and examples.",

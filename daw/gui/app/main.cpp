@@ -433,6 +433,25 @@ int main(int argc, char** argv) {
         if (auto made = a.gestures().newMidiItem(*track, from, to); !made)
             std::fprintf(stderr, "new MIDI item: %s\n", made.error().toString().c_str());
     });
+    // The item clipboard: paste at the playhead, onto the selected channel.
+    auto reportEdit = [](const char* what, const Status& st) {
+        if (!st) std::fprintf(stderr, "%s: %s\n", what, st.error().toString().c_str());
+    };
+    appActions.addUi("ui.item.copy", "Item: copy",
+                     [&] { shell.arrange()->gestures().copySelection(); });
+    appActions.addUi("ui.item.cut", "Item: cut",
+                     [&] { reportEdit("cut", shell.arrange()->gestures().cutSelection()); });
+    appActions.addUi("ui.item.paste", "Item: paste at the playhead", [&] {
+        views::ArrangeView& a = *shell.arrange();
+        std::optional<model::Id> track;
+        if (!uiState.selectedTracks.empty())
+            track = model::Id::parse(uiState.selectedTracks.front());
+        reportEdit("paste",
+                   a.gestures().paste((*app)->head().timeMap->beatAt(a.playhead()), track));
+    });
+    appActions.addUi("ui.item.duplicate", "Item: duplicate after itself", [&] {
+        reportEdit("duplicate", shell.arrange()->gestures().duplicateSelection());
+    });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",

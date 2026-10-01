@@ -543,3 +543,43 @@ TEST_CASE(
     CHECK(f.item(*ranged).position == doctest::Approx(4.0));
     CHECK(f.item(*ranged).length == doctest::Approx(9.0));
 }
+
+TEST_CASE("arrange clipboard: copy, cut, paste onto another channel, duplicate") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id a = f.itemOnRow(0);
+    const double len = f.item(a).length;
+    g.setSelection({a});
+    // Copy, then paste at beat 200 onto row 1's channel: one undo step, selected.
+    g.copySelection();
+    REQUIRE(g.canPaste());
+    const model::Id row1 = f.view->trackLayout().rows()[1].track;
+    auto steps = f.steps();
+    REQUIRE(g.paste(200, row1));
+    f.sync();
+    REQUIRE(g.selection().size() == 1);
+    const model::Id pasted = g.selection()[0];
+    CHECK(pasted != a);
+    CHECK(f.item(pasted).track == row1);
+    CHECK(f.item(pasted).position == doctest::Approx(200));
+    CHECK(f.item(pasted).length == doctest::Approx(len));
+    CHECK(f.steps() == steps + 1);
+    // Cut removes it; a paste brings it back as it was (from the copy's version).
+    g.setSelection({pasted});
+    REQUIRE(g.cutSelection());
+    f.sync();
+    CHECK_FALSE(f.app->head().items.find(pasted));
+    REQUIRE(g.paste(300));
+    f.sync();
+    REQUIRE(g.selection().size() == 1);
+    CHECK(f.item(g.selection()[0]).track == row1);  // its own row (no target given)
+    CHECK(f.item(g.selection()[0]).position == doctest::Approx(300));
+    // Duplicate: right after itself, on the same track.
+    const model::Id last = g.selection()[0];
+    REQUIRE(g.duplicateSelection());
+    f.sync();
+    REQUIRE(g.selection().size() == 1);
+    CHECK(f.item(g.selection()[0]).position == doctest::Approx(300 + len));
+    CHECK(f.item(g.selection()[0]).track == f.item(last).track);
+}

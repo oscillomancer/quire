@@ -259,6 +259,99 @@ Result<model::Id> ItemGestures::newMidiItem(model::Id track, double fromBeat,
     return *id;
 }
 
+ItemGestures::Clip ItemGestures::clip() const {
+    Clip c;
+    const model::Session& s = view_.session();
+    c.version = s.version;
+    for (model::Id id : selection_) {
+        const model::Item* it = itemOf(s, id);
+        const auto row = it ? view_.trackLayout().indexOf(it->track) : std::nullopt;
+        if (!row) continue;
+        c.items.push_back({id, it->position, it->position + it->length, *row});
+    }
+    return c;
+}
+
+void ItemGestures::copySelection() {
+    Clip c = clip();
+    if (!c.items.empty()) clipboard_ = std::move(c);
+}
+
+Status ItemGestures::cutSelection() {
+    Clip c = clip();
+    if (c.items.empty() || !run) return {};
+    std::vector<EditStep> steps;
+    for (const auto& e : c.items) {
+        json::Value args = json::Value::object();
+        args["item"] = e.item.str();
+        steps.push_back({"item.remove", std::move(args)});
+    }
+    auto r = run(c.items.size() == 1 ? "Cut item" : "Cut items", steps);
+    if (!r) return std::move(r).error();
+    clipboard_ = std::move(c);
+    selection_.clear();
+    changed();
+    return {};
+}
+
+Status ItemGestures::paste(double atBeat, std::optional<model::Id> track) {
+    std::optional<std::size_t> row;
+    if (track) row = view_.trackLayout().indexOf(*track);
+    return pasteClip(clipboard_, atBeat, row,
+                     clipboard_.items.size() == 1 ? "Paste item" : "Paste items");
+}
+
+Status ItemGestures::duplicateSelection() {
+    Clip c = clip();
+    if (c.items.empty()) return {};
+    double end = 0;
+    for (const auto& e : c.items) end = std::max(end, e.end);
+    return pasteClip(c, end, std::nullopt,
+                     c.items.size() == 1 ? "Duplicate item" : "Duplicate items");
+}
+
+Status ItemGestures::pasteClip(const Clip& c, double atBeat, std::optional<std::size_t> row,
+                               const std::string& label) {
+    if (c.items.empty() || !run) return {};
+    const auto& rows = view_.trackLayout().rows();
+    double start = 1e300;
+    std::size_t top = rows.size();
+    for (const auto& e : c.items) {
+        start = std::min(start, e.position);
+        top = std::min(top, e.row);
+    }
+    const std::ptrdiff_t shift =
+        row ? static_cast<std::ptrdiff_t>(*row) - static_cast<std::ptrdiff_t>(top) : 0;
+    json::Value placements = json::Value::array();
+    for (const auto& e : c.items) {
+        // The row the item lands on; a row that is not a channel (or past the
+        // end) keeps the item on its own row.
+        std::size_t target = e.row;
+        const std::ptrdiff_t moved = static_cast<std::ptrdiff_t>(e.row) + shift;
+        if (moved >= 0 && static_cast<std::size_t>(moved) < rows.size() &&
+            !rows[static_cast<std::size_t>(moved)].env &&
+            rows[static_cast<std::size_t>(moved)].type == model::StripType::Channel)
+            target = static_cast<std::size_t>(moved);
+        if (target >= rows.size()) continue;
+        json::Value p = json::Value::object();
+        p["item"] = e.item.str();
+        p["track"] = rows[target].track.str();
+        p["position"] = std::max(0.0, atBeat + (e.position - start));
+        placements.push_back(std::move(p));
+    }
+    json::Value args = json::Value::object();
+    args["version"] = static_cast<std::int64_t>(c.version);
+    args["items"] = std::move(placements);
+    auto r = run(label, {{"item.paste", std::move(args)}});
+    if (!r) return std::move(r).error();
+    selection_.clear();
+    if (const json::Value* made = r->find("items"); made && made->isArray())
+        for (const json::Value& id : made->asArray())
+            if (auto parsed = model::Id::parse(id.asString())) selection_.push_back(*parsed);
+    changed();
+    return {};
+}
+
 double ItemGestures::stretchRate(const model::Item& item, const model::Take& take,
                                  double deltaBeats) const {
     const model::Session& s = view_.session();

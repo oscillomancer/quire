@@ -1843,3 +1843,44 @@ TEST_CASE(
           "Automation written");  // newest first
     call("engine.stop", "{}");
 }
+
+TEST_CASE("item.paste copies items as they were in a version, even after a cut") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("track.add", R"({"name": "Keys"})");
+    call("track.add", R"({"name": "Bass"})");
+    call("item.add", R"({"track": "tr_1", "bar": 1, "notation": "voice v; 1: C4:q E4:q G4:h"})");
+    call("item.set", R"({"item": "it_1", "fade_in": 0.05})");
+    const std::uint64_t copied = app->head().version;  // "Ctrl+C" remembers this
+    call("item.remove", R"({"item": "it_1"})");        // the cut
+    REQUIRE_FALSE(app->head().items.find(*model::Id::parse("it_1")));
+    auto pasted =
+        call("item.paste", std::string(R"({"version": )") + std::to_string(copied) +
+                               R"(, "items": [{"item": "it_1", "track": "tr_2", "position": 8}]})");
+    REQUIRE(pasted["items"].size() == 1);
+    const model::Session& s = app->head();
+    const model::Item& item = *s.items.find(*model::Id::parse(pasted["items"].at(0).asString()));
+    CHECK(item.track == *model::Id::parse("tr_2"));
+    CHECK(item.position == doctest::Approx(8));
+    CHECK(item.fadeIn.length == doctest::Approx(0.05));
+    const model::Take& take = *s.takes.find(*item.activeTake);
+    REQUIRE(take.source);
+    CHECK(s.midi.find(*take.source)->sequence.notes.size() == 3);
+    // Errors: a version that does not exist, a buss, an item not in that version.
+    CHECK_FALSE(d.execute({"item.paste", j(R"({"version": 999999, "items": []})"), kTest}));
+    call("track.add", R"({"name": "Bus", "type": "buss"})");
+    auto onBus = d.execute({"item.paste",
+                            j(std::string(R"({"version": )") + std::to_string(copied) +
+                              R"(, "items": [{"item": "it_1", "track": "tr_3", "position": 0}]})"),
+                            kTest});
+    REQUIRE_FALSE(onBus);
+    CHECK(onBus.error().code == "track.strip_type");
+}

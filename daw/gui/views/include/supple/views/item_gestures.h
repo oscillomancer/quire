@@ -74,6 +74,17 @@ class ItemGestures {
     // (onOpenMidi): one transaction. Also a double-click on empty lane space.
     Result<model::Id> newMidiItem(model::Id track, double fromBeat,
                                   std::optional<double> toBeat = {});
+
+    // The clipboard (Ctrl+C/X/V, Ctrl+D): the selected items with the version
+    // they were copied at, so a paste reproduces them as copied (item.paste),
+    // even after a cut. A paste puts the earliest item at `atBeat` and the
+    // topmost one on `track` (default: where it was), keeping the others'
+    // offsets in time and rows; the pasted items become the selection.
+    void copySelection();
+    Status cutSelection();
+    Status paste(double atBeat, std::optional<model::Id> track = {});
+    Status duplicateSelection();  // right after the selection, on the same tracks
+    bool canPaste() const { return !clipboard_.items.empty(); }
     // The play rate that keeps a take's material filling the item when its
     // end moves by `deltaBeats` (the stretch gesture).
     double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
@@ -127,6 +138,18 @@ class ItemGestures {
     bool moved_ = false, free_ = false, copy_ = false;
     std::size_t pressRow_ = 0;
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it
+    struct Clip {
+        std::uint64_t version = 0;
+        struct Entry {
+            model::Id item;
+            double position = 0, end = 0;
+            std::size_t row = 0;
+        };
+        std::vector<Entry> items;
+    } clipboard_;
+    Clip clip() const;  // the selection as a clip of the shown version
+    Status pasteClip(const Clip& clip, double atBeat, std::optional<std::size_t> row,
+                     const std::string& label);
     ui::Root* root_ = nullptr;
 };
 

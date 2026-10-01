@@ -278,6 +278,13 @@ q = nil
 ---@field bar? integer
 ---@field track? string Track id, e.g. "tr_1".
 
+---@class Quire.item_paste_args
+---@field version? integer
+---@field items table[]
+
+---@class Quire.item_paste_result
+---@field items string[]
+
 ---@class Quire.item_remove_args
 ---@field item string Item id, e.g. "it_1".
 
@@ -844,6 +851,7 @@ q = nil
 ---@field add fun(args: Quire.item_add_args): Quire.item_add_result Add an item on a track: MIDI written in notation, or an audio file.
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
+---@field paste fun(args: Quire.item_paste_args): Quire.item_paste_result Copy items as they were in a version (a clipboard) to tracks and beats.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
 ---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, color, or lock.
 ---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an audio or MIDI item at a beat, keeping take source positions aligned.
