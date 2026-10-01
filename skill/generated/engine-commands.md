@@ -1137,6 +1137,7 @@ Result:
       "param": "gain",
       "points": 2,
       "active": true,
+      "visible": true,
       "mode": "read"
     }
   ]

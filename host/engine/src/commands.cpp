@@ -1293,6 +1293,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            // Touch/latch/write envelopes record the change while the transport plays.
+            if (a.volumeDb) app.recordAutomation(*id, "volume", *a.volumeDb);
+            if (a.pan) app.recordAutomation(*id, "pan", *a.pan);
+            if (a.mute) app.recordAutomation(*id, "mute", *a.mute ? 1.0 : 0.0);
             if (a.parentSend && *a.parentSend && !s.tracks.find(*id)->parentSend.enabled)
                 if (auto valid = model::checkInvariants(app.view()); !valid)
                     return Error(
@@ -2647,7 +2651,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        .build();
         c.examples = {
             {"All", obj("{}"),
-             obj(R"({"envelopes": [{"env": "en_1", "target": "fx_2", "param": "gain", "points": 2, "active": true, "mode": "read"}]})"),
+             obj(R"({"envelopes": [{"env": "en_1", "target": "fx_2", "param": "gain", "points": 2, "active": true, "visible": true, "mode": "read"}]})"),
              "song_with_env"}};
         c.run = [](const EnvListArgs& a, Context& ctx) -> Result<EnvList> {
             const model::Session s = A(ctx).view();

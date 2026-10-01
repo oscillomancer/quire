@@ -204,6 +204,13 @@ class EngineApp : public cmd::Host {
     // Transport requests. With a device, each waits (at most a second) until
     // the audio thread has acted on it, so the answer is the new state.
     Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
+    // Automation writing (P5.14): while the transport plays, a change to a
+    // strip's volume/pan/mute (inside the edit's transaction) is recorded into
+    // its envelope when that envelope is in touch, latch or write mode. At
+    // pause/stop latch and write hold the last value to the stop position, and
+    // a write envelope never touched is flattened over the pass (one
+    // transaction, "Automation written").
+    void recordAutomation(model::Id object, const std::string& param, double value);
     // transport.loop / transport.punch (ADR-0015): transport state, not
     // versioned; the loop reaches the engine (now, and whenever it starts),
     // the punch range trims takes when a recording is committed.
@@ -298,7 +305,15 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
-    double playStart_ = 0.0;       // transport.stop returns here
+    double playStart_ = 0.0;  // transport.stop returns here
+    // Automation written during this pass, per envelope (transient).
+    struct AutoWrite {
+        double startBeat = 0, lastBeat = 0, lastValue = 0;
+        bool touched = false;
+    };
+    std::map<model::Id, AutoWrite> autoWrite_;
+    void beginAutomationPass(double beat);
+    Status finishAutomationPass(double stopBeat);
     TransportRange loop_, punch_;  // kept across engine restarts (not in the session)
     std::vector<std::filesystem::path> recordingFiles_;  // while recording
     std::set<model::Id> reportedFailures_;

@@ -1771,3 +1771,66 @@ TEST_CASE("engine.inputs: the record inputs while running, empty while stopped")
     CHECK(inputs->find("audio")->at(1).find("channel")->asInt() == 2);
     REQUIRE(d.execute({"engine.stop", j("{}"), kTest}));
 }
+
+TEST_CASE(
+    "automation writing: touch and latch record a strip's control while the transport plays") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("track.add", R"({"name": "Lead"})");
+    call("env.add",
+         R"({"track": "tr_1", "param": "volume", "points": [{"beat": 0, "value": -6}]})");
+    call("env.add", R"({"track": "tr_1", "param": "pan", "points": [{"beat": 0, "value": 0}]})");
+    auto points = [&](const char* env) {
+        return app->head().envelopes.find(*model::Id::parse(env))->points;
+    };
+    // Read mode, or stopped: nothing is written.
+    call("track.set", R"({"track": "tr_1", "volume_db": -3})");
+    CHECK(points("en_1").size() == 1);
+    call("env.set", R"({"env": "en_1", "mode": "touch"})");
+    call("env.set", R"({"env": "en_2", "mode": "latch"})");
+    call("track.set", R"({"track": "tr_1", "volume_db": -3})");  // stopped
+    CHECK(points("en_1").size() == 1);
+
+    call("engine.start", R"({"backend": "dummy"})");
+    call("transport.play", "{}");
+    auto waitBeats = [&](double beats) {
+        const double until = call("transport.get", "{}")["beat"].asDouble() + beats;
+        for (int i = 0; i < 4000 && call("transport.get", "{}")["beat"].asDouble() < until; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    };
+    waitBeats(0.5);
+    call("track.set", R"({"track": "tr_1", "volume_db": -12, "pan": -50})");
+    waitBeats(0.5);
+    call("track.set", R"({"track": "tr_1", "volume_db": -20, "pan": 40})");
+    waitBeats(0.5);
+    const double stopBeat = call("transport.get", "{}")["beat"].asDouble();
+    call("transport.stop", "{}");
+
+    // Touch: the hold point before the first write, then the written values.
+    const auto vol = points("en_1");
+    REQUIRE(vol.size() == 4);  // 0 dB start point, hold, -12, -20
+    CHECK(vol[1].value == doctest::Approx(-6));
+    CHECK(vol[2].value == doctest::Approx(-12));
+    CHECK(vol[3].value == doctest::Approx(-20));
+    CHECK(vol[2].pos > 0.4);
+    CHECK(vol[3].pos > vol[2].pos);
+    // Latch: holds the last value to where the transport stopped.
+    const auto pan = points("en_2");
+    REQUIRE(pan.size() == 5);
+    CHECK(pan.back().value == doctest::Approx(40));
+    CHECK(pan.back().pos >= stopBeat - 1e-6);
+    CHECK(pan.back().pos > pan[pan.size() - 2].pos);
+    // The stop's completion is one undo step of its own.
+    auto history = call("history.list", "{}");
+    CHECK(history["versions"].at(0).find("label")->asString() ==
+          "Automation written");  // newest first
+    call("engine.stop", "{}");
+}

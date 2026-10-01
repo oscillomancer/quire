@@ -13,6 +13,7 @@
 #include "supple/base/files.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/engine/jack.h"
+#include "supple/model/env_shape.h"
 #include "supple/model/schemas.h"
 #include "supple/product.h"
 
@@ -703,8 +704,11 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         engine_->play();
     } else if (action == "play") {
         playStart_ = engine_->transport().seconds;
+        beginAutomationPass(view().timeMap->beatAt(playStart_));
         engine_->play();
     } else if (action == "pause" || action == "stop") {
+        const double stopBeat = view().timeMap->beatAt(engine_->transport().seconds);
+        const bool wasPlaying = engine_->transport().playing;
         engine_->pause();
         if (action == "stop") engine_->seek(playStart_);
         if (engine_->recording()) {
@@ -715,6 +719,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             if (!committed) return std::move(committed).error();
             recorded = std::move(*committed);
         }
+        if (wasPlaying) SUPPLE_TRY(finishAutomationPass(stopBeat));
     } else if (action == "seek") {
         engine_->seek(seconds.value_or(0.0));
         if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
@@ -733,6 +738,124 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     info.punch = punch_;
     info.recorded = std::move(recorded);
     return info;
+}
+
+namespace {
+
+bool writesAutomation(model::EnvMode m) {
+    return m == model::EnvMode::Touch || m == model::EnvMode::Latch ||
+           m == model::EnvMode::LatchPreview || m == model::EnvMode::Write;
+}
+
+// The envelope's value at a beat with the engine's segment shapes.
+double envelopeAt(const std::vector<model::EnvPoint>& pts, double beat, double fallback) {
+    if (pts.empty()) return fallback;
+    if (beat <= pts.front().pos) return pts.front().value;
+    if (beat >= pts.back().pos) return pts.back().value;
+    const auto next = std::upper_bound(
+        pts.begin(), pts.end(), beat, [](double b, const model::EnvPoint& p) { return b < p.pos; });
+    const model::EnvPoint& b = *next;
+    const model::EnvPoint& a = *(next - 1);
+    if (b.pos <= a.pos) return b.value;
+    return a.value + (b.value - a.value) *
+                         model::shapeCurve(a.shape, a.tension, (beat - a.pos) / (b.pos - a.pos));
+}
+
+void insertPoint(std::vector<model::EnvPoint>& pts, double beat, double value) {
+    model::EnvPoint p;
+    p.pos = beat;
+    p.value = value;
+    const auto at = std::upper_bound(pts.begin(), pts.end(), beat,
+                                     [](double b, const model::EnvPoint& q) { return b < q.pos; });
+    pts.insert(at, p);
+}
+
+// A strip's static value for an envelope's parameter (a write pass that never
+// moved the control flattens to it).
+double staticValue(const model::Session& s, const model::EnvTarget& t) {
+    if (const model::Track* tr = s.tracks.find(t.object))
+        return t.param == "volume" ? tr->volumeDb
+               : t.param == "pan"  ? tr->pan
+                                   : (tr->mute ? 1.0 : 0.0);
+    if (const model::Route* r = s.routes.find(t.object))
+        return t.param == "volume" ? r->volumeDb
+               : t.param == "pan"  ? r->pan.percent.value_or(0.0)
+                                   : (r->mute ? 1.0 : 0.0);
+    return 0.0;
+}
+
+}  // namespace
+
+void EngineApp::beginAutomationPass(double beat) {
+    autoWrite_.clear();
+    for (const auto& e : view().envelopes)
+        if (e.value->active && e.value->mode == model::EnvMode::Write) {
+            AutoWrite w;
+            w.startBeat = w.lastBeat = beat;
+            w.lastValue = staticValue(view(), e.value->target);
+            autoWrite_[e.id] = w;
+        }
+}
+
+void EngineApp::recordAutomation(model::Id object, const std::string& param, double value) {
+    if (!engine_ || !txn_ || !engine_->transport().playing) return;
+    const model::Session& s = view();
+    std::optional<model::Id> envId;
+    for (const auto& e : s.envelopes)
+        if (e.value->target.object == object && e.value->target.param == param && e.value->active &&
+            writesAutomation(e.value->mode))
+            envId = e.id;
+    if (!envId) return;
+    const double beat = s.timeMap->beatAt(engine_->transport().seconds);
+    auto it = autoWrite_.find(*envId);
+    const bool first = it == autoWrite_.end() || !it->second.touched;
+    // A loop pass wraps: the erase window restarts at the write itself.
+    const double from = !first && it->second.lastBeat < beat ? it->second.lastBeat : beat;
+    const double startBeat = it == autoWrite_.end() ? beat : it->second.startBeat;
+    txn().modify<model::Envelope>(*envId, [&](model::Envelope& env) {
+        const double before = envelopeAt(env.points, beat, staticValue(s, env.target));
+        std::erase_if(env.points, [&](const model::EnvPoint& p) {
+            return first ? std::abs(p.pos - beat) < 1e-9 : p.pos > from && p.pos <= beat + 1e-9;
+        });
+        // Touching in: the envelope holds its value up to here, then jumps.
+        if (first && beat > 1e-3) insertPoint(env.points, beat - 1e-3, before);
+        insertPoint(env.points, beat, value);
+    });
+    AutoWrite w;
+    w.startBeat = startBeat;
+    w.lastBeat = beat;
+    w.lastValue = value;
+    w.touched = true;
+    autoWrite_[*envId] = w;
+}
+
+Status EngineApp::finishAutomationPass(double stopBeat) {
+    std::map<model::Id, AutoWrite> pass;
+    pass.swap(autoWrite_);
+    const model::Session s = head();
+    std::vector<std::pair<model::Id, AutoWrite>> work;
+    for (const auto& [id, w] : pass) {
+        const model::Envelope* env = s.envelopes.find(id);
+        if (!env || stopBeat <= w.lastBeat) continue;
+        const bool holds = env->mode == model::EnvMode::Latch ||
+                           env->mode == model::EnvMode::LatchPreview ||
+                           env->mode == model::EnvMode::Write;
+        if (holds) work.emplace_back(id, w);
+    }
+    if (work.empty()) return {};
+    auto txnId =
+        beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, "Automation written");
+    if (!txnId) return std::move(txnId).error();
+    for (const auto& [id, w] : work)
+        txn().modify<model::Envelope>(id, [&](model::Envelope& env) {
+            const double from = w.touched ? w.lastBeat : w.startBeat - 1e-9;
+            std::erase_if(env.points, [&](const model::EnvPoint& p) {
+                return p.pos > from && p.pos <= stopBeat + 1e-9;
+            });
+            if (!w.touched) insertPoint(env.points, w.startBeat, w.lastValue);
+            insertPoint(env.points, stopBeat, w.lastValue);
+        });
+    return commitTransaction(*txnId);
 }
 
 void EngineApp::setLoop(const TransportRange& loop) {
