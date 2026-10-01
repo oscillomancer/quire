@@ -7,6 +7,7 @@
 
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
+#include "supple/json/parse.h"
 
 namespace supple::gui {
 namespace {
@@ -61,23 +62,73 @@ Status generateSession(cmd::Dispatcher& dispatcher, const std::filesystem::path&
         return dispatcher.execute(
             {std::move(command), std::move(args), {cmd::Origin::Type::Internal, "generate", {}}});
     };
-    for (int i = 0; i < tracks; ++i) {
-        json::Value add = json::Value::object();
-        add["name"] = "Track " + std::to_string(i + 1);
-        auto track = run("track.add", std::move(add));
-        if (!track) return std::move(track).error();
-        const std::string id = (*track)["track"].asString();
-        json::Value audioItem = json::Value::object();
-        audioItem["track"] = id;
-        audioItem["bar"] = 1 + (i % 4);
-        audioItem["audio_file"] = files[static_cast<std::size_t>(i) % files.size()].string();
-        if (auto r = run("item.add", std::move(audioItem)); !r) return std::move(r).error();
-        json::Value midiItem = json::Value::object();
-        midiItem["track"] = id;
-        midiItem["bar"] = 21;
-        midiItem["notation"] = pattern(i);
-        if (auto r = run("item.add", std::move(midiItem)); !r) return std::move(r).error();
-    }
+    auto fromJson = [&](std::string_view text) {
+        auto parsed = json::parse(text);
+        return parsed ? *parsed : json::Value::object();
+    };
+    // One transaction: the whole generated session is one undo step (and one
+    // invariant check, so a thousand tracks stay quick).
+    auto body = [&]() -> Result<json::Value> {
+        for (int i = 0; i < tracks; ++i) {
+            json::Value add = json::Value::object();
+            add["name"] = "Track " + std::to_string(i + 1);
+            auto track = run("track.add", std::move(add));
+            if (!track) return std::move(track).error();
+            const std::string id = (*track)["track"].asString();
+            json::Value audioItem = json::Value::object();
+            audioItem["track"] = id;
+            audioItem["bar"] = 1 + (i % 4);
+            audioItem["audio_file"] = files[static_cast<std::size_t>(i) % files.size()].string();
+            auto added = run("item.add", std::move(audioItem));
+            if (!added) return std::move(added).error();
+            const std::string audioId = (*added)["item"].asString();
+            const std::string audioTake = (*added)["take"].asString();
+            // Fades on every audio item; every third muted, every third a second
+            // take, so the arrange view's item states are all exercised.
+            json::Value fade = json::Value::object();
+            fade["item"] = audioId;
+            fade["fade_in"] = 0.5;
+            fade["fade_out"] = 0.75;
+            if (i % 3 == 1) fade["mute"] = true;
+            if (auto r = run("item.set", std::move(fade)); !r) return std::move(r).error();
+            if (i % 3 == 2) {
+                json::Value take = json::Value::object();
+                take["item"] = audioId;
+                take["from"] = audioTake;
+                if (auto r = run("take.add", std::move(take)); !r) return std::move(r).error();
+            }
+            json::Value midiItem = json::Value::object();
+            midiItem["track"] = id;
+            midiItem["bar"] = 21;
+            midiItem["notation"] = pattern(i);
+            if (auto r = run("item.add", std::move(midiItem)); !r) return std::move(r).error();
+        }
+        if (tracks > 0) {
+            // Past the MIDI items (bar 21) so their times stay at the initial
+            // tempo: a tempo point at bar 33, a meter change at bar 35, three
+            // markers, and a region over the first 16 bars.
+            auto r = run("tempo.set", fromJson(R"({"points":[{"beat":0,"bpm":120},)"
+                                               R"({"beat":128,"bpm":140}]})"));
+            if (!r) return std::move(r).error();
+            if (auto m = run("timesig.set", fromJson(R"({"bar":35,"meter":"3/4"})")); !m)
+                return std::move(m).error();
+            for (const auto& [pos, name] : {std::pair{0, "Intro"}, {32, "Verse"}, {64, "Chorus"}}) {
+                json::Value marker = json::Value::object();
+                marker["pos"] = pos;
+                marker["name"] = name;
+                if (auto m = run("marker.add", std::move(marker)); !m) return std::move(m).error();
+            }
+            if (auto g =
+                    run("region.add",
+                        fromJson(R"({"start":0,"end":64,"name":"Section A","color":"#7fa3cf"})"));
+                !g)
+                return std::move(g).error();
+        }
+        return json::Value::object();
+    };
+    auto done = dispatcher.transact("generate session",
+                                    {cmd::Origin::Type::Internal, "generate", {}}, body);
+    if (!done) return done.error();
     return {};
 }
 
