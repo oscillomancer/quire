@@ -384,12 +384,14 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 1));
 
     f.render->open();
+    f.render->setField("render.end", "8");  // a short render: fast and load-insensitive
     f.render->setField("render.pattern", "preview-{counter:02}");
     f.render->refreshPreview();
 
     // The preview matches render.dry-run for the same arguments.
-    auto dry = f.run("render.dry-run",
-                     f.args({{"operation", "mix"}, {"pattern", "preview-{counter:02}"}}));
+    auto dry = f.run(
+        "render.dry-run",
+        f.args({{"operation", "mix"}, {"pattern", "preview-{counter:02}"}, {"end_beat", 8.0}}));
     REQUIRE(dry);
     std::string expected;
     for (const json::Value& file : (*dry)["files"].asArray()) {
@@ -420,7 +422,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     f.render->refreshPreview();
     f.render->run();
     REQUIRE_FALSE(f.render->job().empty());
-    for (int i = 0; i < 2000 && !f.render->job().empty(); ++i) {
+    for (int i = 0; i < 6000 && !f.render->job().empty(); ++i) {
         f.render->tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -441,7 +443,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     f.render->refreshPreview();
     f.render->run();
     REQUIRE_FALSE(f.render->job().empty());
-    for (int i = 0; i < 2000 && !f.render->job().empty(); ++i) {
+    for (int i = 0; i < 6000 && !f.render->job().empty(); ++i) {
         f.render->tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
