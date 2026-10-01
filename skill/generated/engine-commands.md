@@ -3197,6 +3197,120 @@ Result:
 
 ```
 
+## `project.new@1`
+
+Start a new, empty project (replaces the current one and its history).
+
+The new project has one master and no file until project.save {path}. Unsaved changes to the current project are lost: save first.
+
+Kind: `action`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `sample_rate` | number |  | 8000.0..384000.0 |  | Hz; default 48000. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_info",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "sample_rate": {
+      "type": "number"
+    },
+    "tempo": {
+      "type": "number"
+    },
+    "meter": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "recoverable": {
+      "type": "integer"
+    },
+    "autosave_available": {
+      "type": "boolean"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "load_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "branch",
+    "sample_rate",
+    "tempo",
+    "meter",
+    "version",
+    "recoverable",
+    "autosave_available"
+  ],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**New** (`song`)
+
+```json
+{
+  "name": "Sketch"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "Sketch",
+  "path": "",
+  "branch": "main",
+  "sample_rate": 48000.0,
+  "tempo": "<any>",
+  "meter": "<any>",
+  "version": 0,
+  "recoverable": 0,
+  "autosave_available": false
+}
+
+```
+
 ## `project.open@1`
 
 Open a project file (replaces the current project and its history).

@@ -782,6 +782,41 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    // ---------------------------------------------------------------- project.new
+    {
+        struct NewArgs {
+            std::optional<std::string> name;
+            std::optional<double> sampleRate;
+        };
+        Command<NewArgs, ProjectInfo> c;
+        c.name = "project.new";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpExec;
+        c.summary = "Start a new, empty project (replaces the current one and its history).";
+        c.description =
+            "The new project has one master and no file until project.save {path}. Unsaved "
+            "changes to the current project are lost: save first.";
+        c.tags = {"project"};
+        c.args = schema::object<NewArgs>("project_new_args")
+                     .field("name", &NewArgs::name, schema::string())
+                     .field("sample_rate", &NewArgs::sampleRate,
+                            schema::number().min(8000).max(384000).doc("Hz; default 48000."))
+                     .build();
+        c.result = projectInfoSchema();
+        c.examples = {
+            {"New", obj(R"({"name": "Sketch"})"),
+             obj(R"({"name": "Sketch", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": "<any>", "meter": "<any>", "version": 0, "recoverable": 0, "autosave_available": false})"),
+             "song"}};
+        c.run = [](const NewArgs& a, Context& ctx) -> Result<ProjectInfo> {
+            EngineApp& app = A(ctx);
+            model::Project p;
+            if (a.name) p.name = *a.name;
+            if (a.sampleRate) p.sampleRate = *a.sampleRate;
+            app.newProject(std::move(p));
+            return projectInfo(app, app.head());
+        };
+        registry.add(std::move(c));
+    }
     // ---------------------------------------------------------------- project.recoverable /
     // project.recover
     {

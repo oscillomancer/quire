@@ -363,6 +363,22 @@ q = nil
 ---@field autosave_available boolean
 ---@field warnings? table[]
 
+---@class Quire.project_new_args
+---@field name? string
+---@field sample_rate? number Hz; default 48000.
+
+---@class Quire.project_new_result
+---@field name string
+---@field path string
+---@field branch string
+---@field sample_rate number
+---@field tempo number
+---@field meter string
+---@field version integer
+---@field recoverable integer
+---@field autosave_available boolean
+---@field warnings? table[]
+
 ---@class Quire.project_open_args
 ---@field path? string
 
@@ -832,6 +848,7 @@ q = nil
 
 ---@class Quire.project
 ---@field get fun(): Quire.project_get_result Show the project: name, rate, tempo, meter, file, version and branch.
+---@field new fun(args?: Quire.project_new_args): Quire.project_new_result Start a new, empty project (replaces the current one and its history).
 ---@field open fun(args?: Quire.project_open_args): Quire.project_open_result Open a project file (replaces the current project and its history).
 ---@field recover fun(args?: Quire.project_recover_args): Quire.project_recover_result Put recordings a crash left out back into the project (one undo step).
 ---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.
