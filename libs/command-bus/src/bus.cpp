@@ -505,7 +505,29 @@ Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     host_.commandFinished();
     return result;
 }
+void Dispatcher::post(std::string label, std::function<Status()> work) {
+    std::lock_guard lock(postedMutex_);
+    posted_.emplace_back(std::move(label), std::move(work));
+}
+
 void Dispatcher::flushJobEvents() {
+    // Posted work first (it may execute commands, which flush again: the queue
+    // is taken before running so nothing runs twice).
+    for (;;) {
+        std::vector<std::pair<std::string, std::function<Status()>>> work;
+        {
+            std::lock_guard lock(postedMutex_);
+            work.swap(posted_);
+        }
+        if (work.empty()) break;
+        for (auto& [label, fn] : work)
+            if (auto done = fn(); !done) {
+                json::Value payload = json::Value::object();
+                payload["label"] = label;
+                payload["error"] = done.error().toString();
+                host_.emit("bus.post_failed", std::move(payload));
+            }
+    }
     for (auto& [topic, payload] : jobs_.drainEvents()) host_.emit(topic, std::move(payload));
 }
 Result<json::Value> Dispatcher::transact(std::string_view label, const Origin& origin,
@@ -594,6 +616,7 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
     Context context = host_.makeContext(invocation.origin);
     context.provide<const Registry>(registry_);
     context.provide<JobManager>(jobs_);
+    context.provide<Dispatcher>(*this);
     auto invoke = [&]() -> Result<json::Value> {
         auto result = info->invoke(invocation.args, context);
         resolvedArgs = context.resolvedArgs();

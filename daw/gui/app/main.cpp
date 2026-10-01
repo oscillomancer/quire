@@ -263,6 +263,7 @@ int main(int argc, char** argv) {
     }
     auto tick = loop.every(std::chrono::milliseconds(100), [&] {
         (*app)->tick();
+        dispatcher.flushJobEvents();  // job events and follow-ups from workers
         publish();
     });
 

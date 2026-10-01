@@ -2745,6 +2745,10 @@
         "job": {
           "type": "boolean",
           "default": false
+        },
+        "add_to_project": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -2759,7 +2763,7 @@
   {
     "name": "render_mix",
     "title": "Render the mix offline to a float WAV (default: start to the last item's end).",
-    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. See describe for errors and examples.",
+    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "render_mix_args",
@@ -2812,6 +2816,10 @@
         },
         "normalize": {},
         "job": {
+          "type": "boolean",
+          "default": false
+        },
+        "add_to_project": {
           "type": "boolean",
           "default": false
         },
@@ -2956,6 +2964,10 @@
         "job": {
           "type": "boolean",
           "default": false
+        },
+        "add_to_project": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -3058,6 +3070,10 @@
           "maximum": 2.0
         },
         "job": {
+          "type": "boolean",
+          "default": false
+        },
+        "add_to_project": {
           "type": "boolean",
           "default": false
         }

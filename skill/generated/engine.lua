@@ -469,6 +469,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.render_mix_args
 ---@field master? string Master output (default tr_0) id, e.g. "tr_1".
@@ -484,6 +485,7 @@ q = nil
 ---@field channels? integer
 ---@field normalize? any
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 ---@field analyze? "summary"|"full"
 
 ---@class Quire.render_mix_result
@@ -518,6 +520,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.render_stems_args
 ---@field master? string
@@ -540,6 +543,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.route_add_args
 ---@field from string

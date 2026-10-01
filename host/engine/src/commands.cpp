@@ -532,6 +532,7 @@ struct RenderMixArgs {
     std::optional<std::int64_t> bitDepth, sampleRate, channels;
     std::optional<std::string> format;
     bool job = false;
+    bool addToProject = false;
 };
 struct RenderMixResult {
     std::optional<std::string> render, path;
@@ -1953,7 +1954,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). "
             "analyze: summary or full returns a supple.analysis-report/1.0 inline. "
-            "The render id can be passed to analyze.render or analyze.compare.";
+            "The render id can be passed to analyze.render or analyze.compare. "
+            "add_to_project: the file becomes an item on a new track at start_beat, as its own "
+            "undo step right after the render (with job: when the job completes).";
         c.tags = {"render"};
         c.args = schema::object<RenderMixArgs>("render_mix_args")
                      .field("master", &RenderMixArgs::master,
@@ -1973,6 +1976,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("channels", &RenderMixArgs::channels, schema::integer().range(1, 2))
                      .field("normalize", &RenderMixArgs::normalize, schema::any())
                      .field("job", &RenderMixArgs::job, schema::boolean())
+                     .defaultValue(false)
+                     .field("add_to_project", &RenderMixArgs::addToProject, schema::boolean())
                      .defaultValue(false)
                      .field("analyze", &RenderMixArgs::analyze,
                             schema::enumeration<RenderAnalyze>({{RenderAnalyze::Summary, "summary"},
@@ -2029,6 +2034,15 @@ void registerEngineCommands(cmd::Registry& registry) {
             auto resolvedPath = mixPath(app, s, a);
             if (!resolvedPath) return std::move(resolvedPath).error();
             const fs::path path = *resolvedPath;
+            auto& dispatcher = ctx.service<cmd::Dispatcher>();
+            const cmd::Origin origin = ctx.origin();
+            auto addFile = [&dispatcher, origin, path, start = a.startBeat.value_or(0.0)] {
+                json::Value files = json::Value::array(), f = json::Value::object();
+                f["path"] = path.string();
+                f["start_beat"] = start;
+                files.push_back(std::move(f));
+                postAddToProject(dispatcher, origin, files);
+            };
             if (a.job) {
                 auto available = app.plugins();
                 if (!available) return std::move(available).error();
@@ -2037,7 +2051,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 auto& jobs = ctx.service<cmd::JobManager>();
                 const std::string id = jobs.create();
                 const std::string renderId = app.reserveRenderId();
-                app.startJob([&app, &jobs, id, renderId, s = std::move(s), o, path, a,
+                app.startJob([&app, &jobs, id, renderId, s = std::move(s), o, path, a, addFile,
                               catalogue = std::move(catalogue), identity](std::stop_token stop) {
                     if (stop.stop_requested() || jobs.cancelled(id)) return;
                     OfflineSettings settings = o;
@@ -2078,8 +2092,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                                                                  : analysis::Detail::Summary);
                         if (report) result["analysis"] = std::move(*report);
                     }
-                    (void)jobs.completeWith(id, std::move(result),
-                                            [&] { app.publishRender(renderId, path); });
+                    (void)jobs.completeWith(id, std::move(result), [&] {
+                        app.publishRender(renderId, path);
+                        if (a.addToProject) addFile();
+                    });
                 });
                 RenderMixResult started;
                 started.job = id;
@@ -2103,6 +2119,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                          : -1000.0;
             out.outputLatency = r->outputLatency;
             if (!r->warnings.empty()) out.warnings = r->warnings;
+            if (a.addToProject) addFile();
             if (a.analyze) {
                 auto report = analyzeAudio(r->audio, *a.analyze == RenderAnalyze::Full
                                                          ? analysis::Detail::Full

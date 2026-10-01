@@ -1170,6 +1170,58 @@ TEST_CASE("render job cancellation is observable before worker renders") {
     CHECK(d.jobs().status(id)->find("status")->asString() == "cancelled");
 }
 
+TEST_CASE("add_to_project puts renders on new tracks as one undo step (sync and job)") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    // Items whose take plays `path` (and where the last one starts).
+    double position = -1;
+    auto itemsWithFile = [&](const std::string& path) {
+        const model::Session& h = app->head();
+        int n = 0;
+        for (const auto& e : h.items)
+            for (const model::Id& takeId : e.value->takes)
+                if (const auto* take = h.takes.find(takeId); take && take->source)
+                    if (const auto* src = h.media.find(*take->source);
+                        src && fs::path(src->path).filename() == fs::path(path).filename()) {
+                        ++n;
+                        position = e.value->position;
+                    }
+        return n;
+    };
+    const std::size_t tracks = app->head().tracks.size();
+    auto mix = d.execute(
+        {"render.mix", j(R"({"end_beat":2,"start_beat":1,"name":"bounce","add_to_project":true})"),
+         kTest});
+    REQUIRE(mix);
+    // The follow-up ran before execute() returned: a new track, the file on it at start_beat.
+    CHECK(app->head().tracks.size() == tracks + 1);
+    const std::string path = mix->find("path")->asString();
+    CHECK(itemsWithFile(path) == 1);
+    CHECK(position == doctest::Approx(1.0));
+    CHECK(app->versions().history(1).front()->txn.label == "Add renders to project");
+    REQUIRE(d.execute({"history.undo", json::Value::object(), kTest}));
+    CHECK(app->head().tracks.size() == tracks);  // the import alone is undone
+    CHECK(fs::exists(path));
+
+    auto started = d.execute(
+        {"render.stems",
+         j(R"({"end_beat":2,"job":true,"pattern":"stem-{track}","add_to_project":true})"), kTest});
+    REQUIRE(started);
+    json::Value args = json::Value::object();
+    args["job"] = started->find("job")->asString();
+    args["timeout_s"] = 30;
+    auto done = d.execute({"job.wait", args, kTest});
+    REQUIRE(done);
+    // Whoever sees the job done sees its files in the project.
+    const auto& files = *done->find("result")->find("files");
+    REQUIRE(files.size() >= 1);
+    for (const auto& f : files.asArray()) CHECK(itemsWithFile(f.find("path")->asString()) == 1);
+}
+
 TEST_CASE("stem render job publishes files and analysis summaries") {
     Root root;
     cmd::Registry registry;

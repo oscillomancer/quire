@@ -4118,6 +4118,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 
@@ -4151,7 +4152,7 @@ Result:
 
 Render the mix offline to a float WAV (default: start to the last item's end).
 
-start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare.
+start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -4172,6 +4173,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `normalize` | value |  |  |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 | `analyze` | string |  |  |  |  |
 
 ### Result
@@ -4271,6 +4273,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 
@@ -4332,6 +4335,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 
