@@ -27,5 +27,11 @@ Result<audio::WavOptions> finishRenderAudio(audio::AudioData& data, const model:
 Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSettings settings,
                                      const std::vector<host::PluginInfo>& catalogue,
                                      const host::HostIdentity& identity);
+// Adds rendered files (a render result's "files": path, start_beat) to the
+// project as items on a new track each, at their start, as one undo step
+// right after the render (posted to the model thread; from a job, when it
+// completes). Used by add_to_project on the render commands.
+void postAddToProject(cmd::Dispatcher& dispatcher, const cmd::Origin& origin,
+                      const json::Value& files);
 void registerRenderCommands(cmd::Registry& registry);
 }  // namespace supple::engine

@@ -10,6 +10,7 @@
 #include "supple/ui/list.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_area.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 
@@ -372,4 +373,55 @@ TEST_CASE("a scroll bar pages on track clicks and reports drags") {
     root.pointer({PointerEvent::Type::Move, {b.x + 5, b.y + 5 + (b.h - 40) / 2}});
     root.pointer({PointerEvent::Type::Up, {b.x + 5, b.y + 5 + (b.h - 40) / 2}, 1});
     CHECK(last == doctest::Approx(400).epsilon(0.02));  // half the travel of an 800-unit range
+}
+
+TEST_CASE("a text area edits across lines: vertical motion, indentation, undo, marks") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Column;
+    auto& area = content->emplace<TextArea>("area", "voice v\n  1: C4:q\nend");
+    area.layout.height = SizeRule::fraction();
+    std::string submitted;
+    int changes = 0;
+    area.onChange = [&](const std::string&) { ++changes; };
+    area.onSubmit = [&](const std::string& s) { submitted = s; };
+    root.setContent(std::move(content));
+    root.frame(false);
+    CHECK(area.lineCount() == 3);
+    root.focus(&area);
+    root.key(SDLK_HOME, kCtrl);
+    root.key(SDLK_DOWN);
+    root.key(SDLK_END);
+    CHECK(area.caretLineColumn() == std::pair{2, 10});
+    // Enter keeps the indentation.
+    root.key(SDLK_RETURN);
+    root.text("E4:q");
+    CHECK(area.text() == "voice v\n  1: C4:q\n  E4:q\nend");
+    // Up keeps the column where it can; shorter lines clamp.
+    root.key(SDLK_DOWN);
+    CHECK(area.caretLineColumn().first == 4);
+    CHECK(area.caretLineColumn().second == 4);  // "end" is 3 long: clamped to its end
+    root.key(SDLK_UP);
+    CHECK(area.caretLineColumn() == std::pair{3, 7});  // back to the wanted column
+    // A selection across lines, replaced.
+    root.key(SDLK_HOME, kCtrl);
+    root.key(SDLK_DOWN, kShift);
+    root.key(SDLK_DOWN, kShift);
+    root.text("x\n");
+    CHECK(area.text() == "x\n  E4:q\nend");
+    // Undo: the replacement, then the typing burst together with the newline.
+    root.key(SDLK_Z, kCtrl);
+    CHECK(area.text() == "voice v\n  1: C4:q\n  E4:q\nend");
+    root.key(SDLK_Z, kCtrl);
+    root.key(SDLK_Z, kShift | kCtrl);
+    CHECK(changes > 0);
+    root.key(SDLK_RETURN, kCtrl);
+    CHECK(submitted == area.text());
+    // Marks paint and are kept; setText keeps the caret's line.
+    area.setMarks({{2, 4, "unknown pitch", true}});
+    root.frame(false);
+    CHECK(area.marks().size() == 1);
+    area.setText("a\nb\nc\nd");
+    CHECK(area.lineCount() == 4);
 }

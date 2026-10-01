@@ -34,6 +34,7 @@ class AgentPanel {
 
     std::unique_ptr<ui::Node> build();  // the docked panel (hidden until toggled)
     void toggle();
+    void setVisible(bool visible);
     bool visible() const;
     void openSettings();
     // For tests and scripts: what the input field would send.

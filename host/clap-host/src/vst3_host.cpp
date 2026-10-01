@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -15,6 +17,8 @@
 
 #include "pluginterfaces/base/funknownimpl.h"
 #include "pluginterfaces/base/smartpointer.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
@@ -36,7 +40,10 @@ namespace fs = std::filesystem;
 namespace vst = Steinberg::Vst;
 using Steinberg::FUnknownPtr;
 using Steinberg::IPtr;
+using Steinberg::kInvalidArgument;
+using Steinberg::kResultFalse;
 using Steinberg::kResultOk;
+using Steinberg::kResultTrue;
 
 namespace {
 constexpr std::size_t kMaxEvents = 2048;
@@ -113,13 +120,68 @@ class FixedChanges
 class Handler : public Steinberg::U::Implements<Steinberg::U::Directly<vst::IComponentHandler>> {
   public:
     std::atomic<Steinberg::int32> restart{0};
+    std::atomic<bool> edited{false};
+    // An edit from the plug-in's editor (main thread): forwarded to the processor.
+    std::function<bool(vst::ParamID, vst::ParamValue)> edit;
     Steinberg::tresult PLUGIN_API beginEdit(vst::ParamID) override { return kResultOk; }
-    Steinberg::tresult PLUGIN_API performEdit(vst::ParamID, vst::ParamValue) override {
-        return kResultOk;
+    Steinberg::tresult PLUGIN_API performEdit(vst::ParamID id, vst::ParamValue value) override {
+        edited = true;
+        return edit && edit(id, value) ? kResultOk : kResultFalse;
     }
     Steinberg::tresult PLUGIN_API endEdit(vst::ParamID) override { return kResultOk; }
     Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
         restart.fetch_or(flags, std::memory_order_relaxed);
+        return kResultOk;
+    }
+};
+
+// The editor's frame and, on Linux, its run loop: file descriptors and timers
+// the plug-in registers are serviced from the host's main thread (the UI loop
+// polls the descriptors and calls onFd; timers run from serviceMainThread).
+class PlugFrame : public Steinberg::U::Implements<
+                      Steinberg::U::Directly<Steinberg::IPlugFrame, Steinberg::Linux::IRunLoop>> {
+  public:
+    struct Timer {
+        Steinberg::Linux::ITimerHandler* handler;
+        std::uint32_t periodMs;
+        std::chrono::steady_clock::time_point next;
+    };
+    std::vector<std::pair<Steinberg::Linux::IEventHandler*, int>> handlers;
+    std::vector<Timer> timers;
+    std::atomic<bool> resize{false};
+    std::atomic<std::uint32_t> width{0}, height{0};
+
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view,
+                                             Steinberg::ViewRect* r) override {
+        if (!view || !r) return kInvalidArgument;
+        width = static_cast<std::uint32_t>(std::max(0, r->getWidth()));
+        height = static_cast<std::uint32_t>(std::max(0, r->getHeight()));
+        resize = true;
+        // The window follows on the UI loop's next pass; the view takes the
+        // size now (the common host behaviour).
+        return view->onSize(r);
+    }
+    Steinberg::tresult PLUGIN_API registerEventHandler(
+        Steinberg::Linux::IEventHandler* h, Steinberg::Linux::FileDescriptor fd) override {
+        if (!h) return kInvalidArgument;
+        handlers.emplace_back(h, fd);
+        return kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API
+    unregisterEventHandler(Steinberg::Linux::IEventHandler* h) override {
+        std::erase_if(handlers, [&](const auto& x) { return x.first == h; });
+        return kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API registerTimer(Steinberg::Linux::ITimerHandler* h,
+                                                Steinberg::Linux::TimerInterval ms) override {
+        if (!h) return kInvalidArgument;
+        const auto period = static_cast<std::uint32_t>(std::max<Steinberg::uint64>(ms, 1));
+        timers.push_back(
+            {h, period, std::chrono::steady_clock::now() + std::chrono::milliseconds(period)});
+        return kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* h) override {
+        std::erase_if(timers, [&](const Timer& t) { return t.handler == h; });
         return kResultOk;
     }
 };
@@ -285,6 +347,9 @@ struct Vst3Instance::State {
     FUnknownPtr<vst::IAudioProcessor> processor;
     IPtr<vst::IEditController> controller;
     IPtr<Handler> handler = Steinberg::owned(new Handler);
+    IPtr<PlugFrame> frame = Steinberg::owned(new PlugFrame);
+    IPtr<Steinberg::IPlugView> view;                                     // the open editor
+    std::optional<bool> hasEditor;                                       // probed once
     FUnknownPtr<vst::IConnectionPoint> componentPoint, controllerPoint;  // when connected
     std::vector<ParamInfo> parameters;
     std::uint32_t inputs = 0, outputs = 0;  // channels of the main buses
@@ -322,6 +387,7 @@ struct Vst3Instance::State {
 Vst3Instance::Vst3Instance() : state_(std::make_unique<State>()) {}
 Vst3Instance::~Vst3Instance() {
     auto& s = *state_;
+    closeEditor();  // the view goes before the controller
     if (s.active) deactivate();
     if (s.componentPoint && s.controllerPoint) {
         s.componentPoint->disconnect(s.controllerPoint);
@@ -378,6 +444,10 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
         }
     }
     if (s.controller) s.controller->setComponentHandler(s.handler);
+    // Editor edits reach the processor through the same queue as setParam().
+    s.handler->edit = [state = &s](vst::ParamID param, vst::ParamValue normalized) {
+        return state->changes.push({param, normalized});
+    };
     for (auto& channel : s.midiParams) channel.fill(vst::kNoParamId);
     if (s.controller) {
         FUnknownPtr<vst::IMidiMapping> mapping(s.controller);
@@ -829,12 +899,126 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
 bool Vst3Instance::serviceMainThread() {
     const auto flags = state_->handler->restart.exchange(0);
     if (flags & vst::kLatencyChanged) state_->latencyChanged = true;
-    return flags != 0;
+    bool did = flags != 0;
+    const auto now = std::chrono::steady_clock::now();
+    // Copy first: a timer callback may (un)register timers.
+    const auto timers = state_->frame->timers;
+    for (const auto& t : timers)
+        if (now >= t.next) {
+            for (auto& live : state_->frame->timers)
+                if (live.handler == t.handler)
+                    live.next = now + std::chrono::milliseconds(live.periodMs);
+            t.handler->onTimer();
+            did = true;
+        }
+    return did;
 }
+
+bool Vst3Instance::hasEditor() {
+    auto& s = *state_;
+    if (!s.hasEditor) {
+        s.hasEditor = false;
+        if (s.controller)
+            if (IPtr<Steinberg::IPlugView> v =
+                    Steinberg::owned(s.controller->createView(vst::ViewType::kEditor)))
+                s.hasEditor = v->isPlatformTypeSupported(
+                                  Steinberg::kPlatformTypeX11EmbedWindowID) == kResultTrue;
+    }
+    return *s.hasEditor;
+}
+
+Result<Instance::EditorSize> Vst3Instance::openEditor(unsigned long x11Parent, double scale) {
+    auto& s = *state_;
+    if (s.view) closeEditor();
+    if (!hasEditor()) return Error("host.editor", "this plug-in has no X11 editor");
+    s.view = Steinberg::owned(s.controller->createView(vst::ViewType::kEditor));
+    if (!s.view) return Error("host.editor", "the plug-in could not create its editor");
+    s.view->setFrame(s.frame);
+    if (FUnknownPtr<Steinberg::IPlugViewContentScaleSupport> scaling(s.view); scaling)
+        scaling->setContentScaleFactor(static_cast<float>(scale));
+    if (s.view->attached(reinterpret_cast<void*>(x11Parent),
+                         Steinberg::kPlatformTypeX11EmbedWindowID) != kResultOk) {
+        s.view->setFrame(nullptr);
+        s.view = nullptr;
+        return Error("host.editor", "the plug-in refused the parent window");
+    }
+    Steinberg::ViewRect r;
+    Instance::EditorSize size;
+    if (s.view->getSize(&r) == kResultOk) {
+        size.width = static_cast<std::uint32_t>(std::max(0, r.getWidth()));
+        size.height = static_cast<std::uint32_t>(std::max(0, r.getHeight()));
+    }
+    size.resizable = s.view->canResize() == kResultTrue;
+    s.frame->resize = false;
+    return size;
+}
+
+Result<Instance::EditorSize> Vst3Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {
+    auto& s = *state_;
+    if (!s.view) return Error("host.editor", "no editor is open");
+    Steinberg::ViewRect r(0, 0, static_cast<Steinberg::int32>(width),
+                          static_cast<Steinberg::int32>(height));
+    Instance::EditorSize size{width, height, s.view->canResize() == kResultTrue};
+    if (size.resizable) {
+        (void)s.view->checkSizeConstraint(&r);
+        (void)s.view->onSize(&r);
+    }
+    if (s.view->getSize(&r) == kResultOk) {
+        size.width = static_cast<std::uint32_t>(std::max(0, r.getWidth()));
+        size.height = static_cast<std::uint32_t>(std::max(0, r.getHeight()));
+    }
+    return size;
+}
+
+void Vst3Instance::closeEditor() {
+    auto& s = *state_;
+    if (!s.view) return;
+    s.view->removed();
+    s.view->setFrame(nullptr);
+    s.view = nullptr;
+}
+
+bool Vst3Instance::editorOpen() const { return state_->view != nullptr; }
+
+Instance::EditorRequests Vst3Instance::takeEditorRequests() {
+    Instance::EditorRequests r;
+    if (state_->frame->resize.exchange(false)) {
+        r.resize = true;
+        r.width = state_->frame->width;
+        r.height = state_->frame->height;
+    }
+    return r;
+}
+
+std::vector<std::pair<int, std::uint32_t>> Vst3Instance::watchedFds() const {
+    std::vector<std::pair<int, std::uint32_t>> out;
+    for (const auto& [h, fd] : state_->frame->handlers) out.emplace_back(fd, CLAP_POSIX_FD_READ);
+    return out;
+}
+
+void Vst3Instance::onFd(int fd) {
+    const auto handlers = state_->frame->handlers;  // a callback may unregister
+    for (const auto& [h, f] : handlers)
+        if (f == fd) h->onFDIsSet(fd);
+}
+
+int Vst3Instance::nextTimerMs() const {
+    const auto& timers = state_->frame->timers;
+    if (timers.empty()) return -1;
+    auto next = timers.front().next;
+    for (const auto& t : timers) next = std::min(next, t.next);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        next - std::chrono::steady_clock::now())
+                        .count();
+    return static_cast<int>(std::max<std::int64_t>(0, ms));
+}
+
+bool Vst3Instance::takeEdited() { return state_->handler->edited.exchange(false); }
 Instance::Notifications Vst3Instance::takeNotifications() {
     Instance::Notifications n;
     n.latencyChanged = state_->latencyChanged.exchange(false);
     n.droppedEvents = state_->dropped.exchange(0);
+    n.stateDirty = takeEdited();  // the editor changed a parameter
     return n;
 }
 

@@ -126,6 +126,21 @@ void AppActions::addUi(std::string id, std::string name, std::function<void()> r
     registry_.add(std::move(a));
 }
 
+void AppActions::addUi(std::string id, std::string name, std::string prompt,
+                       std::function<Status(const json::Value& value)> run) {
+    actions::Action a;
+    a.id = std::move(id);
+    a.name = std::move(name);
+    a.prompts = {prompt};
+    a.builtin = [prompt, run = std::move(run)](const actions::Context& c) -> Result<json::Value> {
+        const json::Value* v = c.prompted.find(prompt);
+        auto r = run(v ? *v : json::Value());
+        if (!r) return std::move(r).error();
+        return json::Value::object();
+    };
+    registry_.add(std::move(a));
+}
+
 actions::Context AppActions::context(std::vector<std::string> sections) const {
     actions::Context c;
     c.selectedTracks = ui_.selectedTracks;

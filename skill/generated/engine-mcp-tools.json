@@ -1953,6 +1953,143 @@
     }
   },
   {
+    "name": "midi_edit",
+    "title": "Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.",
+    "description": "Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize. ops run in order and are one undo step. notes: indices into midi.notes' list as it was before this command (every op refers to that list, so later ops are not affected by earlier removals). Beats are from the item's start. add {pitch, start, length, velocity?, channel?}; remove {notes}; move {notes, beats?, semitones?}; resize {notes, length? | length_delta? | start_delta?}; velocity {notes, velocity? and/or velocity_delta?}; quantize {notes? (all), grid (beats, on the project's grid), strength? 0-1, ends?}; cc.set {number, points [{beat, value}], channel?}; cc.clear {number, from?, to?}. Returns the new indices of the notes the ops added or changed (to keep a selection). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "midi_edit_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "ops": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "midi_op",
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "add",
+                  "remove",
+                  "move",
+                  "resize",
+                  "velocity",
+                  "quantize",
+                  "cc.set",
+                  "cc.clear"
+                ]
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "pitch": {
+                "type": "integer",
+                "minimum": 0.0,
+                "maximum": 127.0
+              },
+              "start": {
+                "type": "number"
+              },
+              "length": {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              "velocity": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 127.0
+              },
+              "channel": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 16.0
+              },
+              "beats": {
+                "type": "number"
+              },
+              "semitones": {
+                "type": "integer",
+                "minimum": -127.0,
+                "maximum": 127.0
+              },
+              "length_delta": {
+                "type": "number"
+              },
+              "start_delta": {
+                "type": "number"
+              },
+              "velocity_delta": {
+                "type": "integer",
+                "minimum": -127.0,
+                "maximum": 127.0
+              },
+              "grid": {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              "strength": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              },
+              "ends": {
+                "type": "boolean"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 0.0,
+                "maximum": 127.0
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "cc_point",
+                  "properties": {
+                    "beat": {
+                      "type": "number"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 0.0,
+                      "maximum": 127.0
+                    }
+                  },
+                  "required": ["beat", "value"],
+                  "additionalProperties": false
+                }
+              },
+              "from": {
+                "type": "number"
+              },
+              "to": {
+                "type": "number"
+              }
+            },
+            "required": ["op"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["item", "ops"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "midi_get",
     "title": "Read an item's MIDI as notation.",
     "description": "Read an item's MIDI as notation.  See describe for errors and examples.",
@@ -1980,6 +2117,29 @@
       "required": ["text"],
       "additionalProperties": false
     },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "midi_notes",
+    "title": "List a MIDI item's notes and CC points (beats from the item's start).",
+    "description": "List a MIDI item's notes and CC points (beats from the item's start). Notes are in a fixed order (by start, then pitch); midi.edit refers to them by their position in this list. start/length/beat are in beats from the item's start; channel is 1-16 (omitted for 1). pooled: other items share this MIDI, and edits change them too. For writing whole phrases, midi.write with notation is usually better. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "midi_notes_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -2745,6 +2905,10 @@
         "job": {
           "type": "boolean",
           "default": false
+        },
+        "add_to_project": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -2759,7 +2923,7 @@
   {
     "name": "render_mix",
     "title": "Render the mix offline to a float WAV (default: start to the last item's end).",
-    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. See describe for errors and examples.",
+    "description": "Render the mix offline to a float WAV (default: start to the last item's end). start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "render_mix_args",
@@ -2812,6 +2976,10 @@
         },
         "normalize": {},
         "job": {
+          "type": "boolean",
+          "default": false
+        },
+        "add_to_project": {
           "type": "boolean",
           "default": false
         },
@@ -2956,6 +3124,10 @@
         "job": {
           "type": "boolean",
           "default": false
+        },
+        "add_to_project": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -3058,6 +3230,10 @@
           "maximum": 2.0
         },
         "job": {
+          "type": "boolean",
+          "default": false
+        },
+        "add_to_project": {
           "type": "boolean",
           "default": false
         }

@@ -6,6 +6,7 @@
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
+//          [--audio jack|dummy|none]
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <unistd.h>
@@ -25,7 +26,10 @@
 #include "agent_panel.h"
 #include "app_actions.h"
 #include "chrome.h"
+#include "file_actions.h"
 #include "generate.h"
+#include "midi_editor.h"
+#include "plugin_windows.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
@@ -36,6 +40,7 @@
 #include "supple/rpc/model_loop.h"
 #include "supple/rpc/protocol.h"
 #include "supple/ui/root.h"
+#include "ui_persistence.h"
 
 namespace fs = std::filesystem;
 using namespace supple;
@@ -51,6 +56,7 @@ struct Options {
     int generate = 0;                            // tracks of a generated session
     double idleSeconds = 0;                      // measure idle CPU after the frames
     double viewStart = -1, viewPps = 0;          // initial lanes viewport
+    std::string audio;  // jack | dummy | none; default: jack (none offscreen)
 };
 
 int usage() {
@@ -58,7 +64,8 @@ int usage() {
                  "usage: %s [PROJECT] [--offscreen] [--size WxH] [--frames N] [--snapshot PNG]\n"
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
                  "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
-                 "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n",
+                 "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n"
+                 "       [--audio jack|dummy|none]\n",
                  std::string(product::kSlug).c_str());
     return 2;
 }
@@ -75,7 +82,13 @@ bool parse(int argc, char** argv, Options& o) {
             o.serve = false;
         else if (a == "--script")
             o.script = true;
-        else if (a == "--view") {
+        else if (a == "--audio") {
+            const char* v = value();
+            if (!v ||
+                (std::string(v) != "jack" && std::string(v) != "dummy" && std::string(v) != "none"))
+                return false;
+            o.audio = v;
+        } else if (a == "--view") {
             const char* v = value();
             if (!v || std::sscanf(v, "%lf,%lf", &o.viewStart, &o.viewPps) != 2) return false;
         } else if (a == "--generate") {
@@ -251,6 +264,7 @@ int main(int argc, char** argv) {
     }
     auto tick = loop.every(std::chrono::milliseconds(100), [&] {
         (*app)->tick();
+        dispatcher.flushJobEvents();  // job events and follow-ups from workers
         publish();
     });
 
@@ -273,6 +287,15 @@ int main(int argc, char** argv) {
         [&](std::function<void()> f) { loop.post(std::move(f)); },
         agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
+    gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
+    gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
+                                 [&](std::function<void()> f) { loop.post(std::move(f)); });
+    appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
+        const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;
+        if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
+        return pluginWindows.open(*id);
+    });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
@@ -288,10 +311,101 @@ int main(int argc, char** argv) {
                                    chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults()));
         auto& body = frame->emplace<ui::Node>("main");
         body.layout.dir = ui::Layout::Dir::Row;
-        body.add(shell.build());
+        auto& center = body.emplace<ui::Node>("center");
+        center.layout.dir = ui::Layout::Dir::Column;
+        center.layout.width = ui::SizeRule::fraction();
+        center.add(shell.build());
+        center.add(midiEditor.build());
         body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
+    // The audio engine: the device for interactive use, nothing offscreen.
+    const std::string audioMode =
+        !o.audio.empty() ? o.audio : (o.offscreen || o.frames > 0 ? "none" : "jack");
+    if (audioMode != "none") {
+        json::Value args = json::Value::object();
+        args["backend"] = audioMode;
+        if (auto started = dispatcher.execute(
+                {"engine.start", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
+            !started)
+            std::fprintf(
+                stderr,
+                "audio: %s (run engine.start from the actions list when the device is ready)\n",
+                started.error().toString().c_str());
+    }
+
+    // Per-project UI state (gui.md §1.2).
+    gui::UiPersistence uiFile;
+    uiFile.add(
+        "selection",
+        [&] {
+            json::Value v = json::Value::object(), tracks = json::Value::array(),
+                        items = json::Value::array();
+            for (const auto& t : uiState.selectedTracks) tracks.push_back(t);
+            for (const auto& i : uiState.selectedItems) items.push_back(i);
+            v["tracks"] = std::move(tracks);
+            v["items"] = std::move(items);
+            return v;
+        },
+        [&](const json::Value& v) {
+            auto ids = [](const json::Value* a) {
+                std::vector<std::string> out;
+                if (a && a->isArray())
+                    for (const auto& x : a->asArray())
+                        if (x.isString()) out.push_back(x.asString());
+                return out;
+            };
+            uiState.selectedTracks = ids(v.find("tracks"));
+            uiState.selectedItems = ids(v.find("items"));
+        });
+    uiFile.add(
+        "panels",
+        [&] {
+            json::Value v = json::Value::object();
+            v["agent"] = agentPanel.visible();
+            return v;
+        },
+        [&](const json::Value& v) {
+            if (const json::Value* a = v.find("agent"); a && a->isBool())
+                agentPanel.setVisible(a->asBool());
+        });
+    uiFile.add(
+        "window",
+        [&] {
+            json::Value v = json::Value::object();
+            v["width"] = static_cast<int>((*window)->width());
+            v["height"] = static_cast<int>((*window)->height());
+            return v;
+        },
+        [&](const json::Value& v) {
+            const json::Value* w = v.find("width");
+            const json::Value* h = v.find("height");
+            if (!o.offscreen && w && h && w->isNumber() && h->isNumber())
+                (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
+        });
+    uiFile.add(
+        "lanes",
+        [&] {
+            const views::Viewport& vp = shell.lanes()->viewport();
+            json::Value v = json::Value::object();
+            v["start_seconds"] = vp.startSeconds;
+            v["pixels_per_second"] = vp.pixelsPerSecond;
+            v["scroll_y"] = static_cast<double>(vp.scrollY);
+            v["row_height"] = static_cast<double>(vp.rowHeight);
+            return v;
+        },
+        [&](const json::Value& v) {
+            views::Viewport vp = shell.lanes()->viewport();
+            auto num = [&](const char* k, auto& out) {
+                if (const json::Value* x = v.find(k); x && x->isNumber())
+                    out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
+            };
+            num("start_seconds", vp.startSeconds);
+            num("pixels_per_second", vp.pixelsPerSecond);
+            num("scroll_y", vp.scrollY);
+            num("row_height", vp.rowHeight);
+            shell.lanes()->setViewport(vp);
+        });
     if (o.viewStart >= 0) {
         views::Viewport v;
         v.startSeconds = o.viewStart;
@@ -308,12 +422,16 @@ int main(int argc, char** argv) {
     int step = 0;
     while (!quit && !loop.stopRequested()) {
         const double t0 = wallMs();
-        const int next = loop.pump();
+        int next = loop.pump();
+        if (const int plugin = pluginWindows.service(); plugin >= 0)
+            next = next < 0 ? plugin : std::min(next, plugin);
         if (const double ms = wallMs() - t0; ms > 2.0) {
             ++longTasks;
             longestTaskMs = std::max(longestTaskMs, ms);
         }
         shell.sync();
+        midiEditor.sync();
+        uiFile.tick((*app)->projectPath());
         if (o.script && warm) {
             views::Lanes& lanes = *shell.lanes();
             views::Viewport v = lanes.viewport();
@@ -345,9 +463,13 @@ int main(int argc, char** argv) {
         SDL_Event e;
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
-                quit = true;
-            else
+            if (pluginWindows.handle(e)) continue;  // an editor window's event
+            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                if (o.frames > 0 || !fileActions.dirty())
+                    quit = true;
+                else if (!root.popupOpen())
+                    fileActions.confirmDiscard("Quit?", [&] { quit = true; });
+            } else
                 root.handle(e);  // the wake event is ignored: it only interrupts the wait
         }
     }
@@ -357,6 +479,7 @@ int main(int argc, char** argv) {
         while (wallMs() - w0 < o.idleSeconds * 1000) {
             const int next = loop.pump();
             shell.sync();
+            midiEditor.sync();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
@@ -370,8 +493,10 @@ int main(int argc, char** argv) {
     }
     tick.cancel();
     if (server) server->stop();
+    (void)uiFile.flush((*app)->projectPath());
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
         shell.sync();
+        midiEditor.sync();
         root.damageAll();
         root.frame(false);
         auto written = gui::writePng(o.snapshot, root.readBack());

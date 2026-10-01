@@ -1170,6 +1170,58 @@ TEST_CASE("render job cancellation is observable before worker renders") {
     CHECK(d.jobs().status(id)->find("status")->asString() == "cancelled");
 }
 
+TEST_CASE("add_to_project puts renders on new tracks as one undo step (sync and job)") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    // Items whose take plays `path` (and where the last one starts).
+    double position = -1;
+    auto itemsWithFile = [&](const std::string& path) {
+        const model::Session& h = app->head();
+        int n = 0;
+        for (const auto& e : h.items)
+            for (const model::Id& takeId : e.value->takes)
+                if (const auto* take = h.takes.find(takeId); take && take->source)
+                    if (const auto* src = h.media.find(*take->source);
+                        src && fs::path(src->path).filename() == fs::path(path).filename()) {
+                        ++n;
+                        position = e.value->position;
+                    }
+        return n;
+    };
+    const std::size_t tracks = app->head().tracks.size();
+    auto mix = d.execute(
+        {"render.mix", j(R"({"end_beat":2,"start_beat":1,"name":"bounce","add_to_project":true})"),
+         kTest});
+    REQUIRE(mix);
+    // The follow-up ran before execute() returned: a new track, the file on it at start_beat.
+    CHECK(app->head().tracks.size() == tracks + 1);
+    const std::string path = mix->find("path")->asString();
+    CHECK(itemsWithFile(path) == 1);
+    CHECK(position == doctest::Approx(1.0));
+    CHECK(app->versions().history(1).front()->txn.label == "Add renders to project");
+    REQUIRE(d.execute({"history.undo", json::Value::object(), kTest}));
+    CHECK(app->head().tracks.size() == tracks);  // the import alone is undone
+    CHECK(fs::exists(path));
+
+    auto started = d.execute(
+        {"render.stems",
+         j(R"({"end_beat":2,"job":true,"pattern":"stem-{track}","add_to_project":true})"), kTest});
+    REQUIRE(started);
+    json::Value args = json::Value::object();
+    args["job"] = started->find("job")->asString();
+    args["timeout_s"] = 30;
+    auto done = d.execute({"job.wait", args, kTest});
+    REQUIRE(done);
+    // Whoever sees the job done sees its files in the project.
+    const auto& files = *done->find("result")->find("files");
+    REQUIRE(files.size() >= 1);
+    for (const auto& f : files.asArray()) CHECK(itemsWithFile(f.find("path")->asString()) == 1);
+}
+
 TEST_CASE("stem render job publishes files and analysis summaries") {
     Root root;
     cmd::Registry registry;
@@ -1447,4 +1499,129 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
     app->tick();
     CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
     fake.reset();
+}
+
+TEST_CASE("a UI gesture is one undo step: edits with the same gesture coalesce") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, *app);
+    app->attachCommands(dispatcher);
+    auto run = [&](const char* command, json::Value args, cmd::Origin origin) {
+        auto r = dispatcher.execute({command, std::move(args), std::move(origin)});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    const std::string track = run("track.add", j(R"({"name": "Bass"})"), kTest)["track"].asString();
+    const auto versions = [&] {
+        return run("history.list", j("{}"), kTest)["versions"].asArray().size();
+    };
+    const std::size_t before = versions();
+    cmd::Origin drag{cmd::Origin::Type::Ui, "gui", "", "fader:" + track + ":1"};
+    for (double db : {-1.0, -2.5, -4.0, -6.0}) {
+        json::Value args = json::Value::object();
+        args["track"] = track;
+        args["volume_db"] = db;
+        run("track.set", std::move(args), drag);
+    }
+    CHECK(versions() == before + 1);  // four edits, one step
+    CHECK(app->head().tracks.find(*model::Id::parse(track))->volumeDb == doctest::Approx(-6.0));
+    // A new gesture is a new step; another origin's same key does not merge.
+    drag.gesture = "fader:" + track + ":2";
+    run("track.set", j(R"({"track": ")" + track + R"(", "volume_db": -3})"), drag);
+    CHECK(versions() == before + 2);
+    cmd::Origin other{cmd::Origin::Type::Mcp, "agent", "", drag.gesture};
+    run("track.set", j(R"({"track": ")" + track + R"(", "volume_db": -9})"), other);
+    CHECK(versions() == before + 3);
+    // Undo removes the whole gesture.
+    run("history.undo", j("{}"), kTest);
+    run("history.undo", j("{}"), kTest);
+    run("history.undo", j("{}"), kTest);
+    CHECK(app->head().tracks.find(*model::Id::parse(track))->volumeDb == doctest::Approx(0.0));
+}
+
+TEST_CASE("midi.notes / midi.edit: ops by original index, one undo step, selection kept") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "song_with_item");
+    REQUIRE(
+        d.execute({"midi.write",
+                   j(R"({"item":"it_1","notation":"voice v; 1: C4:q D4:q E4:q F4:q"})"), kTest}));
+    auto notes = [&] {
+        auto r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+        REQUIRE(r);
+        return *r->find("notes");
+    };
+    auto n0 = notes();
+    REQUIRE(n0.size() == 4);
+    CHECK(n0.at(0).find("pitch")->asInt() == 60);
+    CHECK(n0.at(1).find("start")->asDouble() == doctest::Approx(1.0));
+    CHECK(n0.at(1).find("length")->asDouble() == doctest::Approx(1.0));
+    const auto before = app->head().version;
+
+    // Remove D (1), move E (2) up an octave and later, add a note at 0.5: all
+    // indices refer to the list before the command.
+    auto edit = d.execute({"midi.edit", j(R"({"item":"it_1","ops":[
+        {"op":"remove","notes":[1]},
+        {"op":"move","notes":[2],"semitones":12,"beats":0.25},
+        {"op":"add","pitch":67,"start":0.5,"length":0.5,"velocity":80},
+        {"op":"velocity","notes":[0],"velocity_delta":-127}]})"),
+                           kTest});
+    INFO((edit ? std::string() : edit.error().toString()));
+    REQUIRE(edit);
+    auto n1 = notes();
+    REQUIRE(n1.size() == 4);  // C, G (added), E' (moved), F
+    CHECK(n1.at(0).find("pitch")->asInt() == 60);
+    CHECK(n1.at(0).find("velocity")->asInt() == 1);  // clamped
+    CHECK(n1.at(1).find("pitch")->asInt() == 67);
+    CHECK(n1.at(2).find("pitch")->asInt() == 76);
+    CHECK(n1.at(2).find("start")->asDouble() == doctest::Approx(2.25));
+    // The touched notes' new indices: C (velocity), G (added), E' (moved).
+    const auto& sel = *edit->find("notes");
+    REQUIRE(sel.size() == 3);
+    CHECK(sel.at(0).asInt() == 0);
+    CHECK(sel.at(1).asInt() == 1);
+    CHECK(sel.at(2).asInt() == 2);
+    CHECK(app->head().version == before + 1);  // one undo step
+
+    // Quantize to the beat: E' at 2.25 snaps to 2.
+    REQUIRE(
+        d.execute({"midi.edit",
+                   j(R"({"item":"it_1","ops":[{"op":"quantize","notes":[2],"grid":1}]})"), kTest}));
+    CHECK(notes().at(2).find("start")->asDouble() == doctest::Approx(2.0));
+    // Resize the end and the start.
+    REQUIRE(d.execute(
+        {"midi.edit",
+         j(R"({"item":"it_1","ops":[{"op":"resize","notes":[3],"length_delta":1},{"op":"resize","notes":[0],"start_delta":0.5}]})"),
+         kTest}));
+    auto n2 = notes();
+    CHECK(n2.at(3).find("length")->asDouble() == doctest::Approx(2.0));
+    // CC points in and out.
+    REQUIRE(d.execute(
+        {"midi.edit",
+         j(R"({"item":"it_1","ops":[{"op":"cc.set","number":1,"points":[{"beat":0,"value":10},{"beat":2,"value":100}]}]})"),
+         kTest}));
+    auto r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    REQUIRE(r->find("cc")->size() == 2);
+    REQUIRE(
+        d.execute({"midi.edit",
+                   j(R"({"item":"it_1","ops":[{"op":"cc.clear","number":1,"from":1}]})"), kTest}));
+    r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    CHECK(r->find("cc")->size() == 1);
+
+    // Errors are structured and change nothing.
+    const auto v = app->head().version;
+    auto bad = d.execute(
+        {"midi.edit", j(R"({"item":"it_1","ops":[{"op":"move","notes":[9],"beats":1}]})"), kTest});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "midi.note_index");
+    CHECK(bad.error().path == "/args/ops/0/notes");
+    CHECK(app->head().version == v);
+    REQUIRE(d.execute({"history.undo", json::Value::object(), kTest}));  // the cc.clear
+    r = d.execute({"midi.notes", j(R"({"item":"it_1"})"), kTest});
+    CHECK(r->find("cc")->size() == 2);
 }

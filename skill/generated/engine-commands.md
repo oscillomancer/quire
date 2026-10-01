@@ -2837,6 +2837,61 @@ Result:
 
 ```
 
+## `midi.edit@1`
+
+Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.
+
+ops run in order and are one undo step. notes: indices into midi.notes' list as it was before this command (every op refers to that list, so later ops are not affected by earlier removals). Beats are from the item's start. add {pitch, start, length, velocity?, channel?}; remove {notes}; move {notes, beats?, semitones?}; resize {notes, length? | length_delta? | start_delta?}; velocity {notes, velocity? and/or velocity_delta?}; quantize {notes? (all), grid (beats, on the project's grid), strength? 0-1, ends?}; cc.set {number, points [{beat, value}], channel?}; cc.clear {number, from?, to?}. Returns the new indices of the notes the ops added or changed (to keep a selection).
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `ops` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Add a note and move the first one up an octave** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "ops": [
+    {
+      "op": "add",
+      "pitch": 64,
+      "start": 0.5,
+      "length": 0.5
+    },
+    {
+      "op": "move",
+      "notes": [0],
+      "semitones": 12
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "notes": "<any>"
+}
+
+```
+
 ## `midi.get@1`
 
 Read an item's MIDI as notation.
@@ -2884,6 +2939,52 @@ Result:
 ```json
 {
   "text": "<any>"
+}
+
+```
+
+## `midi.notes@1`
+
+List a MIDI item's notes and CC points (beats from the item's start).
+
+Notes are in a fixed order (by start, then pitch); midi.edit refers to them by their position in this list. start/length/beat are in beats from the item's start; channel is 1-16 (omitted for 1). pooled: other items share this MIDI, and edits change them too. For writing whole phrases, midi.write with notation is usually better.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Notes of a MIDI item** (`song_with_item`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "item": "it_1",
+  "ppq": 960,
+  "length": "<any>",
+  "position": "<any>",
+  "notes": "<any>",
+  "cc": "<any>"
 }
 
 ```
@@ -3190,6 +3291,120 @@ Result:
   "sample_rate": 48000.0,
   "tempo": 120.0,
   "meter": "4/4",
+  "version": 0,
+  "recoverable": 0,
+  "autosave_available": false
+}
+
+```
+
+## `project.new@1`
+
+Start a new, empty project (replaces the current one and its history).
+
+The new project has one master and no file until project.save {path}. Unsaved changes to the current project are lost: save first.
+
+Kind: `action`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `sample_rate` | number |  | 8000.0..384000.0 |  | Hz; default 48000. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_info",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "sample_rate": {
+      "type": "number"
+    },
+    "tempo": {
+      "type": "number"
+    },
+    "meter": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "recoverable": {
+      "type": "integer"
+    },
+    "autosave_available": {
+      "type": "boolean"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "load_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "branch",
+    "sample_rate",
+    "tempo",
+    "meter",
+    "version",
+    "recoverable",
+    "autosave_available"
+  ],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**New** (`song`)
+
+```json
+{
+  "name": "Sketch"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "Sketch",
+  "path": "",
+  "branch": "main",
+  "sample_rate": 48000.0,
+  "tempo": "<any>",
+  "meter": "<any>",
   "version": 0,
   "recoverable": 0,
   "autosave_available": false
@@ -4004,6 +4219,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 
@@ -4037,7 +4253,7 @@ Result:
 
 Render the mix offline to a float WAV (default: start to the last item's end).
 
-start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare.
+start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -4058,6 +4274,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `normalize` | value |  |  |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 | `analyze` | string |  |  |  |  |
 
 ### Result
@@ -4157,6 +4374,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 
@@ -4218,6 +4436,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
 | `job` | boolean |  |  | false |  |
+| `add_to_project` | boolean |  |  | false |  |
 
 ### Result
 

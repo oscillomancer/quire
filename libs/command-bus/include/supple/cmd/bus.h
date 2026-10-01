@@ -41,6 +41,10 @@ struct Origin {
         Agent
     } type = Type::Internal;
     std::string client, agent;
+    // A continuous UI gesture (a fader drag): consecutive committed edits from
+    // the same origin with the same non-empty gesture replace the head instead
+    // of stacking — one undo step per gesture (session-model §6.2).
+    std::string gesture = {};
 };
 using Warning = schema::Warning;
 
@@ -290,6 +294,14 @@ class Dispatcher {
                                  const std::function<Result<json::Value>()>& body);
     const Registry& registry() const { return registry_; }
     JobManager& jobs() { return jobs_; }
+    // Model-thread follow-up work (thread-safe to call): runs at the next
+    // flushJobEvents(), i.e. right after the command that is executing, or on
+    // the next loop tick when posted from a job's worker. A failure is emitted
+    // as `bus.post_failed` {label, error}. Commands reach the dispatcher with
+    // ctx.service<cmd::Dispatcher>().
+    void post(std::string label, std::function<Status()> work);
+    // Runs posted work, then emits pending job events. Call it from the loop's
+    // tick too: job events and follow-ups from workers wait for it.
     void flushJobEvents();
 
   private:
@@ -300,6 +312,8 @@ class Dispatcher {
     JobManager jobs_;
     std::uint64_t sequence_ = 0;
     int transactionDepth_ = 0;  // > 0: commands join the open transact() transaction
+    std::mutex postedMutex_;
+    std::vector<std::pair<std::string, std::function<Status()>>> posted_;
 };
 
 using FixtureFactory = std::function<std::unique_ptr<Host>(std::string_view)>;

@@ -43,6 +43,15 @@ void Platform::wake() const {
 Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
                                              const WindowOptions& options) {
     (void)platform;
+    if (!options.gl) {
+        std::unique_ptr<Window> w(new Window);
+        SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        if (options.resizable) flags |= SDL_WINDOW_RESIZABLE;
+        if (options.hidden) flags |= SDL_WINDOW_HIDDEN;
+        w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
+        if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+        return w;
+    }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -73,6 +82,12 @@ Window::~Window() {
 }
 
 std::uint32_t Window::id() const { return SDL_GetWindowID(window_); }
+
+void Window::setSize(int width, int height) { SDL_SetWindowSize(window_, width, height); }
+
+void Window::setResizable(bool resizable) { SDL_SetWindowResizable(window_, resizable); }
+
+void Window::setTitle(const std::string& title) { SDL_SetWindowTitle(window_, title.c_str()); }
 
 float Window::width() const {
     int w = 0, h = 0;

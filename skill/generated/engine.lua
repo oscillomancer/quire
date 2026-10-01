@@ -332,11 +332,18 @@ q = nil
 ---@field name? string
 ---@field color? string
 
+---@class Quire.midi_edit_args
+---@field item string
+---@field ops table[]
+
 ---@class Quire.midi_get_args
 ---@field item string Item id, e.g. "it_1".
 
 ---@class Quire.midi_get_result
 ---@field text string
+
+---@class Quire.midi_notes_args
+---@field item string
 
 ---@class Quire.midi_write_args
 ---@field item string Item id, e.g. "it_1".
@@ -352,6 +359,22 @@ q = nil
 ---@field plugins table[]
 
 ---@class Quire.project_get_result
+---@field name string
+---@field path string
+---@field branch string
+---@field sample_rate number
+---@field tempo number
+---@field meter string
+---@field version integer
+---@field recoverable integer
+---@field autosave_available boolean
+---@field warnings? table[]
+
+---@class Quire.project_new_args
+---@field name? string
+---@field sample_rate? number Hz; default 48000.
+
+---@class Quire.project_new_result
 ---@field name string
 ---@field path string
 ---@field branch string
@@ -453,6 +476,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.render_mix_args
 ---@field master? string Master output (default tr_0) id, e.g. "tr_1".
@@ -468,6 +492,7 @@ q = nil
 ---@field channels? integer
 ---@field normalize? any
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 ---@field analyze? "summary"|"full"
 
 ---@class Quire.render_mix_result
@@ -502,6 +527,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.render_stems_args
 ---@field master? string
@@ -524,6 +550,7 @@ q = nil
 ---@field sample_rate? integer
 ---@field channels? integer
 ---@field job? boolean (default: false)
+---@field add_to_project? boolean (default: false)
 
 ---@class Quire.route_add_args
 ---@field from string
@@ -823,7 +850,9 @@ q = nil
 ---@field set fun(args: Quire.marker_set_args): table Edit a ruler's position, name, or color.
 
 ---@class Quire.midi
+---@field edit fun(args: Quire.midi_edit_args): table Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.
 ---@field get fun(args: Quire.midi_get_args): Quire.midi_get_result Read an item's MIDI as notation.
+---@field notes fun(args: Quire.midi_notes_args): table List a MIDI item's notes and CC points (beats from the item's start).
 ---@field write fun(args: Quire.midi_write_args): table Replace an item's MIDI with notation (the item keeps its position and length).
 
 ---@class Quire.plugin
@@ -832,6 +861,7 @@ q = nil
 
 ---@class Quire.project
 ---@field get fun(): Quire.project_get_result Show the project: name, rate, tempo, meter, file, version and branch.
+---@field new fun(args?: Quire.project_new_args): Quire.project_new_result Start a new, empty project (replaces the current one and its history).
 ---@field open fun(args?: Quire.project_open_args): Quire.project_open_result Open a project file (replaces the current project and its history).
 ---@field recover fun(args?: Quire.project_recover_args): Quire.project_recover_result Put recordings a crash left out back into the project (one undo step).
 ---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.

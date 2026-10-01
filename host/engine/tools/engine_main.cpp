@@ -251,6 +251,7 @@ int main(int argc, char** argv) {
             }
             auto tick = loop.every(interval, [&] {
                 (*app)->tick();
+                dispatcher.flushJobEvents();  // job events and follow-ups from workers
                 publishEvents();
             });
             loop.run();
@@ -264,6 +265,7 @@ int main(int argc, char** argv) {
         auto status = server.serve(::fileno(stdin), std::cout,
                                    mcp::Tick{[&] {
                                                  (*app)->tick();
+                                                 dispatcher.flushJobEvents();
                                                  (*app)->takeEvents();
                                              },
                                              interval});

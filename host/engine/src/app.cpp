@@ -1178,6 +1178,8 @@ Result<std::uint64_t> EngineApp::beginTransaction(const cmd::Origin& origin,
     if (txn_) return Error("history.nested", "a transaction is already open");
     txn_ = std::make_unique<model::EditTxn>(head(), versions_->nextVersion());
     record_ = model::TxnRecord{std::string(label), originText(origin), {}, {}};
+    // Scoped by origin, so two clients' gestures never merge into one step.
+    if (!origin.gesture.empty()) record_.coalesceKey = record_.origin + "|" + origin.gesture;
     return ++txnId_;
 }
 

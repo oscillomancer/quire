@@ -72,6 +72,7 @@ add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp
   ${_vst3}/pluginterfaces/base/funknown.cpp
   ${_vst3}/pluginterfaces/base/ustring.cpp
+  ${_vst3}/public.sdk/source/common/commoniids.cpp
   ${_vst3}/public.sdk/source/common/commonstringconvert.cpp
   ${_vst3}/public.sdk/source/vst/vstinitiids.cpp
   ${_vst3}/public.sdk/source/vst/hosting/module.cpp

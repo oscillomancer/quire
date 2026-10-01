@@ -62,11 +62,13 @@ std::string shortName(const actions::Action& a) {
 ChromeLayout ChromeLayout::defaults() {
     ChromeLayout l;
     l.menus = {
-        {"File", {"project.save", "-", "render.mix", "-", "ui.quit"}},
+        {"File",
+         {"ui.file.new", "ui.file.open", "ui.file.save", "ui.file.save_as", "-", "ui.file.import",
+          "-", "render.mix", "-", "ui.quit"}},
         {"Edit", {"history.undo", "history.redo", "-", "ui.actions"}},
         {"View", {"ui.actions", "ui.agent"}},
         {"Track", {"track.add:channel", "track.add:buss", "track.add:master"}},
-        {"Item", {"item.split:playhead", "item.remove:selected"}},
+        {"Item", {"item.split:playhead", "item.remove:selected", "-", "ui.midi.edit"}},
         {"Transport",
          {"transport.toggle", "transport.record", "transport.loop.toggle", "-",
           "transport.seek:start", "transport.seek:end"}},

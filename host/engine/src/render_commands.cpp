@@ -32,6 +32,7 @@ struct Args {
     std::optional<std::int64_t> bitDepth;
     std::optional<std::int64_t> sampleRate, channels;
     bool job = false;
+    bool addToProject = false;
 };
 struct AbArgs {
     std::string a, b;
@@ -480,6 +481,7 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
         json::Value entry = json::Value::object();
         entry["path"] = task.path.string();
         entry["render"] = app.rememberRender(task.path);
+        entry["start_beat"] = task.session.timeMap->beatAt(task.settings.startSeconds);
         entry["seconds"] = audio.seconds();
         entry["output_latency"] = static_cast<std::int64_t>(rendered->outputLatency);
         if (!rendered->warnings.empty()) {
@@ -536,6 +538,8 @@ schema::Schema<Args> argsSchema() {
         .field("sample_rate", &Args::sampleRate, schema::integer().range(8000, 384000))
         .field("channels", &Args::channels, schema::integer().range(1, 2))
         .field("job", &Args::job, schema::boolean())
+        .defaultValue(false)
+        .field("add_to_project", &Args::addToProject, schema::boolean())
         .defaultValue(false)
         .build();
 }
@@ -740,6 +744,39 @@ Result<std::string> expandRenderPattern(std::string_view pattern,
     return expand(pattern, context);
 }
 
+void postAddToProject(cmd::Dispatcher& dispatcher, const cmd::Origin& origin,
+                      const json::Value& files) {
+    std::vector<std::pair<std::string, double>> add;  // path, start beat
+    if (files.isArray())
+        for (const json::Value& f : files.asArray())
+            if (const auto* path = f.find("path"); path && path->isString()) {
+                const auto* start = f.find("start_beat");
+                add.emplace_back(path->asString(),
+                                 start && start->isNumber() ? start->asDouble() : 0.0);
+            }
+    if (add.empty()) return;
+    dispatcher.post("render.add_to_project", [&dispatcher, origin, add]() -> Status {
+        auto done =
+            dispatcher.transact("Add renders to project", origin, [&]() -> Result<json::Value> {
+                for (const auto& [path, start] : add) {
+                    json::Value track = json::Value::object();
+                    track["name"] = fs::path(path).stem().string();
+                    auto t = dispatcher.execute({"track.add", std::move(track), origin});
+                    if (!t) return t;
+                    json::Value item = json::Value::object();
+                    item["track"] = (*t)["track"];
+                    item["position"] = start;
+                    item["audio_file"] = path;
+                    if (auto i = dispatcher.execute({"item.add", std::move(item), origin}); !i)
+                        return i;
+                }
+                return json::Value::object();
+            });
+        if (!done) return std::move(done).error();
+        return {};
+    });
+}
+
 void registerRenderCommands(cmd::Registry& registry) {
     for (const char* name : {"render.stems", "render.regions", "render.dry-run"}) {
         Command<Args, json::Value> c;
@@ -781,20 +818,30 @@ void registerRenderCommands(cmd::Registry& registry) {
             }
             if (a.format && *a.format != "wav")
                 return Error("render.format", "only WAV encoding is available", "/format");
-            if (!a.job) return runTasks(app, *tasks, a);
+            auto& dispatcher = ctx.service<cmd::Dispatcher>();
+            const cmd::Origin origin = ctx.origin();
+            if (!a.job) {
+                auto result = runTasks(app, *tasks, a);
+                if (result && a.addToProject)
+                    postAddToProject(dispatcher, origin, *result->find("files"));
+                return result;
+            }
             auto available = app.plugins();
             if (!available) return std::move(available).error();
             std::vector<host::PluginInfo> catalogue(available->begin(), available->end());
             const auto identity = app.options().identity;
             auto& jobs = ctx.service<cmd::JobManager>();
             const std::string id = jobs.create();
-            app.startJob([&app, &jobs, id, tasks = std::move(*tasks), a,
+            app.startJob([&app, &jobs, &dispatcher, origin, id, tasks = std::move(*tasks), a,
                           catalogue = std::move(catalogue), identity](std::stop_token stop) {
                 if (stop.stop_requested() || jobs.cancelled(id)) return;
                 auto result = runTasks(app, tasks, a, &jobs, id, &catalogue, &identity, stop);
-                if (result)
-                    (void)jobs.complete(id, std::move(*result));
-                else if (!jobs.cancelled(id))
+                if (result) {
+                    json::Value files = *result->find("files");
+                    (void)jobs.completeWith(id, std::move(*result), [&] {
+                        if (a.addToProject) postAddToProject(dispatcher, origin, files);
+                    });
+                } else if (!jobs.cancelled(id))
                     (void)jobs.fail(id, std::move(result).error());
             });
             json::Value out = json::Value::object();

@@ -1,0 +1,965 @@
+#include "midi_editor.h"
+
+#include <SDL3/SDL_keycode.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+#include "supple/notation/notation.h"
+#include "supple/ui/scroll_view.h"
+#include "supple/ui/text_area.h"
+#include "supple/ui/widgets.h"
+
+namespace supple::gui {
+namespace {
+
+const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
+constexpr float kKeysWidth = 46;
+constexpr float kEdge = 5;  // px at a note's ends that resize it
+constexpr auto kCompileDelay = std::chrono::milliseconds(300);
+
+bool blackKey(int pitch) {
+    const int pc = ((pitch % 12) + 12) % 12;
+    return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+}
+
+std::string pitchName(int pitch) {
+    static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    return std::string(names[((pitch % 12) + 12) % 12]) + std::to_string(pitch / 12 - 1);
+}
+
+}  // namespace
+
+double RollState::snapBeat(double itemBeat) const {
+    if (!snap || grid <= 0) return itemBeat;
+    const double project = itemPosition + itemBeat;
+    return std::round(project / grid) * grid - itemPosition;
+}
+
+// ----------------------------------------------------------------- geometry
+
+namespace {
+
+struct Geometry {
+    const RollState& s;
+    ui::Rect area;  // the roll's bounds (notes area)
+    float xOf(double beat) const {
+        return area.x + static_cast<float>((beat - s.scrollBeat) * s.pixelsPerBeat);
+    }
+    double beatOf(float x) const {
+        return s.scrollBeat + static_cast<double>(x - area.x) / s.pixelsPerBeat;
+    }
+    float yOf(int pitch) const {
+        return area.y + static_cast<float>(s.topPitch - pitch) * s.rowHeight;
+    }
+    int pitchOf(float y) const {
+        return static_cast<int>(std::ceil(s.topPitch - static_cast<double>(y - area.y) /
+                                                           static_cast<double>(s.rowHeight)));
+    }
+    // A note as drawn, with the drag preview applied when it is selected.
+    RollNote shown(std::size_t i) const {
+        RollNote n = s.notes[i];
+        if (!s.selected.contains(i)) return n;
+        switch (s.drag) {
+            case RollState::Drag::Move:
+                n.start += s.dBeats;
+                n.pitch = std::clamp(n.pitch + s.dPitch, 0, 127);
+                break;
+            case RollState::Drag::ResizeEnd:
+                n.length = std::max(1.0 / 64, n.length + s.dLength);
+                break;
+            case RollState::Drag::ResizeStart: {
+                const double end = n.start + n.length;
+                n.start = std::min(end - 1.0 / 64, n.start + s.dStart);
+                n.length = end - n.start;
+                break;
+            }
+            case RollState::Drag::Velocity:
+                n.velocity = std::clamp(n.velocity + s.dVelocity, 1, 127);
+                break;
+            default:
+                break;
+        }
+        return n;
+    }
+    ui::Rect rectOf(const RollNote& n) const {
+        const float x = xOf(n.start);
+        return {x, yOf(n.pitch) + 1, std::max(3.0f, xOf(n.start + n.length) - x - 1),
+                s.rowHeight - 2};
+    }
+};
+
+ui::Color velocityColor(const ui::Theme& t, int velocity, bool selected) {
+    const ui::Color base = selected ? t.color("focus") : t.color("accent");
+    const float k = 0.45f + 0.55f * static_cast<float>(velocity) / 127.0f;
+    return {base.r * k, base.g * k, base.b * k, 1};
+}
+
+// ----------------------------------------------------------------- the roll
+
+class Roll : public ui::Node {
+  public:
+    Roll(RollState& s, MidiEditor& editor) : Node("midi.roll"), s_(s), editor_(editor) {
+        focusable = true;
+        interactive = true;
+        layout.width = ui::SizeRule::fraction();
+        layout.height = ui::SizeRule::fraction();
+    }
+
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const Geometry g{s_, bounds()};
+        const ui::Rect b = bounds();
+        c.save();
+        c.clip(b);
+        c.fillRect(b, t.color("ground"));
+        // Rows: black keys darker, C lines stronger.
+        const int top = g.pitchOf(b.y), bottom = g.pitchOf(b.bottom());
+        for (int p = std::min(127, top); p >= std::max(0, bottom); --p) {
+            const float y = g.yOf(p);
+            if (blackKey(p)) c.fillRect({b.x, y, b.w, s_.rowHeight}, t.color("panel"));
+            if (p % 12 == 0) c.fillRect({b.x, y + s_.rowHeight - 1, b.w, 1}, t.color("rule"));
+        }
+        // Outside the item: shaded.
+        const float x0 = g.xOf(0), x1 = g.xOf(s_.itemLength);
+        if (x0 > b.x) c.fillRect({b.x, b.y, x0 - b.x, b.h}, t.color("ground").withAlpha(0.6f));
+        if (x1 < b.right())
+            c.fillRect({x1, b.y, b.right() - x1, b.h}, t.color("ground").withAlpha(0.6f));
+        // Grid: project grid lines, beats, bars.
+        const double first = g.beatOf(b.x), last = g.beatOf(b.right());
+        if (s_.grid > 0 && s_.grid * s_.pixelsPerBeat >= 6) {
+            const double p0 = std::floor((s_.itemPosition + first) / s_.grid) * s_.grid;
+            for (double p = p0; p - s_.itemPosition <= last; p += s_.grid) {
+                const float x = g.xOf(p - s_.itemPosition);
+                const bool beat = std::abs(p - std::round(p)) < 1e-9;
+                c.fillRect({x, b.y, 1, b.h}, t.color("rule").withAlpha(beat ? 0.9f : 0.4f));
+            }
+        }
+        for (double bar : s_.barLines) {
+            const float x = g.xOf(bar - s_.itemPosition);
+            c.fillRect({x, b.y, 1, b.h}, t.color("ink-faint"));
+        }
+        // Notes (selected on top), names when there is room.
+        std::vector<std::size_t> order(s_.notes.size());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_partition(order.begin(), order.end(),
+                              [&](std::size_t i) { return !s_.selected.contains(i); });
+        for (std::size_t i : order) {
+            const RollNote n = g.shown(i);
+            const ui::Rect r = g.rectOf(n);
+            if (r.right() < b.x || r.x > b.right() || r.bottom() < b.y || r.y > b.bottom())
+                continue;
+            const bool sel = s_.selected.contains(i);
+            c.fillRound(r, 2, velocityColor(t, n.velocity, sel));
+            c.strokeRound(r, 2, sel ? t.color("ink") : t.color("ground").withAlpha(0.7f));
+            if (r.w > 34 && s_.rowHeight >= 11)
+                c.text({r.x + 3, r.y, r.w - 4, r.h}, pitchName(n.pitch), ui::Font::Ui,
+                       t.type("caption") - 1, t.color("ground"), ui::kLeft | ui::kMiddle);
+        }
+        if (s_.drag == RollState::Drag::Marquee) {
+            c.fillRect(s_.marquee, t.color("selection").withAlpha(0.35f));
+            c.strokeRect(s_.marquee, t.color("focus"));
+        }
+        c.restore();
+    }
+
+    std::optional<std::size_t> noteAt(ui::Point p, int* edge) const {
+        const Geometry g{s_, bounds()};
+        for (std::size_t k = s_.notes.size(); k-- > 0;) {
+            const ui::Rect r = g.rectOf(s_.notes[k]);
+            if (!r.contains(p)) continue;
+            if (edge)
+                *edge = p.x >= r.right() - kEdge && r.w > 2 * kEdge ? 1
+                        : p.x <= r.x + kEdge && r.w > 2 * kEdge     ? -1
+                                                                    : 0;
+            return k;
+        }
+        return std::nullopt;
+    }
+
+    bool onPointer(const ui::PointerEvent& e) override {
+        const Geometry g{s_, bounds()};
+        using T = ui::PointerEvent::Type;
+        if (e.type == T::Wheel) {
+            if (e.mods & ui::kCtrl) {  // zoom around the pointer
+                const double at = g.beatOf(e.pos.x);
+                s_.pixelsPerBeat =
+                    std::clamp(s_.pixelsPerBeat * std::pow(1.15, e.wheelY), 8.0, 1200.0);
+                s_.scrollBeat = at - static_cast<double>(e.pos.x - bounds().x) / s_.pixelsPerBeat;
+            } else if (e.mods & ui::kShift) {
+                s_.scrollBeat -= static_cast<double>(e.wheelY + e.wheelX) * 60 / s_.pixelsPerBeat;
+            } else {
+                s_.topPitch =
+                    std::clamp(s_.topPitch + static_cast<double>(e.wheelY) * 3, 12.0, 127.0);
+                s_.scrollBeat -= static_cast<double>(e.wheelX) * 60 / s_.pixelsPerBeat;
+            }
+            repaintAll();
+            return true;
+        }
+        if (e.type == T::Down && e.button == 1) {
+            focusSelf();
+            press_ = e.pos;
+            moved_ = false;
+            int edge = 0;
+            const auto hit = noteAt(e.pos, &edge);
+            if (e.clicks >= 2) {
+                if (hit) {  // double-click a note: delete it
+                    s_.selected = {*hit};
+                    editor_.removeSelected();
+                } else {
+                    const double start = std::max(
+                        0.0, std::floor((s_.itemPosition + g.beatOf(e.pos.x)) / s_.grid) * s_.grid -
+                                 s_.itemPosition);
+                    json::Value op = json::Value::object();
+                    op["op"] = "add";
+                    op["pitch"] = std::clamp(g.pitchOf(e.pos.y), 0, 127);
+                    op["start"] = s_.snap ? start : std::max(0.0, g.beatOf(e.pos.x));
+                    op["length"] = s_.lastLength;
+                    op["velocity"] = s_.lastVelocity;
+                    json::Value ops = json::Value::array();
+                    ops.push_back(std::move(op));
+                    (void)editor_.edit(std::move(ops));
+                }
+                s_.drag = RollState::Drag::None;
+                return true;
+            }
+            if (hit) {
+                if (e.mods & ui::kShift) {
+                    if (!s_.selected.erase(*hit)) s_.selected.insert(*hit);
+                } else if (!s_.selected.contains(*hit)) {
+                    s_.selected = {*hit};
+                }
+                anchor_ = *hit;
+                s_.drag = edge > 0   ? RollState::Drag::ResizeEnd
+                          : edge < 0 ? RollState::Drag::ResizeStart
+                                     : RollState::Drag::Move;
+                s_.lastLength = s_.notes[*hit].length;
+                s_.lastVelocity = s_.notes[*hit].velocity;
+            } else {
+                if (!(e.mods & ui::kShift)) s_.selected.clear();
+                s_.drag = RollState::Drag::Marquee;
+                marqueeBase_ = s_.selected;
+                s_.marquee = {e.pos.x, e.pos.y, 0, 0};
+            }
+            s_.dBeats = s_.dLength = s_.dStart = 0;
+            s_.dPitch = 0;
+            if (Root()) Root()->capture(this);
+            repaintAll();
+            return true;
+        }
+        if (e.type == T::Move && s_.drag != RollState::Drag::None) {
+            moved_ = moved_ || std::abs(e.pos.x - press_.x) + std::abs(e.pos.y - press_.y) > 3;
+            const bool free = (e.mods & ui::kAlt) || !s_.snap;
+            const double raw = static_cast<double>(e.pos.x - press_.x) / s_.pixelsPerBeat;
+            auto snapped = [&](double anchorBeat) {
+                if (free) return raw;
+                return s_.snapBeat(anchorBeat + raw) - anchorBeat;
+            };
+            const RollNote& a = s_.notes[anchor_];
+            switch (s_.drag) {
+                case RollState::Drag::Move:
+                    s_.dBeats = snapped(a.start);
+                    s_.dPitch = static_cast<int>(std::lround((press_.y - e.pos.y) / s_.rowHeight));
+                    break;
+                case RollState::Drag::ResizeEnd:
+                    s_.dLength = snapped(a.start + a.length);
+                    break;
+                case RollState::Drag::ResizeStart:
+                    s_.dStart = snapped(a.start);
+                    break;
+                case RollState::Drag::Marquee: {
+                    s_.marquee = {std::min(press_.x, e.pos.x), std::min(press_.y, e.pos.y),
+                                  std::abs(e.pos.x - press_.x), std::abs(e.pos.y - press_.y)};
+                    s_.selected = marqueeBase_;
+                    for (std::size_t i = 0; i < s_.notes.size(); ++i) {
+                        const ui::Rect r = g.rectOf(s_.notes[i]);
+                        if (r.x < s_.marquee.right() && r.right() > s_.marquee.x &&
+                            r.y < s_.marquee.bottom() && r.bottom() > s_.marquee.y)
+                            s_.selected.insert(i);
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+            repaintAll();
+            return true;
+        }
+        if (e.type == T::Up && s_.drag != RollState::Drag::None) {
+            if (Root()) Root()->capture(nullptr);
+            const auto drag = s_.drag;
+            s_.drag = RollState::Drag::None;
+            json::Value ops = json::Value::array();
+            json::Value sel = json::Value::array();
+            for (std::size_t i : s_.selected) sel.push_back(static_cast<std::int64_t>(i));
+            json::Value op = json::Value::object();
+            op["notes"] = sel;
+            if (drag == RollState::Drag::Move && moved_ && (s_.dBeats != 0 || s_.dPitch != 0)) {
+                op["op"] = "move";
+                if (s_.dBeats != 0) op["beats"] = s_.dBeats;
+                if (s_.dPitch != 0) op["semitones"] = s_.dPitch;
+                ops.push_back(std::move(op));
+            } else if (drag == RollState::Drag::ResizeEnd && moved_ && s_.dLength != 0) {
+                op["op"] = "resize";
+                op["length_delta"] = s_.dLength;
+                ops.push_back(std::move(op));
+                s_.lastLength = std::max(1.0 / 64, s_.notes[anchor_].length + s_.dLength);
+            } else if (drag == RollState::Drag::ResizeStart && moved_ && s_.dStart != 0) {
+                op["op"] = "resize";
+                op["start_delta"] = s_.dStart;
+                ops.push_back(std::move(op));
+            } else if (drag == RollState::Drag::Move && !moved_ && !(e.mods & ui::kShift)) {
+                s_.selected = {anchor_};  // a click on a selected note selects just it
+            }
+            s_.dBeats = s_.dLength = s_.dStart = 0;
+            s_.dPitch = 0;
+            if (ops.size() > 0) (void)editor_.edit(std::move(ops));
+            repaintAll();
+            return true;
+        }
+        return false;
+    }
+
+    bool onKey(const ui::KeyEvent& e) override {
+        const bool shift = e.mods & ui::kShift;
+        switch (e.key) {
+            case SDLK_DELETE:
+            case SDLK_BACKSPACE:
+                editor_.removeSelected();
+                return true;
+            case SDLK_UP:
+                editor_.transpose(shift ? 12 : 1);
+                return true;
+            case SDLK_DOWN:
+                editor_.transpose(shift ? -12 : -1);
+                return true;
+            case SDLK_LEFT:
+            case SDLK_RIGHT: {
+                if (s_.selected.empty()) return false;
+                json::Value op = json::Value::object(), sel = json::Value::array();
+                for (std::size_t i : s_.selected) sel.push_back(static_cast<std::int64_t>(i));
+                op["op"] = "move";
+                op["notes"] = std::move(sel);
+                op["beats"] = (e.key == SDLK_LEFT ? -1.0 : 1.0) * s_.grid;
+                json::Value ops = json::Value::array();
+                ops.push_back(std::move(op));
+                (void)editor_.edit(std::move(ops));
+                return true;
+            }
+            case SDLK_ESCAPE:
+                if (s_.selected.empty()) return false;
+                s_.selected.clear();
+                repaintAll();
+                return true;
+            case SDLK_Q:
+                if (e.mods & (ui::kCtrl | ui::kAlt)) return false;
+                editor_.quantize();
+                return true;
+            default:
+                break;
+        }
+        if (e.mods & ui::kCtrl) {
+            if (e.key == SDLK_A) {
+                editor_.selectAll();
+                return true;
+            }
+            if (e.key == SDLK_D) {
+                editor_.duplicate();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::function<void()> repaintAll = [] {};
+
+  private:
+    ui::Root* Root() { return root(); }
+    void focusSelf() {
+        if (ui::Root* r = root()) r->focus(this);
+    }
+    RollState& s_;
+    MidiEditor& editor_;
+    ui::Point press_{};
+    bool moved_ = false;
+    std::size_t anchor_ = 0;
+    std::set<std::size_t> marqueeBase_;
+};
+
+// ----------------------------------------------------------------- keyboard
+
+class Keys : public ui::Node {
+  public:
+    explicit Keys(RollState& s) : Node("midi.keys"), s_(s) {
+        layout.width = ui::SizeRule::fixed(kKeysWidth);
+        layout.height = ui::SizeRule::fraction();
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const ui::Rect b = bounds();
+        const Geometry g{s_, b};
+        c.save();
+        c.clip(b);
+        c.fillRect(b, t.color("raised"));
+        for (int p = std::min(127, g.pitchOf(b.y)); p >= std::max(0, g.pitchOf(b.bottom())); --p) {
+            const float y = g.yOf(p);
+            if (blackKey(p)) c.fillRect({b.x, y, b.w * 0.62f, s_.rowHeight}, t.color("ground"));
+            c.fillRect({b.x, y + s_.rowHeight - 1, b.w, 1}, t.color("rule").withAlpha(0.5f));
+            if (p % 12 == 0 && s_.rowHeight >= 8)
+                c.text({b.x, y, b.w - 4, s_.rowHeight}, pitchName(p), ui::Font::Ui,
+                       t.type("caption") - 1, t.color("ink-quiet"), ui::kRight | ui::kMiddle);
+        }
+        c.fillRect({b.right() - 1, b.y, 1, b.h}, t.color("rule"));
+        c.restore();
+    }
+
+  private:
+    RollState& s_;
+};
+
+// ----------------------------------------------------------------- velocity lane
+
+class VelocityLane : public ui::Node {
+  public:
+    VelocityLane(RollState& s, MidiEditor& editor, ui::Node*& roll)
+        : Node("midi.velocity"), s_(s), editor_(editor), roll_(roll) {
+        interactive = true;
+        layout.height = ui::SizeRule::fixed(72);
+    }
+    ui::Rect area() const {  // aligned with the roll
+        const ui::Rect b = bounds();
+        return {b.x + kKeysWidth, b.y + 4, std::max(0.0f, b.w - kKeysWidth), b.h - 8};
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const ui::Rect b = bounds();
+        c.fillRect(b, t.color("panel"));
+        c.fillRect({b.x, b.y, b.w, 1}, t.color("rule"));
+        c.text({b.x + 4, b.y, kKeysWidth - 6, b.h}, "Vel", ui::Font::Ui, t.type("caption"),
+               t.color("ink-quiet"));
+        const ui::Rect a = area();
+        const Geometry g{s_, roll_ ? roll_->bounds() : a};
+        c.save();
+        c.clip(a);
+        for (std::size_t i = 0; i < s_.notes.size(); ++i) {
+            const RollNote n = g.shown(i);
+            const float x = g.xOf(n.start);
+            if (x < a.x - 4 || x > a.right()) continue;
+            const float h = a.h * static_cast<float>(n.velocity) / 127.0f;
+            const bool sel = s_.selected.contains(i);
+            const ui::Color col = velocityColor(t, n.velocity, sel);
+            c.fillRect({x, a.bottom() - h, 2, h}, col);
+            c.fillRound({x - 2, a.bottom() - h - 2, 6, 4}, 1, col);
+        }
+        c.restore();
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        using T = ui::PointerEvent::Type;
+        const ui::Rect a = area();
+        const Geometry g{s_, roll_ ? roll_->bounds() : a};
+        auto valueAt = [&](float y) {
+            return std::clamp(static_cast<int>(std::lround((a.bottom() - y) / a.h * 127.0f)), 1,
+                              127);
+        };
+        if (e.type == T::Down && e.button == 1) {
+            // The nearest note start within 6 px, selected notes first.
+            std::optional<std::size_t> best;
+            float bestD = 7;
+            for (std::size_t i = 0; i < s_.notes.size(); ++i) {
+                const float d = std::abs(g.xOf(s_.notes[i].start) - e.pos.x) -
+                                (s_.selected.contains(i) ? 0.5f : 0.0f);
+                if (d < bestD) {
+                    bestD = d;
+                    best = i;
+                }
+            }
+            if (!best) return true;
+            if (!s_.selected.contains(*best)) s_.selected = {*best};
+            s_.velocityNote = best;
+            s_.drag = RollState::Drag::Velocity;
+            s_.dVelocity = valueAt(e.pos.y) - s_.notes[*best].velocity;
+            if (ui::Root* r = root()) r->capture(this);
+            repaintAll();
+            return true;
+        }
+        if (e.type == T::Move && s_.drag == RollState::Drag::Velocity && s_.velocityNote) {
+            s_.dVelocity = valueAt(e.pos.y) - s_.notes[*s_.velocityNote].velocity;
+            repaintAll();
+            return true;
+        }
+        if (e.type == T::Up && s_.drag == RollState::Drag::Velocity) {
+            if (ui::Root* r = root()) r->capture(nullptr);
+            s_.drag = RollState::Drag::None;
+            json::Value op = json::Value::object(), sel = json::Value::array();
+            for (std::size_t i : s_.selected) sel.push_back(static_cast<std::int64_t>(i));
+            op["op"] = "velocity";
+            op["notes"] = std::move(sel);
+            if (s_.selected.size() == 1)
+                op["velocity"] =
+                    std::clamp(s_.notes[*s_.velocityNote].velocity + s_.dVelocity, 1, 127);
+            else
+                op["velocity_delta"] = std::clamp(s_.dVelocity, -127, 127);
+            s_.lastVelocity =
+                std::clamp(s_.notes[*s_.velocityNote].velocity + s_.dVelocity, 1, 127);
+            s_.dVelocity = 0;
+            s_.velocityNote.reset();
+            json::Value ops = json::Value::array();
+            ops.push_back(std::move(op));
+            (void)editor_.edit(std::move(ops));
+            repaintAll();
+            return true;
+        }
+        return false;
+    }
+    std::function<void()> repaintAll = [] {};
+
+  private:
+    RollState& s_;
+    MidiEditor& editor_;
+    ui::Node*& roll_;
+};
+
+// ----------------------------------------------------------------- playhead (overlay)
+
+class RollPlayhead : public ui::Node {
+  public:
+    RollPlayhead(const RollState& s, ui::Node*& roll) : Node("midi.playhead"), s_(s), roll_(roll) {}
+    void place(const ui::Rect& r) { setBounds(r); }
+    void paint(ui::Canvas& c) override {
+        if (!roll_ || !roll_->visible || s_.item.empty() || s_.playheadBeat < 0) return;
+        const ui::Rect b = roll_->bounds();
+        const Geometry g{s_, b};
+        const float x = g.xOf(s_.playheadBeat - s_.itemPosition);
+        if (x < b.x || x > b.right()) return;
+        c.fillRect({x, b.y, 1.5f, b.h}, c.theme().color("ink"));
+    }
+
+  private:
+    const RollState& s_;
+    ui::Node*& roll_;
+};
+
+}  // namespace
+
+// ----------------------------------------------------------------- MidiEditor
+
+MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
+                       engine::EngineApp& app, UiState& ui)
+    : root_(root), actions_(actions), dispatcher_(dispatcher), app_(app), ui_(ui) {
+    actions_.addUi("ui.midi.edit", "MIDI: edit selected item", [this] {
+        for (const std::string& it : ui_.selectedItems)
+            if (open(it)) return;
+        if (actions_.onError) actions_.onError("select a MIDI item to edit");
+    });
+    actions_.addUi("ui.midi.open", "MIDI: edit item…", "item",
+                   [this](const json::Value& v) -> Status {
+                       if (!v.isString()) return Error("gui.midi", "an item id like it_3", "/item");
+                       return open(v.asString());
+                   });
+    actions_.addUi("ui.midi.close", "MIDI: close editor", [this] { close(); });
+    actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes", [this] { quantize(); });
+}
+
+MidiEditor::~MidiEditor() {
+    if (playhead_) (void)root_.overlay().remove(playhead_);  // it refers to this editor
+}
+
+std::unique_ptr<ui::Node> MidiEditor::build() {
+    auto panel = std::make_unique<ui::Node>("midi.editor");
+    panel_ = panel.get();
+    panel->layout.dir = ui::Layout::Dir::Column;
+    panel->layout.height = ui::SizeRule::fixed(320);
+    panel->visible = false;
+    auto& header = panel->emplace<ui::Node>("midi.header");
+    header.layout.dir = ui::Layout::Dir::Row;
+    header.layout.height = ui::SizeRule::fixed(32);
+    header.layout.padding = ui::Insets{4, 8, 4, 8};
+    header.layout.gap = 6;
+    header.layout.align = ui::Layout::Align::Center;
+    title_ = &header.emplace<ui::Label>("midi.title", "MIDI", ui::Font::UiBold, "small");
+    title_->layout.width = ui::SizeRule::fraction();
+    for (auto [label, grid] : {std::pair{"1/4", 1.0},
+                               {"1/8", 0.5},
+                               {"1/16", 0.25},
+                               {"1/32", 0.125},
+                               {"1/8T", 1.0 / 3}}) {
+        const double gv = grid;
+        header.emplace<ui::Button>(std::string("midi.grid.") + label, label, [this, gv] {
+            state_.grid = gv;
+            state_.lastLength = gv;
+            refreshTitle();
+            if (roll_) roll_->invalidate();
+        });
+    }
+    header.emplace<ui::Button>("midi.snap", "Snap", [this] {
+        state_.snap = !state_.snap;
+        refreshTitle();
+    });
+    header.emplace<ui::Button>("midi.quantize", "Quantize", [this] { quantize(); });
+    header.emplace<ui::Button>("midi.notation.toggle", "Notation", [this] {
+        if (!notationPane_) return;
+        notationPane_->visible = !notationPane_->visible;
+        root_.relayout();
+        root_.damageAll();
+    });
+    header.emplace<ui::Button>("midi.close", "Close", [this] { close(); });
+
+    auto& body = panel->emplace<ui::Node>("midi.body");
+    body.layout.dir = ui::Layout::Dir::Row;
+    body.layout.height = ui::SizeRule::fraction();
+    auto& left = body.emplace<ui::Node>("midi.left");
+    left.layout.dir = ui::Layout::Dir::Column;
+    left.layout.width = ui::SizeRule::fraction();
+    auto& rollRow = left.emplace<ui::Node>("midi.rollrow");
+    rollRow.layout.dir = ui::Layout::Dir::Row;
+    rollRow.layout.height = ui::SizeRule::fraction();
+    auto& keys = rollRow.emplace<Keys>(state_);
+    keys_ = &keys;
+    auto& roll = rollRow.emplace<Roll>(state_, *this);
+    roll_ = &roll;
+    auto& vel = left.emplace<VelocityLane>(state_, *this, roll_);
+    velocity_ = &vel;
+    auto repaint = [this] {
+        if (roll_) roll_->invalidate();
+        if (keys_) keys_->invalidate();
+        if (velocity_) velocity_->invalidate();
+    };
+    roll.repaintAll = repaint;
+    vel.repaintAll = repaint;
+
+    auto& pane = body.emplace<ui::Node>("midi.notation");
+    notationPane_ = &pane;
+    pane.layout.dir = ui::Layout::Dir::Column;
+    pane.layout.width = ui::SizeRule::fixed(380);
+    pane.layout.padding = ui::Insets{4, 8, 6, 8};
+    pane.layout.gap = 4;
+    pane.emplace<ui::Label>("midi.notation.title", "Notation", ui::Font::UiBold, "caption",
+                            "ink-quiet");
+    auto& text = pane.emplace<ui::TextArea>("midi.notation.text");
+    text_ = &text;
+    text.layout.height = ui::SizeRule::fraction();
+    text.onChange = [this](const std::string&) {
+        textDirty_ = true;
+        compilePending_ = true;
+        lastEdit_ = std::chrono::steady_clock::now();
+    };
+    text.onSubmit = [this](const std::string&) { compileText(true); };
+    text.onFocusChange = [this](bool focused) {
+        if (!focused && textDirty_) compileText(true);
+    };
+    diagnostics_ = &pane.emplace<ui::TextBlock>("midi.notation.diagnostics", "", ui::Font::Mono,
+                                                "caption", "ink-quiet");
+    diagnostics_->layout.height = ui::SizeRule::content();
+
+    auto overlay = std::make_unique<RollPlayhead>(state_, roll_);
+    playhead_ = overlay.get();
+    root_.overlay().add(std::move(overlay));
+    return panel;
+}
+
+Status MidiEditor::open(const std::string& item) {
+    const std::string previous = state_.item;
+    state_.item = item;
+    state_.selected.clear();
+    if (auto r = reload(); !r) {
+        state_.item = previous;
+        return r;
+    }
+    // Center the view on the notes (or middle C).
+    int lo = 127, hi = 0;
+    for (const RollNote& n : state_.notes) {
+        lo = std::min(lo, n.pitch);
+        hi = std::max(hi, n.pitch);
+    }
+    const double center = state_.notes.empty() ? 60 : (lo + hi) / 2.0;
+    const float rows = roll_ && roll_->bounds().h > 0 ? roll_->bounds().h / state_.rowHeight : 22;
+    state_.topPitch =
+        std::clamp(center + static_cast<double>(rows) / 2.0, static_cast<double>(rows), 127.0);
+    state_.scrollBeat = -0.25;
+    if (roll_ && roll_->bounds().w > 0 && state_.itemLength > 0)
+        state_.pixelsPerBeat = std::clamp(
+            static_cast<double>(roll_->bounds().w) / (state_.itemLength + 0.5), 20.0, 400.0);
+    textDirty_ = compilePending_ = false;
+    reloadText();
+    if (panel_ && !panel_->visible) {
+        panel_->visible = true;
+        root_.relayout();
+    }
+    root_.damageAll();
+    if (roll_) root_.focus(roll_);
+    return {};
+}
+
+void MidiEditor::close() {
+    if (textDirty_) compileText(true);
+    state_.item.clear();
+    state_.notes.clear();
+    state_.selected.clear();
+    if (panel_ && panel_->visible) {
+        if (root_.focused() && (root_.focused() == roll_ || root_.focused() == text_))
+            root_.focus(nullptr);
+        panel_->visible = false;
+        root_.relayout();
+        root_.damageAll();
+    }
+}
+
+Status MidiEditor::reload() {
+    json::Value args = json::Value::object();
+    args["item"] = state_.item;
+    auto r = dispatcher_.execute({"midi.notes", std::move(args), kOrigin});
+    if (!r) return std::move(r).error();
+    state_.itemPosition = (*r)["position"].asDouble();
+    state_.itemLength = (*r)["length"].asDouble();
+    state_.notes.clear();
+    for (const json::Value& n : (*r)["notes"].asArray()) {
+        RollNote note;
+        note.pitch = static_cast<int>(n.find("pitch")->asInt());
+        note.start = n.find("start")->asDouble();
+        note.length = n.find("length")->asDouble();
+        note.velocity = static_cast<int>(n.find("velocity")->asInt());
+        if (const json::Value* ch = n.find("channel")) note.channel = static_cast<int>(ch->asInt());
+        state_.notes.push_back(note);
+    }
+    std::erase_if(state_.selected, [&](std::size_t i) { return i >= state_.notes.size(); });
+    // Bars in a generous window around the item.
+    state_.barLines.clear();
+    const auto& map = *app_.head().timeMap;
+    const int firstBar = std::max(1, map.barBeat(std::max(0.0, state_.itemPosition - 64)).bar);
+    for (int bar = firstBar; bar < firstBar + 512; ++bar) {
+        const double at = map.beatOfBar(bar);
+        if (at > state_.itemPosition + state_.itemLength + 64) break;
+        state_.barLines.push_back(at);
+    }
+    version_ = app_.head().version;
+    if (title_) {
+        std::string name = state_.item;
+        if (auto id = model::Id::parse(state_.item))
+            if (const model::Item* it = app_.head().items.find(*id))
+                if (const model::Track* t = app_.head().tracks.find(it->track))
+                    name = (t->name.empty() ? it->track.str() : t->name) + " — " + state_.item;
+        titleBase_ = "MIDI · " + name + " · " + std::to_string(state_.notes.size()) + " notes";
+        refreshTitle();
+    }
+    if (roll_) roll_->invalidate();
+    if (keys_) keys_->invalidate();
+    if (velocity_) velocity_->invalidate();
+    return {};
+}
+
+void MidiEditor::refreshTitle() {
+    if (!title_) return;
+    const double g = state_.grid;
+    std::string grid = g >= 1                         ? "1/4"
+                       : g >= 0.5                     ? "1/8"
+                       : std::abs(g - 1.0 / 3) < 1e-9 ? "1/8T"
+                       : g >= 0.25                    ? "1/16"
+                                                      : "1/32";
+    title_->setText(titleBase_ + " · grid " + grid + (state_.snap ? "" : " · snap off"));
+}
+
+void MidiEditor::reloadText() {
+    if (!text_) return;
+    json::Value args = json::Value::object();
+    args["item"] = state_.item;
+    auto r = dispatcher_.execute({"midi.get", std::move(args), kOrigin});
+    if (!r) {
+        showDiagnostics({}, "notation unavailable: " + r.error().message);
+        return;
+    }
+    appliedText_ = (*r)["text"].asString();
+    text_->setText(appliedText_);
+    textDirty_ = false;
+    showDiagnostics({}, "");
+}
+
+void MidiEditor::showDiagnostics(const std::vector<ui::TextArea::Mark>& marks,
+                                 const std::string& summary) {
+    if (text_) text_->setMarks(marks);
+    if (diagnostics_) diagnostics_->setText(summary);
+    root_.relayout();
+}
+
+void MidiEditor::compileText(bool write) {
+    if (!text_ || state_.item.empty()) return;
+    const std::string text = text_->text();
+    notation::CompileContext cc;
+    cc.ppq = app_.head().project->ppq;
+    auto compiled = notation::compile(text, cc);
+    if (!compiled) {
+        const Error& e = compiled.error();
+        std::vector<ui::TextArea::Mark> marks;
+        std::string summary;
+        auto addOne = [&](const Error& x) {
+            if (x.loc) marks.push_back({x.loc->line, x.loc->column, x.message, true});
+            if (!summary.empty()) summary += "\n";
+            summary +=
+                (x.loc ? std::to_string(x.loc->line) + ":" + std::to_string(x.loc->column) + "  "
+                       : "") +
+                x.message + (x.hint.empty() ? "" : " — " + x.hint);
+        };
+        if (e.details.empty()) addOne(e);
+        for (const Error& d : e.details) addOne(d);
+        showDiagnostics(marks, summary);
+        return;
+    }
+    std::string summary;
+    for (const auto& w : compiled->warnings) summary += (summary.empty() ? "" : "\n") + w.message;
+    showDiagnostics(
+        {}, summary.empty() ? std::to_string(compiled->sequence.notes.size()) + " notes" : summary);
+    if (!write || text == appliedText_) {
+        textDirty_ = text != appliedText_;
+        return;
+    }
+    json::Value args = json::Value::object();
+    args["item"] = state_.item;
+    args["notation"] = text;
+    cmd::Origin origin = kOrigin;
+    origin.gesture = "notation:" + state_.item;  // a typing session is one undo step
+    auto r = dispatcher_.execute({"midi.write", std::move(args), origin});
+    if (!r) {
+        showDiagnostics({}, r.error().message);
+        return;
+    }
+    appliedText_ = text;
+    textDirty_ = false;
+    (void)reload();
+}
+
+Status MidiEditor::edit(json::Value ops) {
+    json::Value args = json::Value::object();
+    args["item"] = state_.item;
+    args["ops"] = std::move(ops);
+    auto r = dispatcher_.execute({"midi.edit", std::move(args), kOrigin});
+    if (!r) {
+        if (actions_.onError) actions_.onError("MIDI: " + r.error().message);
+        return std::move(r).error();
+    }
+    SUPPLE_TRY(reload());
+    state_.selected.clear();
+    for (const json::Value& i : (*r)["notes"].asArray())
+        if (i.asInt() >= 0 && static_cast<std::size_t>(i.asInt()) < state_.notes.size())
+            state_.selected.insert(static_cast<std::size_t>(i.asInt()));
+    if (!text_ || !text_->focused()) reloadText();
+    return {};
+}
+
+namespace {
+json::Value selectionOf(const RollState& s) {
+    json::Value sel = json::Value::array();
+    for (std::size_t i : s.selected) sel.push_back(static_cast<std::int64_t>(i));
+    return sel;
+}
+}  // namespace
+
+void MidiEditor::selectAll() {
+    state_.selected.clear();
+    for (std::size_t i = 0; i < state_.notes.size(); ++i) state_.selected.insert(i);
+    if (roll_) roll_->invalidate();
+    if (velocity_) velocity_->invalidate();
+}
+
+void MidiEditor::quantize() {
+    if (!isOpen()) return;
+    json::Value op = json::Value::object();
+    op["op"] = "quantize";
+    op["grid"] = state_.grid;
+    if (!state_.selected.empty()) op["notes"] = selectionOf(state_);
+    json::Value ops = json::Value::array();
+    ops.push_back(std::move(op));
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::transpose(int semitones) {
+    if (!isOpen() || state_.selected.empty()) return;
+    json::Value op = json::Value::object();
+    op["op"] = "move";
+    op["notes"] = selectionOf(state_);
+    op["semitones"] = semitones;
+    json::Value ops = json::Value::array();
+    ops.push_back(std::move(op));
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::removeSelected() {
+    if (!isOpen() || state_.selected.empty()) return;
+    json::Value op = json::Value::object();
+    op["op"] = "remove";
+    op["notes"] = selectionOf(state_);
+    json::Value ops = json::Value::array();
+    ops.push_back(std::move(op));
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::duplicate() {
+    if (!isOpen() || state_.selected.empty()) return;
+    double first = 1e18, end = -1e18;
+    for (std::size_t i : state_.selected) {
+        first = std::min(first, state_.notes[i].start);
+        end = std::max(end, state_.notes[i].start + state_.notes[i].length);
+    }
+    // After the selection, on the grid.
+    const double span =
+        std::max(state_.grid, std::ceil((end - first) / state_.grid - 1e-9) * state_.grid);
+    json::Value ops = json::Value::array();
+    for (std::size_t i : state_.selected) {
+        const RollNote& n = state_.notes[i];
+        json::Value op = json::Value::object();
+        op["op"] = "add";
+        op["pitch"] = n.pitch;
+        op["start"] = n.start + span;
+        op["length"] = n.length;
+        op["velocity"] = n.velocity;
+        if (n.channel != 1) op["channel"] = n.channel;
+        ops.push_back(std::move(op));
+    }
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::sync() {
+    if (!isOpen()) return;
+    if (playhead_ && roll_) static_cast<RollPlayhead*>(playhead_)->place(roll_->bounds());
+    if (app_.head().version != version_) {
+        // The item went away (undo, delete): close; otherwise reload both views.
+        auto id = model::Id::parse(state_.item);
+        if (!id || !app_.head().items.find(*id)) {
+            close();
+            return;
+        }
+        // Indices shift when notes move: keep the selected notes that are
+        // unchanged, by value.
+        std::vector<RollNote> kept;
+        for (std::size_t i : state_.selected)
+            if (i < state_.notes.size()) kept.push_back(state_.notes[i]);
+        if (!reload()) {
+            close();
+            return;
+        }
+        state_.selected.clear();
+        for (const RollNote& k : kept)
+            for (std::size_t i = 0; i < state_.notes.size(); ++i) {
+                const RollNote& n = state_.notes[i];
+                if (!state_.selected.contains(i) && n.pitch == k.pitch && n.channel == k.channel &&
+                    n.velocity == k.velocity && std::abs(n.start - k.start) < 1e-6 &&
+                    std::abs(n.length - k.length) < 1e-6) {
+                    state_.selected.insert(i);
+                    break;
+                }
+            }
+        if (!text_ || !text_->focused() || !textDirty_) reloadText();
+    }
+    if (compilePending_ && std::chrono::steady_clock::now() - lastEdit_ > kCompileDelay) {
+        compilePending_ = false;  // a failed compile waits for the next edit
+        compileText(true);
+    }
+    if (auto t = app_.transport("get")) {
+        const double beat = t->playing ? t->beat : -1;
+        if (beat != state_.playheadBeat) {
+            state_.playheadBeat = beat;
+            root_.requestAnimationFrame();
+        }
+    }
+}
+
+}  // namespace supple::gui

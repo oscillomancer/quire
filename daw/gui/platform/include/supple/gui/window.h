@@ -39,6 +39,9 @@ struct WindowOptions {
     std::string title;
     int width = 1280, height = 800;  // design units
     bool hidden = false;
+    // false: a plain window without GL or NanoVG (a parent for plugin editors).
+    bool gl = true;
+    bool resizable = true;
 };
 
 // RGBA8, rows top to bottom.
@@ -70,6 +73,9 @@ class Window {
     unsigned long x11Window() const;
 
     void makeCurrent() const;
+    void setSize(int width, int height);  // design units
+    void setResizable(bool resizable);
+    void setTitle(const std::string& title);
     std::string renderer() const;  // GL_RENDERER and GL_VERSION, for reports
     // Makes the context current, clears to `rgb` (0xRRGGBB) and starts a
     // NanoVG frame in design units.

@@ -38,6 +38,9 @@ class AppActions {
     bool key(int keycode, unsigned mods, bool typing);
     // Built-in UI actions the app provides (open the actions list, …).
     void addUi(std::string id, std::string name, std::function<void()> run);
+    // A built-in with one prompted argument (the actions list asks for it).
+    void addUi(std::string id, std::string name, std::string prompt,
+               std::function<Status(const json::Value& value)> run);
     // Shown by the app (status line): the last action's error, if any.
     std::function<void(const std::string&)> onError;
     std::string keysFor(std::string_view action) const;  // "Ctrl+Z", or ""

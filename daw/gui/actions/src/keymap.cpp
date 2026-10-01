@@ -105,7 +105,12 @@ Keymap Keymap::defaults() {
     add({"Ctrl+Z"}, "global", "history.undo");
     add({"Ctrl+Shift+Z"}, "global", "history.redo");
     add({"Ctrl+Y"}, "global", "history.redo");
-    add({"Ctrl+S"}, "global", "project.save");
+    add({"Ctrl+S"}, "global", "ui.file.save");
+    add({"Ctrl+Shift+S"}, "global", "ui.file.save_as");
+    add({"Ctrl+O"}, "global", "ui.file.open");
+    add({"Ctrl+N"}, "global", "ui.file.new");
+    add({"Ctrl+I"}, "global", "ui.file.import");
+    add({"Ctrl+E"}, "global", "ui.midi.edit");
     add({"Ctrl+T"}, "global", "track.add:channel");
     add({"Ctrl+Alt+T"}, "global", "track.add:buss");
     add({"Shift+/"}, "global", "ui.actions");
