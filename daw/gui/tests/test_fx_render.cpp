@@ -471,6 +471,35 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     browser.close();
 }
 
+TEST_CASE("the FX chain badges each effect's state, and a failed one offers a restart") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.addTrack("Guitar");
+    REQUIRE(f.fx->open(track));
+    f.click("fx.add");
+    f.type("Plumb");
+    f.key("Return");
+    REQUIRE(f.fx->chain().size() == 1);
+    const model::Id fx = f.fx->chain()[0];
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    f.click("fx.offline." + fx.str());
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process · offline");
+    f.click("fx.offline." + fx.str());  // back on
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    // The isolation modes and a failed instance compose the same badge.
+    model::FxInstance inst;
+    inst.isolation = model::Isolation::Dedicated;
+    CHECK(gui::FxWindow::badgeText(inst, false) == "isolated");
+    inst.isolation = model::Isolation::SharedBridge;
+    inst.offline = true;
+    CHECK(gui::FxWindow::badgeText(inst, true) == "shared bridge · offline · failed");
+    // A healthy engine reports no failure: no Restart button, and tick() keeps
+    // the set empty.
+    f.fx->tick();
+    CHECK(f.fx->failed().empty());
+    CHECK(f.root->find("fx.restart." + fx.str()) == nullptr);
+}
+
 TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists its file") {
     Fixture f;
     if (!f.ok) return;

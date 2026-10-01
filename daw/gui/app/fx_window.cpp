@@ -18,6 +18,11 @@ namespace {
 
 const cmd::Origin kUiOrigin{cmd::Origin::Type::Ui, "gui", {}};
 
+double nowMs() {
+    using namespace std::chrono;
+    return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
+
 // A chain row: paints its selection, selects the effect on a left press and
 // reorders with Alt+Up / Alt+Down (fx.move).
 class Row : public ui::Node {
@@ -214,8 +219,44 @@ Status FxWindow::dispatch(const char* command, json::Value args) {
     return {};
 }
 
+std::string FxWindow::badgeText(const model::FxInstance& fx, bool failed) {
+    std::string text;
+    switch (fx.isolation) {
+        case model::Isolation::Dedicated:
+            text = "isolated";
+            break;
+        case model::Isolation::SharedBridge:
+            text = "shared bridge";
+            break;
+        case model::Isolation::InProcess:
+        case model::Isolation::Inherit:
+            text = "in-process";
+            break;
+    }
+    if (fx.offline) text += " · offline";
+    if (failed) text += " · failed";
+    return text;
+}
+
+// engine.status lists the isolated instances whose process crashed or hung.
+void FxWindow::checkFailures() {
+    const double now = nowMs();
+    if (now - failureCheckMs_ < 500.0) return;
+    failureCheckMs_ = now;
+    auto status = dispatcher_.execute({"engine.status", json::Value::object(), kUiOrigin});
+    if (!status) return;
+    std::set<std::string> failed;
+    if (const json::Value* list = status->find("failed_fx"); list && list->isArray())
+        for (const json::Value& id : list->asArray())
+            if (id.isString()) failed.insert(id.asString());
+    if (failed == failed_) return;
+    failed_ = std::move(failed);
+    refresh();
+}
+
 void FxWindow::tick() {
     browser_->tick();
+    checkFailures();
     if (page_ && app_.head().version != shownVersion_) refresh();
 }
 
@@ -300,6 +341,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         input ? std::function<void(int)>{}
               : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
     row.selected = selected_ == fx;
+    const bool isFailed = failed_.count(id) != 0;
 
     {
         auto& l1 = line(row, prefix + "line1." + id);
@@ -313,6 +355,15 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         auto& latency = l1.emplace<ui::Label>(prefix + "latency." + id, latencyOf(fx),
                                               ui::Font::Mono, "caption", "ink-quiet");
         latency.layout.width = ui::SizeRule::fixed(80);
+        if (isFailed)
+            l1.emplace<ui::Button>(prefix + "restart." + id, "Restart", [this, fx] {
+                json::Value args = json::Value::object();
+                args["fx"] = fx.str();
+                if (dispatch("fx.restart", std::move(args))) {
+                    failed_.erase(fx.str());
+                    refresh();
+                }
+            });
         l1.emplace<ui::Button>(prefix + "bypass." + id, inst->bypass ? "bypassed" : "bypass",
                                [this, fx, bypass = inst->bypass] {
                                    json::Value args = json::Value::object();
@@ -352,6 +403,10 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
     }
     {
         auto& l2 = line(row, prefix + "line2." + id);
+        auto& badge =
+            l2.emplace<ui::Label>(prefix + "badge." + id, badgeText(*inst, isFailed),
+                                  ui::Font::Mono, "caption", isFailed ? "clip" : "ink-faint");
+        badge.layout.width = ui::SizeRule::fixed(170);
         auto* wetLabel = &l2.emplace<ui::Label>(prefix + "wetlabel." + id, "", ui::Font::Mono,
                                                 "caption", "ink-quiet");
         wetLabel->layout.width = ui::SizeRule::fixed(76);
