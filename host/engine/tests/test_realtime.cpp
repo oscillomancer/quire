@@ -251,7 +251,7 @@ TEST_CASE("a stretched take: real-time output equals the offline render" *
     double offlinePeak = 0;
     for (std::size_t i = 0; i < 96000; ++i)
         offlinePeak = std::max(offlinePeak, std::fabs(double(offline->audio.channels[0][i])));
-    CHECK(offlinePeak > 0.3);  // a stretched, audible take
+    CHECK(offlinePeak > 0.3 * (0.472135955 / 0.70710678118654752));  // a stretched, audible take
 
     auto rtPool = makePool();
     MediaCache media;
@@ -532,7 +532,9 @@ TEST_CASE("a plugin that refuses to start is passed through, not processed") {
         double peak = 0;
         for (std::size_t i = 0; i < 2560; ++i)
             peak = std::max(peak, std::fabs(double(backend.capture().channels[0][i])));
-        CHECK(peak > 0.1);  // the sine passes through the stage that did not start
+        CHECK(peak >
+              0.1 * (0.472135955 /
+                     0.70710678118654752));  // the sine passes through the stage that did not start
         engine.stop();
     }
 }
@@ -673,7 +675,7 @@ TEST_CASE(
             m = std::max(m, std::fabs(double(cap.channels[0][i])));
         return m;
     };
-    CHECK(peakOf(2304, 2560) > 0.1);  // the first note sounds
+    CHECK(peakOf(2304, 2560) > 0.1 * (0.472135955 / 0.70710678118654752));  // the first note sounds
     engine.pause();
     backend.run(1);  // the rendered audio is dropped: silent at once
     CHECK(peakOf(2560, 2816) == 0.0);
@@ -861,14 +863,15 @@ TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the ses
             m = std::max(m, std::fabs(double(cap.channels[static_cast<std::size_t>(ch)][i])));
         return m;
     };
-    CHECK(peak(0, 5000, 10240) > 0.1);
-    CHECK(peak(1, 5000, 10240) > 0.1);
+    CHECK(peak(0, 5000, 10240) > 0.1 * (0.472135955 / 0.70710678118654752));
+    CHECK(peak(1, 5000, 10240) > 0.1 * (0.472135955 / 0.70710678118654752));
     REQUIRE(crash->setParam(1, 1.0).ok());  // crash in its next process()
     runAhead(engine, backend, 200, 256);    // 51200 more frames
     CHECK(crash->failed());
     CHECK(pool.failed().size() == 1);
-    CHECK(peak(0, 50000, 61440) > 0.1);   // the steady track plays on
-    CHECK(peak(1, 50000, 61440) == 0.0);  // the crashed node is silent
+    CHECK(peak(0, 50000, 61440) >
+          0.1 * (0.472135955 / 0.70710678118654752));  // the steady track plays on
+    CHECK(peak(1, 50000, 61440) == 0.0);               // the crashed node is silent
     CHECK(engine.processErrors() == 0);
     engine.stop();
     CHECK(engine.lastStopOnAudioThread());
@@ -930,7 +933,7 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
         REQUIRE(engine.load(s).ok());
         Id track;
         for (const auto& e : s.tracks)
-            if (e.id != kMaster) track = e.id;
+            if (e.value->type == model::StripType::Channel) track = e.id;
         const auto dir =
             std::filesystem::temp_directory_path() / ("supple-rec-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
@@ -985,7 +988,7 @@ TEST_CASE("recording through a playback dropout keeps the take on the timeline" 
     REQUIRE(engine.load(s).ok());
     Id track;
     for (const auto& e : s.tracks)
-        if (e.id != kMaster) track = e.id;
+        if (e.value->type == model::StripType::Channel) track = e.id;
     const auto dir =
         std::filesystem::temp_directory_path() / ("supple-rec-gap-" + std::to_string(::getpid()));
     std::filesystem::remove_all(dir);
@@ -1016,7 +1019,7 @@ model::Session monitoring(model::Session s, model::Monitor mode = model::Monitor
     model::EditTxn t(s, 9);
     Id track;
     for (const auto& e : s.tracks)
-        if (e.id != kMaster) track = e.id;
+        if (e.value->type == model::StripType::Channel) track = e.id;
     model::Route r;
     r.from.hwChannels = std::vector<int>{1, 2};
     r.to.track = track;
@@ -1111,7 +1114,13 @@ DummyBackend::Options rampInput(std::int64_t captureFrames) {
 
 TEST_CASE("anticipative monitoring: live input and rendered playback, identical to the reference" *
           doctest::description("rt")) {
-    const model::Session s = withVocal(true);
+    model::Session s = withVocal(true);
+    model::EditTxn mode(s, 10);
+    auto project = mode.project();
+    project.console9 = true;
+    project.seed = 5723;
+    mode.setProject(project);
+    s = mode.commit().value();
     constexpr std::int64_t kCycles = 400;  // 102400 frames at 256
     audio::AudioData reference;
     for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
@@ -1267,14 +1276,20 @@ TEST_CASE("a note held across the loop end is released at the wrap" * doctest::d
             before = std::max(before, std::fabs(double(L[i])));
         for (std::size_t i = 49000; i < 90000; ++i)
             after = std::max(after, std::fabs(double(L[i])));
-        CHECK(before > 0.1);
+        CHECK(before > 0.1 * (0.472135955 / 0.70710678118654752));
         CHECK(after == 0.0);
     }
 }
 
 TEST_CASE("anticipative monitoring with a loop: identical to the in-callback reference" *
           doctest::description("rt")) {
-    const model::Session s = withVocal(true);
+    model::Session s = withVocal(true);
+    model::EditTxn mode(s, 10);
+    auto project = mode.project();
+    project.console9 = true;
+    project.seed = 5723;
+    mode.setProject(project);
+    s = mode.commit().value();
     constexpr std::int64_t kCycles = 400;  // 102400 frames: several passes of 0.5 .. 1.2 s
     audio::AudioData reference;
     for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 3}}) {
@@ -1328,7 +1343,7 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
         REQUIRE(engine.load(s).ok());
         Id track;
         for (const auto& e : s.tracks)
-            if (e.id != kMaster) track = e.id;
+            if (e.value->type == model::StripType::Channel) track = e.id;
         const auto dir = std::filesystem::temp_directory_path() /
                          ("supple-rec-loop-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
@@ -1453,7 +1468,7 @@ TEST_CASE("MIDI monitoring: a keyboard plays the instrument live, sample-accurat
             };
             CHECK(peakIn(0, 1000) == 0.0);
             CHECK(peakIn(1000, 1010) > 0.0);  // starts at its frame
-            CHECK(peakIn(2000, 19000) > 0.1);
+            CHECK(peakIn(2000, 19000) > 0.1 * (0.472135955 / 0.70710678118654752));
             CHECK(peakIn(20000, 30720) == 0.0);  // off at 20000; channel 2 and "Pads" never sound
         }
 }
@@ -1481,7 +1496,7 @@ TEST_CASE("MIDI recording: events land on the timeline where they were heard, pe
         REQUIRE(engine.load(s).ok());
         Id track;
         for (const auto& e : s.tracks)
-            if (e.id != kMaster) track = e.id;
+            if (e.value->type == model::StripType::Channel) track = e.id;
         engine.setLoop(0.5, 1.0, true);
         RecordTarget target;
         target.track = track;
@@ -1536,7 +1551,7 @@ TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
             before = std::max(before, std::fabs(double(L[i])));
         for (std::size_t i = 30000; i < 40960; ++i)
             after = std::max(after, std::fabs(double(L[i])));
-        CHECK(before > 0.1);
+        CHECK(before > 0.1 * (0.472135955 / 0.70710678118654752));
         CHECK(after == 0.0);
     }
 }
@@ -1574,8 +1589,10 @@ TEST_CASE("a monitored MIDI route change releases held notes" * doctest::descrip
                     p = std::max(p, std::fabs(double(audio[i])));
                 return p;
             };
-            CHECK(peak(2000, 10000) > 0.1);
-            if (change == 0) CHECK(peak(12000, 17000) > 0.1);  // unchanged route carries
+            CHECK(peak(2000, 10000) > 0.1 * (0.472135955 / 0.70710678118654752));
+            if (change == 0)
+                CHECK(peak(12000, 17000) >
+                      0.1 * (0.472135955 / 0.70710678118654752));  // unchanged route carries
             CHECK(peak(21000, 30000) == 0.0);  // the old device's off is filtered after edits
         }
 }
@@ -1701,7 +1718,7 @@ TEST_CASE("a long, dense MIDI performance records without overflow (the writer d
     REQUIRE(engine.load(s).ok());
     Id track;
     for (const auto& e : s.tracks)
-        if (e.id != kMaster) track = e.id;
+        if (e.value->type == model::StripType::Channel) track = e.id;
     RecordTarget target;
     target.track = track;
     target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "*"), 0, 0};
@@ -1825,6 +1842,10 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
             model::Session s = synthSession(-3.0, "com.suppleaudio.test.gain");
             {
                 model::EditTxn t(s, 2);
+                auto project = t.project();
+                project.console9 = true;
+                project.seed = 8901;
+                t.setProject(project);
                 Id source;
                 for (const auto& e : s.tracks)
                     if (e.id != kMaster) source = e.id;
@@ -1842,6 +1863,22 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
                 key.from.track = source;
                 key.to.fx = f;
                 t.create(key);
+                model::Track bus;
+                bus.type = model::StripType::Buss;
+                bus.parent = kMaster;
+                const Id busId = t.create(bus);
+                t.modify<model::Track>(kMaster, [&](auto& m) {
+                    std::erase(m.children, keyed);
+                    m.children.push_back(busId);
+                });
+                t.modify<model::Track>(keyed, [&](auto& tr) { tr.parent = busId; });
+                t.modify<model::Track>(busId, [&](auto& tr) { tr.children.push_back(keyed); });
+                model::Route send;
+                send.from.track = source;
+                send.to.track = busId;
+                send.tap = model::Tap::PreFader;
+                send.volumeDb = -6;
+                t.create(send);
                 s = t.commit().value();
             }
             if (monitored) s = monitoring(s);  // the last track: the keyed one

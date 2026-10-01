@@ -188,7 +188,7 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     t.modify<model::Track>(folder, [](model::Track& x) { x.pan = -100.0; });
     auto s = commit(t);
     auto r = render(s, pool, 0.5);
-    // A at -6 dB, centred (0.707), then the folder hard left (1.0 / 0.0).
+    // Two encode/decode pairs; the folder hard left is sqrt(2) above centre.
     const double expect = 0.25 * std::pow(10.0, -6.0 / 20.0) * kStrip * kHardStrip;
     CHECK(peak(r.audio.channels[0]) == doctest::Approx(expect).epsilon(1e-4));
     CHECK(peak(r.audio.channels[1]) < 1e-9);
@@ -204,7 +204,7 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     t2.create(send);
     auto s2 = commit(t2);
     auto r2 = render(s2, pool, 0.5);
-    // Pre-fader: no -6 dB; the route pans centre (0.707), the bus centre (0.707).
+    // Pre-fader: no -6 dB; send -> buss and buss -> master are neutral pairs.
     CHECK(peak(r2.audio.channels[0]) == doctest::Approx(0.25 * kStrip * kStrip).epsilon(1e-4));
 }
 
@@ -302,7 +302,7 @@ TEST_CASE(
           doctest::Approx(std::pow(10.0, -6.0 / 20.0)).epsilon(0.01));
     CHECK(windowPeak(L, 60000) / base ==
           doctest::Approx(std::pow(10.0, -12.0 / 20.0)).epsilon(0.01));
-    CHECK(peak(L, 72480) == 0.0);  // muted from beat 3 = 1.5 s
+    CHECK(peak(L, 72480) == 0.0);  // fully muted 10 ms after beat 3 = 1.5 s
     CHECK(peak(L, 71800, 72000) > 0.0);
 
     // Through a latent chain the mute still lands on beat 3 of the output.
@@ -348,7 +348,7 @@ TEST_CASE("solo: soloed tracks and their signal path stay audible") {
     t.modify<model::Track>(a, [](model::Track& x) { x.solo = model::Solo::On; });
     auto s = commit(t);
     auto r = render(s, pool, 0.5);
-    // Only A (through its folder) is heard: one sine at the -3 dB law, twice.
+    // Only A (through its folder) is heard: two neutral Console 9 pairs.
     CHECK(peak(r.audio.channels[0]) == doctest::Approx(0.25 * kStrip * kStrip).epsilon(1e-4));
     model::EditTxn t2(s, 2);
     t2.modify<model::Track>(b, [](model::Track& x) { x.solo = model::Solo::Defeat; });

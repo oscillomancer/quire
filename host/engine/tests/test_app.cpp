@@ -955,7 +955,7 @@ TEST_CASE("recorded MIDI notes are clipped at punch and overdub item edges") {
             after = std::max(after, v);
     }
     CHECK(before == 0.0);
-    CHECK(during > 0.1);
+    CHECK(during > 0.1 * (0.472135955 / 0.70710678118654752));
     CHECK(after == 0.0);
 
     auto overdub = makeApp(root.path / "overdub");
@@ -1050,7 +1050,7 @@ TEST_CASE("midi_overdub merges a performance into the item under it, as a new ta
     CHECK(app->head().items.find(item)->takes.size() == 1);
 }
 
-TEST_CASE("render stems sum to the master-less mix, and regions match dry run") {
+TEST_CASE("linear Console 9 stems sum to the master-less mix, and regions match dry run") {
     Root root;
     cmd::Registry registry;
     registerEngineCommands(registry);

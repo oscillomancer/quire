@@ -37,7 +37,7 @@ Session upstreamSession(const Session& source, Id target) {
         for (const auto& entry : source.routes) {
             const auto& route = *entry.value;
             const auto to = route.to.fx ? model::trackOfFx(source, *route.to.fx) : route.to.track;
-            if (!route.mute && route.from.track && to && keep.count(*to))
+            if (route.from.track && to && keep.count(*to))
                 changed |= keep.insert(*route.from.track).second;
         }
     }

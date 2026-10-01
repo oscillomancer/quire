@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <cmath>
+#include <cstdio>
 #include <random>
 #include "plan.h"
 
@@ -120,6 +121,13 @@ TEST_CASE("Console 9: unity staging, level matched off, correlated summing and s
     float peak = 0;
     for (float v : silence) peak = std::max(peak, std::abs(v));
     CHECK(peak < 1e-7f);  // -140 dBFS
+    std::printf(
+        "Console 9 measurements: unity %.6f dB, on/off difference %.3g, correlated buss %.6f dB vs "
+        "linear, silence peak %.3f dBFS\n",
+        20 * std::log10(static_cast<double>(a[100]) / .001),
+        static_cast<double>(std::abs(a[100] - b[100])),
+        20 * std::log10(static_cast<double>(c[100]) / static_cast<double>(d[100])),
+        20 * std::log10(static_cast<double>(peak)));
     locate(quiet, 0);
     CHECK(run(quiet, 0, 127) == silence);
 }
@@ -191,11 +199,13 @@ TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and determinist
         model::EditTxn t(model::Session::create({.console9 = iteration % 2 == 0, .seed = random()}),
                          1);
         const Id second = strip(t, model::StripType::Master);
+        const Id third = strip(t, model::StripType::Master);
         std::vector<Id> buses{strip(t, model::StripType::Buss),
-                              strip(t, model::StripType::Buss, second)};
+                              strip(t, model::StripType::Buss, second),
+                              strip(t, model::StripType::Buss, third)};
         std::vector<Id> channels;
         for (int i = 0; i < 4; ++i) {
-            const Id ch = strip(t, model::StripType::Channel, buses[random() % 2]);
+            const Id ch = strip(t, model::StripType::Channel, buses[random() % buses.size()]);
             channels.push_back(ch);
             model::Route input;
             input.from.hwChannels = std::vector<int>{1};
@@ -210,7 +220,7 @@ TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and determinist
             if (random() % 2) fx(t, ch, "com.suppleaudio.test.gain", true);
             model::Route r;
             r.from.track = ch;
-            r.to.track = buses[random() % 2];
+            r.to.track = buses[random() % buses.size()];
             r.tap = static_cast<model::Tap>(random() % 3);
             r.volumeDb = -static_cast<double>(random() % 12);
             r.mono = random() % 2;
@@ -220,9 +230,10 @@ TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and determinist
             if (random() % 2) envelope(t, send, "volume", -6, -12);
             if (random() % 2) envelope(t, ch, "pan", -30, 30);
         }
-        const Id key = fx(t, buses[1], "com.suppleaudio.test.keymix");
+        if (iteration % 2) fx(t, buses[2], "com.suppleaudio.test.gain", true);
+        const Id key = fx(t, buses[2], "com.suppleaudio.test.keymix");
         model::Route route;
-        route.from.track = channels[0];
+        route.from.track = iteration % 2 ? kMaster : channels[0];
         route.to.fx = key;
         route.tap = static_cast<model::Tap>(iteration % 3);
         t.create(route);

@@ -400,11 +400,12 @@ bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint
 // of the others) and of the edges into them.
 void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole = true) SUPPLE_RT;
 // Audio thread: repositions every playback cursor at `pos` (events,
-// automation) and clears delay lines. Plugins are not touched.
+// automation) and clears delay lines. Plugins are not touched. Plan adoption
+// passes restartConsole=false to preserve console state and mixer ramps.
 void locate(Plan& p, std::int64_t pos, bool restartConsole = true) SUPPLE_RT;
 // A loop wrap (ADR-0015): moves the event and automation cursors of one
 // class of nodes (0: the renderer's, 1: live, -1: all) to `pos`, keeping
-// delay lines and plugin state (tails ring on); notes held at the wrap get
+// delay lines and plugin tails, restarting console seeds; notes held at the wrap get
 // note-offs at the start of the next block.
 void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
 // A plan swap (ADR-0016): device notes still sounding on a track carry over
@@ -414,7 +415,7 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
 // the renderer, and its instance was reset on the way).
 void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
 // A plan swap (the 10 ms crossfade on structural swaps, engine.md §2): the
-// mix gains and stage wet levels applied by the old plan carry into the new
+// Console 9 state, fader ramps and stage wet levels carry into the new
 // one's matching nodes (by track) and stages (by instance), so a changed
 // value ramps from where the old plan left it. `liveClass` as for wrapTo.
 void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT;
