@@ -16,34 +16,6 @@ std::int64_t latTap(const Node& n, model::Tap tap) {
     return tap == model::Tap::PreFx ? n.latIn : n.latIn + n.latChain;
 }
 
-// Where an item sits, after resolving its timebase (item, then track, then
-// project): its start in beats and seconds and its end in seconds.
-struct ItemSpan {
-    double startBeat, startSec, endSec;
-};
-ItemSpan itemSpan(const Session& s, const model::Item& it, const model::Track* tr) {
-    const time::TimeMap& tm = *s.timeMap;
-    model::Timebase tb = s.project->timebase;
-    if (it.timebase == model::ItemTimebase::Time)
-        tb = model::Timebase::Time;
-    else if (it.timebase == model::ItemTimebase::Beats)
-        tb = model::Timebase::Beats;
-    else if (it.timebase == model::ItemTimebase::BeatsPosition)
-        tb = model::Timebase::BeatsPosition;
-    else if (tr && tr->timebase == model::TrackTimebase::Time)
-        tb = model::Timebase::Time;
-    else if (tr && tr->timebase == model::TrackTimebase::Beats)
-        tb = model::Timebase::Beats;
-    else if (tr && tr->timebase == model::TrackTimebase::BeatsPosition)
-        tb = model::Timebase::BeatsPosition;
-    if (tb == model::Timebase::Time)
-        return {tm.beatAt(it.position), it.position, it.position + it.length};
-    const double startSec = tm.secondsAt(it.position);
-    if (tb == model::Timebase::Beats)
-        return {it.position, startSec, tm.secondsAt(it.position + it.length)};
-    return {it.position, startSec, startSec + it.length};  // beats position, seconds length
-}
-
 double fadeCurve(model::FadeShape shape, double t) {
     t = std::clamp(t, 0.0, 1.0);
     switch (shape) {
@@ -71,7 +43,6 @@ std::vector<TimedEvent> trackEvents(const Session& s, Id track, double startSeco
     std::vector<std::pair<int, TimedEvent>> items;  // rank (0 off, 1 ctl, 2 on), event
     const time::TimeMap& tm = *s.timeMap;
     const std::int64_t origin = time::samplesAt(startSeconds, rate);
-    const model::Track* tr = s.tracks.find(track);
     std::int32_t noteId = 0;
     for (const auto& e : s.items) {
         const model::Item& it = *e.value;
@@ -81,7 +52,7 @@ std::vector<TimedEvent> trackEvents(const Session& s, Id track, double startSeco
         const model::MidiSource* src = s.midi.find(*take->source);
         if (!src) continue;
         const midi::Sequence& seq = src->sequence;
-        const ItemSpan span = itemSpan(s, it, tr);
+        const model::ItemSpan span = model::itemSpan(s, it);
         const double startBeat = span.startBeat, endSec = span.endSec;
         const double rateScale = take->playrate > 0 ? take->playrate : 1.0;
         const double loopBeats = seq.ppq > 0 ? static_cast<double>(seq.length) / seq.ppq : 0.0;
@@ -638,7 +609,6 @@ Status prepare(Plan& p, const Session& s) {
     }
     // Audio items, like events shifted by the track's input latency.
     for (Node& n : p.nodes) {
-        const model::Track* tr = s.tracks.find(n.id);
         for (const auto& e : s.items) {
             const model::Item& it = *e.value;
             if (it.track != n.id || it.mute || !it.activeTake) continue;
@@ -675,7 +645,7 @@ Status prepare(Plan& p, const Session& s) {
                 p.warnings.push_back(e.id.str() +
                                      ": stretch_markers are not applied yet; the "
                                      "take plays at its playrate");
-            const ItemSpan span = itemSpan(s, it, tr);
+            const model::ItemSpan span = model::itemSpan(s, it);
             const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
             Clip c;
             c.data = *data;

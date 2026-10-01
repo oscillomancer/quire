@@ -48,7 +48,10 @@ class StripList : public ui::Node {
             y += row;
             for (model::Id child : tr->children) strip(child, depth + 1);
         };
+        c.save();
+        c.clip(bounds());
         for (model::Id master : s.project->masters) strip(master, 0);
+        c.restore();
     }
 
   private:
@@ -67,8 +70,8 @@ class Bar : public ui::Node {
 
 }  // namespace
 
-Shell::Shell(const engine::EngineApp& app, std::string status)
-    : app_(app), status_(std::move(status)) {}
+Shell::Shell(const engine::EngineApp& app, std::string status, peaks::PeakService& peaks)
+    : app_(app), status_(std::move(status)), peaks_(peaks) {}
 
 std::unique_ptr<ui::Node> Shell::build() {
     auto root = std::make_unique<ui::Node>("shell");
@@ -82,7 +85,15 @@ std::unique_ptr<ui::Node> Shell::build() {
     bar.emplace<ui::Label>("position", "1.1.000", ui::Font::MonoBold, "title");
     bar.emplace<ui::Node>("spacer");  // takes the remaining width
     counts_ = &bar.emplace<ui::Label>("counts", "", ui::Font::Mono, "mono", "ink-quiet");
-    strips_ = &root->emplace<StripList>(app_);
+    auto& body = root->emplace<ui::Node>("body");
+    body.layout.dir = ui::Layout::Dir::Row;
+    strips_ = &body.emplace<StripList>(app_);
+    strips_->layout.width = ui::SizeRule::fixed(220);
+    const engine::EngineApp& app = app_;
+    lanes_ = &body.emplace<views::Lanes>(peaks_, [&app](const model::MediaSource& m) {
+        const std::filesystem::path p(m.path);
+        return p.is_absolute() ? p : app.mediaDir() / p;
+    });
     auto& foot = root->emplace<ui::Label>("status", status_, ui::Font::Mono, "small", "ink-quiet");
     foot.layout.width = ui::SizeRule::fraction();
     foot.layout.height = ui::SizeRule::fixed(28);
@@ -98,6 +109,7 @@ void Shell::sync() {
     counts_->setText(std::to_string(s.tracks.size()) + " strips   version " +
                      std::to_string(s.version));
     strips_->invalidate();
+    lanes_->show(s);
 }
 
 }  // namespace supple::gui

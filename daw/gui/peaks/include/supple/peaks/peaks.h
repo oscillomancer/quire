@@ -1,0 +1,117 @@
+// Waveform peak pyramids (docs/specs/gui.md §3.1): min/max/RMS per channel
+// at 64…16384 samples per bucket, built off the UI thread, cached on disk
+// under the user cache directory keyed by the media's content hash (never in
+// the project). The arrange view samples the coarsest level with at least
+// one bucket per pixel column.
+#pragma once
+
+#include <array>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "supple/audio/audio_file.h"
+#include "supple/base/result.h"
+
+namespace supple::peaks {
+
+inline constexpr std::array<std::uint32_t, 5> kSamplesPerBucket{64, 256, 1024, 4096, 16384};
+
+struct Bucket {
+    std::int16_t min = 0, max = 0, rms = 0;  // Q15 (±1.0 = ±32767), clamped
+};
+
+struct Level {
+    std::uint32_t samplesPerBucket = 0;
+    std::size_t count = 0;        // buckets per channel
+    std::vector<Bucket> buckets;  // interleaved: bucket i of channel c at i * channels + c
+};
+
+struct Span {
+    float min = 0, max = 0, rms = 0;
+};
+
+class Pyramid {
+  public:
+    static Pyramid build(const audio::AudioData& audio);
+    static Result<Pyramid> deserialize(std::span<const std::uint8_t> bytes);
+    std::vector<std::uint8_t> serialize() const;
+
+    int channels() const { return channels_; }
+    double sampleRate() const { return sampleRate_; }
+    std::int64_t frames() const { return frames_; }
+    const std::vector<Level>& levels() const { return levels_; }
+    // The coarsest level whose buckets are no wider than `samplesPerColumn`
+    // (the finest when even that is wider: zoomed in past 64 samples/pixel).
+    const Level& pick(double samplesPerColumn) const;
+    // Min/max/RMS over source frames [from, to) of `channel`, from `level`.
+    Span range(const Level& level, int channel, double from, double to) const;
+
+  private:
+    int channels_ = 0;
+    double sampleRate_ = 0;
+    std::int64_t frames_ = 0;
+    std::vector<Level> levels_;
+};
+
+// $XDG_CACHE_HOME/<slug>/peaks, else ~/.cache/<slug>/peaks.
+std::filesystem::path defaultCacheDir(std::string_view slug);
+
+// Loads or builds pyramids on one worker thread. get() never blocks: it
+// returns the pyramid when ready, otherwise queues the work (once) and
+// returns null; `post` delivers the ready notification to the owner's thread.
+class PeakService {
+  public:
+    using Post = std::function<void(std::function<void()>)>;
+    PeakService(std::filesystem::path cacheDir, Post post);
+    ~PeakService();
+    PeakService(const PeakService&) = delete;
+    PeakService& operator=(const PeakService&) = delete;
+
+    // `hash` is the media's "sha256:<hex>" (model::MediaSource::hash); when
+    // empty, the media path keys the pyramid (and path, size and mtime the
+    // disk cache).
+    std::shared_ptr<const Pyramid> get(const std::string& hash, const std::filesystem::path& media);
+    // Called on the owner's thread when a pyramid becomes ready (or fails),
+    // with the key: the hash, or "path:<media>".
+    std::function<void(const std::string& key)> onReady;
+    // A failure is remembered (no retry loop); null when none.
+    std::optional<Error> failure(const std::string& hash, const std::filesystem::path& media) const;
+
+    struct Stats {
+        int built = 0, loaded = 0, failed = 0;
+    };
+    Stats stats() const;
+
+  private:
+    void run(std::stop_token stop);
+    std::filesystem::path cacheDir_;
+    Post post_;
+    mutable std::mutex mutex_;
+    std::condition_variable_any wake_;
+    struct Job {
+        std::string key, hash;
+        std::filesystem::path media;
+    };
+    std::deque<Job> queue_;
+    std::map<std::string, std::shared_ptr<const Pyramid>> ready_;
+    std::map<std::string, Error> failed_;
+    std::map<std::string, bool> pending_;
+    Stats stats_;
+    // Notifications posted to the owner check this first: the service may be
+    // gone by the time the owner's loop runs them.
+    std::shared_ptr<int> alive_ = std::make_shared<int>(0);
+    std::jthread worker_;  // last: joined before the rest is destroyed
+};
+
+}  // namespace supple::peaks

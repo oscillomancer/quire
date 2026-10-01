@@ -1,5 +1,7 @@
 #include "supple/ui/root.h"
 
+#include "supple/ui/gl.h"
+
 #include <SDL3/SDL.h>
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -125,16 +127,36 @@ void Root::ensureCache() {
     damageAll();
 }
 
-void Root::paintTree(Node& node, Canvas& canvas, const Rect& area) {
+void Root::paintTree(Node& node, Canvas& canvas, const Rect& clip) {
     if (!node.visible) return;
-    if (&node != overlay_.get() && node.bounds().intersect(area).empty()) return;
+    if (&node != overlay_.get() && node.bounds().intersect(clip).empty()) return;
     node.paint(canvas);
-    if (node.clipsChildren) {
-        canvas.save();
-        canvas.clip(node.bounds());
+    if (node.drawsGl) paintGl(node, clip);
+    const Rect inner = node.clipsChildren ? clip.intersect(node.bounds()) : clip;
+    if (inner.empty()) return;
+    if (node.clipsChildren) nvgScissor(window_.vg(), inner.x, inner.y, inner.w, inner.h);
+    for (const auto& c : node.children()) paintTree(*c, canvas, inner);
+    if (node.clipsChildren) nvgScissor(window_.vg(), clip.x, clip.y, clip.w, clip.h);
+}
+
+// NanoVG batches until nvgEndFrame, so a GL layer flushes what is pending,
+// draws under a GL scissor, and resumes NanoVG with the same clip.
+void Root::paintGl(Node& node, const Rect& clip) {
+    NVGcontext* vg = window_.vg();
+    nvgEndFrame(vg);
+    const float w = window_.width(), h = window_.height();
+    const Rect r = clip.intersect(node.bounds()).snapOut(ratio_);
+    if (!r.empty()) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(static_cast<GLint>(std::lround(r.x * ratio_)),
+                  static_cast<GLint>(std::lround((h - r.bottom()) * ratio_)),
+                  static_cast<GLsizei>(std::lround(r.w * ratio_)),
+                  static_cast<GLsizei>(std::lround(r.h * ratio_)));
+        node.paintGl(GlFrame{w, h, ratio_, r});
+        glDisable(GL_SCISSOR_TEST);
     }
-    for (const auto& c : node.children()) paintTree(*c, canvas, area);
-    if (node.clipsChildren) canvas.restore();
+    nvgBeginFrame(vg, w, h, ratio_);
+    nvgScissor(vg, clip.x, clip.y, clip.w, clip.h);
 }
 
 void Root::frame(bool present) {
@@ -142,6 +164,7 @@ void Root::frame(bool present) {
     NVGcontext* vg = window_.vg();
     window_.makeCurrent();
     const float w = window_.width(), h = window_.height(), ratio = window_.pixelRatio();
+    ratio_ = ratio;
     if (laidOut_.w != w || laidOut_.h != h) layoutPending_ = true;
     if (layoutPending_) layoutNow(canvas);
     ensureCache();
@@ -166,10 +189,9 @@ void Root::frame(bool present) {
         glDisable(GL_SCISSOR_TEST);
         nvgBeginFrame(vg, w, h, ratio);
         for (const Rect& r : regions) {
-            nvgSave(vg);
             nvgScissor(vg, r.x, r.y, r.w, r.h);
             if (content_) paintTree(*content_, canvas, r);
-            nvgRestore(vg);
+            nvgResetScissor(vg);
             stats_.repaintedArea += static_cast<double>(r.w) * static_cast<double>(r.h);
         }
         nvgEndFrame(vg);

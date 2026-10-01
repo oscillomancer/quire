@@ -70,6 +70,7 @@ class Window {
     unsigned long x11Window() const;
 
     void makeCurrent() const;
+    std::string renderer() const;  // GL_RENDERER and GL_VERSION, for reports
     // Makes the context current, clears to `rgb` (0xRRGGBB) and starts a
     // NanoVG frame in design units.
     void beginFrame(std::uint32_t rgb);

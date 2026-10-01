@@ -99,6 +99,13 @@ unsigned long Window::x11Window() const {
         SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
 }
 
+std::string Window::renderer() const {
+    makeCurrent();
+    const auto* r = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const auto* v = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    return std::string(r ? r : "?") + " | " + (v ? v : "?");
+}
+
 void Window::makeCurrent() const {
     SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
 }

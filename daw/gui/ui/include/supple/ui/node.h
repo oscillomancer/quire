@@ -14,6 +14,7 @@
 namespace supple::ui {
 
 class Root;
+struct GlFrame;
 
 enum class Role {
     Group,
@@ -110,6 +111,10 @@ class Node {
     void invalidate();                  // own bounds
     void invalidate(const Rect& area);  // part of them
     bool clipsChildren = false;         // scroll views, lists
+    // Bulk GL content (gl.h): paintGl runs after paint() with NanoVG flushed
+    // and the GL scissor set to the region being painted.
+    bool drawsGl = false;
+    virtual void paintGl(const GlFrame& frame) { (void)frame; }
 
     // --- state and input
     bool visible = true;

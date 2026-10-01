@@ -4,13 +4,15 @@
 //
 //   <slug> [PROJECT] [--offscreen] [--size WxH] [--frames N] [--snapshot PNG at exit]
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
-//          [--workdir DIR] [--plugin-path P]...
+//          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
+//          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -19,11 +21,13 @@
 #include <string>
 #include <vector>
 
+#include "generate.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/peaks/peaks.h"
 #include "supple/product.h"
 #include "supple/rpc/model_loop.h"
 #include "supple/rpc/protocol.h"
@@ -38,15 +42,19 @@ struct Options {
     fs::path project, workdir, socket, snapshot;
     std::vector<fs::path> pluginPath;
     std::string instance = "default";
-    bool offscreen = false, bench = false, serve = true;
+    bool offscreen = false, bench = false, serve = true, script = false;
     int width = 1280, height = 800, frames = 0;  // frames 0 = run until closed
+    int generate = 0;                            // tracks of a generated session
+    double idleSeconds = 0;                      // measure idle CPU after the frames
+    double viewStart = -1, viewPps = 0;          // initial lanes viewport
 };
 
 int usage() {
     std::fprintf(stderr,
                  "usage: %s [PROJECT] [--offscreen] [--size WxH] [--frames N] [--snapshot PNG]\n"
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
-                 "       [--workdir DIR] [--plugin-path P]...\n",
+                 "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
+                 "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n",
                  std::string(product::kSlug).c_str());
     return 2;
 }
@@ -61,7 +69,20 @@ bool parse(int argc, char** argv, Options& o) {
             o.bench = true;
         else if (a == "--no-socket")
             o.serve = false;
-        else if (a == "--size") {
+        else if (a == "--script")
+            o.script = true;
+        else if (a == "--view") {
+            const char* v = value();
+            if (!v || std::sscanf(v, "%lf,%lf", &o.viewStart, &o.viewPps) != 2) return false;
+        } else if (a == "--generate") {
+            const char* v = value();
+            if (!v) return false;
+            o.generate = std::clamp(std::atoi(v), 1, 1024);
+        } else if (a == "--idle") {
+            const char* v = value();
+            if (!v) return false;
+            o.idleSeconds = std::max(0.0, std::atof(v));
+        } else if (a == "--size") {
             const char* v = value();
             if (!v || std::sscanf(v, "%dx%d", &o.width, &o.height) != 2) return false;
         } else if (a == "--frames") {
@@ -116,6 +137,18 @@ double millisecondsSinceProcessStart() {
             return 1000.0 * (nowS - startS);
         }
     return -1;
+}
+
+double processCpuMs() {
+    timespec t{};
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
+    return 1000.0 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+}
+
+double wallMs() {
+    timespec t{};
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return 1000.0 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
 }
 
 double threadCpuMs() {
@@ -178,6 +211,13 @@ int main(int argc, char** argv) {
     engine::registerEngineCommands(registry);
     cmd::Dispatcher dispatcher(registry, **app);
     (*app)->attachCommands(dispatcher);
+    if (o.generate > 0) {
+        auto generated = gui::generateSession(dispatcher, (*app)->mediaDir(), o.generate);
+        if (!generated) {
+            std::fprintf(stderr, "%s\n", generated.error().toString().c_str());
+            return 1;
+        }
+    }
 
     // The model loop runs inside the SDL loop: its work wakes SDL_WaitEvent.
     rpc::ModelLoop loop;
@@ -208,24 +248,62 @@ int main(int argc, char** argv) {
         publish();
     });
 
-    gui::Shell shell(**app, status);
+    peaks::PeakService peaks(peaks::defaultCacheDir(product::kSlug),
+                             [&](std::function<void()> f) { loop.post(std::move(f)); });
+    gui::Shell shell(**app, status, peaks);
+    peaks.onReady = [&](const std::string&) { shell.lanes()->invalidate(); };
     ui::Root root(**window, *fonts, ui::Theme::dark());
     root.setContent(shell.build());
+    if (o.viewStart >= 0) {
+        views::Viewport v;
+        v.startSeconds = o.viewStart;
+        v.pixelsPerSecond = o.viewPps;
+        shell.lanes()->setViewport(v);
+    }
     bool quit = false;
-    int drawn = 0;
-    double coldStartMs = -1;
+    int drawn = 0, longTasks = 0;
+    double coldStartMs = -1, longestTaskMs = 0;
     std::vector<double> frameCpu;
+    // Counted runs (--frames) first wait, uncounted, until every visible
+    // pyramid is ready; --script then moves the viewport every frame.
+    bool warm = o.frames == 0;
+    const double warmUntil = wallMs() + 60000;
+    int step = 0;
     while (!quit && !loop.stopRequested()) {
+        const double t0 = wallMs();
         const int next = loop.pump();
+        if (const double ms = wallMs() - t0; ms > 2.0) {
+            ++longTasks;
+            longestTaskMs = std::max(longestTaskMs, ms);
+        }
         shell.sync();
+        if (o.script && warm) {
+            views::Lanes& lanes = *shell.lanes();
+            views::Viewport v = lanes.viewport();
+            const double k = step++;
+            v.pixelsPerSecond = 40.0 * std::pow(2.0, 3.0 * std::sin(k / 40.0));
+            v.startSeconds = 2.0 + 20.0 * (1 + std::sin(k / 70.0));
+            v.scrollY = static_cast<float>((1 + std::sin(k / 25.0)) / 2) *
+                        std::max(0.0f, lanes.contentHeight() - lanes.bounds().h);
+            lanes.setViewport(v);
+        }
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
         if (root.wantsFrame()) {
             const double cpu0 = threadCpuMs();
             root.frame();
-            frameCpu.push_back(threadCpuMs() - cpu0);
-            if (drawn == 0) coldStartMs = millisecondsSinceProcessStart();
-            if (o.frames > 0 && ++drawn >= o.frames) break;
-            if (o.frames == 0) ++drawn;
+            const double cpu = threadCpuMs() - cpu0;
+            if (drawn == 0 && coldStartMs < 0) coldStartMs = millisecondsSinceProcessStart();
+            if (!warm) {
+                warm = shell.lanes()->stats().pending == 0;
+                if (!warm && wallMs() > warmUntil) {
+                    std::fprintf(stderr, "peaks did not become ready within 60 s\n");
+                    return 1;
+                }
+            } else {
+                frameCpu.push_back(cpu);
+                if (o.frames > 0 && ++drawn >= o.frames) break;
+                if (o.frames == 0) ++drawn;
+            }
         }
         SDL_Event e;
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
@@ -235,6 +313,23 @@ int main(int argc, char** argv) {
             else
                 root.handle(e);  // the wake event is ignored: it only interrupts the wait
         }
+    }
+    double idleCpuPercent = -1;
+    if (o.idleSeconds > 0) {  // no input, no model changes: the loop should sleep
+        const double c0 = processCpuMs(), w0 = wallMs();
+        while (wallMs() - w0 < o.idleSeconds * 1000) {
+            const int next = loop.pump();
+            shell.sync();
+            if (root.wantsFrame()) root.frame();
+            SDL_Event e;
+            const double left = o.idleSeconds * 1000 - (wallMs() - w0);
+            const int wait =
+                next < 0 ? static_cast<int>(left) : std::min(next, static_cast<int>(left));
+            if (SDL_WaitEventTimeout(&e, std::max(1, wait)))
+                while (SDL_PollEvent(&e)) {
+                }
+        }
+        idleCpuPercent = 100.0 * (processCpuMs() - c0) / (wallMs() - w0);
     }
     tick.cancel();
     if (server) server->stop();
@@ -248,13 +343,19 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    if (o.bench)
+    if (o.bench) {
+        const auto& ls = shell.lanes()->stats();
         std::printf(
-            "{\"schema\": \"supple.gui-bench/1.0\", \"cold_start_ms\": %.1f, \"frames\": %d, "
-            "\"frame_cpu_ms\": {\"p50\": %.3f, \"p95\": %.3f, \"max\": %.3f}, \"driver\": "
-            "\"%s\"}\n",
-            coldStartMs, drawn, percentile(frameCpu, 0.5), percentile(frameCpu, 0.95),
-            frameCpu.empty() ? 0.0 : *std::max_element(frameCpu.begin(), frameCpu.end()),
-            o.offscreen ? "offscreen" : "x11");
+            "{\"schema\": \"supple.gui-bench/1.1\", \"driver\": \"%s\", \"cold_start_ms\": %.1f, "
+            "\"frames\": %d, \"frame_cpu_ms\": {\"p50\": %.3f, \"p95\": %.3f, \"max\": %.3f}, "
+            "\"ui_tasks_over_2ms\": %d, \"longest_ui_task_ms\": %.2f, \"idle_cpu_percent\": %.2f, "
+            "\"tracks\": %d, \"last_frame\": {\"rows\": %zu, \"items\": %zu, \"columns\": %zu, "
+            "\"notes\": %zu}, \"peaks\": {\"built\": %d, \"loaded\": %d}, \"gl\": \"%s\"}\n",
+            o.offscreen ? "offscreen" : "x11", coldStartMs, drawn, percentile(frameCpu, 0.5),
+            percentile(frameCpu, 0.95),
+            frameCpu.empty() ? 0.0 : *std::max_element(frameCpu.begin(), frameCpu.end()), longTasks,
+            longestTaskMs, idleCpuPercent, o.generate, ls.rows, ls.items, ls.columns, ls.notes,
+            peaks.stats().built, peaks.stats().loaded, (*window)->renderer().c_str());
+    }
     return 0;
 }

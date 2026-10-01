@@ -18,15 +18,24 @@ supple_add_library(gui-platform
 target_include_directories(gui-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/include)
 target_link_libraries(gui-platform PUBLIC gui-nanovg)
 
+# Waveform peak pyramids: builder, disk cache, worker (no GL).
+supple_add_library(gui-peaks SOURCES peaks/src/peaks.cpp DEPS supple::audio-file supple::core-base)
+target_include_directories(gui-peaks PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peaks/include)
+
 # The retained toolkit (gui.md §2): nodes, stack layout, input, damage, theme.
 supple_add_library(gui-ui
-  SOURCES ui/src/theme.cpp ui/src/canvas.cpp ui/src/node.cpp ui/src/root.cpp ui/src/widgets.cpp
+  SOURCES ui/src/theme.cpp ui/src/canvas.cpp ui/src/node.cpp ui/src/root.cpp ui/src/widgets.cpp ui/src/gl.cpp
   DEPS supple::gui-platform supple::core-json
   PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
 target_include_directories(gui-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui/include)
 
-add_executable(${PRODUCT_SLUG} app/main.cpp app/shell.cpp)
-target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-ui supple::gui-platform supple::engine
+# Views (gui.md §4): the track lanes now; arrange, mixer, editors follow.
+supple_add_library(gui-views SOURCES views/src/lanes.cpp
+  DEPS supple::gui-ui supple::gui-peaks supple::model supple::timeline)
+target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/include)
+
+add_executable(${PRODUCT_SLUG} app/main.cpp app/shell.cpp app/generate.cpp)
+target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-views supple::gui-ui supple::gui-platform supple::engine
                       supple::control-protocol supple::product-info SDL3::SDL3)
 target_compile_definitions(${PRODUCT_SLUG} PRIVATE
   SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
@@ -40,6 +49,13 @@ if(SUPPLE_BUILD_TESTS)
   # Mesa's allocations outlive the process by design; leak checks would only
   # report the GL driver.
   set_tests_properties(gui-platform.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  supple_add_tests(gui-peaks SOURCES tests/test_peaks.cpp LABELS gui)
+  supple_add_tests(gui-views SOURCES tests/test_views.cpp app/generate.cpp
+                   DEPS supple::engine SDL3::SDL3 LABELS gui tsan-skip)
+  target_compile_definitions(gui-views.tests PRIVATE
+    SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
+    SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
+  set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)
   target_compile_definitions(gui-ui.tests PRIVATE
     SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"

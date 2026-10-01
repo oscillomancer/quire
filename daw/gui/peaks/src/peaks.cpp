@@ -1,0 +1,318 @@
+#include "supple/peaks/peaks.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include "supple/base/files.h"
+
+namespace supple::peaks {
+namespace {
+
+std::int16_t q15(float v) {
+    return static_cast<std::int16_t>(std::lround(std::clamp(v, -1.0f, 1.0f) * 32767.0f));
+}
+
+float unq15(std::int16_t v) { return static_cast<float>(v) / 32767.0f; }
+
+constexpr char kMagic[4] = {'S', 'P', 'P', 'K'};
+constexpr std::uint32_t kFormat = 1;
+
+template <class T>
+void put(std::vector<std::uint8_t>& out, T v) {
+    const auto* p = reinterpret_cast<const std::uint8_t*>(&v);
+    out.insert(out.end(), p, p + sizeof v);
+}
+
+template <class T>
+bool get(std::span<const std::uint8_t>& in, T& v) {
+    if (in.size() < sizeof v) return false;
+    std::memcpy(&v, in.data(), sizeof v);
+    in = in.subspan(sizeof v);
+    return true;
+}
+
+std::string hexOf(const std::string& hash) {
+    const auto colon = hash.find(':');
+    std::string hex = colon == std::string::npos ? hash : hash.substr(colon + 1);
+    // Only hex digits reach the file system.
+    hex.erase(std::remove_if(hex.begin(), hex.end(),
+                             [](char c) { return !std::isxdigit(static_cast<unsigned char>(c)); }),
+              hex.end());
+    return hex;
+}
+
+// The in-memory key: the content hash, or the media path when the model has
+// none yet (MediaSource::hash is not populated everywhere).
+std::string keyOf(const std::string& hash, const std::filesystem::path& media) {
+    return hash.empty() ? "path:" + media.lexically_normal().string() : hash;
+}
+
+// The cache file name: the hash's hex, or a digest of path, size and
+// modification time (so an edited file is rebuilt).
+std::string cacheName(const std::string& hash, const std::filesystem::path& media) {
+    if (!hash.empty() && !hexOf(hash).empty()) return hexOf(hash) + ".peaks";
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(media, ec);
+    const auto mtime = std::filesystem::last_write_time(media, ec).time_since_epoch().count();
+    std::uint64_t h = 1469598103934665603ull;  // FNV-1a 64
+    auto mix = [&](const void* data, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            h ^= static_cast<const std::uint8_t*>(data)[i];
+            h *= 1099511628211ull;
+        }
+    };
+    const std::string path = media.lexically_normal().string();
+    mix(path.data(), path.size());
+    mix(&size, sizeof size);
+    mix(&mtime, sizeof mtime);
+    char name[32];
+    std::snprintf(name, sizeof name, "p-%016llx.peaks", static_cast<unsigned long long>(h));
+    return name;
+}
+
+}  // namespace
+
+Pyramid Pyramid::build(const audio::AudioData& audio) {
+    Pyramid p;
+    p.channels_ = static_cast<int>(audio.channelCount());
+    p.sampleRate_ = audio.sampleRate;
+    p.frames_ = static_cast<std::int64_t>(audio.frames());
+    const auto channels = static_cast<std::size_t>(p.channels_);
+    const std::size_t frames = audio.frames();
+
+    // The finest level from the samples; RMS kept as mean squares until the
+    // level is final so coarser levels combine exactly.
+    Level fine;
+    fine.samplesPerBucket = kSamplesPerBucket[0];
+    fine.count = (frames + fine.samplesPerBucket - 1) / fine.samplesPerBucket;
+    fine.buckets.resize(fine.count * channels);
+    std::vector<double> meanSquares(fine.count * channels);
+    for (std::size_t c = 0; c < channels; ++c) {
+        const float* x = audio.channels[c].data();
+        for (std::size_t b = 0; b < fine.count; ++b) {
+            const std::size_t from = b * fine.samplesPerBucket;
+            const std::size_t to = std::min(frames, from + fine.samplesPerBucket);
+            float lo = x[from], hi = x[from];
+            double sq = 0;
+            for (std::size_t i = from; i < to; ++i) {
+                lo = std::min(lo, x[i]);
+                hi = std::max(hi, x[i]);
+                sq += static_cast<double>(x[i]) * static_cast<double>(x[i]);
+            }
+            meanSquares[b * channels + c] = sq / static_cast<double>(to - from);
+            fine.buckets[b * channels + c] = {q15(lo), q15(hi), 0};
+        }
+    }
+    auto finish = [&](Level& level, const std::vector<double>& ms) {
+        for (std::size_t i = 0; i < level.buckets.size(); ++i)
+            level.buckets[i].rms = q15(static_cast<float>(std::sqrt(ms[i])));
+    };
+    std::vector<double> prevSquares = meanSquares;
+    finish(fine, meanSquares);
+    p.levels_.push_back(std::move(fine));
+
+    // Coarser levels: each bucket combines four of the level below.
+    for (std::size_t l = 1; l < kSamplesPerBucket.size(); ++l) {
+        const Level& below = p.levels_.back();
+        Level level;
+        level.samplesPerBucket = kSamplesPerBucket[l];
+        const std::size_t factor = kSamplesPerBucket[l] / kSamplesPerBucket[l - 1];
+        level.count = (below.count + factor - 1) / factor;
+        level.buckets.resize(level.count * channels);
+        std::vector<double> squares(level.count * channels);
+        for (std::size_t b = 0; b < level.count; ++b)
+            for (std::size_t c = 0; c < channels; ++c) {
+                const std::size_t from = b * factor, to = std::min(below.count, from + factor);
+                Bucket out = below.buckets[from * channels + c];
+                double sq = 0;
+                for (std::size_t i = from; i < to; ++i) {
+                    const Bucket& in = below.buckets[i * channels + c];
+                    out.min = std::min(out.min, in.min);
+                    out.max = std::max(out.max, in.max);
+                    sq += prevSquares[i * channels + c];
+                }
+                squares[b * channels + c] = sq / static_cast<double>(to - from);
+                level.buckets[b * channels + c] = out;
+            }
+        finish(level, squares);
+        prevSquares = std::move(squares);
+        p.levels_.push_back(std::move(level));
+    }
+    return p;
+}
+
+const Level& Pyramid::pick(double samplesPerColumn) const {
+    const Level* best = &levels_.front();
+    for (const Level& l : levels_)
+        if (static_cast<double>(l.samplesPerBucket) <= samplesPerColumn) best = &l;
+    return *best;
+}
+
+Span Pyramid::range(const Level& level, int channel, double from, double to) const {
+    if (level.count == 0 || channel < 0 || channel >= channels_) return {};
+    const double spb = level.samplesPerBucket;
+    const auto last = static_cast<std::int64_t>(level.count) - 1;
+    auto first = static_cast<std::int64_t>(std::floor(from / spb));
+    auto end = static_cast<std::int64_t>(std::ceil(to / spb));
+    if (end <= first) end = first + 1;
+    if (first > last || end <= 0) return {};
+    first = std::max<std::int64_t>(first, 0);
+    end = std::min(end, last + 1);
+    const auto channels = static_cast<std::size_t>(channels_);
+    const auto c = static_cast<std::size_t>(channel);
+    Bucket b = level.buckets[static_cast<std::size_t>(first) * channels + c];
+    double sq = 0;
+    for (auto i = first; i < end; ++i) {
+        const Bucket& in = level.buckets[static_cast<std::size_t>(i) * channels + c];
+        b.min = std::min(b.min, in.min);
+        b.max = std::max(b.max, in.max);
+        sq += static_cast<double>(unq15(in.rms)) * static_cast<double>(unq15(in.rms));
+    }
+    return {unq15(b.min), unq15(b.max),
+            static_cast<float>(std::sqrt(sq / static_cast<double>(end - first)))};
+}
+
+std::vector<std::uint8_t> Pyramid::serialize() const {
+    std::vector<std::uint8_t> out(kMagic, kMagic + 4);
+    put(out, kFormat);
+    put(out, static_cast<std::uint32_t>(channels_));
+    put(out, sampleRate_);
+    put(out, frames_);
+    put(out, static_cast<std::uint32_t>(levels_.size()));
+    for (const Level& l : levels_) {
+        put(out, l.samplesPerBucket);
+        put(out, static_cast<std::uint64_t>(l.count));
+        const auto* p = reinterpret_cast<const std::uint8_t*>(l.buckets.data());
+        out.insert(out.end(), p, p + l.buckets.size() * sizeof(Bucket));
+    }
+    return out;
+}
+
+Result<Pyramid> Pyramid::deserialize(std::span<const std::uint8_t> in) {
+    auto bad = [] { return Error("peaks.cache", "not a peak cache file of this version"); };
+    if (in.size() < 4 || std::memcmp(in.data(), kMagic, 4) != 0) return bad();
+    in = in.subspan(4);
+    std::uint32_t format = 0, channels = 0, levels = 0;
+    Pyramid p;
+    if (!get(in, format) || format != kFormat || !get(in, channels) || channels == 0 ||
+        channels > 64 || !get(in, p.sampleRate_) || !get(in, p.frames_) || !get(in, levels) ||
+        levels != kSamplesPerBucket.size())
+        return bad();
+    p.channels_ = static_cast<int>(channels);
+    for (std::uint32_t i = 0; i < levels; ++i) {
+        Level l;
+        std::uint64_t count = 0;
+        if (!get(in, l.samplesPerBucket) || l.samplesPerBucket != kSamplesPerBucket[i] ||
+            !get(in, count))
+            return bad();
+        const std::uint64_t bytes = count * channels * sizeof(Bucket);
+        if (count > (std::uint64_t{1} << 34) || in.size() < bytes) return bad();
+        l.count = static_cast<std::size_t>(count);
+        l.buckets.resize(l.count * channels);
+        std::memcpy(l.buckets.data(), in.data(), static_cast<std::size_t>(bytes));
+        in = in.subspan(static_cast<std::size_t>(bytes));
+        p.levels_.push_back(std::move(l));
+    }
+    if (!in.empty()) return bad();
+    return p;
+}
+
+std::filesystem::path defaultCacheDir(std::string_view slug) {
+    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
+        return std::filesystem::path(xdg) / slug / "peaks";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".cache" / slug / "peaks";
+    return std::filesystem::temp_directory_path() / slug / "peaks";
+}
+
+PeakService::PeakService(std::filesystem::path cacheDir, Post post)
+    : cacheDir_(std::move(cacheDir)),
+      post_(std::move(post)),
+      worker_([this](std::stop_token stop) { run(stop); }) {}
+
+PeakService::~PeakService() {
+    worker_.request_stop();
+    wake_.notify_all();
+}
+
+std::shared_ptr<const Pyramid> PeakService::get(const std::string& hash,
+                                                const std::filesystem::path& media) {
+    const std::string key = keyOf(hash, media);
+    std::lock_guard lock(mutex_);
+    if (auto it = ready_.find(key); it != ready_.end()) return it->second;
+    if (failed_.count(key) || pending_.count(key)) return nullptr;
+    pending_[key] = true;
+    queue_.push_back({key, hash, media});
+    wake_.notify_one();
+    return nullptr;
+}
+
+std::optional<Error> PeakService::failure(const std::string& hash,
+                                          const std::filesystem::path& media) const {
+    std::lock_guard lock(mutex_);
+    auto it = failed_.find(keyOf(hash, media));
+    return it == failed_.end() ? std::nullopt : std::optional<Error>(it->second);
+}
+
+PeakService::Stats PeakService::stats() const {
+    std::lock_guard lock(mutex_);
+    return stats_;
+}
+
+void PeakService::run(std::stop_token stop) {
+    for (;;) {
+        Job job;
+        {
+            std::unique_lock lock(mutex_);
+            wake_.wait(lock, stop, [&] { return !queue_.empty(); });
+            if (stop.stop_requested()) return;
+            job = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        const auto& [key, hash, media] = job;
+        const std::filesystem::path cached = cacheDir_ / cacheName(hash, media);
+        std::shared_ptr<const Pyramid> pyramid;
+        std::optional<Error> error;
+        bool loaded = false;
+        if (auto bytes = readFile(cached)) {
+            if (auto p = Pyramid::deserialize(*bytes)) {
+                pyramid = std::make_shared<const Pyramid>(std::move(*p));
+                loaded = true;
+            }
+        }
+        if (!pyramid) {
+            auto audio = audio::readAudio(media);
+            if (!audio) {
+                error = audio.error();
+            } else {
+                auto built = std::make_shared<const Pyramid>(Pyramid::build(*audio));
+                std::error_code ec;
+                std::filesystem::create_directories(cacheDir_, ec);
+                (void)writeFileAtomic(
+                    cached, std::span<const std::uint8_t>(built->serialize()));  // best effort
+                pyramid = std::move(built);
+            }
+        }
+        {
+            std::lock_guard lock(mutex_);
+            pending_.erase(key);
+            if (pyramid) {
+                ready_[key] = pyramid;
+                ++(loaded ? stats_.loaded : stats_.built);
+            } else {
+                failed_.emplace(key, *error);
+                ++stats_.failed;
+            }
+        }
+        if (post_)
+            post_([this, alive = std::weak_ptr<int>(alive_), hash = hash] {
+                if (alive.lock() && onReady) onReady(hash);
+            });
+    }
+}
+
+}  // namespace supple::peaks

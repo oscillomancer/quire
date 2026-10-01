@@ -66,7 +66,8 @@ class Root {
 
   private:
     void layoutNow(const Canvas& canvas);
-    void paintTree(Node& node, Canvas& canvas, const Rect& area);
+    void paintTree(Node& node, Canvas& canvas, const Rect& clip);
+    void paintGl(Node& node, const Rect& clip);
     void ensureCache();
     gui::Window& window_;
     gui::Fonts fonts_;
@@ -78,6 +79,7 @@ class Root {
     std::vector<Rect> damage_;
     bool layoutPending_ = true, animate_ = false;
     Size laidOut_{};
+    float ratio_ = 1;  // of the frame being painted
     struct Cache;
     std::unique_ptr<Cache> cache_;
     Stats stats_;
