@@ -73,7 +73,7 @@ InstancePool makeVstPool() {
 
 // A track playing a sine instrument: notes on beats 0, 1, 2, 3 (quarter notes).
 model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr) {
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     model::Track tr;
     tr.name = "Synth";
     tr.parent = kMaster;
@@ -113,7 +113,7 @@ model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr
 
 // A sine track whose notes start at the given ticks (ppq 960, 120 bpm: 25 samples a tick).
 model::Session clusterSession(std::initializer_list<int> ticks) {
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     model::Track tr;
     tr.name = "Synth";
     tr.parent = kMaster;
@@ -171,7 +171,13 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
          {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}})
         for (const char* extra : {static_cast<const char*>(nullptr), "com.suppleaudio.test.gain"}) {
             INFO("anticipative " << options.anticipative << ", workers " << options.workers);
-            const model::Session s = synthSession(-3.0, extra);
+            model::Session s = synthSession(-3.0, extra);
+            model::EditTxn mode(s, 2);
+            auto project = mode.project();
+            project.console9 = true;
+            project.seed = 24681357;
+            mode.setProject(project);
+            s = mode.commit().value();
             auto pool = makePool();
             auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
 
@@ -216,7 +222,7 @@ TEST_CASE("a stretched take: real-time output equals the offline render" *
 
     // One audio item, half speed with the pitch preserved, 2 s long: the
     // stretcher builds this variant on the main thread when the plan loads.
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     model::Track tr;
     tr.name = "Audio";
     tr.parent = kMaster;
@@ -798,7 +804,7 @@ TEST_CASE("anticipative: the renderer stops the plugins when the JACK server goe
 TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the session plays on" *
           doctest::description("rt")) {
     host::setBridgeExecutable(BRIDGE_PATH);
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     Id tracks[2];
     for (int k = 0; k < 2; ++k) {
         model::Track tr;
@@ -1047,7 +1053,7 @@ TEST_CASE("monitoring in the callback: the input is heard through the track, sto
     REQUIRE(engine.load(monitoring(synthSession(-6.0206))).ok());
     backend.run(4);  // stopped: input only, through the fader (-6 dB) and centre pan (-3 dB)
     const auto& cap = backend.capture();
-    const double g = 0.5 * 0.70710678;
+    const double g = 0.5 * 0.472135955;
     CHECK(double(cap.channels[0][600]) == doctest::Approx(0.5 * g).epsilon(1e-4));
     CHECK(double(cap.channels[1][600]) == doctest::Approx(-0.25 * g).epsilon(1e-4));
     CHECK(engine.transport().sample == 0);  // stopped: time stands still
@@ -1366,7 +1372,7 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
 namespace {
 // A sine instrument track that monitors (and may record) every MIDI device.
 model::Session keyboardSession(bool armed = false) {
-    model::EditTxn t(model::Session::create(), 1);
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
     model::Track tr;
     tr.name = "Keys";
     tr.parent = kMaster;

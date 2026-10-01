@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "strip.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
 #include "supple/params/params.h"
@@ -203,8 +204,14 @@ struct Edge {
     model::Tap tap = model::Tap::PostFader;
     double gainL = 1.0, gainR = 1.0;
     double volumeDb = 0.0, pan = 0.0;
+    double staticGain = 1, staticPan = .5;
     bool mono = false, invert = false;
-    Automation autoVolume, autoPan, autoMute;  // route envelopes (dB, %, 0/1)
+    Automation autoVolume, autoPan, autoMute;     // route envelopes (dB, %, 0/1)
+    Automation stripVolume, stripPan, stripMute;  // private copies: source-owned
+    bool encode = false, followPan = true, muted = false;
+    ConsoleStage<console9::Channel> encoder;
+    FaderControl fader;
+    Stereo encoded;
     Delay delay;
     Stereo tmp;
     // A frontier edge (anticipative source, live target): its source's tap
@@ -274,7 +281,8 @@ struct TimedEvent {
 
 struct Node {
     Id id;
-    std::vector<std::size_t> in;  // incoming edges, in summation order
+    std::vector<std::size_t> in;   // incoming edges, in summation order
+    std::vector<std::size_t> out;  // source-owned send encoders
     std::vector<Stage> chain;
     std::int64_t latIn = 0, latChain = 0;
     Stereo sum, preFx, preFader, post;
@@ -286,16 +294,14 @@ struct Node {
     bool releaseHeld = false;
     std::vector<Clip> clips;
     int noteTarget = -1;  // chain index receiving note events
-    double volume = 1.0, width = 1.0, panL = 1.0, panR = 1.0;
-    double volumeDb = 0.0, pan = 0.0, panLawDb = -3.0;
-    bool mute = false, master = false;
-    bool soloSilenced = false;  // another track is soloed and this one is not on its path
-    // Solo acts on what the node sends (its edges, not its keys: ADR-0018):
-    // this block's gain, ramped from the one last applied (carried across swaps).
-    std::vector<float> soloGain;
-    float soloApplied = 1.0f;
-    bool soloValid = false;  // soloApplied is set (a new plan's first block starts at its target)
-    bool soloUnity = true;   // the gain is 1 for the whole block
+    double volumeDb = 0.0, pan = 0.0;
+    double staticGain = 1, staticPan = .5;
+    model::StripType type = model::StripType::Channel;
+    bool mute = false, master = false, decodeInput = false;
+    bool soloSilenced = false;
+    ConsoleStage<console9::Buss> decoder;
+    ConsoleStage<console9::Channel> encoder;
+    FaderControl fader;
     // Input monitoring (ADR-0014): the device inputs this track hears (0-based;
     // one = mono to both sides), and whether it is live (monitors, or is fed
     // by a node that does).
@@ -310,22 +316,7 @@ struct Node {
     std::optional<MidiIn> midiIn;
     std::array<std::uint8_t, 16 * 128> liveHeld{};  // device notes sounding (per channel/key)
     bool live = false;
-    Automation autoVolume, autoTrim, autoPan, autoWidth, autoMute;  // dB, dB, %, %, 0/1
-    // The post-fader gains and width applied at the end of the last block
-    // and the ramp toward new static targets (a volume, pan, mute, solo or
-    // width change ramps over Plan::smoothFrames instead of stepping; the
-    // values carry across plan swaps, carryMix).
-    struct Mix {
-        float gl = 1.0f, gr = 1.0f, w = 1.0f;
-        friend bool operator==(const Mix&, const Mix&) = default;
-    };
-    Mix applied, rampFrom, rampTo;
-    bool mixValid = false;  // `applied` holds a value (no ramp from nothing)
-    std::uint32_t rampLeft = 0;
-    bool automated() const {
-        return autoVolume.active() || autoTrim.active() || autoPan.active() || autoWidth.active() ||
-               autoMute.active();
-    }
+    Automation autoVolume, autoPan, autoMute;
 };
 
 struct Plan {
@@ -333,6 +324,7 @@ struct Plan {
     std::vector<Node> nodes;       // topological order
     std::size_t mainMaster = 0;    // tr_0 need not be last (multiple roots and key routes)
     std::vector<Edge> edges;
+    bool linearConsole = false;
     double rate = 48000.0;
     std::uint32_t smoothFrames = 480;  // 10 ms: ramps at plan swaps (carryMix)
     double startSeconds = 0.0;
@@ -373,6 +365,10 @@ struct Plan {
     std::uint32_t deviceMidiOffset = 0;
 };
 
+// Structural invariant checker, also exposed to the randomized plan tests.
+Status checkStrips(const Plan& p);
+const Stereo& edgeSignal(const Plan& p, const Edge& e) SUPPLE_RT;
+
 // Builds the plan's structure (nodes in topological order, edges, plugin
 // instances from the pool, automation). `startSeconds` is the timeline
 // origin of sample 0 (0 for the real-time engine). `rate`: the rate the plan
@@ -402,10 +398,10 @@ bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint
                           const void* self, const LoopRange* loop = nullptr);
 // Repositions the cursors and clears the delay lines of the live nodes (or
 // of the others) and of the edges into them.
-void locateClass(Plan& p, std::int64_t pos, bool live) SUPPLE_RT;
+void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole = true) SUPPLE_RT;
 // Audio thread: repositions every playback cursor at `pos` (events,
 // automation) and clears delay lines. Plugins are not touched.
-void locate(Plan& p, std::int64_t pos) SUPPLE_RT;
+void locate(Plan& p, std::int64_t pos, bool restartConsole = true) SUPPLE_RT;
 // A loop wrap (ADR-0015): moves the event and automation cursors of one
 // class of nodes (0: the renderer's, 1: live, -1: all) to `pos`, keeping
 // delay lines and plugin state (tails ring on); notes held at the wrap get

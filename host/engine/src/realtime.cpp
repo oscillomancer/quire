@@ -550,7 +550,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         adoptShare(processing_, plan ? &plan->instances : nullptr, &processing_);
         plan_ = plan;
         if (plan) {
-            detail::locate(*plan, pos_);
+            detail::locate(*plan, pos_, false);
             stoppedGen_.store(plan->generation, std::memory_order_release);
         }
     }
@@ -573,7 +573,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         seekSeen_ = xport.seekSeq;
         pos_ = xport.seekSample;
         if (plan) {
-            detail::locate(*plan, pos_);
+            detail::locate(*plan, pos_, false);
             resetOwned(processing_);
         }
     }
@@ -799,7 +799,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
             adoptShare(processing_, plan ? &plan->rendererInstances : nullptr, self);
             plan_ = plan;
             if (plan) {
-                detail::locateClass(*plan, pos_, false);
+                detail::locateClass(*plan, pos_, false, false);
                 plan->handAt = streamLocal_;  // where the callback follows (ADR-0014)
                 plan->handEpoch = seen;
                 stoppedGen_.store(plan->generation, std::memory_order_release);
@@ -832,16 +832,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
         const bool ok =
             detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
         if (!ok) processErrors_.fetch_add(1);
-        auto fill = [&](detail::Chunk* c, const detail::Stereo& from,
-                        const detail::Node* solo = nullptr) {
+        auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
             if (ok) {
                 std::copy_n(from.l.begin(), n, c->l.begin());
                 std::copy_n(from.r.begin(), n, c->r.begin());
-                if (solo && !solo->soloUnity)  // a send carries its source's solo gain
-                    for (std::uint32_t i = 0; i < n; ++i) {
-                        c->l[i] *= solo->soloGain[i];
-                        c->r[i] *= solo->soloGain[i];
-                    }
             } else {
                 std::fill(c->l.begin(), c->l.end(), 0.0f);
                 std::fill(c->r.begin(), c->r.end(), 0.0f);
@@ -854,12 +848,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
         if (plan_->split) {  // the frontier taps, for the callback's live nodes
             for (std::size_t j = 0; j < plan_->frontier.size(); ++j) {
                 const detail::Edge& e = plan_->edges[plan_->frontier[j]];
-                const detail::Node& src = plan_->nodes[e.from];
-                fill(plan_->frontierRings[j]->slot(),
-                     e.tap == model::Tap::PreFx      ? src.preFx
-                     : e.tap == model::Tap::PreFader ? src.preFader
-                                                     : src.post,
-                     e.stage < 0 ? &src : nullptr);
+                fill(plan_->frontierRings[j]->slot(), detail::edgeSignal(*plan_, e));
                 plan_->frontierRings[j]->publish();
             }
         } else {
@@ -897,7 +886,7 @@ void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
     if (!next) return;
     if (next->split) {
         if (wasLive && liveReady_)
-            detail::locateClass(*next, livePos_, true);  // continue at the switch position
+            detail::locateClass(*next, livePos_, true, false);  // continue at the switch position
         else {
             liveReady_ = false;  // entering the live mode: liveRender takes the position
             for (detail::Node& n : next->nodes)  // (not continuous: carry no dry signal)

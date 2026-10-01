@@ -36,7 +36,8 @@ Session upstreamSession(const Session& source, Id target) {
         }
         for (const auto& entry : source.routes) {
             const auto& route = *entry.value;
-            if (!route.mute && route.from.track && route.to.track && keep.count(*route.to.track))
+            const auto to = route.to.fx ? model::trackOfFx(source, *route.to.fx) : route.to.track;
+            if (!route.mute && route.from.track && to && keep.count(*to))
                 changed |= keep.insert(*route.from.track).second;
         }
     }
@@ -55,7 +56,7 @@ Session upstreamSession(const Session& source, Id target) {
             master->chain.clear();
             master->mute = false;
             tracks.put(entry.id, entry.rev, std::move(master));
-        } else if (!entry.value->parent || !keep.count(*entry.value->parent)) {
+        } else if (entry.value->parent && !keep.count(*entry.value->parent)) {
             auto track = std::make_shared<model::Track>(*entry.value);
             track->parent = model::kMaster;
             track->parentSend.enabled = true;
@@ -69,10 +70,13 @@ Session upstreamSession(const Session& source, Id target) {
             items.erase(entry.id);
     s.items = items.build();
     model::IdMap<model::Route>::Builder routes(source.routes);
-    for (const auto& entry : source.routes)
-        if (!entry.value->from.track || !entry.value->to.track ||
-            !keep.count(*entry.value->from.track) || !keep.count(*entry.value->to.track))
+    for (const auto& entry : source.routes) {
+        const auto to = entry.value->to.fx ? model::trackOfFx(source, *entry.value->to.fx)
+                                           : entry.value->to.track;
+        if (!entry.value->from.track || !to || !keep.count(*entry.value->from.track) ||
+            !keep.count(*to))
             routes.erase(entry.id);
+    }
     s.routes = routes.build();
     return s;
 }
@@ -294,6 +298,10 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     const std::int64_t total = length + outputLatency;
     if (total > (std::int64_t(1) << 28)) return Error("engine.too_long", "render too long");
     std::vector<float> outL(static_cast<std::size_t>(total)), outR(static_cast<std::size_t>(total));
+    const bool decodeStem = opt.track && opt.tap == model::Tap::PostFader && !selected->master;
+    ConsoleStage<console9::Buss> stemDecoder;
+    stemDecoder.init(console9::seedsFor(s.project->seed, (selected->id.n << 3) | 4),
+                     p.linearConsole);
     bool failed = false, startFailed = false, cancelled = false;
 
     std::vector<host::Instance*> instances;
@@ -327,6 +335,11 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                                                       : selected->post;
                 std::copy_n(tap.l.begin(), n, outL.begin() + pos);
                 std::copy_n(tap.r.begin(), n, outR.begin() + pos);
+                if (decodeStem)
+                    for (std::uint32_t i = 0; i < n; ++i)
+                        stemDecoder.sample(tap.l[i], tap.r[i],
+                                           outL[static_cast<std::size_t>(pos) + i],
+                                           outR[static_cast<std::size_t>(pos) + i]);
                 if (opt.progressFlag)
                     opt.progressFlag->store(opt.progressBase + opt.progressScale *
                                                                    static_cast<double>(pos + n) /

@@ -38,7 +38,7 @@ std::unique_ptr<EngineApp> makeApp(const fs::path& dir) {
     AppOptions o;
     o.workdir = dir;
     o.pluginPath = {kFixture};
-    auto app = EngineApp::create(o);
+    auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
     return std::move(*app);
 }
@@ -119,7 +119,7 @@ TEST_CASE("an LLM builds a song over the bus: batch, render, undo, save and reop
     CHECK((*mix)["seconds"].asDouble() == doctest::Approx(4.0));  // two bars at 120 BPM
     // velocity 96 sine (0.25 * 96/127), centred (-3 dB), gain -6 dB.
     CHECK((*mix)["peak_dbfs"].asDouble() ==
-          doctest::Approx(20 * std::log10(0.25 * 96 / 127 * std::sqrt(0.5)) - 6).epsilon(0.01));
+          doctest::Approx(20 * std::log10(0.25 * 96 / 127 * 0.472135955) - 6).epsilon(0.01));
     CHECK(fs::exists((*mix)["path"].asString()));
 
     auto inlineMix = call("render.mix", R"({"name":"analyzed","analyze":"summary"})");
@@ -292,7 +292,7 @@ TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)"
     o.workdir = root.path;
     o.pluginPath = {kFixture};
     o.jackLibrary = FakeJack::kPath;
-    auto created = EngineApp::create(o);
+    auto created = EngineApp::create(o, {.console9 = false});
     REQUIRE(created);
     auto app = std::move(*created);
     cmd::Dispatcher d(registry, *app);
@@ -549,7 +549,7 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     REQUIRE(audio);
     double peak = 0;
     for (float x : audio->channels[0]) peak = std::max(peak, std::fabs(double(x)));
-    CHECK(peak == doctest::Approx(0.5 * 0.70710678).epsilon(0.01));
+    CHECK(peak == doctest::Approx(0.5 * 0.472135955).epsilon(0.01));
 
     // One version: undo removes the take.
     call("history.undo", "{}");
@@ -665,8 +665,8 @@ TEST_CASE("recovering a crashed recording repairs its header and plays all of it
     const auto& left = audio->channels[0];
     REQUIRE(left.size() >= 110000);
     CHECK(double(left[47000]) == 0.0);
-    CHECK(double(left[49000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
-    CHECK(double(left[95000]) == doctest::Approx(0.25 * 0.70710678).epsilon(0.01));
+    CHECK(double(left[49000]) == doctest::Approx(0.25 * 0.472135955).epsilon(0.01));
+    CHECK(double(left[95000]) == doctest::Approx(0.25 * 0.472135955).epsilon(0.01));
     CHECK(double(left[97000]) == 0.0);
 }
 
@@ -1392,7 +1392,7 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
     o.workdir = root.path;
     o.pluginPath = {kFixture};
     o.jackLibrary = FakeJack::kPath;
-    auto created = EngineApp::create(o);
+    auto created = EngineApp::create(o, {.console9 = false});
     REQUIRE(created);
     auto app = std::move(*created);
     app->setFixedClock(1'000'000);

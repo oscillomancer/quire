@@ -28,7 +28,7 @@ std::unique_ptr<EngineApp> makeApp(const fs::path& path) {
     AppOptions options;
     options.workdir = path;
     options.pluginPath = {FIXTURE_CLAP_PATH};
-    auto app = EngineApp::create(options);
+    auto app = EngineApp::create(options, {.console9 = false});
     REQUIRE(app);
     return std::move(*app);
 }
@@ -223,7 +223,7 @@ TEST_CASE("a VST3 is listed with its format and describes its plain parameters")
     AppOptions options;
     options.workdir = dir.path;
     options.pluginPath = {FIXTURE_VST3_PATH};
-    auto created = EngineApp::create(options);
+    auto created = EngineApp::create(options, {.console9 = false});
     REQUIRE(created);
     auto app = std::move(*created);
     cmd::Registry registry;
