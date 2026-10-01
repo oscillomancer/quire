@@ -97,9 +97,8 @@ inline double fastTanh(double x) SUPPLE_RT {
 
 // sin(2π·t) for any t (cycles): reduction to a quarter wave and the Taylor
 // series through t^11 (error < 4e-8, below -140 dB).
-inline double sin2pi(double t) SUPPLE_RT {
-    double x = t - std::floor(t);  // 0..1
-    if (x > 0.5) x -= 1.0;         // -0.5..0.5
+inline double sinCycle(double x) SUPPLE_RT {
+    if (x > 0.5) x -= 1.0;  // -0.5..0.5
     if (x > 0.25)
         x = 0.5 - x;  // fold to -0.25..0.25
     else if (x < -0.25)
@@ -109,6 +108,8 @@ inline double sin2pi(double t) SUPPLE_RT {
                             w2 * (1.0 / 120 + w2 * (-1.0 / 5040 + w2 * (1.0 / 362880 +
                                                                         w2 * (-1.0 / 39916800))))));
 }
+
+inline double sin2pi(double t) SUPPLE_RT { return sinCycle(t - std::floor(t)); }
 
 // Linear per-sample ramp across one control tick.
 struct Lerp {
@@ -125,6 +126,15 @@ struct Lerp {
         const double v = value;
         value += step;
         return v;
+    }
+    void fill(double* dst, std::uint32_t n) SUPPLE_RT {
+        if (n == 0) return;
+        if (step == 0.0 || value + step == value) {
+            dst[0] = next();  // retain signed-zero behavior of the first add
+            std::fill_n(dst + 1, n - 1, value);
+        } else {
+            for (std::uint32_t i = 0; i < n; ++i) dst[i] = next();
+        }
     }
 };
 

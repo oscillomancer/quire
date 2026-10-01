@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "../src/filters.h"
+#include "../src/modulators.h"
 #include "../src/oscillators.h"
 #include "../src/oversampling.h"
 #include "orrery/engine.h"
@@ -152,6 +154,118 @@ std::vector<Timed> performance() {
 }
 
 }  // namespace
+
+TEST_CASE("ladder lanes equal scalar processing across group and segment changes") {
+    constexpr std::uint32_t frames = 193;
+    for (const bool db24 : {false, true}) {
+        std::array<Ladder, 4> grouped, scalar;
+        double x[4][frames], y[4][frames], g[4][frames], k[4][frames], d[4][frames], l[4][frames];
+        for (std::size_t j = 0; j < 4; ++j)
+            for (std::uint32_t s = 0; s < frames; ++s) {
+                x[j][s] = 1.5 * std::sin(0.21 * s + static_cast<double>(j));
+                g[j][s] = tptG(80.0 + 20.0 * s + 53.0 * static_cast<double>(j), 96000.0);
+                k[j][s] = 3.9 - 0.1 * static_cast<double>(j);
+                d[j][s] = 1.0 + 0.1 * s;
+                l[j][s] = 0.7 + 0.01 * s;
+            }
+        // Alternate grouped and scalar segments, including a partially filled
+        // group. Unused lanes must not touch another voice's state or output.
+        for (std::uint32_t start = 0; start < frames; start += 7) {
+            const auto n = std::min(7u, frames - start);
+            const std::size_t count = 1 + (start / 7) % 4;
+            Ladder::Lane lanes[4];
+            for (std::size_t j = 0; j < count; ++j)
+                lanes[j] = {&grouped[j],  x[j] + start, y[j] + start, g[j] + start,
+                            k[j] + start, d[j] + start, l[j] + start};
+            Ladder::runGroup<4>(lanes, count, n, db24);
+            for (std::size_t j = count; j < 4; ++j)
+                for (std::uint32_t s = start; s < start + n; ++s)
+                    y[j][s] = grouped[j].next(x[j][s], g[j][s], k[j][s], d[j][s], db24) * l[j][s];
+        }
+        for (std::size_t j = 0; j < 4; ++j)
+            for (std::uint32_t s = 0; s < frames; ++s)
+                CHECK(y[j][s] ==
+                      scalar[j].next(x[j][s], g[j][s], k[j][s], d[j][s], db24) * l[j][s]);
+    }
+}
+
+TEST_CASE("specialized classic oscillators preserve phase and ramps") {
+    for (const Wave w : {Wave::Saw, Wave::Square, Wave::Pulse, Wave::Triangle, Wave::Sine}) {
+        VaOsc staged, scalar;
+        staged.reset(0.97);
+        scalar.reset(0.97);
+        dsp::Lerp inc, width, refInc, refWidth;
+        inc.set(0.001, 0.49, 1024);
+        width.set(0.01, 0.99, 1024);
+        refInc = inc;
+        refWidth = width;
+        for (int block = 0; block < 128; ++block) {
+            double out[7];
+            staged.runClassic(w, inc, width, out, 7);
+            for (const double y : out)
+                CHECK(y == scalar.next(refInc.next(), w, refWidth.next(), 0.0, 0.0));
+            CHECK(staged.phase() == scalar.phase());
+            CHECK(staged.wrapped() == scalar.wrapped());
+        }
+        CHECK(inc.value == refInc.value);
+        CHECK(width.value == refWidth.value);
+    }
+}
+
+TEST_CASE("constant ramp fills retain scalar values including signed zero") {
+    for (const double value : {0.0, -0.0, 0.001, -1.0, 1.0})
+        for (const double step : {0.0, -0.0, 1e-20, -1e-20, 0.001}) {
+            dsp::Lerp ramp{value, step}, scalar = ramp;
+            for (const std::uint32_t n : {1u, 7u, 32u, 63u}) {
+                double values[63];
+                ramp.fill(values, n);
+                for (std::uint32_t s = 0; s < n; ++s) {
+                    const auto expected = scalar.next();
+                    CHECK(values[s] == expected);
+                    CHECK(std::signbit(values[s]) == std::signbit(expected));
+                }
+                CHECK(ramp.value == scalar.value);
+                CHECK(std::signbit(ramp.value) == std::signbit(scalar.value));
+            }
+        }
+}
+
+TEST_CASE("staged drive curves equal scalar curves including bias ramps") {
+    for (const auto curve :
+         {DriveCurve::Soft, DriveCurve::Tape, DriveCurve::Fold, DriveCurve::Hard})
+        for (const bool zeroBias : {false, true}) {
+            constexpr std::uint32_t n = 67;
+            double y[n], expected[n], gain[n], bias[n], comp[n], mix[n];
+            for (std::uint32_t s = 0; s < n; ++s) {
+                y[s] = 2.0 * std::sin(0.3 * s);
+                gain[s] = 1.0 + 0.1 * s;
+                bias[s] = zeroBias ? 0.0 : -1.0 + 0.03 * s;
+                comp[s] = 1.0 / std::sqrt(gain[s]);
+                mix[s] = static_cast<double>(s) / n;
+                expected[s] =
+                    y[s] + (drive(y[s], curve, gain[s], bias[s], comp[s]) - y[s]) * mix[s];
+            }
+            if (zeroBias)
+                driveBlock<true>(curve, y, n, gain, bias, comp, mix);
+            else
+                driveBlock<false>(curve, y, n, gain, bias, comp, mix);
+            for (std::uint32_t s = 0; s < n; ++s) CHECK(y[s] == expected[s]);
+        }
+}
+
+TEST_CASE("inaudible drift evaluation still preserves its clock and RNG") {
+    Lfo full, muted;
+    full.seed(1234);
+    muted.seed(1234);
+    LfoParams p{LfoWave::SmoothRandom, 50.0, 0.0, 0.0, false};
+    full.restart(p);
+    muted.restart(p);
+    for (int tick = 0; tick < 10000; ++tick) {
+        const double expected = full.advance(16, 48000, p);
+        const bool audible = tick >= 8000;
+        CHECK(muted.advance(16, 48000, p, audible) == (audible ? expected : 0.0));
+    }
+}
 
 TEST_CASE("a note makes sound and the voice ends after its release") {
     const Patch p = parse(R"("oscillators": {"osc1": {"type": "va"}},

@@ -502,6 +502,38 @@ real-time engine). The code is the reference; these notes explain the choices.
   parameter edits are host gestures. Outputs: stereo, or mono ((L+R)/2);
   32- and 64-bit hosts.
 
+**Performance (2026-09-30, p3-orrery-perf):** the §9 reference patch now
+measures 9.11 % of one core's CPU time versus 13.77 % for `508a229` in paired
+Release runs pinned to CPU 0 (Core Ultra 5 225F, Clang 22.1.8, 48 kHz / 256,
+median of three 30-second trials). Wall measurements were 10.66 % / 16.26 %;
+the shared workstation's scheduling interference is substantial. The 3 %
+target remains unmet. Portable four-wide float ladder lanes keep double phase
+and coefficient ramps; classic oscillators and drive resolve their waveform /
+curve once per segment, and unchanged control conversions are cached.
+
+| Incremental step | Reference wall % |
+|---|---:|
+| Base, initial 30-second run | 14.79 |
+| Classic oscillator specialization | 11.31 |
+| Double ladder lanes (discarded experiment) | 12.18–12.76 |
+| Float ladder lanes | 10.73 |
+| Parameter starts / gain cache | 10.03 |
+| Constant ramp fills | 10.82 |
+| Drive specialization | 10.32 |
+| Pitch/cutoff cache and muted drift evaluation | 9.46 |
+| Final paired run | 10.66 (9.11 CPU) |
+
+Intermediate runs show workstation variability, not isolated component costs.
+Reference residual against the base is −137.84 dB relative to signal RMS;
+every sound-design guide example passes −80 dB (worst −123.57 dB), with
+bit-identical renders across block sizes. Remaining costs are structural:
+per-voice oscillator recursions and staging (~43 % of sampled time), lane
+filter gathers (~21 %), and repeated per-unison control evaluation (~16 %).
+A persistent voice bank with double phase lanes, fused stages, and dependency-
+checked shared note controls is the next pass. Full measurements, numerical
+results, reproducible baseline capture, and verification commands are in
+[the benchmark report](../benchmarks/orrery-perf-2026-09-30.md).
+
 **Performance (orrery-bench, release, 48 kHz / 256):** the §9 reference patch
 went from 18.0 % to 11.7 % of one core with bit-identical output: voices
 render stage by stage per tick segment (type decisions hoisted out of the

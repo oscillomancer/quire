@@ -9,6 +9,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -51,7 +54,11 @@ constexpr Variant kVariants[] = {
     {"high quality", R"({"voice": {"quality": "high"}})"},
 };
 
-double measure(const Patch& patch, double seconds) {
+struct Measurement {
+    double wall, cpu;
+};
+
+Measurement measure(const Patch& patch, double seconds) {
     constexpr double kRate = 48000.0;
     constexpr std::uint32_t kBlock = 256;
     Engine engine;
@@ -73,13 +80,16 @@ double measure(const Patch& patch, double seconds) {
     const auto blocks = static_cast<long>(seconds * kRate / kBlock);
     volatile float sink = 0.0f;
     const auto t0 = std::chrono::steady_clock::now();
+    const auto cpu0 = std::clock();
     for (long i = 0; i < blocks; ++i) {
         engine.process({}, Transport{}, l.data(), r.data(), kBlock);
         sink = sink + l[0];
     }
     const double spent =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    return 100.0 * spent / (static_cast<double>(blocks) * kBlock / kRate);
+    const double cpu = static_cast<double>(std::clock() - cpu0) / CLOCKS_PER_SEC;
+    const double scale = 100.0 / (static_cast<double>(blocks) * kBlock / kRate);
+    return {spent * scale, cpu * scale};
 }
 
 // Diverse patches for --dump: every module type and routing path the voice
@@ -153,12 +163,79 @@ int dump(const PatchType& type, const char* path) {
     return 0;
 }
 
+// Reference plus every JSON recipe, including attack, held chord, new notes,
+// and release/tail. The same binary can capture the pre-refactor baseline.
+int dumpGuide(const PatchType& type, const char* path, const char* guide) {
+    std::ifstream in(guide);
+    if (!in) return 1;
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string contents = text.str();
+    std::vector<std::string> patches{kReference};
+    std::size_t at = 0;
+    while ((at = contents.find("```json\n", at)) != std::string::npos) {
+        at += 8;
+        const auto end = contents.find("```", at);
+        if (end == std::string::npos) return 1;
+        patches.push_back(contents.substr(at, end - at));
+        at = end + 3;
+    }
+    std::FILE* f = std::fopen(path, "wb");
+    if (!f) return 1;
+    for (const auto& json : patches) {
+        auto patch = type.parse(json);
+        if (!patch) {
+            std::fprintf(stderr, "%s\n", patch.error().toString().c_str());
+            std::fclose(f);
+            return 1;
+        }
+        Engine engine;
+        engine.prepare(48000.0, 128);
+        engine.setPatch(*patch);
+        engine.reset();
+        float l[128], r[128];
+        for (int b = 0; b < 3000; ++b) {
+            std::vector<Event> events;
+            if (b == 0 || b == 750 || b == 1500) {
+                for (int key : {48, 52, 55, 59, 62, 64, 67, 71}) {
+                    Event e;
+                    e.type = Event::Type::NoteOn;
+                    e.key = static_cast<std::int16_t>(key);
+                    e.time = 7;
+                    e.value = b == 750 ? 0.5 : 0.8;
+                    events.push_back(e);
+                }
+            }
+            if (b == 1499 || b == 1875) {
+                for (int key : {48, 52, 55, 59, 62, 64, 67, 71}) {
+                    Event e;
+                    e.type = Event::Type::NoteOff;
+                    e.key = static_cast<std::int16_t>(key);
+                    e.time = 13;
+                    events.push_back(e);
+                }
+            }
+            engine.process(events, Transport{}, l, r, 128);
+            if (std::fwrite(l, sizeof(float), 128, f) != 128 ||
+                std::fwrite(r, sizeof(float), 128, f) != 128) {
+                std::fclose(f);
+                return 1;
+            }
+        }
+    }
+    return std::fclose(f) == 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const PatchType type;
     if (argc > 2 && std::string(argv[1]) == "--dump") return dump(type, argv[2]);
-    const double seconds = argc > 1 ? std::atof(argv[1]) : 10.0;
+    if (argc > 3 && std::string(argv[1]) == "--dump-guide")
+        return dumpGuide(type, argv[2], argv[3]);
+    const bool referenceOnly = argc > 1 && std::string(argv[1]) == "--reference";
+    const double seconds = referenceOnly ? (argc > 2 ? std::atof(argv[2]) : 30.0)
+                                         : (argc > 1 ? std::atof(argv[1]) : 10.0);
     auto reference = type.parse(kReference);
     if (!reference) {
         std::fprintf(stderr, "%s\n", reference.error().toString().c_str());
@@ -167,6 +244,7 @@ int main(int argc, char** argv) {
     std::printf("Orrery benchmark: 48 kHz / 256 frames, %.0f s per variant, %% of one core\n",
                 seconds);
     for (const Variant& v : kVariants) {
+        if (referenceOnly && *v.merge) continue;
         Patch p = *reference;
         if (*v.merge) {
             auto merged = type.merge(p, supple::json::parse(v.merge).value());
@@ -177,10 +255,15 @@ int main(int argc, char** argv) {
             p = *merged;
         }
         // Median of three runs: the machine is shared with other work.
-        double runs[3];
-        for (double& x : runs) x = measure(p, seconds / 3.0);
+        double runs[3], cpu[3];
+        for (int i = 0; i < 3; ++i) {
+            const auto m = measure(p, seconds / 3.0);
+            runs[i] = m.wall;
+            cpu[i] = m.cpu;
+        }
         std::sort(runs, runs + 3);
-        std::printf("  %-24s %6.2f %%\n", v.name, runs[1]);
+        std::sort(cpu, cpu + 3);
+        std::printf("  %-24s %6.2f %% wall; %6.2f %% CPU\n", v.name, runs[1], cpu[1]);
     }
     return 0;
 }
