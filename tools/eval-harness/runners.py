@@ -13,7 +13,7 @@ from common import HERE, ROOT, Mcp, capture, evaluation_profile, recipe_patch, s
 from relay import Recorder
 
 
-def preamble(task, reference=None, seed=42):
+def preamble(task, reference=None, seed=42, blind=False):
     files = ["SKILL.md", "guides/sandbox-loop.md", "guides/analysis.md", "guides/notation.md"]
     if task["suite"] != "notation":
         files.append("guides/sound-design.md")
@@ -30,7 +30,7 @@ def preamble(task, reference=None, seed=42):
     else:
         prompt += "Render this fixed evaluation phrase (also used by the scorer):\n" + task["phrase"] + "\n"
     prompt += "Fixed render options: " + json.dumps(task["render"]) + "\n"
-    if task["score"].get("profile"):
+    if task["score"].get("profile") and not blind:
         prompt += "Descriptor targets: " + json.dumps(task["score"]["profile"]) + "\n"
     if reference:
         prompt += ("Match the reference audio at " + str(reference) + ". Use analyze/compare or the "
@@ -177,7 +177,7 @@ def hermes(task, directory, seed, options, reference=None):
     command = hermes_command(options)
     version = subprocess.run(command + ["--version"], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=30, check=True).stdout.strip()
-    prompt = preamble(task, reference, seed)
+    prompt = preamble(task, reference, seed, getattr(options, "blind", False))
     (directory / "prompt.txt").write_text(prompt)
     started = time.monotonic()
     timed_out = False

@@ -89,7 +89,8 @@ def score_final(task, directory, seed, binary=None, reference=None):
 def publish(report):
     model = re.sub(r"[^a-zA-Z0-9.-]+", "-", report["model"])
     date = report["started_utc"][:10]
-    basename = f"{date}-{report['suite']}-{report['runner']}-{model}"
+    suite = report["suite"] + ("-blind" if report.get("blind") else "")
+    basename = f"{date}-{suite}-{report['runner']}-{model}"
     destination = ROOT / "docs/benchmarks/eval" / (basename + ".json")
     if destination.exists():
         basename += "-" + report["run_id"].split("-")[0]
@@ -116,7 +117,7 @@ def publish(report):
         listening.append(f"- `{task_id}`: `{paths[0]}`, `{paths[1]}` — {records[0]['listening']}")
     report["listening_audio"] = str(audio_dir.relative_to(ROOT))
     write_json(destination, report)
-    markdown = (f"# {report['suite']} — {report['runner']} / {report['model']}\n\n"
+    markdown = (f"# {suite} — {report['runner']} / {report['model']}\n\n"
                 f"Run `{report['run_id']}`; git `{report['git_hash']}`; skill `{report['skill_hash']}`.\n\n"
                 f"Pass rate: {report['pass_rate']:.1%}. Median loss: {report['median_loss']}.\n\n"
                 + "\n".join(rows) + "\n\nUsage: `" + json.dumps(report["usage_totals"]) + "`.\n\n"
@@ -129,7 +130,7 @@ def publish(report):
                            "| Date | Suite | Git | Skill SHA256 | Runner/model | Pass rate | Median loss | Report |\n"
                            "|---|---|---|---|---|---:|---:|---|\n")
     with history.open("a") as stream:
-        stream.write(f"| {date} | {report['suite']} | `{report['git_hash'][:10]}` | `{report['skill_hash'][:12]}` | "
+        stream.write(f"| {date} | {suite} | `{report['git_hash'][:10]}` | `{report['skill_hash'][:12]}` | "
                      f"{report['runner']}/{report['model']} | {report['pass_rate']:.1%} | {report['median_loss']} | "
                      f"[{basename}](eval/{destination.name}) |\n")
     if report["runner"] == "dry":
@@ -138,7 +139,7 @@ def publish(report):
     text = review.read_text()
     ids = [int(n) for n in re.findall(r"(?m)^### (\d+)\.", text)]
     item = (f"### {max(ids, default=0) + 1}. Evaluation listening — {report['run_id']}\n"
-            f"Suite: {report['suite']}, runner/model: {report['runner']}/{report['model']}. "
+            f"Suite: {suite}, runner/model: {report['runner']}/{report['model']}. "
             "Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?\n\n"
             + "\n".join(listening or ["- No valid renders; inspect the report's failures."]) + "\n\n")
     # Keep new items in the active queue, ahead of resolved decisions.
@@ -153,6 +154,8 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="Validate with scripted answers, never call a model (default)")
     parser.add_argument("--tasks", nargs="+", help="Task ids or suffixes, space or comma separated")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--blind", action="store_true",
+                        help="Hide descriptor targets from the agent: it works from the description alone; scoring is unchanged")
     parser.add_argument("--jobs", type=int, default=1, help="Attempts run concurrently (each fully isolated); 1..16")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sandbox", type=Path)
@@ -174,7 +177,7 @@ def main(argv=None):
     run_dir = ROOT / "build/eval" / run_id
     run_dir.mkdir(parents=True)
     report = {"schema": "supple.eval-report/1.0", "run_id": run_id, "started_utc": start.isoformat(),
-              "suite": options.suite, "runner": runner, "seed": options.seed,
+              "suite": options.suite, "runner": runner, "seed": options.seed, "blind": options.blind,
               "git_hash": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "working_tree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)),
               "skill_hash": skill_hash(), "task_hashes": {}, "tasks": [], "run_directory": str(run_dir.relative_to(ROOT))}

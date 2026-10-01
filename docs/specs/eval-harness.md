@@ -33,7 +33,9 @@ also retained in the report.
 
 Pad, pluck bass, bell, supersaw lead, sub bass, FM electric piano, noise snare,
 formant lead, acid bass and strings. A task publishes its descriptor targets to
-the agent. The dry runner sets the **current guide recipe**, rather than a stale
+the agent; `--blind` withholds them (same tasks and scoring), so the agent works
+from the verbal description alone — the discriminating variant, since the
+published targets made the first full run trivially 30/30 (2026-10-01). The dry runner sets the **current guide recipe**, rather than a stale
 copied baseline; every recipe must pass its own profile. Calibration used the
 508a229 engine with post-level FM/AM modulators, so the revised bell/e-piano
 brightness is reflected in these numbers.

@@ -64,14 +64,21 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 15. Evaluation listening — 20261001T030823264794Z-notation-hermes
-Suite: notation, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
-
-- `notation.bass-riff`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.bass-riff-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.bass-riff-worst.wav` — Does the rhythm and register fit the requested phrase?
-- `notation.chords`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.chords-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.chords-worst.wav` — Does the rhythm and register fit the requested phrase?
-- `notation.drums`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.drums-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.drums-worst.wav` — Does the rhythm and register fit the requested phrase?
-- `notation.triplet-lead`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.triplet-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.triplet-lead-worst.wav` — Does the rhythm and register fit the requested phrase?
-- `notation.waltz`: `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.waltz-best.wav`, `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/notation.waltz-worst.wav` — Does the rhythm and register fit the requested phrase?
+### 15. Evaluation listening — first Hermes campaign (15–20 minutes, when convenient)
+Summary: `docs/benchmarks/eval/2026-10-01-campaign.md`. Each folder holds the
+best and worst render per task (by score) from three attempts by the cheap
+evaluation model. Most useful, in order:
+- **Blind descriptive** — the model had only the verbal description: does each
+  sound fit its name (pad, bell, FM e-piano, strings, …)?
+  `docs/benchmarks/eval/audio/20261001T035104417802Z-synth-descriptive-hermes/`
+- **Reference matching** — do the passing ones (pluck bass, noise snare,
+  supersaw) sound like a match, and are the failing ones near misses or far off?
+  Hidden references are in `build/eval/20261001T034021918752Z-synth-reference-hermes/*-hidden/renders/`.
+  `docs/benchmarks/eval/audio/20261001T034021918752Z-synth-reference-hermes/`
+- Notation phrases (rhythm/register fit):
+  `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/`
+*Meanwhile:* the reference suite waits for the harness/optimizer fixes listed
+in the summary; nothing else waits on this.
 
 ## Resolved
 
