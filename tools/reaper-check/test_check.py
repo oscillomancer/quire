@@ -54,7 +54,7 @@ class Helpers(unittest.TestCase):
             ini = check.private_config(root, root / "plugins", user)
             self.assertEqual(check.snapshot(user), before)
             text = ini.read_text()
-            self.assertIn("linux_audio_mode=3", text)
+            self.assertIn("linux_audio_mode=2", text)
             self.assertIn(f"clap_path_linux-x86_64={root / 'plugins'}", text)
             self.assertNotIn("secret", text)
             self.assertFalse((ini.parent / "session.rpp").exists())

@@ -50,7 +50,9 @@ selected artifact directory; VST/LV2 paths point to an empty private directory.
 `-newinst -nosplash -cfgfile <private ini>` prevents reuse of another instance.
 `GetResourcePath()` must confirm the private directory before setup proceeds.
 
-The Linux dummy system is selected by `linux_audio_mode=3`; the script checks
+The Linux dummy system is selected by `linux_audio_mode=2` (REAPER's Linux modes,
+probed 2026-10-01: 0 JACK, 2 Dummy Audio, 3 PulseAudio; 1 and 4 open nothing
+without further device settings); the script checks
 `GetAudioDeviceInfo('MODE')` and accepts only Dummy or an already closed device,
 then calls `Audio_Quit()` (also closes MIDI). Offline renders use
 `-renderproject <absolute RPP>` and exit. Private MIDI input/output masks are
