@@ -136,7 +136,7 @@ within −120 dBFS for the stock test synth).
 | `plugin.list` | query | `filter?` (text), `rescan?` | `plugins: [{id, name, instrument, semantic, features}]` |
 | `plugin.load` | edit | `plugin` (id or path), `position?` (chain index, default: instrument first else end) | `instance`, `name`, `semantic`, `chain` |
 | `plugin.remove` | edit | `instance` | `chain` |
-| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list), `patch_type`, `patch_schema` (full only), `description` (prose), `docs` |
+| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list; `active: false` while the parameter's module is not in the patch), `patch_type`, `patch_schema` (full only), `description` (prose), `docs` |
 | `param.get` | query | `instance`, `keys?` | `values: {key: {value, text}}` |
 | `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text |
 | `patch.get` | query | `instance`, `detail` (`changed`/`full`) | `patch` |

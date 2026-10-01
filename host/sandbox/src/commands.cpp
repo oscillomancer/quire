@@ -197,9 +197,11 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
     r.name = in.info().name;
     const bool full = a.detail == Detail::Full;
     if (in.info().semantic) {
-        const json::Value& schema = s.schema(a.instance);
+        // The values first: reading them may refresh the schema cache, so take
+        // the (current) schema reference after it.
         auto values = s.paramGet(a.instance);
         if (!values) return std::move(values).error();
+        const json::Value& schema = s.schema(a.instance);
         json::Value params = json::Value::object();
         if (const json::Value* entries = schema.find("params"); entries && entries->isObject()) {
             for (const auto& m : entries->asObject()) {
@@ -469,8 +471,9 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.description =
             "detail summary: parameters grouped as compact 'key = value (range)' lines plus a "
             "prose description of the current sound. detail full: every parameter's schema entry "
-            "with current value and text, and the patch JSON Schema. Semantic plugins are "
-            "programmed with param.set (physical units) or patch.merge.";
+            "with current value and text, and the patch JSON Schema. An entry whose module is not "
+            "in the patch carries \"active\": false (add the module with patch.merge to use it). "
+            "Semantic plugins are programmed with param.set (physical units) or patch.merge.";
         c.tags = {"plugin", "params"};
         c.args = schema::object<DescribeArgs>("plugin_describe_args")
                      .field("instance", &DescribeArgs::instance, instanceField())

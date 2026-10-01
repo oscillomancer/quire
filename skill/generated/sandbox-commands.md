@@ -867,7 +867,7 @@ Result:
 
 Describe a plugin instance: parameters, current values, patch format.
 
-detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. Semantic plugins are programmed with param.set (physical units) or patch.merge.
+detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. An entry whose module is not in the patch carries "active": false (add the module with patch.merge to use it). Semantic plugins are programmed with param.set (physical units) or patch.merge.
 
 Kind: `query`. Exposure: `mcp-tool`.
 

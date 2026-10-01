@@ -9,7 +9,9 @@ differences you measure are differences you made.
 
 1. **Load and read.** `plugin_list` → `plugin_load {plugin}` →
    `plugin_describe {instance, detail: "summary"}`. The description lists
-   parameter keys, units and ranges, and the patch's current prose summary.
+   parameter keys, units and ranges, and the patch's current prose summary. With
+   `detail: "full"` a parameter whose module is not in the patch carries
+   `"active": false` — add the module with `patch_merge` before using it.
 2. **Decide the structure first** (which modules, which routes), then set a
    first guess in one `patch_merge`. For Orrery read `guides/sound-design.md`.
 3. **Render a phrase that exercises the sound** — a held note for pads and

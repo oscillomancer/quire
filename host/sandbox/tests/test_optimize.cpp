@@ -234,6 +234,44 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     CHECK(shifted["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(0.5));
 }
 
+TEST_CASE("plugin.describe reports parameter activity from the current patch") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    // At load the patch has no filter, so the *load-time* schema marks filter1's
+    // parameters inactive; kPatch adds filters.filter1, and from then on the
+    // plugin reports them active. describe must follow the patch, not the copy
+    // taken at load (this check fails on the old behavior).
+    h.call("patch.set", kPatch);
+    json::Value after = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
+    REQUIRE(after["params"].find("filter1.cutoff") != nullptr);
+    CHECK(after["params"]["filter1.cutoff"].find("active") == nullptr);
+    CHECK(after["params"]["filter1.cutoff"]["type"].asString() == "float");
+    // The optimizer reads the instance's live schema, so the two agree; before
+    // the fix they disagreed, which is what made this confusing to an agent.
+    json::Value probe = h.call("optimize.start",
+                               R"({"instance": "in_1", "params": ["filter1.cutoff"],
+            "target": {"profile": {"schema": "supple.analysis-profile/1.0",
+                       "targets": {"spectral.centroid_hz.median": {"target": 1500, "tolerance": 100}}}},
+            "evaluations": 10, "seconds": 0.2, "tail_s": 0})");
+    CHECK(probe["params"].size() == 1);
+    h.call("job.cancel", R"({"job": ")" + probe["job"].asString() + R"("})");
+    h.call("job.wait", R"({"job": ")" + probe["job"].asString() + R"(", "timeout_s": 30})");
+    // Drop the module again: describe reports inactive and the optimizer
+    // refuses the key, the same way round.
+    h.call("patch.set", R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0"}})");
+    json::Value dropped = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
+    REQUIRE(dropped["params"]["filter1.cutoff"].find("active") != nullptr);
+    CHECK(dropped["params"]["filter1.cutoff"]["active"].asBool() == false);
+    auto refused =
+        h.d->execute({"optimize.start", j(R"({"instance": "in_1", "params": ["filter1.cutoff"],
+               "target": {"profile": {"schema": "supple.analysis-profile/1.0",
+                          "targets": {"spectral.centroid_hz.median": {"target": 1500, "tolerance": 100}}}},
+               "evaluations": 10, "seconds": 0.2, "tail_s": 0})"),
+                      kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "optimize.not_tunable");
+}
+
 TEST_CASE("auto search windows follow the parameter's shape") {
     params::ParamSpec cutoff;  // 20 Hz .. 20 kHz, log
     cutoff.unit = params::Unit::Hz;
