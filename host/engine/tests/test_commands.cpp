@@ -746,6 +746,7 @@ TEST_CASE("FX chain opaque states have content hashes across SHA-256 block bound
         CHECK(*fx.state == "sha256:" + hash);
         CHECK(f.app->head().blobs.at(*fx.state)->data == bytes);
     }
+}
 
 TEST_CASE("item.add hashes the file, reads its header, and adds one source per file") {
     Workdir dir;
