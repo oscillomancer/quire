@@ -129,6 +129,8 @@ def publish(report):
         stream.write(f"| {date} | {report['suite']} | `{report['git_hash'][:10]}` | `{report['skill_hash'][:12]}` | "
                      f"{report['runner']}/{report['model']} | {report['pass_rate']:.1%} | {report['median_loss']} | "
                      f"[{basename}](eval/{destination.name}) |\n")
+    if report["runner"] == "dry":
+        return destination  # Scripted answers are infrastructure coverage, not listening material.
     review = ROOT / "HUMAN_REVIEW.md"
     text = review.read_text()
     ids = [int(n) for n in re.findall(r"(?m)^### (\d+)\.", text)]

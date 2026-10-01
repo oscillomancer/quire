@@ -80,7 +80,7 @@ require direct `render` or an explicit `batch`/`exec` containing render.
 
 Real attempts always publish JSON/Markdown under `docs/benchmarks/eval/`, a
 history row, ignored best/worst WAVs, and one active listening queue item per
-suite run in `HUMAN_REVIEW.md`. One repeat gives identical best/worst selections.
+suite run in `HUMAN_REVIEW.md` (dry runs publish only the benchmark files). One repeat gives identical best/worst selections.
 Transcripts, usage, prompts, captures, stderr and intermediate renders remain in
 `build/eval/<run>/`. These local files and the listening WAVs must be retained or
 archived together if the report is to remain fully reviewable after build cleanup.

@@ -194,7 +194,7 @@ identical. Append one active `HUMAN_REVIEW.md` listening item per published suit
 with paths and each task's question. This is the authorized exception to the
 original draft's benchmark-only repository-write rule. No other repository data
 is changed by a run. Default dry validation stays in ignored `build/eval/`;
-`--publish` explicitly retains a dry benchmark and listening item, labeled as
+`--publish` explicitly retains a dry benchmark (no listening item: scripted answers are not model output), labeled as
 infrastructure evidence rather than model quality.
 
 Local transcripts, isolated profiles, usage, prompts, capture/audit files and
