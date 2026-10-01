@@ -639,6 +639,10 @@ EngineStatus EngineApp::engineStatus() {
     st.restartNeeded = b.restartNeeded;
     st.anticipative = engine_->options().anticipative;
     st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());
+    if (const std::shared_ptr<MeterBank> bank = engine_->meterBank()) {
+        st.meterDrops.renderer = static_cast<std::int64_t>(bank->droppedRenderer());
+        st.meterDrops.callback = static_cast<std::int64_t>(bank->droppedCallback());
+    }
     return st;
 }
 

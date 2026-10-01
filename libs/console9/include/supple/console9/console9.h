@@ -9,6 +9,13 @@ double faderGain(double db) SUPPLE_RT;
 double nativeFader(double db) SUPPLE_RT;
 double faderDb(double native) SUPPLE_RT;
 double nativePan(double percent) SUPPLE_RT;
+// The pan angle (radians, 0..π/2) a stage uses for a native pan (0..1, .5 centre).
+double panAngle(double nativePan) SUPPLE_RT;
+// The per-channel gains a stage applies at `angle`: constant power — right is
+// sin(angle), left sin(π/2 − angle), so centre is sin(π/4) on both channels.
+// Exposed so a host can meter or analyse a strip's pre-encode level; the
+// stages' trim_ (fader plus the console's own gain) is not included.
+void panGains(double angle, double& left, double& right) SUPPLE_RT;
 
 struct Seeds {
     uint32_t left = 16386, right = 16387;

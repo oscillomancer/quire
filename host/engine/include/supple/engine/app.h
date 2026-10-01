@@ -41,6 +41,13 @@ struct AppOptions {
     std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
 };
 
+// Meter entries a full ring dropped (P5.3c): the renderer's ring and the audio
+// callback's. A drop means a strip's peak/RMS missed a block, not that audio
+// was lost.
+struct MeterDrops {
+    std::int64_t renderer = 0, callback = 0;
+};
+
 // The real-time engine as engine.status reports it.
 struct EngineStatus {
     bool running = false;
@@ -52,6 +59,7 @@ struct EngineStatus {
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;
+    MeterDrops meterDrops;              // meter entries dropped by a full ring
     std::vector<std::string> failedFx;  // isolated instances whose bridge crashed or hung
 };
 

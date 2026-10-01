@@ -689,6 +689,20 @@ Kind: `action`. Exposure: `mcp-tool`.
     "anticipation_misses": {
       "type": "integer"
     },
+    "meter_drops": {
+      "type": "object",
+      "title": "meter_drops",
+      "properties": {
+        "renderer": {
+          "type": "integer"
+        },
+        "callback": {
+          "type": "integer"
+        }
+      },
+      "required": ["renderer", "callback"],
+      "additionalProperties": false
+    },
     "failed_fx": {
       "type": "array",
       "items": {
@@ -710,6 +724,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "restart_needed",
     "anticipative",
     "anticipation_misses",
+    "meter_drops",
     "failed_fx"
   ],
   "additionalProperties": false
@@ -752,6 +767,10 @@ Result:
   "restart_needed": false,
   "anticipative": true,
   "anticipation_misses": 0,
+  "meter_drops": {
+    "renderer": 0,
+    "callback": 0
+  },
   "failed_fx": []
 }
 
@@ -761,7 +780,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -816,6 +835,20 @@ Kind: `query`. Exposure: `mcp-tool`.
     "anticipation_misses": {
       "type": "integer"
     },
+    "meter_drops": {
+      "type": "object",
+      "title": "meter_drops",
+      "properties": {
+        "renderer": {
+          "type": "integer"
+        },
+        "callback": {
+          "type": "integer"
+        }
+      },
+      "required": ["renderer", "callback"],
+      "additionalProperties": false
+    },
     "failed_fx": {
       "type": "array",
       "items": {
@@ -837,6 +870,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "restart_needed",
     "anticipative",
     "anticipation_misses",
+    "meter_drops",
     "failed_fx"
   ],
   "additionalProperties": false
@@ -870,6 +904,10 @@ Result:
   "restart_needed": false,
   "anticipative": false,
   "anticipation_misses": 0,
+  "meter_drops": {
+    "renderer": 0,
+    "callback": 0
+  },
   "failed_fx": []
 }
 

@@ -155,6 +155,13 @@ struct RangeArgs {
     std::optional<std::int64_t> startBar, endBar;
 };
 
+schema::Schema<MeterDrops> meterDropsSchema() {
+    return schema::object<MeterDrops>("meter_drops")
+        .field("renderer", &MeterDrops::renderer, schema::integer())
+        .field("callback", &MeterDrops::callback, schema::integer())
+        .build();
+}
+
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
         .field("running", &EngineStatus::running, schema::boolean())
@@ -170,6 +177,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
         .field("anticipative", &EngineStatus::anticipative, schema::boolean())
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
+        .field("meter_drops", &EngineStatus::meterDrops, meterDropsSchema())
         .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
         .build();
 }
@@ -2662,7 +2670,8 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
-                     "anticipative": true, "anticipation_misses": 0, "failed_fx": []})"),
+                     "anticipative": true, "anticipation_misses": 0,
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
@@ -2699,7 +2708,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
-            "away; engine.stop and engine.start again. failed_fx: isolated plugins whose "
+            "away; engine.stop and engine.start again. meter_drops: meter entries a full ring "
+            "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
+            "never audio. failed_fx: isolated plugins whose "
             "process crashed or hung (silent now; fx.restart re-creates them).";
         c.tags = {"engine"};
         c.args = schema::object<NoArgs>("no_args").build();
@@ -2708,7 +2719,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
-                     "anticipative": false, "anticipation_misses": 0, "failed_fx": []})"),
+                     "anticipative": false, "anticipation_misses": 0,
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();
