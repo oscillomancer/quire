@@ -24,6 +24,8 @@ class TextBlock;
 
 namespace supple::gui {
 
+class MidiEventList;
+
 struct RollNote {
     int pitch = 60;
     double start = 0, length = 1;  // beats from the item's start
@@ -87,6 +89,7 @@ class MidiEditor {
     RollState& state() { return state_; }
     ui::Node* roll() const { return roll_; }
     ui::TextArea* notation() const { return text_; }
+    MidiEventList* eventList() const { return eventList_.get(); }
     Status edit(json::Value ops);  // midi.edit on the open item, keeping the selection
     void selectAll();
     void quantize();
@@ -107,6 +110,9 @@ class MidiEditor {
     UiState& ui_;
     RollState state_;
     ui::Node* panel_ = nullptr;
+    std::unique_ptr<MidiEventList> eventList_;
+    ui::Node* listPane_ = nullptr;
+    ui::Node* rollPane_ = nullptr;
     ui::Node* roll_ = nullptr;
     ui::Node* keys_ = nullptr;
     ui::Node* velocity_ = nullptr;

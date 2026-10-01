@@ -1,4 +1,5 @@
 #include "midi_editor.h"
+#include "midi_event_list.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -742,12 +743,23 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
         root_.relayout();
         root_.damageAll();
     });
+    header.emplace<ui::Button>("midi.list.toggle", "List", [this] {
+        if (!listPane_ || !rollPane_) return;
+        listPane_->visible = !listPane_->visible;
+        rollPane_->visible = !listPane_->visible;
+        roll_->visible = !listPane_->visible;
+        eventList_->activate(listPane_->visible);
+        if (!listPane_->visible) root_.focus(roll_);
+        root_.relayout();
+        root_.damageAll();
+    });
     header.emplace<ui::Button>("midi.close", "Close", [this] { close(); });
 
     auto& body = panel->emplace<ui::Node>("midi.body");
     body.layout.dir = ui::Layout::Dir::Row;
     body.layout.height = ui::SizeRule::fraction();
     auto& left = body.emplace<ui::Node>("midi.left");
+    rollPane_ = &left;
     left.layout.dir = ui::Layout::Dir::Column;
     left.layout.width = ui::SizeRule::fraction();
     auto& rollRow = left.emplace<ui::Node>("midi.rollrow");
@@ -768,6 +780,11 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     };
     roll.repaintAll = repaint;
     vel.repaintAll = repaint;
+
+    eventList_ = std::make_unique<MidiEventList>(root_, *this, app_);
+    auto listPane = eventList_->build();
+    listPane_ = listPane.get();
+    body.add(std::move(listPane));
 
     auto& pane = body.emplace<ui::Node>("midi.notation");
     notationPane_ = &pane;
@@ -829,15 +846,20 @@ Status MidiEditor::open(const std::string& item) {
         root_.relayout();
     }
     root_.damageAll();
-    if (roll_) root_.focus(roll_);
+    if (listPane_ && listPane_->visible)
+        eventList_->activate(true);
+    else if (roll_)
+        root_.focus(roll_);
     return {};
 }
 
 void MidiEditor::close() {
+    if (eventList_) eventList_->activate(false);
     if (textDirty_) compileText(true);
     state_.item.clear();
     state_.notes.clear();
     state_.selected.clear();
+    if (eventList_) eventList_->sync();
     if (panel_ && panel_->visible) {
         if (root_.focused() && (root_.focused() == roll_ || root_.focused() == text_))
             root_.focus(nullptr);
@@ -1104,6 +1126,7 @@ void MidiEditor::sync() {
         compilePending_ = false;  // a failed compile waits for the next edit
         compileText(true);
     }
+    if (eventList_ && listPane_ && listPane_->visible) eventList_->sync();
     if (auto t = app_.transport("get")) {
         const double beat = t->playing ? t->beat : -1;
         if (beat != state_.playheadBeat) {
