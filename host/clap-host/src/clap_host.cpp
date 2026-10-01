@@ -138,6 +138,12 @@ struct Instance::HostState {
     std::vector<Timer> timers;  // main thread only
     clap_id nextTimer = 1;
 
+    // clap.gui requests ([thread-safe]: any thread may call them).
+    std::atomic<bool> guiResize{false}, guiClosed{false};
+    std::atomic<std::uint32_t> guiWidth{0}, guiHeight{0};
+    // clap.posix-fd-support (main thread).
+    std::vector<std::pair<int, std::uint32_t>> fds;
+
     SpscRing<LogLine, 256> audioLog;  // plugin audio thread -> main
     std::mutex logMutex;              // any other thread
     std::vector<std::string> log;
@@ -250,6 +256,42 @@ struct HostCallbacks {
         return t.size() != before;
     }
 
+    // clap.gui (the editor lives in a window the host owns)
+    static void CLAP_ABI guiResizeHintsChanged(const clap_host_t*) {}
+    static bool CLAP_ABI guiRequestResize(const clap_host_t* h, uint32_t width, uint32_t height) {
+        auto* s = S(h);
+        s->guiWidth = width;
+        s->guiHeight = height;
+        s->guiResize = true;
+        return true;  // applied by the window owner on its next loop pass
+    }
+    static bool CLAP_ABI guiRequestShow(const clap_host_t*) { return true; }
+    static bool CLAP_ABI guiRequestHide(const clap_host_t*) { return true; }
+    static void CLAP_ABI guiClosed(const clap_host_t* h, bool) { S(h)->guiClosed = true; }
+
+    // clap.posix-fd-support (main thread)
+    static bool CLAP_ABI registerFd(const clap_host_t* h, int fd, clap_posix_fd_flags_t flags) {
+        auto& fds = S(h)->fds;
+        for (auto& [f, fl] : fds)
+            if (f == fd) return false;
+        fds.emplace_back(fd, flags);
+        return true;
+    }
+    static bool CLAP_ABI modifyFd(const clap_host_t* h, int fd, clap_posix_fd_flags_t flags) {
+        for (auto& [f, fl] : S(h)->fds)
+            if (f == fd) {
+                fl = flags;
+                return true;
+            }
+        return false;
+    }
+    static bool CLAP_ABI unregisterFd(const clap_host_t* h, int fd) {
+        auto& fds = S(h)->fds;
+        const auto before = fds.size();
+        std::erase_if(fds, [&](const auto& x) { return x.first == fd; });
+        return fds.size() != before;
+    }
+
     // com.suppleaudio.semantic-params
     static void CLAP_ABI semanticChanged(const clap_host_t* h, uint32_t) {
         S(h)->semanticChanged = true;
@@ -322,6 +364,11 @@ const clap_host_note_ports_t kHostNotePorts = {HostCallbacks::noteDialects,
                                                HostCallbacks::noteRescan};
 const clap_host_timer_support_t kHostTimer = {HostCallbacks::registerTimer,
                                               HostCallbacks::unregisterTimer};
+const clap_host_gui_t kHostGui = {HostCallbacks::guiResizeHintsChanged,
+                                  HostCallbacks::guiRequestResize, HostCallbacks::guiRequestShow,
+                                  HostCallbacks::guiRequestHide, HostCallbacks::guiClosed};
+const clap_host_posix_fd_support_t kHostFd = {HostCallbacks::registerFd, HostCallbacks::modifyFd,
+                                              HostCallbacks::unregisterFd};
 const clap_host_supple_semantic_params_t kHostSemantic = {
     sizeof(clap_host_supple_semantic_params_t), HostCallbacks::semanticChanged};
 
@@ -394,6 +441,8 @@ const void* CLAP_ABI HostCallbacks::getExtension(const clap_host_t*, const char*
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kHostAudioPorts;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kHostNotePorts;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kHostTimer;
+    if (!std::strcmp(id, CLAP_EXT_GUI)) return &kHostGui;
+    if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &kHostFd;
     if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS)) return &kHostSemantic;
     return nullptr;
 }
@@ -553,6 +602,9 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
     self->extLatency_ = static_cast<const clap_plugin_latency_t*>(ext(CLAP_EXT_LATENCY));
     self->extTail_ = static_cast<const clap_plugin_tail_t*>(ext(CLAP_EXT_TAIL));
     self->extTimer_ = static_cast<const clap_plugin_timer_support_t*>(ext(CLAP_EXT_TIMER_SUPPORT));
+    self->extGui_ = static_cast<const clap_plugin_gui_t*>(ext(CLAP_EXT_GUI));
+    self->extFd_ =
+        static_cast<const clap_plugin_posix_fd_support_t*>(ext(CLAP_EXT_POSIX_FD_SUPPORT));
     self->extSemantic_ = static_cast<const clap_plugin_supple_semantic_params_t*>(
         ext(CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));
     if (self->extSemantic_ && self->extSemantic_->struct_size <
@@ -634,6 +686,7 @@ Instance::~Instance() {
         return;
     }
     if (!plugin_) return;
+    closeEditor();  // the editor goes before the plugin
     // Destroying a processing instance is a caller bug (the audio thread must
     // stop processing first); recover by stopping on this thread.
     if (processing_) stopProcessing();
@@ -1219,6 +1272,91 @@ bool Instance::serviceMainThread() {
         }
     }
     return did;
+}
+
+bool Instance::hasEditor() const {
+    return plugin_ && !vst3_ && !remote_ && extGui_ &&
+           extGui_->is_api_supported(plugin_, CLAP_WINDOW_API_X11, false);
+}
+
+Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, double scale) {
+    if (vst3_ || remote_)
+        return Error("host.editor", "editors of VST3 and isolated plugins are not supported yet",
+                     "", "run the plugin in-process to open its editor");
+    if (!hasEditor()) return Error("host.editor", "this plugin has no embeddable X11 editor");
+    if (editorOpen_) closeEditor();
+    if (!extGui_->create(plugin_, CLAP_WINDOW_API_X11, false))
+        return Error("host.editor", "the plugin could not create its editor");
+    (void)extGui_->set_scale(plugin_, scale);  // X11 plugins may handle scale themselves
+    clap_window_t window{};
+    window.api = CLAP_WINDOW_API_X11;
+    window.x11 = x11Parent;
+    if (!extGui_->set_parent(plugin_, &window)) {
+        extGui_->destroy(plugin_);
+        return Error("host.editor", "the plugin refused the parent window");
+    }
+    EditorSize size;
+    (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    size.resizable = extGui_->can_resize(plugin_);
+    (void)extGui_->show(plugin_);
+    editorOpen_ = true;
+    hostState_->guiClosed = false;
+    hostState_->guiResize = false;
+    return size;
+}
+
+Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {
+    if (!editorOpen_) return Error("host.editor", "no editor is open");
+    EditorSize size{width, height, extGui_->can_resize(plugin_)};
+    if (size.resizable) {
+        (void)extGui_->adjust_size(plugin_, &size.width, &size.height);
+        (void)extGui_->set_size(plugin_, size.width, size.height);
+    }
+    (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    return size;
+}
+
+void Instance::closeEditor() {
+    if (!editorOpen_) return;
+    (void)extGui_->hide(plugin_);
+    extGui_->destroy(plugin_);
+    editorOpen_ = false;
+}
+
+Instance::EditorRequests Instance::takeEditorRequests() {
+    EditorRequests r;
+    if (!hostState_) return r;
+    HostState& h = *hostState_;
+    if (h.guiResize.exchange(false)) {
+        r.resize = true;
+        r.width = h.guiWidth;
+        r.height = h.guiHeight;
+    }
+    if (h.guiClosed.exchange(false)) {
+        r.closed = true;
+        if (editorOpen_) {  // the plugin closed its own window: release it
+            extGui_->destroy(plugin_);
+            editorOpen_ = false;
+        }
+    }
+    return r;
+}
+
+std::vector<std::pair<int, std::uint32_t>> Instance::watchedFds() const {
+    return hostState_ ? hostState_->fds : std::vector<std::pair<int, std::uint32_t>>{};
+}
+
+void Instance::onFd(int fd, std::uint32_t flags) {
+    if (extFd_ && plugin_) extFd_->on_fd(plugin_, fd, flags);
+}
+
+int Instance::nextTimerMs() const {
+    if (!hostState_ || !extTimer_ || hostState_->timers.empty()) return -1;
+    const auto now = std::chrono::steady_clock::now();
+    auto next = hostState_->timers.front().next;
+    for (const auto& t : hostState_->timers) next = std::min(next, t.next);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
+    return static_cast<int>(std::max<std::int64_t>(0, ms));
 }
 
 Instance::Notifications Instance::takeNotifications() {

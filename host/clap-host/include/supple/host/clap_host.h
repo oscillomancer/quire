@@ -239,6 +239,32 @@ class Instance {
     };
     Notifications takeNotifications();
 
+    // --- editor (main thread): the plugin's GUI embedded in an X11 window
+    // (CLAP gui extension). VST3 and isolated instances: not yet.
+    struct EditorSize {
+        std::uint32_t width = 0, height = 0;
+        bool resizable = false;
+    };
+    bool hasEditor() const;
+    Result<EditorSize> openEditor(unsigned long x11Parent, double scale);
+    // Host-driven resize; returns the size the plugin accepted.
+    Result<EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    void closeEditor();
+    bool editorOpen() const { return editorOpen_; }
+    // What the plugin asked for since the last call (resize, or it closed itself).
+    struct EditorRequests {
+        bool resize = false, closed = false;
+        std::uint32_t width = 0, height = 0;
+    };
+    EditorRequests takeEditorRequests();
+    // clap.posix-fd-support: descriptors to watch (fd, CLAP_POSIX_FD_* flags),
+    // and the callback when one is ready.
+    std::vector<std::pair<int, std::uint32_t>> watchedFds() const;
+    void onFd(int fd, std::uint32_t flags);
+    // Milliseconds until the next plugin timer is due (-1: none): the UI
+    // loop's deadline while editors are open.
+    int nextTimerMs() const;
+
     // Log lines the plugin wrote (from any thread), drained on the main thread.
     std::vector<std::string> takeLog();
 
@@ -260,6 +286,9 @@ class Instance {
     const clap_plugin_tail_t* extTail_ = nullptr;
     const clap_plugin_timer_support_t* extTimer_ = nullptr;
     const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
+    const clap_plugin_gui_t* extGui_ = nullptr;
+    const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
+    bool editorOpen_ = false;
     std::uint32_t inChannels_ = 0, outChannels_ = 0, keyChannels_ = 0;
     bool acceptsNotes_ = false, keyActive_ = false;
     bool active_ = false;

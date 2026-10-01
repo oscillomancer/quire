@@ -163,7 +163,14 @@ Result<json::Value> Runner::resolve(const json::Value& args, const Context& c) {
 }
 
 Result<json::Value> Runner::step(const Action& a, const Context& c, const json::Value& prompted) {
-    if (a.builtin) return a.builtin(c);
+    if (a.builtin) {
+        for (const std::string& p : a.prompts)
+            if (!prompted.isObject() || !prompted.find(p))
+                return Error("action.prompt", a.name + " needs \"" + p + "\"", "/" + p);
+        Context withArgs = c;
+        withArgs.prompted = prompted;
+        return a.builtin(withArgs);
+    }
     if (!a.steps.empty()) {
         json::Value results = json::Value::array();
         for (const std::string& id : a.steps) {

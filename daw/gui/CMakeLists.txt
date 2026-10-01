@@ -43,7 +43,7 @@ target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/in
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp)
+  app/agent_panel.cpp app/plugin_windows.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_link_libraries(gui-app PUBLIC supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
                       supple::engine supple::control-protocol supple::product-info SDL3::SDL3)
@@ -72,8 +72,9 @@ if(SUPPLE_BUILD_TESTS)
   set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-actions SOURCES tests/test_actions.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
   # The app driven by keys and clicks, asserting on the session (gui.md §10).
-  supple_add_tests(gui-app SOURCES tests/test_app.cpp LABELS gui tsan-skip)
-  target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
+  supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp LABELS gui tsan-skip)
+  target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
+                             SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap")
   target_include_directories(gui-app.tests PRIVATE ${PROJECT_SOURCE_DIR}/daw/agent-panel/tests)
   set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)

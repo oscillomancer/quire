@@ -26,6 +26,7 @@
 #include "app_actions.h"
 #include "chrome.h"
 #include "generate.h"
+#include "plugin_windows.h"
 #include "shell.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
@@ -273,6 +274,12 @@ int main(int argc, char** argv) {
         [&](std::function<void()> f) { loop.post(std::move(f)); },
         agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
+    gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
+        const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;
+        if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
+        return pluginWindows.open(*id);
+    });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
@@ -308,7 +315,9 @@ int main(int argc, char** argv) {
     int step = 0;
     while (!quit && !loop.stopRequested()) {
         const double t0 = wallMs();
-        const int next = loop.pump();
+        int next = loop.pump();
+        if (const int plugin = pluginWindows.service(); plugin >= 0)
+            next = next < 0 ? plugin : std::min(next, plugin);
         if (const double ms = wallMs() - t0; ms > 2.0) {
             ++longTasks;
             longestTaskMs = std::max(longestTaskMs, ms);
@@ -345,6 +354,7 @@ int main(int argc, char** argv) {
         SDL_Event e;
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
+            if (pluginWindows.handle(e)) continue;  // an editor window's event
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
                 quit = true;
             else

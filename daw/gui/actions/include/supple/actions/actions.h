@@ -24,7 +24,8 @@ namespace supple::actions {
 struct Context {
     std::vector<std::string> selectedTracks, selectedItems;  // ids, in order
     double playheadSeconds = 0, playheadBeats = 0;
-    std::vector<std::string> sections{"global"};  // innermost first: {"arrange", "global"}
+    std::vector<std::string> sections{"global"};   // innermost first: {"arrange", "global"}
+    json::Value prompted = json::Value::object();  // a built-in's prompted arguments
 };
 
 struct Action {
