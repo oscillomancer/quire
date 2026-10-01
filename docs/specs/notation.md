@@ -169,7 +169,7 @@ header keyword for a line that starts with a bar number.
 
 ```
 voice NAME [ch 1..16] [vel 1..127] [octave -1..8] [grid DUR [len DUR]] [accent 1..127] [ghost 1..127]
-BAR ":" events [ "|" events ]...
+BAR ":" events [ "|" [ BAR ":" ] events ]...
 BARS "=" BARS
 ```
 
@@ -180,6 +180,9 @@ A voice is an independent time cursor. Several voices may share a channel.
 Bar lines: `N:` starts bar N (1-based, relative to the item start). Bars in a
 voice must appear in increasing order; gaps are silent. `|` on the same line
 continues with the next bar: `1: C4:q D4:q E4:q F4:q | G4:w` is bars 1 and 2.
+A number written immediately after `|` is accepted when it names the bar the
+`|` starts (`1: … | 2: …` reads the same as `1: … | …`); any other number
+there is an error (`notation.bar_after_pipe`). *(Amended 2026-10-01.)*
 
 **Every written bar must sum exactly to the meter** (in ticks). Otherwise:
 
@@ -459,7 +462,8 @@ collects all errors (up to 50) as `details` of one `notation.invalid` error
 `bar_length` (says how many beats the bar has and needs, and what single
 rest would fix it), `bar_order`, `bar_overlap` (bar written twice),
 `copy_source` (copy from unwritten bars), `dangling_tie`, `tie_mismatch`,
-`fill_not_last`, `bar_after_pipe` (omit the next bar number after `|`),
+`fill_not_last`, `bar_after_pipe` (a number after `|` that is not the bar the
+pipe starts: drop it, or start a new line with it),
 `grid_steps` (states the step count needed), `grid_char`,
 `unknown_drum` (closest names), `unknown_chord` (closest quality),
 `velocity_range`, `channel_range`, `lane_order` (positions must not decrease),
