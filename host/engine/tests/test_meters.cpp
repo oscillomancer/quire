@@ -100,9 +100,9 @@ TEST_CASE("the meter ring wraps under a producer and a consumer thread") {
     // slower), so only the single-threaded case asserts an exact count.
 }
 
-TEST_CASE("meter slots follow their track and are reused when a plan drops it") {
+TEST_CASE("a slot a plan drops is reused only after another plan has been compiled") {
     MeterBank bank;
-    bank.beginPlan();
+    bank.beginPlan();  // plan 1: tracks 1 and 2
     const std::uint16_t a = bank.slotFor(track(1));
     const std::uint16_t b = bank.slotFor(track(2));
     CHECK(a != MeterBank::kNoSlot);
@@ -110,7 +110,9 @@ TEST_CASE("meter slots follow their track and are reused when a plan drops it") 
     CHECK(bank.slotFor(track(1)) == a);  // stable within one plan
     bank.endPlan();
 
-    // A plan without track 1 releases its slot for the next track that needs one.
+    // Plan 2 drops track 1 (its slot retires) and brings track 3: the retired
+    // slot must not be handed to a new track yet — the plan that dropped it is
+    // still playing while this one is compiled.
     bank.beginPlan();
     CHECK(bank.slotFor(track(2)) == b);
     const std::uint16_t c = bank.slotFor(track(3));
@@ -118,9 +120,16 @@ TEST_CASE("meter slots follow their track and are reused when a plan drops it") 
     CHECK(c != b);
     bank.endPlan();
 
+    // Plan 3 still cannot use it: the plan that dropped it must have been
+    // adopted first. Plan 4 can.
     bank.beginPlan();
-    CHECK(bank.slotFor(track(2)) == b);  // track 2 keeps its slot
-    CHECK(bank.slotFor(track(4)) == a);  // track 1's slot was released and is reused
+    CHECK(bank.slotFor(track(2)) == b);
+    const std::uint16_t d = bank.slotFor(track(4));
+    CHECK(d != a);
+    bank.endPlan();
+    bank.beginPlan();
+    CHECK(bank.slotFor(track(2)) == b);  // track 2 keeps its slot throughout
+    CHECK(bank.slotFor(track(5)) == a);  // track 1's slot is reusable now
     bank.endPlan();
 }
 

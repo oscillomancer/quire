@@ -179,22 +179,25 @@ a benchmark failure).
 6. Write hardware outputs; publish meters (lossy rings) and state deltas
    (coalescing slots).
 
-**Meters** (P5.3c). Per strip, the peak and the mean square of the **post**
-signal (post-fader, post-pan; for a Channel strip that is the Console 9 encoded
-level the master sees) since the reader's last call. Two SPSC rings of
-`MeterEntry` carry them, one per producer: the renderer thread publishes what it
-renders ahead (after the block, collected from its nodes, never from worker
-tasks), the audio callback publishes what it plays — the live nodes, or the
-whole graph when anticipation is off. An entry is **heard** once the callback's
-play position in that epoch has passed the end of the block it covers, minus
-the device's reported output latency; entries of an older epoch (a seek or a
-pause bumped it) are dropped, and while the transport is stopped everything
-already processed counts as heard (monitored input). `EngineApp::meters()`
-drains the rings and returns one reading per strip of the newest plan — zeros
-for a strip with no heard audio; decay and peak hold belong to the GUI. A full
-ring drops the entry and counts it (`MeterBank::dropped*`). Offline renders do
-not meter at all (no bank: zero cost), and the publishers never touch the
-signal, so renders stay bit-identical.
+**Meters** (P5.3c). Per strip, the peak and the mean square of the strip's signal
+**after the fader and after the pan law, before the Console 9 encode**
+(`sum × faderGain × ` the stage's own `panGains` — what a user expects at
+unity: a −6 dBFS item at 0 dB reads its own peak times the Channel pan law)
+since the reader's last call; a master has no encode and measures its output,
+the signal the device is given. Two SPSC rings of `MeterEntry` carry the
+numbers, one per producer: the renderer thread publishes what it renders ahead
+(after the block, collected from its nodes, never from worker tasks), the audio
+callback publishes what it plays — the live nodes, or the whole graph when
+anticipation is off. An entry is **heard** once the callback's play position in
+that epoch has passed the end of the block it covers, minus the device's
+reported output latency; entries of an older epoch (a seek or a pause bumped
+it) are dropped, and while the transport is stopped everything already
+processed counts as heard (monitored input). `EngineApp::meters()` drains the
+rings and returns one reading per strip of the newest plan — zeros for a strip
+with no heard audio; decay and peak hold belong to the GUI. A full ring drops
+the entry and counts it (`engine.status.meter_drops`, per producer). Offline
+renders do not meter at all (no bank: zero cost), and the publishers never
+touch the signal, so renders stay bit-identical.
 
 Everything in this cycle is `SUPPLE_RT` and runs under rtsan in the `rtsan`
 preset's engine tests (with the dummy backend).
@@ -279,7 +282,7 @@ bus and exposes it through the control protocol (Unix socket), Lua (Phase
 4/5 bindings) and MCP (proxy or in-process). Engine-specific commands:
 `engine.start {backend, device, rate, block}`, `engine.stop`,
 `engine.status` (q: backend, rate, block, load, xruns, anticipation
-misses), `engine.graph` (q: nodes, live/anticipative classification,
+misses, meter drops), `engine.graph` (q: nodes, live/anticipative classification,
 latencies, CPU per node), `engine.settings.set {render_ahead_ms,
 worker_threads, live_multiprocessing, automation_resolution, …}`.
 Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),

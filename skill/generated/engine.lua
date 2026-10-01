@@ -98,6 +98,7 @@ q = nil
 ---@field restart_needed boolean
 ---@field anticipative boolean
 ---@field anticipation_misses integer
+---@field meter_drops table
 ---@field failed_fx string[]
 
 ---@class Quire.engine_status_result
@@ -114,6 +115,7 @@ q = nil
 ---@field restart_needed boolean
 ---@field anticipative boolean
 ---@field anticipation_misses integer
+---@field meter_drops table
 ---@field failed_fx string[]
 
 ---@class Quire.env_add_args

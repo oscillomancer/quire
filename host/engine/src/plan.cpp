@@ -1135,6 +1135,13 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         }
     }
     node.preFader.copyFrom(node.sum, n);
+    // Metering (P5.3c): a strip's meter shows the signal before the Console 9
+    // encode — after the fader and after the pan law (one multiply per channel
+    // per sample, with the pan gains computed from libs/console9 when the pan
+    // moves); a master's meter is its output, the signal the device is given.
+    const bool metered = node.meterSlot != 0xffff;
+    double meterPeakL = 0.0, meterPeakR = 0.0, meterSumL = 0.0, meterSumR = 0.0;
+    double meterLeft = 0.0, meterRight = 0.0, meterPan = -1.0;
     // Fader controls and mute act before the channel encode; masters balance decoded audio.
     for (std::uint32_t i = 0; i < n; ++i) {
         const auto at = pos + i;
@@ -1157,26 +1164,34 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             const double r = balance >= 0 ? 1 : std::cos(balance * std::numbers::pi / 2);
             node.post.l[i] = node.sum.l[i] * static_cast<float>(gain * l);
             node.post.r[i] = node.sum.r[i] * static_cast<float>(gain * r);
+            if (metered) {
+                meterPeakL = std::max(meterPeakL, std::fabs(double(node.post.l[i])));
+                meterPeakR = std::max(meterPeakR, std::fabs(double(node.post.r[i])));
+                meterSumL += double(node.post.l[i]) * double(node.post.l[i]);
+                meterSumR += double(node.post.r[i]) * double(node.post.r[i]);
+            }
         } else {
             node.encoder.sample(node.sum.l[i], node.sum.r[i], node.post.l[i], node.post.r[i], gain,
                                 nativePan);
+            if (metered) {
+                if (nativePan != meterPan) {
+                    console9::panGains(console9::panAngle(nativePan), meterLeft, meterRight);
+                    meterPan = nativePan;
+                }
+                const double l = double(node.sum.l[i]) * gain * meterLeft;
+                const double r = double(node.sum.r[i]) * gain * meterRight;
+                meterPeakL = std::max(meterPeakL, std::fabs(l));
+                meterPeakR = std::max(meterPeakR, std::fabs(r));
+                meterSumL += l * l;
+                meterSumR += r * r;
+            }
         }
     }
-    // Metering (P5.3c): the post signal is what a meter shows. Unmetered
-    // nodes pay one comparison; a metered one pays one pass over the block.
-    if (node.meterSlot != 0xffff) {
-        float peakL = 0.0f, peakR = 0.0f, sumL = 0.0f, sumR = 0.0f;
-        for (std::uint32_t i = 0; i < n; ++i) {
-            const float l = node.post.l[i], r = node.post.r[i];
-            peakL = std::max(peakL, std::fabs(l));
-            peakR = std::max(peakR, std::fabs(r));
-            sumL += l * l;
-            sumR += r * r;
-        }
-        node.meterPeak[0] = peakL;
-        node.meterPeak[1] = peakR;
-        node.meterSumSq[0] = sumL;
-        node.meterSumSq[1] = sumR;
+    if (metered) {
+        node.meterPeak[0] = static_cast<float>(meterPeakL);
+        node.meterPeak[1] = static_cast<float>(meterPeakR);
+        node.meterSumSq[0] = static_cast<float>(meterSumL);
+        node.meterSumSq[1] = static_cast<float>(meterSumR);
     }
     // Independent encoders run at the source, before PDC and frontier publication.
     for (std::size_t ei : node.out) {
