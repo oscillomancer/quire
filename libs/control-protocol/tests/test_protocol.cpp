@@ -405,6 +405,36 @@ TEST_CASE("large pipelined frames stop at the per-peer posted byte limit") {
     server.stop();
 }
 
+// Embedded in another loop (the GUI's): pump() runs what is due without
+// blocking and reports the next deadline; the waker fires for posts and timer
+// changes from any thread, so the owner's wait can be interrupted.
+TEST_CASE("model-loop pump runs due work without blocking and wakes its owner") {
+    rpc::ModelLoop loop;
+    std::atomic<int> wakes{0};
+    loop.setWaker([&] { ++wakes; });
+    CHECK(loop.pump() == -1);  // nothing scheduled
+    int ran = 0;
+    std::thread poster([&] { loop.post([&] { ++ran; }); });
+    poster.join();
+    CHECK(wakes.load() >= 1);
+    CHECK(loop.pump() == -1);
+    CHECK(ran == 1);
+    int ticks = 0;
+    const int before = wakes.load();
+    auto timer = loop.every(std::chrono::milliseconds(20), [&] { ++ticks; });
+    CHECK(wakes.load() > before);
+    const int next = loop.pump();
+    CHECK(next >= 0);
+    CHECK(next <= 20);
+    CHECK(ticks == 0);  // not due yet
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    CHECK(loop.pump() >= 0);
+    CHECK(ticks == 1);
+    timer.cancel();
+    CHECK(loop.pump() == -1);
+    CHECK_FALSE(loop.stopRequested());
+}
+
 // The service timers run on the model thread between posted tasks, without a
 // busy wait (the loop's poll gets the nearest deadline as its timeout).
 TEST_CASE("model-loop timers run on the model thread in order and stop on cancel") {

@@ -1,0 +1,48 @@
+# Phase 5 GUI (docs/specs/gui.md, ADR-0005): SDL3 windows (X11 driver; the
+# offscreen driver for tests and benchmarks), OpenGL 3.3 core, NanoVG GL3.
+find_package(SDL3 REQUIRED CONFIG)
+find_package(OpenGL REQUIRED)
+
+# NanoVG with its GL3 backend (vendored, Zlib; stb_image inside is PD/MIT).
+add_library(gui-nanovg STATIC ${PROJECT_SOURCE_DIR}/third_party/nanovg/src/nanovg.c
+                              platform/src/nanovg_gl3.c)
+target_include_directories(gui-nanovg SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party/nanovg/src)
+target_link_libraries(gui-nanovg PUBLIC OpenGL::GL)
+set_target_properties(gui-nanovg PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+supple_add_library(gui-platform
+  SOURCES platform/src/window.cpp platform/src/png.cpp
+  DEPS supple::core-base
+  PRIVATE_DEPS SDL3::SDL3 gui-nanovg)
+target_include_directories(gui-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/include)
+target_link_libraries(gui-platform PUBLIC gui-nanovg)
+
+add_executable(${PRODUCT_SLUG} app/main.cpp app/shell.cpp)
+target_link_libraries(${PRODUCT_SLUG} PRIVATE supple::gui-platform supple::engine
+                      supple::control-protocol supple::product-info SDL3::SDL3)
+target_compile_definitions(${PRODUCT_SLUG} PRIVATE
+  SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
+supple_target_defaults(${PRODUCT_SLUG})
+
+if(SUPPLE_BUILD_TESTS)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  supple_add_tests(gui-platform SOURCES tests/test_platform.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)
+  target_compile_definitions(gui-platform.tests PRIVATE
+    SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
+  # Mesa's allocations outlive the process by design; leak checks would only
+  # report the GL driver.
+  set_tests_properties(gui-platform.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # The app end to end, offscreen: renders, writes a snapshot, reports timings.
+  add_test(NAME gui.app-offscreen
+           COMMAND ${PRODUCT_SLUG} --offscreen --no-socket --frames 3 --bench
+                   --snapshot ${CMAKE_CURRENT_BINARY_DIR}/app-offscreen.png)
+  set_tests_properties(gui.app-offscreen PROPERTIES LABELS "gui;tsan-skip"
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # An agent drives the running GUI through its control socket and the MCP proxy.
+  add_test(NAME gui.agent-over-socket
+           COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_agent.py
+                   $<TARGET_FILE:${PRODUCT_SLUG}> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
+                   ${CMAKE_CURRENT_BINARY_DIR}/agent-final.png)
+  set_tests_properties(gui.agent-over-socket PROPERTIES LABELS "gui;tsan-skip"
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+endif()

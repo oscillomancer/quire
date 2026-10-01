@@ -34,7 +34,8 @@ OS library, dynamic only — explicitly permitted by policy), libX11/libGL.
 
 Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts
 Nate's plugin template already ships) are permitted for bundling; see
-ADR-0003.
+ADR-0003. The DAW GUI bundles Inter (Regular, SemiBold) and IBM Plex Mono (Regular,
+Medium) under `assets/fonts/` with their OFL-1.1 license texts.
 
 The vendored clap-wrapper has three pre-applied template patches recorded in
 `third_party/manifest.json`, with copies under `cmake/patches/`: all automation
