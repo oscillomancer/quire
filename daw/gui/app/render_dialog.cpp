@@ -131,8 +131,8 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
         mode_ = t;
         markDirty();
     };
-    tapLabel_ = &stems.emplace<ui::Label>("render.tap.label", "Tap", ui::Font::Ui, "caption",
-                                          "ink-quiet");
+    tapLabel_ =
+        &stems.emplace<ui::Label>("render.tap.label", "Tap", ui::Font::Ui, "caption", "ink-quiet");
     tapLabel_->layout.width = ui::SizeRule::fixed(40);
     tapField_ = &stems.emplace<ui::TextField>("render.tap", tap_);
     tapField_->layout.width = ui::SizeRule::fixed(120);
@@ -147,17 +147,17 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     actions.layout.gap = 6;
     actions.layout.align = ui::Layout::Align::Center;
     actions.emplace<ui::Button>("render.run", "Render", [this] { run(); });
-    addButton_ = &actions.emplace<ui::Button>("render.add", "[ ] Add to project", [this] {
-        setAddToProject(!addToProject_);
-    });
-    status_ = &actions.emplace<ui::Label>("render.status", "", ui::Font::Ui, "caption", "ink-quiet");
+    addButton_ = &actions.emplace<ui::Button>("render.add", "[ ] Add to project",
+                                              [this] { setAddToProject(!addToProject_); });
+    status_ =
+        &actions.emplace<ui::Label>("render.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
 
-    previewBlock_ = &page->emplace<ui::TextBlock>("render.preview", "", ui::Font::Mono, "caption",
-                                                  "ink");
+    previewBlock_ =
+        &page->emplace<ui::TextBlock>("render.preview", "", ui::Font::Mono, "caption", "ink");
     previewBlock_->layout.height = ui::SizeRule::fixed(60);
-    resultsBlock_ = &page->emplace<ui::TextBlock>("render.results", "", ui::Font::Mono, "caption",
-                                                  "ink-quiet");
+    resultsBlock_ =
+        &page->emplace<ui::TextBlock>("render.results", "", ui::Font::Mono, "caption", "ink-quiet");
     resultsBlock_->layout.height = ui::SizeRule::fixed(70);
     setSource(Source::Master);
     return page;
@@ -219,18 +219,30 @@ void RenderDialog::setField(const std::string& id, const std::string& text) {
         if (auto* node = dynamic_cast<ui::TextField*>(root_.find(id))) node->setText(text);
         markDirty();
     };
-    if (id == "render.pattern") set(pattern_);
-    else if (id == "render.start") set(start_);
-    else if (id == "render.end") set(end_);
-    else if (id == "render.tail") set(tail_);
-    else if (id == "render.sample_rate") set(sampleRate_);
-    else if (id == "render.bit_depth") set(bitDepth_);
-    else if (id == "render.channels") set(channels_);
-    else if (id == "render.normalize") set(normalize_);
-    else if (id == "render.target") set(target_);
-    else if (id == "render.limit") set(limit_);
-    else if (id == "render.mode") set(mode_);
-    else if (id == "render.tap") set(tap_);
+    if (id == "render.pattern")
+        set(pattern_);
+    else if (id == "render.start")
+        set(start_);
+    else if (id == "render.end")
+        set(end_);
+    else if (id == "render.tail")
+        set(tail_);
+    else if (id == "render.sample_rate")
+        set(sampleRate_);
+    else if (id == "render.bit_depth")
+        set(bitDepth_);
+    else if (id == "render.channels")
+        set(channels_);
+    else if (id == "render.normalize")
+        set(normalize_);
+    else if (id == "render.target")
+        set(target_);
+    else if (id == "render.limit")
+        set(limit_);
+    else if (id == "render.mode")
+        set(mode_);
+    else if (id == "render.tap")
+        set(tap_);
 }
 
 json::Value RenderDialog::previewArgs() const {
@@ -269,6 +281,9 @@ json::Value RenderDialog::args(bool forJob) const {
         if (!mode_.empty()) a["mode"] = mode_;
         if (!tap_.empty()) a["tap"] = tap_;
     }
+    // A mix carries no per-file analysis unless it is asked for; the other
+    // commands always attach one, and the dialog lists its loudness.
+    if (source_ == Source::Master) a["analyze"] = "summary";
     if (addToProject_) a["add_to_project"] = true;
     if (forJob) a["job"] = true;
     return a;
@@ -298,12 +313,11 @@ void RenderDialog::refreshPreview() {
     std::size_t count = 0;
     if (files && files->isArray())
         for (const json::Value& f : files->asArray()) {
-            const std::string path = f.find("path") && f.find("path")->isString()
-                                         ? f.find("path")->asString()
-                                         : "";
-            const double seconds =
-                f.find("seconds") && f.find("seconds")->isNumber() ? f.find("seconds")->asDouble()
-                                                                   : 0.0;
+            const std::string path =
+                f.find("path") && f.find("path")->isString() ? f.find("path")->asString() : "";
+            const double seconds = f.find("seconds") && f.find("seconds")->isNumber()
+                                       ? f.find("seconds")->asDouble()
+                                       : 0.0;
             char line[256];
             std::snprintf(line, sizeof line, "%s  (%.2f s)", baseName(path).c_str(), seconds);
             text += (text.empty() ? "" : "\n") + std::string(line);
@@ -374,13 +388,30 @@ void RenderDialog::pollJob() {
         const std::string path = entry.find("path") && entry.find("path")->isString()
                                      ? entry.find("path")->asString()
                                      : "";
-        const double seconds =
-            entry.find("seconds") && entry.find("seconds")->isNumber() ? entry.find("seconds")->asDouble()
-                                                                       : 0.0;
+        const double seconds = entry.find("seconds") && entry.find("seconds")->isNumber()
+                                   ? entry.find("seconds")->asDouble()
+                                   : 0.0;
         resultFiles_.push_back(path);
-        char line[256];
+        char line[320];
         std::snprintf(line, sizeof line, "%s  (%.2f s)", baseName(path).c_str(), seconds);
-        text += (text.empty() ? "" : "\n") + std::string(line);
+        std::string row = line;
+        // The analysis summary, when the render carries one: loudness and peak.
+        if (const json::Value* analysis = entry.find("analysis");
+            analysis && analysis->isObject()) {
+            const json::Value* loudness = analysis->find("loudness");
+            if (loudness && loudness->isObject()) {
+                const auto append = [&](const char* key, const char* unit) {
+                    const json::Value* v = loudness->find(key);
+                    if (!v || !v->isNumber()) return;
+                    char part[48];
+                    std::snprintf(part, sizeof part, "  %.1f %s", v->asDouble(), unit);
+                    row += part;
+                };
+                append("integrated_lufs", "LUFS");
+                append("true_peak_dbtp", "dBTP");
+            }
+        }
+        text += (text.empty() ? "" : "\n") + row;
     };
     const json::Value* result = status->find("result");
     if (result && result->isObject()) {
@@ -398,7 +429,8 @@ void RenderDialog::pollJob() {
 void RenderDialog::tick() {
     if (!page_) return;
     if (!job_.empty()) pollJob();
-    if (dirty_ && nowMs() - lastEditMs_ >= static_cast<std::uint64_t>(debounceMs_)) refreshPreview();
+    if (dirty_ && nowMs() - lastEditMs_ >= static_cast<std::uint64_t>(debounceMs_))
+        refreshPreview();
 }
 
 }  // namespace supple::gui

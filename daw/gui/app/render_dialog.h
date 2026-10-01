@@ -20,7 +20,7 @@ class Button;
 class Label;
 class TextBlock;
 class TextField;
-}
+}  // namespace supple::ui
 
 namespace supple::gui {
 

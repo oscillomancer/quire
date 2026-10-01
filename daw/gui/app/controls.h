@@ -13,8 +13,8 @@ namespace supple::gui {
 
 class Slider : public ui::Node {
   public:
-    Slider(std::string id, std::function<void(double)> onSet,
-           std::function<void()> onBegin = {}, std::function<void()> onEnd = {});
+    Slider(std::string id, std::function<void(double)> onSet, std::function<void()> onBegin = {},
+           std::function<void()> onEnd = {});
     void setValue(double normalized);  // 0..1, no callback
     double value() const { return value_; }
 

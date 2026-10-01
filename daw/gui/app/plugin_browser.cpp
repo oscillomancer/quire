@@ -52,8 +52,8 @@ Result<Favourites> Favourites::load(const std::filesystem::path& file) {
     if (!doc) return std::move(doc).error();
     const json::Value* schema = doc->isObject() ? doc->find("schema") : nullptr;
     if (!schema || !schema->isString() || schema->asString() != "supple.favourites/1.0")
-        return Error("favourites.schema", file.string() + " is not a supple.favourites/1.0 document",
-                     "/schema");
+        return Error("favourites.schema",
+                     file.string() + " is not a supple.favourites/1.0 document", "/schema");
     const json::Value* list = doc->find("favourites");
     if (!list) return out;
     if (!list->isArray())
@@ -95,9 +95,7 @@ bool Favourites::toggle(std::string_view id) {
 
 PluginBrowser::PluginBrowser(engine::EngineApp&, cmd::Dispatcher& dispatcher, ui::Root& root,
                              std::filesystem::path favouritesFile)
-    : dispatcher_(dispatcher),
-      root_(root),
-      favouritesFile_(std::move(favouritesFile)) {
+    : dispatcher_(dispatcher), root_(root), favouritesFile_(std::move(favouritesFile)) {
     if (auto loaded = Favourites::load(favouritesFile_))
         favourites_ = std::move(*loaded);
     else
@@ -123,8 +121,7 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
         const Entry& e = *rows_[i].entry;
         const std::string name = (rows_[i].favourite ? std::string(kFavMark) + " " : "") + e.name;
         const float w = c.textWidth(name, ui::Font::Ui, t.type("small"));
-        c.text({r.x + 10, r.y, r.w - 20, r.h}, name, ui::Font::Ui, t.type("small"),
-               t.color("ink"));
+        c.text({r.x + 10, r.y, r.w - 20, r.h}, name, ui::Font::Ui, t.type("small"), t.color("ink"));
         c.text({r.x + 20 + w, r.y, std::max(0.0f, r.w - 32 - w), r.h},
                lower(e.vendor) == lower(product::kVendor) ? "stock" : e.vendor, ui::Font::Mono,
                t.type("caption"), t.color("ink-faint"));
@@ -160,7 +157,8 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
     });
     footer.emplace<ui::Button>("browser.add", "Add",
                                [this] { activate(list_->selected().value_or(0)); });
-    status_ = &footer.emplace<ui::Label>("browser.status", "", ui::Font::Ui, "caption", "ink-quiet");
+    status_ =
+        &footer.emplace<ui::Label>("browser.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
     refresh();
     return page;

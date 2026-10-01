@@ -45,7 +45,8 @@ struct Fixture {
     bool ok = false;
 
     Fixture() {
-        dir = std::filesystem::temp_directory_path() / ("supple-fx-render-" + std::to_string(::getpid()));
+        dir = std::filesystem::temp_directory_path() /
+              ("supple-fx-render-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
         configDir = dir / "config";
         std::filesystem::create_directories(configDir);
@@ -73,9 +74,8 @@ struct Fixture {
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
         actions = std::make_unique<gui::AppActions>(registry, *dispatcher, *app, ui,
                                                     actions::Keymap::defaultFile("quire-test"));
-        fx = std::make_unique<gui::FxWindow>(
-            *app, *dispatcher, *root, gui::FxWindow::Hooks{},
-            gui::Favourites::defaultFile("quire-test"));
+        fx = std::make_unique<gui::FxWindow>(*app, *dispatcher, *root, gui::FxWindow::Hooks{},
+                                             gui::Favourites::defaultFile("quire-test"));
         render = std::make_unique<gui::RenderDialog>(*app, *dispatcher, *root);
         actions->addUi("ui.fx.chain", "FX: chain…", "track",
                        [this](const json::Value& v) -> Status { return fx->openFor(ui, v); });
@@ -275,7 +275,8 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     const float wetY = wet->bounds().y + wet->bounds().h / 2;
     f.root->pointer({ui::PointerEvent::Type::Down, {wet->bounds().x + 12, wetY}, 1});
     for (int i = 1; i <= 20; ++i)
-        f.root->pointer({ui::PointerEvent::Type::Move, {wet->bounds().x + 12.0f + i * 6.0f, wetY}, 1});
+        f.root->pointer(
+            {ui::PointerEvent::Type::Move, {wet->bounds().x + 12.0f + i * 6.0f, wetY}, 1});
     f.root->pointer({ui::PointerEvent::Type::Up, {wet->bounds().x + 12, wetY}, 1});
     CHECK(f.historyCount() == wetBefore + 1);
     CHECK(f.app->head().fx.find(fx1)->wet < 100.0);
@@ -301,7 +302,8 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.root->pointer({ui::PointerEvent::Type::Down, {x0, y}, 1});
     for (int i = 1; i <= 20; ++i)
         f.root->pointer({ui::PointerEvent::Type::Move, {x0 + i * 8.0f, y}, 1});
-    f.root->pointer({ui::PointerEvent::Type::Up, {slider->bounds().x + slider->bounds().w - 12, y}, 1});
+    f.root->pointer(
+        {ui::PointerEvent::Type::Up, {slider->bounds().x + slider->bounds().w - 12, y}, 1});
     CHECK(f.historyCount() == before + 1);
     auto moved = f.run("fx.param.get", f.args({{"fx", fx1.str()}, {"param", "gain"}}));
     REQUIRE(moved);
@@ -386,7 +388,8 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     f.render->refreshPreview();
 
     // The preview matches render.dry-run for the same arguments.
-    auto dry = f.run("render.dry-run", f.args({{"operation", "mix"}, {"pattern", "preview-{counter:02}"}}));
+    auto dry = f.run("render.dry-run",
+                     f.args({{"operation", "mix"}, {"pattern", "preview-{counter:02}"}}));
     REQUIRE(dry);
     std::string expected;
     for (const json::Value& file : (*dry)["files"].asArray()) {
@@ -424,6 +427,8 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     REQUIRE(f.render->resultFiles().size() == 1);
     CHECK(std::filesystem::exists(f.render->resultFiles()[0]));
     CHECK(f.render->statusText().find("1 file") != std::string::npos);
+    // The result list carries the analysis summary when the render has one.
+    CHECK(f.root->find("render.results")->valueText().find("LUFS") != std::string::npos);
 
     // add_to_project: the file lands as an item on a new track (one undo step).
     const std::size_t tracksBefore = f.trackCount();

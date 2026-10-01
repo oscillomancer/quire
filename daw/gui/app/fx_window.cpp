@@ -131,7 +131,7 @@ Status FxWindow::open(model::Id track) {
     selected_ = {};
     tab_ = Tab::Chain;
     latency_.clear();  // a fresh window measures each effect again
-    if (page_) {  // already open: switch track in place
+    if (page_) {       // already open: switch track in place
         refresh();
         return {};
     }
@@ -248,8 +248,10 @@ void FxWindow::refresh() {
     body_->clear();
     if (hasSelected() && !app_.head().fx.find(selected_)) selected_ = {};
     if (!hasSelected()) {
-        if (!track->chain.empty()) selected_ = track->chain.front();
-        else if (!track->inputChain.empty()) selected_ = track->inputChain.front();
+        if (!track->chain.empty())
+            selected_ = track->chain.front();
+        else if (!track->inputChain.empty())
+            selected_ = track->inputChain.front();
     }
     if (tab_ == Tab::Chain)
         buildChain(*body_);
@@ -273,10 +275,9 @@ void FxWindow::buildChain(ui::Node& body) {
     }
     body.emplace<ui::Label>("fx.section.chain", "Chain", ui::Font::UiBold, "caption", "ink-quiet");
     if (track->chain.empty())
-        body.emplace<ui::Label>("fx.empty", "No effects yet — use “Add plugin…”.",
-                                ui::Font::Ui, "small", "ink-quiet");
-    for (std::size_t i = 0; i < track->chain.size(); ++i)
-        buildRow(body, track->chain[i], i, false);
+        body.emplace<ui::Label>("fx.empty", "No effects yet — use “Add plugin…”.", ui::Font::Ui,
+                                "small", "ink-quiet");
+    for (std::size_t i = 0; i < track->chain.size(); ++i) buildRow(body, track->chain[i], i, false);
 }
 
 void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool input) {
@@ -284,10 +285,10 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
     if (!inst) return;
     const std::string prefix = input ? "ifx." : "fx.";
     const std::string id = fx.str();
-    auto& row = body.emplace<Row>(prefix + "row." + id, [this, fx] { select(fx); },
-                                  input ? std::function<void(int)>{}
-                                        : std::function<void(int)>{
-                                              [this, fx](int delta) { moveFx(fx, delta); }});
+    auto& row = body.emplace<Row>(
+        prefix + "row." + id, [this, fx] { select(fx); },
+        input ? std::function<void(int)>{}
+              : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
     row.selected = selected_ == fx;
 
     {
@@ -296,10 +297,11 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         std::snprintf(number, sizeof number, "%zu.", index + 1);
         l1.emplace<ui::Label>(prefix + "number." + id, number, ui::Font::Mono, "caption",
                               "ink-quiet");
-        auto& name = l1.emplace<ui::Label>(prefix + "name." + id, nameOf(fx), ui::Font::Ui, "small");
+        auto& name =
+            l1.emplace<ui::Label>(prefix + "name." + id, nameOf(fx), ui::Font::Ui, "small");
         name.layout.width = ui::SizeRule::fixed(160);
-        auto& latency = l1.emplace<ui::Label>(prefix + "latency." + id, latencyOf(fx), ui::Font::Mono,
-                                              "caption", "ink-quiet");
+        auto& latency = l1.emplace<ui::Label>(prefix + "latency." + id, latencyOf(fx),
+                                              ui::Font::Mono, "caption", "ink-quiet");
         latency.layout.width = ui::SizeRule::fixed(80);
         l1.emplace<ui::Button>(prefix + "bypass." + id, inst->bypass ? "bypassed" : "bypass",
                                [this, fx, bypass = inst->bypass] {
@@ -374,14 +376,18 @@ void FxWindow::buildParams(ui::Node& body) {
     chooser.emplace<ui::Button>("fx.params.prev", "<", [this] {
         const std::vector<model::Id> c = chain();
         auto it = std::find(c.begin(), c.end(), selected_);
-        if (it != c.end() && it != c.begin()) select(*(it - 1));
-        else if (!c.empty()) select(c.back());
+        if (it != c.end() && it != c.begin())
+            select(*(it - 1));
+        else if (!c.empty())
+            select(c.back());
     });
     chooser.emplace<ui::Button>("fx.params.next", ">", [this] {
         const std::vector<model::Id> c = chain();
         auto it = std::find(c.begin(), c.end(), selected_);
-        if (it != c.end() && it + 1 != c.end()) select(*(it + 1));
-        else if (!c.empty()) select(c.front());
+        if (it != c.end() && it + 1 != c.end())
+            select(*(it + 1));
+        else if (!c.empty())
+            select(c.front());
     });
     if (!hasSelected()) {
         body.emplace<ui::Label>("fx.params.note", "Add or select an effect first.", ui::Font::Ui,

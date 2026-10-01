@@ -304,10 +304,10 @@ int main(int argc, char** argv) {
         if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
         return pluginWindows.open(*id);
     });
-    gui::FxWindow fxWindow(
-        **app, dispatcher, root,
-        gui::FxWindow::Hooks{[&](model::Id id) { return pluginWindows.open(id); }},
-        gui::Favourites::defaultFile(product::kSlug));
+    gui::FxWindow fxWindow(**app, dispatcher, root, gui::FxWindow::Hooks{[&](model::Id id) {
+        return pluginWindows.open(id);
+    }},
+                           gui::Favourites::defaultFile(product::kSlug));
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
     gui::RenderDialog renderDialog(**app, dispatcher, root);

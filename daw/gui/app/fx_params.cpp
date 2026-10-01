@@ -65,8 +65,8 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                 row.layout.dir = ui::Layout::Dir::Row;
                 row.layout.height = ui::SizeRule::fixed(22);
                 row.layout.gap = 6;
-                row.emplace<ui::Label>("fx.plain.name." + std::to_string(shown), pname, ui::Font::Ui,
-                                       "small", "ink-quiet");
+                row.emplace<ui::Label>("fx.plain.name." + std::to_string(shown), pname,
+                                       ui::Font::Ui, "small", "ink-quiet");
                 row.emplace<ui::Label>("fx.plain.value." + std::to_string(shown), value,
                                        ui::Font::Mono, "caption", "ink");
                 ++shown;
@@ -136,7 +136,8 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
         row.layout.height = ui::SizeRule::fixed(24);
         row.layout.gap = 6;
         row.layout.align = ui::Layout::Align::Center;
-        auto& label = row.emplace<ui::Label>("fx.param.name." + d.key, d.name, ui::Font::Ui, "small");
+        auto& label =
+            row.emplace<ui::Label>("fx.param.name." + d.key, d.name, ui::Font::Ui, "small");
         label.layout.width = ui::SizeRule::fixed(150);
         auto& control = row.emplace<ui::Node>("fx.param.control." + d.key);
         control.layout.width = ui::SizeRule::fraction();
@@ -155,11 +156,13 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                 text = physical >= 0.5 ? "on" : "off";
             else {
                 const int index = static_cast<int>(physical + 0.5);
-                text = spec.choices.empty()
-                           ? std::to_string(index)
-                           : std::string(spec.choices[static_cast<std::size_t>(std::clamp(
-                                 index, 0, static_cast<int>(spec.choices.size()) - 1))]
-                                             .label);
+                text =
+                    spec.choices.empty()
+                        ? std::to_string(index)
+                        : std::string(spec
+                                          .choices[static_cast<std::size_t>(std::clamp(
+                                              index, 0, static_cast<int>(spec.choices.size()) - 1))]
+                                          .label);
             }
             auto* button = &control.emplace<ui::Button>(
                 "fx.param." + d.key, text, [this, spec_keep, key, physical] {
@@ -168,9 +171,8 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                     if (s.type == params::Type::Bool)
                         next = physical >= 0.5 ? 0.0 : 1.0;
                     else if (!s.choices.empty())
-                        next = static_cast<double>(
-                            (static_cast<int>(physical + 0.5) + 1) %
-                            static_cast<int>(s.choices.size()));
+                        next = static_cast<double>((static_cast<int>(physical + 0.5) + 1) %
+                                                   static_cast<int>(s.choices.size()));
                     json::Value v = json::Value(next);
                     setValue(key, std::move(v), false);
                 });
@@ -180,9 +182,8 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
             auto* slider = &control.emplace<Slider>(
                 "fx.param." + d.key,
                 [spec_keep, key, setPhysical](double normalized) {
-                    const double physical =
-                        params::clampPhysical(spec_keep->spec,
-                                              params::fromNormalized(spec_keep->spec, normalized));
+                    const double physical = params::clampPhysical(
+                        spec_keep->spec, params::fromNormalized(spec_keep->spec, normalized));
                     setPhysical(physical, true);
                 },
                 [this, key] { gesture_ = "fx.param:" + idText(fx_) + ":" + key; },
@@ -190,7 +191,8 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
             slider->setValue(params::toNormalized(spec, physical));
             slider->enabled = writable;
         }
-        auto& field = row.emplace<ui::TextField>("fx.param.text." + d.key, params::format(spec, physical));
+        auto& field =
+            row.emplace<ui::TextField>("fx.param.text." + d.key, params::format(spec, physical));
         field.layout.width = ui::SizeRule::fixed(120);
         field.enabled = writable;
         field.onSubmit = [this, key, spec_keep](const std::string& text) {

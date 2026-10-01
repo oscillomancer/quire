@@ -21,7 +21,7 @@
 namespace supple::ui {
 class Root;
 class Label;
-}
+}  // namespace supple::ui
 
 namespace supple::gui {
 
@@ -81,8 +81,8 @@ class FxWindow {
 
     model::Id track_, selected_;
     Tab tab_ = Tab::Chain;
-    std::string gesture_;                              // the active slider drag
-    std::map<std::string, std::string> latency_;       // measured once per effect
+    std::string gesture_;                         // the active slider drag
+    std::map<std::string, std::string> latency_;  // measured once per effect
     ui::Node* page_ = nullptr;
     ui::Node* body_ = nullptr;
     ui::Node* tabsRow_ = nullptr;
