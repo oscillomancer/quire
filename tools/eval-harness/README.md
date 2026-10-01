@@ -78,7 +78,9 @@ Descriptive scores use production `profile.evaluate`, with pass fraction,
 weighted normalized profile distance, and a squared-distance loss. Reference
 scores use the production C++ optimizer loss directly through the sandbox's
 non-MCP `eval-reference` tooling entry, with explicit note-off times for both
-files and production loudness matching. There is no rounded-JSON reimplementation
+files and production loudness matching; the MCP `compare` command reports that
+same number as `loss.total`, so an attempt can read the score it is judged by.
+There is no rounded-JSON reimplementation
 or optimizer search in scoring. Notation scores use compiler-produced note data
 in `<render>.midi.json`: first attempted render compilation, bars, all bar
 meters, pitch bounds, and note attacks per bar. The last notation submitted

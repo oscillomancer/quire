@@ -147,7 +147,7 @@ within −120 dBFS for the stock test synth).
 | `preset.list` | query | `plugin?` | `presets: [{plugin, name, tags}]` |
 | `render` | action | one of `notation`, `midi_file`, `audio_file`; `bars?`/`seconds?`; `tempo?`; `tail_s?`; `name?`; `analyze?` (`none`/`summary`/`standard`/`full`) | `render` (id), `path`, `seconds`, `peak_dbfs`, `analysis?` |
 | `analyze` | query | `render` or `file`, `detail`, `note_off_s?` | `report` |
-| `compare` | query | `reference` (render/file), `test` (render/file) | `deltas` (notable first), `ltas_rms_db`, `summary` (prose) |
+| `compare` | query | `reference` (render/file), `test` (render/file), `reference_note_off_s?`, `test_note_off_s?` | `deltas` (notable first), `ltas_rms_db`, `summary` (prose), `loss` (the optimizer's score: `total`, `terms`, `note_off_s`) |
 | `masking` | query | `masker`, `maskee` (render/file) | masking report |
 | `profile.evaluate` | query | `render`, `profile` (inline document) | per-target results, `loss` |
 | `session.get` | query | — | settings, chain, instances, renders |

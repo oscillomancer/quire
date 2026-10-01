@@ -80,8 +80,11 @@ report, compute:
   - `bands`: RMS of the named band level differences (dB), weight 0.5,
     scale 2 dB;
   - `centroid`: |log2(c/c_ref)| in octaves, weight 0.5, scale 0.25 oct;
-  - `envelope`: |attack − attack_ref| / max(10 ms, attack_ref) and the same
-    for decay20 (and release when a note-off is known), weight 1.0, scale 0.3;
+  - `envelope`: `|log2((attack + 10 ms) / (attack_ref + 10 ms))|` and the same
+    for decay20 (and release when a note-off is known), weight 1.0, scale 0.43
+    (≈ 0.3 / ln 2, so for references well above 10 ms the term matches the old
+    ratio `|c − r| / max(10 ms, r)` at scale 0.3); a value present on one side
+    only scores distance 1.43 at that scale (≈ 11.1, as before);
   - `harmonics` (when both pitched): RMS difference of the first 8 harmonic
     levels (dB), weight 0.5, scale 3 dB; `inharmonicity` absolute
     difference, weight 0.3, scale 0.01;
@@ -107,8 +110,10 @@ can outlast a tool call. The command bus gains a generic job facility:
   instead of its result; the host runs it on a worker thread.
 - `job.status {job}` (q) → `{status: running|done|failed|cancelled,
   progress: {fraction, message, best_loss?, evaluations?}, result?, error?}`.
-- `job.wait {job, timeout_s ≤ 30}` (q) → like status, but blocks up to the
-  timeout for completion (so an MCP client can poll without spinning).
+- `job.wait {job, timeout_s}` (q) → like status, but blocks up to the
+  timeout for completion (so an MCP client can poll without spinning). The
+  block is capped at 30 s: a larger `timeout_s` is accepted and clamped, and
+  the result then carries `"timeout_clamped_s": 30` (0 returns at once).
 - `job.cancel {job}` (a); `job.list` (q).
 - Events `job.progress` (≤ 2 Hz) and `job.done`.
 - Jobs are session-scoped, kept until the session ends or 100 finished jobs
@@ -208,3 +213,25 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
   active threads stay owned by the session until completion or shutdown.
 - Semantic curve strings are parsed without exceptions. Unknown curves and
   non-finite or non-positive exponents return structured parameter errors.
+
+## Amendments (2026-10-01, first evaluation campaign)
+
+- Envelope attack, decay20 and release use a **log-time distance**
+  `|log2((c + 10 ms) / (r + 10 ms))|` at scale 0.43 instead of
+  `|c − r| / max(10 ms, r)` at scale 0.3: the old ratio term was unbounded, so
+  a 23 ms attack against a 0 ms reference scored 5877 and swamped every timbre
+  term (≈ 1) in both the optimizer's landscape and the evaluation scorer
+  (`docs/benchmarks/eval/2026-10-01-campaign.md`, issue 2). The 10 ms offset
+  keeps a 0 ms value inside the domain; the new scale is ≈ 0.3 / ln 2, so a
+  reference well above 10 ms scores what it did before. A value present on one
+  side only keeps its old contribution: distance 1.43 at that scale ≈ 11.1.
+- `compare` reports the same scored loss (`loss.total`, its terms, and the
+  note-off used per side) through the shared `detail::referenceScore`, so an
+  agent can see how close a render is without running the optimizer: the test
+  is loudness-matched to the reference and both sides are analyzed with
+  `detail::analyzeMatched` (campaign issue 4). The evaluation scorer's
+  `eval-reference` subcommand calls the same function, so the harness number an
+  agent can reproduce is the number it is judged by.
+- `job.wait` accepts any nonnegative `timeout_s` and clamps the block to 30 s
+  (reporting `"timeout_clamped_s": 30`) instead of rejecting the call
+  (campaign issue 5).

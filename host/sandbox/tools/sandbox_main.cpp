@@ -99,8 +99,8 @@ int main(int argc, char** argv) {
                                   "reference, test, reference_note_off_s, test_note_off_s")));
             return 1;
         }
-        auto analyze = [&](std::string_view fileKey, std::string_view endKey,
-                           std::optional<double> target) -> Result<analysis::Report> {
+        auto read = [&](std::string_view fileKey, std::string_view endKey,
+                        double& noteOff) -> Result<audio::AudioData> {
             const auto* file = request->find(fileKey);
             const auto* end = request->find(endKey);
             if (!file || !file->isString() || !end || !end->isNumber() ||
@@ -108,29 +108,33 @@ int main(int argc, char** argv) {
                 return Error("eval.arguments", "expected a WAV path and a nonnegative note-off",
                              "/" + std::string(fileKey),
                              "give both reference and test note-off times");
-            auto audio = audio::readAudio(file->asString());
-            if (!audio) return std::move(audio).error();
-            return sandbox::detail::analyzeMatched(*audio, target, end->asDouble());
+            noteOff = end->asDouble();
+            return audio::readAudio(file->asString());
         };
-        auto reference = analyze("reference", "reference_note_off_s", {});
+        // The scorer knows each side's input end, so it never assumes one.
+        double referenceNoteOff = 0.0, testNoteOff = 0.0;
+        auto reference = read("reference", "reference_note_off_s", referenceNoteOff);
         if (!reference) {
             print(errorJson(reference.error()));
             return 1;
         }
-        std::optional<double> target;
-        if (reference->loudness && std::isfinite(reference->loudness->integrated))
-            target = reference->loudness->integrated;
-        auto test = analyze("test", "test_note_off_s", target);
+        auto test = read("test", "test_note_off_s", testNoteOff);
         if (!test) {
             print(errorJson(test.error()));
             return 1;
         }
-        const auto loss = sandbox::detail::referenceLoss(*reference, *test);
+        // The same scored comparison `compare` reports (optimize_loss.h).
+        const auto scored =
+            sandbox::detail::referenceScore(*reference, referenceNoteOff, *test, testNoteOff);
+        if (!scored) {
+            print(errorJson(scored.error()));
+            return 1;
+        }
         json::Value result = json::Value::object();
-        result["loss"] = loss.total;
+        result["loss"] = scored->loss.total;
         result["terms"] = json::Value::object();
-        for (const auto& [key, value] : loss.terms) result["terms"][key] = value;
-        result["ltas_rms_db"] = analysis::compare(*reference, *test).ltasRmsDb;
+        for (const auto& [key, value] : scored->loss.terms) result["terms"][key] = value;
+        result["ltas_rms_db"] = scored->ltasRmsDb;
         print(result);
         return 0;
     }

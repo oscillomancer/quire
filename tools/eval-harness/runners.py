@@ -34,7 +34,9 @@ def preamble(task, reference=None, seed=42, blind=False):
         prompt += "Descriptor targets: " + json.dumps(task["score"]["profile"]) + "\n"
     if reference:
         prompt += ("Match the reference audio at " + str(reference) + ". Use analyze/compare or the "
-                   "optimizer to measure it. The hidden patch is unavailable.\n")
+                   "optimizer to measure it. The hidden patch is unavailable. You are scored by "
+                   "compare's loss.total against that reference (lower is better); it passes at "
+                   f"or below the task's max_loss of {task['score']['max_loss']}.\n")
     prompt += f"Budget: {task['limits']['tool_calls']} MCP calls, {task['limits']['minutes']} minutes.\n"
     prompt += f"Use patch seed {seed}; the scorer restores this same seed for reproducibility.\n"
     return prompt

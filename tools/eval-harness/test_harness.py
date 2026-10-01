@@ -55,6 +55,15 @@ class Tasks(unittest.TestCase):
         self.assertNotIn("supple.analysis-profile", blind)
         self.assertIn(task["prompt"], blind)
 
+    def test_reference_preamble_states_the_scoring_rule(self):
+        task = load_tasks("synth-reference", ["sub-bass"])[0]
+        text = preamble(task, "/render/reference.wav")
+        # The scored loss is named (the guide mentions loss.total too, so match
+        # the rule's own wording).
+        self.assertIn("You are scored by compare's loss.total", text)
+        self.assertIn(str(task["score"]["max_loss"]), text)
+        self.assertNotIn("You are scored by", preamble(task))
+
 
 class Scoring(unittest.TestCase):
     def midi(self):
@@ -171,6 +180,37 @@ class Integration(unittest.TestCase):
                 if suite == "synth-descriptive":
                     task["score"]["profile"]["targets"]["spectral.centroid_hz.median"] = {"min": 10000, "max": 11000}
                     self.assertFalse(score_final(task, run_dir, 42)["score"]["pass"])
+
+    def test_compare_reports_the_same_loss_as_the_scorer(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+            root = Path(directory)
+            task = load_tasks("synth-reference", ["sub-bass"])[0]
+            reference, _ = render_patch(task, task["hidden_patch"], root / "hidden", 42)
+            reference_end = read_json(root / "hidden/reference.json")["input_end_s"]
+            run_dir = root / "attempt"
+            dry(task, run_dir, 42)
+            with Mcp(sandbox_command(run_dir), run_dir) as client:
+                setup(client, task, 42)
+                patch = read_json(run_dir / "final.json")["patches"]["in_1"]
+                client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=42)})
+                # A release the recipe does not have: a non-zero loss both paths
+                # must report identically.
+                client.call("patch.merge", {"instance": "in_1",
+                                            "patch": {"envelopes": {"amp": {"release": "240 ms"}}}})
+                rendered = client.call("render", dict(task["render"], notation=task["phrase"]))
+                test_end = rendered["seconds"] - rendered["tail_s"]
+                compared = client.call("compare", {"reference": str(reference),
+                                                   "test": rendered["render"],
+                                                   "reference_note_off_s": reference_end})
+            scored = subprocess.run([sandbox_command(run_dir)[0], "eval-reference", json.dumps(
+                {"reference": str(reference), "test": rendered["path"],
+                 "reference_note_off_s": reference_end, "test_note_off_s": test_end})],
+                capture_output=True, text=True, timeout=90, check=True)
+            self.assertGreater(compared["loss"]["total"], 0)
+            self.assertAlmostEqual(compared["loss"]["total"], json.loads(scored.stdout)["loss"],
+                                   places=9)
+            self.assertNotIn("note_off_assumed", compared["loss"])
+            self.assertAlmostEqual(compared["loss"]["note_off_s"]["test"], test_end, places=9)
 
     def test_limits_capture_batch_and_invalid_final(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:

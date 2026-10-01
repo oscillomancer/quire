@@ -2,6 +2,7 @@
 // profile.evaluate — over renders (rd_<n>) or audio files.
 #include "analysis_commands.h"
 #include "../../analysis-commands/analysis_shared.h"
+#include "optimize_loss.h"
 
 #include "supple/analysis/analysis.h"
 #include "supple/audio/audio_file.h"
@@ -42,6 +43,30 @@ Result<Loaded> load(Session& s, const std::string& ref, std::string_view path) {
     return l;
 }
 
+// A session render knows where its input ended (its length minus the rendered
+// tail): by id, or by the path it was written to.
+const RenderRecord* sessionRender(const Session& s, const std::string& source) {
+    if (source.rfind("rd_", 0) == 0) {
+        auto r = s.findRender(source);
+        return r ? *r : nullptr;
+    }
+    const auto path = std::filesystem::path(source).lexically_normal();
+    for (const auto& [id, record] : s.renders()) {
+        (void)id;
+        if (record.path.lexically_normal() == path) return &record;
+    }
+    return nullptr;
+}
+
+// Note-off for one side of a scored comparison: the render's own input end,
+// else the caller's argument (a plain file has none unless one is given).
+std::optional<double> noteOffFor(const Session& s, const std::string& source,
+                                 const std::optional<double>& given) {
+    if (const RenderRecord* record = sessionRender(s, source))
+        return record->seconds - record->tailSeconds;
+    return given;
+}
+
 struct AnalyzeArgs {
     std::string source;
     DetailArg detail = DetailArg::Summary;
@@ -53,8 +78,47 @@ struct AnalyzeResult {
 };
 struct CompareArgs {
     std::string reference, test;
+    std::optional<double> referenceNoteOffS, testNoteOffS;
 };
 using analysis_commands::CompareResult;
+
+// `compare`'s result: the shared comparison plus the scored reference loss
+// (optimize_loss.h) — the scalar the optimizer minimizes and the evaluation
+// scorer judges.
+struct CompareScoredResult {
+    json::Value notable;
+    double ltasRmsDb = 0;
+    std::string summary;
+    json::Value loss;
+};
+
+// {total, terms, note_off_s: {reference, test}}, plus note_off_assumed when
+// one side had no note-off of its own and borrowed the other's.
+json::Value lossJson(const detail::ReferenceScore& score, std::optional<double> referenceNoteOff,
+                     std::optional<double> testNoteOff, bool assumed) {
+    json::Value loss = json::Value::object();
+    loss["total"] = score.loss.total;
+    json::Value terms = json::Value::object();
+    for (const auto& [key, value] : score.loss.terms) terms[key] = value;
+    loss["terms"] = std::move(terms);
+    json::Value ends = json::Value::object();
+    ends["reference"] = referenceNoteOff ? json::Value(*referenceNoteOff) : json::Value(nullptr);
+    ends["test"] = testNoteOff ? json::Value(*testNoteOff) : json::Value(nullptr);
+    loss["note_off_s"] = std::move(ends);
+    if (assumed) loss["note_off_assumed"] = true;
+    return loss;
+}
+
+schema::Schema<CompareScoredResult> compareScoredSchema() {
+    return schema::object<CompareScoredResult>("comparison")
+        .field("notable", &CompareScoredResult::notable, schema::any())
+        .field("ltas_rms_db", &CompareScoredResult::ltasRmsDb, schema::number())
+        .field("summary", &CompareScoredResult::summary, schema::string())
+        .field("loss", &CompareScoredResult::loss,
+               schema::any().doc("The score the optimizer minimizes: total, per-term "
+                                 "contributions, and the note-off_s used per side."))
+        .build();
+}
 struct MaskingArgs {
     std::string masker, maskee;
 };
@@ -131,7 +195,7 @@ void registerAnalysisCommands(cmd::Registry& registry) {
 
     // compare
     {
-        Command<CompareArgs, CompareResult> c;
+        Command<CompareArgs, CompareScoredResult> c;
         c.name = "compare";
         c.kind = Kind::Query;
         c.exposure = Exposure::McpTool;
@@ -141,29 +205,60 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             "dB, "
             "harmonics 3 dB, f0 10 cents, ...). ltas_rms_db is the RMS difference of the "
             "1/3-octave "
-            "spectra after removing the level offset: a pure gain change reads 0.";
+            "spectra after removing the level offset: a pure gain change reads 0. loss is the "
+            "score the optimizer minimizes and the evaluation scorer judges: the test is "
+            "loudness-matched to the reference, both are analyzed at their note-off times "
+            "(note_off_s reports them), and loss.total is the number to get down. A render's "
+            "note-off is its own input end; give reference_note_off_s / test_note_off_s for "
+            "files, and one unknown side borrows the other's (note_off_assumed).";
         c.tags = {"analysis"};
         c.args = schema::object<CompareArgs>("compare_args")
                      .field("reference", &CompareArgs::reference, sourceField())
                      .field("test", &CompareArgs::test, sourceField())
+                     .field("reference_note_off_s", &CompareArgs::referenceNoteOffS,
+                            schema::number().range(0, 3600).doc(
+                                "The reference's note-off; defaults to a render's input end."))
+                     .field("test_note_off_s", &CompareArgs::testNoteOffS,
+                            schema::number().range(0, 3600).doc(
+                                "The test's note-off; defaults to a render's input end."))
                      .build();
-        c.result = analysis_commands::compareSchema();
-        c.examples = {{"A render against itself", obj(R"({"reference": "rd_1", "test": "rd_1"})"),
-                       obj(R"({"notable": [], "ltas_rms_db": 0.0, "summary": "<any>"})"),
-                       "synth_and_render"}};
-        c.run = [](const CompareArgs& a, Context& ctx) -> Result<CompareResult> {
-            auto ref = load(S(ctx), a.reference, "/reference");
+        c.result = compareScoredSchema();
+        c.examples = {
+            {"A render against itself", obj(R"({"reference": "rd_1", "test": "rd_1"})"),
+             obj(R"({"notable": [], "ltas_rms_db": 0.0, "summary": "<any>", "loss": {"total": "<any>",
+                    "terms": "<any>", "note_off_s": {"reference": "<any>", "test": "<any>"}}})"),
+             "synth_and_render"}};
+        c.run = [](const CompareArgs& a, Context& ctx) -> Result<CompareScoredResult> {
+            Session& s = S(ctx);
+            auto ref = load(s, a.reference, "/reference");
             if (!ref) return std::move(ref).error();
-            auto test = load(S(ctx), a.test, "/test");
+            auto test = load(s, a.test, "/test");
             if (!test) return std::move(test).error();
+            // One unknown side borrows the other's note-off: the usual case is
+            // two renders of the same phrase, where either end fits.
+            auto refNoteOff = noteOffFor(s, a.reference, a.referenceNoteOffS);
+            auto testNoteOff = noteOffFor(s, a.test, a.testNoteOffS);
+            bool assumed = false;
+            if (!refNoteOff && testNoteOff) {
+                refNoteOff = testNoteOff;
+                assumed = true;
+            } else if (refNoteOff && !testNoteOff) {
+                testNoteOff = refNoteOff;
+                assumed = true;
+            }
             analysis::Options o;
-            o.noteOffSeconds = ref->noteOff;
+            o.noteOffSeconds = refNoteOff;
             auto ra = analysis::analyze(ref->signal(), o);
             if (!ra) return std::move(ra).error();
-            o.noteOffSeconds = test->noteOff;
+            o.noteOffSeconds = testNoteOff;
             auto rb = analysis::analyze(test->signal(), o);
             if (!rb) return std::move(rb).error();
-            return analysis_commands::compare(*ra, *rb);
+            CompareResult base = analysis_commands::compare(*ra, *rb);
+            auto scored = detail::referenceScore(ref->data, refNoteOff, test->data, testNoteOff);
+            if (!scored) return std::move(scored).error();
+            return CompareScoredResult{std::move(base.notable), base.ltasRmsDb,
+                                       std::move(base.summary),
+                                       lossJson(*scored, refNoteOff, testNoteOff, assumed)};
         };
         registry.add(std::move(c));
     }
