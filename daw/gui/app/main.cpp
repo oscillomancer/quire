@@ -313,6 +313,9 @@ int main(int argc, char** argv) {
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
+    shell.onRouting = [&routing](const model::Id&, const ui::Rect& anchor) {
+        routing.open(anchor);
+    };
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),

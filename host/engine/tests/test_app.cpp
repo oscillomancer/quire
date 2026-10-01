@@ -37,6 +37,7 @@ struct Root {
 std::unique_ptr<EngineApp> makeApp(const fs::path& dir) {
     AppOptions o;
     o.workdir = dir;
+    o.chainDir = dir / "chains";  // never the user's config
     o.pluginPath = {kFixture};
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);

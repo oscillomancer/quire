@@ -279,7 +279,7 @@ Status RoutingMatrix::reload() {
     return {};
 }
 
-void RoutingMatrix::open() {
+void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     if (isOpen()) return;
     auto panel = std::make_unique<ui::Node>("routing");
     panel->layout.dir = ui::Layout::Dir::Column;
@@ -360,15 +360,16 @@ void RoutingMatrix::open() {
     });
     status_ = &panel->emplace<ui::Label>("routing.status", "", ui::Font::Ui, "small", "ink-quiet");
     status_->layout.height = ui::SizeRule::fixed(18);
-    root_.openPopup(std::move(panel), {}, ui::Placement::Center, [this] {
-        grid_ = nullptr;
-        status_ = sendTitle_ = nullptr;
-        details_ = nullptr;
-        volume_ = pan_ = nullptr;
-        mute_ = nullptr;
-        taps_.clear();
-        selected_.reset();
-    });
+    root_.openPopup(std::move(panel), anchor.value_or(ui::Rect{}),
+                    anchor ? ui::Placement::Below : ui::Placement::Center, [this] {
+                        grid_ = nullptr;
+                        status_ = sendTitle_ = nullptr;
+                        details_ = nullptr;
+                        volume_ = pan_ = nullptr;
+                        mute_ = nullptr;
+                        taps_.clear();
+                        selected_.reset();
+                    });
     if (auto r = reload(); !r && status_) status_->setText(r.error().message);
     if (status_) status_->setText(status());
 }

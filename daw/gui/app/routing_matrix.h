@@ -49,7 +49,7 @@ class RoutingMatrix {
   public:
     RoutingMatrix(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
                   engine::EngineApp& app);
-    void open();
+    void open(std::optional<ui::Rect> anchor = std::nullopt);
     bool isOpen() const { return grid_ != nullptr; }
     void sync();  // reload when the session changed while open
 
