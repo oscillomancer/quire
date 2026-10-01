@@ -407,6 +407,99 @@ TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog
     f.golden("render-dialog-dark.png");
 }
 
+TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.addTrack("Guitar");
+    REQUIRE(f.fx->open(track));
+    f.click("fx.add");
+    REQUIRE(f.fx->browser().isOpen());
+    f.type("Plumb");
+    // The detail line names the file the plugin would be loaded from.
+    CHECK(f.fx->browser().detail().find("Plumb.clap") != std::string::npos);
+    CHECK(f.fx->browser().detail().find("shadowed") == std::string::npos);
+    CHECK(f.fx->browser().rowText(0).vendor == "stock");
+    f.key("Escape");
+
+    // A copy of the same plugin earlier on the search path shadows the built
+    // one; the browser says which copy wins and which is ignored.
+    const std::filesystem::path dup = f.dir / "shadow";
+    std::filesystem::create_directories(dup);
+    std::filesystem::copy_file(std::filesystem::path(SUPPLE_CLAP_DIR) / "Plumb.clap",
+                               dup / "Plumb.clap",
+                               std::filesystem::copy_options::overwrite_existing);
+    engine::AppOptions options;
+    options.workdir = f.dir / "shadow-work";
+    options.pluginPath = {dup, std::filesystem::path(SUPPLE_CLAP_DIR)};
+    options.identity = host::HostIdentity{"Quire test", "Supple Audio", "", "0"};
+    auto app = engine::EngineApp::create(options);
+    REQUIRE(app);
+    cmd::Registry registry;
+    engine::registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, **app);
+    (*app)->attachCommands(bus);
+    gui::PluginBrowser browser(**app, bus, *f.root, f.configDir / "quire-test" / "favourites.json");
+    browser.open([](const std::string&) {});
+    auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
+    REQUIRE(search);
+    f.root->focus(search);
+    f.type("Plumb");
+    auto* list = dynamic_cast<ui::List*>(f.root->find("browser.results"));
+    REQUIRE(list);
+    bool sawShadowed = false, sawWinner = false;
+    std::optional<std::size_t> shadowedRow;
+    for (std::size_t i = 0; i < browser.rowCount(); ++i) {
+        const auto row = browser.rowText(i);
+        if (row.id != "com.suppleaudio.utility") continue;
+        if (row.vendor == "shadowed") {
+            sawShadowed = true;
+            shadowedRow = i;
+        } else {
+            sawWinner = true;
+        }
+    }
+    CHECK(sawWinner);
+    CHECK(sawShadowed);
+    REQUIRE(shadowedRow);
+    list->select(*shadowedRow, true);  // as a click or the arrow keys would
+    // The shadowed copy is the built one: its own file, and why it is ignored.
+    CHECK(browser.detail().find("Plumb.clap") != std::string::npos);
+    CHECK(browser.detail().find("shadowed") != std::string::npos);
+    // The copy the loader would use is the one earlier on the search path.
+    list->select(*shadowedRow == 0 ? 1 : 0, true);
+    CHECK(browser.detail().find(dup.string()) != std::string::npos);
+    browser.close();
+}
+
+TEST_CASE("the FX chain badges each effect's state, and a failed one offers a restart") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.addTrack("Guitar");
+    REQUIRE(f.fx->open(track));
+    f.click("fx.add");
+    f.type("Plumb");
+    f.key("Return");
+    REQUIRE(f.fx->chain().size() == 1);
+    const model::Id fx = f.fx->chain()[0];
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    f.click("fx.offline." + fx.str());
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process · offline");
+    f.click("fx.offline." + fx.str());  // back on
+    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    // The isolation modes and a failed instance compose the same badge.
+    model::FxInstance inst;
+    inst.isolation = model::Isolation::Dedicated;
+    CHECK(gui::FxWindow::badgeText(inst, false) == "isolated");
+    inst.isolation = model::Isolation::SharedBridge;
+    inst.offline = true;
+    CHECK(gui::FxWindow::badgeText(inst, true) == "shared bridge · offline · failed");
+    // A healthy engine reports no failure: no Restart button, and tick() keeps
+    // the set empty.
+    f.fx->tick();
+    CHECK(f.fx->failed().empty());
+    CHECK(f.root->find("fx.restart." + fx.str()) == nullptr);
+}
+
 TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists its file") {
     Fixture f;
     if (!f.ok) return;

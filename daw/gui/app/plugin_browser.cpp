@@ -118,20 +118,21 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
     list_->paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
         if (i >= rows_.size()) return;
         const ui::Theme& t = c.theme();
-        const Entry& e = *rows_[i].entry;
-        const std::string name = (rows_[i].favourite ? std::string(kFavMark) + " " : "") + e.name;
-        const float w = c.textWidth(name, ui::Font::Ui, t.type("small"));
-        c.text({r.x + 10, r.y, r.w - 20, r.h}, name, ui::Font::Ui, t.type("small"), t.color("ink"));
-        c.text({r.x + 20 + w, r.y, std::max(0.0f, r.w - 32 - w), r.h},
-               lower(e.vendor) == lower(product::kVendor) ? "stock" : e.vendor, ui::Font::Mono,
-               t.type("caption"), t.color("ink-faint"));
-        c.text({r.x, r.y, r.w - 12, r.h}, e.id, ui::Font::Mono, t.type("caption"),
+        const RowText text = rowText(i);
+        const float w = c.textWidth(text.name, ui::Font::Ui, t.type("small"));
+        const bool shadowed = rows_[i].entry->shadowed;
+        c.text({r.x + 10, r.y, r.w - 20, r.h}, text.name, ui::Font::Ui, t.type("small"),
+               shadowed ? t.color("ink-quiet") : t.color("ink"));
+        c.text({r.x + 20 + w, r.y, std::max(0.0f, r.w - 32 - w), r.h}, text.vendor, ui::Font::Mono,
+               t.type("caption"), shadowed ? t.color("clip") : t.color("ink-faint"));
+        c.text({r.x, r.y, r.w - 12, r.h}, text.id, ui::Font::Mono, t.type("caption"),
                t.color("ink-quiet"), ui::kRight | ui::kMiddle);
     };
     search_->onChange = [this](const std::string&) { sortAndFilter(); };
     search_->onSubmit = [this](const std::string&) { activate(list_->selected().value_or(0)); };
     search_->onOtherKey = [this](const ui::KeyEvent& e) { return list_->onKey(e); };
     list_->onActivate = [this](std::size_t row) { activate(row); };
+    list_->onSelect = [this](std::size_t) { updateDetail(); };
     auto& footer = page->emplace<ui::Node>("browser.footer");
     footer.layout.dir = ui::Layout::Dir::Row;
     footer.layout.height = ui::SizeRule::fixed(28);
@@ -159,9 +160,37 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
                                [this] { activate(list_->selected().value_or(0)); });
     status_ =
         &footer.emplace<ui::Label>("browser.status", "", ui::Font::Ui, "caption", "ink-quiet");
-    status_->layout.width = ui::SizeRule::fraction();
+    status_->layout.width = ui::SizeRule::fixed(120);
+    detailLabel_ =
+        &page->emplace<ui::Label>("browser.detail", "", ui::Font::Mono, "caption", "ink-quiet");
+    detailLabel_->layout.width = ui::SizeRule::fraction();
     refresh();
     return page;
+}
+
+PluginBrowser::RowText PluginBrowser::rowText(std::size_t row) const {
+    RowText text;
+    if (row >= rows_.size()) return text;
+    const Entry& entry = *rows_[row].entry;
+    text.name = (rows_[row].favourite ? std::string(kFavMark) + " " : "") + entry.name;
+    text.vendor = entry.shadowed                                   ? "shadowed"
+                  : lower(entry.vendor) == lower(product::kVendor) ? "stock"
+                                                                   : entry.vendor;
+    text.id = entry.id;
+    return text;
+}
+
+// The selected plugin's own file: a shadowed copy is the one a `fx.add` would
+// not use, which is why it is called out.
+void PluginBrowser::updateDetail() {
+    std::string text;
+    if (const auto row = list_->selected(); row && *row < rows_.size()) {
+        const Entry& entry = *rows_[*row].entry;
+        text = entry.path;
+        if (entry.shadowed) text += "  — shadowed: the first copy on the plugin path wins";
+    }
+    detail_ = text;
+    if (detailLabel_) detailLabel_->setText(detail_);
 }
 
 void PluginBrowser::open(std::function<void(const std::string&)> onAdd) {
@@ -228,6 +257,8 @@ void PluginBrowser::refresh() {
             e.format = str("format");
             e.instrument = p.find("instrument") && p.find("instrument")->asBool();
             e.semantic = p.find("semantic") && p.find("semantic")->asBool();
+            e.path = str("path");
+            e.shadowed = p.find("shadowed") && p.find("shadowed")->asBool();
             all_.push_back(std::move(e));
         }
     sortAndFilter();
@@ -259,6 +290,7 @@ void PluginBrowser::sortAndFilter() {
         list_->select(rows_.empty() ? std::nullopt : std::optional<std::size_t>(0));
         list_->invalidate();
     }
+    updateDetail();
 }
 
 void PluginBrowser::activate(std::size_t row) {
