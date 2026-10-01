@@ -5352,7 +5352,7 @@ Result:
 
 Choose the take heard from an item.
 
-
+take (its id) or index (0-based in the item's take order — the same position after item.split, which copies the takes in order: comping splits an item and picks a take by index on the piece).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -5362,6 +5362,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `item` | string |  |  |  |  |
 | `take` | string |  |  |  |  |
+| `index` | integer |  | 0.0.. |  |  |
 
 ### Result
 

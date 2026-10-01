@@ -6,7 +6,9 @@
 // right edge stretches: the play rate follows the length), slip
 // (Alt-drag: the source moves under the item), fade handles at the top
 // corners, the take badge cycles takes, double-click opens a MIDI item, and
-// files dropped on the lanes. On an automation lane: click adds a point, drag
+// files dropped on the lanes. An item showing its take lanes: click a lane to
+// hear that take, swipe across one to comp that range (split + take), drag
+// the name bar to move it. On an automation lane: click adds a point, drag
 // moves one (snapped; Shift frees), Alt+click deletes one. Each gesture previews as a ghost on the
 // root's overlay and commits ONE transaction on release.
 #pragma once
@@ -90,14 +92,27 @@ class ItemGestures {
     double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
 
     // What a drag is doing (the overlay and tests read it).
-    enum class Drag { None, Move, TrimLeft, TrimRight, Slip, FadeIn, FadeOut, Marquee, EnvPoint };
+    enum class Drag {
+        None,
+        Move,
+        TrimLeft,
+        TrimRight,
+        Slip,
+        FadeIn,
+        FadeOut,
+        Marquee,
+        EnvPoint,
+        Comp
+    };
     struct State {
         Drag drag = Drag::None;
-        model::Id anchor{};      // the item under the press
-        double deltaBeats = 0;   // move / trim-left / trim-right / slip, snapped
-        int deltaRows = 0;       // move
-        double fadeSeconds = 0;  // fade in/out length being drawn
-        bool stretch = false;    // Alt on the right edge: length and play rate together
+        model::Id anchor{};               // the item under the press
+        double deltaBeats = 0;            // move / trim-left / trim-right / slip, snapped
+        int deltaRows = 0;                // move
+        double fadeSeconds = 0;           // fade in/out length being drawn
+        bool stretch = false;             // Alt on the right edge: length and play rate together
+        std::size_t takeLane = 0;         // comp: the take lane under the press
+        double compFrom = 0, compTo = 0;  // comp: the range being swiped (beats)
         ui::Rect marquee{};
         std::vector<model::Id> marqueeBase;
         // An automation lane's point being added or dragged (P5.14): a click
@@ -117,6 +132,7 @@ class ItemGestures {
         ui::Rect rect{};
         Drag zone = Drag::None;
         bool takeBadge = false;
+        std::optional<std::size_t> takeLane;  // a take lane under the point (comping)
     };
     std::optional<Hit> hit(ui::Point p) const;
     std::optional<std::size_t> rowAt(float y) const;

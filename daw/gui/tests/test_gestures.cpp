@@ -583,3 +583,47 @@ TEST_CASE("arrange clipboard: copy, cut, paste onto another channel, duplicate")
     CHECK(f.item(g.selection()[0]).position == doctest::Approx(300 + len));
     CHECK(f.item(g.selection()[0]).track == f.item(last).track);
 }
+
+TEST_CASE("take comping: click a take lane to hear it, swipe a range to comp it in") {
+    Fixture f;
+    if (!f.ok) return;
+    std::optional<model::Id> it;
+    for (const auto& e : f.app->head().items)
+        if (e.value->takes.size() == 2) it = e.id;
+    REQUIRE(it);
+    const ui::Rect r = f.rectOf(*it);
+    REQUIRE(views::Lanes::showsTakeLanes(r, 2));
+    const std::size_t heard = static_cast<std::size_t>(
+        std::find(f.item(*it).takes.begin(), f.item(*it).takes.end(), *f.item(*it).activeTake) -
+        f.item(*it).takes.begin());
+    const std::size_t other = 1 - heard;
+    auto laneCenter = [&](const ui::Rect& ir, std::size_t lane, float fraction) {
+        const ui::Rect l = views::Lanes::takeLaneRect(ir, 2, lane);
+        return ui::Point{ir.x + ir.w * fraction, l.y + l.h / 2};
+    };
+    // A click on the other take's lane: the whole item plays it (one step).
+    auto steps = f.steps();
+    f.click(laneCenter(r, other, 0.5f));
+    CHECK(*f.item(*it).activeTake == f.item(*it).takes[other]);
+    CHECK(f.steps() == steps + 1);
+    // Swipe the first take's lane across the middle: split twice, the middle
+    // piece plays the first take, the outer pieces keep the other.
+    const std::size_t items = f.app->head().items.size();
+    steps = f.steps();
+    const ui::Rect r2 = f.rectOf(*it);
+    f.drag(laneCenter(r2, heard, 0.3f), laneCenter(r2, heard, 0.6f));
+    CHECK(f.app->head().items.size() == items + 2);
+    CHECK(f.steps() == steps + 1);
+    const model::Session& s = f.app->head();
+    std::vector<const model::Item*> pieces;
+    for (const auto& e : s.items)
+        if (e.value->track == f.item(*it).track && e.value->takes.size() == 2)
+            pieces.push_back(e.value.get());
+    std::sort(pieces.begin(), pieces.end(),
+              [](auto* a, auto* b) { return a->position < b->position; });
+    REQUIRE(pieces.size() == 3);
+    CHECK(*pieces[0]->activeTake == pieces[0]->takes[other]);
+    CHECK(*pieces[1]->activeTake == pieces[1]->takes[heard]);
+    CHECK(*pieces[2]->activeTake == pieces[2]->takes[other]);
+    CHECK(pieces[1]->position == doctest::Approx(pieces[0]->position + pieces[0]->length));
+}

@@ -43,6 +43,10 @@ class Lanes : public ui::Node {
     ui::Rect itemRect(std::size_t row, const model::Item& item) const;
     // An automation lane's value area inside its row (gestures map y with it).
     static ui::Rect envArea(const ui::Rect& row);
+    // Take lanes (comping): an item with several takes, tall enough, shows
+    // each take in its own lane under its label; the heard one is lit.
+    static bool showsTakeLanes(const ui::Rect& item, std::size_t takes);
+    static ui::Rect takeLaneRect(const ui::Rect& item, std::size_t takes, std::size_t index);
 
     void arrange(const ui::Canvas& canvas, const ui::Rect& bounds) override;
     void paint(ui::Canvas& canvas) override;

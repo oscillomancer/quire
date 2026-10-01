@@ -639,7 +639,8 @@ q = nil
 
 ---@class Quire.take_activate_args
 ---@field item string
----@field take string
+---@field take? string
+---@field index? integer
 
 ---@class Quire.take_add_args
 ---@field item string

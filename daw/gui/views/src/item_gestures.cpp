@@ -196,6 +196,19 @@ class Ghost : public ui::Node {
                 }
                 break;
             }
+            case ItemGestures::Drag::Comp:
+                if (anchor && st.compTo > st.compFrom) {
+                    const auto row = v.trackLayout().indexOf(anchor->track);
+                    if (!row) break;
+                    const ui::Rect ir = const_cast<ArrangeView&>(v).lanes().itemRect(*row, *anchor);
+                    const ui::Rect lane =
+                        Lanes::takeLaneRect(ir, anchor->takes.size(), st.takeLane);
+                    const float x0 = v.xAt(s.timeMap->secondsAt(st.compFrom));
+                    const float x1 = v.xAt(s.timeMap->secondsAt(st.compTo));
+                    c.fillRect({x0, lane.y, x1 - x0, lane.h}, t.color("focus").withAlpha(0.3f));
+                    c.strokeRect({x0, lane.y, x1 - x0, lane.h}, t.color("focus"), 1.5f);
+                }
+                break;
             case ItemGestures::Drag::None:
                 break;
         }
@@ -421,6 +434,14 @@ std::optional<ItemGestures::Hit> ItemGestures::hit(ui::Point p) const {
             h.zone = Drag::TrimRight;
         else
             h.zone = Drag::Move;
+        // Below the name bar of an item showing its take lanes: comping.
+        if (h.zone == Drag::Move && !h.takeBadge && p.y >= r.y + 15 &&
+            Lanes::showsTakeLanes(r, it.takes.size())) {
+            const ui::Rect first = Lanes::takeLaneRect(r, it.takes.size(), 0);
+            const auto index = static_cast<std::size_t>(std::max(0.0f, (p.y - first.y) / first.h));
+            h.takeLane = std::min(index, it.takes.size() - 1);
+            h.zone = Drag::Comp;
+        }
         best = h;
     }
     return best;
@@ -467,6 +488,7 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 changed();
             }
             state_.drag = h->zone;
+            if (h->takeLane) state_.takeLane = *h->takeLane;
             if (state_.drag == Drag::Move && (e.mods & ui::kAlt)) state_.drag = Drag::Slip;
             state_.stretch = state_.drag == Drag::TrimRight && (e.mods & ui::kAlt) &&
                              !isMidi(activeTake(s, *itemOf(s, h->item)));
@@ -554,6 +576,15 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 }
                 break;
             }
+            case Drag::Comp:
+                if (anchor) {
+                    const double start = anchor->position, end = anchor->position + anchor->length;
+                    const double a0 = std::clamp(snap(beatAtX(press_.x), free_), start, end);
+                    const double a1 = std::clamp(snap(beatAtX(e.pos.x), free_), start, end);
+                    state_.compFrom = std::min(a0, a1);
+                    state_.compTo = std::max(a0, a1);
+                }
+                break;
             case Drag::EnvPoint:
             case Drag::None:
                 break;
@@ -582,6 +613,44 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
     if (state_.drag == Drag::EnvPoint) {
         if (moved_ || state_.envCreated)
             commitEnv(state_.envCreated ? "Add envelope point" : "Move envelope point");
+        return;
+    }
+    if (state_.drag == Drag::Comp && anchor && !anchor->locked) {
+        // A click hears that take for the whole item; a swipe splits the item
+        // at the range and hears that take there (the piece keeps the take
+        // order, so the take is chosen by index).
+        json::Value activate = json::Value::object();
+        activate["index"] = static_cast<std::int64_t>(state_.takeLane);
+        const double start = anchor->position, end = anchor->position + anchor->length;
+        const bool whole = !moved_ || state_.compTo - state_.compFrom < kMinLength ||
+                           (state_.compFrom <= start + 1e-9 && state_.compTo >= end - 1e-9);
+        if (whole) {
+            if (anchor->activeTake && state_.takeLane < anchor->takes.size() &&
+                anchor->takes[state_.takeLane] == *anchor->activeTake)
+                return;
+            activate["item"] = state_.anchor.str();
+            runSteps("Switch take", {{"take.activate", std::move(activate)}});
+            return;
+        }
+        std::vector<EditStep> steps;
+        std::string target = state_.anchor.str();
+        if (state_.compFrom > start + 1e-9) {
+            json::Value split = json::Value::object();
+            split["item"] = target;
+            split["at"] = state_.compFrom;
+            steps.push_back({"item.split", std::move(split)});
+            target = "$step" + std::to_string(steps.size() - 1) + ".right";
+        }
+        if (state_.compTo < end - 1e-9) {
+            json::Value split = json::Value::object();
+            split["item"] = target;
+            split["at"] = state_.compTo;
+            steps.push_back({"item.split", std::move(split)});
+            target = "$step" + std::to_string(steps.size() - 1) + ".left";
+        }
+        activate["item"] = target;
+        steps.push_back({"take.activate", std::move(activate)});
+        runSteps("Comp take", steps);
         return;
     }
     if (!moved_) {  // a click
@@ -770,6 +839,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                      {{"item.set", std::move(args)}});
             return;
         }
+        case Drag::Comp:
         case Drag::EnvPoint:
         case Drag::None:
             return;

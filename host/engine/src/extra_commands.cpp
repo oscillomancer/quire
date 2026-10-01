@@ -158,8 +158,10 @@ struct ItemSplitArgs {
 struct SplitResult {
     std::string left, right;
 };
-struct TakeRef {
-    std::string item, take;
+struct TakeActivateArgs {
+    std::string item;
+    std::optional<std::string> take;
+    std::optional<std::int64_t> index;  // 0-based, in the item's take order
 };
 struct ItemQuery {
     std::string item;
@@ -1363,29 +1365,46 @@ void registerExtraCommands(cmd::Registry& registry) {
         registry.add(std::move(c));
     }
     {
-        Command<TakeRef, Empty> c;
+        Command<TakeActivateArgs, Empty> c;
         c.name = "take.activate";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Choose the take heard from an item.";
+        c.description =
+            "take (its id) or index (0-based in the item's take order — the same position "
+            "after item.split, which copies the takes in order: comping splits an item and "
+            "picks a take by index on the piece).";
         c.tags = {"take"};
-        c.args = schema::object<TakeRef>("take_activate_args")
-                     .field("item", &TakeRef::item, idSchema("it"))
-                     .field("take", &TakeRef::take, idSchema("tk"))
+        c.args = schema::object<TakeActivateArgs>("take_activate_args")
+                     .field("item", &TakeActivateArgs::item, idSchema("it"))
+                     .field("take", &TakeActivateArgs::take, idSchema("tk"))
+                     .field("index", &TakeActivateArgs::index, schema::integer().min(0))
                      .build();
         c.result = emptySchema();
         c.examples = {
             {"Activate", j(R"({"item":"it_1","take":"tk_1"})"), j("{}"), "song_with_item"}};
-        c.run = [](const TakeRef& a, Context& ctx) -> Result<Empty> {
+        c.run = [](const TakeActivateArgs& a, Context& ctx) -> Result<Empty> {
             const auto s = app(ctx).view();
             auto item = require<model::Item>(s, a.item, "/item");
             if (!item) return std::move(item).error();
-            auto take = require<model::Take>(s, a.take, "/take");
-            if (!take) return std::move(take).error();
             const auto& takes = s.items.find(*item)->takes;
-            if (std::find(takes.begin(), takes.end(), *take) == takes.end())
-                return Error("take.not_in_item", a.take + " does not belong to " + a.item, "/take",
-                             "use take.list for this item");
+            if (a.take.has_value() == a.index.has_value())
+                return Error("take.choice", "give take or index", "", "take: \"tk_2\" or index: 1");
+            std::optional<Id> take;
+            if (a.index) {
+                if (*a.index >= static_cast<std::int64_t>(takes.size()))
+                    return Error("take.index",
+                                 a.item + " has " + std::to_string(takes.size()) + " takes",
+                                 "/index", "use take.list for this item");
+                take = takes[static_cast<std::size_t>(*a.index)];
+            } else {
+                auto found = require<model::Take>(s, *a.take, "/take");
+                if (!found) return std::move(found).error();
+                take = *found;
+                if (std::find(takes.begin(), takes.end(), *take) == takes.end())
+                    return Error("take.not_in_item", *a.take + " does not belong to " + a.item,
+                                 "/take", "use take.list for this item");
+            }
             app(ctx).txn().modify<model::Item>(*item,
                                                [&](model::Item& it) { it.activeTake = *take; });
             return Empty{};

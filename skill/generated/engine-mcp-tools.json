@@ -3896,7 +3896,7 @@
   {
     "name": "take_activate",
     "title": "Choose the take heard from an item.",
-    "description": "Choose the take heard from an item.  See describe for errors and examples.",
+    "description": "Choose the take heard from an item. take (its id) or index (0-based in the item's take order — the same position after item.split, which copies the takes in order: comping splits an item and picks a take by index on the piece). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "take_activate_args",
@@ -3908,9 +3908,13 @@
         "take": {
           "type": "string",
           "pattern": "^tk_[0-9]+$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
         }
       },
-      "required": ["item", "take"],
+      "required": ["item"],
       "additionalProperties": false
     },
     "outputSchema": {

@@ -220,6 +220,16 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
            t.type("caption"), t.color("ink-quiet"));
 }
 
+bool Lanes::showsTakeLanes(const ui::Rect& item, std::size_t takes) {
+    return takes >= 2 && (item.h - 17.0f) / static_cast<float>(takes) >= 14.0f;
+}
+
+ui::Rect Lanes::takeLaneRect(const ui::Rect& item, std::size_t takes, std::size_t index) {
+    const float h =
+        std::max(0.0f, item.h - 17.0f) / static_cast<float>(std::max<std::size_t>(1, takes));
+    return {item.x, item.y + 15.0f + h * static_cast<float>(index), item.w, h};
+}
+
 ui::Rect Lanes::envArea(const ui::Rect& row) {
     return {row.x, row.y + 4, row.w, std::max(1.0f, row.h - 8)};
 }
@@ -272,11 +282,30 @@ void Lanes::paintGl(const ui::GlFrame& frame) {
             bodies_->add(r, body, edge);
             const model::Take* take = item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
             if (!take || !take->source) continue;
-            const ui::Rect inner{r.x, r.y + 15, r.w, std::max(0.0f, r.h - 17)};  // under the label
-            if (const model::MediaSource* m = s.media.find(*take->source))
-                drawAudio(frame, inner, *item, *take, *m, wave);
-            else if (const model::MidiSource* src = s.midi.find(*take->source))
-                drawMidi(inner, *item, *take, *src, note, noteBorder);
+            if (showsTakeLanes(r, item->takes.size())) {  // every take in its lane
+                for (std::size_t ti = 0; ti < item->takes.size(); ++ti) {
+                    const model::Take* tk = s.takes.find(item->takes[ti]);
+                    if (!tk || !tk->source) continue;
+                    const ui::Rect lane = takeLaneRect(r, item->takes.size(), ti);
+                    const bool heard = item->activeTake == item->takes[ti];
+                    if (heard)
+                        bodies_->add(lane, ui::packRgba(type.withAlpha(0.22f)),
+                                     ui::packRgba(type.withAlpha(0.7f)));
+                    const std::uint32_t ink =
+                        heard ? wave : ui::packRgba(t.color("ink").withAlpha(dim ? 0.15f : 0.35f));
+                    if (const model::MediaSource* m = s.media.find(*tk->source))
+                        drawAudio(frame, lane, *item, *tk, *m, ink);
+                    else if (const model::MidiSource* src = s.midi.find(*tk->source))
+                        drawMidi(lane, *item, *tk, *src, heard ? note : ink, noteBorder);
+                }
+            } else {
+                const ui::Rect inner{r.x, r.y + 15, r.w,
+                                     std::max(0.0f, r.h - 17)};  // under the label
+                if (const model::MediaSource* m = s.media.find(*take->source))
+                    drawAudio(frame, inner, *item, *take, *m, wave);
+                else if (const model::MidiSource* src = s.midi.find(*take->source))
+                    drawMidi(inner, *item, *take, *src, note, noteBorder);
+            }
             drawFades(r, *item, wave);
         }
     }
