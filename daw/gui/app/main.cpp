@@ -25,6 +25,7 @@
 #include "agent_panel.h"
 #include "app_actions.h"
 #include "chrome.h"
+#include "file_actions.h"
 #include "generate.h"
 #include "plugin_windows.h"
 #include "shell.h"
@@ -276,6 +277,8 @@ int main(int argc, char** argv) {
         agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
+                                 [&](std::function<void()> f) { loop.post(std::move(f)); });
     appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
         const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;
         if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
@@ -429,9 +432,12 @@ int main(int argc, char** argv) {
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, next);
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
             if (pluginWindows.handle(e)) continue;  // an editor window's event
-            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
-                quit = true;
-            else
+            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                if (o.frames > 0 || !fileActions.dirty())
+                    quit = true;
+                else if (!root.popupOpen())
+                    fileActions.confirmDiscard("Quit?", [&] { quit = true; });
+            } else
                 root.handle(e);  // the wake event is ignored: it only interrupts the wait
         }
     }
