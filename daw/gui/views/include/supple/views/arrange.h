@@ -1,11 +1,10 @@
-// The arrange view (gui.md §4.3, read-only): the ruler (bars|beats, time,
+// The arrange view (gui.md §4.3): the ruler (bars|beats, time,
 // tempo/meter, markers/regions, the loop range) above the lanes, with the
 // track control panel column to the left sharing the row geometry and the
 // vertical scroll; the playhead lives on the root's overlay tree so a running
 // transport never repaints the content.
 //
-// The view reads the model head and transport telemetry only (never waits,
-// never calls the audio thread); editing gestures are P5.6.
+// Edits go through command callbacks; drags preview locally and commit once.
 #pragma once
 
 #include <cstdint>
@@ -45,6 +44,12 @@ struct Transport {
 };
 
 using TransportSource = std::function<Transport()>;
+
+struct RulerCallbacks {
+    // One command per completed gesture. Transport actions are not undoable.
+    std::function<Result<json::Value>(const std::string&, json::Value)> run;
+    std::function<void(const Error&)> onError;
+};
 
 // gui.md §4.3: the playhead follows the transport off, by page (default) or
 // continuously (centred).
@@ -101,6 +106,9 @@ class ArrangeView : public ui::Node {
     ItemGestures& gestures() { return *gestures_; }  // P5.6: editing gestures
     ui::Node& tcp();
     ui::Node& ruler();
+    void setRulerCallbacks(RulerCallbacks callbacks);
+    void addMarker();  // at the playhead, through marker.add
+    void addRegion();  // over the loop range, through region.add
     // What the panel needs from the app (selection, commands, meters). Call
     // before build/insert; the panel keeps the callbacks.
     void setTcpCallbacks(TcpCallbacks callbacks) { tcpCallbacks_ = std::move(callbacks); }
