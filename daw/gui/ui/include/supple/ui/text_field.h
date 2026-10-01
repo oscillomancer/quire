@@ -20,6 +20,7 @@ class TextField : public Node {
     std::function<void()> onCancel;                    // Escape
     // Keys the field does not use (Up/Down for a list under a search field).
     std::function<bool(const KeyEvent&)> onOtherKey;
+    bool secret = false;  // show dots (API keys); copy and cut are disabled
 
     const std::string& text() const { return text_; }
     void setText(std::string text);  // does not call onChange
@@ -44,6 +45,8 @@ class TextField : public Node {
     void erase(std::size_t from, std::size_t to);
     void moveTo(std::size_t pos, bool extend);
     std::size_t hit(float x) const;
+    static std::string dots(const std::string& s);
+    std::size_t dotOffset(std::size_t byte) const;
     void changed();
     std::string text_, placeholder_, composing_;
     int composingCursor_ = 0;

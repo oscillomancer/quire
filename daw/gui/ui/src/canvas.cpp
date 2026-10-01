@@ -70,6 +70,25 @@ float Canvas::textWidth(std::string_view s, Font font, float size) const {
     return nvgTextBounds(vg_, 0, 0, s.data(), s.data() + s.size(), nullptr);
 }
 
+std::vector<std::string> Canvas::wrap(std::string_view s, Font font, float size,
+                                      float width) const {
+    std::vector<std::string> lines;
+    if (s.empty()) return lines;
+    nvgFontFaceId(vg_, face(font));
+    nvgFontSize(vg_, size);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+    const char* at = s.data();
+    const char* end = s.data() + s.size();
+    NVGtextRow rows[16];
+    while (at < end) {
+        const int n = nvgTextBreakLines(vg_, at, end, std::max(1.0f, width), rows, 16);
+        if (n <= 0) break;
+        for (int i = 0; i < n; ++i) lines.emplace_back(rows[i].start, rows[i].end);
+        at = rows[n - 1].next;
+    }
+    return lines;
+}
+
 std::vector<std::pair<std::size_t, float>> Canvas::carets(std::string_view s, Font font, float size,
                                                           float x0) const {
     std::vector<std::pair<std::size_t, float>> out;

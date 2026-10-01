@@ -8,12 +8,15 @@
 #include <filesystem>
 
 #include "actions_list.h"
+#include "agent_panel.h"
 #include "app_actions.h"
 #include "chrome.h"
+#include "fake_llm.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/ui/list.h"
 #include "supple/ui/root.h"
+#include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
 
 using namespace supple;
@@ -186,4 +189,68 @@ TEST_CASE("app actions: keys, the actions list, prompts, key binding and menus")
         {"gui.selection", json::Value::object(), {cmd::Origin::Type::Test, "t", {}}});
     REQUIRE(sel);
     CHECK((*sel)["tracks"].asArray().size() == 1);
+}
+
+TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd and accepted") {
+    App a;
+    if (!a.ok) return;
+    using namespace supple::agent::testing;
+    FakeServer server;
+    server.push(anthropicTurn(
+        "Adding a drum buss.",
+        {{"exec", R"({"command": "track.add", "args": {"type": "buss", "name": "Drums"}})"}}));
+    server.push(anthropicTurn("Done: one buss named Drums.", {}));
+    std::vector<std::function<void()>> posted;
+    std::mutex m;
+    gui::AgentPanel panel(
+        *a.root, *a.app, a.registry, *a.dispatcher,
+        [&](std::function<void()> f) {
+            std::lock_guard lock(m);
+            posted.push_back(std::move(f));
+        },
+        a.dir / "config" / "agent.json", SUPPLE_SKILL_DIR);
+    panel.config().endpoints = {
+        {agent::Endpoint::Kind::Anthropic, "fake", server.url(), "test-model", "k"}};
+    auto frame = std::make_unique<ui::Node>("window");
+    frame->layout.dir = ui::Layout::Dir::Row;
+    frame->emplace<ui::Node>("body");
+    frame->add(panel.build());
+    a.root->setContent(std::move(frame));
+    panel.toggle();
+    a.root->frame(false);
+    CHECK(a.root->focused() == a.root->find("agent.input"));
+    a.type("Add a drum buss");
+    a.key("Return");
+    REQUIRE(panel.session());
+    for (int i = 0; i < 2000 && panel.session()->busy(); ++i) {
+        std::vector<std::function<void()>> now;
+        {
+            std::lock_guard lock(m);
+            now.swap(posted);
+        }
+        for (auto& f : now) f();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    {  // the idle notification
+        std::lock_guard lock(m);
+        for (auto& f : posted) f();
+        posted.clear();
+    }
+    REQUIRE_FALSE(panel.session()->busy());
+    a.root->frame(false);
+    auto* diff = dynamic_cast<ui::TextBlock*>(a.root->find("agent.review.diff"));
+    REQUIRE(diff);
+    CHECK(a.root->find("agent.review")->visible);
+    CHECK(diff->text() == "+ buss \"Drums\"");  // the master's implied "children" update is hidden
+    a.snapshot("agent-panel.png");
+    CHECK(a.tracks("buss") == 1);
+    REQUIRE(a.root->click("agent.yours"));
+    CHECK(a.tracks("buss") == 0);
+    REQUIRE(a.root->click("agent.theirs"));
+    CHECK(a.tracks("buss") == 1);
+    REQUIRE(a.root->click("agent.accept"));
+    a.root->frame(false);
+    CHECK(a.tracks("buss") == 1);
+    CHECK_FALSE(a.root->find("agent.review")->visible);
+    CHECK(panel.session()->branch().empty());
 }

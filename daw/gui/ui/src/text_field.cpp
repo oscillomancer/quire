@@ -84,11 +84,15 @@ void TextField::paint(Canvas& c) {
     c.strokeRound(b, t.radius("s"), focused() ? t.color("focus") : t.color("rule"));
     const Rect inner{b.x + kPad, b.y, std::max(0.0f, b.w - 2 * kPad), b.h};
 
-    // What is shown: the text with any composition inserted at the caret.
-    const std::string shown =
-        composing_.empty() ? text_ : text_.substr(0, caret_) + composing_ + text_.substr(caret_);
+    // What is shown: the text with any composition inserted at the caret
+    // (secret fields: one dot per character).
+    const std::string shown = secret ? dots(text_)
+                              : composing_.empty()
+                                  ? text_
+                                  : text_.substr(0, caret_) + composing_ + text_.substr(caret_);
     carets_ = c.carets(shown, Font::Ui, size, 0);
     auto xOf = [&](std::size_t byte) {
+        if (secret) byte = dotOffset(byte);
         for (const auto& [at, x] : carets_)
             if (at >= byte) return x;
         return carets_.back().second;
@@ -123,18 +127,39 @@ void TextField::paint(Canvas& c) {
     c.restore();
 }
 
+std::string TextField::dots(const std::string& s) {
+    std::string out;
+    for (char ch : s)
+        if (!continuation(ch)) out += "\xE2\x80\xA2";  // U+2022, three bytes
+    return out;
+}
+
+std::size_t TextField::dotOffset(std::size_t byte) const {
+    std::size_t chars = 0;
+    for (std::size_t i = 0; i < byte && i < text_.size(); ++i) chars += !continuation(text_[i]);
+    return chars * 3;
+}
+
 std::size_t TextField::hit(float x) const {
     const float local = x - (bounds().x + kPad) + scroll_;
     std::size_t best = 0;
     float bestD = 1e9f;
     for (const auto& [at, cx] : carets_) {
         const float d = std::abs(cx - local);
-        if (d < bestD && at <= text_.size()) {
+        if (d < bestD) {
             bestD = d;
             best = at;
         }
     }
-    return best;
+    if (secret) {  // dot offset → byte offset in the text
+        std::size_t chars = best / 3, i = 0;
+        while (i < text_.size() && chars > 0) {
+            i = nextBoundary(text_, i);
+            --chars;
+        }
+        return i;
+    }
+    return std::min(best, text_.size());
 }
 
 void TextField::changed() {
@@ -238,10 +263,10 @@ bool TextField::onKey(const KeyEvent& e) {
                 selectAll();
                 return true;
             case SDLK_C:
-                if (r && s1 > s0) r->setClipboard(text_.substr(s0, s1 - s0));
+                if (r && s1 > s0 && !secret) r->setClipboard(text_.substr(s0, s1 - s0));
                 return true;
             case SDLK_X:
-                if (r && s1 > s0) {
+                if (r && s1 > s0 && !secret) {
                     r->setClipboard(text_.substr(s0, s1 - s0));
                     erase(s0, s1);
                 }
