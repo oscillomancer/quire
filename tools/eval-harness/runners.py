@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 import time
 
 from common import HERE, ROOT, Mcp, capture, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
@@ -129,6 +130,19 @@ def isolated_config(task, directory, seed, model, credentials, binary=None, star
     return home, env
 
 
+# Live attempts' process groups (each Hermes runs in its own session), so an
+# interrupted run can stop them instead of orphaning them.
+ACTIVE = set()
+ACTIVE_LOCK = threading.Lock()
+
+
+def stop_all():
+    with ACTIVE_LOCK:
+        live = list(ACTIVE)
+    for process in live:
+        stop_group(process)
+
+
 def hermes_command(options):
     return ([options.hermes_python, "-I", "-B", "-m", "hermes_cli.main"]
             if options.hermes_python else [options.hermes_bin])
@@ -171,12 +185,16 @@ def hermes(task, directory, seed, options, reference=None):
         process = subprocess.Popen(command + ["-z", prompt, "--usage-file", str(directory / "usage.json"),
                                                "--toolsets", "sandbox", "--ignore-rules"],
                                    env=env, cwd=directory, stdout=stdout, stderr=stderr, start_new_session=True)
+        with ACTIVE_LOCK:
+            ACTIVE.add(process)
         try:
             process.wait(timeout=task["limits"]["minutes"] * 60)
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
             stop_group(process)
+            with ACTIVE_LOCK:
+                ACTIVE.discard(process)
     export = subprocess.run(command + ["sessions", "export", str(directory / "transcript.jsonl"),
                                        "--format", "jsonl", "--redact"],
                             env=env, cwd=directory, capture_output=True, text=True, timeout=30)

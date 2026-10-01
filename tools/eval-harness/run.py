@@ -2,12 +2,14 @@
 """P3.4 evaluation: defaults to a free scripted validation run."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -151,6 +153,7 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="Validate with scripted answers, never call a model (default)")
     parser.add_argument("--tasks", nargs="+", help="Task ids or suffixes, space or comma separated")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--jobs", type=int, default=1, help="Attempts run concurrently (each fully isolated); 1..16")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sandbox", type=Path)
     parser.add_argument("--hermes-bin", default="hermes")
@@ -161,8 +164,8 @@ def main(argv=None):
                         help="Dedicated evaluation profile credential .env to reference; never copied")
     parser.add_argument("--publish", action="store_true", help="Write benchmarks and one listening queue item; default for real Hermes runs")
     options = parser.parse_args(argv)
-    if not 1 <= options.repeat <= 100 or not 0 <= options.seed <= 1000000000:
-        parser.error("repeat must be 1..100 and seed 0..1e9")
+    if not 1 <= options.repeat <= 100 or not 0 <= options.seed <= 1000000000 or not 1 <= options.jobs <= 16:
+        parser.error("repeat must be 1..100, jobs 1..16 and seed 0..1e9")
     runner = "dry" if options.dry_run else options.runner
     selected = [part for arg in (options.tasks or []) for part in arg.split(",")]
     tasks = load_tasks(options.suite, selected)
@@ -184,43 +187,61 @@ def main(argv=None):
         except (RuntimeError, OSError, subprocess.SubprocessError) as error:
             print("error:", error, file=sys.stderr)
             return 2
-    usage_totals = {"total_tokens": 0, "estimated_cost_usd": 0.0, "cost_known": True}
+    references = {}
     for task in tasks:
         report["task_hashes"][task["id"]] = hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()
-        reference = None
         if task["suite"] == "synth-reference":
-            reference, _ = render_patch(task, task["hidden_patch"], run_dir / (task["id"] + "-hidden"), options.seed, options.sandbox)
-        for repeat in range(options.repeat):
-            directory = run_dir / (task["id"] + f"-{repeat + 1}")
-            directory.mkdir()
-            begin = time.monotonic()
-            record = {"task": task["id"], "repeat": repeat + 1, "seed": options.seed,
-                      "listening": task["listening"], "transcript": str((directory / "transcript.jsonl").relative_to(ROOT))}
-            try:
-                record["runner"] = (runners.dry(task, directory, options.seed, options.sandbox)
-                                    if runner == "dry" else runners.hermes(task, directory, options.seed, options, reference))
-                record.update(score_final(task, directory, options.seed, options.sandbox, reference))
-                record["limits_exceeded"] = record["efficiency"]["tool_calls"] > task["limits"]["tool_calls"]
-                if record["runner"]["exit_code"] or record["runner"]["timed_out"] or record["limits_exceeded"]:
-                    record["score"]["pass"] = False
-                    record["incomplete"] = True
-                if runner == "dry" and not record["score"]["pass"]:
-                    record["error"] = "Scripted reference failed its own scorer/profile"
-            except (ValueError, KeyError, OSError, RuntimeError, TimeoutError, subprocess.SubprocessError) as error:
-                record.update(valid_patch=False, error=str(error))
-            usage = read_json(directory / "usage.json") if (directory / "usage.json").exists() else {}
-            record["usage"] = usage
-            total = usage.get("total_including_auxiliary", usage)
-            usage_totals["total_tokens"] += total.get("total_tokens", 0) or 0
-            cost = total.get("estimated_cost_usd")
-            if cost is None:
-                usage_totals["cost_known"] = False
-            else:
-                usage_totals["estimated_cost_usd"] += cost
-            record["wall_seconds"] = round(time.monotonic() - begin, 3)
-            report["tasks"].append(record)
-            print(f"{task['id']} repeat {repeat + 1}: {'PASS' if record.get('score', {}).get('pass') else 'FAIL'}"
-                  f" ({record['wall_seconds']:.2f}s)" + (f" — {record['error']}" if record.get("error") else ""), flush=True)
+            references[task["id"]], _ = render_patch(task, task["hidden_patch"], run_dir / (task["id"] + "-hidden"),
+                                                     options.seed, options.sandbox)
+
+    def attempt(task, repeat):
+        directory = run_dir / (task["id"] + f"-{repeat + 1}")
+        directory.mkdir()
+        reference = references.get(task["id"])
+        begin = time.monotonic()
+        record = {"task": task["id"], "repeat": repeat + 1, "seed": options.seed,
+                  "listening": task["listening"], "transcript": str((directory / "transcript.jsonl").relative_to(ROOT))}
+        try:
+            record["runner"] = (runners.dry(task, directory, options.seed, options.sandbox)
+                                if runner == "dry" else runners.hermes(task, directory, options.seed, options, reference))
+            record.update(score_final(task, directory, options.seed, options.sandbox, reference))
+            record["limits_exceeded"] = record["efficiency"]["tool_calls"] > task["limits"]["tool_calls"]
+            if record["runner"]["exit_code"] or record["runner"]["timed_out"] or record["limits_exceeded"]:
+                record["score"]["pass"] = False
+                record["incomplete"] = True
+            if runner == "dry" and not record["score"]["pass"]:
+                record["error"] = "Scripted reference failed its own scorer/profile"
+        except (ValueError, KeyError, OSError, RuntimeError, TimeoutError, subprocess.SubprocessError) as error:
+            record.update(valid_patch=False, error=str(error))
+        record["usage"] = read_json(directory / "usage.json") if (directory / "usage.json").exists() else {}
+        record["wall_seconds"] = round(time.monotonic() - begin, 3)
+        print(f"{task['id']} repeat {repeat + 1}: {'PASS' if record.get('score', {}).get('pass') else 'FAIL'}"
+              f" ({record['wall_seconds']:.2f}s)" + (f" — {record['error']}" if record.get("error") else ""), flush=True)
+        return record
+
+    def interrupted(signum, _frame):
+        runners.stop_all()  # no orphaned Hermes process groups
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    # Attempts are independent (own directory, Hermes home and sandbox); the
+    # report keeps task/repeat order whatever the completion order.
+    order = [(index, task, repeat) for index, task in enumerate(tasks) for repeat in range(options.repeat)]
+    with ThreadPoolExecutor(max_workers=options.jobs) as pool:
+        futures = {pool.submit(attempt, task, repeat): (index, repeat) for index, task, repeat in order}
+        done = {futures[f]: f.result() for f in as_completed(futures)}
+    report["tasks"] = [done[key] for key in sorted(done)]
+    usage_totals = {"total_tokens": 0, "estimated_cost_usd": 0.0, "cost_known": True}
+    for record in report["tasks"]:
+        usage = record["usage"]
+        total = usage.get("total_including_auxiliary", usage)
+        usage_totals["total_tokens"] += total.get("total_tokens", 0) or 0
+        cost = total.get("estimated_cost_usd")
+        if cost is None:
+            usage_totals["cost_known"] = False
+        else:
+            usage_totals["estimated_cost_usd"] += cost
     report["model"] = next((r.get("usage", {}).get("model") or r.get("runner", {}).get("model")
                              for r in report["tasks"] if r.get("usage", {}).get("model") or r.get("runner", {}).get("model")), "unknown")
     report["provider"] = next((r.get("usage", {}).get("provider") for r in report["tasks"] if r.get("usage", {}).get("provider")), "unknown")
