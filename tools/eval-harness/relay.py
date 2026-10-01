@@ -6,7 +6,8 @@ from pathlib import Path
 import signal
 import sys
 
-from common import Mcp, capture, read_json, setup, tool_data, write_json
+from common import (Mcp, PluginProvenanceError, capture, check_plugin_provenance, plugin_dir,
+                    read_json, setup, tool_data, write_json)
 
 
 def invocations(name, args):
@@ -80,6 +81,20 @@ def main():
                     client.call("patch.set", {"instance": "in_1", "patch": patch})
                 capture(client, workdir / "final.json")
                 write_json(workdir / "exposed-tools.json", client.rpc("tools/list"))
+                # Record which plugin files this attempt runs, and refuse to go on
+                # when one of them is not the build's: a stale copy installed in
+                # ~/.clap shadowed the built Orrery for two evaluation campaigns
+                # (2026-09-30..10-01), so their numbers measured another plugin.
+                expect = plugin_dir(config["sandbox_command"])
+                try:
+                    provenance = check_plugin_provenance(client, expect, what="the attempt")
+                except PluginProvenanceError as error:
+                    write_json(workdir / "plugins.json",
+                               {"expected": str(expect), "error": str(error)})
+                    print(f"eval.plugin_provenance: {error}", file=sys.stderr, flush=True)
+                    raise SystemExit(3) from error
+                write_json(workdir / "plugins.json",
+                           {"expected": str(expect), "plugins": provenance})
                 initialized = True
             else:
                 response = recorder.handle(message)

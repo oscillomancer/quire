@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-from common import HERE, ROOT, Mcp, capture, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
+from common import HERE, ROOT, Mcp, capture, check_plugin_provenance, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
 from relay import Recorder
 
 
@@ -46,6 +46,7 @@ def dry(task, directory, seed, binary=None):
     directory = Path(directory)
     with Mcp(sandbox_command(directory, binary), directory) as client:
         setup(client, task, seed)
+        check_plugin_provenance(client, what="the scripted attempt")
         recorder = Recorder(client, directory, task["limits"]["tool_calls"])
         serial = 0
 

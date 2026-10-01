@@ -52,6 +52,70 @@ def sandbox_command(workdir, binary=None):
             "--plugin-path", str(ROOT / "build/dev/plugins/clap")]
 
 
+class PluginProvenanceError(ValueError):
+    """A session loaded a plugin that is not the build under test."""
+
+
+def plugin_dir(command=None):
+    """The plugin directory the harness searches (the command's --plugin-path)."""
+    command = list(command or sandbox_command("/tmp"))
+    for i, arg in enumerate(command):
+        if arg == "--plugin-path" and i + 1 < len(command):
+            return Path(command[i + 1]).resolve()
+    return (ROOT / "build/dev/plugins/clap").resolve()
+
+
+def load_provenance(client):
+    """{instance: {plugin, path, version, shadowed}} for the plugins a session loaded.
+
+    `plugin.list` reports each plugin's file and flags the copies it shadowed,
+    and a session resolves an id to the first entry on the search path: the
+    first entry per id is the one in use.
+    """
+    session = client.call("session.get")
+    chosen, shadowed = {}, {}
+    for entry in client.call("plugin.list", {})["plugins"]:
+        chosen.setdefault(entry["id"], entry)
+        if entry.get("shadowed"):
+            shadowed.setdefault(entry["id"], []).append(entry.get("path"))
+    out = {}
+    for instance in session["chain"]:
+        plugin = session["instances"][instance]["plugin"]
+        entry = chosen.get(plugin, {})
+        out[instance] = {"plugin": plugin, "path": entry.get("path"),
+                         "version": entry.get("version"),
+                         "shadowed": shadowed.get(plugin, [])}
+    return out
+
+
+def check_plugin_provenance(client, expect_dir=None, what="the session"):
+    """Every plugin a session loaded must come from the build under test.
+
+    The sandbox opens the first file on its search path for an id, so a stale
+    copy installed elsewhere (a release in ~/.clap) used to shadow the built
+    one: an eval attempt or the optimizer could run a different plugin than the
+    scorer, which is silent and worthless to measure. Raises, loudly, instead.
+    """
+    expect = Path(expect_dir or plugin_dir()).resolve()
+    provenance = load_provenance(client)
+    bad = {}
+    for instance, entry in provenance.items():
+        path = entry.get("path")
+        candidates = []
+        if path:
+            given = Path(path)
+            candidates = [given.resolve() if given.is_absolute() else (base / given).resolve()
+                          for base in (Path.cwd(), ROOT)]
+        if not any(c.is_relative_to(expect) for c in candidates):
+            bad[instance] = entry
+    if bad:
+        raise PluginProvenanceError(
+            f"{what} loaded plugins outside the build ({expect}): {json.dumps(bad)}; "
+            "a stale copy is shadowing it (plugin.list flags it as shadowed) — remove it or "
+            "fix the search path before measuring")
+    return provenance
+
+
 def stop_group(process):
     # Kill descendants too, even if their parent has already exited.
     try:

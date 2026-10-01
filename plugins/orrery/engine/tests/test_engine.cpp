@@ -330,6 +330,36 @@ TEST_CASE("after reset a render depends only on the patch, not on the previous r
     CHECK(maxDiff(play(engine, ev, frames, 256), render(y, ev, frames, 256)) == 0.0);
 }
 
+TEST_CASE("after reset a render depends only on the patch: the amp level") {
+    // The sandbox's sequence at engine level: render patch A, change a *smoothed*
+    // parameter (the amp level), render again. The second render must equal a
+    // fresh instance's render of the same patch: the parameter ramps snap on
+    // adoption, the per-voice gain lerps snap at the voice's first tick.
+    const Patch a = parse(R"(
+      "voice": {"mode": "mono", "glide": "20 ms"},
+      "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
+      "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}})");
+    const Patch b = parse(R"(
+      "voice": {"mode": "mono", "glide": "20 ms"},
+      "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
+      "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}},
+      "amp": {"level": "0.825 dB"})");
+    const std::vector<Timed> ev = {note(0, 45, 0.9), noteOff(12000, 45)};
+    const std::int64_t frames = 30000;
+    Engine engine;
+    engine.prepare(48000.0, 256);
+    engine.setPatch(a);
+    play(engine, ev, frames, 256);
+    engine.setPatch(b);
+    const Audio second = play(engine, ev, frames, 256);
+    const Audio fresh = render(b, ev, frames, 256);
+    double d = 0.0;
+    for (std::size_t i = 0; i < fresh.l.size(); ++i)
+        d = std::max({d, std::fabs(static_cast<double>(second.l[i] - fresh.l[i])),
+                      std::fabs(static_cast<double>(second.r[i] - fresh.r[i]))});
+    CHECK(d == 0.0);
+}
+
 TEST_CASE("the seed decides every random choice") {
     const Patch p = parse(kPad);
     Patch other = p;
