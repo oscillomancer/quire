@@ -1176,6 +1176,7 @@ that exactly duplicates structuredContent is shown once.
           }
         },
         "evaluations": 17,
+        "failed": 0,
         "seconds": "<elapsed-job-seconds>",
         "stopped": "evaluations",
         "patch": {
@@ -2687,6 +2688,7 @@ that exactly duplicates structuredContent is shown once.
           }
         },
         "evaluations": 17,
+        "failed": 0,
         "seconds": "<elapsed-job-seconds>",
         "stopped": "evaluations",
         "patch": {
