@@ -102,12 +102,15 @@ def changes(before, after):
 
 
 class Runner:
-    def __init__(self, executable, ini, user_config, directory, timeout):
+    def __init__(self, executable, ini, user_config, directory, timeout, *, audio=False):
         self.executable, self.ini = executable, ini
         self.user_config, self.directory, self.timeout = user_config, directory, timeout
         self.commands = []
+        self.audio = audio
 
     def run(self, arguments, label):
+        if self.audio and os.environ.get("SUPPLE_AUDIO_DEVICE_TEST") != "1":
+            raise CheckError("real audio requires SUPPLE_AUDIO_DEVICE_TEST=1")
         command = [self.executable, "-newinst", "-nosplash", "-cfgfile", str(self.ini), *arguments]
         self.commands.append(command)
         print("$ " + shlex.join(command), flush=True)
@@ -119,8 +122,13 @@ class Runner:
         env["LV2_PATH"] = str(self.ini.parent / "unused")
         env["VST_PATH"] = str(self.ini.parent / "unused")
         env["JACK_NO_START_SERVER"] = "1"
-        env["PIPEWIRE_REMOTE"] = "reaper-check-no-device"
-        env["PULSE_SERVER"] = "unix:" + str(self.ini.parent / "no-pulse-server")
+        if self.audio:
+            # Private benchmark child only; PipeWire treats this as a graph request.
+            env["PIPEWIRE_QUANTUM"] = "64/48000"
+            env["PIPEWIRE_LATENCY"] = "64/48000"
+        else:
+            env["PIPEWIRE_REMOTE"] = "reaper-check-no-device"
+            env["PULSE_SERVER"] = "unix:" + str(self.ini.parent / "no-pulse-server")
         process = None
         timed_out = False
         try:
@@ -159,7 +167,11 @@ class Runner:
             raise CheckError(f"{label}: REAPER exit {code}; see {label}.log")
 
 
-def private_config(directory, plugin_dir, user_config):
+def private_config(directory, plugin_dir, user_config, *, block=256, device="dummy"):
+    if device not in ("dummy", "jack"):
+        raise CheckError("private config device must be dummy or jack")
+    if device == "jack" and os.environ.get("SUPPLE_AUDIO_DEVICE_TEST") != "1":
+        raise CheckError("real audio requires SUPPLE_AUDIO_DEVICE_TEST=1")
     cfg = directory / "config"
     cfg.mkdir(mode=0o700)
     (cfg / "unused").mkdir()
@@ -170,10 +182,10 @@ def private_config(directory, plugin_dir, user_config):
     # Fresh allowlist, not a copy of the user's devices, projects, caches or paths.
     ini = cfg / "reaper.ini"
     ini.write_text(f"""[reaper]
-linux_audio_mode=3
+linux_audio_mode={3 if device == "dummy" else 1}
 linux_audio_srate=48000
-linux_audio_bsize=256
-linux_audio_nch_in=0
+linux_audio_bsize={block}
+linux_audio_nch_in={0 if device == "dummy" else 2}
 linux_audio_nch_out=2
 clap_path_linux-x86_64={plugin_dir}
 vstpath={cfg / "unused"}

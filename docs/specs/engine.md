@@ -306,6 +306,14 @@ loop are restored; playback stays stopped.
 Results are recorded with kernel, PipeWire version, quantum actually
 granted, and CPU governor (read-only facts).
 
+B1/B2 tooling: [tools/bench/README.md](../../tools/bench/README.md).
+The command-built shared session, paced search and REAPER offline generator
+are dry-verifiable. Real measurements require `SUPPLE_AUDIO_DEVICE_TEST=1`
+exactly; no real-device acceptance numbers have been recorded yet. The
+search retains every trial, independently confirms its candidate, and labels
+a passing search cap as a lower bound. REAPER counts observed audio/media
+underrun timestamp changes (multiple events between polls can be undercounted).
+
 ## Implementation notes (2026-09-26, orchestrator)
 
 - **Code layout:** `host/engine/src/plan.{h,cpp}` is the shared compiled plan
@@ -455,5 +463,6 @@ granted, and CPU governor (read-only facts).
   one shared process for `shared_bridge`,
   MIDI output ports, automation recording
   (write/touch/latch),
-  crossfades for structural changes (inserting/removing plugins), B1 proper (preliminary:
-  docs/benchmarks/b1-preliminary.md).
+  crossfades for structural changes (inserting/removing plugins), B1/B2
+  real-device acceptance measurements (tooling: tools/bench/README.md;
+  historical Orrery-only measurements: docs/benchmarks/b1-preliminary.md).
