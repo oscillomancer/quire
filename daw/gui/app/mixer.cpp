@@ -103,6 +103,13 @@ Mixer::~Mixer() {
     for (const Strip& s : strips_) meters_.detach(s.meter);
 }
 
+void Mixer::run(std::string_view action, json::Value args) {
+    const actions::Action* a = actions_.registry().find(action);
+    if (!a) return;
+    if (auto r = actions_.run(*a, args); !r && actions_.onError)
+        actions_.onError(r.error().message);
+}
+
 std::unique_ptr<ui::Node> Mixer::build() {
     auto panel = std::make_unique<ui::Node>("mixer");
     panel_ = panel.get();
@@ -218,16 +225,18 @@ void Mixer::rebuild() {
         st.name = &frame->emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
                                              ui::Font::UiBold, "caption");
         st.name->layout.height = ui::SizeRule::fixed(16);
-        // FX slots: click opens the plug-in's editor.
+        // FX slots (a click opens the plug-in's editor), then "+ FX" (the plugin
+        // browser) or, past two effects, "+N more…" (the chain).
         auto& fxBox = frame->emplace<ui::Node>("mixer.fx." + tid);
         fxBox.layout.dir = ui::Layout::Dir::Column;
         fxBox.layout.height = ui::SizeRule::fixed(3 * 18 + 2 * 2);
         fxBox.layout.gap = 2;
         int slots = 0;
         for (model::Id fx : t.chain) {
-            if (slots++ == 3) break;
+            if (slots == 2) break;
             const model::FxInstance* f = s.fx.find(fx);
             if (!f) continue;
+            ++slots;
             std::string label = f->label.empty()
                                     ? (f->plugin.name.empty() ? f->plugin.id : f->plugin.name)
                                     : f->label;
@@ -236,21 +245,23 @@ void Mixer::rebuild() {
             else if (f->bypass)
                 label = "~" + label;
             auto& b = fxBox.emplace<ui::Button>("mixer.fx." + fx.str(), label, [this, fx] {
-                const actions::Action* open = actions_.registry().find("ui.fx.editor");
-                if (!open) return;
                 json::Value args = json::Value::object();
                 args["fx"] = fx.str();
-                if (auto r = actions_.run(*open, args); !r && actions_.onError)
-                    actions_.onError(r.error().message);
+                run("ui.fx.editor", std::move(args));
             });
             b.layout.height = ui::SizeRule::fixed(18);
             b.layout.width = ui::SizeRule::fraction();
         }
-        if (t.chain.empty())
-            fxBox
-                .emplace<ui::Label>("mixer.nofx." + tid, "no FX", ui::Font::Ui, "caption",
-                                    "ink-faint")
-                .layout.height = ui::SizeRule::fixed(18);
+        const std::size_t more = t.chain.size() > 2 ? t.chain.size() - 2 : 0;
+        auto& add = fxBox.emplace<ui::Button>(
+            "mixer.fxadd." + tid, more ? "+" + std::to_string(more) + " more\u2026" : "+ FX",
+            [this, tid, more] {
+                json::Value args = json::Value::object();
+                args["track"] = tid;
+                run(more ? "ui.fx.chain" : "ui.fx.add", std::move(args));
+            });
+        add.layout.height = ui::SizeRule::fixed(18);
+        add.layout.width = ui::SizeRule::fraction();
         // Sends: name and level.
         auto& sends = frame->emplace<ui::Node>("mixer.sends." + tid);
         sends.layout.dir = ui::Layout::Dir::Column;

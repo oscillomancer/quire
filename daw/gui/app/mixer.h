@@ -50,6 +50,7 @@ class Mixer {
     const std::vector<Strip>& strips() const { return strips_; }
 
   private:
+    void run(std::string_view action, json::Value args);  // an app action; errors to onError
     void rebuild();
     void update();
     std::string structure() const;

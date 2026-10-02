@@ -43,6 +43,7 @@
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/host/clap_host.h"
 #include "supple/json/parse.h"
 #include "supple/peaks/peaks.h"
 #include "supple/product.h"
@@ -244,7 +245,13 @@ int main(int argc, char** argv) {
     options.identity.name = std::string(product::kName);
     options.identity.vendor = std::string(product::kVendor);
     options.identity.version = std::string(product::kVersion);
+    // --plugin-path replaces the search path; otherwise the stock plugins built
+    // beside this binary come before the standard locations.
     options.pluginPath = o.pluginPath;
+    if (options.pluginPath.empty()) {
+        if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
+        for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
+    }
     options.workdir = !o.workdir.empty()   ? o.workdir
                       : !o.project.empty() ? o.project.parent_path()
                                            : fs::current_path();
@@ -366,6 +373,9 @@ int main(int argc, char** argv) {
                            gui::Favourites::defaultFile(product::kSlug));
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
+    appActions.addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
+        return fxWindow.openToAdd(uiState, v);
+    });
     gui::RenderDialog renderDialog(**app, dispatcher, root);
     appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {

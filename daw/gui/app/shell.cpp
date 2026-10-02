@@ -145,6 +145,16 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
     };
+    // "fx": the chain, or straight to the plugin browser when it is empty.
+    tcp.fx = [this, &actions](const model::Id& track) {
+        const model::Track* t = app_.head().tracks.find(track);
+        const actions::Action* action =
+            actions.registry().find(t && !t->chain.empty() ? "ui.fx.chain" : "ui.fx.add");
+        if (!action) return;
+        json::Value args = json::Value::object();
+        args["track"] = track.str();
+        if (auto r = actions.run(*action, args); !r && onError) onError(r.error().message);
+    };
     tcp.addSend = [this](const model::Id& from, const model::Id& to) {
         json::Value args = json::Value::object();
         args["from"] = from.str();

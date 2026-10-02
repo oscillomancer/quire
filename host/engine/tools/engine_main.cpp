@@ -29,6 +29,7 @@
 #include <supple/product.h>
 
 #include "supple/engine/app.h"
+#include "supple/host/clap_host.h"
 
 using namespace supple;
 namespace fs = std::filesystem;
@@ -129,8 +130,9 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
             return usage();
     }
     options.workdir = project.parent_path();
-    if (!options.pluginPath.empty())
-        for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
+    // --plugin-path first, then the stock plugins built beside this binary, then the defaults.
+    if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
+    for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
     auto app = engine::EngineApp::create(options);
     if (!app) {
         print(errorJson(app.error()));
@@ -211,8 +213,8 @@ int main(int argc, char** argv) {
         }
         if (options.workdir.empty())
             options.workdir = project.empty() ? defaultWorkdir() : project.parent_path();
-        if (!options.pluginPath.empty())
-            for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
+        if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
+        for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
         auto app = engine::EngineApp::create(options);
         if (!app) {
             std::fprintf(stderr, "%s\n", app.error().toString().c_str());

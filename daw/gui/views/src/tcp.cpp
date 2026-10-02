@@ -179,7 +179,7 @@ class TcpPanel::Row : public ui::Node {
     ui::Fader* fader_ = nullptr;
     ui::PanControl* pan_ = nullptr;
     ui::Meter* meter_ = nullptr;
-    ui::Label* fx_ = nullptr;
+    ui::Button* fx_ = nullptr;
     ui::Button* input_ = nullptr;
     ui::Button* env_ = nullptr;
     OutButton* out_ = nullptr;
@@ -261,7 +261,9 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
                                       : std::string{});
     };
     meter_ = &emplace<ui::Meter>(id + ".meter", true);
-    fx_ = &emplace<ui::Label>(id + ".fx", "", ui::Font::Mono, "caption", "ink-quiet");
+    fx_ = &emplace<ui::Button>(id + ".fx", "fx", [this] {
+        if (track_ && panel_.cb_.fx) panel_.cb_.fx(*track_);
+    });
     input_ = &emplace<ui::Button>(id + ".input", "in \u2014", [this] {
         if (!track_ || !panel_.cb_.pickInput) return;
         panel_.cb_.pickInput(*track_, absoluteRect(*input_));
@@ -307,10 +309,10 @@ void TcpPanel::Row::refresh(const model::Session& session) {
             bypassed += f->bypass ? 1 : 0;
             offline += f->offline ? 1 : 0;
         }
-    std::string fxText = fx == 0 ? "FX \u2014" : "FX " + std::to_string(fx);
-    if (bypassed) fxText += " byp";
-    if (offline) fxText += " off";
-    fx_->setText(fxText);
+    // "fx", "fx 3"; a trailing "~" when one is bypassed or offline.
+    std::string fxText = fx == 0 ? "fx" : "fx " + std::to_string(fx);
+    if (bypassed || offline) fxText += "~";
+    if (fx_->valueText() != fxText) fx_->setText(fxText);
     // The record input: the view knows the channels, the app knows the device's
     // port names (engine.inputs), so the app writes the label.
     std::string channels;
@@ -350,7 +352,10 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
     const float x = r.x, right = r.right();
     const float indent = 14.0f * static_cast<float>(depth_);
-    nameRect_ = {x + 26 + indent, r.y + 2, std::max(20.0f, right - x - 34 - indent), 18};
+    // The "fx" button ends the name line, so every row has it at any height.
+    const float fxWidth = fx_->valueText().size() > 2 ? 34.0f : 22.0f;
+    fx_->arrange(canvas, {right - 10 - fxWidth, r.y + 3, fxWidth, 15});
+    nameRect_ = {x + 26 + indent, r.y + 2, std::max(20.0f, right - x - 40 - fxWidth - indent), 18};
     name_->arrange(canvas, nameRect_);
     rename_->arrange(canvas, {nameRect_.x, nameRect_.y + 1, nameRect_.w, 17});
     meter_->arrange(canvas, {right - 5, r.y + 3, 4, std::max(4.0f, r.h - 6)});
@@ -363,7 +368,6 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     arm_->visible = controls && channel_;
     monitor_->visible = controls && channel_;
     input_->visible = controls && channel_;
-    fx_->visible = controls;
     env_->visible = controls;
     out_->visible = controls;
     // Keep both I/O buttons inside the TCP, even on deeply nested channels.
@@ -390,8 +394,6 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         out_->arrange(canvas, {tx, ty, 28, 14});
         tx += 30;
     }
-    fx_->visible = controls && right - tx - 8 >= 20;
-    if (fx_->visible) fx_->arrange(canvas, {tx, ty, right - tx - 8, 14});
     fader_->visible = big;
     pan_->visible = big;
     if (big) {

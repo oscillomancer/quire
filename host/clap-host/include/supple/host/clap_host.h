@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -42,6 +43,10 @@ struct PluginInfo {
 Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);
 // CLAP and VST3 standard search paths, plus CLAP_PATH/VST3_PATH (existing only).
 std::vector<std::filesystem::path> defaultSearchPath();
+// The stock plugins built beside the running binary: build/<preset>/plugins/clap,
+// two folders above daw/gui/ and host/engine/, when it exists. The apps search it
+// before defaultSearchPath(), so an older stock copy in ~/.clap never wins.
+std::optional<std::filesystem::path> stockPluginDir();
 // Orders a scan result as a catalogue: by id, and within one id in search-path
 // order, so a lookup by id takes the first location that has it (an explicit
 // --plugin-path before ~/.clap). `shadowed` marks the later copies.

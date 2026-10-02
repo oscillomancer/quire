@@ -44,6 +44,8 @@ class FxWindow {
     Status open(model::Id track);
     // The `ui.fx.chain` action: a track id in `prompt`, else the selected track.
     Status openFor(const UiState& ui, const json::Value& prompt);
+    // The same, with the plugin browser open on top (ui.fx.add).
+    Status openToAdd(const UiState& ui, const json::Value& prompt);
     void close();
     bool isOpen() const { return page_ != nullptr; }
 

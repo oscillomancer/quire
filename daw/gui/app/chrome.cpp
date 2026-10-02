@@ -69,7 +69,7 @@ ChromeLayout ChromeLayout::defaults() {
         {"View", {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "ui.agent"}},
         {"Track",
          {"track.add:channel", "track.add:buss", "track.add:master", "track.template.load", "-",
-          "ui.fx.chain", "track.template.save"}},
+          "ui.fx.add", "ui.fx.chain", "track.template.save"}},
         {"Item",
          {"ui.midi.new", "-", "ui.item.cut", "ui.item.copy", "ui.item.paste", "ui.item.duplicate",
           "item.split:playhead", "item.remove:selected", "-", "ui.midi.edit"}},

@@ -451,6 +451,15 @@ const void* CLAP_ABI HostCallbacks::getExtension(const clap_host_t*, const char*
 // Scanning
 // ---------------------------------------------------------------------------
 
+std::optional<fs::path> stockPluginDir() {
+    std::error_code ec;
+    const fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+    if (ec) return std::nullopt;
+    const fs::path dir = exe.parent_path().parent_path().parent_path() / "plugins" / "clap";
+    if (!fs::is_directory(dir, ec)) return std::nullopt;
+    return fs::weakly_canonical(dir, ec);
+}
+
 std::vector<fs::path> defaultSearchPath() {
     std::vector<fs::path> out;
     auto add = [&](const fs::path& p) {

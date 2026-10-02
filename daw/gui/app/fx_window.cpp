@@ -273,6 +273,12 @@ Status FxWindow::openFor(const UiState& ui, const json::Value& prompt) {
     return open(*id);
 }
 
+Status FxWindow::openToAdd(const UiState& ui, const json::Value& prompt) {
+    if (auto opened = openFor(ui, prompt); !opened) return opened;
+    browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
+    return {};
+}
+
 void FxWindow::close() {
     if (page_) root_.closePopup();
 }

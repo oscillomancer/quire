@@ -50,6 +50,9 @@ struct TcpCallbacks {
     // The strip's "env" button: the app's menu of its automation lanes
     // (show/hide volume, pan, mute; creating the envelope when missing).
     std::function<void(const model::Id& track, const ui::Rect& anchor)> envelopes;
+    // The strip's "fx" button: its chain (the app opens the plugin browser
+    // when the chain is empty).
+    std::function<void(const model::Id& track)> fx;
     // Output drags commit one send on release; a click opens the matrix.
     std::function<Result<json::Value>(const model::Id& from, const model::Id& to)> addSend;
     std::function<void(const Error&)> onError;
