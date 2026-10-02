@@ -44,6 +44,9 @@ option(PROBESYNTH_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer
 # monorepo build passes its shared plugins/clap folder instead.
 set(PROBESYNTH_ASSET_DIR "${CMAKE_BINARY_DIR}/probesynth_assets" CACHE PATH
     "Directory the plugin formats are written to")
+# Beside a CLAP on Linux/Windows, the notices are named <prefix>NOTICES.txt; the
+# monorepo's shared folder holds every stock plugin, so it passes "<name>-".
+set(PROBESYNTH_NOTICES_PREFIX "" CACHE STRING "Prefix of the staged NOTICES.txt and LICENSE.txt")
 
 function(probesynth_target_defaults target)
     if (PROBESYNTH_STRICT_WARNINGS)
@@ -348,9 +351,9 @@ if (PROBESYNTH_BUILD_PLUGIN)
             # can reach this copy first, so create it here as well.
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PROBESYNTH_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_notices}"
-                "${PROBESYNTH_ASSET_DIR}/NOTICES.txt"
+                "${PROBESYNTH_ASSET_DIR}/${PROBESYNTH_NOTICES_PREFIX}NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_license}"
-                "${PROBESYNTH_ASSET_DIR}/LICENSE.txt"
+                "${PROBESYNTH_ASSET_DIR}/${PROBESYNTH_NOTICES_PREFIX}LICENSE.txt"
             VERBATIM)
     endif()
 

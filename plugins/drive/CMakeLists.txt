@@ -44,6 +44,9 @@ option(DRIVE_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF
 # monorepo build passes its shared plugins/clap folder instead.
 set(DRIVE_ASSET_DIR "${CMAKE_BINARY_DIR}/drive_assets" CACHE PATH
     "Directory the plugin formats are written to")
+# Beside a CLAP on Linux/Windows, the notices are named <prefix>NOTICES.txt; the
+# monorepo's shared folder holds every stock plugin, so it passes "<name>-".
+set(DRIVE_NOTICES_PREFIX "" CACHE STRING "Prefix of the staged NOTICES.txt and LICENSE.txt")
 
 function(drive_target_defaults target)
     if (DRIVE_STRICT_WARNINGS)
@@ -334,9 +337,9 @@ if (DRIVE_BUILD_PLUGIN)
             # can reach this copy first, so create it here as well.
             COMMAND ${CMAKE_COMMAND} -E make_directory "${DRIVE_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${drive_notices}"
-                "${DRIVE_ASSET_DIR}/NOTICES.txt"
+                "${DRIVE_ASSET_DIR}/${DRIVE_NOTICES_PREFIX}NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${drive_license}"
-                "${DRIVE_ASSET_DIR}/LICENSE.txt"
+                "${DRIVE_ASSET_DIR}/${DRIVE_NOTICES_PREFIX}LICENSE.txt"
             VERBATIM)
     endif()
 

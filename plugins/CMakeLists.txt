@@ -54,6 +54,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DSUPPLE_ROOT=${CMAKE_SOURCE_DIR}
         -D${prefix}_ASSET_DIR=${CMAKE_BINARY_DIR}/plugins/clap
+        -D${prefix}_NOTICES_PREFIX=${artifact}-
         -DSUPPLE_SEMANTIC_CONFORMANCE=${CMAKE_BINARY_DIR}/plugins/common/semantic-conformance
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
         -D${prefix}_VST3=${SUPPLE_PLUGIN_VST3}

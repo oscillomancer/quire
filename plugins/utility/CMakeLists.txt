@@ -44,6 +44,9 @@ option(UTILITY_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" O
 # monorepo build passes its shared plugins/clap folder instead.
 set(UTILITY_ASSET_DIR "${CMAKE_BINARY_DIR}/utility_assets" CACHE PATH
     "Directory the plugin formats are written to")
+# Beside a CLAP on Linux/Windows, the notices are named <prefix>NOTICES.txt; the
+# monorepo's shared folder holds every stock plugin, so it passes "<name>-".
+set(UTILITY_NOTICES_PREFIX "" CACHE STRING "Prefix of the staged NOTICES.txt and LICENSE.txt")
 
 function(utility_target_defaults target)
     if (UTILITY_STRICT_WARNINGS)
@@ -333,9 +336,9 @@ if (UTILITY_BUILD_PLUGIN)
             # can reach this copy first, so create it here as well.
             COMMAND ${CMAKE_COMMAND} -E make_directory "${UTILITY_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${utility_notices}"
-                "${UTILITY_ASSET_DIR}/NOTICES.txt"
+                "${UTILITY_ASSET_DIR}/${UTILITY_NOTICES_PREFIX}NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${utility_license}"
-                "${UTILITY_ASSET_DIR}/LICENSE.txt"
+                "${UTILITY_ASSET_DIR}/${UTILITY_NOTICES_PREFIX}LICENSE.txt"
             VERBATIM)
     endif()
 

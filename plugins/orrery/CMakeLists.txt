@@ -44,6 +44,9 @@ option(ORRERY_RTSAN "Instrument the plugin and its tests with RealtimeSanitizer"
 # monorepo build passes its shared plugins/clap folder instead.
 set(ORRERY_ASSET_DIR "${CMAKE_BINARY_DIR}/orrery_assets" CACHE PATH
     "Directory the plugin formats are written to")
+# Beside a CLAP on Linux/Windows, the notices are named <prefix>NOTICES.txt; the
+# monorepo's shared folder holds every stock plugin, so it passes "<name>-".
+set(ORRERY_NOTICES_PREFIX "" CACHE STRING "Prefix of the staged NOTICES.txt and LICENSE.txt")
 
 function(orrery_target_defaults target)
     if (ORRERY_STRICT_WARNINGS)
@@ -332,9 +335,9 @@ if (ORRERY_BUILD_PLUGIN)
             # can reach this copy first, so create it here as well.
             COMMAND ${CMAKE_COMMAND} -E make_directory "${ORRERY_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${orrery_notices}"
-                "${ORRERY_ASSET_DIR}/NOTICES.txt"
+                "${ORRERY_ASSET_DIR}/${ORRERY_NOTICES_PREFIX}NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${orrery_license}"
-                "${ORRERY_ASSET_DIR}/LICENSE.txt"
+                "${ORRERY_ASSET_DIR}/${ORRERY_NOTICES_PREFIX}LICENSE.txt"
             VERBATIM)
     endif()
 

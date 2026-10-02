@@ -44,6 +44,9 @@ option(EQ_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
 # monorepo build passes its shared plugins/clap folder instead.
 set(EQ_ASSET_DIR "${CMAKE_BINARY_DIR}/eq_assets" CACHE PATH
     "Directory the plugin formats are written to")
+# Beside a CLAP on Linux/Windows, the notices are named <prefix>NOTICES.txt; the
+# monorepo's shared folder holds every stock plugin, so it passes "<name>-".
+set(EQ_NOTICES_PREFIX "" CACHE STRING "Prefix of the staged NOTICES.txt and LICENSE.txt")
 
 function(eq_target_defaults target)
     if (EQ_STRICT_WARNINGS)
@@ -350,9 +353,9 @@ if (EQ_BUILD_PLUGIN)
             # can reach this copy first, so create it here as well.
             COMMAND ${CMAKE_COMMAND} -E make_directory "${EQ_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${eq_notices}"
-                "${EQ_ASSET_DIR}/NOTICES.txt"
+                "${EQ_ASSET_DIR}/${EQ_NOTICES_PREFIX}NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${eq_license}"
-                "${EQ_ASSET_DIR}/LICENSE.txt"
+                "${EQ_ASSET_DIR}/${EQ_NOTICES_PREFIX}LICENSE.txt"
             VERBATIM)
     endif()
 
