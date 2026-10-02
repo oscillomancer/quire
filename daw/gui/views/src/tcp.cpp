@@ -730,6 +730,7 @@ void TcpPanel::bindRows() {
 
 void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
+    rearrange_ = false;
     bindRows();
     for (Row* row : rows_) {
         if (!row->visible || !row->bound()) continue;
@@ -748,7 +749,17 @@ void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     if (mixer_) mixer_->arrange(canvas, {r.right() - 122, r.bottom() - 22, 56, 18});
 }
 
-void TcpPanel::paint(ui::Canvas& c) { c.fillRect(bounds(), c.theme().color("panel")); }
+void TcpPanel::scrolled() {
+    rearrange_ = true;
+    invalidate();
+}
+
+void TcpPanel::paint(ui::Canvas& c) {
+    // Children paint after this, so re-binding and re-placing the rows here
+    // shows them at the new scroll in this same frame.
+    if (rearrange_) arrange(c, bounds());
+    c.fillRect(bounds(), c.theme().color("panel"));
+}
 
 ui::Node* TcpPanel::hitTest(ui::Point p) {
     for (ui::Button* b : {add_, mixer_})

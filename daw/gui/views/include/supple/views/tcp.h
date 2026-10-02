@@ -91,6 +91,9 @@ class TcpPanel : public ui::Node {
 
     void arrange(const ui::Canvas& canvas, const ui::Rect& r) override;
     void paint(ui::Canvas& canvas) override;
+    // The shared viewport scrolled: the rows move with the lanes at the next
+    // paint (one panel re-arranged, not the whole window).
+    void scrolled();
     // The foot's buttons are the panel's own chrome: they win over the rows under them.
     ui::Node* hitTest(ui::Point p) override;
 
@@ -121,6 +124,7 @@ class TcpPanel : public ui::Node {
     ui::Point sendPress_{}, sendPointer_{};
     ui::Rect sendAnchor_{};
     bool sendMoved_ = false, sendOverlay_ = false;
+    bool rearrange_ = false;  // scrolled() since the last arrange
     std::shared_ptr<TcpPanel*> alive_;
 };
 

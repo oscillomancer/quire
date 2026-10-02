@@ -84,6 +84,7 @@ std::unique_ptr<ui::Node> TransportBar::build() {
         b.layout.height = ui::SizeRule::fixed(24);
         return &b;
     };
+    actionButton("transport.start", "start", "transport.seek:start", 44);  // also W, Home
     play_ = actionButton("transport.play", "play", "transport.toggle", 44);
     record_ = actionButton("transport.record", "rec", "transport.record", 38);
     loop_ = actionButton("transport.loop", "loop", "transport.loop.toggle", 48);

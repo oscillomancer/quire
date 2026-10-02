@@ -805,10 +805,12 @@ void ArrangeView::setLoopRange(double start, double end, bool on) {
 }
 
 void ArrangeView::setViewport(const Viewport& v) {
+    const float scrolledFrom = view_.scrollY;
     view_ = v;
     view_.pixelsPerSecond = std::clamp(view_.pixelsPerSecond, 0.01, 200000.0);
     view_.startSeconds = std::max(0.0, view_.startSeconds);
     clampScroll();
+    if (tcp_ && view_.scrollY != scrolledFrom) tcp_->scrolled();  // the tracks follow the lanes
     syncScrollbars();
     damageViews();
 }
@@ -909,25 +911,30 @@ ui::Rect ArrangeView::tcpRowRect(std::size_t row) const {
 
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
+    // Where the pointer is decides: over the track panel the wheel scrolls the
+    // tracks (and the lanes with them); over the lanes and the ruler it zooms
+    // around the playhead (Shift: scroll in time, Ctrl: scroll the tracks,
+    // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
-    if (ctrl && shift) {  // vertical zoom: the global row height
+    const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);
+    if (overTracks || (ctrl && !shift)) {  // vertical scroll
+        v.scrollY -= e.wheelY * layout_.globalHeight();
+    } else if (ctrl && shift) {  // vertical zoom: the global row height
         layout_.setGlobalHeight(static_cast<float>(static_cast<double>(layout_.globalHeight()) *
                                                    std::pow(1.25, static_cast<double>(e.wheelY))));
+        if (tcp_) tcp_->scrolled();
         return true;
-    }
-    if (ctrl) {  // horizontal zoom around the pointer
-        const double at = timeAt(e.pos.x);
-        v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
-        v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
-        v.startSeconds = at - static_cast<double>(e.pos.x - lanes_->bounds().x) / v.pixelsPerSecond;
-        v.startSeconds = std::max(0.0, v.startSeconds);
     } else if (shift || e.wheelX != 0) {  // horizontal scroll
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
             std::max(0.0, v.startSeconds - static_cast<double>(dx) * 60.0 / v.pixelsPerSecond);
-    } else {  // vertical scroll
-        v.scrollY -= e.wheelY * layout_.globalHeight();
+    } else {  // horizontal zoom around the playhead: it keeps its place on screen
+        const double keep = playhead_ - v.startSeconds;
+        v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
+        v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
+        v.startSeconds =
+            std::max(0.0, playhead_ - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
     }
     setViewport(v);
     return true;

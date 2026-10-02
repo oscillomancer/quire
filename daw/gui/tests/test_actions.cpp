@@ -165,6 +165,9 @@ TEST_CASE("chords print and parse; keymaps resolve sections and sequences") {
     Keymap k = Keymap::defaults();
     CHECK(k.conflicts().empty());
     CHECK(k.press(*parseChord("Ctrl+Z"), {"global"}) == std::optional<std::string>("history.undo"));
+    // W (and Home) send the playhead back to the start.
+    CHECK(k.press(*parseChord("W"), {"arrange", "global"}) ==
+          std::optional<std::string>("transport.seek:start"));
     // A section binding wins inside its section only.
     CHECK(k.press(*parseChord("S"), {"arrange", "global"}) ==
           std::optional<std::string>("item.split:playhead"));
@@ -189,6 +192,9 @@ TEST_CASE("chords print and parse; keymaps resolve sections and sequences") {
     // A broken sequence retries the second chord on its own.
     CHECK_FALSE(k.press(*parseChord("Ctrl+K"), {"global"}));
     CHECK(k.press(*parseChord("Ctrl+Z"), {"global"}) == std::optional<std::string>("history.undo"));
+    // W (and Home) send the playhead back to the start.
+    CHECK(k.press(*parseChord("W"), {"arrange", "global"}) ==
+          std::optional<std::string>("transport.seek:start"));
     // Conflicts are reported: Ctrl+K alone would shadow the sequence.
     k.bind({{*parseChord("Ctrl+K")}, "global", "something"});
     CHECK(k.conflicts().size() == 1);

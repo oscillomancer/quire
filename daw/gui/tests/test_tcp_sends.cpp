@@ -374,15 +374,17 @@ TEST_CASE("TCP: the fx button opens the plugin browser for an empty chain") {
     CHECK(added == std::vector<std::string>{f.a.str()});
 }
 
-TEST_CASE("TCP: the wheel scrolls a long track list from anywhere in the panel, never a control") {
+TEST_CASE("TCP: the wheel over the tracks scrolls them and the lanes together, never a control") {
     SendsFixture f;
-    for (int i = 0; i < 30; ++i) f.add("channel", "T" + std::to_string(i));
+    std::vector<model::Id> tracks;
+    for (int i = 0; i < 30; ++i) tracks.push_back(f.add("channel", "T" + std::to_string(i)));
     f.sync();
-    auto wheel = [&](ui::Point p, float dy) {
+    auto wheel = [&](ui::Point p, float dy, unsigned mods = 0) {
         ui::PointerEvent e;
         e.type = Pointer::Wheel;
         e.pos = p;
         e.wheelY = dy;
+        e.mods = mods;
         f.root->pointer(e);
         f.sync();
     };
@@ -391,31 +393,52 @@ TEST_CASE("TCP: the wheel scrolls a long track list from anywhere in the panel, 
         for (const auto& t : f.app->head().tracks) v.push_back(t.value->volumeDb);
         return v;
     };
+    // What the eye checks: every shown track row sits level with its lane row.
+    auto aligned = [&] {
+        int shown = 0;
+        for (const model::Id& t : tracks) {
+            ui::Node* row = f.view().tcpPanel().rowNode(t);
+            if (!row) continue;
+            const auto index = f.view().trackLayout().indexOf(t);
+            REQUIRE(index);
+            INFO("track " << t.str());
+            CHECK(static_cast<double>(row->bounds().y) ==
+                  doctest::Approx(static_cast<double>(f.view().rowRect(*index).y)));
+            ++shown;
+        }
+        return shown;
+    };
     const auto before = volumes();
-    // Walk down the panel over every kind of spot: names, buttons, faders, pans, meters.
     const ui::Rect tcp = f.view().tcpPanel().bounds();
     float last = f.view().viewport().scrollY;
-    int moved = 0, tried = 0;
     for (float fy : {0.15f, 0.3f, 0.45f, 0.6f, 0.75f})
         for (float fx : {0.1f, 0.3f, 0.5f, 0.7f, 0.9f, 0.98f}) {
             wheel({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy}, -1.0f);
-            ++tried;
             const float now = f.view().viewport().scrollY;
-            if (now > last) ++moved;
-            ui::Node* hitNode =
-                f.root->content()->hitTest({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy});
-            ui::Node* overlayHit =
-                f.root->overlay().hitTest({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy});
-            INFO("at " << fx << "," << fy << " scroll " << last << " -> " << now << " hit "
-                       << (hitNode ? hitNode->id() : "-") << " overlay "
-                       << (overlayHit ? overlayHit->id() : "-"));
+            INFO("at " << fx << "," << fy << " scroll " << last << " -> " << now);
             CHECK(now > last);
-            last = now;
+            CHECK(aligned() > 0);
             if (now > 600) wheel({tcp.x + 20, tcp.y + 40}, 30.0f);  // back to the top
             last = f.view().viewport().scrollY;
         }
-    CHECK(moved == tried);
     CHECK(volumes() == before);  // no fader or pan moved
+
+    // Over the lanes the wheel zooms around the playhead, which keeps its place.
+    f.view().setPlayhead(4.0);
+    f.sync();
+    const ui::Rect lanes = f.view().lanesRect();
+    const float scroll = f.view().viewport().scrollY;
+    const double pps = f.view().viewport().pixelsPerSecond;
+    const float x = f.view().lanes().xAt(4.0);
+    wheel({lanes.x + lanes.w / 2, lanes.y + lanes.h / 2}, 1.0f);
+    CHECK(f.view().viewport().pixelsPerSecond > pps);
+    CHECK(static_cast<double>(f.view().lanes().xAt(4.0)) ==
+          doctest::Approx(static_cast<double>(x)).epsilon(0.001));
+    CHECK(f.view().viewport().scrollY == scroll);
+    // Ctrl scrolls the tracks from the lanes too, still aligned.
+    wheel({lanes.x + lanes.w / 2, lanes.y + lanes.h / 2}, -1.0f, ui::kCtrl);
+    CHECK(f.view().viewport().scrollY > scroll);
+    CHECK(aligned() > 0);
 }
 
 TEST_CASE("TCP sends: output click opens the existing routing matrix action") {

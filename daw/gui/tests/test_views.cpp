@@ -263,7 +263,7 @@ TEST_CASE("the ruler shows the tempo and meter changes the session carries") {
     CHECK(tm.meterAt(34).numerator == 4);
 }
 
-TEST_CASE("zoom keeps the time under the pointer") {
+TEST_CASE("the wheel over the lanes zooms around the playhead, which keeps its place") {
     Gl& g = gl();
     if (!g.ok) return;
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
@@ -272,16 +272,20 @@ TEST_CASE("zoom keeps the time under the pointer") {
     v.startSeconds = 40;
     v.pixelsPerSecond = 40;
     arrange->setViewport(v);
+    arrange->setPlayhead(50);
     root.damageAll();
     root.frame(false);
     const double before = arrange->viewport().pixelsPerSecond;
-    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {600, 300}};
-    wheel.mods = ui::kCtrl;
+    const float x = arrange->playheadX();
+    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {600, 300}};  // anywhere on the lanes
     wheel.wheelY = 1;
     root.pointer(wheel);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before * 1.25));
-    CHECK(arrange->timeAt(600) ==
-          doctest::Approx(40 + static_cast<double>(600.0f - arrange->lanesRect().x) / before));
+    CHECK(static_cast<double>(arrange->playheadX()) ==
+          doctest::Approx(static_cast<double>(x)).epsilon(0.001));
+    wheel.wheelY = -1;  // and back out
+    root.pointer(wheel);
+    CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before));
 }
 
 TEST_CASE("the TCP column and the lanes stay aligned through scroll and height changes") {

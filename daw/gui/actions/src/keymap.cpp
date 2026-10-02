@@ -101,6 +101,7 @@ Keymap Keymap::defaults() {
     add({"Ctrl+R"}, "global", "transport.record");
     add({"R"}, "global", "transport.loop.toggle");
     add({"Home"}, "global", "transport.seek:start");
+    add({"W"}, "global", "transport.seek:start");
     add({"End"}, "global", "transport.seek:end");
     add({"Ctrl+Z"}, "global", "history.undo");
     add({"Ctrl+Shift+Z"}, "global", "history.redo");
