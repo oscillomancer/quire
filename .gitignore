@@ -1,5 +1,7 @@
 /build/
 /build-*/
+# A stock plugin's own standalone build (its BUILDING.md)
+/plugins/*/build-*/
 compile_commands.json
 .cache/
 __pycache__/

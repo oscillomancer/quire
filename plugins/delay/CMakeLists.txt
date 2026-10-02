@@ -40,6 +40,10 @@ option(DELAY_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(DELAY_STRICT_WARNINGS "Enable warnings on delay-owned code" ON)
 option(DELAY_SANITIZERS "Enable AddressSanitizer and UBSan on delay-owned code" OFF)
 option(DELAY_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
+# Where the built formats are written (the template's layout); the Quire
+# monorepo build passes its shared plugins/clap folder instead.
+set(DELAY_ASSET_DIR "${CMAKE_BINARY_DIR}/delay_assets" CACHE PATH
+    "Directory the plugin formats are written to")
 
 function(delay_target_defaults target)
     if (DELAY_STRICT_WARNINGS)
@@ -104,14 +108,14 @@ if (DELAY_BUILD_TOOLS)
         add_executable(delay-tail-transport test/tail_transport.cpp)
         target_link_libraries(delay-tail-transport PRIVATE supple::plugin-support ${CMAKE_DL_LIBS})
         delay_target_defaults(delay-tail-transport)
-        add_test(NAME tail-transport COMMAND delay-tail-transport ${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.clap)
+        add_test(NAME tail-transport COMMAND delay-tail-transport ${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.clap)
         add_test(NAME semantic-rt COMMAND delay-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.clap)
+            ${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.clap com.suppleaudio.delay)
+            ${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.clap com.suppleaudio.delay)
     endif()
 endif()
 
@@ -225,10 +229,10 @@ if (DELAY_BUILD_PLUGIN)
         delay_target_defaults(delay-host-smoke)
         add_test(NAME host-smoke
                  COMMAND delay-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.clap)
+                         ${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.clap)
         add_test(NAME host-smoke-mono
                  COMMAND delay-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.clap --mono)
+                         ${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.clap --mono)
     endif()
 
     option(DELAY_VST3 "Build VST3 format" OFF)
@@ -251,7 +255,7 @@ if (DELAY_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${DELAY_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
+        ASSET_OUTPUT_DIRECTORY ${DELAY_ASSET_DIR}
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QDly"
@@ -337,11 +341,11 @@ if (DELAY_BUILD_PLUGIN)
                 add_dependencies(delay-notices ${target})
                 add_custom_command(TARGET delay-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
+                        "${DELAY_ASSET_DIR}/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_notices}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${DELAY_ASSET_DIR}/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_license}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${DELAY_ASSET_DIR}/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -352,11 +356,11 @@ if (DELAY_BUILD_PLUGIN)
         add_custom_command(TARGET delay-notices POST_BUILD
             # The plugins create that directory when they link, but a clean build
             # can reach this copy first, so create it here as well.
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/../clap"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DELAY_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
+                "${DELAY_ASSET_DIR}/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_license}"
-                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
+                "${DELAY_ASSET_DIR}/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -369,24 +373,24 @@ if (DELAY_BUILD_PLUGIN)
         add_custom_target(delay-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/delay-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component/Contents/Info.plist"
+                "${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component/Contents/Resources"
+                "${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
+                "${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${delay_license}"
-                "${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
+                "${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component"
+                "${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component"
             DEPENDS delay-plugin_auv2
             COMMENT "Preparing and ad-hoc signing ${DELAY_DISPLAY_NAME}.component"
             VERBATIM)
         if (DELAY_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/${DELAY_DISPLAY_NAME}.component
+                    -DBUNDLE=${DELAY_ASSET_DIR}/${DELAY_DISPLAY_NAME}.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -426,7 +430,7 @@ if (DELAY_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
+                        "${DELAY_ASSET_DIR}/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()

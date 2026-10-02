@@ -1,7 +1,8 @@
 # Building and validation
 
-Dependencies are fetched at configure time and pinned in CMake. No git
-submodules are required.
+Dependencies are pinned and vendored in the Quire repository's `third_party/`
+(this plugin finds it two directories up, or through `-DSUPPLE_ROOT=`), so
+configuring is offline. No git submodules are required.
 
 ## macOS
 
@@ -18,8 +19,8 @@ cmake --build --preset release -j
 ctest --preset release
 ```
 
-Outputs are under `build-cmake/utility_assets/`. macOS builds `Utility.clap`,
-`Utility.vst3` and `Utility.component`. Metal is the default. To exercise the
+Outputs are under `build-cmake/utility_assets/`. macOS builds `Plumb.clap`,
+`Plumb.vst3` and `Plumb.component`. Metal is the default. To exercise the
 OpenGL plugin path explicitly:
 
 ```sh
@@ -76,7 +77,7 @@ On macOS, load the binary inside the built bundle:
 
 ```sh
 ./build-cmake/utility-clap-probe \
-  ./build-cmake/utility_assets/Utility.clap/Contents/MacOS/Utility \
+  ./build-cmake/utility_assets/Plumb.clap/Contents/MacOS/Plumb \
   200 --mono --resize --reopen
 ```
 
@@ -106,6 +107,10 @@ bundles differs on Linux and Windows.
   if it has a parameter that does.
 - `host-smoke-mono` -- the same lifecycle and contract checks on the negotiated
   mono configuration.
+- `semantic-rt` -- the built CLAP processing audio while the main thread
+  replaces patches through the semantic-params extension.
+- `semantic-conformance` -- the semantic-params extension against the shared
+  conformance checker (registered only in the Quire monorepo build).
 
 ## Sanitizers and warnings
 
@@ -119,26 +124,17 @@ cmake --build --preset sanitizers -j
 ctest --preset sanitizers
 ```
 
-## Offline audio rendering
-
-```sh
-./build-cmake/utility-cli input.wav output.wav \
-  --input-gain 3 --output-gain -1 --block 257
-```
-
-The offline renderer calls the same SDK-free processor as every plugin format.
-Vary `--block` when investigating history or boundary bugs. Extend this tool
-with product-specific traces and independent measurements rather than making a
-DAW meter the only source of truth.
-
 ## Visual preview
 
 ```sh
 ./build-cmake/utility-gui-preview 180 utility-gui.ppm
+./build-cmake/utility-gui-preview 180 utility-wide.ppm 1 wide
 ```
 
-This renders the real editor and is useful for layout review. It is not a host
-integration test and cannot validate wrapper timers, parent views or automation.
+This renders the real editor and is useful for layout review. The optional
+arguments are a scale and a scenario (`default`, `wide`, `pan-left`, `pan-right`; `default` by default).
+It is not a host integration test and cannot validate wrapper timers, parent
+views or automation.
 
 ## CLAP host-contract regression checks
 
@@ -177,7 +173,7 @@ With an X11/XWayland display available, run:
 
 ```sh
 ./build-cmake/utility-linux-host-probe \
-  ./build-cmake/utility_assets/Utility.clap /tmp/utility-host.ppm
+  ./build-cmake/utility_assets/Plumb.clap /tmp/utility-host.ppm
 ```
 
 This product-independent probe creates a real X11 parent, verifies the mapped
@@ -186,3 +182,21 @@ create/destroy cycles and timer cleanup while audio runs on a separate thread.
 It exits nonzero on failed assertions. The existing `--resize`/`--reopen` flags
 on `clap-probe` exercise macOS only; use this probe for Linux.
 `--no-host-timer` is diagnostic: it does not prove fallback repaint liveness.
+
+## Quire monorepo build
+
+The repository root builds every stock plugin as an isolated project:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev -j6
+ctest --test-dir build/dev -R utility --output-on-failure
+```
+
+The CLAP lands in `build/dev/plugins/clap/Plumb.clap` with the other stock
+plugins, the tools in `build/dev/plugins/utility/`, and this project's CTest suite
+runs as `plugin.utility.ctest`. VST3 is opt-in (`-DSUPPLE_PLUGIN_VST3=ON`).
+`utility-engine.tests` (the SDK-free engine, label `rt`) runs in every sanitizer
+preset.
+Neither build installs anything; `utility-install` above is the way to put the
+plugin in `~/.clap` and `~/.vst3`.

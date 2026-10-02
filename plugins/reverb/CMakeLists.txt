@@ -40,6 +40,10 @@ option(REVERB_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(REVERB_STRICT_WARNINGS "Enable warnings on reverb-owned code" ON)
 option(REVERB_SANITIZERS "Enable AddressSanitizer and UBSan on reverb-owned code" OFF)
 option(REVERB_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
+# Where the built formats are written (the template's layout); the Quire
+# monorepo build passes its shared plugins/clap folder instead.
+set(REVERB_ASSET_DIR "${CMAKE_BINARY_DIR}/reverb_assets" CACHE PATH
+    "Directory the plugin formats are written to")
 
 function(reverb_target_defaults target)
     if (REVERB_STRICT_WARNINGS)
@@ -105,7 +109,7 @@ if (REVERB_BUILD_TOOLS)
             target_link_options(reverb-semantic-rt PRIVATE -fsanitize=realtime)
         endif()
         add_test(NAME semantic-rt COMMAND reverb-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.clap)
+            ${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.clap)
     endif()
 
     if(UNIX AND NOT APPLE)
@@ -113,12 +117,12 @@ if (REVERB_BUILD_TOOLS)
         target_link_libraries(reverb-tail-rt PRIVATE reverb-dsp supple::plugin-support ${CMAKE_DL_LIBS})
         target_include_directories(reverb-tail-rt PRIVATE plugin/src)
         reverb_target_defaults(reverb-tail-rt)
-        add_test(NAME tail-rt COMMAND reverb-tail-rt ${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.clap)
+        add_test(NAME tail-rt COMMAND reverb-tail-rt ${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.clap com.suppleaudio.reverb)
+            ${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.clap com.suppleaudio.reverb)
     endif()
 endif()
 
@@ -232,10 +236,10 @@ if (REVERB_BUILD_PLUGIN)
         reverb_target_defaults(reverb-host-smoke)
         add_test(NAME host-smoke
                  COMMAND reverb-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.clap)
+                         ${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.clap)
         add_test(NAME host-smoke-mono
                  COMMAND reverb-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.clap --mono)
+                         ${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.clap --mono)
     endif()
 
     option(REVERB_VST3 "Build VST3 format" OFF)
@@ -257,7 +261,7 @@ if (REVERB_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${REVERB_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
+        ASSET_OUTPUT_DIRECTORY ${REVERB_ASSET_DIR}
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QRvb"
@@ -334,11 +338,11 @@ if (REVERB_BUILD_PLUGIN)
                 add_dependencies(reverb-notices ${target})
                 add_custom_command(TARGET reverb-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
+                        "${REVERB_ASSET_DIR}/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_notices}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${REVERB_ASSET_DIR}/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_license}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${REVERB_ASSET_DIR}/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -349,11 +353,11 @@ if (REVERB_BUILD_PLUGIN)
         add_custom_command(TARGET reverb-notices POST_BUILD
             # The plugins create that directory when they link, but a clean build
             # can reach this copy first, so create it here as well.
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/../clap"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${REVERB_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
+                "${REVERB_ASSET_DIR}/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_license}"
-                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
+                "${REVERB_ASSET_DIR}/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -366,24 +370,24 @@ if (REVERB_BUILD_PLUGIN)
         add_custom_target(reverb-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/reverb-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component/Contents/Info.plist"
+                "${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component/Contents/Resources"
+                "${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
+                "${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${reverb_license}"
-                "${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
+                "${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component"
+                "${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component"
             DEPENDS reverb-plugin_auv2
             COMMENT "Preparing and ad-hoc signing ${REVERB_DISPLAY_NAME}.component"
             VERBATIM)
         if (REVERB_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/${REVERB_DISPLAY_NAME}.component
+                    -DBUNDLE=${REVERB_ASSET_DIR}/${REVERB_DISPLAY_NAME}.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -423,7 +427,7 @@ if (REVERB_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
+                        "${REVERB_ASSET_DIR}/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()

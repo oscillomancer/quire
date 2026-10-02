@@ -40,6 +40,10 @@ option(COMP_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(COMP_STRICT_WARNINGS "Enable warnings on comp-owned code" ON)
 option(COMP_SANITIZERS "Enable AddressSanitizer and UBSan on comp-owned code" OFF)
 option(COMP_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
+# Where the built formats are written (the template's layout); the Quire
+# monorepo build passes its shared plugins/clap folder instead.
+set(COMP_ASSET_DIR "${CMAKE_BINARY_DIR}/comp_assets" CACHE PATH
+    "Directory the plugin formats are written to")
 
 function(comp_target_defaults target)
     if (COMP_STRICT_WARNINGS)
@@ -105,12 +109,12 @@ if (COMP_BUILD_TOOLS)
             target_link_options(comp-semantic-rt PRIVATE -fsanitize=realtime)
         endif()
         add_test(NAME semantic-rt COMMAND comp-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.clap)
+            ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.clap com.suppleaudio.comp)
+            ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap com.suppleaudio.comp)
     endif()
 endif()
 
@@ -224,10 +228,10 @@ if (COMP_BUILD_PLUGIN)
         comp_target_defaults(comp-host-smoke)
         add_test(NAME host-smoke
                  COMMAND comp-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.clap)
+                         ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap)
         add_test(NAME host-smoke-mono
                  COMMAND comp-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.clap --mono)
+                         ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap --mono)
     endif()
 
     option(COMP_VST3 "Build VST3 format" OFF)
@@ -250,7 +254,7 @@ if (COMP_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${COMP_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
+        ASSET_OUTPUT_DIRECTORY ${COMP_ASSET_DIR}
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QCmp"
@@ -336,11 +340,11 @@ if (COMP_BUILD_PLUGIN)
                 add_dependencies(comp-notices ${target})
                 add_custom_command(TARGET comp-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
+                        "${COMP_ASSET_DIR}/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_notices}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${COMP_ASSET_DIR}/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_license}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${COMP_ASSET_DIR}/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -351,11 +355,11 @@ if (COMP_BUILD_PLUGIN)
         add_custom_command(TARGET comp-notices POST_BUILD
             # The plugins create that directory when they link, but a clean build
             # can reach this copy first, so create it here as well.
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/../clap"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${COMP_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
+                "${COMP_ASSET_DIR}/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_license}"
-                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
+                "${COMP_ASSET_DIR}/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -368,24 +372,24 @@ if (COMP_BUILD_PLUGIN)
         add_custom_target(comp-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/comp-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component/Contents/Info.plist"
+                "${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component/Contents/Resources"
+                "${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
+                "${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${comp_license}"
-                "${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
+                "${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component"
+                "${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component"
             DEPENDS comp-plugin_auv2
             COMMENT "Preparing and ad-hoc signing ${COMP_DISPLAY_NAME}.component"
             VERBATIM)
         if (COMP_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/${COMP_DISPLAY_NAME}.component
+                    -DBUNDLE=${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -425,7 +429,7 @@ if (COMP_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
+                        "${COMP_ASSET_DIR}/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()

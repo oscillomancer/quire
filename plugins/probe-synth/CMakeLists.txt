@@ -40,6 +40,10 @@ option(PROBESYNTH_BUILD_GUI "Build the Pugl + NanoVG editor" ON)
 option(PROBESYNTH_STRICT_WARNINGS "Enable warnings on probesynth-owned code" ON)
 option(PROBESYNTH_SANITIZERS "Enable AddressSanitizer and UBSan on probesynth-owned code" OFF)
 option(PROBESYNTH_RTSAN "Instrument the SDK-free DSP test with RealtimeSanitizer" OFF)
+# Where the built formats are written (the template's layout); the Quire
+# monorepo build passes its shared plugins/clap folder instead.
+set(PROBESYNTH_ASSET_DIR "${CMAKE_BINARY_DIR}/probesynth_assets" CACHE PATH
+    "Directory the plugin formats are written to")
 
 function(probesynth_target_defaults target)
     if (PROBESYNTH_STRICT_WARNINGS)
@@ -97,12 +101,12 @@ if (PROBESYNTH_BUILD_TOOLS)
             target_link_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
         endif()
         add_test(NAME semantic-rt COMMAND probesynth-semantic-rt
-            ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap)
+            ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap)
     endif()
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
-            ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap com.suppleaudio.probe-synth)
+            ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap com.suppleaudio.probe-synth)
     endif()
 endif()
 
@@ -215,10 +219,10 @@ if (PROBESYNTH_BUILD_PLUGIN)
         probesynth_target_defaults(probesynth-host-smoke)
         add_test(NAME host-smoke
                  COMMAND probesynth-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap)
+                         ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap)
         add_test(NAME host-smoke-mono
                  COMMAND probesynth-host-smoke
-                         ${CMAKE_BINARY_DIR}/../clap/ProbeSynth.clap --mono)
+                         ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap --mono)
     endif()
 
     option(PROBESYNTH_VST3 "Build VST3 format" OFF)
@@ -241,7 +245,7 @@ if (PROBESYNTH_BUILD_PLUGIN)
         BUNDLE_VERSION ${PROJECT_VERSION}
         COPY_AFTER_BUILD FALSE
         PLUGIN_FORMATS ${PROBESYNTH_FORMATS}
-        ASSET_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../clap
+        ASSET_OUTPUT_DIRECTORY ${PROBESYNTH_ASSET_DIR}
         AUV2_MANUFACTURER_NAME "Supple Audio"
         AUV2_MANUFACTURER_CODE "Supl"
         AUV2_SUBTYPE_CODE "QPrb"
@@ -327,11 +331,11 @@ if (PROBESYNTH_BUILD_PLUGIN)
                 add_dependencies(probesynth-notices ${target})
                 add_custom_command(TARGET probesynth-notices POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E make_directory
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources"
+                        "${PROBESYNTH_ASSET_DIR}/${bundle}/Contents/Resources"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_notices}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/NOTICES.txt"
+                        "${PROBESYNTH_ASSET_DIR}/${bundle}/Contents/Resources/NOTICES.txt"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_license}"
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}/Contents/Resources/LICENSE.txt"
+                        "${PROBESYNTH_ASSET_DIR}/${bundle}/Contents/Resources/LICENSE.txt"
                     VERBATIM)
             endif()
         endforeach()
@@ -342,11 +346,11 @@ if (PROBESYNTH_BUILD_PLUGIN)
         add_custom_command(TARGET probesynth-notices POST_BUILD
             # The plugins create that directory when they link, but a clean build
             # can reach this copy first, so create it here as well.
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/../clap"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PROBESYNTH_ASSET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/NOTICES.txt"
+                "${PROBESYNTH_ASSET_DIR}/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_license}"
-                "${CMAKE_BINARY_DIR}/../clap/LICENSE.txt"
+                "${PROBESYNTH_ASSET_DIR}/LICENSE.txt"
             VERBATIM)
     endif()
 
@@ -359,24 +363,24 @@ if (PROBESYNTH_BUILD_PLUGIN)
         add_custom_target(probesynth-prepare-auv2 ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_BINARY_DIR}/probesynth-plugin_auv2-build-helper-output/auv2_Info.plist"
-                "${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component/Contents/Info.plist"
+                "${PROBESYNTH_ASSET_DIR}/ProbeSynth.component/Contents/Info.plist"
             # Before the signature, not after: adding a file to a signed bundle
             # invalidates it, and the auv2-bundle test checks the signature.
             COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component/Contents/Resources"
+                "${PROBESYNTH_ASSET_DIR}/ProbeSynth.component/Contents/Resources"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_notices}"
-                "${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component/Contents/Resources/NOTICES.txt"
+                "${PROBESYNTH_ASSET_DIR}/ProbeSynth.component/Contents/Resources/NOTICES.txt"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${probesynth_license}"
-                "${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component/Contents/Resources/LICENSE.txt"
+                "${PROBESYNTH_ASSET_DIR}/ProbeSynth.component/Contents/Resources/LICENSE.txt"
             COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-                "${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component"
+                "${PROBESYNTH_ASSET_DIR}/ProbeSynth.component"
             DEPENDS probesynth-plugin_auv2
             COMMENT "Preparing and ad-hoc signing ProbeSynth.component"
             VERBATIM)
         if (PROBESYNTH_BUILD_TOOLS)
             add_test(NAME auv2-bundle
                 COMMAND ${CMAKE_COMMAND}
-                    -DBUNDLE=${CMAKE_BINARY_DIR}/../clap/ProbeSynth.component
+                    -DBUNDLE=${PROBESYNTH_ASSET_DIR}/ProbeSynth.component
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/check_auv2_bundle.cmake)
         endif()
     endif()
@@ -416,7 +420,7 @@ if (PROBESYNTH_BUILD_PLUGIN)
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "${destination}/${bundle}"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
                     COMMAND ${CMAKE_COMMAND} -E ${copyCmd}
-                        "${CMAKE_BINARY_DIR}/../clap/${bundle}"
+                        "${PROBESYNTH_ASSET_DIR}/${bundle}"
                         "${destination}/${bundle}"
                     VERBATIM)
             endif()
