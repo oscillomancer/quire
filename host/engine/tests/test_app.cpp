@@ -688,6 +688,58 @@ TEST_CASE("recovering a crashed recording repairs its header and plays all of it
     CHECK(double(left[97000]) == 0.0);
 }
 
+TEST_CASE("an unsaved project records into its scratch folder; the first save moves the files") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto open = [&](const fs::path& scratch) {
+        AppOptions o;
+        o.workdir = root.path / "work";
+        o.scratchDir = scratch;
+        o.chainDir = root.path / "chains";
+        o.templateDir = root.path / "templates";
+        o.pluginPath = {kFixture};
+        auto app = EngineApp::create(o, {.console9 = false});
+        REQUIRE(app);
+        return std::move(*app);
+    };
+    // Saved: the recording moves beside the project, under the same relative path.
+    {
+        const fs::path scratch = root.path / "unsaved-1";
+        auto app = open(scratch);
+        cmd::Dispatcher d(registry, *app);
+        app->setupFixture(d, "recording_interrupted");  // rec/Vocal-1.wav in the scratch media
+        CHECK(app->recordDir() == scratch / "media" / "rec");
+        REQUIRE(d.execute({"project.recover", j("{}"), kTest}));
+        const auto& media = app->head().media;
+        REQUIRE(media.size() == 1);
+        CHECK(media.begin()->value->path == "rec/Vocal-1.wav");  // relative to the media folder
+        REQUIRE(app->save(root.path / "song" / "song.json"));
+        CHECK(fs::exists(root.path / "song" / "media" / "rec" / "Vocal-1.wav"));
+        CHECK_FALSE(fs::exists(scratch));
+        auto mix = d.execute({"render.mix", j(R"({"name": "after-save", "end_beat": 5})"), kTest});
+        REQUIRE(mix);
+        CHECK((*mix)["peak_dbfs"].asDouble() > -20.0);  // the moved file still plays
+        app->clearScratch();  // quitting a saved project deletes nothing of it
+        CHECK(fs::exists(root.path / "song" / "media" / "rec" / "Vocal-1.wav"));
+    }
+    // Discarded: quitting, or starting a new project, deletes the recordings.
+    {
+        const fs::path scratch = root.path / "unsaved-2";
+        auto app = open(scratch);
+        cmd::Dispatcher d(registry, *app);
+        app->setupFixture(d, "recording_interrupted");
+        REQUIRE(fs::exists(scratch / "media" / "rec" / "Vocal-1.wav"));
+        app->newProject(model::Project{});
+        CHECK_FALSE(fs::exists(scratch));
+        app->setupFixture(d, "recording_interrupted");
+        REQUIRE(fs::exists(scratch / "media" / "rec" / "Vocal-1.wav"));
+        app->clearScratch();
+        CHECK_FALSE(fs::exists(scratch));
+        CHECK(fs::exists(root.path / "work"));
+    }
+}
+
 TEST_CASE("two armed tracks with one name record to two files (review round 8)") {
     Root root;
     cmd::Registry registry;

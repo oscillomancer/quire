@@ -39,6 +39,11 @@ struct AppOptions {
     std::filesystem::path chainDir;     // empty = the user config directory / <slug> / chains
     std::filesystem::path templateDir;  // empty = … / <slug> / track-templates
     std::filesystem::path workdir;      // renders are written to <workdir>/renders
+    // An unsaved project's own folder (the GUI's, one per run): its media (the
+    // recordings) live in <scratchDir>/<media_dir> until the first save moves
+    // them beside the project file; clearScratch() deletes it when the
+    // unsaved project is discarded. Empty: <workdir>/media, never deleted.
+    std::filesystem::path scratchDir;
     std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
     std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
 };
@@ -128,6 +133,13 @@ class EngineApp : public cmd::Host {
     model::VersionStore& versions() { return *versions_; }
     const AppOptions& options() const { return options_; }
     const std::filesystem::path& projectPath() const { return projectPath_; }
+    // Where relative media paths resolve: the saved project's folder, or the
+    // scratch folder of an unsaved one (empty without either).
+    std::filesystem::path projectDir() const;
+    // Deletes the scratch folder (an unsaved project's recordings): called when
+    // the unsaved project is discarded (quit, new, open). Does nothing once the
+    // project is saved, and never touches a folder holding the work directory.
+    void clearScratch();
 
     // --- plugins ----------------------------------------------------------------
     Result<std::span<const host::PluginInfo>> plugins(bool rescan = false);
@@ -322,6 +334,7 @@ class EngineApp : public cmd::Host {
     };
     std::vector<JobThread> jobs_;
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
+    Status moveScratchMedia(const std::filesystem::path& dest);
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;

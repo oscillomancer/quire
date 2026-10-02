@@ -253,7 +253,7 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         task.session = s;
         task.settings.startSeconds = s.timeMap->secondsAt(first);
         task.settings.endSeconds = s.timeMap->secondsAt(last);
-        if (!app.projectPath().empty()) task.settings.projectDir = app.projectPath().parent_path();
+        task.settings.projectDir = app.projectDir();
         task.settings.tailSeconds =
             a.tailS.value_or(setting("tail_ms") && setting("tail_ms")->isNumber()
                                  ? setting("tail_ms")->asDouble() / 1000.0

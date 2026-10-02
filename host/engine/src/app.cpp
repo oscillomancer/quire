@@ -200,6 +200,8 @@ Result<std::string> EngineApp::describeFx(const model::FxInstance& fx, bool chan
 // --- project files ----------------------------------------------------------------------
 
 void EngineApp::newProject(model::Project project) {
+    // An unsaved project being replaced is discarded (the GUI asked first).
+    if (versions_ && projectPath_.empty()) clearScratch();
     versions_ = std::make_unique<model::VersionStore>(model::Session::create(std::move(project)));
     projectPath_.clear();
     autosaveMarked_ = false;  // no file yet: nothing to autosave next to
@@ -213,8 +215,13 @@ fs::path EngineApp::resolve(const fs::path& path) const {
 Status EngineApp::save(const fs::path& where) {
     const fs::path path = resolve(where);
     SUPPLE_TRY(model::checkInvariants(head()));
+    const bool fromScratch = projectPath_.empty() && !options_.scratchDir.empty();
+    if (fromScratch && engine_ && engine_->recording())
+        return Error("project.recording", "a recording is running", {},
+                     "stop it before the project's first save (its files move then)");
     SUPPLE_TRY(writeFileAtomic(path, model::serializeProject(head())));
     projectPath_ = path;
+    if (fromScratch) SUPPLE_TRY(moveScratchMedia(path.parent_path() / head().project->mediaDir));
     autosaveMarked_ = true;  // the file itself is the newest copy
     autosaveMs_ = clockMs();
     autosaveVersion_ = head().version;
@@ -227,6 +234,7 @@ Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warn
     if (!text) return std::move(text).error();
     auto s = model::parseProject(*text, warnings);
     if (!s) return std::move(s).error();
+    if (projectPath_.empty()) clearScratch();  // the unsaved project is discarded
     versions_ = std::make_unique<model::VersionStore>(std::move(*s));
     projectPath_ = path;
     autosaveMarked_ = true;
@@ -313,7 +321,7 @@ Result<OfflineResult> EngineApp::renderMix(const OfflineSettings& settings) {
 Result<OfflineResult> EngineApp::renderSession(const model::Session& session,
                                                const OfflineSettings& settings) {
     OfflineSettings s = settings;
-    if (s.projectDir.empty() && !projectPath_.empty()) s.projectDir = projectPath_.parent_path();
+    if (s.projectDir.empty()) s.projectDir = projectDir();
     MediaCache localMedia;
     if (!s.media) s.media = &localMedia;
     // Offline renders use their own plugin instances (engine.md §3): playback
@@ -397,7 +405,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     if (loop_.enabled || loop_.end > loop_.start)
         engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
     engine_->setMetronome(metronome_.enabled, metronome_.volumeDb);
-    return engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
+    return engine_->load(head(), projectDir());
 }
 
 Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative) {
@@ -1083,8 +1091,9 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
     auto txnId = beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, label);
     if (!txnId) return std::move(txnId).error();
     const model::Session s = view();
-    const fs::path media =
-        projectPath_.empty() ? fs::path() : projectPath_.parent_path() / s.project->mediaDir;
+    // Relative to the media folder when there is one (a saved project's or the
+    // scratch folder), so a first save can move the files and keep the paths.
+    const fs::path media = projectDir().empty() ? fs::path() : projectDir() / s.project->mediaDir;
     for (const RecordedTake& r : takes) {
         if (!r.error.empty()) {
             json::Value ev = json::Value::object();
@@ -1207,8 +1216,65 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
 // --- recordings (crash recovery) ------------------------------------------------------------
 
 fs::path EngineApp::mediaDir() const {
-    return projectPath_.empty() ? options_.workdir / "media"
-                                : projectPath_.parent_path() / head().project->mediaDir;
+    return projectDir().empty() ? options_.workdir / "media"
+                                : projectDir() / head().project->mediaDir;
+}
+
+fs::path EngineApp::projectDir() const {
+    return projectPath_.empty() ? options_.scratchDir : projectPath_.parent_path();
+}
+
+namespace {
+bool within(const fs::path& inner, const fs::path& outer) {
+    std::error_code ec;
+    const fs::path a = fs::weakly_canonical(inner, ec), b = fs::weakly_canonical(outer, ec);
+    const auto rel = a.lexically_relative(b);
+    return !rel.empty() && *rel.begin() != "..";
+}
+}  // namespace
+
+void EngineApp::clearScratch() {
+    const fs::path& scratch = options_.scratchDir;
+    // Only an unsaved project's: once saved, its recordings moved beside the
+    // file (or, if that failed, are still here and must stay).
+    if (!projectPath_.empty() || scratch.empty() || scratch == scratch.root_path()) return;
+    if (within(options_.workdir, scratch)) return;
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+}
+
+// The first save of a project with a scratch folder: its media moves to
+// `dest` (beside the project file), keeping the relative paths it was
+// recorded under. Refuses (moving nothing) when a file of the same name is
+// already there.
+Status EngineApp::moveScratchMedia(const fs::path& dest) {
+    const fs::path from = options_.scratchDir / head().project->mediaDir;
+    std::error_code ec;
+    if (!fs::is_directory(from, ec)) return okStatus();
+    std::vector<fs::path> files;
+    for (auto it = fs::recursive_directory_iterator(from, ec); !ec && it != fs::end(it);
+         it.increment(ec))
+        if (it->is_regular_file(ec)) files.push_back(it->path().lexically_relative(from));
+    for (const fs::path& rel : files)
+        if (fs::exists(dest / rel, ec))
+            return Error("project.media_exists", (dest / rel).string() + " already exists", {},
+                         "save into another folder; the recordings stay in " + from.string());
+    for (const fs::path& rel : files) {
+        const fs::path to = dest / rel;
+        fs::create_directories(to.parent_path(), ec);
+        fs::rename(from / rel, to, ec);
+        if (ec) {  // another file system: copy, then remove
+            ec.clear();
+            fs::copy_file(from / rel, to, ec);
+            if (ec)
+                return Error("project.media_move",
+                             "could not move " + (from / rel).string() + ": " + ec.message(), {},
+                             "the recordings stay in " + from.string());
+            fs::remove(from / rel, ec);
+        }
+    }
+    fs::remove_all(options_.scratchDir, ec);
+    return okStatus();
 }
 
 namespace {
@@ -1238,7 +1304,7 @@ std::vector<RecoverableInfo> EngineApp::recoverable() const {
     if (!fs::is_directory(fs::symlink_status(dir, ec))) return out;
     // Every file a version uses, resolved the way plans resolve media.
     std::set<fs::path> used;
-    const fs::path projectDir = projectPath_.empty() ? fs::path() : projectPath_.parent_path();
+    const fs::path projectDir = this->projectDir();
     versions_->forEachVersion([&](const model::Version& v) {
         for (const auto& e : v.session->media) {
             const fs::path p = e.value->path;
@@ -1328,7 +1394,7 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
 
 void EngineApp::headChanged() {
     if (!engine_) return;
-    auto st = engine_->load(head(), projectPath_.empty() ? fs::path() : projectPath_.parent_path());
+    auto st = engine_->load(head(), projectDir());
     if (!st) emit("engine.error", json::Value(st.error().toString()));
     engine_->service();
 }

@@ -16,6 +16,14 @@ Audio goes through JACK (PipeWire's JACK on this machine). If the device is
 not ready, the app still opens; run `engine.start` from the actions list
 (Shift+/) once it is.
 
+## Unsaved projects
+
+Until a project is saved, its recordings go to its own folder,
+`~/.local/share/quire/unsaved/<start time>-<pid>/media/rec`. The first save moves
+them into `media/` beside the project file. Quitting (or starting another
+project) without saving deletes that folder, after the app has asked. A crashed
+run leaves its folder behind, recordings included.
+
 ## Plugins
 
 The app scans, in this order: the stock plugins built beside it

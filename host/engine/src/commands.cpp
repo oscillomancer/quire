@@ -2169,7 +2169,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 s.project->render.isObject() ? s.project->render.find("tail_ms") : nullptr;
             o.tailSeconds = a.tailS.value_or(
                 tailDefault && tailDefault->isNumber() ? tailDefault->asDouble() / 1000.0 : 0.0);
-            if (!app.projectPath().empty()) o.projectDir = app.projectPath().parent_path();
+            o.projectDir = app.projectDir();
             auto resolvedPath = mixPath(app, s, a);
             if (!resolvedPath) return std::move(resolvedPath).error();
             const fs::path path = *resolvedPath;

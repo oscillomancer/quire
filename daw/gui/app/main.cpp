@@ -16,7 +16,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -180,6 +182,25 @@ Result<ui::Theme> loadTheme(const std::string& spec, gui::Appearance& look) {
     return ui::Theme::fromJson(*doc, look.theme());
 }
 
+// An unsaved project's own folder, one per run (crashed runs' folders stay, with
+// their recordings): <data>/<slug>/unsaved/<start time>-<pid>; under --workdir
+// when one is given (tests), so nothing lands in the user's data folder.
+fs::path scratchFolder(const Options& o) {
+    fs::path base;
+    if (!o.workdir.empty())
+        base = o.workdir;
+    else if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        base = fs::path(xdg) / std::string(product::kSlug);
+    else if (const char* home = std::getenv("HOME"); home && *home)
+        base = fs::path(home) / ".local" / "share" / std::string(product::kSlug);
+    else
+        base = fs::temp_directory_path() / std::string(product::kSlug);
+    char stamp[32] = {};
+    const std::time_t now = std::time(nullptr);
+    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
+    return base / "unsaved" / (std::string(stamp) + "-" + std::to_string(::getpid()));
+}
+
 // Milliseconds since the kernel started this process (exec and dynamic
 // loading included), for the cold-start gate (ADR-0005 §5: < 300 ms).
 double millisecondsSinceProcessStart() {
@@ -264,11 +285,14 @@ int main(int argc, char** argv) {
     options.workdir = !o.workdir.empty()   ? o.workdir
                       : !o.project.empty() ? o.project.parent_path()
                                            : fs::current_path();
+    options.scratchDir = scratchFolder(o);
     auto app = engine::EngineApp::create(options);
     if (!app) {
         std::fprintf(stderr, "%s\n", app.error().toString().c_str());
         return 1;
     }
+    // Leaving an unsaved project discards it: its recordings go with it.
+    std::shared_ptr<void> discardUnsaved(nullptr, [&](void*) { (*app)->clearScratch(); });
     if (!o.project.empty() && fs::exists(o.project)) {
         auto opened = (*app)->open(o.project);
         if (!opened) {
