@@ -6,7 +6,7 @@
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
-//          [--audio jack|dummy|none]
+//          [--audio jack|dummy|none] [--theme dark|light|FILE] [--action ID]...
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <unistd.h>
@@ -20,6 +20,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "actions_list.h"
@@ -37,10 +38,12 @@
 #include "render_dialog.h"
 #include "routing_matrix.h"
 #include "shell.h"
+#include "supple/base/files.h"
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/json/parse.h"
 #include "supple/peaks/peaks.h"
 #include "supple/product.h"
 #include "supple/rpc/model_loop.h"
@@ -62,7 +65,11 @@ struct Options {
     int generate = 0;                            // tracks of a generated session
     double idleSeconds = 0;                      // measure idle CPU after the frames
     double viewStart = -1, viewPps = 0;          // initial lanes viewport
-    std::string audio;  // jack | dummy | none; default: jack (none offscreen)
+    std::string audio;           // jack | dummy | none; default: jack (none offscreen)
+    std::string theme = "dark";  // dark | light | a supple.theme/1.0 file
+    // Run in order once the project and its UI state are loaded: an action id,
+    // optionally followed by a space and a JSON object of its prompted inputs.
+    std::vector<std::string> actions;
 };
 
 int usage() {
@@ -71,7 +78,7 @@ int usage() {
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
                  "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
                  "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n"
-                 "       [--audio jack|dummy|none]\n",
+                 "       [--audio jack|dummy|none] [--theme dark|light|FILE] [--action ID]...\n",
                  std::string(product::kSlug).c_str());
     return 2;
 }
@@ -94,6 +101,14 @@ bool parse(int argc, char** argv, Options& o) {
                 (std::string(v) != "jack" && std::string(v) != "dummy" && std::string(v) != "none"))
                 return false;
             o.audio = v;
+        } else if (a == "--action") {
+            const char* v = value();
+            if (!v) return false;
+            o.actions.emplace_back(v);
+        } else if (a == "--theme") {
+            const char* v = value();
+            if (!v) return false;
+            o.theme = v;
         } else if (a == "--view") {
             const char* v = value();
             if (!v || std::sscanf(v, "%lf,%lf", &o.viewStart, &o.viewPps) != 2) return false;
@@ -138,6 +153,21 @@ bool parse(int argc, char** argv, Options& o) {
             return false;
     }
     return o.width > 0 && o.height > 0;
+}
+
+// --theme: a built-in theme, or a supple.theme/1.0 file of overrides on the
+// dark theme ("base": "light" starts from the light one).
+Result<ui::Theme> loadTheme(const std::string& spec) {
+    if (spec == "dark") return ui::Theme::dark();
+    if (spec == "light") return ui::Theme::light();
+    auto bytes = readFile(spec);
+    if (!bytes) return std::move(bytes).error();
+    auto doc =
+        json::parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+    if (!doc) return std::move(doc).error();
+    const json::Value* base = doc->isObject() ? doc->find("base") : nullptr;
+    const bool light = base && base->isString() && base->asString() == "light";
+    return ui::Theme::fromJson(*doc, light ? ui::Theme::light() : ui::Theme::dark());
 }
 
 // Milliseconds since the kernel started this process (exec and dynamic
@@ -293,7 +323,12 @@ int main(int argc, char** argv) {
     });
     gui::Shell shell(**app, dispatcher, uiState, status, peaks, meterFeed);
     peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
-    ui::Root root(**window, *fonts, ui::Theme::dark());
+    auto theme = loadTheme(o.theme);
+    if (!theme) {
+        std::fprintf(stderr, "theme: %s\n", theme.error().toString().c_str());
+        return 1;
+    }
+    ui::Root root(**window, *fonts, std::move(*theme));
     bool quit = false;
     std::vector<std::filesystem::path> dropped;  // files of a drop in progress
     ui::Point dropAt{};
@@ -635,6 +670,22 @@ int main(int argc, char** argv) {
         fxWindow.tick();
         renderDialog.tick();
         uiFile.tick((*app)->projectPath());
+        // --action: after the first tick has read the project's UI state.
+        for (const auto& spec : std::exchange(o.actions, {})) {
+            const auto space = spec.find(' ');
+            const std::string id = spec.substr(0, space);
+            const actions::Action* action = appActions.registry().find(id);
+            Result<json::Value> inputs = json::Value::object();
+            if (space != std::string::npos) inputs = json::parse(spec.substr(space + 1));
+            Result<json::Value> r =
+                !action   ? Result<json::Value>(Error("action.unknown", "no action " + id))
+                : !inputs ? Result<json::Value>(inputs.error())
+                          : appActions.run(*action, *inputs);
+            if (!r) {
+                std::fprintf(stderr, "action %s: %s\n", id.c_str(), r.error().toString().c_str());
+                return 1;
+            }
+        }
         const bool moved = shell.arrange()->poll();
         if (moved) root.requestAnimationFrame();
         if (o.script && warm) {

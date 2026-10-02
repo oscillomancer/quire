@@ -64,37 +64,19 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 15. Evaluation listening — first Hermes campaign (15–20 minutes, when convenient)
-Summary: `docs/benchmarks/eval/2026-10-01-campaign.md`. Each folder holds the
-best and worst render per task (by score) from three attempts by the cheap
-evaluation model. Most useful, in order:
-- **Blind descriptive** — the model had only the verbal description: does each
-  sound fit its name (pad, bell, FM e-piano, strings, …)?
-  `docs/benchmarks/eval/audio/20261001T035104417802Z-synth-descriptive-hermes/`
-- **Reference matching** — do the passing ones (pluck bass, noise snare,
-  supersaw) sound like a match, and are the failing ones near misses or far off?
-  Hidden references are in `build/eval/20261001T034021918752Z-synth-reference-hermes/*-hidden/renders/`.
-  `docs/benchmarks/eval/audio/20261001T034021918752Z-synth-reference-hermes/`
-- Notation phrases (rhythm/register fit):
-  `docs/benchmarks/eval/audio/20261001T030823264794Z-notation-hermes/`
-*Meanwhile:* the reference suite waits for the harness/optimizer fixes listed
-in the summary; nothing else waits on this.
-
-### 16. Evaluation listening — 20261001T130928234028Z-synth-reference-hermes
-Suite: synth-reference, runner/model: hermes/meta/muse-spark-1.3-contributor. Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?
-
-- `reference.acid-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.acid-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.acid-bass-worst.wav` — Is the resonant snap recognizably acid-like and controlled?
-- `reference.bell`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.bell-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.bell-worst.wav` — Does the strike sound metallic, with a smooth ringing decay?
-- `reference.fm-e-piano`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.fm-e-piano-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.fm-e-piano-worst.wav` — Does the attack have FM character while the body stays mellow?
-- `reference.formant-lead`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.formant-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.formant-lead-worst.wav` — Can you hear vowel-like movement without losing the pitched lead?
-- `reference.noise-snare`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.noise-snare-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.noise-snare-worst.wav` — Is the body audible under the fizz, and does the hit end cleanly?
-- `reference.pad`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pad-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pad-worst.wav` — Does it swell warmly and stay wide without sounding harsh?
-- `reference.pluck-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pluck-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.pluck-bass-worst.wav` — Is the filter snap short and audible, with convincing bass weight?
-- `reference.strings`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.strings-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.strings-worst.wav` — Does it feel like a cohesive sustained ensemble with a natural swell?
-- `reference.sub-bass`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.sub-bass-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.sub-bass-worst.wav` — Is the sub clean and solid, free of clicks or harsh upper harmonics?
-- `reference.supersaw-lead`: `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.supersaw-lead-best.wav`, `docs/benchmarks/eval/audio/20261001T130928234028Z-synth-reference-hermes/reference.supersaw-lead-worst.wav` — Is this a bright, playable lead with a stable wide image?
+### 17. Visual identity — review the renders (P5.16; 10 minutes)
+Real renders of the app in both themes, built from a demo session, with the
+proposal and how far the app follows it:
+https://claude.ai/artifact/XorL6LobSvyQdfFuTpSFHe (regenerate with
+`tools/gui/mockups.py`). Six questions at the bottom: keep paper and ink?
+default theme? track colours for items? strip-type colours and edge
+treatments? a quieter track panel? the accent? *Meanwhile:* nothing waits on
+this; P5.16 (the identity pass) starts from your answers.
 
 ## Resolved
+
+### 15, 16. Evaluation listening — Hermes campaigns
+**Answer (2026-10-01):** listening to the renders showed the LLM is competent at using the tools; the numeric scoring did not seem very useful. *Follow-up:* no eval reruns (the clean reference rerun is dropped); LLM evaluation, if it comes back, leads with renders to listen to.
 
 ### 14. Re-listen: FM electric piano and the `digital` wavetable — listening check
 **Answer (2026-09-30):** the new bell and electric piano sound much better; the wavetables sound good; no issues. (FM depth now follows the modulator's level, 508a229; `digital` is a coarse stepped, bit-reduced table.)

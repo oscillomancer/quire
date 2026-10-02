@@ -94,6 +94,19 @@ if(SUPPLE_BUILD_TESTS)
                    --snapshot ${CMAKE_CURRENT_BINARY_DIR}/app-offscreen.png)
   set_tests_properties(gui.app-offscreen PROPERTIES LABELS "gui;tsan-skip"
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # --theme and --action (the identity mockups use both): the light theme with
+  # the mixer and the history open; an unknown action fails the run.
+  add_test(NAME gui.app-theme-actions
+           COMMAND ${PRODUCT_SLUG} --offscreen --no-socket --frames 2 --audio none --theme light
+                   --action ui.mixer --action ui.history
+                   --snapshot ${CMAKE_CURRENT_BINARY_DIR}/app-theme-actions.png)
+  set_tests_properties(gui.app-theme-actions PROPERTIES LABELS "gui;tsan-skip"
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  add_test(NAME gui.app-unknown-action
+           COMMAND ${PRODUCT_SLUG} --offscreen --no-socket --frames 2 --audio none
+                   --action ui.no-such-action)
+  set_tests_properties(gui.app-unknown-action PROPERTIES LABELS "gui;tsan-skip" WILL_FAIL TRUE
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   # An agent drives the running GUI through its control socket and the MCP proxy.
   add_test(NAME gui.agent-over-socket
            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_agent.py
