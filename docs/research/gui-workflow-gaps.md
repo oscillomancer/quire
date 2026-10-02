@@ -3,7 +3,7 @@
 Living document: each of REAPER's top-40 workflows (the research's
 priority list) against what Quire's GUI does today. "Done" means a person can
 do it in the GUI, through commands, with one undo step per gesture. Updated
-2026-10-01 (orchestrator) at p5-widgets `fc02d3c` plus work in flight.
+2026-10-01 (orchestrator) at p5-widgets `a289f58`.
 
 Status: **done** · **partial** (what is missing) · **in progress** (owner,
 branch) · **gap** (not started).
@@ -43,7 +43,7 @@ branch) · **gap** (not started).
 | 24 | Markers/regions: create, rename, navigate | done — M adds a marker at the playhead, Shift+R a region over the loop range; drag, double-click to rename, Alt+click removes; a ruler drag sets the loop range. [ and ] jump to the previous/next marker or region start |
 | 25 | Piano roll, velocity and CC lanes | done — MIDI editor: piano roll, velocity lane, CC lane (mod, volume, pan, expression, sustain; draw/erase), notation panel |
 | 26 | MIDI event list and notation views | done — notation panel; event list (every note and CC, text-edited cells, Delete, + Note) |
-| 27 | Track automation lanes, read/write modes | done — volume/pan/mute and plugin-parameter lanes under their strip (click adds, drag moves, Alt+click deletes a point); header with mode, on, hide; touch/latch/write record fader moves while playing (`track.set`/`route.set`), latch/write hold to the stop. Plugin parameters are drawn and edited but not yet recorded from their controls |
+| 27 | Track automation lanes, read/write modes | done — volume/pan/mute and plugin-parameter lanes under their strip (click adds, drag moves, Alt+click deletes a point); header with mode, on, hide; touch/latch/write record fader moves while playing (`track.set`/`route.set`), latch/write hold to the stop. plugin parameters record the same way (`fx.param.set`) |
 | 28 | Automation items with pooled identity | gap — modelled (`ai_*`), no commands |
 | 29 | Project/track/item timebase with visible consequences | gap (UI) |
 | 30 | Track templates and FX chain presets | done — FX chain presets (`fx.chain.*`, FX window) and track templates (`track.template.*`, Track menu) |
@@ -51,7 +51,7 @@ branch) · **gap** (not started).
 | 32 | Render selected tracks/items/regions as stems | done — render dialog stems/regions |
 | 33 | Queue exports, second output format | partial — renders are jobs; one format per render |
 | 34 | True-peak/LUFS normalization, render measurements | done — normalize/target/limit in the dialog, loudness in results |
-| 35 | Loop record into takes, punch modes | partial — engine done (ADR-0014/15); transport modes in progress (`gui`) |
+| 35 | Loop record into takes, punch modes | partial — recording while looping makes one take per pass (ADR-0014/15); loop and punch toggles on the transport bar, a ruler drag sets the loop range. The punch range is set only by command (`transport.punch {start, end}`), not yet in the GUI |
 | 36 | Peaks cached, never blocking editing | done — worker-built pyramids, disk cache |
 
 ## P2 (37–40)
@@ -74,5 +74,5 @@ branch) · **gap** (not started).
 - Also closed: new MIDI items from the GUI (Item > New MIDI item, double-click on
   empty channel space), the item clipboard, the metronome, comping (#21),
   plugin-parameter automation recording (#27).
-- Open: automation items (#28), screensets
-  (#38), count-in, FX pin maps (#31), multichannel strips (#6).
+- Open: automation items (#28), screensets (#38), count-in, the punch range in
+  the GUI (#35), FX pin maps (#31), multichannel strips (#6).
