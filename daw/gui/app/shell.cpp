@@ -3,6 +3,7 @@
 #include "plugin_scales.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -144,6 +145,9 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     };
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
+    };
+    tcp.color = [this](const model::Id& track, const ui::Rect& anchor) {
+        (void)openColorMenu(track, anchor);
     };
     // "fx": the chain, or straight to the plugin browser when it is empty.
     tcp.fx = [this, &actions](const model::Id& track) {
@@ -339,6 +343,38 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
     root_->openPopup(
         ui::makeMenu("tcp.env." + track.str(), std::move(items), [this] { root_->closePopup(); }),
         anchor);
+}
+
+Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {
+    if (!root_) return Error("gui.root", "the window is not ready");
+    const model::Track* tr = app_.head().tracks.find(track);
+    if (!tr) return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
+    std::vector<ui::MenuItem> items;
+    auto pick = [this, track](std::string colour) {
+        json::Value args = json::Value::object();
+        args["track"] = track.str();
+        args["color"] = std::move(colour);
+        commit("track.set", std::move(args), {});
+    };
+    for (std::string_view name : model::kTrackColors) {
+        ui::MenuItem m;
+        m.label = std::string(name);
+        m.label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(m.label[0])));
+        m.checked = tr->color == name;
+        m.swatch = root_->theme().trackColor(name);
+        m.run = [pick, colour = std::string(name)] { pick(colour); };
+        items.push_back(std::move(m));
+    }
+    items.push_back({"", "", {}, true, true});  // separator
+    ui::MenuItem none;
+    none.label = "None";
+    none.checked = tr->color.empty();
+    none.run = [pick] { pick(""); };
+    items.push_back(std::move(none));
+    root_->openPopup(
+        ui::makeMenu("tcp.color." + track.str(), std::move(items), [this] { root_->closePopup(); }),
+        anchor, anchor.w > 0 ? ui::Placement::Below : ui::Placement::Center);
+    return {};
 }
 
 void Shell::openInputMenu(const model::Id& track, const ui::Rect& anchor) {

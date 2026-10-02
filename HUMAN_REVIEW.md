@@ -64,16 +64,17 @@ compressor/limiter **Ballast**, gate/expander **Sluice**, transient shaper
 utility **Plumb**, analyzer **Gauge** (`docs/specs/stock-effects.md`). Code
 uses functional ids (`eq`, `comp`, …) until you confirm, so vetoes are free.
 
-### 17. Visual identity — review the renders (P5.16; 10 minutes)
-Real renders of the app in both themes, built from a demo session, with the
-proposal and how far the app follows it:
-https://claude.ai/artifact/XorL6LobSvyQdfFuTpSFHe (regenerate with
-`tools/gui/mockups.py`). Six questions at the bottom: keep paper and ink?
-default theme? track colours for items? strip-type colours and edge
-treatments? a quieter track panel? the accent? *Meanwhile:* nothing waits on
-this; P5.16 (the identity pass) starts from your answers.
-
 ## Resolved
+
+### 17. Visual identity — review the renders (P5.16)
+**Answer (2026-10-02):** likes it visually. 1) keep paper and ink; 2) dark by
+default; 3) choosable track colours, minimal: a small stripe per track and a
+small set to pick from; 4) strip-type colours are fine, draw the heavier
+spines (may revisit after seeing them), and group all masters on the right
+side of the mixer; 5) keep the TCP toggles as they are; 6) the blue accent is
+fine, but add a warmer palette with an orange accent, switchable, and make it
+the default. *Follow-up:* all done in the identity pass (gui.md §7); renders
+republished on the same page for a second look.
 
 ### 15, 16. Evaluation listening — Hermes campaigns
 **Answer (2026-10-01):** listening to the renders showed the LLM is competent at using the tools; the numeric scoring did not seem very useful. *Follow-up:* no eval reruns (the clean reference rerun is dropped); LLM evaluation, if it comes back, leads with renders to listen to.

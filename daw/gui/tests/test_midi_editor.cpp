@@ -423,6 +423,14 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     const auto& strips = mixer.strips();
     REQUIRE(strips.size() == 3);
     CHECK(strips[0].type == "channel");  // channels, busses, masters
+    // The masters stay pinned to the right edge; the others start at the left.
+    const ui::Rect row = f.root->find("mixer.strips")->bounds();
+    CHECK(static_cast<double>(strips[0].node->bounds().x) ==
+          doctest::Approx(static_cast<double>(row.x)));
+    CHECK(static_cast<double>(strips[2].node->bounds().right()) ==
+          doctest::Approx(static_cast<double>(row.right() - 4)));
+    CHECK(strips[2].node->bounds().x > strips[1].node->bounds().right() + 100);
+    CHECK(f.root->find("mixer.fxadd." + strips[0].track));  // "+ FX" on every strip
     CHECK(strips[1].track == buss);
     CHECK(strips[2].track == "tr_0");
     CHECK(strips[0].arm != nullptr);

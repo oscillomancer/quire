@@ -53,6 +53,9 @@ struct TcpCallbacks {
     // The strip's "fx" button: its chain (the app opens the plugin browser
     // when the chain is empty).
     std::function<void(const model::Id& track)> fx;
+    // The track's colour menu: a click on the strip-type badge or a right-click
+    // on the row (anchor: the badge, in window coordinates).
+    std::function<void(const model::Id& track, const ui::Rect& anchor)> color;
     // Output drags commit one send on release; a click opens the matrix.
     std::function<Result<json::Value>(const model::Id& from, const model::Id& to)> addSend;
     std::function<void(const Error&)> onError;

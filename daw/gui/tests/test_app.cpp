@@ -10,6 +10,7 @@
 #include "actions_list.h"
 #include "agent_panel.h"
 #include "app_actions.h"
+#include "appearance.h"
 #include "chrome.h"
 #include "fake_llm.h"
 #include "file_actions.h"
@@ -262,6 +263,33 @@ TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd 
     CHECK(a.tracks("buss") == 1);
     CHECK_FALSE(a.root->find("agent.review")->visible);
     CHECK(panel.session()->branch().empty());
+}
+
+TEST_CASE("the appearance: warm and dark by default, saved and read back, palettes differ") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-appearance-" + std::to_string(::getpid()));
+    const auto file = dir / "appearance.json";
+    gui::Appearance look = gui::Appearance::load(file);  // missing: the defaults
+    CHECK(look.dark);
+    CHECK(look.palette == ui::Palette::Warm);
+    CHECK(look.theme().name() == "dark-warm");
+    look.dark = false;
+    look.palette = ui::Palette::Ink;
+    REQUIRE(look.save(file));
+    const gui::Appearance read = gui::Appearance::load(file);
+    CHECK_FALSE(read.dark);
+    CHECK(read.palette == ui::Palette::Ink);
+    CHECK(read.theme().name() == "light");
+    // Warm swaps the accent family; strip types and track colours stay.
+    const ui::Theme warm = ui::Theme::dark(ui::Palette::Warm), ink = ui::Theme::dark();
+    CHECK_FALSE(warm.color("accent") == ink.color("accent"));
+    CHECK(warm.color("accent").r > warm.color("accent").b);  // orange
+    CHECK(warm.color("channel") == ink.color("channel"));
+    CHECK(warm.trackColor("teal") == ink.trackColor("teal"));
+    CHECK(warm.trackColor("#102030") == ui::Color::hex(0x102030));
+    CHECK_FALSE(warm.trackColor("pink"));
+    CHECK_FALSE(warm.trackColor(""));
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("UI state is saved beside the project and restored when it is opened") {

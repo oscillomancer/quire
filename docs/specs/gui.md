@@ -300,21 +300,32 @@ attributed.
 
 ## 7. Visual identity
 
-Quire's own character, not a REAPER clone or a generic dark theme. A
-proposal for Nate's review (rendered mockups through the real toolkit come
-before the theme is frozen, HUMAN_REVIEW):
+Quire's own character, not a REAPER clone or a generic dark theme. Reviewed by
+Nate on rendered mockups (2026-10-02, HUMAN_REVIEW #17;
+`tools/gui/mockups.py` renders them):
 
 - **Material:** paper and ink — warm neutral grounds (light: off-white
-  paper; dark: deep warm graphite, not blue-black), ink-black and one ink
-  accent, fine ruled lines for grids (the quire: gathered, ruled sheets).
+  paper; dark: deep warm graphite, not blue-black), ink text, fine ruled lines
+  for grids (the quire: gathered, ruled sheets). **Dark is the default.**
+- **Two palettes, one accent each:** *warm* (an orange ink; the default) and
+  *ink* (blue). The palette sets the accent, focus and selection; everything
+  else is shared. View > switch light / dark and View > switch warm / ink
+  palette apply at once and are saved in `<config>/<slug>/appearance.json`;
+  `--theme` and `--palette` override them for one run.
 - **Type-led hierarchy:** Inter for UI, IBM Plex Mono for every number and
   for notation; few font sizes; labels quiet, values prominent.
-- **Strip types as bindings:** Channel, Buss and Master each have a colour
-  and an edge treatment (channels plain, busses with a double rule, masters
-  with a heavier spine), consistent across TCP, mixer and routing.
+- **Strip types as bindings:** Channel blue, Buss amber, Master red, in every
+  palette, on the TCP badge, the mixer strip's top edge and the routing
+  matrix's marks. Masters carry a heavier spine (the mixer strip's left edge,
+  the routing marks) and sit pinned at the mixer's right edge. (Busses' double
+  rule from the proposal is not drawn.)
+- **Track colours, for organizing:** a small set (red, orange, yellow, green,
+  teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
+  a stripe down the TCP row's left edge and under the mixer strip's name.
+  Picked from the badge (or a right-click on the row) or Track > color….
 - **Calm by default:** colour reserved for state (armed, clipping, selected,
   agent-changed), meters and waveforms in ink tones; motion only for
-  feedback.
+  feedback. The TCP keeps its boxed toggles (Nate: no quieter variant).
 
 ## 8. Commands the GUI will need (gap list, to verify against the registry)
 

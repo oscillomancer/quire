@@ -90,7 +90,9 @@ class Grid : public ui::Node {
             const auto& d = m_.destinations[col];
             const float x = gx + static_cast<float>(col) * kCell;
             if (x + kCell < cells.x || x > cells.right()) continue;
-            c.fillRect({x + 4, b.y + kHeaderH - 6, kCell - 8, 3},
+            // A master's mark is heavier (its spine, gui.md §7).
+            const float mark = d.type == "master" ? 5.0f : 3.0f;
+            c.fillRect({x + 4, b.y + kHeaderH - 3 - mark, kCell - 8, mark},
                        d.kind == "key" ? t.color("agent") : typeColor(d.type));
             nvgSave(vg);
             nvgTranslate(vg, x + kCell / 2 + 4, b.y + kHeaderH - 10);
@@ -109,7 +111,8 @@ class Grid : public ui::Node {
             const float y = gy + static_cast<float>(row) * kCell;
             if (y + kCell < cells.y || y > cells.bottom()) continue;
             const float indent = 8 + static_cast<float>(s.depth) * 12;
-            c.fillRect({b.x + indent - 6, y + 4, 3, kCell - 8}, typeColor(s.type));
+            const float mark = s.type == "master" ? 5.0f : 3.0f;
+            c.fillRect({b.x + indent - 3 - mark, y + 4, mark, kCell - 8}, typeColor(s.type));
             c.text({b.x + indent, y, kLabelW - indent - 6, kCell}, s.name.empty() ? s.id : s.name,
                    ui::Font::Ui, t.type("small"), t.color("ink"));
         }

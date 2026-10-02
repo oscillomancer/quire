@@ -6,7 +6,8 @@
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
-//          [--audio jack|dummy|none] [--theme dark|light|FILE] [--action ID]...
+//          [--audio jack|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
+//          [--action ID]...
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <unistd.h>
@@ -26,6 +27,7 @@
 #include "actions_list.h"
 #include "agent_panel.h"
 #include "app_actions.h"
+#include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
 #include "fx_window.h"
@@ -66,8 +68,10 @@ struct Options {
     int generate = 0;                            // tracks of a generated session
     double idleSeconds = 0;                      // measure idle CPU after the frames
     double viewStart = -1, viewPps = 0;          // initial lanes viewport
-    std::string audio;           // jack | dummy | none; default: jack (none offscreen)
-    std::string theme = "dark";  // dark | light | a supple.theme/1.0 file
+    std::string audio;  // jack | dummy | none; default: jack (none offscreen)
+    // Override the saved appearance for this run (not saved): dark | light | a
+    // supple.theme/1.0 file, and warm | ink.
+    std::string theme, palette;
     // Run in order once the project and its UI state are loaded: an action id,
     // optionally followed by a space and a JSON object of its prompted inputs.
     std::vector<std::string> actions;
@@ -79,7 +83,8 @@ int usage() {
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
                  "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
                  "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n"
-                 "       [--audio jack|dummy|none] [--theme dark|light|FILE] [--action ID]...\n",
+                 "       [--audio jack|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]\n"
+                 "       [--action ID]...\n",
                  std::string(product::kSlug).c_str());
     return 2;
 }
@@ -110,6 +115,10 @@ bool parse(int argc, char** argv, Options& o) {
             const char* v = value();
             if (!v) return false;
             o.theme = v;
+        } else if (a == "--palette") {
+            const char* v = value();
+            if (!v || !ui::paletteFrom(v)) return false;
+            o.palette = v;
         } else if (a == "--view") {
             const char* v = value();
             if (!v || std::sscanf(v, "%lf,%lf", &o.viewStart, &o.viewPps) != 2) return false;
@@ -156,19 +165,19 @@ bool parse(int argc, char** argv, Options& o) {
     return o.width > 0 && o.height > 0;
 }
 
-// --theme: a built-in theme, or a supple.theme/1.0 file of overrides on the
-// dark theme ("base": "light" starts from the light one).
-Result<ui::Theme> loadTheme(const std::string& spec) {
-    if (spec == "dark") return ui::Theme::dark();
-    if (spec == "light") return ui::Theme::light();
+// --theme / --palette over the saved appearance: dark or light, or a
+// supple.theme/1.0 file of overrides ("base": "light" starts from light).
+Result<ui::Theme> loadTheme(const std::string& spec, gui::Appearance& look) {
+    if (spec == "dark" || spec == "light") look.dark = spec == "dark";
+    if (spec.empty() || spec == "dark" || spec == "light") return look.theme();
     auto bytes = readFile(spec);
     if (!bytes) return std::move(bytes).error();
     auto doc =
         json::parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
     if (!doc) return std::move(doc).error();
     const json::Value* base = doc->isObject() ? doc->find("base") : nullptr;
-    const bool light = base && base->isString() && base->asString() == "light";
-    return ui::Theme::fromJson(*doc, light ? ui::Theme::light() : ui::Theme::dark());
+    look.dark = !(base && base->isString() && base->asString() == "light");
+    return ui::Theme::fromJson(*doc, look.theme());
 }
 
 // Milliseconds since the kernel started this process (exec and dynamic
@@ -330,7 +339,10 @@ int main(int argc, char** argv) {
     });
     gui::Shell shell(**app, dispatcher, uiState, status, peaks, meterFeed);
     peaks.onReady = [&](const std::string&) { shell.arrange()->lanes().invalidate(); };
-    auto theme = loadTheme(o.theme);
+    const fs::path appearanceFile = gui::Appearance::defaultFile(product::kSlug);
+    gui::Appearance look = gui::Appearance::load(appearanceFile);
+    if (!o.palette.empty()) look.palette = *ui::paletteFrom(o.palette);
+    auto theme = loadTheme(o.theme, look);
     if (!theme) {
         std::fprintf(stderr, "theme: %s\n", theme.error().toString().c_str());
         return 1;
@@ -352,6 +364,21 @@ int main(int argc, char** argv) {
         [&](std::function<void()> f) { loop.post(std::move(f)); },
         agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
     appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
+    // The look: switching repaints at once and is saved (not in offscreen runs).
+    auto applyLook = [&] {
+        root.setTheme(look.theme());
+        if (o.offscreen) return;
+        if (auto saved = look.save(appearanceFile); !saved)
+            std::fprintf(stderr, "appearance: %s\n", saved.error().toString().c_str());
+    };
+    appActions.addUi("ui.theme.mode", "View: switch light / dark", [&] {
+        look.dark = !look.dark;
+        applyLook();
+    });
+    appActions.addUi("ui.theme.palette", "View: switch warm / ink palette", [&] {
+        look.palette = look.palette == ui::Palette::Warm ? ui::Palette::Ink : ui::Palette::Warm;
+        applyLook();
+    });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
@@ -373,6 +400,17 @@ int main(int argc, char** argv) {
                            gui::Favourites::defaultFile(product::kSlug));
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
+    appActions.addUi("ui.track.color", "Track: color…", "track",
+                     [&](const json::Value& v) -> Status {
+                         std::string text = v.isString() ? v.asString() : std::string{};
+                         if (text.empty() && !uiState.selectedTracks.empty())
+                             text = uiState.selectedTracks.front();
+                         const auto id = model::Id::parse(text);
+                         if (!id)
+                             return Error("gui.track", "no track given and nothing is selected",
+                                          "/track", "select a track, or give an id like tr_1");
+                         return shell.openColorMenu(*id, {});
+                     });
     appActions.addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
         return fxWindow.openToAdd(uiState, v);
     });

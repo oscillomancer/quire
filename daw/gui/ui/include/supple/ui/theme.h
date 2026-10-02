@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -24,15 +25,24 @@ struct Color {
     bool operator==(const Color&) const = default;
 };
 
+// The accent family (gui.md §7): Warm (an orange ink, the app's default) or
+// Ink (blue). Either one comes in a dark and a light theme.
+enum class Palette { Warm, Ink };
+std::string_view paletteName(Palette palette);
+std::optional<Palette> paletteFrom(std::string_view name);
+
 class Theme {
   public:
-    // The default themes from the identity proposal (paper and ink).
-    static Theme dark();
-    static Theme light();
+    // The themes from the identity proposal (paper and ink).
+    static Theme dark(Palette palette = Palette::Ink);
+    static Theme light(Palette palette = Palette::Ink);
     // Overrides on top of `base` (every token optional).
     static Result<Theme> fromJson(const json::Value& document, const Theme& base);
 
     Color color(std::string_view token) const;
+    // A track's colour: one of model::kTrackColors in this theme's tones
+    // ("track-red", …), a literal "#rrggbb", or nothing ("" or unknown).
+    std::optional<Color> trackColor(std::string_view name) const;
     float type(std::string_view token) const;    // font sizes
     float space(std::string_view token) const;   // gaps and padding
     float radius(std::string_view token) const;  // corner radii

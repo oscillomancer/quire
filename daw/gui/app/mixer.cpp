@@ -21,43 +21,74 @@ std::string dbText(double db) {
     return buf;
 }
 
-// Strips side by side, scrolled horizontally (wheel or the bar).
+// A run of strips side by side from `scroll` on (the scrolled ones clip).
+class StripGroup : public ui::Node {
+  public:
+    explicit StripGroup(std::string id, bool clip) : Node(std::move(id)) { clipsChildren = clip; }
+    float scroll = 0;
+    float content() const {
+        float w = 0;
+        for (const auto& c : children())
+            if (c->visible) w += kStripW + 4;
+        return w;
+    }
+    void arrange(const ui::Canvas& canvas, const ui::Rect& b) override {
+        setBounds(b);
+        float x = b.x - scroll;
+        for (const auto& c : children()) {
+            if (!c->visible) continue;
+            c->arrange(canvas, {x, b.y, kStripW, b.h});
+            x += kStripW + 4;
+        }
+    }
+};
+
+// Strips side by side, scrolled horizontally (wheel or the bar); the masters
+// stay pinned to the right edge.
 class StripRow : public ui::Node {
   public:
     StripRow() : Node("mixer.strips") {
         interactive = true;
         layout.height = ui::SizeRule::fraction();
+        scrolled_ = &emplace<StripGroup>("mixer.scrolled", true);
+        pinned_ = &emplace<StripGroup>("mixer.pinned", false);
         auto bar = std::make_unique<ui::ScrollBar>("mixer.scroll", ui::ScrollBar::Axis::Horizontal);
         bar_ = bar.get();
         bar_->onScroll = [this](float v) {
-            scroll_ = v;
+            scrolled_->scroll = v;
             relayout();
             invalidate();
         };
         add(std::move(bar));
     }
+    void clear() {
+        for (StripGroup* g : {scrolled_, pinned_}) {
+            std::vector<ui::Node*> old;
+            for (const auto& c : g->children()) old.push_back(c.get());
+            for (ui::Node* n : old) (void)g->remove(n);
+        }
+    }
+    void addStrip(std::unique_ptr<ui::Node> strip, bool pinned) {
+        (pinned ? pinned_ : scrolled_)->add(std::move(strip));
+    }
     void arrange(const ui::Canvas& canvas, const ui::Rect& b) override {
         setBounds(b);
-        float content = 0;
-        for (const auto& c : children())
-            if (c.get() != bar_ && c->visible) content += kStripW + 4;
-        const float barH = content > b.w ? ui::ScrollBar::kThickness : 0;
-        scroll_ = std::clamp(scroll_, 0.0f, std::max(0.0f, content - b.w));
-        bar_->setRange(content, b.w);
-        bar_->setValue(scroll_);
+        const float pinnedW = std::min(b.w, pinned_->content());
+        const float areaW = b.w - pinnedW;
+        const float content = scrolled_->content();
+        const float barH = content > areaW ? ui::ScrollBar::kThickness : 0;
+        scrolled_->scroll = std::clamp(scrolled_->scroll, 0.0f, std::max(0.0f, content - areaW));
+        bar_->setRange(content, areaW);
+        bar_->setValue(scrolled_->scroll);
         bar_->visible = barH > 0;
-        bar_->arrange(canvas, {b.x, b.bottom() - barH, b.w, barH});
-        float x = b.x - scroll_;
-        for (const auto& c : children()) {
-            if (c.get() == bar_ || !c->visible) continue;
-            c->arrange(canvas, {x, b.y, kStripW, b.h - barH});
-            x += kStripW + 4;
-        }
+        bar_->arrange(canvas, {b.x, b.bottom() - barH, areaW, barH});
+        scrolled_->arrange(canvas, {b.x, b.y, areaW, b.h - barH});
+        pinned_->arrange(canvas, {b.right() - pinnedW, b.y, pinnedW, b.h});
     }
     void paint(ui::Canvas& c) override { c.fillRect(bounds(), c.theme().color("ground")); }
     bool onPointer(const ui::PointerEvent& e) override {
         if (e.type != ui::PointerEvent::Type::Wheel) return false;
-        scroll_ = std::max(0.0f, scroll_ - (e.wheelY + e.wheelX) * 60);
+        scrolled_->scroll = std::max(0.0f, scrolled_->scroll - (e.wheelY + e.wheelX) * 60);
         relayout();
         invalidate();
         return true;
@@ -67,15 +98,17 @@ class StripRow : public ui::Node {
     void relayout() {
         if (ui::Root* r = root()) r->relayout();
     }
+    StripGroup* scrolled_ = nullptr;
+    StripGroup* pinned_ = nullptr;
     ui::ScrollBar* bar_ = nullptr;
-    float scroll_ = 0;
 };
 
-// A strip's background: the type's colour along the top.
+// A strip's background: the type's colour along the top, a master's heavier
+// spine down its left side, and the track's colour as a stripe under the name.
 class StripFrame : public ui::Node {
   public:
-    StripFrame(std::string id, std::string colorToken)
-        : Node(std::move(id)), color_(std::move(colorToken)) {
+    StripFrame(std::string id, std::string colorToken, std::string trackColor)
+        : Node(std::move(id)), color_(std::move(colorToken)), trackColor_(std::move(trackColor)) {
         layout.dir = ui::Layout::Dir::Column;
         layout.padding = ui::Insets{8, 5, 5, 5};
         layout.gap = 4;
@@ -84,11 +117,16 @@ class StripFrame : public ui::Node {
         const ui::Theme& t = c.theme();
         c.fillRect(bounds(), t.color("panel"));
         c.fillRect({bounds().x, bounds().y, bounds().w, 4}, t.color(color_));
+        if (color_ == "master")
+            c.fillRect({bounds().x, bounds().y, 5, bounds().h}, t.color(color_));
         c.fillRect({bounds().right() - 1, bounds().y, 1, bounds().h}, t.color("rule"));
+        // Below the 16 px name, in the 4 px gap before the FX slots.
+        if (const auto colour = t.trackColor(trackColor_))
+            c.fillRect({bounds().x + 5, bounds().y + 8 + 16 + 0.5f, bounds().w - 10, 3}, *colour);
     }
 
   private:
-    std::string color_;
+    std::string color_, trackColor_;
 };
 
 }  // namespace
@@ -164,7 +202,8 @@ std::string Mixer::structure() const {
     std::function<void(model::Id)> walk = [&](model::Id id) {
         const model::Track* t = s.tracks.find(id);
         if (!t) return;
-        out += id.str() + ":" + std::string(model::stripTypeName(t->type)) + ":" + t->name + ":";
+        out += id.str() + ":" + std::string(model::stripTypeName(t->type)) + ":" + t->name + ":" +
+               t->color + ":";
         for (model::Id fx : t->chain) {
             const model::FxInstance* f = s.fx.find(fx);
             out += fx.str() + (f && (f->bypass || f->offline) ? "-" : "") + ",";
@@ -193,11 +232,8 @@ Result<json::Value> Mixer::set(const std::string& track, const char* field, json
 void Mixer::rebuild() {
     for (const Strip& s : strips_) meters_.detach(s.meter);
     strips_.clear();
-    // Remove the old strips (keep the scroll bar, the row's first child).
-    std::vector<ui::Node*> old;
-    for (const auto& c : row_->children())
-        if (c->id() != "mixer.scroll") old.push_back(c.get());
-    for (ui::Node* n : old) (void)row_->remove(n);
+    // Remove the old strips (the row keeps its scroll bar).
+    static_cast<StripRow*>(row_)->clear();
     const model::Session& s = app_.head();
     std::vector<model::Id> order;
     std::function<void(model::Id)> walk = [&](model::Id id) {
@@ -220,7 +256,7 @@ void Mixer::rebuild() {
         Strip st;
         st.track = tid;
         st.type = type;
-        auto frame = std::make_unique<StripFrame>("mixer.strip." + tid, type);
+        auto frame = std::make_unique<StripFrame>("mixer.strip." + tid, type, t.color);
         st.node = frame.get();
         st.name = &frame->emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
                                              ui::Font::UiBold, "caption");
@@ -347,7 +383,8 @@ void Mixer::rebuild() {
         });
         st.solo->layout.width = ui::SizeRule::fraction();
         meters_.attach(tid, st.meter);
-        row_->add(std::move(frame));
+        static_cast<StripRow*>(row_)->addStrip(std::move(frame),
+                                               t.type == model::StripType::Master);
         strips_.push_back(st);
     }
     root_.relayout();

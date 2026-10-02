@@ -25,7 +25,13 @@ class MenuList : public List {
             const Color ink = item.enabled ? t.color("ink") : t.color("ink-faint");
             if (item.checked)
                 c.text({r.x + 8, r.y, 16, r.h}, "\xE2\x9C\x93", Font::Ui, t.type("small"), ink);
-            c.text({r.x + 26, r.y, r.w - 34, r.h}, item.label, Font::Ui, t.type("small"), ink);
+            float labelX = r.x + 26;
+            if (item.swatch) {
+                c.fillRound({labelX, r.y + (r.h - 12) / 2, 12, 12}, 2, *item.swatch);
+                labelX += 18;
+            }
+            c.text({labelX, r.y, r.right() - labelX - 8, r.h}, item.label, Font::Ui,
+                   t.type("small"), ink);
             if (!item.shortcut.empty())
                 c.text({r.x, r.y, r.w - 10, r.h}, item.shortcut, Font::Mono, t.type("caption"),
                        t.color("ink-quiet"), kRight | kMiddle);

@@ -1204,7 +1204,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             "off | on | auto (auto: while armed) — a monitored track hears its input live (an "
             "instrument plays the keyboard), also while stopped. record_mode: input (new "
             "items), midi_overdub (merge into the MIDI item under the start, as a new take), "
-            "midi_replace.";
+            "midi_replace. color: red | orange | yellow | green | teal | blue | violet | grey | "
+            "\"#rrggbb\" (\"\" clears it), shown as a stripe on the track.";
         c.tags = {"track", "mixer"};
         c.args =
             schema::object<TrackSetArgs>("track_set_args")
@@ -1255,6 +1256,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto id = existing<model::Track>(s, a.track, "/track");
             if (!id) return std::move(id).error();
+            if (a.color && !model::validTrackColor(*a.color))
+                return Error("track.color", "unknown colour \"" + *a.color + "\"", "/color",
+                             "red, orange, yellow, green, teal, blue, violet, grey or \"#rrggbb\"; "
+                             "\"\" clears it");
             if ((a.armed || a.recordInput || a.recordMidi || a.midiChannel || a.recordMode ||
                  a.monitor) &&
                 a.type.value_or(s.tracks.find(*id)->type) != model::StripType::Channel)

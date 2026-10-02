@@ -306,6 +306,51 @@ TEST_CASE("TCP sends: overlay survives replacement of its owning view") {
     CHECK(f.routes().size() == 0);
 }
 
+TEST_CASE("TCP: the badge (or a right-click) opens the colour menu; a pick is one undo step") {
+    SendsFixture f;
+    const auto row = f.view().trackLayout().indexOf(f.a);
+    REQUIRE(row);
+    const ui::Rect r = f.view().tcpRowRect(*row);
+    const ui::Point badge{r.x + 14, r.y + 12};
+    f.pointer(Pointer::Down, badge);
+    f.pointer(Pointer::Up, badge);
+    f.root->frame(false);
+    ui::Node* menu = f.root->find("tcp.color." + f.a.str());
+    REQUIRE(menu);
+    const auto before = f.history();
+    // Rows are 26 px: red, orange, yellow, green, teal, …
+    const ui::Point teal{menu->bounds().x + 40, menu->bounds().y + 4 * 26 + 13};
+    f.pointer(Pointer::Move, teal);
+    f.pointer(Pointer::Down, teal);
+    f.pointer(Pointer::Up, teal);
+    f.sync();
+    CHECK(f.app->head().tracks.find(f.a)->color == "teal");
+    CHECK(f.history() == before + 1);
+    CHECK_FALSE(f.root->find("tcp.color." + f.a.str()));
+    // A right-click anywhere on the row opens it too.
+    ui::PointerEvent e;
+    e.type = Pointer::Down;
+    e.button = 3;
+    e.pos = {r.x + r.w / 2, r.y + r.h - 6};
+    f.root->pointer(e);
+    f.root->frame(false);
+    CHECK(f.root->find("tcp.color." + f.a.str()));
+}
+
+TEST_CASE("TCP: the fx button opens the plugin browser for an empty chain") {
+    SendsFixture f;
+    std::vector<std::string> added;
+    f.actions->addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
+        added.push_back(v.asString());
+        return {};
+    });
+    auto* fx = f.view().tcpPanel().controlNode(f.a, "fx");
+    REQUIRE(fx);
+    CHECK(fx->valueText() == "fx");
+    REQUIRE(f.root->click(fx->id()));
+    CHECK(added == std::vector<std::string>{f.a.str()});
+}
+
 TEST_CASE("TCP sends: output click opens the existing routing matrix action") {
     SendsFixture f;
     gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);

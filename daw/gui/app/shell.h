@@ -58,6 +58,9 @@ class Shell {
     std::function<void(const std::string&)> onError;
     // The TCP's output click hands the matrix its strip and popup anchor.
     std::function<void(const model::Id&, const ui::Rect&)> onRouting;
+    // The track's colour menu (model::kTrackColors and "None"), at `anchor`
+    // (an empty rect: the window's centre). The ui.track.color action uses it.
+    Status openColorMenu(const model::Id& track, const ui::Rect& anchor);
 
   private:
     bool isSelected(const model::Id& track) const;

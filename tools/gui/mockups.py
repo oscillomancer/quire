@@ -6,9 +6,10 @@ region, Orrery parts in a synth buss, a reverb return with sends, EQ and
 compressor on the bass, automation, a bounced audio item), saves it, then
 snapshots the app in several layouts per theme:
 
-  mockups.py --build build/dev --out DIR [--theme dark --theme light|FILE ...]
+  mockups.py --build build/dev --out DIR [--theme dark|light|FILE ...] [--palette warm|ink ...]
 
-Writes DIR/<theme>-<view>.png and DIR/session/demo.json. Opens no audio device.
+Writes DIR/<palette>-<theme>-<view>.png and DIR/session/demo.json. Opens no
+audio device.
 """
 
 import argparse
@@ -139,6 +140,8 @@ def build_session(engine, plugin_dir, workdir):
         for key, vol, pan in (("bass", -4, 0), ("pad", -14, -30), ("lead", -9, 20), ("arp", -16, 45),
                               ("synths", -2, 0), ("verb", -6, 0)):
             steps.append(step("track.set", {"track": "${%s.track}" % key, "volume_db": vol, "pan": pan}))
+        for key, colour in (("bass", "red"), ("pad", "teal"), ("lead", "violet"), ("arp", "blue")):
+            steps.append(step("track.set", {"track": "${%s.track}" % key, "color": colour}))
         steps += [
             step("marker.add", {"pos": 0, "name": "Intro"}),
             step("marker.add", {"pos": 16, "name": "Verse"}),
@@ -158,6 +161,7 @@ def build_session(engine, plugin_dir, workdir):
                                         "normalize": {"mode": "peak", "target": -1}})
         mcp.call("batch", {"label": "Bounce", "steps": [
             step("track.add", {"name": "Bounce", "index": 0}, "b"),
+            step("track.set", {"track": "${b.track}", "color": "grey"}),
             step("item.add", {"track": "${b.track}", "bar": 1, "audio_file": bounce["path"],
                               "name": "bounce"})]})
         mcp.call("project_save", {"path": "demo.json"})
@@ -170,17 +174,17 @@ def build_session(engine, plugin_dir, workdir):
             "bass-track": ids["bass"]["track"]}
 
 
-def snapshot(app, plugin_dir, project, theme, view, ids, out, size):
+def snapshot(app, plugin_dir, project, theme, palette, view, ids, out, size):
     actions, selected = VIEWS[view]
     ui = {"panels": {"agent": False, "mixer": False, "history": False},
           "selection": {"tracks": [ids["bass-track"]], "items": [ids[selected]]},
           "arrange": {"start_seconds": 0, "pixels_per_second": 26, "scroll_y": 0, "row_height": 72}}
     project.with_suffix(".ui.json").write_text(json.dumps(ui, indent=2) + "\n")
     tag = Path(theme).stem if theme not in ("dark", "light") else theme
-    png = out / f"{tag}-{view}.png"
+    png = out / f"{palette}-{tag}-{view}.png"
     argv = [str(app), str(project), "--offscreen", "--size", size, "--frames", "12",
             "--snapshot", str(png), "--no-socket", "--audio", "none", "--theme", theme,
-            "--plugin-path", str(plugin_dir)]
+            "--palette", palette, "--plugin-path", str(plugin_dir)]
     for a in actions:
         for key, value in ids.items():
             a = a.replace("{%s}" % key, value)
@@ -194,6 +198,7 @@ def main():
     parser.add_argument("--build", type=Path, default=Path("build/dev"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--theme", action="append")
+    parser.add_argument("--palette", action="append", choices=["warm", "ink"])
     parser.add_argument("--view", action="append", choices=sorted(VIEWS))
     parser.add_argument("--size", default="1600x1000")
     args = parser.parse_args()
@@ -204,9 +209,11 @@ def main():
     session.mkdir(parents=True, exist_ok=True)
     ids = build_session(build / "host" / "engine" / f"{slug()}-engine", plugin_dir, session)
     app = build / "daw" / "gui" / slug()
-    for theme in args.theme or ["dark", "light"]:
-        for view in args.view or list(VIEWS):
-            print(snapshot(app, plugin_dir, session / "demo.json", theme, view, ids, out, args.size))
+    for palette in args.palette or ["warm", "ink"]:
+        for theme in args.theme or ["dark", "light"]:
+            for view in args.view or list(VIEWS):
+                print(snapshot(app, plugin_dir, session / "demo.json", theme, palette, view, ids,
+                               out, args.size))
 
 
 if __name__ == "__main__":

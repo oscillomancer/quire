@@ -68,6 +68,12 @@ struct RecordSettings {
 enum class StripType : std::uint8_t { Channel, Buss, Master };
 std::string_view stripTypeName(StripType);
 
+// Track colours for organizing (gui.md §7): a small named set the GUI draws in
+// each theme's tones, or "#rrggbb"; "" = none.
+inline constexpr std::array<std::string_view, 8> kTrackColors = {
+    "red", "orange", "yellow", "green", "teal", "blue", "violet", "grey"};
+bool validTrackColor(std::string_view color);
+
 struct Track {
     StripType type = StripType::Channel;
     std::string name, color, notes;

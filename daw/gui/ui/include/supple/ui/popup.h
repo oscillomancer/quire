@@ -5,10 +5,12 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "supple/ui/node.h"
+#include "supple/ui/theme.h"
 
 namespace supple::ui {
 
@@ -18,6 +20,7 @@ struct MenuItem {
     std::string label, shortcut;
     std::function<void()> run;
     bool enabled = true, separator = false, checked = false;
+    std::optional<Color> swatch = std::nullopt;  // a colour square before the label
 };
 
 // A menu's content node (a list); `close` is called before an item runs.

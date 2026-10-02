@@ -1,9 +1,19 @@
 #include "supple/model/schemas.h"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace supple::model {
+
+bool validTrackColor(std::string_view color) {
+    if (color.empty()) return true;
+    if (std::find(kTrackColors.begin(), kTrackColors.end(), color) != kTrackColors.end())
+        return true;
+    return color.size() == 7 && color[0] == '#' &&
+           std::all_of(color.begin() + 1, color.end(),
+                       [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; });
+}
 
 std::string_view stripTypeName(StripType type) {
     switch (type) {

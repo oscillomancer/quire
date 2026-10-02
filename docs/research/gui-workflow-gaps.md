@@ -27,7 +27,7 @@ branch) · **gap** (not started).
 | 13 | Switch takes, see the active take | done — the take badge cycles the active take |
 | 14 | Searchable command list from anywhere | done — actions list (Shift+/), every command + built-ins + macros |
 | 15 | Assign shortcuts, show conflicts by context | done — Ctrl+B in the actions list, keymap sections, user deltas |
-| 16 | Add, reorder, bypass, wet/dry FX quickly | done — FX chain window + plugin browser (favourites, stock first) + parameter panel |
+| 16 | Add, reorder, bypass, wet/dry FX quickly | done — the **fx** button on every track (straight to the plugin browser on an empty chain) and **+ FX** in the mixer; FX chain window + plugin browser (favourites, stock first; the stock plugins built beside the app are found without setup) + parameter panel |
 | 17 | Render master with clear source/bounds/format/destination | done — render dialog with live dry-run file names, jobs, add-to-project |
 | 18 | Arm, pick input, monitor, record without hidden state | done — arm/monitor/input per strip (the picker names the device's ports from `engine.inputs`), record/loop/punch on the transport bar, a metronome (live output only). Count-in and showing the record path before recording are open |
 | 19 | Save/reopen with stable IDs and readable diffs | done — File new/open/save/save as, canonical JSON, confirm before discarding |
@@ -59,7 +59,7 @@ branch) · **gap** (not started).
 | # | Workflow | Status |
 |---|---|---|
 | 37 | Contextual mouse gestures, toolbar/menu customization | partial — menus.json + keymap; mouse modifiers fixed |
-| 38 | Screensets and track layouts | partial — per-project UI state (panels, zoom, selection); no named screensets |
+| 38 | Screensets and track layouts | partial — per-project UI state (panels, zoom, selection), track colours, light/dark and warm/ink themes; no named screensets |
 | 39 | Isolated plug-ins with visible recovery state | partial — isolation in the engine; a per-FX badge (in-process / shared bridge / isolated, offline, failed) with Restart; isolated/VST3-bridged editors not embeddable yet |
 | 40 | Reusable multi-action macros with typed inputs and undo | done — macros as one undo step, prompted inputs |
 

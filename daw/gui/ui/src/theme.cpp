@@ -3,9 +3,18 @@
 #include <cstdlib>
 
 namespace supple::ui {
-Theme Theme::dark() {
+
+std::string_view paletteName(Palette palette) { return palette == Palette::Warm ? "warm" : "ink"; }
+
+std::optional<Palette> paletteFrom(std::string_view name) {
+    if (name == "warm") return Palette::Warm;
+    if (name == "ink") return Palette::Ink;
+    return std::nullopt;
+}
+
+Theme Theme::dark(Palette palette) {
     Theme t;
-    t.name_ = "dark";
+    t.name_ = palette == Palette::Warm ? "dark-warm" : "dark";
     // Warm graphite ground, ink-toned text, one ink accent; strip types as
     // bindings (gui.md §7). State colours are reserved for state.
     for (auto [k, v] : {std::pair{"ground", 0x1c1a17u},
@@ -27,6 +36,22 @@ Theme Theme::dark() {
                         {"meter", 0x8fb27au},
                         {"meter-hot", 0xd8b04au}})
         t.colors_[k] = Color::hex(v);
+    // Track colours: muted enough for the graphite ground.
+    for (auto [k, v] : {std::pair{"track-red", 0xc96a5eu},
+                        {"track-orange", 0xd08a4au},
+                        {"track-yellow", 0xc9b04fu},
+                        {"track-green", 0x7fa66au},
+                        {"track-teal", 0x5fa39bu},
+                        {"track-blue", 0x6f95c4u},
+                        {"track-violet", 0x9a84c9u},
+                        {"track-grey", 0x8f8a82u}})
+        t.colors_[k] = Color::hex(v);
+    // Warm: an orange ink for the accent, focus and selection; strip types keep
+    // their colours (channel blue, buss amber, master red).
+    if (palette == Palette::Warm)
+        for (auto [k, v] :
+             {std::pair{"accent", 0xe08a3cu}, {"focus", 0xf0a35cu}, {"selection", 0x4a3525u}})
+            t.colors_[k] = Color::hex(v);
     for (auto [k, v] : {std::pair{"caption", 11.0f},
                         {"small", 12.0f},
                         {"body", 14.0f},
@@ -41,9 +66,9 @@ Theme Theme::dark() {
     return t;
 }
 
-Theme Theme::light() {
-    Theme t = dark();
-    t.name_ = "light";
+Theme Theme::light(Palette palette) {
+    Theme t = dark(Palette::Ink);
+    t.name_ = palette == Palette::Warm ? "light-warm" : "light";
     // Off-white paper, ink black; the same accents slightly deepened.
     for (auto [k, v] : {std::pair{"ground", 0xf3efe6u},
                         {"panel", 0xebe6dbu},
@@ -59,6 +84,19 @@ Theme Theme::light() {
                         {"buss", 0xa57d24u},
                         {"master", 0xa4442fu}})
         t.colors_[k] = Color::hex(v);
+    for (auto [k, v] : {std::pair{"track-red", 0xb4493cu},
+                        {"track-orange", 0xb8692au},
+                        {"track-yellow", 0xa88a1eu},
+                        {"track-green", 0x5a8a45u},
+                        {"track-teal", 0x3d8279u},
+                        {"track-blue", 0x456fa3u},
+                        {"track-violet", 0x7461a8u},
+                        {"track-grey", 0x77716au}})
+        t.colors_[k] = Color::hex(v);
+    if (palette == Palette::Warm)
+        for (auto [k, v] :
+             {std::pair{"accent", 0xb4601eu}, {"focus", 0xb4601eu}, {"selection", 0xf0dcc8u}})
+            t.colors_[k] = Color::hex(v);
     return t;
 }
 
@@ -98,6 +136,20 @@ Result<Theme> Theme::fromJson(const json::Value& document, const Theme& baseThem
         }
     }
     return t;
+}
+
+std::optional<Color> Theme::trackColor(std::string_view name) const {
+    if (name.size() == 7 && name[0] == '#') {
+        char* end = nullptr;
+        const std::string digits(name.substr(1));
+        const auto rgb = std::strtoul(digits.c_str(), &end, 16);
+        if (*end == '\0') return Color::hex(static_cast<std::uint32_t>(rgb));
+        return std::nullopt;
+    }
+    if (name.empty()) return std::nullopt;
+    auto it = colors_.find("track-" + std::string(name));
+    if (it == colors_.end()) return std::nullopt;
+    return it->second;
 }
 
 Color Theme::color(std::string_view token) const {

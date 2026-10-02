@@ -169,7 +169,7 @@ class TcpPanel::Row : public ui::Node {
     int depth_ = 0;
     bool channel_ = true;
     bool renaming_ = false;
-    ui::Rect nameRect_{};
+    ui::Rect nameRect_{}, badgeRect_{};
     ui::Label* name_ = nullptr;
     ui::TextField* rename_ = nullptr;
     ui::Toggle* mute_ = nullptr;
@@ -352,6 +352,7 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
     const float x = r.x, right = r.right();
     const float indent = 14.0f * static_cast<float>(depth_);
+    badgeRect_ = {x + 6 + indent, r.y + 4, 16, 16};
     // The "fx" button ends the name line, so every row has it at any height.
     const float fxWidth = fx_->valueText().size() > 2 ? 34.0f : 22.0f;
     fx_->arrange(canvas, {right - 10 - fxWidth, r.y + 3, fxWidth, 15});
@@ -410,6 +411,8 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
     const ui::Rect r = bounds();
     c.fillRect(r, t.color("panel"));
     c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.5f));
+    // The track's colour (organizing): a stripe down the row's left edge.
+    if (const auto colour = t.trackColor(tr->color)) c.fillRect({r.x, r.y, 4, r.h - 1}, *colour);
     // Parentage: a bar down the left of a child's row.
     if (depth_ > 0) {
         const float px = r.x + 8 + 14.0f * static_cast<float>(depth_ - 1);
@@ -445,6 +448,13 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
         return true;
     }
     if (panel_.cb_.select) panel_.cb_.select(*track_, e.mods);
+    // The colour menu: the badge (or a right-click anywhere on the row).
+    const ui::Rect hit{badgeRect_.x - 3, badgeRect_.y - 3, badgeRect_.w + 6, badgeRect_.h + 6};
+    if (panel_.cb_.color && (e.button == 3 || (e.button == 1 && hit.contains(e.pos)))) {
+        const ui::Rect row = bounds(), abs = absoluteRect(*this);
+        panel_.cb_.color(*track_, {abs.x + badgeRect_.x - row.x, abs.y + badgeRect_.y - row.y,
+                                   badgeRect_.w, badgeRect_.h});
+    }
     return true;
 }
 

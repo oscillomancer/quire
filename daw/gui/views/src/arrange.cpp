@@ -709,6 +709,9 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     forward.fx = [this](const model::Id& id) {
         if (tcpCallbacks_.fx) tcpCallbacks_.fx(id);
     };
+    forward.color = [this](const model::Id& id, const ui::Rect& anchor) {
+        if (tcpCallbacks_.color) tcpCallbacks_.color(id, anchor);
+    };
     forward.addSend = [this](const model::Id& from, const model::Id& to) -> Result<json::Value> {
         if (tcpCallbacks_.addSend) return tcpCallbacks_.addSend(from, to);
         return Error("gui.send", "send editing is unavailable", {}, "wire the TCP send callback");
