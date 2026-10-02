@@ -126,6 +126,10 @@ void Root::ensureCache() {
     if (!cache_) cache_ = std::make_unique<Cache>();
     if (cache_->fb) nvgluDeleteFramebuffer(cache_->fb);
     cache_->fb = nvgluCreateFramebuffer(window_.vg(), pw, ph, 0);
+    if (!cache_->fb) {  // never draw through a missing cache: try again next frame
+        cache_.reset();
+        return;
+    }
     cache_->width = pw;
     cache_->height = ph;
     damageAll();
@@ -166,12 +170,16 @@ void Root::paintGl(Node& node, const Rect& clip) {
 void Root::frame(bool present) {
     Canvas canvas(window_.vg(), fonts_, theme_);
     NVGcontext* vg = window_.vg();
-    window_.makeCurrent();
+    window_.forceCurrent();  // a plugin editor may have switched contexts since the last frame
     const float w = window_.width(), h = window_.height(), ratio = window_.pixelRatio();
     ratio_ = ratio;
     if (laidOut_.w != w || laidOut_.h != h) layoutPending_ = true;
     if (layoutPending_) layoutNow(canvas);
     ensureCache();
+    if (!cache_) {  // the framebuffer could not be made: skip this frame, retry on the next
+        animate_ = true;
+        return;
+    }
 
     // 1. Repaint the damaged regions of the content into the cache.
     if (!damage_.empty()) {

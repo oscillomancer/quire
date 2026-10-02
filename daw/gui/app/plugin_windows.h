@@ -50,7 +50,13 @@ class PluginWindows {
     // Opens an editor for an instance the caller owns (tests, previews).
     Status open(host::Instance& instance, const std::string& title);
     void close(model::Id fx);
+    // Opens the effect's editor, or closes it when it is open (the FX chain's
+    // "UI" and the mixer's slot buttons).
+    Status toggle(model::Id fx);
     void closeAll();
+    // The app's window: editors float above it, and its GL context is made
+    // current again after plugin code ran (editors draw with their own).
+    void setOwner(const Window* owner) { owner_ = owner; }
     std::size_t count() const { return editors_.size(); }
     bool isOpen(model::Id fx) const;
 
@@ -69,7 +75,11 @@ class PluginWindows {
     };
     Status attach(Editor editor, const std::string& title);
     void drop(std::size_t index);
+    void restoreContext() const {
+        if (owner_) owner_->forceCurrent();
+    }
     const Platform& platform_;
+    const Window* owner_ = nullptr;
     engine::EngineApp& app_;
     std::vector<Editor> editors_;
     FdWatcher watcher_;

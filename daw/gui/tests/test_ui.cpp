@@ -543,3 +543,34 @@ TEST_CASE("the normalized slider: relative drags, a default, keys") {
     CHECK(calls.back().second == Gesture::Set);
     CHECK_FALSE(slider.valueText().empty());
 }
+
+TEST_CASE("a plugin editor switching GL contexts behind SDL's back cannot break the next frame") {
+    REQUIRE_GL();
+    Fixture& f = fixture();
+    Root root(*f.window, f.fonts, Theme::dark());
+    auto content = std::make_unique<Node>("content");
+    content->layout.dir = Layout::Dir::Row;  // the box fills the window
+    Box& box = content->emplace<Box>("box");
+    root.setContent(std::move(content));
+    root.frame(false);
+    REQUIRE(box.paints > 0);
+    // What a Pugl editor's timer does on the UI thread: leave GL with another
+    // context (here: none) without telling SDL, which then believes ours is
+    // still current.
+    using MakeCurrent = unsigned (*)(void*, void*, void*, void*);
+    auto makeCurrent = reinterpret_cast<MakeCurrent>(SDL_EGL_GetProcAddress("eglMakeCurrent"));
+    void* display = SDL_EGL_GetCurrentDisplay();
+    if (!makeCurrent || !display) {
+        MESSAGE("skipped: the offscreen driver does not use EGL here");
+        return;
+    }
+    REQUIRE(makeCurrent(display, nullptr, nullptr, nullptr));
+    const int painted = box.paints;
+    f.window->setSize(360, 230);  // a new size needs a new framebuffer
+    root.frame(false);
+    CHECK(box.paints > painted);
+    const gui::Image image = root.readBack();
+    CHECK(image.width >= 360);
+    f.window->setSize(320, 200);
+    root.frame(false);
+}

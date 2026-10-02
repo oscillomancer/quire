@@ -42,6 +42,10 @@ struct WindowOptions {
     // false: a plain window without GL or NanoVG (a parent for plugin editors).
     bool gl = true;
     bool resizable = true;
+    // A utility window owned by `parent` (plugin editors): window managers
+    // float it above its owner instead of tiling it (Hyprland, i3, sway).
+    bool utility = false;
+    const class Window* parent = nullptr;
 };
 
 // RGBA8, rows top to bottom.
@@ -73,6 +77,11 @@ class Window {
     unsigned long x11Window() const;
 
     void makeCurrent() const;
+    // makeCurrent that always reaches GL: plugin editors (Pugl, …) make their
+    // own contexts current on this thread behind SDL's back, and SDL skips a
+    // bind it believes is already in place.
+    void forceCurrent() const;
+    void show();
     void setSize(int width, int height);  // design units
     void setResizable(bool resizable);
     void setTitle(const std::string& title);

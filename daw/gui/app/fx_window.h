@@ -33,7 +33,8 @@ struct UiState;
 class FxWindow {
   public:
     struct Hooks {
-        // Open a plugin's own editor (PluginWindows in the app); errors are shown.
+        // Open (or close, when open) a plugin's own editor (PluginWindows in the app);
+        // errors are shown.
         std::function<Status(model::Id)> openEditor;
     };
 

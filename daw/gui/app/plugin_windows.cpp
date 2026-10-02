@@ -107,15 +107,22 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
     options.height = 400;
     options.gl = false;
     options.resizable = false;
+    // Floating above the app from the first map: hidden until the editor is in
+    // and sized, owned by the app's window, a utility window.
+    options.hidden = true;
+    options.utility = true;
+    options.parent = owner_;
     auto window = Window::open(platform_, options);
     if (!window) return std::move(window).error();
     const unsigned long parent = (*window)->x11Window();
     if (!parent) return Error("gui.editor", "plugin editors need the X11 video driver");
     auto size = editor.instance->openEditor(parent, static_cast<double>((*window)->pixelRatio()));
+    restoreContext();
     if (!size) return std::move(size).error();
     if (size->width > 0 && size->height > 0)
         (*window)->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
     (*window)->setResizable(size->resizable);
+    (*window)->show();
     editor.window = std::move(*window);
     editor.resizable = size->resizable;
     editors_.push_back(std::move(editor));
@@ -157,6 +164,15 @@ void PluginWindows::drop(std::size_t index) {
     // editor of the instance that is still the effect's.
     if (!e.fx || app_.instanceOf(*e.fx) == e.instance) e.instance->closeEditor();
     editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(index));
+    restoreContext();
+}
+
+Status PluginWindows::toggle(model::Id fx) {
+    if (isOpen(fx)) {
+        close(fx);
+        return {};
+    }
+    return open(fx);
 }
 
 void PluginWindows::close(model::Id fx) {
@@ -185,6 +201,7 @@ bool PluginWindows::handle(const SDL_Event& e) {
                              accepted->height != static_cast<std::uint32_t>(e.window.data2)))
                 ed.window->setSize(static_cast<int>(accepted->width),
                                    static_cast<int>(accepted->height));
+            restoreContext();
         }
         return true;
     }
@@ -225,6 +242,7 @@ int PluginWindows::service() {
         if (due >= 0) next = next < 0 ? due : std::min(next, due);
     }
     watcher_.watch(std::move(fds));
+    if (!editors_.empty()) restoreContext();
     return next;
 }
 

@@ -48,8 +48,11 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
         SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
         if (options.resizable) flags |= SDL_WINDOW_RESIZABLE;
         if (options.hidden) flags |= SDL_WINDOW_HIDDEN;
+        if (options.utility) flags |= SDL_WINDOW_UTILITY;
         w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
         if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+        if (options.parent && options.parent->window_)
+            (void)SDL_SetWindowParent(w->window_, options.parent->window_);
         return w;
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -124,6 +127,14 @@ std::string Window::renderer() const {
 void Window::makeCurrent() const {
     SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
 }
+
+void Window::forceCurrent() const {
+    if (!context_) return;
+    SDL_GL_MakeCurrent(window_, nullptr);  // SDL now knows nothing is current
+    SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
+}
+
+void Window::show() { SDL_ShowWindow(window_); }
 
 void Window::beginFrame(std::uint32_t rgb) {
     SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
