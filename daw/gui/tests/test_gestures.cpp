@@ -627,3 +627,18 @@ TEST_CASE("take comping: click a take lane to hear it, swipe a range to comp it 
     CHECK(*pieces[2]->activeTake == pieces[2]->takes[other]);
     CHECK(pieces[1]->position == doctest::Approx(pieces[0]->position + pieces[0]->length));
 }
+
+TEST_CASE("arrange gestures: Ctrl+click on a fade handle cycles the fade's shape") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id a = f.itemOnRow(0);
+    const ui::Rect r = f.rectOf(a);
+    REQUIRE(f.item(a).fadeIn.shape == model::FadeShape::Linear);
+    auto steps = f.steps();
+    f.click({r.x + 3, r.y + 3}, ui::kCtrl);
+    CHECK(f.item(a).fadeIn.shape == model::FadeShape::Slow);
+    CHECK(f.steps() == steps + 1);
+    f.click({r.x + 3, r.y + 3}, ui::kCtrl);
+    CHECK(f.item(a).fadeIn.shape == model::FadeShape::Fast);
+    CHECK(f.item(a).fadeOut.shape == model::FadeShape::Linear);  // the other end untouched
+}

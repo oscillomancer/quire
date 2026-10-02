@@ -2662,6 +2662,8 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `locked` | boolean |  |  |  | The arrange view marks locked items. |
 | `gain_db` | value | dB | -150.0..24.0 |  | Quantity strings are range-checked by the server. |
 | `fade_in` | number |  | 0.0.. |  |  |
+| `fade_in_shape` | string |  |  |  |  |
+| `fade_out_shape` | string |  |  |  |  |
 | `fade_out` | number |  | 0.0.. |  |  |
 | `name` | string |  |  |  |  |
 | `color` | string |  |  |  |  |

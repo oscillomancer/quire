@@ -5,12 +5,12 @@
 // left edge moves the take's source offset so the audio stays put; Alt on the
 // right edge stretches: the play rate follows the length), slip
 // (Alt-drag: the source moves under the item), fade handles at the top
-// corners, the take badge cycles takes, double-click opens a MIDI item, and
-// files dropped on the lanes. An item showing its take lanes: click a lane to
-// hear that take, swipe across one to comp that range (split + take), drag
-// the name bar to move it. On an automation lane: click adds a point, drag
-// moves one (snapped; Shift frees), Alt+click deletes one. Each gesture previews as a ghost on the
-// root's overlay and commits ONE transaction on release.
+// corners (Ctrl+click cycles a fade's shape), the take badge cycles takes, double-click opens a
+// MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
+// that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
+// an automation lane: click adds a point, drag moves one (snapped; Shift frees), Alt+click deletes
+// one. Each gesture previews as a ghost on the root's overlay and commits ONE transaction on
+// release.
 #pragma once
 
 #include <filesystem>

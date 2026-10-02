@@ -132,6 +132,7 @@ struct TimeResult {
 struct ItemSetArgs {
     std::string item;
     std::optional<double> position, length, gainDb, fadeIn, fadeOut;
+    std::optional<model::FadeShape> fadeInShape, fadeOutShape;
     std::optional<std::int64_t> bar;
     std::optional<bool> mute, loop, locked;
     std::optional<std::string> name, color;
@@ -335,6 +336,16 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
     if (a.pan) r.pan = *a.pan;
     if (a.mute) r.mute = *a.mute;
     return r;
+}
+
+schema::Schema<model::FadeShape> fadeShapeSchema() {
+    return schema::enumeration<model::FadeShape>({{model::FadeShape::Linear, "linear"},
+                                                  {model::FadeShape::Slow, "slow"},
+                                                  {model::FadeShape::Fast, "fast"},
+                                                  {model::FadeShape::SlowFast, "slow_fast"},
+                                                  {model::FadeShape::FastSlow, "fast_slow"},
+                                                  {model::FadeShape::Cos, "cos"},
+                                                  {model::FadeShape::Exp, "exp"}});
 }
 
 void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
@@ -1043,6 +1054,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                      .field("gain_db", &ItemSetArgs::gainDb,
                             schema::number().range(model::kSilenceDb, 24).unit(units::Unit::dB))
                      .field("fade_in", &ItemSetArgs::fadeIn, schema::number().min(0))
+                     .field("fade_in_shape", &ItemSetArgs::fadeInShape, fadeShapeSchema())
+                     .field("fade_out_shape", &ItemSetArgs::fadeOutShape, fadeShapeSchema())
                      .field("fade_out", &ItemSetArgs::fadeOut, schema::number().min(0))
                      .field("name", &ItemSetArgs::name, schema::string())
                      .field("color", &ItemSetArgs::color, schema::string())
@@ -1075,6 +1088,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.gainDb) it.gainDb = *a.gainDb;
             if (a.fadeIn) it.fadeIn.length = *a.fadeIn;
             if (a.fadeOut) it.fadeOut.length = *a.fadeOut;
+            if (a.fadeInShape) it.fadeIn.shape = *a.fadeInShape;
+            if (a.fadeOutShape) it.fadeOut.shape = *a.fadeOutShape;
             if (a.color) it.color = *a.color;
             if (a.name && !it.activeTake)
                 return Error("item.no_take", "item has no active take to name", "/name");

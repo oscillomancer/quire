@@ -653,6 +653,20 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         runSteps("Comp take", steps);
         return;
     }
+    // Ctrl+click on a fade handle cycles the fade's shape.
+    if (!moved_ && anchor && !anchor->locked && (e.mods & ui::kCtrl) &&
+        (state_.drag == Drag::FadeIn || state_.drag == Drag::FadeOut)) {
+        static constexpr const char* kShapes[] = {"linear",    "slow", "fast", "slow_fast",
+                                                  "fast_slow", "cos",  "exp"};
+        const bool in = state_.drag == Drag::FadeIn;
+        const auto now =
+            static_cast<std::size_t>(in ? anchor->fadeIn.shape : anchor->fadeOut.shape);
+        json::Value args = json::Value::object();
+        args["item"] = state_.anchor.str();
+        args[in ? "fade_in_shape" : "fade_out_shape"] = kShapes[(now + 1) % 7];
+        runSteps(in ? "Fade-in shape" : "Fade-out shape", {{"item.set", std::move(args)}});
+        return;
+    }
     if (!moved_) {  // a click
         if (state_.drag == Drag::Marquee) {
             if (e.button == 1 && state_.marqueeBase.empty()) {

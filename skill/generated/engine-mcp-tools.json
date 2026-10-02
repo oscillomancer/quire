@@ -2002,6 +2002,14 @@
           "type": "number",
           "minimum": 0.0
         },
+        "fade_in_shape": {
+          "type": "string",
+          "enum": ["linear", "slow", "fast", "slow_fast", "fast_slow", "cos", "exp"]
+        },
+        "fade_out_shape": {
+          "type": "string",
+          "enum": ["linear", "slow", "fast", "slow_fast", "fast_slow", "cos", "exp"]
+        },
         "fade_out": {
           "type": "number",
           "minimum": 0.0

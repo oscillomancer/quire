@@ -323,6 +323,8 @@ q = nil
 ---@field locked? boolean The arrange view marks locked items.
 ---@field gain_db? number|string Quantity strings are range-checked by the server.
 ---@field fade_in? number
+---@field fade_in_shape? "linear"|"slow"|"fast"|"slow_fast"|"fast_slow"|"cos"|"exp"
+---@field fade_out_shape? "linear"|"slow"|"fast"|"slow_fast"|"fast_slow"|"cos"|"exp"
 ---@field fade_out? number
 ---@field name? string
 ---@field color? string
