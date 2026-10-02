@@ -337,11 +337,11 @@ class Ruler : public ui::Node {
         const auto& tm = *s.timeMap;
         const float y = at.y - bounds().y;
         std::vector<ui::MenuItem> items;
-        auto add = [&](std::string label, std::function<void()> run, bool enabled = true) {
+        auto add = [&](std::string label, std::function<void()> run, bool allowed = true) {
             ui::MenuItem m;
             m.label = std::move(label);
             m.run = std::move(run);
-            m.enabled = enabled;
+            m.enabled = allowed;
             items.push_back(std::move(m));
         };
         const float tempoTop = kBeatRowH + kTimeRowH;
