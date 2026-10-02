@@ -39,7 +39,7 @@ branch) · **gap** (not started).
 |---|---|---|
 | 21 | Take lanes, fixed-lane comping | done — an item with several takes shows them as lanes; click a lane to hear that take, swipe a range to comp it in (split + take, one undo step) |
 | 22 | Take FX, item/take envelopes | partial — commands (`env.*` on takes, take chains in the model); no UI |
-| 23 | Tempo ramps and meter changes on the timeline | partial — double-click edits or adds a tempo point, Alt+click toggles its ramp; meter changes only from the transport bar's meter form (no meter-change command on the timeline) |
+| 23 | Tempo ramps and meter changes on the timeline | done — in the ruler's tempo row: double-click edits or adds a tempo point, Alt+click toggles its ramp; in its meter half, double-click edits or adds a meter change (`timesig.set`) |
 | 24 | Markers/regions: create, rename, navigate | done — M adds a marker at the playhead, Shift+R a region over the loop range; drag, double-click to rename, Alt+click removes; a ruler drag sets the loop range. [ and ] jump to the previous/next marker or region start |
 | 25 | Piano roll, velocity and CC lanes | done — MIDI editor: piano roll, velocity lane, CC lane (mod, volume, pan, expression, sustain; draw/erase), notation panel |
 | 26 | MIDI event list and notation views | done — notation panel; event list (every note and CC, text-edited cells, Delete, + Note) |
@@ -74,5 +74,5 @@ branch) · **gap** (not started).
 - Also closed: new MIDI items from the GUI (Item > New MIDI item, double-click on
   empty channel space), the item clipboard, the metronome, comping (#21),
   plugin-parameter automation recording (#27).
-- Open: meter changes on the timeline (#23), automation items (#28), screensets
+- Open: automation items (#28), screensets
   (#38), count-in, FX pin maps (#31), multichannel strips (#6).

@@ -412,6 +412,30 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
                     drag_ = Drag::LoopMove;
             }
             if (drag_ == Drag::LoopNew) originalStart_ = originalEnd_ = position(e.pos.x, free);
+        } else if (y < kBeatRowH + kTimeRowH + kTempoRowH &&
+                   y >= kBeatRowH + kTimeRowH + kTempoRowH / 2.0f) {
+            // The meter half: a double-click edits the meter change under the
+            // pointer, or starts one at the bar under it (timesig.set).
+            if (e.clicks != 2 || !root()) return true;
+            int bar = tm.barBeat(std::max(0.0, tm.beatAt(view_.timeAt(e.pos.x)))).bar;
+            for (const time::MeterChange& m : tm.meter()) {
+                const float x = view_.xAt(tm.secondsAt(tm.beatOfBar(m.bar)));
+                if (e.pos.x >= x - 5 && e.pos.x <= x + 40) bar = m.bar;
+            }
+            const time::MeterChange now = tm.meterAt(bar);
+            auto field =
+                std::make_unique<ui::TextField>("ruler-meter", std::to_string(now.numerator) + "/" +
+                                                                   std::to_string(now.denominator));
+            field->layout.width = ui::SizeRule::fixed(100);
+            field->selectAll();
+            field->onSubmit = [this, bar](const std::string& text) {
+                json::Value args = json::Value::object();
+                args["bar"] = static_cast<std::int64_t>(bar);
+                args["meter"] = text;
+                if (execute("timesig.set", std::move(args))) root()->closePopup();
+            };
+            root()->openPopup(std::move(field), {e.pos.x, e.pos.y, 1, 1});
+            return true;
         } else if (y < kBeatRowH + kTimeRowH + kTempoRowH) {
             const bool toggleRamp = e.clicks == 1 && (e.mods & ui::kAlt);
             if (e.clicks != 2 && !toggleRamp) return true;

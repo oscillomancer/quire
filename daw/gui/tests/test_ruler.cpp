@@ -393,3 +393,24 @@ TEST_CASE("ruler: Alt+click on a tempo point toggles its ramp") {
     f.click(f.at(0.2, 42), ui::kAlt, 1);
     CHECK(f.app->head().timeMap->tempo()[0].shape == time::TempoShape::Step);
 }
+
+TEST_CASE("ruler: double-click in the meter half adds or edits a meter change") {
+    RulerFixture f;
+    auto n = f.history();
+    // At bar 3 (beat 8 in 4/4): a new change.
+    f.click(f.at(8.5, 55), 0, 2);
+    f.submit("3/4");
+    CHECK(f.history() == ++n);
+    const auto& meter = f.app->head().timeMap->meter();
+    REQUIRE(meter.size() == 2);
+    CHECK(meter[1].bar == 3);
+    CHECK(meter[1].numerator == 3);
+    // On its flag: that change is edited, not a new one.
+    f.click(f.at(8.0, 55), 0, 2);
+    f.submit("6/8");
+    CHECK(f.history() == ++n);
+    REQUIRE(f.app->head().timeMap->meter().size() == 2);
+    CHECK(f.app->head().timeMap->meter()[1].numerator == 6);
+    CHECK(f.app->head().timeMap->meter()[1].denominator == 8);
+    CHECK(f.errors.empty());
+}
