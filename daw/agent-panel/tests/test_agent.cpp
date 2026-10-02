@@ -130,6 +130,20 @@ TEST_CASE("request bodies carry history, tool calls and results in each format")
           "object");
 }
 
+TEST_CASE("OpenAI-compatible tool schemas leave out regex patterns (llama.cpp grammars)") {
+    Endpoint e{Endpoint::Kind::OpenAI, "t", "http://x", "m", "k", 100};
+    Request r;
+    r.messages.push_back({Message::Role::User, "hi", {}, {}});
+    r.tools.push_back({"tempo_set", "Set the tempo", *json::parse(R"({"type":"object",
+        "properties":{"points":{"type":"array","items":{"type":"object","properties":{
+        "bpm":{"anyOf":[{"type":"number"},{"type":"string","pattern":"^[0-9]+$"}]}}}}}})")});
+    const std::string text = json::writeCompact(openaiBody(e, r));
+    CHECK(text.find("pattern") == std::string::npos);
+    CHECK(text.find("anyOf") != std::string::npos);
+    // The Anthropic body keeps the schema as it is.
+    CHECK(json::writeCompact(anthropicBody(e, r)).find("pattern") != std::string::npos);
+}
+
 TEST_CASE("an Anthropic agent edits on its own branch; the human diffs, A/Bs and accepts") {
     Rig rig;
     FakeServer server;

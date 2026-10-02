@@ -239,6 +239,25 @@ Result<Turn> anthropic(const Endpoint& e, const Request& r,
 
 // --- OpenAI-compatible
 
+namespace {
+// The schema without regex "pattern"s. llama.cpp turns tool schemas into a
+// sampling grammar and rejects some patterns (one inside anyOf inside array
+// items: tempo_set's bpm) with HTTP 400 "failed to parse grammar"; the
+// commands check quantity strings themselves, so the patterns add nothing.
+json::Value withoutPatterns(const json::Value& schema) {
+    if (schema.isArray()) {
+        json::Value out = json::Value::array();
+        for (const json::Value& v : schema.asArray()) out.push_back(withoutPatterns(v));
+        return out;
+    }
+    if (!schema.isObject()) return schema;
+    json::Value out = json::Value::object();
+    for (const auto& m : schema.asObject())
+        if (m.key != "pattern") out[m.key] = withoutPatterns(m.value);
+    return out;
+}
+}  // namespace
+
 json::Value openaiBody(const Endpoint& e, const Request& r) {
     json::Value body = json::Value::object();
     body["model"] = e.model;
@@ -288,7 +307,7 @@ json::Value openaiBody(const Endpoint& e, const Request& r) {
             json::Value fn = json::Value::object();
             fn["name"] = t.name;
             fn["description"] = t.description;
-            fn["parameters"] = t.inputSchema;
+            fn["parameters"] = withoutPatterns(t.inputSchema);
             tool["function"] = std::move(fn);
             tools.push_back(std::move(tool));
         }
