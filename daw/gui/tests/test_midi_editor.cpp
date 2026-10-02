@@ -430,7 +430,30 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     CHECK(static_cast<double>(strips[2].node->bounds().right()) ==
           doctest::Approx(static_cast<double>(row.right() - 4)));
     CHECK(strips[2].node->bounds().x > strips[1].node->bounds().right() + 100);
-    CHECK(f.root->find("mixer.fxadd." + strips[0].track));  // "+ FX" on every strip
+    // "fx" on every strip: the plugin browser for an empty chain.
+    auto* fxButton = f.root->find("mixer.fxadd." + strips[0].track);
+    REQUIRE(fxButton);
+    CHECK(fxButton->valueText() == "fx");
+    // The colour stripe has its own row between the name and the FX slots.
+    f.exec("track.set", R"({"track":")" + strips[0].track + R"(","color":"teal"})");
+    mixer.sync();
+    f.root->frame(false);
+    auto* stripe = f.root->find("mixer.color." + strips[0].track);
+    REQUIRE(stripe);
+    CHECK(stripe->bounds().y >= f.root->find("mixer.name." + strips[0].track)->bounds().bottom());
+    CHECK(stripe->bounds().bottom() <= f.root->find("mixer.fx." + strips[0].track)->bounds().y);
+    // A right-click on the strip opens the track menu.
+    const ui::Rect fxNow = f.root->find("mixer.fxadd." + strips[0].track)->bounds();  // rebuilt
+    ui::PointerEvent rc;
+    rc.type = ui::PointerEvent::Type::Down;
+    rc.button = 3;
+    rc.pos = {fxNow.x + 4, fxNow.y + 4};
+    f.root->pointer(rc);
+    rc.type = ui::PointerEvent::Type::Up;
+    f.root->pointer(rc);
+    f.root->frame(false);
+    CHECK(f.root->find("track.menu." + strips[0].track));
+    f.root->key(SDLK_ESCAPE);
     CHECK(strips[1].track == buss);
     CHECK(strips[2].track == "tr_0");
     CHECK(strips[0].arm != nullptr);

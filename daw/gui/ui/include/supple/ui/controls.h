@@ -23,6 +23,7 @@ constexpr double kFaderSilenceDb = -150.0;
 
 class Fader : public Node {
   public:
+    bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
     enum class Orientation { Vertical, Horizontal };
     Fader(std::string id, Orientation orientation = Orientation::Vertical);
     std::function<void(double db, Gesture)> onChange;
@@ -53,6 +54,7 @@ class Fader : public Node {
 // the keys/wheel step. Drags report a gesture, so a drag is one undo step.
 class Slider : public Node {
   public:
+    bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
     explicit Slider(std::string id);
     std::function<void(double value, Gesture)> onChange;
     void setValue(double value);  // from the model; no callback
@@ -80,6 +82,7 @@ class Slider : public Node {
 // Pan -100 (left) .. +100 (right) as a horizontal bar from the centre.
 class PanControl : public Node {
   public:
+    bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
     explicit PanControl(std::string id);
     std::function<void(double pan, Gesture)> onChange;
     void setValue(double pan);

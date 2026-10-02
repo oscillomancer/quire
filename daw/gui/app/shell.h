@@ -27,6 +27,8 @@ namespace supple::gui {
 
 class TransportBar;
 
+struct TrackMenu;
+
 class Shell {
   public:
     // The device's record inputs (the shape of `engine.inputs`: running, audio
@@ -59,7 +61,8 @@ class Shell {
     // The TCP's output click hands the matrix its strip and popup anchor.
     std::function<void(const model::Id&, const ui::Rect&)> onRouting;
     // The track's colour menu (model::kTrackColors and "None"), at `anchor`
-    // (an empty rect: the window's centre). The ui.track.color action uses it.
+    // (an empty rect: the window's centre). The ui.track.color action uses it;
+    // the TCP's right-click menu offers it too.
     Status openColorMenu(const model::Id& track, const ui::Rect& anchor);
 
   private:
@@ -75,6 +78,7 @@ class Shell {
 
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
+    std::unique_ptr<TrackMenu> trackMenu_;  // made in build() (needs the root)
     UiState& ui_;
     std::string status_;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};

@@ -103,12 +103,28 @@ class StripRow : public ui::Node {
     ui::ScrollBar* bar_ = nullptr;
 };
 
-// A strip's background: the type's colour along the top, a master's heavier
-// spine down its left side, and the track's colour as a stripe under the name.
+// The track's colour, as a stripe under the strip's name (nothing when none).
+class ColorStripe : public ui::Node {
+  public:
+    ColorStripe(std::string id, std::string colour)
+        : Node(std::move(id)), colour_(std::move(colour)) {
+        layout.height = ui::SizeRule::fixed(3);
+    }
+    void paint(ui::Canvas& c) override {
+        if (const auto colour = c.theme().trackColor(colour_)) c.fillRect(bounds(), *colour);
+    }
+
+  private:
+    std::string colour_;
+};
+
+// A strip's background: the type's colour along the top and a master's heavier
+// spine down its left side; a right-click anywhere on it opens the track menu.
 class StripFrame : public ui::Node {
   public:
-    StripFrame(std::string id, std::string colorToken, std::string trackColor)
-        : Node(std::move(id)), color_(std::move(colorToken)), trackColor_(std::move(trackColor)) {
+    StripFrame(std::string id, std::string colorToken, std::function<void(ui::Point)> menu)
+        : Node(std::move(id)), color_(std::move(colorToken)), menu_(std::move(menu)) {
+        interactive = true;
         layout.dir = ui::Layout::Dir::Column;
         layout.padding = ui::Insets{8, 5, 5, 5};
         layout.gap = 4;
@@ -120,20 +136,30 @@ class StripFrame : public ui::Node {
         if (color_ == "master")
             c.fillRect({bounds().x, bounds().y, 5, bounds().h}, t.color(color_));
         c.fillRect({bounds().right() - 1, bounds().y, 1, bounds().h}, t.color("rule"));
-        // Below the 16 px name, in the 4 px gap before the FX slots.
-        if (const auto colour = t.trackColor(trackColor_))
-            c.fillRect({bounds().x + 5, bounds().y + 8 + 16 + 0.5f, bounds().w - 10, 3}, *colour);
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type != ui::PointerEvent::Type::Down || e.button != 3 || !menu_) return false;
+        menu_(e.pos);
+        return true;
     }
 
   private:
-    std::string color_, trackColor_;
+    std::string color_;
+    std::function<void(ui::Point)> menu_;
 };
 
 }  // namespace
 
 Mixer::Mixer(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
              engine::EngineApp& app, MeterFeed& meters)
-    : root_(root), actions_(actions), dispatcher_(dispatcher), app_(app), meters_(meters) {
+    : root_(root),
+      actions_(actions),
+      dispatcher_(dispatcher),
+      app_(app),
+      meters_(meters),
+      trackMenu_{root, dispatcher, app, [this](const std::string& e) {
+                     if (actions_.onError) actions_.onError(e);
+                 }} {
     actions_.addUi("ui.mixer", "View: mixer", [this] { toggle(); });
 }
 
@@ -256,13 +282,17 @@ void Mixer::rebuild() {
         Strip st;
         st.track = tid;
         st.type = type;
-        auto frame = std::make_unique<StripFrame>("mixer.strip." + tid, type, t.color);
+        auto frame =
+            std::make_unique<StripFrame>("mixer.strip." + tid, type, [this, id](ui::Point p) {
+                // Strip coordinates are the window's (the row lays them out in place).
+                trackMenu_.open(id, {p.x, p.y, 1, 1}, {});
+            });
         st.node = frame.get();
         st.name = &frame->emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
                                              ui::Font::UiBold, "caption");
         st.name->layout.height = ui::SizeRule::fixed(16);
-        // FX slots (a click opens the plug-in's editor), then "+ FX" (the plugin
-        // browser) or, past two effects, "+N more…" (the chain).
+        frame->emplace<ColorStripe>("mixer.color." + tid, t.color);
+        // FX slots (a click opens or closes the plug-in's editor), then "fx".
         auto& fxBox = frame->emplace<ui::Node>("mixer.fx." + tid);
         fxBox.layout.dir = ui::Layout::Dir::Column;
         fxBox.layout.height = ui::SizeRule::fixed(3 * 18 + 2 * 2);
@@ -288,13 +318,15 @@ void Mixer::rebuild() {
             b.layout.height = ui::SizeRule::fixed(18);
             b.layout.width = ui::SizeRule::fraction();
         }
-        const std::size_t more = t.chain.size() > 2 ? t.chain.size() - 2 : 0;
+        // "fx" (the plugin browser) on an empty chain, "fx 3" (the chain) otherwise:
+        // the TCP's button.
+        const bool empty = t.chain.empty();
         auto& add = fxBox.emplace<ui::Button>(
-            "mixer.fxadd." + tid, more ? "+" + std::to_string(more) + " more\u2026" : "+ FX",
-            [this, tid, more] {
+            "mixer.fxadd." + tid, empty ? "fx" : "fx " + std::to_string(t.chain.size()),
+            [this, tid, empty] {
                 json::Value args = json::Value::object();
                 args["track"] = tid;
-                run(more ? "ui.fx.chain" : "ui.fx.add", std::move(args));
+                run(empty ? "ui.fx.add" : "ui.fx.chain", std::move(args));
             });
         add.layout.height = ui::SizeRule::fixed(18);
         add.layout.width = ui::SizeRule::fraction();

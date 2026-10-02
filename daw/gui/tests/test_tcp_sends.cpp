@@ -8,6 +8,7 @@
 #include "routing_matrix.h"
 #include "shell.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
 
 using namespace supple;
 
@@ -306,35 +307,57 @@ TEST_CASE("TCP sends: overlay survives replacement of its owning view") {
     CHECK(f.routes().size() == 0);
 }
 
-TEST_CASE("TCP: the badge (or a right-click) opens the colour menu; a pick is one undo step") {
+TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one undo step each)") {
     SendsFixture f;
     const auto row = f.view().trackLayout().indexOf(f.a);
     REQUIRE(row);
     const ui::Rect r = f.view().tcpRowRect(*row);
-    const ui::Point badge{r.x + 14, r.y + 12};
-    f.pointer(Pointer::Down, badge);
-    f.pointer(Pointer::Up, badge);
-    f.root->frame(false);
-    ui::Node* menu = f.root->find("tcp.color." + f.a.str());
-    REQUIRE(menu);
-    const auto before = f.history();
-    // Rows are 26 px: red, orange, yellow, green, teal, …
-    const ui::Point teal{menu->bounds().x + 40, menu->bounds().y + 4 * 26 + 13};
-    f.pointer(Pointer::Move, teal);
-    f.pointer(Pointer::Down, teal);
-    f.pointer(Pointer::Up, teal);
-    f.sync();
+    auto rightClick = [&] {
+        ui::PointerEvent e;
+        e.type = Pointer::Down;
+        e.button = 3;
+        e.pos = {r.x + 60, r.y + 10};
+        f.root->pointer(e);
+        e.type = Pointer::Up;
+        f.root->pointer(e);
+        f.root->frame(false);
+    };
+    // Menu rows are 26 px: Rename, Color…, (separator), Delete.
+    auto pickRow = [&](const std::string& menu, int index) {
+        ui::Node* m = f.root->find(menu);
+        REQUIRE(m);
+        const ui::Point p{m->bounds().x + 40, m->bounds().y + static_cast<float>(index) * 26 + 13};
+        f.pointer(Pointer::Move, p);
+        f.pointer(Pointer::Down, p);
+        f.pointer(Pointer::Up, p);
+        f.sync();
+    };
+    const std::string menu = "track.menu." + f.a.str();
+    // Color… opens the swatches; teal is the fifth.
+    rightClick();
+    REQUIRE(f.root->find(menu));
+    auto before = f.history();
+    pickRow(menu, 1);
+    REQUIRE(f.root->find("track.color." + f.a.str()));
+    pickRow("track.color." + f.a.str(), 4);
     CHECK(f.app->head().tracks.find(f.a)->color == "teal");
     CHECK(f.history() == before + 1);
-    CHECK_FALSE(f.root->find("tcp.color." + f.a.str()));
-    // A right-click anywhere on the row opens it too.
-    ui::PointerEvent e;
-    e.type = Pointer::Down;
-    e.button = 3;
-    e.pos = {r.x + r.w / 2, r.y + r.h - 6};
-    f.root->pointer(e);
-    f.root->frame(false);
-    CHECK(f.root->find("tcp.color." + f.a.str()));
+    // Rename edits the name in place.
+    rightClick();
+    pickRow(menu, 0);
+    auto* field = dynamic_cast<ui::TextField*>(f.view().tcpPanel().controlNode(f.a, "rename"));
+    REQUIRE(field);
+    CHECK(field->visible);
+    field->setText("Renamed");
+    f.root->key(SDLK_RETURN);
+    f.sync();
+    CHECK(f.app->head().tracks.find(f.a)->name == "Renamed");
+    // Delete removes it.
+    before = f.history();
+    rightClick();
+    pickRow(menu, 3);
+    CHECK_FALSE(f.app->head().tracks.find(f.a));
+    CHECK(f.history() == before + 1);
 }
 
 TEST_CASE("TCP: the fx button opens the plugin browser for an empty chain") {
@@ -349,6 +372,50 @@ TEST_CASE("TCP: the fx button opens the plugin browser for an empty chain") {
     CHECK(fx->valueText() == "fx");
     REQUIRE(f.root->click(fx->id()));
     CHECK(added == std::vector<std::string>{f.a.str()});
+}
+
+TEST_CASE("TCP: the wheel scrolls a long track list from anywhere in the panel, never a control") {
+    SendsFixture f;
+    for (int i = 0; i < 30; ++i) f.add("channel", "T" + std::to_string(i));
+    f.sync();
+    auto wheel = [&](ui::Point p, float dy) {
+        ui::PointerEvent e;
+        e.type = Pointer::Wheel;
+        e.pos = p;
+        e.wheelY = dy;
+        f.root->pointer(e);
+        f.sync();
+    };
+    auto volumes = [&] {
+        std::vector<double> v;
+        for (const auto& t : f.app->head().tracks) v.push_back(t.value->volumeDb);
+        return v;
+    };
+    const auto before = volumes();
+    // Walk down the panel over every kind of spot: names, buttons, faders, pans, meters.
+    const ui::Rect tcp = f.view().tcpPanel().bounds();
+    float last = f.view().viewport().scrollY;
+    int moved = 0, tried = 0;
+    for (float fy : {0.15f, 0.3f, 0.45f, 0.6f, 0.75f})
+        for (float fx : {0.1f, 0.3f, 0.5f, 0.7f, 0.9f, 0.98f}) {
+            wheel({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy}, -1.0f);
+            ++tried;
+            const float now = f.view().viewport().scrollY;
+            if (now > last) ++moved;
+            ui::Node* hitNode =
+                f.root->content()->hitTest({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy});
+            ui::Node* overlayHit =
+                f.root->overlay().hitTest({tcp.x + tcp.w * fx, tcp.y + tcp.h * fy});
+            INFO("at " << fx << "," << fy << " scroll " << last << " -> " << now << " hit "
+                       << (hitNode ? hitNode->id() : "-") << " overlay "
+                       << (overlayHit ? overlayHit->id() : "-"));
+            CHECK(now > last);
+            last = now;
+            if (now > 600) wheel({tcp.x + 20, tcp.y + 40}, 30.0f);  // back to the top
+            last = f.view().viewport().scrollY;
+        }
+    CHECK(moved == tried);
+    CHECK(volumes() == before);  // no fader or pan moved
 }
 
 TEST_CASE("TCP sends: output click opens the existing routing matrix action") {

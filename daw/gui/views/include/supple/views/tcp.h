@@ -53,13 +53,17 @@ struct TcpCallbacks {
     // The strip's "fx" button: its chain (the app opens the plugin browser
     // when the chain is empty).
     std::function<void(const model::Id& track)> fx;
-    // The track's colour menu: a click on the strip-type badge or a right-click
-    // on the row (anchor: the badge, in window coordinates).
-    std::function<void(const model::Id& track, const ui::Rect& anchor)> color;
+    // A right-click on the row: the track's menu (rename, colour, delete) at
+    // the pointer, in window coordinates; `rename` starts the in-place rename.
+    std::function<void(const model::Id& track, const ui::Rect& anchor,
+                       std::function<void()> rename)>
+        menu;
     // Output drags commit one send on release; a click opens the matrix.
     std::function<Result<json::Value>(const model::Id& from, const model::Id& to)> addSend;
     std::function<void(const Error&)> onError;
     std::function<void(const model::Id& track, const ui::Rect& anchor)> routing;
+    // The "mixer" button at the panel's foot: show or hide the mixer.
+    std::function<void()> mixer;
     // The arrange lanes accept drops too, with the TCP's shared row geometry.
     std::function<ui::Rect()> lanesRect;
 };
@@ -80,12 +84,14 @@ class TcpPanel : public ui::Node {
     // of its controls by name ("name", "mute", "fader", …).
     ui::Node* rowNode(const model::Id& track) const;
     ui::Node* controlNode(const model::Id& track, std::string_view what) const;
+    // Starts the in-place rename of the row showing `track` (false: not shown).
+    bool rename(const model::Id& track);
     // An automation lane's header control ("title", "mode", "active", "hide").
     ui::Node* envControl(const model::Id& env, std::string_view what) const;
 
     void arrange(const ui::Canvas& canvas, const ui::Rect& r) override;
     void paint(ui::Canvas& canvas) override;
-    // The "+" is the panel's own chrome: it wins over the rows under it.
+    // The foot's buttons are the panel's own chrome: they win over the rows under them.
     ui::Node* hitTest(ui::Point p) override;
 
   private:
@@ -107,6 +113,7 @@ class TcpPanel : public ui::Node {
     TcpCallbacks cb_;
     model::Session session_;
     ui::Button* add_ = nullptr;        // "+ strip", at the panel's foot
+    ui::Button* mixer_ = nullptr;      // "mixer" beside it
     std::vector<Row*> rows_;           // a pool: only visible rows exist
     std::vector<EnvRow*> envRows_;     // the same for automation lanes
     std::uint64_t gestureSerial_ = 0;  // unique per drag (coalescing key)

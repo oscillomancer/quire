@@ -322,7 +322,8 @@ Nate on rendered mockups (2026-10-02, HUMAN_REVIEW #17;
 - **Track colours, for organizing:** a small set (red, orange, yellow, green,
   teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
   a stripe down the TCP row's left edge and under the mixer strip's name.
-  Picked from the badge (or a right-click on the row) or Track > color….
+  Picked from the track's right-click menu (Rename, Color…, Delete; the same
+  in the TCP and the mixer) or Track > color….
 - **Calm by default:** colour reserved for state (armed, clipping, selected,
   agent-changed), meters and waveforms in ink tones; motion only for
   feedback. The TCP keeps its boxed toggles (Nate: no quieter variant).

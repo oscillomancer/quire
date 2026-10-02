@@ -157,6 +157,7 @@ bool Fader::onPointer(const PointerEvent& e) {
             change(db_, Gesture::End);
             return true;
         case T::Wheel: {
+            if (!wheel) return false;  // the wheel scrolls what holds it
             const double step = (e.mods & kShift) ? 0.1 : 0.5;
             const double base = db_ <= kFloorDb ? kFloorDb : db_;
             change(base + static_cast<double>(e.wheelY) * step, Gesture::Set);
@@ -266,6 +267,7 @@ bool PanControl::onPointer(const PointerEvent& e) {
             change(pan_, Gesture::End);
             return true;
         case T::Wheel:
+            if (!wheel) return false;  // the wheel scrolls what holds it
             change(pan_ + static_cast<double>(e.wheelY) * ((e.mods & kShift) ? 1 : 5),
                    Gesture::Set);
             return true;
@@ -367,6 +369,7 @@ bool Slider::onPointer(const PointerEvent& e) {
             change(value_, Gesture::End);
             return true;
         case T::Wheel:
+            if (!wheel) return false;  // the wheel scrolls what holds it
             change(value_ + static_cast<double>(e.wheelY) * ((e.mods & kShift) ? 0.005 : 0.02),
                    Gesture::Set);
             return true;

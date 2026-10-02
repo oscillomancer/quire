@@ -156,6 +156,7 @@ class TcpPanel::Row : public ui::Node {
     void unbind();
 
     bool bound() const { return track_.has_value(); }
+    void startRename();  // the name becomes an edit field
     const model::Id& track() const { return *track_; }
     ui::Node* control(std::string_view what) const;
 
@@ -169,7 +170,7 @@ class TcpPanel::Row : public ui::Node {
     int depth_ = 0;
     bool channel_ = true;
     bool renaming_ = false;
-    ui::Rect nameRect_{}, badgeRect_{};
+    ui::Rect nameRect_{};
     ui::Label* name_ = nullptr;
     ui::TextField* rename_ = nullptr;
     ui::Toggle* mute_ = nullptr;
@@ -260,6 +261,9 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
                                       ? gestureFor("tcp.pan", *track_, panel_.gestureSerial_)
                                       : std::string{});
     };
+    // The wheel scrolls the track list, never a strip's level or pan.
+    fader_->wheel = false;
+    pan_->wheel = false;
     meter_ = &emplace<ui::Meter>(id + ".meter", true);
     fx_ = &emplace<ui::Button>(id + ".fx", "fx", [this] {
         if (track_ && panel_.cb_.fx) panel_.cb_.fx(*track_);
@@ -352,7 +356,6 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
     const float x = r.x, right = r.right();
     const float indent = 14.0f * static_cast<float>(depth_);
-    badgeRect_ = {x + 6 + indent, r.y + 4, 16, 16};
     // The "fx" button ends the name line, so every row has it at any height.
     const float fxWidth = fx_->valueText().size() > 2 ? 34.0f : 22.0f;
     fx_->arrange(canvas, {right - 10 - fxWidth, r.y + 3, fxWidth, 15});
@@ -436,26 +439,29 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
 bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Down || !track_.has_value()) return false;
     if (e.clicks >= 2 && nameRect_.contains(e.pos)) {  // rename in place
-        renaming_ = true;
-        rename_->setText(name_->text());
-        rename_->selectAll();
-        rename_->visible = true;
-        name_->visible = false;
-        rename_->relayout();
-        name_->relayout();
-        if (ui::Root* r = root()) r->focus(rename_);
-        invalidate();
+        startRename();
         return true;
     }
     if (panel_.cb_.select) panel_.cb_.select(*track_, e.mods);
-    // The colour menu: the badge (or a right-click anywhere on the row).
-    const ui::Rect hit{badgeRect_.x - 3, badgeRect_.y - 3, badgeRect_.w + 6, badgeRect_.h + 6};
-    if (panel_.cb_.color && (e.button == 3 || (e.button == 1 && hit.contains(e.pos)))) {
-        const ui::Rect row = bounds(), abs = absoluteRect(*this);
-        panel_.cb_.color(*track_, {abs.x + badgeRect_.x - row.x, abs.y + badgeRect_.y - row.y,
-                                   badgeRect_.w, badgeRect_.h});
+    // A right-click: the track's menu, at the pointer.
+    if (e.button == 3 && panel_.cb_.menu) {
+        const model::Id track = *track_;
+        TcpPanel* panel = &panel_;
+        panel_.cb_.menu(track, {e.pos.x, e.pos.y, 1, 1}, [panel, track] { panel->rename(track); });
     }
     return true;
+}
+
+void TcpPanel::Row::startRename() {
+    renaming_ = true;
+    rename_->setText(name_->text());
+    rename_->selectAll();
+    rename_->visible = true;
+    name_->visible = false;
+    rename_->relayout();
+    name_->relayout();
+    if (ui::Root* r = root()) r->focus(rename_);
+    invalidate();
 }
 
 // --- the panel ---------------------------------------------------------------------
@@ -467,6 +473,9 @@ TcpPanel::TcpPanel(const TrackLayout& rowLayout, const Viewport& view, TcpCallba
     add_ = &emplace<ui::Button>("tcp.add", "+ strip", [this] { openAddMenu(); });
     add_->layout.width = ui::SizeRule::fixed(56);
     add_->layout.height = ui::SizeRule::fixed(18);
+    mixer_ = &emplace<ui::Button>("tcp.mixer", "mixer", [this] {
+        if (cb_.mixer) cb_.mixer();
+    });
 }
 
 // The three strip types, offered by the "+" (ADR-0019: exactly these).
@@ -734,13 +743,16 @@ void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         if (!row->visible || !row->bound()) continue;
         if (const auto at = layout_.indexOfEnv(row->env())) row->arrange(canvas, rowRect(*at));
     }
-    if (add_) add_->arrange(canvas, {r.right() - 62, r.bottom() - 22, 56, 18});  // the panel's foot
+    // The panel's foot: "mixer" (show or hide it) and "+ strip".
+    if (add_) add_->arrange(canvas, {r.right() - 62, r.bottom() - 22, 56, 18});
+    if (mixer_) mixer_->arrange(canvas, {r.right() - 122, r.bottom() - 22, 56, 18});
 }
 
 void TcpPanel::paint(ui::Canvas& c) { c.fillRect(bounds(), c.theme().color("panel")); }
 
 ui::Node* TcpPanel::hitTest(ui::Point p) {
-    if (add_ && add_->visible && add_->enabled && add_->bounds().contains(p)) return add_;
+    for (ui::Button* b : {add_, mixer_})
+        if (b && b->visible && b->enabled && b->bounds().contains(p)) return b;
     return ui::Node::hitTest(p);
 }
 
@@ -754,6 +766,15 @@ ui::Node* TcpPanel::envControl(const model::Id& env, std::string_view what) cons
     for (EnvRow* row : const_cast<TcpPanel*>(this)->envRows_)
         if (row->visible && row->bound() && row->env() == env) return row->control(what);
     return nullptr;
+}
+
+bool TcpPanel::rename(const model::Id& track) {
+    for (Row* row : rows_)
+        if (row->visible && row->bound() && row->track() == track) {
+            row->startRename();
+            return true;
+        }
+    return false;
 }
 
 ui::Node* TcpPanel::controlNode(const model::Id& track, std::string_view what) const {

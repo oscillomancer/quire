@@ -380,6 +380,7 @@ int main(int argc, char** argv) {
         applyLook();
     });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    pluginWindows.setOwner(window->get());
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
     shell.onRouting = [&routing](const model::Id&, const ui::Rect& anchor) {
@@ -389,13 +390,14 @@ int main(int argc, char** argv) {
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
-    appActions.addUi("ui.fx.editor", "FX: open editor", "fx", [&](const json::Value& v) -> Status {
-        const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;
-        if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
-        return pluginWindows.open(*id);
-    });
+    appActions.addUi(
+        "ui.fx.editor", "FX: open or close editor", "fx", [&](const json::Value& v) -> Status {
+            const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;
+            if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
+            return pluginWindows.toggle(*id);
+        });
     gui::FxWindow fxWindow(**app, dispatcher, root, gui::FxWindow::Hooks{[&](model::Id id) {
-        return pluginWindows.open(id);
+        return pluginWindows.toggle(id);
     }},
                            gui::Favourites::defaultFile(product::kSlug));
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",

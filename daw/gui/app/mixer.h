@@ -12,6 +12,7 @@
 #include "app_actions.h"
 #include "meter_feed.h"
 #include "supple/ui/root.h"
+#include "track_menu.h"
 
 namespace supple::ui {
 class Label;
@@ -61,6 +62,7 @@ class Mixer {
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     MeterFeed& meters_;
+    TrackMenu trackMenu_;  // a strip's right-click menu
     ui::Node* panel_ = nullptr;
     ui::Node* row_ = nullptr;  // the strips' container
     ui::Toggle* console9_ = nullptr;
