@@ -36,8 +36,9 @@ namespace supple::engine {
 struct AppOptions {
     std::vector<std::filesystem::path> pluginPath;  // empty = host::defaultSearchPath()
     host::HostIdentity identity;
-    std::filesystem::path chainDir;  // empty = the user config directory / <slug> / chains
-    std::filesystem::path workdir;   // renders are written to <workdir>/renders
+    std::filesystem::path chainDir;     // empty = the user config directory / <slug> / chains
+    std::filesystem::path templateDir;  // empty = … / <slug> / track-templates
+    std::filesystem::path workdir;      // renders are written to <workdir>/renders
     std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
     std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
 };

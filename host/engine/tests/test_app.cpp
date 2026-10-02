@@ -39,6 +39,7 @@ std::unique_ptr<EngineApp> makeApp(const fs::path& dir) {
     AppOptions o;
     o.workdir = dir;
     o.chainDir = dir / "chains";  // never the user's config
+    o.templateDir = dir / "templates";
     o.pluginPath = {kFixture};
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
@@ -1894,4 +1895,55 @@ TEST_CASE("item.paste copies items as they were in a version, even after a cut")
                             kTest});
     REQUIRE_FALSE(onBus);
     CHECK(onBus.error().code == "track.strip_type");
+}
+
+TEST_CASE("track templates: a strip's settings and chains saved, then added as a new strip") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("track.add", R"({"name": "Lead Vox"})");
+    call(
+        "track.set",
+        R"({"track": "tr_1", "volume_db": -4.5, "pan": -20, "color": "#ff8800", "monitor": "auto"})");
+    call(
+        "fx.add",
+        R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain", "patch": {"params": {"gain": -6}}})");
+    call(
+        "fx.add",
+        R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain", "chain": "input", "patch": {"params": {"gain": -3}}})");
+    auto saved = call("track.template.save", R"({"track": "tr_1", "name": "Vocal"})");
+    CHECK(saved["effects"].asInt() == 2);
+    CHECK(call("track.template.list", "{}")["templates"].size() == 1);
+    // Saving again without replace is refused.
+    CHECK_FALSE(
+        d.execute({"track.template.save", j(R"({"track": "tr_1", "name": "Vocal"})"), kTest}));
+    const auto before = app->versions().history(1000).size();
+    auto loaded = call("track.template.load", R"({"name": "Vocal"})");
+    CHECK(app->versions().history(1000).size() == before + 1);  // one undo step
+    const model::Session& s = app->head();
+    const model::Track& strip = *s.tracks.find(*model::Id::parse(loaded["track"].asString()));
+    CHECK(strip.name == "Lead Vox");
+    CHECK(strip.volumeDb == doctest::Approx(-4.5));
+    CHECK(strip.pan == doctest::Approx(-20));
+    CHECK(strip.color == "#ff8800");
+    CHECK(strip.record.monitor == model::Monitor::Auto);
+    REQUIRE(strip.chain.size() == 1);
+    REQUIRE(strip.inputChain.size() == 1);
+    CHECK(loaded["effects"].size() == 2);
+    auto gainOf = [&](model::Id fx) {
+        auto patch = call("fx.patch.get", std::string(R"({"fx": ")") + fx.str() + R"("})");
+        return patch["patch"]["params"]["gain"].asDouble();
+    };
+    CHECK(gainOf(strip.chain[0]) == doctest::Approx(-6));
+    CHECK(gainOf(strip.inputChain[0]) == doctest::Approx(-3));
+    // Errors: neither or both sources, an unknown name.
+    CHECK_FALSE(d.execute({"track.template.load", j("{}"), kTest}));
+    CHECK_FALSE(d.execute({"track.template.load", j(R"({"name": "Nope"})"), kTest}));
 }

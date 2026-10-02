@@ -4653,6 +4653,142 @@
     }
   },
   {
+    "name": "track_template_list",
+    "title": "List saved track templates by name, path and effect count.",
+    "description": "List saved track templates by name, path and effect count.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_template_list_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_template_list_result",
+      "properties": {
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "track_template_entry",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "effects": {
+                "type": "integer",
+                "minimum": 0.0
+              }
+            },
+            "required": ["name", "path", "effects"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["templates"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_template_load",
+    "title": "Add a strip from a track template (settings and FX) in one undo step.",
+    "description": "Add a strip from a track template (settings and FX) in one undo step. Give exactly one of name (in the user's track-templates directory) or path. parent defaults to the master. Every plugin and state is checked before the model changes. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_template_load_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_template_load_result",
+      "properties": {
+        "track": {
+          "type": "string"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["track", "effects"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_template_save",
+    "title": "Save a strip (settings and FX chains) as a named track template.",
+    "description": "Save a strip (settings and FX chains) as a named track template. Writes a supple.track-template/1.0 file to the user's track-templates directory: the strip's type, name, colour, notes, level, pan and monitoring, and its main and input chains as fx.chain.save stores them (semantic patches or base64 state). Not routing or items. replace: true overwrites an existing name. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_template_save_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "replace": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": ["track", "name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_template_save_result",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "effects": {
+          "type": "integer",
+          "minimum": 0.0
+        }
+      },
+      "required": ["path", "effects"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "transport_get",
     "title": "The play position and whether it is playing.",
     "description": "The play position and whether it is playing.  See describe for errors and examples.",

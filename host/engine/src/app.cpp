@@ -1478,13 +1478,16 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
-    if (fixture == "song_with_chain" || fixture == "song_with_saved_chain") {
+    if (fixture == "song_with_chain" || fixture == "song_with_saved_chain" ||
+        fixture == "song_with_saved_template") {
         run("fx.add",
             R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-6}}})");
         run("fx.add",
             R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-12}}})");
         if (fixture == "song_with_saved_chain")
             run("fx.chain.save", R"({"track":"tr_1","name":"Bass"})");
+        if (fixture == "song_with_saved_template")
+            run("track.template.save", R"({"track":"tr_1","name":"Bass"})");
         return;
     }
     if (fixture == "song_with_keymix") {  // + tr_2 "Keyed" with fx_1, a key mix (ADR-0018)

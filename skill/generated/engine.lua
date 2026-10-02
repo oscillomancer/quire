@@ -730,6 +730,27 @@ q = nil
 ---@field monitor? "off"|"on"|"auto"
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 
+---@class Quire.track_template_list_result
+---@field templates table[]
+
+---@class Quire.track_template_load_args
+---@field name? string
+---@field path? string
+---@field parent? string
+
+---@class Quire.track_template_load_result
+---@field track string
+---@field effects string[]
+
+---@class Quire.track_template_save_args
+---@field track string
+---@field name string
+---@field replace? boolean (default: false)
+
+---@class Quire.track_template_save_result
+---@field path string
+---@field effects integer
+
 ---@class Quire.transport_get_result
 ---@field playing boolean
 ---@field recording boolean
@@ -982,6 +1003,11 @@ q = nil
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
+
+---@class Quire.track.template
+---@field list fun(): Quire.track_template_list_result List saved track templates by name, path and effect count.
+---@field load fun(args?: Quire.track_template_load_args): Quire.track_template_load_result Add a strip from a track template (settings and FX) in one undo step.
+---@field save fun(args: Quire.track_template_save_args): Quire.track_template_save_result Save a strip (settings and FX chains) as a named track template.
 
 ---@class Quire.transport
 ---@field get fun(): Quire.transport_get_result The play position and whether it is playing.

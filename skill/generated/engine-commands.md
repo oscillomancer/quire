@@ -6228,6 +6228,191 @@ Result:
 
 ```
 
+## `track.template.list@1`
+
+List saved track templates by name, path and effect count.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_template_list_result",
+  "properties": {
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "track_template_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "integer",
+            "minimum": 0.0
+          }
+        },
+        "required": ["name", "path", "effects"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["templates"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**None yet** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "templates": []
+}
+
+```
+
+## `track.template.load@1`
+
+Add a strip from a track template (settings and FX) in one undo step.
+
+Give exactly one of name (in the user's track-templates directory) or path. parent defaults to the master. Every plugin and state is checked before the model changes.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `path` | string |  |  |  |  |
+| `parent` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_template_load_result",
+  "properties": {
+    "track": {
+      "type": "string"
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["track", "effects"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Add the saved bass strip** (`song_with_saved_template`)
+
+```json
+{
+  "name": "Bass"
+}
+
+```
+
+Result:
+
+```json
+{
+  "track": "<any>",
+  "effects": ["<any>", "<any>"]
+}
+
+```
+
+## `track.template.save@1`
+
+Save a strip (settings and FX chains) as a named track template.
+
+Writes a supple.track-template/1.0 file to the user's track-templates directory: the strip's type, name, colour, notes, level, pan and monitoring, and its main and input chains as fx.chain.save stores them (semantic patches or base64 state). Not routing or items. replace: true overwrites an existing name.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `replace` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_template_save_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "effects": {
+      "type": "integer",
+      "minimum": 0.0
+    }
+  },
+  "required": ["path", "effects"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Save the bass strip** (`song_with_chain`)
+
+```json
+{
+  "track": "tr_1",
+  "name": "Bass"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>",
+  "effects": 2
+}
+
+```
+
 ## `transport.get@1`
 
 The play position and whether it is playing.
