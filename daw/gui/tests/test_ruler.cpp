@@ -378,3 +378,18 @@ TEST_CASE("ruler: moving a loop across tempo changes preserves its beat span") {
     CHECK(f.history() == n);
     CHECK_FALSE(f.app->loop().enabled);
 }
+
+TEST_CASE("ruler: Alt+click on a tempo point toggles its ramp") {
+    RulerFixture f;
+    auto args = json::parse(R"({"points":[{"beat":0,"bpm":120},{"beat":12,"bpm":90}]})");
+    REQUIRE(args);
+    f.exec("tempo.set", *args);
+    auto n = f.history();
+    REQUIRE(f.app->head().timeMap->tempo()[0].shape == time::TempoShape::Step);
+    f.click(f.at(0.2, 42), ui::kAlt, 1);
+    CHECK(f.history() == ++n);
+    CHECK(f.app->head().timeMap->tempo()[0].shape == time::TempoShape::Ramp);
+    CHECK(f.app->head().timeMap->tempo()[1].bpm == 90);  // the others unchanged
+    f.click(f.at(0.2, 42), ui::kAlt, 1);
+    CHECK(f.app->head().timeMap->tempo()[0].shape == time::TempoShape::Step);
+}

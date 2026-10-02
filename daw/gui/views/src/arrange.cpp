@@ -327,6 +327,19 @@ class Ruler : public ui::Node {
         };
         root()->openPopup(std::move(field), {at.x, at.y, 1, 1});
     }
+    bool setRamp(double beat, bool ramp) {
+        json::Value points = json::Value::array();
+        for (const auto& p : view_.session().timeMap->tempo()) {
+            json::Value point = json::Value::object();
+            point["beat"] = p.beat;
+            point["bpm"] = p.bpm;
+            point["ramp"] = p.beat == beat ? ramp : p.shape == time::TempoShape::Ramp;
+            points.push_back(std::move(point));
+        }
+        json::Value args = json::Value::object();
+        args["points"] = std::move(points);
+        return execute("tempo.set", std::move(args));
+    }
     bool tempo(double beat, double bpm) {
         // Inserting into a ramp splits it without changing its trajectory.
         bool ramp = false;
@@ -400,7 +413,8 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
             }
             if (drag_ == Drag::LoopNew) originalStart_ = originalEnd_ = position(e.pos.x, free);
         } else if (y < kBeatRowH + kTimeRowH + kTempoRowH) {
-            if (e.clicks != 2) return true;
+            const bool toggleRamp = e.clicks == 1 && (e.mods & ui::kAlt);
+            if (e.clicks != 2 && !toggleRamp) return true;
             const time::TempoPoint* hit = nullptr;
             float distance = 1e9f;
             for (const auto& p : tm.tempo()) {
@@ -410,6 +424,10 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
                     hit = &p;
                     distance = d;
                 }
+            }
+            if (toggleRamp) {  // Alt+click: the point steps or ramps to the next one
+                if (hit) setRamp(hit->beat, hit->shape != time::TempoShape::Ramp);
+                return true;
             }
             if (hit) {
                 if (!root()) return true;
