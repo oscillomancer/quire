@@ -22,10 +22,16 @@ int main(int argc, char** argv) {
     rpc::Client client;
     auto connected = client.connect(path, "mcp-proxy", {}, true);
     if (!connected) {
-        std::fprintf(stderr, "%s\n", connected.error().toString().c_str());
+        std::fprintf(stderr, "%s\nIs %.*s running (instance \"%s\")? Start it, then reconnect.\n",
+                     connected.error().toString().c_str(), static_cast<int>(product::kName.size()),
+                     product::kName.data(), instance.c_str());
         return 1;
     }
-    auto server = mcp::Server::proxy(client);
+    // After the app restarts, calls reconnect to the same socket.
+    auto server = mcp::Server::proxy(client, [&](const cmd::Origin& origin) {
+        return client.connect(path, origin.client.empty() ? "mcp-proxy" : origin.client,
+                              origin.agent, true);
+    });
     if (!server) {
         std::fprintf(stderr, "%s\n", server.error().toString().c_str());
         return 1;

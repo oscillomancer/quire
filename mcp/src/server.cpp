@@ -100,13 +100,24 @@ Server::Server(const cmd::Registry& registry, cmd::Dispatcher& dispatcher) {
     }
     queryTool_ = registry.find("session.describe") != nullptr;
 }
-Server::Server(rpc::Client& client) : proxyClient_(&client) {
-    invoke_ = [&client](std::string_view name, const json::Value& args, const cmd::Origin&) {
-        return client.call(name, args);
+Server::Server(rpc::Client& client, Reconnect reconnect)
+    : proxyClient_(&client), reconnect_(std::move(reconnect)) {
+    invoke_ = [this, &client](std::string_view name, const json::Value& args,
+                              const cmd::Origin& origin) {
+        auto result = client.call(name, args);
+        if (result || !reconnect_) return result;
+        // The app went away. Not sent (write failed, or no connection): connect
+        // and send it once more. Sent but unanswered: reconnect for the next
+        // call, but do not repeat a command that may have run.
+        const std::string& code = result.error().code;
+        const bool unsent = code == "rpc.write" || code == "rpc.connect";
+        if (!unsent && code != "rpc.read") return result;
+        if (!reconnect_(origin)) return result;
+        return unsent ? client.call(name, args) : result;
     };
 }
-Result<std::unique_ptr<Server>> Server::proxy(rpc::Client& client) {
-    auto server = std::unique_ptr<Server>(new Server(client));
+Result<std::unique_ptr<Server>> Server::proxy(rpc::Client& client, Reconnect reconnect) {
+    auto server = std::unique_ptr<Server>(new Server(client, std::move(reconnect)));
     auto listed = client.call("registry.list");
     if (!listed) return listed.error();
     auto* commands = listed->find("commands");

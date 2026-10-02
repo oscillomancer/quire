@@ -22,7 +22,11 @@ struct Tick {
 class Server {
   public:
     Server(const cmd::Registry& registry, cmd::Dispatcher& dispatcher);
-    static Result<std::unique_ptr<Server>> proxy(rpc::Client& client);
+    // A proxy to an app's control socket. `reconnect` (optional) connects the
+    // client again after the app restarted; a call whose request never reached
+    // the app (it was gone) reconnects once and is sent again.
+    using Reconnect = std::function<Status(const cmd::Origin&)>;
+    static Result<std::unique_ptr<Server>> proxy(rpc::Client& client, Reconnect reconnect = {});
     Status serve(std::istream& input, std::ostream& output, Tick tick = {});
     // As above, reading requests from `fd` so it can be polled with the tick's
     // deadline (a negative fd reads blocking).
@@ -32,7 +36,7 @@ class Server {
     void setOrigin(cmd::Origin origin) { origin_ = std::move(origin); }
 
   private:
-    explicit Server(rpc::Client& client);
+    Server(rpc::Client& client, Reconnect reconnect);
     Result<json::Value> call(std::string_view name, const json::Value& args);
     json::Value tools() const;
     std::function<Result<json::Value>(std::string_view, const json::Value&, const cmd::Origin&)>
@@ -41,6 +45,7 @@ class Server {
     std::map<std::string, std::string> commands_;
     std::map<std::string, cmd::Kind> kinds_;
     rpc::Client* proxyClient_ = nullptr;
+    Reconnect reconnect_;
     bool queryTool_ = false;
     bool initialized_ = false;
     cmd::Origin origin_{cmd::Origin::Type::Mcp, {}, {}};

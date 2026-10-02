@@ -188,6 +188,43 @@ TEST_CASE("proxy MCP forwards calls over the Unix control socket") {
     CHECK_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("the proxy reconnects after the app restarts") {
+    auto commands = registry();
+    Host host;
+    cmd::Dispatcher dispatcher(commands, host);
+    ModelQueue model;
+    auto path = std::filesystem::temp_directory_path() / std::string(product::kSlug) /
+                ("mcp-reconnect-" + std::to_string(::getpid()) + ".sock");
+    auto first = std::make_unique<rpc::Server>(commands, dispatcher,
+                                               [&](auto task) { model.post(std::move(task)); });
+    REQUIRE(first->start(path));
+    rpc::Client client;
+    REQUIRE(client.connect(path, "proxy", {}, true));
+    int reconnects = 0;
+    auto proxy = mcp::Server::proxy(client, [&](const cmd::Origin&) {
+        ++reconnects;
+        return client.connect(path, "proxy", {}, true);
+    });
+    REQUIRE(proxy);
+    request(
+        **proxy,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"remote-client"}}})");
+    const char* add =
+        R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"counter_add","arguments":{"value":2}}})";
+    CHECK(request(**proxy, add).find("result")->find("structuredContent")->find("count")->asInt() ==
+          2);
+    first->stop();  // the app quits ...
+    first.reset();
+    rpc::Server second(commands, dispatcher, [&](auto task) { model.post(std::move(task)); });
+    REQUIRE(second.start(path));  // ... and starts again on the same socket
+    auto again = request(**proxy, add);
+    CHECK(reconnects == 1);
+    REQUIRE(again.find("result")->find("structuredContent"));
+    CHECK(again.find("result")->find("structuredContent")->find("count")->asInt() == 4);
+    client.close();
+    second.stop();
+}
+
 TEST_CASE("MCP stdio caps an unterminated oversized frame") {
     auto commands = registry();
     Host host;
