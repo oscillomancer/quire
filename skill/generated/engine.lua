@@ -687,6 +687,9 @@ q = nil
 ---@field beat_in_bar integer
 ---@field fraction number
 
+---@class Quire.timesig_remove_args
+---@field bar integer
+
 ---@class Quire.timesig_set_args
 ---@field bar integer
 ---@field meter string
@@ -995,6 +998,7 @@ q = nil
 ---@field convert fun(args?: Quire.time_convert_args): Quire.time_convert_result Convert a seconds, beat, or bar position to all three time domains.
 
 ---@class Quire.timesig
+---@field remove fun(args: Quire.timesig_remove_args): table Remove the meter change at a bar: the meter before it continues.
 ---@field set fun(args: Quire.timesig_set_args): table Set the meter from a bar on, e.g. {"bar": 9, "meter": "3/4"}.
 
 ---@class Quire.track

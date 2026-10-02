@@ -407,6 +407,9 @@ struct TimesigSetArgs {
     int bar = 1;
     std::string meter;
 };
+struct TimesigRemoveArgs {
+    int bar = 2;
+};
 struct CountResult {
     std::int64_t count = 0;
 };
@@ -1054,6 +1057,33 @@ void registerEngineCommands(cmd::Registry& registry) {
                 t.put(*at, model::MeterObj{a.bar, n, d});
             else
                 t.create(model::MeterObj{a.bar, n, d});
+            return Empty{};
+        };
+        registry.add(std::move(c));
+    }
+    // ---------------------------------------------------------------- timesig.remove
+    {
+        Command<TimesigRemoveArgs, Empty> c;
+        c.name = "timesig.remove";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Remove the meter change at a bar: the meter before it continues.";
+        c.description = "Bar 1's meter cannot be removed (change it with timesig.set).";
+        c.tags = {"tempo"};
+        c.args = schema::object<TimesigRemoveArgs>("timesig_remove_args")
+                     .field("bar", &TimesigRemoveArgs::bar, schema::integerOf<int>().min(2))
+                     .build();
+        c.result = emptySchema();
+        c.examples = {{"Back to 4/4 at bar 9", obj(R"({"bar": 9})"), obj("{}"), "meter_change"}};
+        c.run = [](const TimesigRemoveArgs& a, Context& ctx) -> Result<Empty> {
+            model::EditTxn& t = A(ctx).txn();
+            std::optional<Id> at;
+            for (const auto& e : model::Traits<model::MeterObj>::map(t.base()))
+                if (e.value->bar == a.bar) at = e.id;
+            if (!at)
+                return Error("timesig.unknown", "no meter change at bar " + std::to_string(a.bar),
+                             "/bar", "timesig changes are listed by session.describe");
+            t.remove<model::MeterObj>(*at);
             return Empty{};
         };
         registry.add(std::move(c));

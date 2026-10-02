@@ -1537,6 +1537,10 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         (void)st;
         return;
     }
+    if (fixture == "meter_change") {  // 3/4 from bar 9
+        run("timesig.set", R"({"bar": 9, "meter": "3/4"})");
+        return;
+    }
     if (fixture == "saved") {
         run("project.set", R"({"name": "Saved"})");
         (void)save("example-project.json");

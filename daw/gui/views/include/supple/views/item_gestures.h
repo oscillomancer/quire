@@ -9,8 +9,8 @@
 // MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
 // that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
 // an automation lane: click adds a point, drag moves one (snapped; Shift frees), Alt+click deletes
-// one. Each gesture previews as a ghost on the root's overlay and commits ONE transaction on
-// release.
+// one. A right-click on an item (without dragging) opens its menu: Delete. Each gesture previews as
+// a ghost on the root's overlay and commits ONE transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -86,6 +86,8 @@ class ItemGestures {
     Status cutSelection();
     Status paste(double atBeat, std::optional<model::Id> track = {});
     Status duplicateSelection();  // right after the selection, on the same tracks
+    // Removes the selected items (one undo step): the item menu's Delete.
+    Status deleteSelection();
     bool canPaste() const { return !clipboard_.items.empty(); }
     // The play rate that keeps a take's material filling the item when its
     // end moves by `deltaBeats` (the stretch gesture).
@@ -141,6 +143,8 @@ class ItemGestures {
 
   private:
     double beatAtX(float x) const;
+    // A right-click on an item (no drag): the menu of the selection (Delete).
+    void openItemMenu(ui::Point at);
     bool envPress(std::size_t row, const ui::PointerEvent& e);
     void envDrag(const ui::PointerEvent& e);
     void commitEnv(const std::string& label);

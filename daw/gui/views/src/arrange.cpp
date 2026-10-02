@@ -12,6 +12,7 @@
 
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/theme.h"
@@ -327,6 +328,110 @@ class Ruler : public ui::Node {
         };
         root()->openPopup(std::move(field), {at.x, at.y, 1, 1});
     }
+    // A right-click on a tempo point, meter change, region or marker: its menu
+    // (Delete; Rename for regions and markers). The first tempo point and bar
+    // 1's meter stay.
+    bool contextMenu(ui::Point at) {
+        if (!root()) return true;
+        const auto& s = view_.session();
+        const auto& tm = *s.timeMap;
+        const float y = at.y - bounds().y;
+        std::vector<ui::MenuItem> items;
+        auto add = [&](std::string label, std::function<void()> run, bool enabled = true) {
+            ui::MenuItem m;
+            m.label = std::move(label);
+            m.run = std::move(run);
+            m.enabled = enabled;
+            items.push_back(std::move(m));
+        };
+        const float tempoTop = kBeatRowH + kTimeRowH;
+        if (y >= tempoTop && y < tempoTop + kTempoRowH / 2.0f) {
+            const time::TempoPoint* hit = nullptr;
+            float distance = 1e9f;
+            for (const auto& p : tm.tempo()) {
+                const float x = view_.xAt(tm.secondsAt(p.beat));
+                const float d = std::abs(at.x - x);
+                if (at.x >= x - 5 && at.x <= x + 57 && d < distance) {
+                    hit = &p;
+                    distance = d;
+                }
+            }
+            if (hit)
+                add(
+                    "Delete tempo change", [this, beat = hit->beat] { removeTempo(beat); },
+                    hit->beat > 0);
+        } else if (y >= tempoTop && y < tempoTop + kTempoRowH) {
+            for (const time::MeterChange& m : tm.meter()) {
+                const float x = view_.xAt(tm.secondsAt(tm.beatOfBar(m.bar)));
+                if (at.x < x - 5 || at.x > x + 40) continue;
+                add(
+                    "Delete meter change",
+                    [this, bar = m.bar] {
+                        json::Value args = json::Value::object();
+                        args["bar"] = static_cast<std::int64_t>(bar);
+                        execute("timesig.remove", std::move(args));
+                    },
+                    m.bar > 1);
+                break;
+            }
+        } else if (y >= tempoTop + kTempoRowH && y < tempoTop + kTempoRowH + kRegionRowH) {
+            for (const auto& entry : s.regions) {
+                const auto& rg = *entry.value;
+                const float left = view_.xAt(atSeconds(tm, rg.start, rg.timebase));
+                const float right = view_.xAt(atSeconds(tm, rg.end, rg.timebase));
+                if (at.x < left - 5 || at.x > right + 5) continue;
+                add("Rename region\u2026",
+                    [this, id = entry.id, name = rg.name, at] { rename("region", id, name, at); });
+                add("Delete region", [this, id = entry.id] { remove("region", id); });
+                break;
+            }
+        } else if (y >= tempoTop + kTempoRowH + kRegionRowH) {
+            std::optional<model::Id> hit;
+            std::string name;
+            float distance = 1e9f;
+            for (const auto& entry : s.markers) {
+                const auto& mk = *entry.value;
+                const float x = view_.xAt(atSeconds(tm, mk.pos, mk.timebase));
+                const float d = std::abs(at.x - x);
+                if (at.x >= x - 5 && at.x <= x + 98 && d < distance) {
+                    hit = entry.id;
+                    name = mk.name;
+                    distance = d;
+                }
+            }
+            if (hit) {
+                add("Rename marker\u2026",
+                    [this, id = *hit, name, at] { rename("marker", id, name, at); });
+                add("Delete marker", [this, id = *hit] { remove("marker", id); });
+            }
+        }
+        if (items.empty()) return true;
+        root()->openPopup(ui::makeMenu("ruler.menu", std::move(items),
+                                       [this] {
+                                           if (root()) root()->closePopup();
+                                       }),
+                          {at.x, at.y, 1, 1});
+        return true;
+    }
+    void remove(const std::string& stem, model::Id id) {
+        json::Value args = json::Value::object();
+        args["id"] = id.str();
+        execute(stem + ".remove", std::move(args));
+    }
+    bool removeTempo(double beat) {
+        json::Value points = json::Value::array();
+        for (const auto& p : view_.session().timeMap->tempo()) {
+            if (p.beat == beat) continue;
+            json::Value point = json::Value::object();
+            point["beat"] = p.beat;
+            point["bpm"] = p.bpm;
+            point["ramp"] = p.shape == time::TempoShape::Ramp;
+            points.push_back(std::move(point));
+        }
+        json::Value args = json::Value::object();
+        args["points"] = std::move(points);
+        return execute("tempo.set", std::move(args));
+    }
     bool setRamp(double beat, bool ramp) {
         json::Value points = json::Value::array();
         for (const auto& p : view_.session().timeMap->tempo()) {
@@ -387,6 +492,8 @@ class Ruler : public ui::Node {
 
 bool Ruler::onPointer(const ui::PointerEvent& e) {
     if (e.type == ui::PointerEvent::Type::Wheel) return false;
+    if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && bounds().contains(e.pos))
+        return contextMenu(e.pos);
     if (e.type == ui::PointerEvent::Type::Down) {
         if (e.button != 1 || !bounds().contains(e.pos)) return false;
         press_ = e.pos;

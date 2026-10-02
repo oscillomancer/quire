@@ -4311,6 +4311,34 @@
     }
   },
   {
+    "name": "timesig_remove",
+    "title": "Remove the meter change at a bar: the meter before it continues.",
+    "description": "Remove the meter change at a bar: the meter before it continues. Bar 1's meter cannot be removed (change it with timesig.set). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "timesig_remove_args",
+      "properties": {
+        "bar": {
+          "type": "integer",
+          "minimum": 2.0
+        }
+      },
+      "required": ["bar"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "timesig_set",
     "title": "Set the meter from a bar on, e.g. {\"bar\": 9, \"meter\": \"3/4\"}.",
     "description": "Set the meter from a bar on, e.g. {\"bar\": 9, \"meter\": \"3/4\"}.  See describe for errors and examples.",

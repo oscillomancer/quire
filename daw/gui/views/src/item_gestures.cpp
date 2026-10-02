@@ -6,6 +6,7 @@
 #include <map>
 
 #include "supple/ui/canvas.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
 #include "supple/views/envelope_lane.h"
@@ -473,6 +474,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             }
         }
         if (e.button == 3 || !h) {  // a marquee (right-drag anywhere, or from empty space)
+            // A right-click that does not drag opens the item's menu instead.
+            if (e.button == 3 && h) state_.anchor = h->item;
             state_.drag = Drag::Marquee;
             state_.marquee = {e.pos.x, e.pos.y, 0, 0};
             if (e.mods & (ui::kShift | ui::kCtrl)) state_.marqueeBase = selection_;
@@ -602,6 +605,36 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
     return false;
 }
 
+Status ItemGestures::deleteSelection() {
+    if (selection_.empty() || !run) return {};
+    std::vector<EditStep> steps;
+    for (model::Id item : selection_) {
+        json::Value args = json::Value::object();
+        args["item"] = item.str();
+        steps.push_back({"item.remove", std::move(args)});
+    }
+    auto r = run(selection_.size() == 1 ? "Delete item" : "Delete items", steps);
+    if (!r) return r.error();
+    selection_.clear();
+    changed();
+    return {};
+}
+
+void ItemGestures::openItemMenu(ui::Point at) {
+    if (!root_ || selection_.empty()) return;
+    std::vector<ui::MenuItem> items;
+    ui::MenuItem del;
+    del.label = selection_.size() == 1 ? "Delete"
+                                       : "Delete " + std::to_string(selection_.size()) + " items";
+    del.shortcut = "Delete";
+    del.run = [this] {
+        if (auto r = deleteSelection(); !r && onError) onError(r.error());
+    };
+    items.push_back(std::move(del));
+    root_->openPopup(ui::makeMenu("item.menu", std::move(items), [this] { root_->closePopup(); }),
+                     {at.x, at.y, 1, 1});
+}
+
 void ItemGestures::commit(const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
     const model::Item* anchor =
@@ -668,6 +701,15 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         return;
     }
     if (!moved_) {  // a click
+        if (state_.drag == Drag::Marquee && e.button == 3 &&
+            state_.anchor.kind == model::Kind::Item) {
+            if (!isSelected(state_.anchor)) {
+                selection_ = {state_.anchor};
+                changed();
+            }
+            openItemMenu(e.pos);
+            return;
+        }
         if (state_.drag == Drag::Marquee) {
             if (e.button == 1 && state_.marqueeBase.empty()) {
                 selection_.clear();

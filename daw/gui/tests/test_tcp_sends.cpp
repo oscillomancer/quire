@@ -455,3 +455,17 @@ TEST_CASE("TCP sends: output click opens the existing routing matrix action") {
     f.root->key(SDLK_ESCAPE);
     CHECK_FALSE(matrix.isOpen());
 }
+
+TEST_CASE("the Delete key removes the selected items") {
+    SendsFixture f;
+    json::Value args = json::Value::object();
+    args["track"] = f.a.str();
+    args["notation"] = "voice a; 1: C4:w";
+    const auto item = f.exec("item.add", std::move(args));
+    const std::string id = item.find("item")->asString();
+    f.state.selectedItems = {id};
+    f.sync();
+    f.root->key(SDLK_DELETE);
+    f.sync();
+    CHECK(f.app->head().items.size() == 0);
+}

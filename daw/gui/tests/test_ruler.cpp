@@ -414,3 +414,58 @@ TEST_CASE("ruler: double-click in the meter half adds or edits a meter change") 
     CHECK(f.app->head().timeMap->meter()[1].denominator == 8);
     CHECK(f.errors.empty());
 }
+
+TEST_CASE("ruler: a right-click deletes a tempo change, a meter change, a region or a marker") {
+    RulerFixture f;
+    auto rightClick = [&](ui::Point p) {
+        ui::PointerEvent e;
+        e.type = Pointer::Down;
+        e.pos = p;
+        e.button = 3;
+        f.root->pointer(e);
+        e.type = Pointer::Up;
+        f.root->pointer(e);
+        f.root->frame(false);
+    };
+    auto pick = [&](int row) {  // menu rows are 26 px
+        ui::Node* menu = f.root->find("ruler.menu");
+        REQUIRE(menu);
+        const ui::Point p{menu->bounds().x + 30,
+                          menu->bounds().y + static_cast<float>(row) * 26 + 13};
+        f.pointer(Pointer::Move, p);
+        f.pointer(Pointer::Down, p);
+        f.pointer(Pointer::Up, p);
+        f.sync();
+    };
+    f.exec(
+        "tempo.set",
+        json::parse(R"({"points": [{"beat": 0, "bpm": 120}, {"beat": 16, "bpm": 90}]})").value());
+    f.exec("timesig.set", json::parse(R"({"bar": 3, "meter": "3/4"})").value());
+    f.exec("marker.add", json::parse(R"({"pos": 4, "name": "Verse"})").value());
+    f.exec("region.add", json::parse(R"({"start": 8, "end": 12, "name": "Hook"})").value());
+    auto n = f.history();
+    // The tempo half of the tempo row.
+    rightClick(f.at(16.2, 41));
+    pick(0);
+    CHECK(f.app->head().timeMap->tempo().size() == 1);
+    CHECK(f.history() == ++n);
+    rightClick(f.at(0.2, 41));  // the first point stays (its item is disabled)
+    pick(0);
+    CHECK(f.app->head().timeMap->tempo().size() == 1);
+    CHECK(f.history() == n);
+    f.root->closePopups();
+    // The meter half.
+    rightClick(f.at(8.2, 55));
+    pick(0);
+    CHECK(f.app->head().timeMap->meter().size() == 1);
+    CHECK(f.history() == ++n);
+    // Regions and markers: Rename…, Delete.
+    rightClick(f.at(10, 64));
+    pick(1);
+    CHECK(f.app->head().regions.size() == 0);
+    rightClick(f.at(4.2, 78));
+    pick(1);
+    CHECK(f.app->head().markers.size() == 0);
+    CHECK(f.history() == n + 2);
+    CHECK(f.errors.empty());
+}

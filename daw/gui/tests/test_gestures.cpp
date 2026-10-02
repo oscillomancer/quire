@@ -642,3 +642,45 @@ TEST_CASE("arrange gestures: Ctrl+click on a fade handle cycles the fade's shape
     CHECK(f.item(a).fadeIn.shape == model::FadeShape::Fast);
     CHECK(f.item(a).fadeOut.shape == model::FadeShape::Linear);  // the other end untouched
 }
+
+TEST_CASE(
+    "arrange gestures: a right-click on an item opens its menu; Delete removes the selection") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id midi = f.itemOnRow(0, true), audio = f.itemOnRow(0);
+    const ui::Rect rm = f.rectOf(midi);
+    const ui::Point on{rm.x + rm.w / 2, rm.y + rm.h / 2};
+    auto rightClick = [&](ui::Point p) {
+        f.pointer(ui::PointerEvent::Type::Down, p, 3);
+        f.pointer(ui::PointerEvent::Type::Up, p, 3);
+        f.sync();
+    };
+    rightClick(on);
+    CHECK(g.selection() == std::vector<model::Id>{midi});  // the item under the pointer
+    ui::Node* menu = f.root->find("item.menu");
+    REQUIRE(menu);
+    const auto before = f.steps();
+    REQUIRE(f.root->click("item.menu"));  // its only row: Delete
+    f.sync();
+    CHECK_FALSE(f.app->head().items.find(midi));
+    CHECK(f.app->head().items.find(audio));
+    CHECK(f.steps() == before + 1);
+    CHECK(g.selection().empty());
+    // With several selected, Delete takes them all in one step.
+    const model::Id a = f.itemOnRow(0), b = f.itemOnRow(1);
+    g.setSelection({a, b});
+    const ui::Rect ra = f.rectOf(a);
+    rightClick({ra.x + ra.w / 2, ra.y + ra.h / 2});
+    REQUIRE(f.root->find("item.menu"));
+    REQUIRE(f.root->click("item.menu"));
+    f.sync();
+    CHECK_FALSE(f.app->head().items.find(a));
+    CHECK_FALSE(f.app->head().items.find(b));
+    CHECK(f.steps() == before + 2);
+    // A right-drag is still a marquee, not a menu.
+    const ui::Rect lanes = f.view->lanesRect();
+    f.drag({lanes.x + 4, f.view->rowRect(0).y + 4},
+           {lanes.x + 200, f.view->rowRect(1).bottom() - 4}, 0, 3);
+    CHECK_FALSE(f.root->find("item.menu"));
+}

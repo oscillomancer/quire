@@ -288,7 +288,8 @@ class EngineApp : public cmd::Host {
     // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_with_env (+ en_1
     // on fx_2 gain), song_undone,
     // engine_running (the dummy backend), engine_armed (+ tr_1 armed),
-    // recording_interrupted (tr_1 + rec/Vocal-1.wav left by a crash), and the
+    // recording_interrupted (tr_1 + rec/Vocal-1.wav left by a crash), meter_change
+    // (3/4 from bar 9), and the
     // bus's job_running. Built by running commands.
     void setupFixture(cmd::Dispatcher& dispatcher, std::string_view fixture) override;
     // Relative project paths resolve against the work directory.
