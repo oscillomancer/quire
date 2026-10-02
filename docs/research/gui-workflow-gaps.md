@@ -21,7 +21,7 @@ branch) · **gap** (not started).
 | 7 | Parent/master send independent of explicit sends | done here — `track.set {parent_send}` and a toggle in the routing matrix (the outlined parent cell) |
 | 8 | Drop audio/MIDI files onto tracks and timeline | done — File > Import and drag-and-drop onto the lanes (first file on the channel under the pointer, the rest on new tracks; one transaction) |
 | 9 | Move, trim, split, duplicate with direct gestures | done — move (snapped, across channels), trim (left edge keeps the material), Ctrl-drag copy, S splits at the playhead, Ctrl+C/X/V and Ctrl+D (paste reproduces the items as copied, even after a cut), Ctrl+A; one undo step each |
-| 10 | Draw fades, change crossfades | done — fade handles; overlaps made by a move, copy or trim crossfade automatically. Editing a crossfade's shape is open |
+| 10 | Draw fades, change crossfades | done — fade handles (Ctrl+click cycles the shape); overlaps made by a move, copy or trim crossfade automatically |
 | 11 | Slip media inside an item | done — Alt-drag |
 | 12 | Stretch with rate/pitch mode visible | done — Alt on an item's right edge sets length and play rate together; the label shows the rate and "varispeed" when pitch is not preserved |
 | 13 | Switch takes, see the active take | done — the take badge cycles the active take |
@@ -39,14 +39,14 @@ branch) · **gap** (not started).
 |---|---|---|
 | 21 | Take lanes, fixed-lane comping | done — an item with several takes shows them as lanes; click a lane to hear that take, swipe a range to comp it in (split + take, one undo step) |
 | 22 | Take FX, item/take envelopes | partial — commands (`env.*` on takes, take chains in the model); no UI |
-| 23 | Tempo ramps and meter changes on the timeline | partial — drawn in the ruler; double-click edits or adds a tempo point; ramps and meter changes only through `tempo.set` |
+| 23 | Tempo ramps and meter changes on the timeline | partial — double-click edits or adds a tempo point, Alt+click toggles its ramp; meter changes only from the transport bar's meter form (no meter-change command on the timeline) |
 | 24 | Markers/regions: create, rename, navigate | done — M adds a marker at the playhead, Shift+R a region over the loop range; drag, double-click to rename, Alt+click removes; a ruler drag sets the loop range. [ and ] jump to the previous/next marker or region start |
 | 25 | Piano roll, velocity and CC lanes | done — MIDI editor: piano roll, velocity lane, CC lane (mod, volume, pan, expression, sustain; draw/erase), notation panel |
 | 26 | MIDI event list and notation views | done — notation panel; event list (every note and CC, text-edited cells, Delete, + Note) |
 | 27 | Track automation lanes, read/write modes | done — volume/pan/mute and plugin-parameter lanes under their strip (click adds, drag moves, Alt+click deletes a point); header with mode, on, hide; touch/latch/write record fader moves while playing (`track.set`/`route.set`), latch/write hold to the stop. Plugin parameters are drawn and edited but not yet recorded from their controls |
 | 28 | Automation items with pooled identity | gap — modelled (`ai_*`), no commands |
 | 29 | Project/track/item timebase with visible consequences | gap (UI) |
-| 30 | Track templates and FX chain presets | partial — FX chain presets (`fx.chain.save/load/list`, FX window); track templates open |
+| 30 | Track templates and FX chain presets | done — FX chain presets (`fx.chain.*`, FX window) and track templates (`track.template.*`, Track menu) |
 | 31 | FX pin maps, detector input on 3/4 | gap — key routes (ADR-0018) cover the common sidechain case |
 | 32 | Render selected tracks/items/regions as stems | done — render dialog stems/regions |
 | 33 | Queue exports, second output format | partial — renders are jobs; one format per render |
@@ -74,5 +74,5 @@ branch) · **gap** (not started).
 - Also closed: new MIDI items from the GUI (Item > New MIDI item, double-click on
   empty channel space), the item clipboard, the metronome, comping (#21),
   plugin-parameter automation recording (#27).
-- Open: crossfade shape editing (#10), tempo ramps and meter edits in the ruler
-  (#23), automation items (#28), track templates (#30), screensets (#38), count-in.
+- Open: meter changes on the timeline (#23), automation items (#28), screensets
+  (#38), count-in, FX pin maps (#31), multichannel strips (#6).
