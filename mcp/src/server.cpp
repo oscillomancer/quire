@@ -333,7 +333,7 @@ Status pump(Server& server, Byter& byter, std::ostream& output, const Tick& tick
         const int ready = byter.wait(periodic ? static_cast<int>(tick.interval.count()) : -1);
         if (ready < 0) break;
         if (ready == 0) {
-            runTick();
+            if (periodic) runTick();
             continue;
         }
         const int next = byter.get();

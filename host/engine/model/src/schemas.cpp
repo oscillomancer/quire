@@ -5,6 +5,7 @@
 #include "supple/base/files.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 
 namespace supple::model {
@@ -60,28 +61,35 @@ Schema<midi::Sequence> sequenceSchema() {
         }
         auto intAt = [&](const json::Value& row, std::size_t i, std::int64_t lo, std::int64_t hi,
                          const std::string& at, std::int64_t& x) {
-            if (i >= row.size() || !row.at(i).isNumber()) {
-                c.error("schema.type", "expected a number", at + "/" + std::to_string(i));
+            if (i >= row.size()) {
+                c.error("schema.type", "expected an integer", at + "/" + std::to_string(i));
                 return false;
             }
-            x = static_cast<std::int64_t>(row.at(i).asDouble());
+            const auto path = at + "/" + std::to_string(i);
+            if (!schema::integer().decodeInto(row.at(i), x, c, path)) return false;
             if (x < lo || x > hi) {
-                c.error("schema.out_of_range", "value out of range", at + "/" + std::to_string(i),
+                c.error("schema.out_of_range", "value out of range", path,
                         std::to_string(lo) + " .. " + std::to_string(hi));
                 return false;
             }
             return true;
         };
         bool ok = true;
-        if (const auto* ppq = v.find("ppq"); ppq && ppq->isNumber())
-            out.ppq = static_cast<int>(ppq->asInt());
-        if (const auto* len = v.find("length"); len && len->isNumber()) out.length = len->asInt();
+        if (const auto* ppq = v.find("ppq"))
+            ok &= schema::integerOf<int>().range(1, 32767).decodeInto(*ppq, out.ppq, c, p + "/ppq");
+        if (const auto* len = v.find("length"))
+            ok &= schema::integer().min(0).decodeInto(*len, out.length, c, p + "/length");
+        for (const char* key : {"notes", "controls", "sysex"})
+            if (const auto* rows = v.find(key); rows && !rows->isArray()) {
+                c.error("schema.type", "expected an array", p + "/" + key);
+                ok = false;
+            }
         if (const auto* notes = v.find("notes"); notes && notes->isArray()) {
             for (std::size_t i = 0; i < notes->size(); ++i) {
                 const auto& row = notes->at(i);
                 const std::string at = p + "/notes/" + std::to_string(i);
                 std::int64_t s = 0, l = 0, ch = 0, key = 0, vel = 0, off = 0;
-                if (!row.isArray() || row.size() < 5) {
+                if (!row.isArray() || row.size() < 5 || row.size() > 6) {
                     c.error("schema.type",
                             "a note is [start, length, channel, pitch, velocity, off_velocity?]",
                             at);
@@ -124,7 +132,9 @@ Schema<midi::Sequence> sequenceSchema() {
                 }
                 std::int64_t t = 0, ch = 0, n = 0, val = 0;
                 if (!intAt(row, 0, 0, INT64_MAX / 4, at, t) || !intAt(row, 2, 1, 16, at, ch) ||
-                    !intAt(row, 3, 0, 127, at, n) || !intAt(row, 4, -8192, 16383, at, val)) {
+                    !intAt(row, 3, 0, 127, at, n) ||
+                    !intAt(row, 4, ctl.kind == midi::ControlKind::PitchBend ? -8192 : 0,
+                           ctl.kind == midi::ControlKind::PitchBend ? 8191 : 127, at, val)) {
                     ok = false;
                     continue;
                 }
@@ -146,12 +156,28 @@ Schema<midi::Sequence> sequenceSchema() {
                     continue;
                 }
                 midi::Sysex x;
-                x.tick = row.at(0).asInt();
+                if (!intAt(row, 0, 0, INT64_MAX / 4, at, x.tick)) {
+                    ok = false;
+                    continue;
+                }
                 const std::string& hex = row.at(1).asString();
-                for (std::size_t k = 0; k + 1 < hex.size() + 1; k += 3) {
-                    if (k + 2 > hex.size()) break;
-                    x.bytes.push_back(
-                        static_cast<std::uint8_t>(std::stoul(hex.substr(k, 2), nullptr, 16)));
+                bool valid = !hex.empty() && hex.size() % 3 == 2;
+                for (std::size_t k = 0; valid && k < hex.size(); k += 3) {
+                    unsigned byte = 0;
+                    const auto [end, ec] =
+                        std::from_chars(hex.data() + k, hex.data() + k + 2, byte, 16);
+                    valid = ec == std::errc{} && end == hex.data() + k + 2 &&
+                            (k + 2 == hex.size() || hex[k + 2] == ' ');
+                    if (valid) x.bytes.push_back(static_cast<std::uint8_t>(byte));
+                }
+                if (!valid || x.bytes.size() < 2 || x.bytes.front() != 0xF0 ||
+                    x.bytes.back() != 0xF7 ||
+                    std::any_of(x.bytes.begin() + 1, x.bytes.end() - 1,
+                                [](std::uint8_t byte) { return byte > 0x7F; })) {
+                    c.error("schema.type", "expected a hexadecimal F0 .. F7 sysex message",
+                            at + "/1", "e.g. F0 7E 7F 09 01 F7");
+                    ok = false;
+                    continue;
                 }
                 out.sysex.push_back(std::move(x));
             }
@@ -926,12 +952,22 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         } else {
             s.project = std::make_shared<const Project>(std::move(*project));
         }
-        if (next && next->isObject())
-            for (const auto& m : next->asObject()) {
-                auto k = kindFromPrefix(m.key);
-                if (k && m.value.isNumber())
-                    s.next[*k] = static_cast<std::uint32_t>(m.value.asInt());
-            }
+        if (next) {
+            if (!next->isObject())
+                errors.emplace_back("schema.type", "expected next_ids object", "/project/next_ids");
+            else
+                for (const auto& m : next->asObject()) {
+                    const auto k = kindFromPrefix(m.key);
+                    if (!k) continue;
+                    auto counter = schema::integerOf<std::uint32_t>().decode(m.value);
+                    if (!counter) {
+                        auto error = std::move(counter).error();
+                        error.path = json::pointerJoin("/project/next_ids", m.key) + error.path;
+                        errors.push_back(std::move(error));
+                    } else
+                        s.next[*k] = *counter;
+                }
+        }
     }
     auto sub = [&](const char* a, const char* b) -> const json::Value* {
         const json::Value* x = doc.find(a);

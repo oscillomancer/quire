@@ -437,3 +437,34 @@ TEST_CASE("a script created without a registry or dispatcher can still compute")
     REQUIRE_MESSAGE(!call, call.error().toString());
     CHECK(call.error().code == "script.error");  // q.toy is nil: the bindings are not there
 }
+
+TEST_CASE("Lua JSON conversion bounds cyclic and deep tables and preserves binary keys") {
+    Scene scene;
+    auto cyclic = scene.run("local t = {}; t.self = t; return t");
+    REQUIRE_FALSE(cyclic);
+    CHECK(cyclic.error().code == "script.value");
+    auto deep = scene.run("local t = {}; for i = 1, 100 do t = {t} end; return t");
+    REQUIRE_FALSE(deep);
+    CHECK(deep.error().code == "script.value");
+    auto badArgs = scene.run("local t = {}; t.self = t; q.toy.add(t)");
+    REQUIRE_FALSE(badArgs);
+    CHECK(badArgs.error().code == "script.value");
+    CHECK(badArgs.error().path.rfind("/args", 0) == 0);
+    auto cyclicError = scene.run("local t = {code='custom'}; t.details = {t}; error(t)");
+    REQUIRE_FALSE(cyclicError);
+    CHECK(cyclicError.error().code == "custom");
+    auto version = scene.run("q.run('toy.add@999999999999999999999999', {})");
+    REQUIRE_FALSE(version);
+    CHECK(version.error().code == "command.version");
+    for (const auto* expression : {"return 0/0", "return math.huge", "return {x=-math.huge}"}) {
+        auto number = scene.run(expression);
+        REQUIRE_FALSE(number);
+        CHECK(number.error().code == "script.value");
+    }
+    auto keys = scene.runWith("return args", obj(R"({"a\u0000b":1,"a":2})"));
+    REQUIRE(keys);
+    CHECK(keys->result == obj(R"({"a\u0000b":1,"a":2})"));
+    auto healthy = scene.run("return 42");
+    REQUIRE(healthy);
+    CHECK(healthy->result == 42);
+}

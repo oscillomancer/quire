@@ -2,6 +2,8 @@
 
 #include <curl/curl.h>
 
+#include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 
@@ -16,11 +18,15 @@ void initCurl() {
     std::call_once(once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
-// Tool arguments as an object; malformed or empty JSON gives {}.
-json::Value parseObject(const std::string& raw) {
+// Tool arguments must be a JSON object.
+Result<json::Value> parseObject(const std::string& raw) {
     if (raw.empty()) return json::Value::object();
     auto v = json::parse(raw);
-    return v && v->isObject() ? *v : json::Value::object();
+    if (!v)
+        return Error("agent.tool_arguments", "invalid tool argument JSON", {},
+                     v.error().toString());
+    if (!v->isObject()) return Error("agent.tool_arguments", "tool arguments must be an object");
+    return std::move(*v);
 }
 
 std::string trimSlash(std::string s) {
@@ -206,7 +212,11 @@ Result<Turn> anthropic(const Endpoint& e, const Request& r,
         } else if (type == "content_block_stop") {
             const int index = static_cast<int>(at((*ev), "index").asInt());
             if (auto it = callAt.find(index); it != callAt.end()) {
-                turn.message.toolCalls[it->second].input = parseObject(partialJson[index]);
+                auto input = parseObject(partialJson[index]);
+                if (!input)
+                    streamError = input.error();
+                else
+                    turn.message.toolCalls[it->second].input = std::move(*input);
             }
         } else if (type == "message_start") {
             if (const json::Value* u = at((*ev), "message").find("usage"))
@@ -323,6 +333,7 @@ Result<Turn> openai(const Endpoint& e, const Request& r,
     Turn turn;
     turn.message.role = Message::Role::Assistant;
     std::map<int, std::string> args;  // per tool call index
+    std::map<int, ToolCall> toolCalls;
     std::optional<Error> streamError;
     SseParser sse;
     auto onEvent = [&](std::string_view, std::string_view data) {
@@ -358,11 +369,20 @@ Result<Turn> openai(const Endpoint& e, const Request& r,
         }
         if (const json::Value* calls = delta->find("tool_calls"); calls && calls->isArray())
             for (const json::Value& call : calls->asArray()) {
-                const int index =
-                    call.find("index") ? static_cast<int>(at(call, "index").asInt()) : 0;
-                while (static_cast<int>(turn.message.toolCalls.size()) <= index)
-                    turn.message.toolCalls.push_back({});
-                ToolCall& tc = turn.message.toolCalls[static_cast<std::size_t>(index)];
+                int index = 0;
+                if (const auto* value = call.find("index")) {
+                    if (!value->isNumber() || !std::isfinite(value->asDouble()) ||
+                        value->asDouble() < 0 ||
+                        value->asDouble() > std::numeric_limits<int>::max() ||
+                        std::floor(value->asDouble()) != value->asDouble()) {
+                        streamError =
+                            Error("agent.tool_index",
+                                  "tool call index must be a nonnegative integer in range");
+                        return;
+                    }
+                    index = static_cast<int>(value->asDouble());
+                }
+                ToolCall& tc = toolCalls[index];
                 if (const json::Value* id = call.find("id"); id && id->isString())
                     tc.id = id->asString();
                 if (const json::Value* fn = call.find("function"); fn && fn->isObject()) {
@@ -381,10 +401,12 @@ Result<Turn> openai(const Endpoint& e, const Request& r,
         [&](std::string_view bytes) { sse.feed(bytes, onEvent); }, stop);
     if (!status) return std::move(status).error();
     if (streamError) return *streamError;
-    for (auto& [index, raw] : args) {
-        auto& tc = turn.message.toolCalls[static_cast<std::size_t>(index)];
-        tc.input = parseObject(raw);
+    for (auto& [index, tc] : toolCalls) {
+        auto input = parseObject(args[index]);
+        if (!input) return input.error();
+        tc.input = std::move(*input);
         if (tc.id.empty()) tc.id = "call_" + std::to_string(index);
+        turn.message.toolCalls.push_back(std::move(tc));
     }
     if (turn.stopReason.empty())
         turn.stopReason = turn.message.toolCalls.empty() ? "end_turn" : "tool_use";

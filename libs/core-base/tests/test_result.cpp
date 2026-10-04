@@ -42,6 +42,11 @@ TEST_CASE("base units and closest match") {
     CHECK(*hz == 1200);
     CHECK(units::formatQuantity(1200, units::Unit::Hz) == "1.20 kHz");
     CHECK(units::formatQuantity(4, units::Unit::ratio) == "4.00:1");
+    for (const char* text : {"1e308 kHz", "-1e308 kHz"}) {
+        auto overflow = units::parseQuantity(text, units::Unit::Hz);
+        REQUIRE_FALSE(overflow);
+        CHECK(overflow.error().code == "schema.unit");
+    }
     const std::string_view names[] = {"cutoff", "resonance"};
     CHECK(closestMatch("cuttoff", names) == "cutoff");
 }

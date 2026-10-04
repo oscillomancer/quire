@@ -107,7 +107,7 @@ Result<json::Value> describe(const model::Session& s, const Target& t) {
     json::Value out = json::Value::object();
     out["item"] = t.item.str();
     out["ppq"] = static_cast<std::int64_t>(seq.ppq);
-    out["length"] = round4(s.items.find(t.item)->length);
+    out["length"] = round4(model::itemLengthBeats(s, *s.items.find(t.item)));
     out["position"] = round4(t.frame.itemPosition);
     if (t.midi->pooled) out["pooled"] = true;
     json::Value notes = json::Value::array();
@@ -208,7 +208,7 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
                 if (op.startDelta) {
                     const std::int64_t end = n.start + n.length;
                     n.start = std::clamp<std::int64_t>(n.start + f.ticksOf(*op.startDelta), 0,
-                                                       end - minLength);
+                                                       std::max<std::int64_t>(0, end - minLength));
                     n.length = end - n.start;
                 }
                 if (op.lengthDelta)

@@ -485,3 +485,49 @@ TEST_CASE("automation items replace the envelope under them: loop, scale, overla
     t4.create(stray);
     CHECK_FALSE(t4.commit());
 }
+
+TEST_CASE("project MIDI decoding rejects malformed rows without truncation or exceptions") {
+    auto doc = projectToJson(richSession());
+    auto& seq = doc["sources"]["midi"]["mi_1"]["sequence"];
+    auto rejects = [&](const char* key, const char* input, const char* field) {
+        auto bad = doc;
+        bad["sources"]["midi"]["mi_1"]["sequence"][key] = json::parse(input).value();
+        Result<Session> result = Error("test", "not decoded");
+        REQUIRE_NOTHROW(result = projectFromJson(bad));
+        REQUIRE_FALSE(result);
+        CHECK(result.error().path == std::string("/sources/midi/mi_1/sequence/") + field);
+    };
+    rejects("ppq", "0", "ppq");
+    rejects("ppq", "960.5", "ppq");
+    rejects("length", "-1", "length");
+    rejects("notes", "false", "notes");
+    rejects("notes", "[[0.5,480,1,60,96]]", "notes/0/0");
+    rejects("notes", "[[1e100,480,1,60,96]]", "notes/0/0");
+    rejects("notes", "[[0,480,1,60,96,0,123]]", "notes/0");
+    rejects("controls", "[[0,\"cc\",1,7,-1]]", "controls/0/4");
+    rejects("controls", "[[0,\"program\",1,0,128]]", "controls/0/4");
+    rejects("controls", "[[0,\"bend\",1,0,8192]]", "controls/0/4");
+    rejects("sysex", "[[0,\"GG\"]]", "sysex/0/1");
+    rejects("sysex", "[[0,\"F0 7E F7 junk\"]]", "sysex/0/1");
+    rejects("sysex", "[[0,\"F0 FF F7\"]]", "sysex/0/1");
+    rejects("sysex", "[[-1,\"F0 F7\"]]", "sysex/0/0");
+    seq["notes"] = json::parse("[[9007199254740993,480,1,60,96]]").value();
+    auto exact = projectFromJson(doc);
+    REQUIRE(exact);
+    CHECK(exact->midi.find(Id{Kind::Midi, 1})->sequence.notes[0].start == 9007199254740993LL);
+}
+
+TEST_CASE("project ID counters refuse narrowing and fractional values") {
+    for (const char* value : {"-1", "4294967297", "1.5", "1e100", "\"1\""}) {
+        auto doc = projectToJson(Session::create());
+        doc["project"]["next_ids"]["tr"] = json::parse(value).value();
+        auto parsed = projectFromJson(doc);
+        REQUIRE_FALSE(parsed);
+        CHECK(parsed.error().path == "/project/next_ids/tr");
+    }
+    auto doc = projectToJson(Session::create());
+    doc["project"]["next_ids"] = false;
+    auto parsed = projectFromJson(doc);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().path == "/project/next_ids");
+}

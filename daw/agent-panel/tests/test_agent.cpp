@@ -92,6 +92,30 @@ Options skillOptions(const std::filesystem::path& dir) {
 
 }  // namespace
 
+TEST_CASE("follow-up agent turns return to their branch after auditioning the base") {
+    Rig rig;
+    FakeServer server;
+    server.push(anthropicTurn("First turn", {}));
+    server.push(anthropicTurn(
+        "Follow-up", {{"exec", R"({"command":"track.add","args":{"name":"Follow-up"}})"}}));
+    server.push(anthropicTurn("Done", {}));
+    Session s({Endpoint::Kind::Anthropic, "fake", server.url(), "test-model", "sk-test"},
+              rig.registry, *rig.dispatcher, rig.post(), skillOptions(rig.dir / "skill"));
+    bool idle = false;
+    s.events.idle = [&] { idle = true; };
+    s.events.error = [&](const std::string& error) { FAIL(error); };
+    REQUIRE(s.send("Start"));
+    REQUIRE(rig.pump([&] { return idle; }));
+    REQUIRE(s.audition(false));
+    idle = false;
+    REQUIRE(s.send("Add a track"));
+    REQUIRE(rig.pump([&] { return idle; }));
+    CHECK(rig.tracks("Follow-up") == 1);
+    REQUIRE(s.audition(false));
+    CHECK(rig.tracks("Follow-up") == 0);
+    REQUIRE(s.reject());
+}
+
 TEST_CASE("SSE parsing survives arbitrary chunking") {
     SseParser p;
     std::vector<std::pair<std::string, std::string>> got;
@@ -104,6 +128,43 @@ TEST_CASE("SSE parsing survives arbitrary chunking") {
     CHECK(got[0] == std::pair<std::string, std::string>{"a", "{\"x\":1}"});
     CHECK(got[1].second == "line1\nline2");
     CHECK(got[2].second == "[DONE]");
+}
+
+TEST_CASE("streamed tool calls reject malformed arguments and invalid indices") {
+    Request request;
+    request.messages.push_back({Message::Role::User, "Test", {}, {}});
+    for (const auto kind : {Endpoint::Kind::Anthropic, Endpoint::Kind::OpenAI}) {
+        for (const auto* input : {"{broken", "[]   "}) {
+            FakeServer server;
+            server.push(kind == Endpoint::Kind::Anthropic ? anthropicTurn("", {{"exec", input}})
+                                                          : openaiTurn("", {{"exec", input}}));
+            auto turn =
+                complete({kind, "fake", server.url(), "test-model", "sk-test"}, request, {}, {});
+            REQUIRE_FALSE(turn);
+            CHECK(turn.error().code == "agent.tool_arguments");
+        }
+    }
+    for (const auto* index : {"-1", "0.5", "1e100", "2147483647"}) {
+        FakeServer server;
+        auto reply = openaiTurn("", {{"exec", "{}   "}});
+        for (auto& chunk : reply.chunks) {
+            const auto position = chunk.find("\"tool_calls\":[{\"index\":0");
+            if (position != std::string::npos)
+                chunk.replace(position + std::string("\"tool_calls\":[{\"index\":").size(), 1,
+                              index);
+        }
+        server.push(std::move(reply));
+        auto turn =
+            complete({Endpoint::Kind::OpenAI, "fake", server.url(), "test-model", "sk-test"},
+                     request, {}, {});
+        if (std::string_view(index) == "2147483647") {
+            REQUIRE(turn);
+            CHECK(turn->message.toolCalls.size() == 1);
+        } else {
+            REQUIRE_FALSE(turn);
+            CHECK(turn.error().code == "agent.tool_index");
+        }
+    }
 }
 
 TEST_CASE("request bodies carry history, tool calls and results in each format") {

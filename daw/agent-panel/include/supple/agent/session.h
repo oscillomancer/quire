@@ -70,7 +70,7 @@ class Session {
     const std::string& system() const { return system_; }
 
   private:
-    void work(std::stop_token stop);
+    void work(std::stop_token stop, std::weak_ptr<int> alive);
     Result<json::Value> exec(const std::string& command, json::Value args);  // model thread
     ToolResult call(const ToolCall& call);                                   // model thread
     Status ensureBranch();                                                   // model thread

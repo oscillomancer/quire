@@ -6,6 +6,7 @@
 #include <lualib.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <string_view>
@@ -143,11 +144,12 @@ const cmd::CommandInfo* findInfo(ScriptImpl& impl, std::string_view name) {
     if (!impl.registry) return nullptr;
     const auto at = name.find('@');
     if (at == std::string_view::npos) return impl.registry->find(name);
+    const auto suffix = name.substr(at + 1);
     int version = 0;
-    for (char ch : name.substr(at + 1)) {
-        if (ch < '0' || ch > '9') return nullptr;
-        version = version * 10 + (ch - '0');
-    }
+    const auto [end, ec] = std::from_chars(suffix.data(), suffix.data() + suffix.size(), version);
+    if (suffix.empty() || suffix.front() == '0' || ec != std::errc{} ||
+        end != suffix.data() + suffix.size() || version <= 0)
+        return nullptr;
     return impl.registry->find(name.substr(0, at), version);
 }
 
@@ -565,6 +567,13 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
     ScriptImpl& impl = *impl_;
     if (!impl.L || impl.subscriptions.empty()) return;
     lua_State* L = impl.L;
+    const bool wasRunning = impl.running;
+    impl.running = true;
+    struct Finished {
+        bool& flag;
+        bool previous;
+        ~Finished() { flag = previous; }
+    } finished{impl.running, wasRunning};
     std::vector<ScriptImpl::Subscription> matches;
     for (const auto& subscription : impl.subscriptions)
         if (topicMatches(subscription.topic, topic) && filterMatches(subscription.filter, payload))
@@ -574,7 +583,7 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
                                        [&](const auto& s) { return s.id == subscription.id; });
         if (live == impl.subscriptions.end()) continue;  // q.off inside an earlier handler
         const int base = lua_gettop(L);
-        startBudget(L, impl, impl.options.defaultBudgetMs);
+        if (!wasRunning) startBudget(L, impl, impl.options.defaultBudgetMs);
         lua_rawgeti(L, LUA_REGISTRYINDEX, subscription.ref);
         pushJson(L, payload);
         lua_pushlstring(L, topic.data(), topic.size());
@@ -583,7 +592,7 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
             impl.appendLog("handler for " + subscription.topic + " failed: " + error.code + ": " +
                            error.message);
         }
-        stopBudget(L);
+        if (!wasRunning) stopBudget(L);
         lua_settop(L, base);
     }
 }

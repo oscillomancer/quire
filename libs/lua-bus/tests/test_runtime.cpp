@@ -196,3 +196,19 @@ TEST_CASE("a script cannot run itself from a handler") {
     CHECK(log.back().find("script.busy") != std::string::npos);
     CHECK(scene.runtime.droppedEvents() == 0);
 }
+
+TEST_CASE("delivering a handler preserves the running script's instruction hook") {
+    Scene scene;
+    auto out = scene.runtime.run("budget", R"(
+        q.on('session.changed', function() seen = true end)
+        q.toy.add{value = 1}
+        local sum = 0
+        for i = 1, 10000 do sum = sum + i end
+        return {seen = seen, sum = sum}
+    )",
+                                 -1.0);
+    REQUIRE(out);
+    CHECK(out->result["seen"] == true);
+    CHECK(out->result["sum"] == 50005000);
+    CHECK(out->instructions >= scene.runtime.find("budget")->options().hookCount);
+}

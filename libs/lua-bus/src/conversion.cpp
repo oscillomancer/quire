@@ -5,6 +5,7 @@
 #include <lua.h>
 #include <lualib.h>
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -112,26 +113,34 @@ const json::Value* itemSchema(const json::Value& schema) {
 }
 
 Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* schema,
-                                const std::string& path);
+                                const std::string& path, int depth);
 
 Result<json::Value> valueToJson(lua_State* L, int index, const json::Value* schema,
-                                const std::string& path) {
+                                const std::string& path, int depth) {
+    if (depth > 64 || !lua_checkstack(L, 4))
+        return Error("script.value", "table nesting exceeds the JSON conversion limit", path,
+                     "use an acyclic table with at most 64 levels");
     switch (lua_type(L, index)) {
         case LUA_TNIL:
             return json::Value();
         case LUA_TBOOLEAN:
             return json::Value(static_cast<bool>(lua_toboolean(L, index)));
-        case LUA_TNUMBER:
+        case LUA_TNUMBER: {
             if (lua_isinteger(L, index))
                 return json::Value(static_cast<long long>(lua_tointeger(L, index)));
-            return json::Value(static_cast<double>(lua_tonumber(L, index)));
+            const double number = static_cast<double>(lua_tonumber(L, index));
+            if (!std::isfinite(number))
+                return Error("script.value", "non-finite numbers have no JSON form", path,
+                             "use a finite number");
+            return json::Value(number);
+        }
         case LUA_TSTRING: {
             std::size_t length = 0;
             const char* text = lua_tolstring(L, index, &length);
             return json::Value(std::string(text, length));
         }
         case LUA_TTABLE:
-            return tableToJson(L, index, schema, path);
+            return tableToJson(L, index, schema, path, depth);
         case LUA_TLIGHTUSERDATA:
             if (isNull(L, index)) return json::Value();
             break;
@@ -145,7 +154,7 @@ Result<json::Value> valueToJson(lua_State* L, int index, const json::Value* sche
 }
 
 Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* schema,
-                                const std::string& path) {
+                                const std::string& path, int depth) {
     const int table = lua_absindex(L, index);
     const Kind kind = kindOf(L, table, schema);
     const std::size_t length = lua_rawlen(L, table);
@@ -158,7 +167,7 @@ Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* sche
         const json::Value* items = schema ? itemSchema(*schema) : nullptr;
         for (std::size_t i = 1; i <= length; ++i) {
             lua_rawgeti(L, table, static_cast<lua_Integer>(i));
-            auto item = valueToJson(L, -1, items, path + "/" + std::to_string(i - 1));
+            auto item = valueToJson(L, -1, items, path + "/" + std::to_string(i - 1), depth + 1);
             lua_pop(L, 1);
             if (!item) return item.error();
             out.push_back(std::move(*item));
@@ -169,9 +178,11 @@ Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* sche
     lua_pushnil(L);
     while (lua_next(L, table) != 0) {
         std::string key;
-        if (lua_type(L, -2) == LUA_TSTRING)
-            key = lua_tostring(L, -2);
-        else if (lua_isinteger(L, -2))
+        if (lua_type(L, -2) == LUA_TSTRING) {
+            std::size_t keyLength = 0;
+            const char* keyText = lua_tolstring(L, -2, &keyLength);
+            key.assign(keyText, keyLength);
+        } else if (lua_isinteger(L, -2))
             // An integer key in an object position is passed through as its
             // decimal name: the bus then reports it as an unknown member,
             // which is more useful than refusing it here.
@@ -183,7 +194,7 @@ Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* sche
             return Error("script.table", "object keys must be strings", path,
                          "use {\"name\": value} with string keys");
         const json::Value* member = schema ? memberSchema(*schema, key) : nullptr;
-        auto value = valueToJson(L, -1, member, path + "/" + key);
+        auto value = valueToJson(L, -1, member, json::pointerJoin(path, key), depth + 1);
         lua_pop(L, 1);
         if (!value) return value.error();
         out[key] = std::move(*value);
@@ -230,8 +241,9 @@ void pushJson(lua_State* L, const json::Value& value) {
             lua_createtable(L, 0, static_cast<int>(value.size()));
             const int table = lua_gettop(L);
             for (const auto& member : value.asObject()) {
+                lua_pushlstring(L, member.key.data(), member.key.size());
                 pushJson(L, member.value);
-                lua_setfield(L, table, member.key.c_str());
+                lua_rawset(L, table);
             }
             return;
         }
@@ -240,7 +252,7 @@ void pushJson(lua_State* L, const json::Value& value) {
 
 Result<json::Value> toJson(lua_State* L, int index, const json::Value* schema,
                            const std::string& path) {
-    return valueToJson(L, index, schema, path);
+    return valueToJson(L, index, schema, path, 0);
 }
 
 void pushError(lua_State* L, const Error& error) {
@@ -264,7 +276,12 @@ void pushError(lua_State* L, const Error& error) {
     lua_setfield(L, table, "details");
 }
 
-Error errorFromLua(lua_State* L, int index) {
+namespace {
+Error errorFromLuaAt(lua_State* L, int index, int depth) {
+    if (depth > 64 || !lua_checkstack(L, 4))
+        return Error("script.error", "error details exceed the nesting limit", {},
+                     "use an acyclic error table with at most 64 levels");
+    index = lua_absindex(L, index);
     if (lua_type(L, index) == LUA_TTABLE) {
         Error error;
         lua_getfield(L, index, "code");
@@ -284,7 +301,7 @@ Error errorFromLua(lua_State* L, int index) {
             const std::size_t count = lua_rawlen(L, -1);
             for (std::size_t i = 1; i <= count; ++i) {
                 lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
-                error.details.push_back(errorFromLua(L, -1));
+                error.details.push_back(errorFromLuaAt(L, -1, depth + 1));
                 lua_pop(L, 1);
             }
         }
@@ -297,5 +314,9 @@ Error errorFromLua(lua_State* L, int index) {
     if (lua_type(L, index) == LUA_TSTRING) return Error("script.error", lua_tostring(L, index));
     return Error("script.error", "the script raised a non-string, non-table error value");
 }
+
+}  // namespace
+
+Error errorFromLua(lua_State* L, int index) { return errorFromLuaAt(L, index, 0); }
 
 }  // namespace supple::lua

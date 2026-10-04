@@ -222,7 +222,8 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
     };
     auto encoding = renderEncoding(*s.project, a.format, a.bitDepth);
     if (!encoding) return std::move(encoding).error();
-    SUPPLE_TRY(secondaryEncoding(*s.project, a.secondary));  // refused before rendering
+    auto secondary = secondaryEncoding(*s.project, a.secondary);
+    if (!secondary) return std::move(secondary).error();
     const std::string formatName = encoding->container;
     std::string pattern = a.name.value_or(a.pattern.value_or(
         setting("pattern") && setting("pattern")->isString() ? setting("pattern")->asString()
@@ -358,10 +359,17 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         if (relative.empty() || *relative.begin() == ".." || relative.is_absolute())
             return Error("render.path", "render name escapes the renders directory", "/pattern");
         task.label = *name;
-        for (const auto& prior : tasks)
-            if (prior.path == task.path)
+        const auto second =
+            *secondary ? secondaryPath(task.path, *encoding, **secondary) : fs::path{};
+        for (const auto& prior : tasks) {
+            const auto priorSecond =
+                *secondary ? secondaryPath(prior.path, *encoding, **secondary) : fs::path{};
+            if (prior.path == task.path ||
+                (!second.empty() &&
+                 (prior.path == second || priorSecond == task.path || priorSecond == second)))
                 return Error("render.path", "render files collide", "/pattern",
                              "include {track}, {region}, or {counter}");
+        }
         tasks.push_back(std::move(task));
         return {};
     };

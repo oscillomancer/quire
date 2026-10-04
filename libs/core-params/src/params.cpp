@@ -7,11 +7,13 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "supple/base/closest.h"
+#include "supple/json/pointer.h"
 #include "supple/json/write.h"
 
 namespace supple::params {
@@ -178,8 +180,8 @@ Status validateTable(Table table) {
                 else if (p.curve.kind == CurveKind::Log && !(p.max / p.min <= 1e15))
                     fail("log_range", "a log curve spans at most 15 decades (max/min <= 1e15)");
                 if ((p.curve.kind == CurveKind::Pow || p.curve.kind == CurveKind::Bipolar) &&
-                    !(p.curve.k > 0.0))
-                    fail("curve_k", "pow/bipolar curves need k > 0");
+                    !(std::isfinite(p.curve.k) && p.curve.k > 0.0))
+                    fail("curve_k", "pow/bipolar curves need finite k > 0");
                 break;
             case Type::Int:
                 if (!(p.min < p.max)) fail("range", "min must be below max");
@@ -629,6 +631,10 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
     };
     const json::Value* id = e.find("id");
     if (!id || !id->isNumber()) return Error("params.description", "no id", "/" + out->key);
+    if (!isInteger(id->asDouble()) || id->asDouble() < 0 ||
+        id->asDouble() > std::numeric_limits<std::uint32_t>::max())
+        return Error("params.description", "id must be an integer 0..4294967295",
+                     json::pointerJoin("", out->key) + "/id");
     p.id = static_cast<std::uint32_t>(id->asDouble());
     out->name = str("name");
     out->group = str("group");

@@ -1436,7 +1436,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 model::Take tk = **source;
                 const double delta = tk.source && tk.source->kind == model::Kind::Midi
                                          ? (a.at - startBeat) * tk.playrate
-                                         : splitSec - startSec;
+                                         : (splitSec - startSec) * tk.playrate;
                 tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
                 tk.chain.clear();
@@ -1867,8 +1867,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             const auto& fx = *s.fx.find(*id);
             auto effective = app(ctx).mergedPatch(fx, json::Value::object(), false);
-            if (!effective) return std::move(effective).error();  // a broken patch is the cause
-            const auto* params = effective->find("params");
+            if (!effective && effective.error().code != "fx.not_semantic")
+                return std::move(effective).error();  // a broken patch is the cause
+            const auto* params = effective ? effective->find("params") : nullptr;
             if (params && params->isObject())
                 if (const auto* value = params->find(a.param)) return FxParamResult{*value};
             for (const auto& [key, value] : fx.params)

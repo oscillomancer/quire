@@ -194,7 +194,8 @@ Result<std::string> EngineApp::describeFx(const model::FxInstance& fx, bool chan
     if (!inr) return std::move(inr).error();
     host::Instance& in = **inr;
     if (!in.info().semantic) return in.info().name;
-    if (fx.patch) SUPPLE_TRY(in.setPatch(json::writeCompact(*fx.patch), CLAP_SUPPLE_SET_REPLACE));
+    auto patch = mergedPatch(fx, json::Value::object(), false);
+    if (!patch) return std::move(patch).error();
     return in.describe(changedOnly);
 }
 

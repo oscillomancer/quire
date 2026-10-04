@@ -1052,8 +1052,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                     return Error("tempo.order", "tempo points must increase in beat",
                                  "/points/" + std::to_string(i) + "/beat");
             std::vector<Id> old;
-            for (const auto& e : model::Traits<model::TempoPointObj>::map(t.base()))
-                old.push_back(e.id);
+            const auto current = A(ctx).view();
+            for (const auto& e : current.tempo) old.push_back(e.id);
             for (Id id : old) t.remove<model::TempoPointObj>(id);
             for (const auto& p : a.points) t.create(model::TempoPointObj{p.beat, p.bpm, p.ramp});
             return CountResult{static_cast<std::int64_t>(a.points.size())};
@@ -1084,7 +1084,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 return Error("timesig.invalid", "invalid meter " + a.meter, "/meter",
                              "N 1..64, D a power of 2");
             std::optional<Id> at;
-            for (const auto& e : model::Traits<model::MeterObj>::map(t.base()))
+            const auto current = A(ctx).view();
+            for (const auto& e : current.meters)
                 if (e.value->bar == a.bar) at = e.id;
             if (at)
                 t.put(*at, model::MeterObj{a.bar, n, d});
@@ -1111,7 +1112,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const TimesigRemoveArgs& a, Context& ctx) -> Result<Empty> {
             model::EditTxn& t = A(ctx).txn();
             std::optional<Id> at;
-            for (const auto& e : model::Traits<model::MeterObj>::map(t.base()))
+            const auto current = A(ctx).view();
+            for (const auto& e : current.meters)
                 if (e.value->bar == a.bar) at = e.id;
             if (!at)
                 return Error("timesig.unknown", "no meter change at bar " + std::to_string(a.bar),
@@ -1215,6 +1217,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                     a.track + " is a folder with " + std::to_string(tr.children.size()) + " tracks",
                     "/track", "move or remove its children first");
             std::set<Id> gone(tr.chain.begin(), tr.chain.end());
+            gone.insert(tr.inputChain.begin(), tr.inputChain.end());
             gone.insert(id);
             for (const auto& e : s.items)
                 if (e.value->track == id) {

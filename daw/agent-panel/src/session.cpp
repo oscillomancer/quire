@@ -9,6 +9,7 @@
 #include "supple/base/files.h"
 #include "supple/json/write.h"
 #include "supple/mcp/server.h"
+#include "supple/product.h"
 
 namespace supple::agent {
 namespace {
@@ -90,7 +91,9 @@ Session::Session(Endpoint endpoint, const cmd::Registry& registry, cmd::Dispatch
         R"({"type": "object", "properties": {"topic": {"type": "string"}}, "required": ["topic"]})");
     skill["properties"]["topic"]["enum"] = std::move(topics);
     tools_.push_back({"skill_read",
-                      "Read a topic of the Quire skill (guides and generated references).", skill});
+                      "Read a topic of the " + std::string(product::kName) +
+                          " skill (guides and generated references).",
+                      skill});
     tools_.push_back({"listen",
                       "Ask the human to listen before you decide: what to listen for, where, and "
                       "whether to A/B against their "
@@ -120,7 +123,7 @@ Result<json::Value> Session::exec(const std::string& command, json::Value args) 
 }
 
 Status Session::ensureBranch() {
-    if (!branch_.empty()) return {};
+    if (!branch_.empty()) return audition(true);
     auto list = exec("branch.list", json::Value::object());
     if (!list) return std::move(list).error();
     base_ = at((*list), "current").asString();
@@ -157,7 +160,8 @@ bool Session::send(std::string prompt) {
         history_.push_back(std::move(m));
     }
     busy_ = true;
-    worker_ = std::jthread([this](std::stop_token stop) { work(stop); });
+    worker_ = std::jthread(
+        [this, alive = std::weak_ptr<int>(alive_)](std::stop_token stop) { work(stop, alive); });
     return true;
 }
 
@@ -206,8 +210,7 @@ ToolResult Session::call(const ToolCall& c) {
     return r;
 }
 
-void Session::work(std::stop_token stop) {
-    std::weak_ptr<int> alive = alive_;
+void Session::work(std::stop_token stop, std::weak_ptr<int> alive) {
     auto onModel = [this, alive](std::function<void()> f) {
         post_([alive, f = std::move(f)] {
             if (alive.lock()) f();
