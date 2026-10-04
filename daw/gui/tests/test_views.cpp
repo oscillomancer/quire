@@ -23,6 +23,7 @@
 #include "supple/model/session.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
+#include "supple/views/mouse_map.h"
 
 using namespace supple;
 
@@ -1108,4 +1109,47 @@ TEST_CASE("the strip's input button names the ports and hands the anchor to the 
     CHECK(tcp.pickedAnchor.w > 0);
     CHECK(tcp.pickedAnchor.x > 0);
     CHECK(tcp.pickedAnchor.y > 0);
+}
+
+TEST_CASE("the mouse map: built-in defaults, per-combination overrides, the file round-trips") {
+    views::MouseMap m;
+    CHECK(m.behaviour("item.drag", 0) == "move");
+    CHECK(m.behaviour("item.drag", ui::kAlt) == "slip");
+    CHECK(m.behaviour("item.drag", ui::kCtrl | ui::kShift) == "copy_free");
+    CHECK(m.behaviour("item.drag", ui::kCtrl | ui::kAlt) == "move");   // unbound: the plain press
+    CHECK(m.behaviour("item.drag", ui::kAlt | ui::kSuper) == "slip");  // other modifiers ignored
+    CHECK(m.behaviour("envelope", ui::kAlt) == "delete");
+    CHECK(m.behaviour("nowhere", 0).empty());
+    // The defaults write an empty contexts object.
+    CHECK(m.toJson()["contexts"].asObject().empty());
+    REQUIRE(m.set("item.drag", ui::kAlt, "copy"));
+    REQUIRE(m.set("item.drag", ui::kShift, ""));  // back to the plain press
+    REQUIRE(m.set("ruler.tempo", ui::kCtrl | ui::kAlt, "toggle_ramp"));
+    CHECK(m.behaviour("item.drag", ui::kShift) == "move");
+    json::Value doc = m.toJson();
+    CHECK(doc["contexts"]["item.drag"]["alt"].asString() == "copy");
+    CHECK(doc["contexts"]["item.drag"]["shift"].asString().empty());
+    CHECK(doc["contexts"]["ruler.tempo"]["ctrl+alt"].asString() == "toggle_ramp");
+    auto back = views::MouseMap::fromJson(doc);
+    REQUIRE(back);
+    CHECK(*back == m);
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-mouse-test-" + std::to_string(::getpid()));
+    REQUIRE(m.save(dir / "mouse.json"));
+    auto loaded = views::MouseMap::load(dir / "mouse.json");
+    REQUIRE(loaded);
+    CHECK(*loaded == m);
+    std::filesystem::remove_all(dir);
+    // Errors name the place and the choices.
+    auto bad = views::MouseMap::fromJson(
+        json::parse(R"({"schema":"supple.mouse/1.0","contexts":{"fade":{"hyper":"drag"}}})")
+            .value());
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "mouse.combo");
+    bad = views::MouseMap::fromJson(
+        json::parse(R"({"schema":"supple.mouse/1.0","contexts":{"fade":{"alt":"spin"}}})").value());
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().path == "/contexts/fade/alt");
+    CHECK(bad.error().hint.find("cycle_shape") != std::string::npos);
+    CHECK_FALSE(views::MouseMap::fromJson(json::parse(R"({"schema":"x"})").value()));
 }

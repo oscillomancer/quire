@@ -480,6 +480,40 @@ TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pool
     CHECK(items().size() == 1);
 }
 
+TEST_CASE("arrange gestures: the mouse map rebinds modifiers per context (gap log #37)") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id a = f.itemOnRow(0);
+    const float step = static_cast<float>(g.gridBeats()) * f.beatPx();
+    // Alt-drag copies instead of slipping; Ctrl-drag moves.
+    REQUIRE(g.mouse.set("item.drag", ui::kAlt, "copy"));
+    REQUIRE(g.mouse.set("item.drag", ui::kCtrl, "move"));
+    const std::size_t count = f.app->head().items.size();
+    auto offsetOf = [&] { return f.app->head().takes.find(*f.item(a).activeTake)->startOffset; };
+    const double pos = f.item(a).position, offset = offsetOf();
+    ui::Rect r = f.rectOf(a);
+    f.drag({r.x + r.w / 2, r.y + r.h / 2}, {r.x + r.w / 2 + 2 * step, r.y + r.h / 2}, ui::kAlt);
+    CHECK(f.app->head().items.size() == count + 1);
+    CHECK(f.item(a).position == pos);
+    CHECK(offsetOf() == offset);  // not slipped
+    r = f.rectOf(a);
+    f.drag({r.x + 14, r.y + r.h / 2}, {r.x + 14 + step, r.y + r.h / 2}, ui::kCtrl);
+    CHECK(f.app->head().items.size() == count + 1);
+    CHECK(f.item(a).position == doctest::Approx(pos + g.gridBeats()));
+    // Ctrl+click on an item now extends the selection (it toggled by default).
+    REQUIRE(g.mouse.set("item.click", ui::kCtrl, "extend"));
+    const model::Id b = f.itemOnRow(1);
+    f.click({f.rectOf(a).x + 14, f.rectOf(a).y + f.rectOf(a).h / 2});
+    f.click({f.rectOf(b).x + 14, f.rectOf(b).y + f.rectOf(b).h / 2}, ui::kCtrl);
+    f.click({f.rectOf(b).x + 14, f.rectOf(b).y + f.rectOf(b).h / 2}, ui::kCtrl);
+    CHECK(g.selection().size() == 2);
+    // Unknown behaviours are refused with the context's choices.
+    const auto bad = g.mouse.set("item.drag", ui::kAlt, "fly");
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().hint.find("slip") != std::string::npos);
+}
+
 TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length and play rate)") {
     Fixture f;
     if (!f.ok) return;

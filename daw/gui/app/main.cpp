@@ -38,6 +38,7 @@
 #include "meter_feed.h"
 #include "midi_editor.h"
 #include "mixer.h"
+#include "mouse_dialog.h"
 #include "plugin_windows.h"
 #include "render_dialog.h"
 #include "routing_matrix.h"
@@ -381,8 +382,19 @@ int main(int argc, char** argv) {
     appActions.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
+    auto chromeLayout = gui::ChromeLayout::load(gui::ChromeLayout::defaultFile(product::kSlug));
+    if (!chromeLayout)
+        std::fprintf(stderr, "menus: %s (using the defaults)\n",
+                     chromeLayout.error().toString().c_str());
+    // Toolbar and menu edits from the GUI are saved there (not in offscreen runs).
+    gui::Chrome chrome(root, appActions,
+                       chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults(),
+                       o.offscreen ? fs::path{} : gui::ChromeLayout::defaultFile(product::kSlug));
+    chrome.onError = [](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+    };
     appActions.addUi("ui.actions", "View: actions list",
-                     [&] { gui::openActionsList(root, appActions); });
+                     [&] { gui::openActionsList(root, appActions, &chrome); });
     appActions.addUi("ui.quit", "File: quit", [&] { quit = true; });
     gui::AgentPanel agentPanel(
         root, **app, registry, dispatcher,
@@ -441,21 +453,24 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
         return fxWindow.openToAdd(uiState, v);
     });
+    // Mouse modifiers (gap log #37): loaded into the arrange view below.
+    const fs::path mouseFile = views::MouseMap::defaultFile(product::kSlug);
+    gui::MouseDialog mouseDialog(root, shell.arrange()->gestures().mouse,
+                                 o.offscreen ? fs::path{} : mouseFile);
+    mouseDialog.onError = [](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+    };
+    appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
     gui::RenderDialog renderDialog(**app, dispatcher, root);
     appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
         return appActions.key(e.key, e.mods, typing);
     };
-    auto chromeLayout = gui::ChromeLayout::load(gui::ChromeLayout::defaultFile(product::kSlug));
-    if (!chromeLayout)
-        std::fprintf(stderr, "menus: %s (using the defaults)\n",
-                     chromeLayout.error().toString().c_str());
     {
         auto frame = std::make_unique<ui::Node>("window");
         frame->layout.dir = ui::Layout::Dir::Column;
-        frame->add(gui::makeChrome(root, appActions,
-                                   chromeLayout ? *chromeLayout : gui::ChromeLayout::defaults()));
+        frame->add(chrome.build());
         auto& body = frame->emplace<ui::Node>("main");
         body.layout.dir = ui::Layout::Dir::Row;
         auto& center = body.emplace<ui::Node>("center");
@@ -473,6 +488,11 @@ int main(int argc, char** argv) {
     {
         views::ItemGestures& g = shell.arrange()->gestures();
         const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
+        if (auto mouse = views::MouseMap::load(mouseFile))
+            g.mouse = std::move(*mouse);
+        else
+            std::fprintf(stderr, "mouse: %s (using the defaults)\n",
+                         mouse.error().toString().c_str());
         g.run = [&dispatcher, ui](
                     const std::string& label,
                     const std::vector<views::EditStep>& steps) -> Result<json::Value> {

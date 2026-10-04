@@ -1,9 +1,11 @@
 #include "chrome.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 #include "supple/base/files.h"
 #include "supple/json/parse.h"
+#include "supple/json/write.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/widgets.h"
 
@@ -41,6 +43,24 @@ class MenuTitle : public ui::Node {
     std::function<void(const ui::Rect&)> open_;
 };
 
+// A toolbar button that also answers a right-click (move, remove).
+class ToolButton : public ui::Button {
+  public:
+    ToolButton(std::string id, std::string text, std::function<void()> run,
+               std::function<void(const ui::Rect&)> context)
+        : Button(std::move(id), std::move(text), std::move(run)), context_(std::move(context)) {}
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.button == 3 && context_) {
+            if (e.type == ui::PointerEvent::Type::Down) context_(bounds());
+            return true;
+        }
+        return Button::onPointer(e);
+    }
+
+  private:
+    std::function<void(const ui::Rect&)> context_;
+};
+
 class ChromeBar : public ui::Node {
   public:
     using Node::Node;
@@ -65,7 +85,7 @@ ChromeLayout ChromeLayout::defaults() {
         {"File",
          {"ui.file.new", "ui.file.open", "ui.file.save", "ui.file.save_as", "-", "ui.file.import",
           "-", "render.mix", "ui.render", "-", "ui.quit"}},
-        {"Edit", {"history.undo", "history.redo", "-", "ui.actions"}},
+        {"Edit", {"history.undo", "history.redo", "-", "ui.actions", "ui.mouse"}},
         {"View",
          {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "ui.agent", "-", "ui.theme.mode",
           "ui.theme.palette", "-", "ui.screenset.save", "ui.screenset.load",
@@ -141,16 +161,39 @@ Result<ChromeLayout> ChromeLayout::load(const std::filesystem::path& file) {
     return l;
 }
 
-std::unique_ptr<ui::Node> makeChrome(ui::Root& root, AppActions& actions, ChromeLayout layout) {
-    auto bar = std::make_unique<ChromeBar>("chrome");
-    bar->layout.dir = ui::Layout::Dir::Row;
-    bar->layout.height = ui::SizeRule::fixed(36);
-    bar->layout.padding = ui::Insets::xy(8, 4);
-    bar->layout.gap = 2;
-    bar->layout.align = ui::Layout::Align::Center;
+json::Value ChromeLayout::toJson() const {
+    json::Value doc = json::Value::object(), menuList = json::Value::array(),
+                tools = json::Value::array();
+    doc["schema"] = "supple.menus/1.0";
+    for (const Menu& m : menus) {
+        json::Value menu = json::Value::object(), items = json::Value::array();
+        menu["title"] = m.title;
+        for (const std::string& id : m.items) items.push_back(id);
+        menu["items"] = std::move(items);
+        menuList.push_back(std::move(menu));
+    }
+    for (const std::string& id : toolbar) tools.push_back(id);
+    doc["menus"] = std::move(menuList);
+    doc["toolbar"] = std::move(tools);
+    return doc;
+}
+
+Status ChromeLayout::save(const std::filesystem::path& file) const {
+    if (file.empty()) return {};
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    auto text = json::write(toJson());
+    if (!text) return std::move(text).error();
+    return writeFileAtomic(file, *text + "\n");
+}
+
+namespace {
+
+void fillChrome(ui::Node& bar, ui::Root& root, AppActions& actions, const ChromeLayout& layout,
+                std::function<void(const std::string&, const ui::Rect&)> toolMenu) {
     for (const ChromeLayout::Menu& menu : layout.menus) {
         auto items = menu.items;
-        bar->emplace<MenuTitle>(
+        bar.emplace<MenuTitle>(
             menu.title, [&root, &actions, items, title = menu.title](const ui::Rect& anchor) {
                 std::vector<ui::MenuItem> entries;
                 for (const std::string& id : items) {
@@ -169,16 +212,124 @@ std::unique_ptr<ui::Node> makeChrome(ui::Root& root, AppActions& actions, Chrome
                                anchor);
             });
     }
-    auto& gap = bar->emplace<ui::Node>("chrome.gap");
+    auto& gap = bar.emplace<ui::Node>("chrome.gap");
     gap.layout.width = ui::SizeRule::fixed(16);
     for (const std::string& id : layout.toolbar) {
         const actions::Action* a = actions.registry().find(id);
         if (!a) continue;
-        auto& b = bar->emplace<ui::Button>("tool." + id, shortName(*a),
-                                           [&actions, id] { (void)actions.run(id); });
+        std::function<void(const ui::Rect&)> context;
+        if (toolMenu) context = [toolMenu, id](const ui::Rect& r) { toolMenu(id, r); };
+        auto& b = bar.emplace<ToolButton>(
+            "tool." + id, shortName(*a), [&actions, id] { (void)actions.run(id); }, context);
         b.layout.height = ui::SizeRule::fixed(26);
     }
+}
+
+std::unique_ptr<ui::Node> makeBar() {
+    auto bar = std::make_unique<ChromeBar>("chrome");
+    bar->layout.dir = ui::Layout::Dir::Row;
+    bar->layout.height = ui::SizeRule::fixed(36);
+    bar->layout.padding = ui::Insets::xy(8, 4);
+    bar->layout.gap = 2;
+    bar->layout.align = ui::Layout::Align::Center;
     return bar;
+}
+
+}  // namespace
+
+std::unique_ptr<ui::Node> makeChrome(ui::Root& root, AppActions& actions, ChromeLayout layout) {
+    auto bar = makeBar();
+    fillChrome(*bar, root, actions, layout, {});
+    return bar;
+}
+
+Chrome::Chrome(ui::Root& root, AppActions& actions, ChromeLayout layout, std::filesystem::path file)
+    : root_(root), actions_(actions), layout_(std::move(layout)), file_(std::move(file)) {}
+
+std::unique_ptr<ui::Node> Chrome::build() {
+    auto bar = makeBar();
+    bar_ = bar.get();
+    fill();
+    return bar;
+}
+
+void Chrome::fill() {
+    if (!bar_) return;
+    bar_->clear();
+    fillChrome(*bar_, root_, actions_, layout_,
+               [this](const std::string& id, const ui::Rect& r) { openToolMenu(id, r); });
+    bar_->relayout();
+}
+
+void Chrome::changed() {
+    fill();
+    if (auto saved = layout_.save(file_); !saved && onError)
+        onError("menus: " + saved.error().toString());
+}
+
+bool Chrome::inToolbar(const std::string& id) const {
+    return std::find(layout_.toolbar.begin(), layout_.toolbar.end(), id) != layout_.toolbar.end();
+}
+
+bool Chrome::inMenu(const std::string& title, const std::string& id) const {
+    for (const ChromeLayout::Menu& m : layout_.menus)
+        if (m.title == title) return std::find(m.items.begin(), m.items.end(), id) != m.items.end();
+    return false;
+}
+
+void Chrome::toggleToolbar(const std::string& id) {
+    if (inToolbar(id))
+        std::erase(layout_.toolbar, id);
+    else
+        layout_.toolbar.push_back(id);
+    changed();
+}
+
+void Chrome::moveTool(const std::string& id, int delta) {
+    auto& t = layout_.toolbar;
+    const auto at = std::find(t.begin(), t.end(), id);
+    if (at == t.end()) return;
+    const auto from = static_cast<int>(at - t.begin());
+    const int to = std::clamp(from + delta, 0, static_cast<int>(t.size()) - 1);
+    if (to == from) return;
+    std::string moved = std::move(t[static_cast<std::size_t>(from)]);
+    t.erase(t.begin() + from);
+    t.insert(t.begin() + to, std::move(moved));
+    changed();
+}
+
+void Chrome::toggleMenu(const std::string& title, const std::string& id) {
+    for (ChromeLayout::Menu& m : layout_.menus) {
+        if (m.title != title) continue;
+        if (std::find(m.items.begin(), m.items.end(), id) != m.items.end())
+            std::erase(m.items, id);
+        else
+            m.items.push_back(id);
+        changed();
+        return;
+    }
+}
+
+void Chrome::reset() {
+    layout_ = ChromeLayout::defaults();
+    changed();
+}
+
+void Chrome::openToolMenu(const std::string& id, const ui::Rect& anchor) {
+    std::vector<ui::MenuItem> items;
+    ui::MenuItem left, right, remove, rule, reset;
+    left.label = "Move left";
+    left.run = [this, id] { moveTool(id, -1); };
+    right.label = "Move right";
+    right.run = [this, id] { moveTool(id, 1); };
+    remove.label = "Remove from toolbar";
+    remove.run = [this, id] { toggleToolbar(id); };
+    rule.separator = true;
+    reset.label = "Reset menus and toolbar";
+    reset.run = [this] { this->reset(); };
+    items = {left, right, remove, rule, reset};
+    root_.openPopup(ui::makeMenu("tool.menu", std::move(items), [this] { root_.closePopup(); }),
+                    {anchor.x, anchor.bottom(), 1, 1});
 }
 
 }  // namespace supple::gui

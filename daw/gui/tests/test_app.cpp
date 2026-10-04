@@ -16,6 +16,7 @@
 #include "chrome.h"
 #include "fake_llm.h"
 #include "file_actions.h"
+#include "mouse_dialog.h"
 #include "shell.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
@@ -201,6 +202,95 @@ TEST_CASE("app actions: keys, the actions list, prompts, key binding and menus")
         {"gui.selection", json::Value::object(), {cmd::Origin::Type::Test, "t", {}}});
     REQUIRE(sel);
     CHECK((*sel)["tracks"].asArray().size() == 1);
+}
+
+TEST_CASE("the toolbar and menus are edited in the app and saved (gap log #37)") {
+    App a;
+    if (!a.ok) return;
+    const auto file = a.dir / "config" / "menus.json";
+    gui::Chrome chrome(*a.root, *a.actions, gui::ChromeLayout::defaults(), file);
+    {
+        auto frame = std::make_unique<ui::Node>("window");
+        frame->layout.dir = ui::Layout::Dir::Column;
+        frame->add(chrome.build());
+        frame->emplace<ui::Node>("body");
+        a.root->setContent(std::move(frame));
+        a.root->frame(false);
+    }
+    CHECK_FALSE(a.root->find("tool.track.add:buss"));
+    // Ctrl+T in the actions list puts the action on the toolbar.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.type("add buss");
+    a.key("Ctrl+T");
+    a.key("Escape");
+    REQUIRE(a.root->find("tool.track.add:buss"));
+    const std::size_t busses = a.tracks("buss");
+    REQUIRE(a.root->click("tool.track.add:buss"));
+    CHECK(a.tracks("buss") == busses + 1);
+    // Ctrl+M lists the menus; picking Edit adds it there.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.type("add buss");
+    a.key("Ctrl+M");
+    REQUIRE(a.root->find("actions.menus"));
+    a.key("Down");  // File
+    a.key("Down");  // Edit
+    a.key("Return");
+    CHECK(chrome.inMenu("Edit", "track.add:buss"));
+    a.key("Escape");
+    // A right-click on a toolbar button moves or removes it.
+    REQUIRE(a.root->click("tool.track.add:buss", 3));
+    a.root->frame(false);
+    REQUIRE(a.root->find("tool.menu"));
+    a.key("Down");  // Move left
+    a.key("Return");
+    const auto& t = chrome.layout().toolbar;
+    REQUIRE(t.size() >= 2);
+    CHECK(t[t.size() - 2] == "track.add:buss");
+    REQUIRE(a.root->click("tool.track.add:buss", 3));
+    a.root->frame(false);
+    a.key("Down");
+    a.key("Down");
+    a.key("Down");  // Remove from toolbar
+    a.key("Return");
+    a.root->frame(false);
+    CHECK_FALSE(a.root->find("tool.track.add:buss"));
+    // Every edit was saved; the file reads back as the chrome now is.
+    auto loaded = gui::ChromeLayout::load(file);
+    REQUIRE(loaded);
+    CHECK(loaded->toolbar == chrome.layout().toolbar);
+    CHECK(loaded->toJson() == chrome.layout().toJson());
+}
+
+TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #37)") {
+    App a;
+    if (!a.ok) return;
+    views::MouseMap map;
+    const auto file = a.dir / "config" / "mouse.json";
+    gui::MouseDialog dialog(*a.root, map, file);
+    dialog.open("item.drag");
+    a.root->frame(false);
+    REQUIRE(a.root->find("mouse.set.alt"));
+    CHECK(a.root->find("mouse.set.alt")->valueText() == "slip");
+    CHECK(a.root->find("mouse.set.ctrl+alt")->valueText() == "move  (plain)");
+    // Alt: pick "copy" (move, move off the grid, copy, ...).
+    REQUIRE(a.root->click("mouse.set.alt"));
+    a.root->frame(false);
+    REQUIRE(a.root->find("mouse.behaviours"));
+    a.key("Down");
+    a.key("Down");
+    a.key("Down");
+    a.key("Return");
+    CHECK(map.behaviour("item.drag", ui::kAlt) == "copy");
+    CHECK(a.root->find("mouse.set.alt")->valueText() == "copy");
+    auto saved = views::MouseMap::load(file);
+    REQUIRE(saved);
+    CHECK(*saved == map);
+    // Another context from the picker; then reset puts the defaults back.
+    REQUIRE(a.root->click("mouse.reset"));
+    CHECK(map.behaviour("item.drag", ui::kAlt) == "slip");
+    dialog.open("envelope");
+    a.root->frame(false);
+    CHECK(a.root->find("mouse.set.alt")->valueText() == "delete");
 }
 
 TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd and accepted") {

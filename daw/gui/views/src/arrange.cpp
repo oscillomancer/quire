@@ -542,7 +542,13 @@ class Ruler : public ui::Node {
     ui::Point press_{};
     double originalStart_ = 0, originalEnd_ = 0, draftStart_ = 0, draftEnd_ = 0;
     bool moved_ = false, loopEnabled_ = false;
-    bool punch_ = false;  // the range gesture edits the punch range (time row), not the loop
+    bool punch_ = false;       // the range gesture edits the punch range (time row), not the loop
+    bool markerFree_ = false;  // a marker/region drag the mouse map frees from the grid
+    std::string_view markerMods(unsigned mods) {
+        const std::string_view b = view_.gestures().mouse.behaviour("ruler.marker", mods);
+        markerFree_ = b == "move_free";
+        return b;
+    }
 };
 
 bool Ruler::onPointer(const ui::PointerEvent& e) {
@@ -560,6 +566,7 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
         const float y = e.pos.y - bounds().y;
         const bool free = (e.mods & ui::kShift) != 0;
         punch_ = false;
+        (void)markerMods(e.mods);  // a marker or region press drags by these modifiers
         if (y < kBeatRowH + kTimeRowH) {
             // The bars row sets the loop range, the time row the punch range.
             punch_ = y >= kBeatRowH;
@@ -604,7 +611,8 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
             root()->openPopup(std::move(field), {e.pos.x, e.pos.y, 1, 1});
             return true;
         } else if (y < kBeatRowH + kTimeRowH + kTempoRowH) {
-            const bool toggleRamp = e.clicks == 1 && (e.mods & ui::kAlt);
+            const bool toggleRamp = e.clicks == 1 && view_.gestures().mouse.behaviour(
+                                                         "ruler.tempo", e.mods) == "toggle_ramp";
             if (e.clicks != 2 && !toggleRamp) return true;
             const time::TempoPoint* hit = nullptr;
             float distance = 1e9f;
@@ -652,7 +660,7 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
                 const float right = view_.xAt(atSeconds(tm, rg.end, rg.timebase));
                 if (e.pos.x < left - 5 || e.pos.x > right + 5) continue;
                 id_ = entry.id;
-                if (e.mods & ui::kAlt) {
+                if (markerMods(e.mods) == "remove") {
                     json::Value args = json::Value::object();
                     args["id"] = id_.str();
                     execute("region.remove", std::move(args));
@@ -685,7 +693,7 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
             }
             if (hit) {
                 const auto& mk = *hit;
-                if (e.mods & ui::kAlt) {
+                if (markerMods(e.mods) == "remove") {
                     json::Value args = json::Value::object();
                     args["id"] = id_.str();
                     execute("marker.remove", std::move(args));
@@ -708,7 +716,9 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
     if (e.type == ui::PointerEvent::Type::Move || e.type == ui::PointerEvent::Type::Up) {
         moved_ = moved_ || std::abs(e.pos.x - press_.x) >= 3;
         if (moved_) {
-            const bool free = (e.mods & ui::kShift) != 0;
+            const bool ranged = drag_ == Drag::LoopNew || drag_ == Drag::LoopLeft ||
+                                drag_ == Drag::LoopRight || drag_ == Drag::LoopMove;
+            const bool free = ranged ? (e.mods & ui::kShift) != 0 : markerFree_;
             const double at = position(e.pos.x, free);
             const double raw = position(e.pos.x, true) - position(press_.x, true);
             draftStart_ = originalStart_;

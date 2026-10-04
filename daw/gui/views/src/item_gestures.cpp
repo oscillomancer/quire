@@ -155,14 +155,18 @@ class Ghost : public ui::Node {
         const model::Item* anchor =
             st.anchor.kind == model::Kind::Item ? itemOf(s, st.anchor) : nullptr;
         switch (st.drag) {
-            case ItemGestures::Drag::Move:
-                for (model::Id id : g.selection())
+            case ItemGestures::Drag::Move: {
+                std::vector<model::Id> moving = g.selection();
+                if (anchor && std::find(moving.begin(), moving.end(), st.anchor) == moving.end())
+                    moving.push_back(st.anchor);
+                for (model::Id id : moving)
                     if (const model::Item* it = itemOf(s, id))
                         if (auto r = rectFor(*it, st.deltaBeats, st.deltaRows, 0, 0)) {
                             c.fillRect(*r, t.color("focus").withAlpha(0.25f));
                             c.strokeRect(*r, t.color("focus"), 1.5f);
                         }
                 break;
+            }
             case ItemGestures::Drag::TrimLeft:
                 if (anchor)
                     if (auto r = rectFor(*anchor, 0, 0, 0, st.deltaBeats)) {
@@ -525,7 +529,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         press_ = e.pos;
         moved_ = false;
         free_ = (e.mods & ui::kShift) != 0;
-        copy_ = (e.mods & ui::kCtrl) != 0;
+        copy_ = false;
+        cycleFade_ = false;
         state_ = State{};
         if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env) {
             const model::Id env = *view_.trackLayout().rows()[*lane].env;
@@ -563,7 +568,7 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             if (e.button == 3 && h) state_.anchor = h->item;
             state_.drag = Drag::Marquee;
             state_.marquee = {e.pos.x, e.pos.y, 0, 0};
-            if (e.mods & (ui::kShift | ui::kCtrl)) state_.marqueeBase = selection_;
+            if (mouse.behaviour("lane.drag", e.mods) == "add") state_.marqueeBase = selection_;
         } else {
             state_.anchor = h->item;
             if (e.clicks >= 2) {
@@ -571,15 +576,30 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 state_ = State{};
                 return true;
             }
-            if (!isSelected(h->item) && !(e.mods & (ui::kShift | ui::kCtrl))) {
+            state_.drag = h->zone;
+            if (h->takeLane) state_.takeLane = *h->takeLane;
+            // The mouse map says what this press does with these modifiers.
+            std::string_view b;
+            if (state_.drag == Drag::Move) {
+                b = mouse.behaviour("item.drag", e.mods);
+                copy_ = b.starts_with("copy");
+                if (b.starts_with("slip")) state_.drag = Drag::Slip;
+            } else if (state_.drag == Drag::TrimLeft || state_.drag == Drag::TrimRight) {
+                b = mouse.behaviour("item.edge", e.mods);
+                state_.stretch = state_.drag == Drag::TrimRight && b.starts_with("stretch") &&
+                                 !isMidi(activeTake(s, *itemOf(s, h->item)));
+            } else if (state_.drag == Drag::FadeIn || state_.drag == Drag::FadeOut) {
+                b = mouse.behaviour("fade", e.mods);
+                cycleFade_ = b == "cycle_shape";
+            }
+            if (!b.empty()) free_ = b.ends_with("_free");
+            // A press on an unselected item selects it, unless these modifiers
+            // make a click toggle or extend the selection, or the drag copies.
+            if (!isSelected(h->item) && !copy_ &&
+                mouse.behaviour("item.click", e.mods) == "select") {
                 selection_ = {h->item};
                 changed();
             }
-            state_.drag = h->zone;
-            if (h->takeLane) state_.takeLane = *h->takeLane;
-            if (state_.drag == Drag::Move && (e.mods & ui::kAlt)) state_.drag = Drag::Slip;
-            state_.stretch = state_.drag == Drag::TrimRight && (e.mods & ui::kAlt) &&
-                             !isMidi(activeTake(s, *itemOf(s, h->item)));
         }
         if (root_) root_->capture(&view_);
         return true;
@@ -803,10 +823,10 @@ void ItemGestures::openItemMenu(ui::Point at) {
                     command = "env.add";
                     args["take"] = take.str();
                     args["param"] = param;
-                    json::Value points = json::Value::array(), first = json::Value::object();
-                    first["beat"] = 0.0;
-                    first["value"] = 0.0;
-                    points.push_back(std::move(first));
+                    json::Value points = json::Value::array(), start = json::Value::object();
+                    start["beat"] = 0.0;
+                    start["value"] = 0.0;
+                    points.push_back(std::move(start));
                     args["points"] = std::move(points);
                 }
                 if (auto r = run(env ? "Take envelope" : "Add take envelope",
@@ -888,8 +908,8 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         runSteps("Comp take", steps);
         return;
     }
-    // Ctrl+click on a fade handle cycles the fade's shape.
-    if (!moved_ && anchor && !anchor->locked && (e.mods & ui::kCtrl) &&
+    // A click on a fade handle with the cycle_shape modifier (Ctrl) cycles its shape.
+    if (!moved_ && anchor && !anchor->locked && cycleFade_ &&
         (state_.drag == Drag::FadeIn || state_.drag == Drag::FadeOut)) {
         static constexpr const char* kShapes[] = {"linear",    "slow", "fast", "slow_fast",
                                                   "fast_slow", "cos",  "exp"};
@@ -931,12 +951,13 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             runSteps("Switch take", {{"take.activate", std::move(args)}});
             return;
         }
-        if (e.mods & ui::kCtrl) {  // toggle
+        const std::string_view click = mouse.behaviour("item.click", e.mods);
+        if (click == "toggle") {
             if (isSelected(state_.anchor))
                 std::erase(selection_, state_.anchor);
             else
                 selection_.push_back(state_.anchor);
-        } else if (e.mods & ui::kShift) {
+        } else if (click == "extend") {
             if (!isSelected(state_.anchor)) selection_.push_back(state_.anchor);
         } else {
             selection_ = {state_.anchor};
@@ -950,10 +971,10 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             return;
         case Drag::Move: {
             if (state_.deltaBeats == 0 && state_.deltaRows == 0) return;
-            // Ctrl-drag copies: the anchor joins the copied set even if it was
-            // not selected (a Ctrl press on an unselected item does not select).
+            // The anchor joins the set even if it was not selected (a press
+            // whose modifiers copy, toggle or extend does not select it).
             std::vector<model::Id> items = selection_;
-            if (copy_ && !isSelected(state_.anchor)) items.push_back(state_.anchor);
+            if (!isSelected(state_.anchor)) items.push_back(state_.anchor);
             std::vector<EditStep> steps;
             std::vector<Placed> placed;
             for (model::Id id : items) {
@@ -1159,7 +1180,9 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
             nearest = i;
         }
     }
-    if (nearest && (e.mods & ui::kAlt)) {  // delete it
+    const std::string_view press = mouse.behaviour("envelope", e.mods);
+    free_ = press == "edit_free";
+    if (nearest && press == "delete") {
         state_.envDraft.erase(state_.envDraft.begin() + static_cast<std::ptrdiff_t>(*nearest));
         commitEnv("Delete envelope point");
         state_ = State{};

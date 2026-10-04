@@ -24,6 +24,7 @@
 #include "supple/json/json.h"
 #include "supple/model/session.h"
 #include "supple/ui/geometry.h"
+#include "supple/views/mouse_map.h"
 
 namespace supple::ui {
 class Root;
@@ -58,6 +59,9 @@ class ItemGestures {
     // REAPER's default: a move, copy or trim that makes two items overlap on a
     // track fades both over the overlap (in the same transaction).
     bool autoCrossfade = true;
+    // What each modifier does where the press lands (gap log #37); the ruler
+    // reads it too.
+    MouseMap mouse;
 
     const std::vector<model::Id>& selection() const { return selection_; }
     void setSelection(std::vector<model::Id> items);  // no onSelection call
@@ -179,7 +183,7 @@ class ItemGestures {
     std::vector<model::Id> selection_;
     State state_;
     ui::Point press_{};
-    bool moved_ = false, free_ = false, copy_ = false;
+    bool moved_ = false, free_ = false, copy_ = false, cycleFade_ = false;
     std::size_t pressRow_ = 0;
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it
     struct Clip {

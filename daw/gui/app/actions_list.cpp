@@ -4,8 +4,10 @@
 
 #include <memory>
 
+#include "chrome.h"
 #include "supple/json/parse.h"
 #include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 
@@ -47,8 +49,8 @@ class KeyCapture : public ui::Node {
 
 class ActionsPanel : public ui::Node {
   public:
-    ActionsPanel(ui::Root& root, AppActions& actions)
-        : Node("actions"), root_(root), actions_(actions) {
+    ActionsPanel(ui::Root& root, AppActions& actions, Chrome* chrome)
+        : Node("actions"), root_(root), actions_(actions), chrome_(chrome) {
         layout.dir = ui::Layout::Dir::Column;
         layout.width = ui::SizeRule::fixed(600);
         layout.height = ui::SizeRule::fixed(440);
@@ -57,13 +59,22 @@ class ActionsPanel : public ui::Node {
         search_ = &emplace<ui::TextField>("actions.search", "", "Search actions…");
         list_ = &emplace<ui::List>("actions.results");
         capture_ = &emplace<KeyCapture>([this](std::optional<actions::Chord> c) { captured(c); });
-        hint_ = &emplace<ui::Label>("actions.hint", kHint, ui::Font::Ui, "caption", "ink-quiet");
+        hint_ = &emplace<ui::Label>("actions.hint", chrome_ ? kChromeHint : kHint, ui::Font::Ui,
+                                    "caption", "ink-quiet");
         hint_->layout.width = ui::SizeRule::fraction();
         search_->onChange = [this](const std::string& q) { filter(q); };
         search_->onSubmit = [this](const std::string&) { activate(); };
         search_->onOtherKey = [this](const ui::KeyEvent& e) {
             if (e.key == SDLK_B && (e.mods & ui::kCtrl)) {
                 startCapture();
+                return true;
+            }
+            if (e.key == SDLK_T && (e.mods & ui::kCtrl) && chrome_) {
+                toggleToolbar();
+                return true;
+            }
+            if (e.key == SDLK_M && (e.mods & ui::kCtrl) && chrome_) {
+                openMenuChoice();
                 return true;
             }
             return list_->onKey(e);  // Up/Down/PgUp/PgDn/Home/End move the selection
@@ -93,6 +104,42 @@ class ActionsPanel : public ui::Node {
 
   private:
     static constexpr const char* kHint = "Enter run · Ctrl+B bind a key · Esc close";
+    static constexpr const char* kChromeHint =
+        "Enter run · Ctrl+B bind a key · Ctrl+T toolbar · Ctrl+M menu · Esc close";
+
+    void toggleToolbar() {
+        const actions::Action* a = current();
+        if (!a) return;
+        const std::string id = a->id;
+        chrome_->toggleToolbar(id);
+        hint_->setText((chrome_->inToolbar(id) ? "On the toolbar: " : "Off the toolbar: ") + id);
+    }
+
+    // Which menu holds the action: a checked entry per menu; choosing one
+    // adds the action there or takes it out.
+    void openMenuChoice() {
+        const actions::Action* a = current();
+        if (!a) return;
+        const std::string id = a->id;
+        std::vector<ui::MenuItem> items;
+        for (const ChromeLayout::Menu& m : chrome_->layout().menus) {
+            ui::MenuItem item;
+            item.label = m.title;
+            item.checked = chrome_->inMenu(m.title, id);
+            item.run = [this, title = m.title, id] {
+                chrome_->toggleMenu(title, id);
+                hint_->setText((chrome_->inMenu(title, id) ? "In " : "Out of ") + title + ": " +
+                               id);
+            };
+            items.push_back(std::move(item));
+        }
+        root_.openPopup(ui::makeMenu("actions.menus", std::move(items),
+                                     [this] {
+                                         root_.closePopup();
+                                         root_.focus(search_);
+                                     }),
+                        {}, ui::Placement::Center);
+    }
 
     void filter(const std::string& q) {
         matches_.clear();
@@ -138,7 +185,7 @@ class ActionsPanel : public ui::Node {
     void captured(std::optional<actions::Chord> chord) {
         root_.focus(search_);
         if (!chord) {
-            hint_->setText(kHint);
+            hint_->setText(chrome_ ? kChromeHint : kHint);
             return;
         }
         actions::Binding b{{*chord}, "global", capturing_};
@@ -187,6 +234,7 @@ class ActionsPanel : public ui::Node {
 
     ui::Root& root_;
     AppActions& actions_;
+    Chrome* chrome_ = nullptr;
     ui::TextField* search_ = nullptr;
     ui::List* list_ = nullptr;
     ui::Node* capture_ = nullptr;
@@ -197,9 +245,10 @@ class ActionsPanel : public ui::Node {
 
 }  // namespace
 
-void openActionsList(ui::Root& root, AppActions& actions) {
+void openActionsList(ui::Root& root, AppActions& actions, Chrome* chrome) {
     if (root.popupOpen()) root.closePopups();
-    root.openPopup(std::make_unique<ActionsPanel>(root, actions), {}, ui::Placement::Center);
+    root.openPopup(std::make_unique<ActionsPanel>(root, actions, chrome), {},
+                   ui::Placement::Center);
 }
 
 }  // namespace supple::gui
