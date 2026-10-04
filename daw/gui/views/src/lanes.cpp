@@ -515,13 +515,6 @@ void Lanes::drawMidi(const ui::Rect& r, const model::Item& item, const model::Ta
                      const model::MidiSource& source, std::uint32_t rgba, std::uint32_t border) {
     const midi::Sequence& seq = source.sequence;
     if (seq.notes.empty() || r.h < 4) return;
-    auto [lo, hi] = std::minmax_element(
-        seq.notes.begin(), seq.notes.end(),
-        [](const midi::Note& a, const midi::Note& b) { return a.pitch < b.pitch; });
-    const int pitches = hi->pitch - lo->pitch + 3;  // a free row above and below
-    const float noteH = std::max(1.0f, std::min(8.0f, r.h / static_cast<float>(pitches)));
-    const float usedH = noteH * static_cast<float>(pitches);
-    const float top = r.y + (r.h - usedH) / 2;
     const time::TimeMap& tm = *layout_.session().timeMap;
     const model::ItemSpan span = model::itemSpan(layout_.session(), item);
     const double itemBeat = span.startBeat;
@@ -529,22 +522,41 @@ void Lanes::drawMidi(const ui::Rect& r, const model::Item& item, const model::Ta
     const model::SourceBeatMapping mapping{take.startOffset,
                                            take.playrate > 0 ? take.playrate : 1.0,
                                            static_cast<double>(seq.length) / ppq};
+    const bool looping = item.loop && mapping.sourceLength > 0;
+    int lo = 127, hi = 0;
+    double end = 0;
+    bool hasNotes = false;
+    for (const midi::Note& n : seq.notes) {
+        if (looping && n.start >= seq.length) continue;
+        hasNotes = true;
+        lo = std::min(lo, static_cast<int>(n.pitch));
+        hi = std::max(hi, static_cast<int>(n.pitch));
+        end = std::max(end, (static_cast<double>(n.start) + static_cast<double>(n.length)) / ppq /
+                                mapping.rate);
+    }
+    if (!hasNotes) return;
+    const double tail = std::max(0.0, end - mapping.period());
+    const int pitches = hi - lo + 3;  // a free row above and below
+    const float noteH = std::max(1.0f, std::min(8.0f, r.h / static_cast<float>(pitches)));
+    const float usedH = noteH * static_cast<float>(pitches);
+    const float top = r.y + (r.h - usedH) / 2;
     const double visibleFrom =
         std::max(0.0, tm.beatAt(std::max(0.0, timeAt(bounds().x))) - itemBeat);
     const double visibleTo =
         std::min(tm.beatAt(span.endSec) - itemBeat,
                  tm.beatAt(std::max(0.0, timeAt(bounds().right()))) - itemBeat);
     std::size_t glyphs = 0;
-    for (const double base : mapping.visibleOrigins(tm.beatAt(span.endSec) - itemBeat, item.loop,
-                                                    visibleFrom, visibleTo))
+    for (const double base : mapping.visibleOrigins(tm.beatAt(span.endSec) - itemBeat, looping,
+                                                    visibleFrom, visibleTo, tail))
         for (const midi::Note& n : seq.notes) {
+            if (looping && n.start >= seq.length) continue;
             const double b0 = base + static_cast<double>(n.start) / ppq / mapping.rate;
             const double b1 = b0 + static_cast<double>(n.length) / ppq / mapping.rate;
             if (b1 <= visibleFrom || b0 >= visibleTo) continue;
             if (++glyphs > 8192) return;
             const double s0 = tm.secondsAt(itemBeat + std::max(0.0, b0));
             const double s1 = std::min(tm.secondsAt(itemBeat + b1), span.endSec);
-            const float y = top + static_cast<float>(hi->pitch + 1 - n.pitch) * noteH;
+            const float y = top + static_cast<float>(hi + 1 - n.pitch) * noteH;
             notes_->add({xAt(s0), y, std::max(1.0f, xAt(s1) - xAt(s0)), noteH}, rgba, border);
             ++stats_.notes;
         }

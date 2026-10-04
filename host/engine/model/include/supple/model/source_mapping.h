@@ -41,12 +41,23 @@ struct SourceBeatMapping {
     double itemBeat(double sourceBeat, double pass = 0, bool loop = false) const {
         return (sourceBeat + pass * sourceLength - sourceOffset(loop)) / rate;
     }
-    std::vector<double> visibleOrigins(double duration, bool loop, double from, double to) const {
-        if (!(rate > 0) || !std::isfinite(rate) || !(period() > 0) || !std::isfinite(period()))
+    // tail: the largest note-end extension beyond one source period, in item
+    // beats. Playback chases at most the preceding source cycle at item start.
+    std::vector<double> visibleOrigins(double duration, bool loop, double from, double to,
+                                       double tail = 0) const {
+        if (!(rate > 0) || !std::isfinite(rate) || !(duration > 0) || !std::isfinite(duration) ||
+            !(tail >= 0) || !std::isfinite(tail))
             return {};
-        const double span = loop ? (1 + std::floor(duration / period())) * period() : period();
+        const double origin = itemBeat(0, 0, loop);
+        if (!std::isfinite(origin)) return {};
+        if (!loop)
+            return std::min(duration, to) >= std::max(0.0, from) ? std::vector<double>{origin}
+                                                                 : std::vector<double>{};
+        if (!(period() > 0) || !std::isfinite(period())) return {};
+        const double first = origin - period();
+        const double span = duration - first;
         if (!std::isfinite(span)) return {};
-        return visibleLoopPasses(itemBeat(0, 0, loop), span, period(), loop, from, to);
+        return visibleLoopPasses(first, span, period(), true, from - tail, to);
     }
 };
 

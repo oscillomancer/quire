@@ -1170,6 +1170,18 @@ TEST_CASE("visible source passes preserve offset and rate with a bounded iterati
           std::vector<double>{100000, 100004, 100008});
     CHECK(model::visibleLoopPasses(0, 100, 0.001, true, 0, 100, 10).size() == 10);
     CHECK(model::visibleLoopPasses(0, 1, 1e-300, true, 0.5, 0.6).size() <= 1);
+    model::SourceBeatMapping crossing{0, 1, 4};
+    CHECK(crossing.visibleOrigins(8, true, 0, 8, 0.5) == std::vector<double>{-4, 0, 4});
+    CHECK(crossing.visibleOrigins(8, true, 4, 8, 0.5) == std::vector<double>{0, 4});
+    CHECK(crossing.visibleOrigins(8, true, 0, 8, 100) == std::vector<double>{-4, 0, 4});
+    CHECK(crossing.visibleOrigins(1e9, true, 100000, 100008, 0.5) ==
+          std::vector<double>{99996, 100000, 100004, 100008});
+    crossing.offset = 3.5;
+    CHECK(crossing.visibleOrigins(3, true, 0, 3, 0.5) == std::vector<double>{-3.5, 0.5});
+    crossing = {0, 2, 4};
+    CHECK(crossing.visibleOrigins(8, true, 0, 8, 0.25) == std::vector<double>{-2, 0, 2, 4, 6});
+    crossing = {0, 1, 1e-5};
+    CHECK(crossing.visibleOrigins(1e9, true, 0, 1e9, 1).size() == 8192);
     map.rate = 0;
     CHECK(map.visibleOrigins(20, true, 8, 10).empty());
 }
@@ -1535,5 +1547,112 @@ TEST_CASE("unrelated FX edits in 200 tracks and 2000 items have bounded invalida
         model::EditTxn txn(current, version++);
         txn.modify<model::Track>(tracks[0], [](auto& track) { track.hiddenTcp = true; });
         apply(txn, true, true, true);
+    }
+}
+
+TEST_CASE(
+    "MIDI thumbnails chase source-crossing tails and exclude loop starts outside the source") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    model::EditTxn build(model::Session::create(), 1);
+    model::Track track;
+    track.parent = model::kMaster;
+    const auto tid = build.create(track);
+    build.modify<model::Track>(model::kMaster, [&](auto& master) { master.children = {tid}; });
+    model::MidiSource midi;
+    midi.sequence.ppq = 960;
+    midi.sequence.length = 4 * 960;
+    midi.sequence.notes = {{3360, 960, 0, 72, 127, 0}};
+    const auto source = build.create(midi);
+    model::Take take;
+    take.source = source;
+    const auto takeId = build.create(take);
+    model::Item item;
+    item.track = tid;
+    item.length = 8;
+    item.loop = true;
+    item.takes = {takeId};
+    item.activeTake = takeId;
+    const auto itemId = build.create(item);
+    auto committed = build.commit();
+    REQUIRE(committed);
+    peaks::PeakService peaks(std::filesystem::temp_directory_path() /
+                                 ("supple-thumbnail-cache-" + std::to_string(::getpid())),
+                             [](std::function<void()>) {});
+    auto draw = [&](const model::Session& session, double start, double zoom, std::size_t notes) {
+        ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+        auto owned = std::make_unique<views::ArrangeView>(peaks, views::ArrangeView::Resolve{});
+        auto* view = owned.get();
+        view->show(session);
+        view->setViewport({start, zoom, 0});
+        root.setContent(std::move(owned));
+        root.frame(false);
+        CHECK(view->lanes().stats().notes == notes);
+        return root.readBack();
+    };
+    // Playback's 4-beat source: the previous note is held from 0 through .5,
+    // followed by notes at 3.5..4.5 and 7.5..8 (clipped at the item's end).
+    const auto canonical = draw(*committed, 0, 160, 3);
+    draw(*committed, 2, 160, 2);  // scroll to beat 4: chase the tail from pass 0
+    for (double offset : {4., 12., 400.}) {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::Take>(takeId, [&](auto& tk) { tk.startOffset = offset; });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        const auto image = draw(*edited, 0, 160, 3);
+        CHECK((image.rgba == canonical.rgba));
+    }
+    {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::Take>(takeId, [](auto& tk) { tk.playrate = 2; });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        draw(*edited, 0, 160, 5);
+    }
+    {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::MidiSource>(source, [](auto& src) {
+            src.sequence.notes.push_back({3840, 960, 0, 0, 127, 0});
+            src.sequence.notes.push_back({4800, 960, 0, 127, 127, 0});
+        });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        const auto image = draw(*edited, 0, 160, 3);
+        CHECK((image.rgba == canonical.rgba));  // also exclude these pitches from scaling
+        model::EditTxn noLoop(*edited, 3);
+        noLoop.modify<model::Item>(itemId, [](auto& it) { it.loop = false; });
+        auto plain = noLoop.commit();
+        REQUIRE(plain);
+        draw(*plain, 2.25, 160, 2);  // nonlooping notes beyond source length still play
+    }
+    {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::Take>(takeId, [](auto& tk) { tk.startOffset = 3.5; });
+        txn.modify<model::Item>(itemId, [](auto& it) { it.length = 3; });
+        txn.modify<model::MidiSource>(source, [](auto& src) {
+            src.sequence.notes.insert(src.sequence.notes.begin(), {0, 480, 0, 72, 127, 0});
+        });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        draw(*edited, 0, 160, 2);  // include the offset's final partial source cycle
+    }
+    {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::MidiSource>(source, [](auto& src) { src.sequence.length = 0; });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        draw(*edited, 0, 160, 1);  // playback uses one pass when no loop length exists
+    }
+
+    {
+        model::EditTxn txn(*committed, 2);
+        txn.modify<model::MidiSource>(source, [](auto& src) {
+            src.sequence.length = 1;
+            src.sequence.notes = {{0, 2, 0, 72, 127, 0}};
+        });
+        txn.modify<model::Item>(itemId, [](auto& it) { it.length = 100; });
+        auto edited = txn.commit();
+        REQUIRE(edited);
+        draw(*edited, 0, 1, 8192);  // keep the pass/glyph drawing budget
     }
 }
