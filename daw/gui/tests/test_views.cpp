@@ -1461,8 +1461,7 @@ TEST_CASE("unrelated FX edits in 200 tracks and 2000 items have bounded invalida
         model::AutomationItem ai;
         ai.envelope = envelope;
         ai.points = {{0, -6}, {4, 0}};
-        const auto id = txn.create(ai);
-        txn.modify<model::Envelope>(envelope, [&](auto& env) { env.items.push_back(id); });
+        txn.create(ai);
         apply(txn, false, false, true);
     }
     {
