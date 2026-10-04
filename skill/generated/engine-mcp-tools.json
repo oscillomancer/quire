@@ -1930,9 +1930,12 @@
               },
               "origin": {
                 "type": "string"
+              },
+              "squashed_steps": {
+                "type": "integer"
               }
             },
-            "required": ["version", "label", "origin"],
+            "required": ["version", "label", "origin", "squashed_steps"],
             "additionalProperties": false
           }
         },
@@ -1941,9 +1944,25 @@
         },
         "can_redo": {
           "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "retained_bytes": {
+          "type": "integer"
+        },
+        "budget_bytes": {
+          "type": "integer"
         }
       },
-      "required": ["versions", "can_undo", "can_redo"],
+      "required": [
+        "versions",
+        "can_undo",
+        "can_redo",
+        "truncated",
+        "retained_bytes",
+        "budget_bytes"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -2865,9 +2884,88 @@
             "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
             "additionalProperties": false
           }
+        },
+        "scan": {
+          "type": "object",
+          "title": "scan_report",
+          "properties": {
+            "failures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "scan_failure",
+                "properties": {
+                  "module": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "object",
+                    "title": "scan_reason",
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "hint": {
+                        "type": "string"
+                      },
+                      "details": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "required": ["code", "message", "path", "hint"],
+                    "additionalProperties": false
+                  },
+                  "cached": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["module", "reason", "cached"],
+                "additionalProperties": false
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "scan_reason",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": ["code", "message", "path", "hint"],
+                "additionalProperties": false
+              }
+            },
+            "cached_modules": {
+              "type": "integer"
+            }
+          },
+          "required": ["failures", "warnings", "cached_modules"],
+          "additionalProperties": false
         }
       },
-      "required": ["plugins"],
+      "required": ["plugins", "scan"],
       "additionalProperties": false
     },
     "annotations": {
@@ -2925,9 +3023,88 @@
             "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
             "additionalProperties": false
           }
+        },
+        "scan": {
+          "type": "object",
+          "title": "scan_report",
+          "properties": {
+            "failures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "scan_failure",
+                "properties": {
+                  "module": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "object",
+                    "title": "scan_reason",
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "hint": {
+                        "type": "string"
+                      },
+                      "details": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "required": ["code", "message", "path", "hint"],
+                    "additionalProperties": false
+                  },
+                  "cached": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["module", "reason", "cached"],
+                "additionalProperties": false
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "scan_reason",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": ["code", "message", "path", "hint"],
+                "additionalProperties": false
+              }
+            },
+            "cached_modules": {
+              "type": "integer"
+            }
+          },
+          "required": ["failures", "warnings", "cached_modules"],
+          "additionalProperties": false
         }
       },
-      "required": ["plugins"],
+      "required": ["plugins", "scan"],
       "additionalProperties": false
     },
     "annotations": {
@@ -3371,6 +3548,11 @@
         },
         "console9": {
           "type": "boolean"
+        },
+        "history_budget_bytes": {
+          "type": "integer",
+          "minimum": 1.0,
+          "description": "Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it."
         },
         "render": {},
         "timebase": {

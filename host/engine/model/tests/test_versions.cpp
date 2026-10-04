@@ -344,3 +344,117 @@ TEST_CASE("coalescing retains leased old versions without adding an undo step") 
     vs.collectUnused();
     CHECK_FALSE(vs.version(old));
 }
+
+TEST_CASE("history budget squashes oldest steps, retains leases and round-trips undo redo") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    const auto first = run(vs, {inv("track.add", R"({"name":"A"})")});
+    std::weak_ptr<const Session> old = vs.pin(first);
+    const auto second = run(vs, {inv("track.set", R"({"track":"tr_1","name":"B"})")});
+    CHECK(old.expired());
+    CHECK_FALSE(vs.version(first));
+    CHECK(vs.historyTruncated());
+    REQUIRE(vs.history().size() == 2);
+    CHECK(vs.history().front()->txn.label == "earlier history");
+    CHECK(vs.history().front()->squashedSteps == 1);
+    CHECK(vs.history().front()->txn.invocations.size() == 2);
+    auto lease = vs.pin(second);
+    run(vs, {inv("track.set", R"({"track":"tr_1","name":"C"})")});
+    REQUIRE(vs.version(second));
+    CHECK(lease->tracks.find(Id{Kind::Track, 1})->name == "B");
+    REQUIRE(vs.undo());
+    CHECK(vs.headVersion("main") == second);
+    CHECK(track(vs, "main", "tr_1")->name == "B");
+    REQUIRE(vs.redo());
+    CHECK(track(vs, "main", "tr_1")->name == "C");
+    lease.reset();
+    vs.enforceBudget();
+    CHECK_FALSE(vs.version(second));
+    REQUIRE(vs.undo());
+    CHECK_FALSE(track(vs, "main", "tr_1"));
+    CHECK(vs.historyTruncated());  // the combined step is now a redo target
+    REQUIRE(vs.redo());
+    CHECK(track(vs, "main", "tr_1")->name == "C");
+    CHECK(vs.head()->next[Kind::Track] > 1);
+}
+
+TEST_CASE(
+    "history payload estimate deduplicates large shared sources and squashing releases them") {
+    VersionStore vs(Session::create());
+    auto commitBlob = [&](const std::string& key) {
+        auto state = *vs.head();
+        state.version = vs.nextVersion();
+        state.blobs.clear();
+        auto source = std::make_shared<MidiSource>();
+        source->sequence.length = 960;
+        source->sequence.notes.resize(8000);
+        state.midi = IdMap<MidiSource>().with(Id{Kind::Midi, 1}, state.version, source);
+        state.next[Kind::Midi] = 2;
+        auto data = std::make_shared<Blob>();
+        data->data.resize(128 * 1024);
+        state.blobs.emplace(key, data);
+        REQUIRE(vs.commit(std::move(state), {key, "test", {}, {}}, {}, {}));
+        return std::weak_ptr<const Blob>(data);
+    };
+    auto a = commitBlob("a");
+    const auto one = vs.retainedBytes();
+    for (int i = 0; i < 3; ++i) {
+        auto state = *vs.head();
+        state.version = vs.nextVersion();
+        REQUIRE(vs.commit(std::move(state), {"shared", "test", {}, {}}, {}, {}));
+    }
+    CHECK(vs.retainedBytes() < one + 16 * 1024);  // shared blob and MIDI payload counted once
+    auto b = commitBlob("b");
+    auto state = *vs.head();
+    auto project = *state.project;
+    project.historyBudgetBytes = one + 16 * 1024;
+    state.project = std::make_shared<const Project>(project);
+    state.version = vs.nextVersion();
+    REQUIRE(vs.commit(std::move(state), {"budget", "test", {}, {}}, {}, {}));
+    CHECK(a.expired());
+    CHECK_FALSE(b.expired());
+    CHECK(vs.retainedBytes() <= project.historyBudgetBytes);
+}
+
+TEST_CASE("budgeted branches retain fork boundaries and combined replay preserves merges") {
+    Project p;
+    p.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(p));
+    run(vs, {inv("track.add", R"({"name":"A"})")});
+    REQUIRE(vs.createBranch("other", "main"));
+    const auto fork = vs.headVersion("main");
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-3})")});
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-6})")});
+    REQUIRE(vs.switchBranch("other"));
+    run(vs, {inv("track.set", R"({"track":"tr_1","mute":true})")});
+    run(vs, {inv("track.set", R"({"track":"tr_1","name":"branch"})")});
+    REQUIRE(vs.version(fork));
+    auto merged = vs.merge("other", "main", apply, {});
+    REQUIRE(merged.conflicts.empty());
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -6);
+    CHECK(track(vs, "main", "tr_1")->mute);
+    CHECK(track(vs, "main", "tr_1")->name == "branch");
+    REQUIRE(vs.switchBranch("other"));
+    REQUIRE(vs.undo());
+    CHECK(vs.headVersion("other") == fork);
+    REQUIRE(vs.redo());
+    CHECK(track(vs, "other", "tr_1")->name == "branch");
+}
+
+TEST_CASE("squashed edits that return to the fork value still conflict with target edits") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    run(vs, {inv("track.add", R"({"name":"A"})")});
+    REQUIRE(vs.createBranch("agent", "main"));
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-6})")});
+    REQUIRE(vs.switchBranch("agent"));
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-3})")});
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":0})")});
+    const auto target = vs.headVersion("main");
+    auto result = vs.merge("agent", "main", apply, schemas);
+    CHECK_FALSE(result.conflicts.empty());
+    CHECK(vs.headVersion("main") == target);
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -6);
+}

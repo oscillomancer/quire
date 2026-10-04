@@ -477,6 +477,9 @@ Status automationExpansionBudget(const Session& s) {
 }
 
 Status validateNumeric(const Session& s) {
+    if (s.project->historyBudgetBytes == 0)
+        return Error("history.budget", "history byte budget must be positive",
+                     "/project/history_budget_bytes", "use a positive estimated byte budget");
     auto position = [&](double value, Timebase tb, const std::string& path) {
         return tb == Timebase::Time ? checkedSeconds(s, value, path) : checkedBeat(s, value, path);
     };

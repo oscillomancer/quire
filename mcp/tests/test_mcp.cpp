@@ -35,6 +35,12 @@ struct Host : cmd::Host {
         count = prior;
         return okStatus();
     }
+    Result<std::function<Status()>> invocationSavepoint() override {
+        return std::function<Status()>([this, saved = count] {
+            count = saved;
+            return okStatus();
+        });
+    }
     void log(const cmd::LogRecord&) override {}
     void emit(std::string_view, json::Value) override {}
 };

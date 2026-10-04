@@ -258,7 +258,11 @@ class Host {
     virtual Status rollbackTransaction(std::uint64_t) = 0;
     // Snapshot the open transaction before an invocation. On failure the
     // dispatcher calls the returned restore function, even if Lua catches it.
-    virtual std::function<void()> invocationSavepoint() { return {}; }
+    // Capture failure refuses the invocation. Restore failure poisons the
+    // outer transaction, even if the caller catches the command error.
+    virtual Result<std::function<Status()>> invocationSavepoint() {
+        return std::function<Status()>{};
+    }
     virtual void log(const LogRecord&) = 0;
     virtual void emit(std::string_view topic, json::Value payload) = 0;
     // Called on the model thread when a top-level command has finished (its
@@ -326,6 +330,7 @@ class Dispatcher {
     std::uint64_t sequence_ = 0;
     std::vector<Admission> admissions_;
     int transactionDepth_ = 0;  // > 0: commands join the open transact() transaction
+    std::optional<Error> transactionFailure_;
     std::mutex postedMutex_;
     std::vector<std::pair<std::string, std::function<Status()>>> posted_;
 };

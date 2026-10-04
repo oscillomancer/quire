@@ -124,8 +124,70 @@ struct PluginEntry {
     std::string path;
     std::optional<bool> shadowed;  // an earlier location on the plugin path has this id
 };
+struct ScanReason {
+    std::string code, message, path, hint;
+    std::optional<std::vector<json::Value>> details;
+};
+ScanReason scanReason(const Error& e) {
+    ScanReason r{e.code, e.message, e.path, e.hint, {}};
+    if (!e.details.empty()) {
+        auto encode = [](auto&& self, const Error& error) -> json::Value {
+            json::Value v = json::Value::object();
+            v["code"] = error.code;
+            v["message"] = error.message;
+            v["path"] = error.path;
+            v["hint"] = error.hint;
+            if (!error.details.empty()) {
+                v["details"] = json::Value::array();
+                for (const auto& d : error.details) v["details"].push_back(self(self, d));
+            }
+            return v;
+        };
+        r.details = std::vector<json::Value>{};
+        for (const auto& d : e.details) r.details->push_back(encode(encode, d));
+    }
+    return r;
+}
+struct ScanFailure {
+    std::string module;
+    ScanReason reason;
+    bool cached = false;
+};
+struct ScanReport {
+    std::vector<ScanFailure> failures;
+    std::vector<ScanReason> warnings;
+    std::uint64_t cachedModules = 0;
+};
+ScanReport scanReport(const host::ScanReport& source) {
+    ScanReport r;
+    for (const auto& f : source.failures)
+        r.failures.push_back({f.module.string(), scanReason(f.reason), f.cached});
+    for (const auto& w : source.warnings) r.warnings.push_back(scanReason(w));
+    r.cachedModules = source.cachedModules;
+    return r;
+}
+auto scanReportSchema() {
+    auto reason = schema::object<ScanReason>("scan_reason")
+                      .field("code", &ScanReason::code, schema::string())
+                      .field("message", &ScanReason::message, schema::string())
+                      .field("path", &ScanReason::path, schema::string())
+                      .field("hint", &ScanReason::hint, schema::string())
+                      .field("details", &ScanReason::details, schema::arrayOf(schema::any()))
+                      .build();
+    auto failure = schema::object<ScanFailure>("scan_failure")
+                       .field("module", &ScanFailure::module, schema::string())
+                       .field("reason", &ScanFailure::reason, reason)
+                       .field("cached", &ScanFailure::cached, schema::boolean())
+                       .build();
+    return schema::object<ScanReport>("scan_report")
+        .field("failures", &ScanReport::failures, schema::arrayOf(failure))
+        .field("warnings", &ScanReport::warnings, schema::arrayOf(reason))
+        .field("cached_modules", &ScanReport::cachedModules, schema::integerOf<std::uint64_t>())
+        .build();
+}
 struct PluginList {
     std::vector<PluginEntry> plugins;
+    ScanReport scan;
 };
 struct TimeArgs {
     std::optional<double> seconds, beat;
@@ -999,13 +1061,15 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
+                       .field("scan", &PluginList::scan, scanReportSchema())
                        .build();
         c.examples = {{"Find a test synth", j(R"({"filter":"test.sine"})"),
-                       j(R"({"plugins":"<any>"})"), "empty"}};
+                       j(R"({"plugins":"<any>","scan":"<any>"})"), "empty"}};
         c.run = [](const PluginArgs& a, Context& ctx) -> Result<PluginList> {
             auto found = app(ctx).plugins();
             if (!found) return std::move(found).error();
             PluginList out;
+            out.scan = scanReport(app(ctx).pluginScanReport());
             for (std::size_t i = 0; i < found->size(); ++i) {
                 const auto& p = (*found)[i];
                 if (a.filter && p.id.find(*a.filter) == std::string::npos &&
@@ -1042,12 +1106,14 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .build();
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
+                       .field("scan", &PluginList::scan, scanReportSchema())
                        .build();
-        c.examples = {{"Scan", j("{}"), j(R"({"plugins":"<any>"})"), "empty"}};
+        c.examples = {{"Scan", j("{}"), j(R"({"plugins":"<any>","scan":"<any>"})"), "empty"}};
         c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<PluginList> {
             auto found = app(ctx).plugins(true);
             if (!found) return std::move(found).error();
             PluginList out;
+            out.scan = scanReport(app(ctx).pluginScanReport());
             for (std::size_t i = 0; i < found->size(); ++i) {
                 const auto& p = (*found)[i];
                 PluginEntry e{p.id,         p.name,     p.vendor,        p.format,

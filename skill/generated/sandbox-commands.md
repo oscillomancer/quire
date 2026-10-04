@@ -1005,9 +1005,88 @@ Kind: `query`. Exposure: `mcp-tool`.
         ],
         "additionalProperties": false
       }
+    },
+    "scan": {
+      "type": "object",
+      "title": "scan_report",
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_failure",
+            "properties": {
+              "module": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "object",
+                "title": "scan_reason",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": ["code", "message", "path", "hint"],
+                "additionalProperties": false
+              },
+              "cached": {
+                "type": "boolean"
+              }
+            },
+            "required": ["module", "reason", "cached"],
+            "additionalProperties": false
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_reason",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {}
+              }
+            },
+            "required": ["code", "message", "path", "hint"],
+            "additionalProperties": false
+          }
+        },
+        "cached_modules": {
+          "type": "integer"
+        }
+      },
+      "required": ["failures", "warnings", "cached_modules"],
+      "additionalProperties": false
     }
   },
-  "required": ["plugins"],
+  "required": ["plugins", "scan"],
   "additionalProperties": false
 }
 
@@ -1026,7 +1105,8 @@ Result:
 
 ```json
 {
-  "plugins": "<any>"
+  "plugins": "<any>",
+  "scan": "<any>"
 }
 
 ```

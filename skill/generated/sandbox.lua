@@ -121,6 +121,7 @@ q = nil
 
 ---@class Quire.plugin_list_result
 ---@field plugins table[]
+---@field scan table
 
 ---@class Quire.plugin_load_args
 ---@field plugin string Plugin id or .clap path.

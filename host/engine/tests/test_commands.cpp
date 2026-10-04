@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <supple/product.h>
 
 #include <unistd.h>
 #include <cmath>
@@ -1567,4 +1568,80 @@ TEST_CASE("automation duplication refuses pool-id overflow without changing eith
     REQUIRE_FALSE(r);
     CHECK(r.error().code == "autoitem.pool");
     CHECK(model::serializeProject(app->head()) == before);
+}
+
+TEST_CASE("project history budget is persisted and history lists an earlier-history step") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "project.set", R"({"history_budget_bytes":1})");
+    run(bus, "track.add", R"({"name":"A"})");
+    run(bus, "track.set", R"({"track":"tr_1","name":"B"})");
+    auto history = run(bus, "history.list", "{}");
+    CHECK(history["truncated"].asBool());
+    CHECK(history["budget_bytes"].asInt() == 1);
+    CHECK(history["retained_bytes"].asInt() > 1);  // mandatory current/root payloads
+    CHECK(history["versions"].asArray()[0]["label"] == "earlier history");
+    CHECK(history["versions"].asArray()[0]["squashed_steps"].asInt() > 0);
+    auto saved = model::parseProject(model::serializeProject(app->head()));
+    REQUIRE(saved);
+    CHECK(saved->project->historyBudgetBytes == 1);
+    run(bus, "history.undo", "{}");
+    CHECK_FALSE(app->head().tracks.contains(model::Id{model::Kind::Track, 1}));
+    run(bus, "history.redo", "{}");
+    CHECK(app->head().tracks.find(model::Id{model::Kind::Track, 1})->name == "B");
+}
+
+TEST_CASE(
+    "engine catalogue commands retain failed-module cache reports with no available plugins") {
+    Workdir dir;
+    const auto cache = dir.path / "cache";
+    struct Environment {
+        std::optional<std::string> previous;
+        ~Environment() {
+            if (previous)
+                ::setenv("XDG_CACHE_HOME", previous->c_str(), 1);
+            else
+                ::unsetenv("XDG_CACHE_HOME");
+        }
+    } env;
+    if (const char* previous = std::getenv("XDG_CACHE_HOME")) env.previous = previous;
+    REQUIRE(::setenv("XDG_CACHE_HOME", cache.c_str(), 1) == 0);
+    struct Bridge {
+        fs::path previous =
+            fs::path(FIXTURE_CLAP_PATH).parent_path() / (std::string(product::kSlug) + "-bridge");
+        ~Bridge() { host::setBridgeExecutable(previous); }
+    } bridge;
+    const auto bad = dir.path / "bad.clap";
+    REQUIRE(writeFileAtomic(bad, "invalid plugin"));
+    AppOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {bad};
+    auto opened = EngineApp::create(options);
+    REQUIRE(opened);
+    auto& app = **opened;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, app);
+    auto first = run(bus, "plugin.list", "{}");
+    CHECK(first["plugins"].size() == 0);
+    auto failure = first["scan"]["failures"].asArray()[0];
+    CHECK(failure["module"] == fs::canonical(bad).string());
+    CHECK(failure["reason"]["code"] == "host.load");
+    CHECK(failure["reason"]["path"].isString());
+    CHECK(failure["reason"]["hint"].isString());
+    CHECK_FALSE(failure["cached"].asBool());
+    host::setBridgeExecutable(dir.path / "missing-bridge");
+    auto second = run(bus, "plugin.scan", "{}");
+    CHECK(second["plugins"].size() == 0);
+    CHECK(second["scan"]["warnings"].asArray()[0]["code"] == "host.scan.unsupervised");
+    CHECK(second["scan"]["failures"].asArray()[0]["cached"].asBool());
+    CHECK(second["scan"]["cached_modules"].asInt() == 1);
+    const std::vector<fs::path> empty;
+    REQUIRE(host::scan(empty));
+    auto retained = run(bus, "plugin.list", R"({"filter":"nothing"})");
+    CHECK(retained["scan"] == second["scan"]);
+    CHECK(retained["scan"]["warnings"].isArray());
 }

@@ -2577,9 +2577,12 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "origin": {
             "type": "string"
+          },
+          "squashed_steps": {
+            "type": "integer"
           }
         },
-        "required": ["version", "label", "origin"],
+        "required": ["version", "label", "origin", "squashed_steps"],
         "additionalProperties": false
       }
     },
@@ -2588,9 +2591,18 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "can_redo": {
       "type": "boolean"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "retained_bytes": {
+      "type": "integer"
+    },
+    "budget_bytes": {
+      "type": "integer"
     }
   },
-  "required": ["versions", "can_undo", "can_redo"],
+  "required": ["versions", "can_undo", "can_redo", "truncated", "retained_bytes", "budget_bytes"],
   "additionalProperties": false
 }
 
@@ -2611,7 +2623,10 @@ Result:
 {
   "versions": "<any>",
   "can_undo": true,
-  "can_redo": false
+  "can_redo": false,
+  "truncated": false,
+  "retained_bytes": "<any>",
+  "budget_bytes": 1073741824
 }
 
 ```
@@ -3902,9 +3917,88 @@ Kind: `query`. Exposure: `mcp-tool`.
         "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
+    },
+    "scan": {
+      "type": "object",
+      "title": "scan_report",
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_failure",
+            "properties": {
+              "module": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "object",
+                "title": "scan_reason",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": ["code", "message", "path", "hint"],
+                "additionalProperties": false
+              },
+              "cached": {
+                "type": "boolean"
+              }
+            },
+            "required": ["module", "reason", "cached"],
+            "additionalProperties": false
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_reason",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {}
+              }
+            },
+            "required": ["code", "message", "path", "hint"],
+            "additionalProperties": false
+          }
+        },
+        "cached_modules": {
+          "type": "integer"
+        }
+      },
+      "required": ["failures", "warnings", "cached_modules"],
+      "additionalProperties": false
     }
   },
-  "required": ["plugins"],
+  "required": ["plugins", "scan"],
   "additionalProperties": false
 }
 
@@ -3925,7 +4019,8 @@ Result:
 
 ```json
 {
-  "plugins": "<any>"
+  "plugins": "<any>",
+  "scan": "<any>"
 }
 
 ```
@@ -3985,9 +4080,88 @@ Kind: `action`. Exposure: `mcp-tool`.
         "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
         "additionalProperties": false
       }
+    },
+    "scan": {
+      "type": "object",
+      "title": "scan_report",
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_failure",
+            "properties": {
+              "module": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "object",
+                "title": "scan_reason",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": ["code", "message", "path", "hint"],
+                "additionalProperties": false
+              },
+              "cached": {
+                "type": "boolean"
+              }
+            },
+            "required": ["module", "reason", "cached"],
+            "additionalProperties": false
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "scan_reason",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {}
+              }
+            },
+            "required": ["code", "message", "path", "hint"],
+            "additionalProperties": false
+          }
+        },
+        "cached_modules": {
+          "type": "integer"
+        }
+      },
+      "required": ["failures", "warnings", "cached_modules"],
+      "additionalProperties": false
     }
   },
-  "required": ["plugins"],
+  "required": ["plugins", "scan"],
   "additionalProperties": false
 }
 
@@ -4006,7 +4180,8 @@ Result:
 
 ```json
 {
-  "plugins": "<any>"
+  "plugins": "<any>",
+  "scan": "<any>"
 }
 
 ```
@@ -4717,6 +4892,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `author` | string |  |  |  |  |
 | `notes` | string |  |  |  |  |
 | `console9` | boolean |  |  |  |  |
+| `history_budget_bytes` | integer |  | 1.0.. |  | Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it. |
 | `render` | value |  |  |  |  |
 | `timebase` | string |  |  |  |  |
 

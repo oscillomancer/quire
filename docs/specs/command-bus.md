@@ -125,7 +125,8 @@ class Host {    // implemented by the application
     virtual Context makeContext(const Origin&) = 0;
     virtual Result<std::uint64_t> beginTransaction(const Origin&, std::string_view label) = 0;
     virtual Status commitTransaction(std::uint64_t) = 0;
-    virtual void rollbackTransaction(std::uint64_t) = 0;
+    virtual Status rollbackTransaction(std::uint64_t) = 0;
+    virtual Result<std::function<Status()>> invocationSavepoint() = 0;
     virtual void log(const LogRecord&) = 0;          // audit/command log (§1.7)
     virtual void emit(std::string_view topic, json::Value payload) = 0;   // events (§3.4)
 };
@@ -397,7 +398,13 @@ Phase 2 demo committed to `docs/demos/`.
 ## Follow-up boundary guarantees (2026-10-04)
 
 Each command invocation inside a transaction is atomic through a host savepoint;
-Lua `pcall` can catch an error without retaining that call's partial edits. Scoped
+Lua `pcall` can catch an error without retaining that call's partial edits.
+The savepoint hook returns `Result<std::function<Status()>>`: capture failure
+refuses the invocation; restore failure is attached to the invocation error's
+details and makes the outer transaction roll back even if the script catches
+the error. Its outer failure is `transaction.restore_failed`; a failed outer
+rollback retains this error in its details. Subsequent calls in a poisoned
+transaction refuse, and the failure state is cleared at transaction end. Scoped
 dispatch admission applies to nested batch/Lua invocations too. The agent panel
 uses it to deny branch/project/engine lifecycle changes and save-as, pins each
 turn to the current branch/project generation, and invalidates queued tool calls

@@ -568,9 +568,17 @@ Result<json::Value> Dispatcher::transact(std::string_view label, const Origin& o
     if (transactionDepth_ > 0) return body();  // join the transaction already open
     auto transaction = host_.beginTransaction(origin, label);
     if (!transaction) return transaction.error();
+    transactionFailure_.reset();
     ++transactionDepth_;
     auto result = body();
     --transactionDepth_;
+    if (auto failure = std::exchange(transactionFailure_, {})) {
+        Error error("transaction.restore_failed", "an invocation could not be restored", {},
+                    "repair the reported host state before retrying the transaction");
+        error.details.push_back(std::move(*failure));
+        if (!result) error.details.push_back(result.error());
+        result = std::move(error);
+    }
     if (!result) {
         auto rollback = host_.rollbackTransaction(*transaction);
         if (!rollback) {
@@ -596,6 +604,7 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
     for (const auto& admit : admissions_)
         if (auto allowed = admit(invocation); !allowed) return allowed.error();
     inBatch = inBatch || transactionDepth_ > 0;
+    if (inBatch && transactionFailure_) return *transactionFailure_;
     const auto start = std::chrono::steady_clock::now();
     auto parsed = parseCommand(invocation.command);
     auto name = parsed ? parsed->first : invocation.command;
@@ -663,15 +672,19 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
     context.provide<JobManager>(jobs_);
     context.provide<Dispatcher>(*this);
     auto invoke = [&]() -> Result<json::Value> {
-        auto savepoint = inBatch ? host_.invocationSavepoint() : std::function<void()>{};
-        bool succeeded = false;
-        struct Restore {
-            std::function<void()>& restore;
-            bool& succeeded;
-            ~Restore() {
-                if (!succeeded && restore) restore();
+        auto saved = inBatch ? host_.invocationSavepoint()
+                             : Result<std::function<Status()>>(std::function<Status()>{});
+        if (!saved) return saved.error();
+        auto fail = [&](Error error) -> Result<json::Value> {
+            if (*saved) {
+                auto restored = (*saved)();
+                if (!restored) {
+                    if (!transactionFailure_) transactionFailure_ = restored.error();
+                    error.details.push_back(restored.error());
+                }
             }
-        } guard{savepoint, succeeded};
+            return error;
+        };
         auto result = info->invoke(invocation.args, context);
         resolvedArgs = context.resolvedArgs();
         if (!result) {
@@ -679,44 +692,22 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
             if (!error.path.empty() && error.path.front() == '/' &&
                 error.path.rfind("/args", 0) != 0)
                 prefixError(error, "/args");
-            return error;
+            return fail(std::move(error));
         }
         auto checked = info->validateResult(*result);
         if (!checked) {
             Error error("command.bad_result", "handler returned a value outside its result schema",
                         "/result", "fix the command handler or result schema");
             error.details.push_back(checked.error());
-            return error;
+            return fail(std::move(error));
         }
         if (info->kind != Kind::Query)
             host_.invoked(name, info->version, resolvedArgs.value_or(invocation.args), info->kind);
-        succeeded = true;
         return result;
     };
     Result<json::Value> result = Error("command.internal", "unreachable");
     if (info->kind == Kind::Edit && !inBatch) {
-        auto transaction = host_.beginTransaction(invocation.origin, name);
-        if (!transaction) return finish(transaction.error());
-        result = invoke();
-        if (result) {
-            auto committed = host_.commitTransaction(*transaction);
-            if (!committed) {
-                auto rollback = host_.rollbackTransaction(*transaction);
-                result = committed.error();
-                if (!rollback) {
-                    auto error = rollback.error();
-                    error.details.push_back(result.error());
-                    result = std::move(error);
-                }
-            }
-        } else {
-            auto rollback = host_.rollbackTransaction(*transaction);
-            if (!rollback) {
-                auto error = rollback.error();
-                error.details.push_back(result.error());
-                result = std::move(error);
-            }
-        }
+        result = transact(name, invocation.origin, invoke);
     } else
         result = invoke();
     return finish(std::move(result));
@@ -758,57 +749,33 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
             return Error("command.invalid_args", "step args must be an object", path + "/args");
     }
     auto label = stringField(args, "label");
-    auto transaction = host_.beginTransaction(origin, label);
-    if (!transaction) return transaction.error();
-    json::Value result = json::Value::object();
-    result["label"] = label;
-    result["results"] = json::Value::array();
-    std::map<std::string, json::Value> saved;
-    for (std::size_t i = 0; i < steps.size(); ++i) {
-        const auto& step = steps.at(i);
-        auto path = json::pointerJoin("/steps", std::to_string(i));
-        const auto* rawArgs = step.find("args");
-        auto resolved =
-            resolveReference(rawArgs ? *rawArgs : json::Value::object(), saved, path + "/args");
-        if (!resolved) {
-            auto rollback = host_.rollbackTransaction(*transaction);
-            if (!rollback) {
-                auto error = rollback.error();
-                error.details.push_back(resolved.error());
+    return transact(label, origin, [&]() -> Result<json::Value> {
+        json::Value result = json::Value::object();
+        result["label"] = label;
+        result["results"] = json::Value::array();
+        std::map<std::string, json::Value> saved;
+        for (std::size_t i = 0; i < steps.size(); ++i) {
+            const auto& step = steps.at(i);
+            auto path = json::pointerJoin("/steps", std::to_string(i));
+            const auto* rawArgs = step.find("args");
+            auto resolved =
+                resolveReference(rawArgs ? *rawArgs : json::Value::object(), saved, path + "/args");
+            if (!resolved) return resolved.error();
+            Invocation invocation{step.find("command")->asString(), std::move(*resolved), origin};
+            auto output = dispatch(invocation, true, true);
+            if (!output) {
+                auto detail = output.error();
+                prefixError(detail, path);
+                Error error("batch.step_failed", "batch step " + std::to_string(i) + " failed",
+                            path, "fix this step and retry the batch");
+                error.details.push_back(std::move(detail));
                 return error;
             }
-            return resolved.error();
+            if (auto* alias = step.find("as"); alias) saved[alias->asString()] = *output;
+            result["results"].push_back(std::move(*output));
         }
-        Invocation invocation{step.find("command")->asString(), std::move(*resolved), origin};
-        auto output = dispatch(invocation, true, true);
-        if (!output) {
-            auto rollback = host_.rollbackTransaction(*transaction);
-            auto detail = output.error();
-            prefixError(detail, path);
-            Error error("batch.step_failed", "batch step " + std::to_string(i) + " failed", path,
-                        "fix this step and retry the batch");
-            error.details.push_back(std::move(detail));
-            if (!rollback) {
-                auto failure = rollback.error();
-                failure.details.push_back(std::move(error));
-                return failure;
-            }
-            return error;
-        }
-        if (auto* alias = step.find("as"); alias) saved[alias->asString()] = *output;
-        result["results"].push_back(std::move(*output));
-    }
-    auto committed = host_.commitTransaction(*transaction);
-    if (!committed) {
-        auto rollback = host_.rollbackTransaction(*transaction);
-        if (!rollback) {
-            auto error = rollback.error();
-            error.details.push_back(committed.error());
-            return error;
-        }
-        return committed.error();
-    }
-    return result;
+        return result;
+    });
 }
 
 Status runExamples(const Registry& registry, const FixtureFactory& factory) {
