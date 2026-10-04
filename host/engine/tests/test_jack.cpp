@@ -92,6 +92,20 @@ TEST_CASE("an unreachable server is a clean error") {
     fake.reset();
 }
 
+TEST_CASE("capture names retain channel indices when a connection fails") {
+    FakeJack& fake = fakeJack();
+    fake.reset();
+    fake.failCapture(1);
+    JackBackend backend(fakeOptions());
+    Recorder rec;
+    BackendConfig cfg;
+    cfg.inputs = 2;
+    REQUIRE(backend.start(cfg, rec.callback()));
+    CHECK(backend.inputNames() == std::vector<std::string>{"", "system:capture_2"});
+    backend.stop();
+    fake.reset();
+}
+
 TEST_CASE("the backend runs the engine in blocks, whatever the graph's period") {
     FakeJack& fake = fakeJack();
     fake.reset(1024);

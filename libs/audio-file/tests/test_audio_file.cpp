@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 
 #include <supple/audio/audio_file.h>
@@ -60,6 +62,65 @@ TEST_CASE("RF64 header carries 64-bit sizes without allocating a payload") {
     REQUIRE(small);
     CHECK(small->size() == 44);
     CHECK(std::string(reinterpret_cast<const char*>(small->data()), 4) == "RIFF");
+}
+
+TEST_CASE("inspect reads little-endian RF64 and BW64 sizes from sparse files") {
+    const auto path =
+        fs::temp_directory_path() / ("supple-inspect-rf64-" + std::to_string(::getpid()) + ".wav");
+    constexpr std::uint64_t frames = (std::uint64_t{1} << 30) + 3;
+    auto header = wavHeader(frames, 1, 48000, SampleFormat::Float32);
+    REQUIRE(header);
+    for (const auto tag : {"RF64", "BW64"}) {
+        std::copy_n(tag, 4, header->begin());
+        {
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(header->data()),
+                       static_cast<std::streamsize>(header->size()));
+            file.seekp(static_cast<std::streamoff>(header->size() + frames * 4 - 1));
+            file.put(0);
+            REQUIRE(file.good());
+        }
+        auto info = inspect(path);
+        REQUIRE(info);
+        CHECK(info->frames == static_cast<std::int64_t>(frames));
+        CHECK(info->sampleRate == 48000);
+        CHECK_FALSE(info->truncated);
+    }
+    fs::remove(path);
+}
+
+TEST_CASE("inspect rejects short fmt chunks and overflowing chunk skips") {
+    const auto path = fs::temp_directory_path() /
+                      ("supple-inspect-invalid-" + std::to_string(::getpid()) + ".wav");
+    auto header = wavHeader(0, 1, 48000, SampleFormat::Float32);
+    REQUIRE(header);
+    (*header)[16] = 0;  // fmt declares no payload, despite bytes that resemble one
+    REQUIRE(supple::writeFileAtomic(path, *header));
+    CHECK_FALSE(inspect(path));
+    header = wavHeader(0, 1, 48000, SampleFormat::Float32);
+    REQUIRE(header);
+    std::vector<std::uint8_t> oversized{'J', 'U', 'N', 'K', 255, 255, 255, 255};
+    header->insert(header->begin() + 12, oversized.begin(), oversized.end());
+    REQUIRE(supple::writeFileAtomic(path, *header));
+    CHECK_FALSE(inspect(path));  // must not wrap the skip and parse the following fmt
+    fs::remove(path);
+}
+
+TEST_CASE("streamed WAV validates rates and rejects overflowing append sizes") {
+    const auto path =
+        fs::temp_directory_path() / ("supple-stream-bounds-" + std::to_string(::getpid()) + ".wav");
+    fs::remove(path);
+    WavStreamWriter writer;
+    for (double rate : {0.25, std::numeric_limits<double>::infinity(), 1e20}) {
+        CHECK_FALSE(writer.open(path, rate, 2));
+        CHECK_FALSE(fs::exists(path));
+    }
+    REQUIRE(writer.open(path, 48000, 2));
+    CHECK(writer.append(nullptr, std::size_t{1} << (sizeof(std::size_t) * 8 - 3)).error().code ==
+          "audio.stream_full");
+    REQUIRE(writer.close());
+    CHECK(readAudio(path)->frames() == 0);
+    fs::remove(path);
 }
 
 TEST_CASE("PCM WAV round trips within quantization + dither, deterministic by seed") {
@@ -390,4 +451,9 @@ TEST_CASE("FLAC encoding decodes to exactly what the same WAV holds (16 and 24 b
     REQUIRE(back);
     CHECK(back->frames() == 37);
     CHECK(encodeFlac(tiny, {.bitsPerSample = 20}).error().code == "audio.encode");
+    auto minimumBlock = encodeFlac(tiny, {.blockSize = -1});
+    REQUIRE(minimumBlock);
+    CHECK((*minimumBlock)[8] == 0);
+    CHECK((*minimumBlock)[9] == 16);  // STREAMINFO minimum block size clamps to 16, not 65535
+    CHECK(readAudio(*minimumBlock)->frames() == tiny.frames());
 }

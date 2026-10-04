@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 using namespace supple;
 using namespace supple::time;
@@ -166,4 +167,11 @@ TEST_CASE("samples round half to even") {
     CHECK(samplesAt(1.25, 2.0) == 2);  // 2.5
     CHECK(samplesAt(-0.75, 2.0) == -2);
     CHECK(samplesAt(1.0, 48000.0) == 48000);
+}
+
+TEST_CASE("pickup positions do not overflow integer subtraction") {
+    const auto map = TimeMap::constant(120);
+    constexpr int first = std::numeric_limits<int>::min();
+    CHECK(map.beatOfBar(first) == (static_cast<double>(first) - 1) * 4);
+    CHECK(map.beatOf({1, first}) == static_cast<double>(first) - 1);
 }

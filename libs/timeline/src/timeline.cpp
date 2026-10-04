@@ -163,7 +163,8 @@ double TimeMap::barLength(int bar) const { return meterSegs_[meterSegAtBar(bar)]
 
 double TimeMap::beatOfBar(int bar) const {
     const MeterSeg& s = meterSegs_[meterSegAtBar(bar)];
-    return s.beat + (bar - s.bar) * s.barQuarters;  // bars before 1 extend the first meter
+    return s.beat + (static_cast<double>(bar) - s.bar) *
+                        s.barQuarters;  // bars before 1 extend the first meter
 }
 
 BarBeat TimeMap::barBeat(double beat) const {
@@ -194,7 +195,8 @@ BarBeat TimeMap::barBeat(double beat) const {
 
 double TimeMap::beatOf(const BarBeat& p) const {
     const MeterSeg& s = meterSegs_[meterSegAtBar(p.bar)];
-    return beatOfBar(p.bar) + ((p.beat - 1) + p.fraction) * 4.0 / s.denominator;
+    return beatOfBar(p.bar) +
+           ((static_cast<double>(p.beat) - 1) + p.fraction) * 4.0 / s.denominator;
 }
 
 std::int64_t samplesAt(double seconds, double rate) {

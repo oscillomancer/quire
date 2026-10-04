@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -120,6 +121,76 @@ TEST_CASE("pan law gains") {
     CHECK(std::fabs(r) < 1e-12);
     std::tie(l, r) = panGains(0.0, 0.0);
     CHECK(l == doctest::Approx(1.0).epsilon(1e-6));
+}
+
+TEST_CASE("muted routes still order their source before their destination") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    const Id source = addTrack(t, "Source");  // later ID than the destination
+    t.modify<model::Track>(source, [](auto& track) { track.parentSend.enabled = false; });
+    addFx(t, source, kSine);
+    addNote(t, source, 0.0, 1.0);
+    model::Route route;
+    route.from.track = source;
+    route.to.track = bus;
+    route.mute = true;
+    const Id send = t.create(route);
+    model::Envelope envelope;
+    envelope.target = {send, "mute"};
+    envelope.points = {{0.0, 1.0, model::PointShape::Square, 0.0},
+                       {0.1, 0.0, model::PointShape::Square, 0.0}};
+    t.create(envelope);
+    auto pool = makePool();
+    const auto result = render(commit(t), pool, 0.1);
+    CHECK(peak(result.audio.channels[0], 0, 2400) == 0);
+    CHECK(peak(result.audio.channels[0], 3000) > 0.01);
+}
+
+TEST_CASE("unchanged auxiliary latency survives a plan adoption") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    t.modify<model::Track>(bus, [](auto& track) { track.channels = 4; });
+    const Id source = addTrack(t, "Source");
+    t.modify<model::Track>(source, [](auto& track) { track.parentSend.enabled = false; });
+    addFx(t, source, kSine);
+    addNote(t, source, 0, 1);
+    const auto latent =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+            .value();
+    addFx(t, bus, kGain, latent);  // delays the unwritten 3/4 along with 1/2
+    const Id keyed = addFx(t, bus, "com.suppleaudio.test.keymix");
+    t.modify<model::FxInstance>(keyed, [](auto& fx) { fx.pins.key = {3, 4}; });
+    model::Route route;
+    route.from.track = source;
+    route.to.track = bus;
+    route.tap = model::Tap::PreFader;
+    route.channels = {{1, 2}, {3, 4}};
+    t.create(route);
+    const auto session = commit(t);
+    auto pool = makePool();
+    auto referencePool = makePool();
+    auto old = detail::compile(session, pool, 0, 128).value();
+    auto reference = detail::compile(session, referencePool, 0, 128).value();
+    REQUIRE(detail::prepare(old, session));
+    REQUIRE(detail::prepare(reference, session));
+    for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+    for (auto* instance : reference.instances) REQUIRE(instance->startProcessing());
+    for (int pos = 0; pos < 512; pos += 128) {
+        REQUIRE(detail::processBlock(old, pos, 128));
+        REQUIRE(detail::processBlock(reference, pos, 128));
+    }
+    auto replacement = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(replacement, session));
+    detail::carryMix(old, replacement, -1);
+    detail::locate(replacement, 512, false);
+    REQUIRE(detail::processBlock(replacement, 512, 128));
+    REQUIRE(detail::processBlock(reference, 512, 128));
+    const auto& actual = replacement.nodes[replacement.mainMaster].post;
+    const auto& expected = reference.nodes[reference.mainMaster].post;
+    CHECK(std::equal(actual.l.begin(), actual.l.end(), expected.l.begin()));
+    CHECK(std::equal(actual.r.begin(), actual.r.end(), expected.r.begin()));
+    for (auto* instance : old.instances) instance->stopProcessing();
+    for (auto* instance : reference.instances) instance->stopProcessing();
 }
 
 TEST_CASE("shared bridge accepts a new effect after its last instance is removed") {

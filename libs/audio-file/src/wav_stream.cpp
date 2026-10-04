@@ -47,7 +47,8 @@ WavStreamWriter::~WavStreamWriter() { (void)close(); }
 Status WavStreamWriter::open(const std::filesystem::path& path, double sampleRate,
                              std::uint32_t channels) {
     if (file_) return Error("audio.stream", "the writer is already open");
-    if (channels == 0 || channels > 64 || !(sampleRate > 0))
+    if (channels == 0 || channels > 64 || !std::isfinite(sampleRate) || sampleRate < 1 ||
+        sampleRate > 768000)
         return Error("audio.stream", "bad channel count or rate");
     file_ = std::fopen(path.c_str(), "wbx");  // never an existing file (another take's)
     if (!file_) return Error("file.write", "cannot create " + path.string() + " (does it exist?)");
@@ -73,7 +74,7 @@ Status WavStreamWriter::open(const std::filesystem::path& path, double sampleRat
 
 Status WavStreamWriter::append(const float* frames, std::size_t count) {
     if (!file_) return Error("audio.stream", "the writer is closed");
-    if ((frames_ + count) * channels_ * 4 > kMaxData)
+    if (count > kMaxData / (channels_ * 4) - frames_)
         return Error("audio.stream_full", "a recording over 4 GiB needs RF64 (not yet)");
     if (count && std::fwrite(frames, sizeof(float) * channels_, count, file_) != count)
         return Error("file.write", "short write");
@@ -86,6 +87,7 @@ Status WavStreamWriter::updateHeader() {
     const auto data = static_cast<std::uint32_t>(frames_ * channels_ * 4);
     std::uint8_t b[4];
     const long end = std::ftell(file_);
+    if (end < 0) return Error("file.write", "position");
     put32(b, data + kHeaderBytes - 8);
     if (std::fseek(file_, 4, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
         return Error("file.write", "header");
@@ -93,8 +95,7 @@ Status WavStreamWriter::updateHeader() {
     if (std::fseek(file_, 40, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
         return Error("file.write", "header");
     if (std::fseek(file_, end, SEEK_SET) != 0) return Error("file.write", "seek");
-    std::fflush(file_);
-    return okStatus();
+    return flush();
 }
 
 Status WavStreamWriter::flush() {
@@ -111,8 +112,9 @@ void WavStreamWriter::abandon() {
 Status WavStreamWriter::close() {
     if (!file_) return okStatus();
     auto st = updateHeader();
-    std::fclose(file_);
+    const int closed = std::fclose(file_);
     file_ = nullptr;
+    if (st && closed != 0) return Error("file.write", "close");
     return st;
 }
 

@@ -1,3 +1,4 @@
+#include <clap/plugin.h>
 #include <doctest/doctest.h>
 
 #include <array>
@@ -42,6 +43,7 @@ struct EngineTestAccess {
     static LoopRange rtLoop(const Engine& e) { return e.loopC_; }
     static std::uint64_t rendererEpoch(const Engine& e) { return e.epochDone_.load(); }
     static LoopRange rendererLoop(const Engine& e) { return e.loopR_; }  // after rendererEpoch
+    static const detail::Plan& latestPlan(const Engine& e) { return *e.latestPlan_.load(); }
 };
 }  // namespace supple::engine
 using model::Id;
@@ -1531,6 +1533,110 @@ TEST_CASE("MIDI monitoring: a keyboard plays the instrument live, sample-accurat
             CHECK(peakIn(2000, 19000) > 0.1 * (0.472135955 / 0.70710678118654752));
             CHECK(peakIn(20000, 30720) == 0.0);  // off at 20000; channel 2 and "Pads" never sound
         }
+}
+
+TEST_CASE("a live processing error silences the failed device block" * doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        const auto session = monitoring(synthSession());
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 384});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}));
+        REQUIRE(engine.load(session));
+        if (options.anticipative) REQUIRE(engine.awaitPlan());
+        engine.play();
+        if (options.anticipative) engine.awaitTransport();
+        backend.run(2);
+        // Inject a process error in the in-tree fixture on the manual audio thread.
+        std::vector<std::pair<clap_plugin_t*, decltype(clap_plugin_t::process)>> processes;
+        for (const auto& fx : session.fx)
+            if (auto* instance = pool.find(fx.id)) {
+                auto* plugin = const_cast<clap_plugin_t*>(instance->raw());
+                REQUIRE(plugin);
+                processes.emplace_back(plugin, plugin->process);
+                plugin->process = [](const clap_plugin_t*, const clap_process_t*) {
+                    return clap_process_status{CLAP_PROCESS_ERROR};
+                };
+            }
+        backend.run(1);
+        for (const auto& [plugin, process] : processes) plugin->process = process;
+        engine.stop();
+        CHECK(engine.processErrors() == 1);
+        const auto& captured = backend.capture().channels[0];
+        CHECK(std::any_of(captured.begin() + 128, captured.begin() + 256,
+                          [](float sample) { return std::abs(sample) > 0.01f; }));
+        CHECK(std::all_of(captured.begin() + 256, captured.end(),
+                          [](float sample) { return sample == 0; }));
+    }
+}
+
+TEST_CASE("MIDI monitoring preserves every event in a device block" * doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        auto pool = makePool();
+        MediaCache media;
+        // Both messages fit in one block: losing the off leaves a stuck voice.
+        DummyBackend backend(keyboard({{10, 0x90, 60, 100}, {100, 0x80, 60, 0}}, 512));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.blockSize = 256, .midiInputs = true}).ok());
+        REQUIRE(engine.load(keyboardSession()).ok());
+        REQUIRE(engine.awaitPlan());
+        backend.run(2);
+        engine.stop();
+        const auto& signal = backend.capture().channels[0];
+        CHECK(signal[50] != 0.0f);
+        for (std::size_t i = 100; i < signal.size(); ++i) REQUIRE(signal[i] == 0.0f);
+    }
+}
+
+TEST_CASE("live buffers cover a device block larger than the render block" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(constantInput(512));
+    Engine engine(pool, media, {.renderBlock = 64, .workers = 0});
+    REQUIRE(engine.start(backend, {.blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.load(monitoring(synthSession())).ok());
+    // Check before driving it: the unfixed plan would overrun its buffers.
+    REQUIRE(EngineTestAccess::latestPlan(engine).block >= 256);
+    REQUIRE(engine.awaitPlan());
+    backend.run(2);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    for (float sample : backend.capture().channels[0])
+        CHECK(sample == doctest::Approx(0.5 * 0.472135955).epsilon(1e-5));
+}
+
+TEST_CASE("seeking restarts the console seeds in both executors" * doctest::description("rt")) {
+    model::Session s = synthSession();
+    model::EditTxn edit(s, 2);
+    auto project = edit.project();
+    project.console9 = true;
+    project.seed = 12345;
+    edit.setProject(project);
+    s = edit.commit().value();
+    auto offlinePool = makePool();
+    auto reference = renderOffline(s, offlinePool, {.endSeconds = 0.1, .threads = 1});
+    REQUIRE(reference);
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.captureFrames = 8192});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative) REQUIRE(engine.awaitRendered(2048));
+        backend.run(16);
+        engine.seek(0);
+        if (options.anticipative) REQUIRE(engine.awaitRendered(6144));
+        backend.run(48);
+        engine.stop();
+        CHECK(maxDiff(backend.capture().channels[0], 2048, reference->audio.channels[0], 4800) ==
+              0);
+        CHECK(maxDiff(backend.capture().channels[1], 2048, reference->audio.channels[1], 4800) ==
+              0);
+    }
 }
 
 TEST_CASE("MIDI recording: events land on the timeline where they were heard, per loop pass" *

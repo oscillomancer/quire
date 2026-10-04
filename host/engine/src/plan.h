@@ -513,7 +513,8 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
 // the renderer, and its instance was reset on the way).
 void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
 // A plan swap (the 10 ms crossfade on structural swaps, engine.md §2): the
-// Console 9 state, fader ramps and stage wet levels carry into the new
+// Console 9 state, fader ramps, stage wet levels and matching dry/channel
+// delay histories carry into the new
 // one's matching nodes (by track) and stages (by instance), so a changed
 // value ramps from where the old plan left it. `liveClass` as for wrapTo.
 void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT;

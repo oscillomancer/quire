@@ -166,7 +166,7 @@ Result<std::vector<Id>> topoOrder(const Session& s) {
     for (const auto& e : s.routes) {
         const model::Route& r = *e.value;
         const std::optional<Id> to = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
-        if (r.from.track && to && !r.mute) link(*r.from.track, *to);
+        if (r.from.track && to) link(*r.from.track, *to);
     }
     std::set<Id> ready;
     for (const auto& [id, d] : indeg)
@@ -975,7 +975,12 @@ Status prepare(Plan& p, const Session& s) {
                 }
                 lanes += block / kAutomationStep + 2 + pts;
             }
-            st.blockEvents.reserve(windowMax + 1 + lanes);
+            const bool noteTarget =
+                n.noteTarget >= 0 && &st == &n.chain[static_cast<std::size_t>(n.noteTarget)];
+            const std::size_t notes =
+                noteTarget ? 16 * 128 : 0;  // releases at a wrap or route edit
+            const std::size_t live = noteTarget && n.midiIn ? kMaxMidiInputEvents : 0;
+            st.blockEvents.reserve(windowMax + 1 + lanes + notes + live);
         }
     }
     // The node graph for the worker pool: a node waits for its edges' sources.
@@ -1926,6 +1931,17 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                                 std::swap(st.dry.buf[1], os.dry.buf[1]);
                                 st.dry.pos = os.dry.pos;
                                 st.preserveDryOnLocate = true;
+                            }
+                            if (st.chanDelay.size() == os.chanDelay.size() &&
+                                std::equal(std::begin(st.outPin), std::end(st.outPin),
+                                           std::begin(os.outPin))) {
+                                for (std::size_t c = 0; c < st.chanDelay.size(); ++c) {
+                                    MonoDelay& delay = st.chanDelay[c];
+                                    MonoDelay& oldDelay = os.chanDelay[c];
+                                    if (delay.length != oldDelay.length) continue;
+                                    std::swap(delay.buf, oldDelay.buf);
+                                    delay.pos = oldDelay.pos;
+                                }
                             }
                             break;
                         }

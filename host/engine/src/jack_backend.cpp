@@ -371,11 +371,12 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
             api->free(static_cast<void*>(ports));
         }
         // The physical capture ports into our inputs, in order.
+        impl->inputNames.resize(config.inputs);
         if (const char** ports =
                 api->getPorts(impl->client, nullptr, kAudioType, kPortIsPhysical | kPortIsOutput)) {
             for (std::uint32_t c = 0; c < config.inputs && ports[c]; ++c)
                 if (api->connect(impl->client, ports[c], api->portName(impl->inPorts[c])) == 0)
-                    impl->inputNames.emplace_back(ports[c]);
+                    impl->inputNames[c] = ports[c];
             api->free(static_cast<void*>(ports));
         }
     }
