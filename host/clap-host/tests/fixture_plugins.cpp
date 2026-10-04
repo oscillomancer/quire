@@ -655,7 +655,9 @@ bool CLAP_ABI edgeParamInfo(const clap_plugin_t* pl, uint32_t index, clap_param_
     if (index > 1) return false;
     std::memset(info, 0, sizeof(*info));
     info->id = index == 0 && !E(pl)->removed ? 7 : 8;
-    info->flags = E(pl)->config[0] >= 11 ? CLAP_PARAM_IS_AUTOMATABLE : CLAP_PARAM_IS_READONLY;
+    // Mode 33: an editor that emits outputs for a read-only (display) parameter.
+    info->flags = E(pl)->config[0] >= 11 && E(pl)->config[0] != 33 ? CLAP_PARAM_IS_AUTOMATABLE
+                                                                   : CLAP_PARAM_IS_READONLY;
     std::snprintf(info->name, sizeof(info->name), index == 0 ? "Flushes" : "Editor parent");
     info->max_value = index == 0 ? 1e9 : 1e15;
     return true;

@@ -2399,6 +2399,31 @@ TEST_CASE("app applies stopped editor flushes immediately and discards obsolete 
     app->stopEngine();
 }
 
+TEST_CASE("app keeps read-only plug-in outputs out of the model and history") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Meter"})"), kTest}));
+    REQUIRE(bus.execute(
+        {"fx.add", j(R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})"), kTest}));
+    const auto fx = *model::Id::parse("fx_1");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    auto* instance = app->instanceOf(fx);
+    instance->deactivate();
+    REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{33, 0, 0, 0}));
+    REQUIRE(instance->openEditor(1234, 1));
+    const auto version = app->head().version;
+    app->tick();  // the editor's idle flush reports the read-only parameter
+    CHECK(app->head().version == version);
+    CHECK_FALSE(app->head().fx.find(fx)->params.count(7));
+    instance->closeEditor();
+    app->stopEngine();
+}
+
 TEST_CASE("app converts semantic output values to physical patches without setter feedback") {
     struct Control {
         void (*edit)(const clap_plugin_t*, double, std::uint32_t);

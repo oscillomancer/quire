@@ -40,7 +40,9 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
     const auto info = instance->params();
     auto param =
         std::find_if(info.begin(), info.end(), [&](const auto& p) { return p.id == key.second; });
-    if (param == info.end()) return {};
+    // Read-only outputs (meters, readouts) are display values: they never
+    // enter the model, history or automation.
+    if (param == info.end() || (param->flags & CLAP_PARAM_IS_READONLY)) return {};
     auto plain = [&](double value) -> Result<double> {
         if (!std::isfinite(value)) return Error("fx.output_value", "non-finite plug-in output");
         if (instance->paramsNormalized()) {
@@ -75,7 +77,7 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
     auto next = *fx;
     next.params[key.second] = *value;
     std::string paramKey = semantic ? semantic->key : std::to_string(key.second);
-    if (semantic && !(param->flags & CLAP_PARAM_IS_READONLY)) {
+    if (semantic) {
         if (!next.patch) {
             auto patch = instance->getPatch(false);
             if (!patch) return patch.error();
@@ -89,7 +91,6 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
     const auto before = head();
     bool changed = fx->params != next.params || fx->patch != next.patch;
     const bool records =
-        !(param->flags & CLAP_PARAM_IS_READONLY) &&
         std::any_of(before.envelopes.begin(), before.envelopes.end(), [&](const auto& env) {
             const auto& e = *env.value;
             return e.active && e.target.object == key.first &&
@@ -139,11 +140,8 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
     auto args = json::Value::object();
     args["fx"] = key.first.str();
     args["values"] = json::Value::object();
-    if (!(param->flags & CLAP_PARAM_IS_READONLY)) {
-        args["values"][paramKey] =
-            semantic ? (*next.patch)["params"][paramKey] : json::Value(*value);
-        record_.invocations.push_back({"fx.param.set", std::move(args)});
-    }
+    args["values"][paramKey] = semantic ? (*next.patch)["params"][paramKey] : json::Value(*value);
+    record_.invocations.push_back({"fx.param.set", std::move(args)});
     static constexpr const char* shapes[]{"linear",     "square",   "slow",
                                           "fast_start", "fast_end", "bezier"};
     const auto preview = txn().preview();
