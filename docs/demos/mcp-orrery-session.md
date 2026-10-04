@@ -1036,10 +1036,10 @@ that exactly duplicates structuredContent is shown once.
       "notable": {
         "_elided_array_count": 18
       },
-      "ltas_rms_db": 7.6,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed).",
+      "ltas_rms_db": 7.8,
+      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.8 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 80.02406382262534,
+        "total": 80.36952957891427,
         "terms": {
           "bands": 13.927822043692457,
           "centroid": 1.9728050065375413,
@@ -1050,7 +1050,7 @@ that exactly duplicates structuredContent is shown once.
           "flux": 0.0003809826034800333,
           "harmonics": 0.4600659303701549,
           "inharmonicity": 4.935881297447454e-09,
-          "ltas": 6.403355871894821,
+          "ltas": 6.748821628183759,
           "stereo": 0.0,
           "trajectory": 57.210228415175536
         },
@@ -2548,10 +2548,10 @@ that exactly duplicates structuredContent is shown once.
       "notable": {
         "_elided_array_count": 18
       },
-      "ltas_rms_db": 7.6,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.6 dB (LTAS RMS, level removed).",
+      "ltas_rms_db": 7.8,
+      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.8 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 80.02406382262534,
+        "total": 80.36952957891427,
         "terms": {
           "bands": 13.927822043692457,
           "centroid": 1.9728050065375413,
@@ -2562,7 +2562,7 @@ that exactly duplicates structuredContent is shown once.
           "flux": 0.0003809826034800333,
           "harmonics": 0.4600659303701549,
           "inharmonicity": 4.935881297447454e-09,
-          "ltas": 6.403355871894821,
+          "ltas": 6.748821628183759,
           "stereo": 0.0,
           "trajectory": 57.210228415175536
         },
