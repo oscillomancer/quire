@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "strip.h"
@@ -274,12 +275,48 @@ struct ParamLane {
     }
 };
 
+// Held input notes (not release tails). Preserve the full CLAP address: a
+// NoteEnd with id -1 uses the tuple, and each -1 field is a wildcard.
+struct NoteOrigin {
+    std::uint64_t item = 0, take = 0, source = 0;
+    std::int64_t tick = 0;
+    std::int32_t pass = 0;
+    auto address() const { return std::tuple{item, take, source, tick, pass}; }
+};
+struct NoteSource {
+    NoteOrigin origin{};
+    std::int64_t start = 0, end = 0;
+    std::int16_t port = 0, channel = 0, key = 0;
+    std::uint32_t ordinal = 0;
+    std::int32_t id = -1;
+    auto addressWithoutOrdinal() const {
+        return std::tuple_cat(origin.address(), std::tuple{port, channel, key});
+    }
+    auto address() const { return std::tuple_cat(addressWithoutOrdinal(), std::tuple{ordinal}); }
+};
+struct HeldVoice {
+    std::int32_t noteId = -1;
+    std::int16_t port = 0, channel = 0, key = 0;
+    bool live = false;
+    NoteOrigin origin{};
+    std::uint32_t sourceOrdinal = 0;
+    bool release = false;
+    std::int32_t sourceId = -1;  // compiled id, distinct from the running voice id
+};
+inline bool matchesVoice(const HeldVoice& voice, std::int16_t port, std::int16_t channel,
+                         std::int16_t key, std::int32_t noteId) SUPPLE_RT {
+    return (port == -1 || voice.port == port) && (channel == -1 || voice.channel == channel) &&
+           (key == -1 || voice.key == key) && (noteId == -1 || voice.noteId == noteId);
+}
+
 struct Stage {
     host::Instance* instance = nullptr;  // null: placeholder (pass-through)
     Id fx;
     std::vector<ParamLane> lanes;
     bool bypass = false, instrument = false;
-    bool callbackBypass = false;  // synchronous bridges never run on the device thread
+    bool autoBypassOnSilence = false, sleeping = false, processed = false;
+    std::int64_t inputLatency = 0;  // output event timeline correction
+    bool callbackBypass = false;    // synchronous bridges never run on the device thread
     double wet = 1.0;
     // The wet level applied at the end of the last block (-1: none yet) and
     // a ramp toward the target (0 when bypassed): a bypass or wet change
@@ -304,6 +341,12 @@ struct Stage {
     std::vector<MonoDelay> chanDelay;
     Stereo pinBuf;
     std::vector<host::Event> blockEvents;
+    std::vector<HeldVoice> voices, pendingVoices;          // bounded input preflight
+    std::vector<NoteSource> noteSources, noteSourceIndex;  // immutable compiled identities
+    std::vector<std::int32_t> sourceIds;                   // parallel to this block's inputs
+    std::uint32_t nextNoteId = 0;
+    std::size_t releases = 0;  // leading addressed releases already use running ids
+    std::uint64_t voiceDropped = 0;
     std::vector<host::OutputEvent> outStorage;
     host::OutputEvents outEvents;
 };
@@ -326,6 +369,7 @@ struct Clip {
 struct TimedEvent {
     std::int64_t sample;
     host::Event event;
+    NoteOrigin origin{};
 };
 
 // A take with its own FX chain or envelopes (gap log #22): the item plays
@@ -423,6 +467,7 @@ void forEachStage(N& node, F&& f) {
 }
 
 struct Plan {
+    InstancePool* pool = nullptr;  // main-thread prepare/notifications only
     std::uint64_t generation = 0;  // set by the real-time engine when it publishes the plan
     std::vector<Node> nodes;       // topological order
     std::size_t mainMaster = 0;    // tr_0 need not be last (multiple roots and key routes)
@@ -502,7 +547,7 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames, bool playing 
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t frames);
 // The renderer's nodes only (rendererGraph), serially without helpers.
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t frames,
-                          const void* self, const LoopRange* loop = nullptr);
+                          const void* self, const LoopRange* loop = nullptr, bool playing = true);
 // Repositions the cursors and clears the delay lines of the live nodes (or
 // of the others) and of the edges into them.
 void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole = true) SUPPLE_RT;

@@ -2839,3 +2839,298 @@ TEST_CASE("recording recovery requires a complete valid sidecar") {
     }
     std::filesystem::remove_all(dir);
 }
+
+namespace {
+struct EngineEdgeControl {
+    void (*requestProcess)(const clap_plugin_t*);
+    void (*rescan)(const clap_plugin_t*, bool);
+    void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
+    void (*restart)(const clap_plugin_t*);
+};
+const EngineEdgeControl& engineEdgeControl(host::Instance& instance) {
+    const auto* control = static_cast<const EngineEdgeControl*>(
+        instance.raw()->get_extension(instance.raw(), "supple.test.edge-control"));
+    REQUIRE(control);
+    return *control;
+}
+model::Session edgeSession(std::uint8_t mode, bool automaticBypass = false, bool live = false) {
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    model::Track track;
+    track.parent = kMaster;
+    track.name = "Edge";
+    const auto tr = edit.create(track);
+    edit.modify<model::Track>(kMaster, [&](auto& master) { master.children.push_back(tr); });
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.edge";
+    fx.state = "sha256:engine-edge-config";
+    fx.autoBypassOnSilence = automaticBypass;
+    const auto id = edit.create(fx);
+    edit.modify<model::Track>(tr, [&](auto& t) { t.chain.push_back(id); });
+    edit.putBlob(*fx.state, std::make_shared<const model::Blob>(model::Blob{{mode, 0, 0, 0}}));
+    if (live) {
+        model::Route input;
+        input.from.hwChannels = std::vector<int>{1, 2};
+        input.to.track = tr;
+        const auto route = edit.create(input);
+        edit.modify<model::Track>(tr, [&](auto& t) {
+            t.record.input = route;
+            t.record.monitor = model::Monitor::On;
+        });
+    }
+    return edit.commit().value();
+}
+}  // namespace
+
+TEST_CASE("plugin outputs retain FX epoch timeline flags addresses and counted overflow") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    const auto session = edgeSession(13);
+    const auto fx = session.fx.begin()->id;
+    REQUIRE(engine.load(session));
+    engine.seek(.5);
+    engine.play();
+    backend.run(1);
+    auto first = engine.takePluginOutputs();
+    REQUIRE(first.events.size() == 256);
+    CHECK(first.dropped == 900 - 256);
+    CHECK(first.events[0].fx == fx);
+    CHECK(first.events[0].planGeneration == EngineTestAccess::latestPlan(engine).generation);
+    CHECK(first.events[0].epoch == EngineTestAccess::epoch(engine));
+    CHECK(first.events[0].timelineSample == 24001);
+    CHECK(first.events[0].event.kind == host::OutputEvent::Kind::GestureBegin);
+    CHECK(first.events[1].event.kind == host::OutputEvent::Kind::ParamValue);
+    CHECK(first.events[2].event.kind == host::OutputEvent::Kind::GestureEnd);
+    const auto& value = first.events[1].event;
+    CHECK(value.flags == (host::OutputEvent::IsLive | host::OutputEvent::DontRecord));
+    CHECK(value.port == 1);
+    CHECK(value.channel == 2);
+    CHECK(value.key == 3);
+    CHECK(value.noteId == 4);
+    CHECK_FALSE(first.events[1].idle);
+    backend.run(20);
+    auto overflow = engine.takePluginOutputs();
+    CHECK(overflow.events.size() == 4096);
+    CHECK(overflow.dropped == first.dropped + 20 * 900 - 4096);
+    CHECK(engine.pluginOutputDrops() == overflow.dropped);
+    CHECK(engine.takePluginOutputs().events.empty());
+    engine.stop();
+}
+
+TEST_CASE("idle flush outputs join the main-thread engine take API") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    const auto session = edgeSession(10);
+    const auto fx = session.fx.begin()->id;
+    REQUIRE(engine.load(session));
+    engine.service();
+    auto outputs = engine.takePluginOutputs();
+    REQUIRE(outputs.events.size() == host::Instance::IdleOutputs::kCapacity);
+    CHECK(outputs.dropped == 1800 - host::Instance::IdleOutputs::kCapacity);
+    for (const auto& output : outputs.events) {
+        CHECK(output.idle);
+        CHECK(output.fx == fx);
+    }
+    CHECK((outputs.events[1].event.flags & host::OutputEvent::DontRecord) != 0);
+    engine.stop();
+}
+
+TEST_CASE("request_process wakes a silent sleeping FX at the next block") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    const auto session = edgeSession(11, true);
+    REQUIRE(engine.load(session));
+    engine.play();
+    backend.run(1);
+    REQUIRE(engine.takePluginOutputs().events.size() == 1);
+    auto* instance = pool.find(session.fx.begin()->id);
+    REQUIRE(instance);
+    CHECK(instance->sleeping());
+    backend.run(3);
+    CHECK(engine.takePluginOutputs().events.empty());
+    engineEdgeControl(*instance).requestProcess(instance->raw());
+    backend.run(1);
+    auto woke = engine.takePluginOutputs();
+    REQUIRE(woke.events.size() == 1);
+    CHECK(woke.events[0].event.value == 2);
+    CHECK_FALSE(instance->processRequested());
+    backend.run(1);
+    CHECK(engine.takePluginOutputs().events.empty());
+    REQUIRE(instance->setParam(7, 5));
+    backend.run(1);
+    CHECK(engine.takePluginOutputs().events.size() == 1);
+    engine.pause();
+    backend.run(1);
+    engine.takePluginOutputs();
+    engineEdgeControl(*instance).requestProcess(instance->raw());
+    backend.run(1);
+    CHECK(engine.takePluginOutputs().events.size() == 1);
+    engine.stop();
+    instance->deactivate();
+    CHECK_FALSE(instance->active());
+    engineEdgeControl(*instance).requestProcess(instance->raw());
+    engine.service();
+    CHECK(instance->active());  // lifecycle stays on main
+}
+
+TEST_CASE("both anticipative executors publish plug-in outputs through their own queues") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media,
+                  {.anticipative = true, .renderBlock = 64, .renderAheadMs = 20, .workers = 2});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 2}));
+    auto session = edgeSession(12, false, true);
+    model::EditTxn edit(session, 2);
+    model::Track track;
+    track.parent = kMaster;
+    track.name = "Rendered";
+    const auto tr = edit.create(track);
+    edit.modify<model::Track>(kMaster, [&](auto& master) { master.children.push_back(tr); });
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.edge";
+    const auto renderedFx = edit.create(fx);
+    edit.modify<model::Track>(tr, [&](auto& t) { t.chain.push_back(renderedFx); });
+    session = edit.commit().value();
+    REQUIRE(engine.load(session));
+    engine.play();
+    REQUIRE(engine.awaitRendered(128));
+    backend.run(2);
+    auto outputs = engine.takePluginOutputs();
+    CHECK(std::any_of(outputs.events.begin(), outputs.events.end(), [&](const auto& output) {
+        return output.fx == renderedFx && output.anticipative;
+    }));
+    CHECK(std::any_of(outputs.events.begin(), outputs.events.end(), [&](const auto& output) {
+        return output.fx != renderedFx && !output.anticipative;
+    }));
+    CHECK(outputs.dropped == 0);
+    engine.stop();
+}
+
+TEST_CASE("main servicing publishes a new plan for parameter clear and rescan") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    auto session = edgeSession(12);
+    const auto fx = session.fx.begin()->id;
+    model::EditTxn edit(session, 2);
+    model::Envelope envelope;
+    envelope.target = {fx, "7"};
+    envelope.points = {{0, 2, model::PointShape::Linear, 0}};
+    const auto env = edit.create(envelope);
+    session = edit.commit().value();
+    REQUIRE(engine.load(session));
+    backend.run(1);
+    auto* instance = pool.find(fx);
+    REQUIRE(instance);
+    engineEdgeControl(*instance).clear(instance->raw(), 7, CLAP_PARAM_CLEAR_ALL);
+    engine.service();
+    backend.run(1);
+    auto checkLanes = [&] {
+        for (const auto& node : EngineTestAccess::latestPlan(engine).nodes)
+            for (const auto& stage : node.chain)
+                if (stage.fx == fx) CHECK(stage.lanes.empty());
+    };
+    checkLanes();
+    CHECK(session.envelopes.find(env)->points.size() == 1);
+    // A valid ALL rescan happens while deactivated; request_process reactivates.
+    instance->stopProcessing();
+    instance->setOwner(nullptr);
+    instance->deactivate();
+    engineEdgeControl(*instance).rescan(instance->raw(), true);
+    engineEdgeControl(*instance).requestProcess(instance->raw());
+    engine.service();
+    backend.run(1);
+    checkLanes();
+    CHECK(instance->active());
+    CHECK(std::any_of(engine.warnings().begin(), engine.warnings().end(), [](const auto& warning) {
+        return warning.find("orphaned automation parameter 7") != std::string::npos;
+    }));
+    engine.stop();
+}
+
+TEST_CASE("plug-in output timeline samples subtract the latency ahead of the stage") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    auto session = synthSession(0, "com.suppleaudio.test.gain");
+    model::EditTxn edit(session, 2);
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.edge";
+    const auto outputFx = edit.create(fx);
+    for (const auto& track : session.tracks)
+        if (!track.value->chain.empty())
+            edit.modify<model::Track>(track.id, [&](auto& t) { t.chain.push_back(outputFx); });
+    session = edit.commit().value();
+    REQUIRE(engine.load(session));
+    engine.seek(.5);
+    engine.play();
+    backend.run(1);
+    const auto outputs = engine.takePluginOutputs();
+    REQUIRE(outputs.events.size() == 1);
+    CHECK(outputs.events[0].fx == outputFx);
+    CHECK(outputs.events[0].timelineSample == 24000 - 64);
+    engine.stop();
+}
+
+TEST_CASE("a bypassed note target still receives note releases before it resumes") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 32000});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    const auto session = synthSession();
+    const auto fx = session.fx.begin()->id;
+    REQUIRE(engine.load(session));
+    engine.play();
+    backend.run(1);
+    model::EditTxn bypass(session, 2);
+    bypass.modify<model::FxInstance>(fx, [](auto& value) { value.bypass = true; });
+    const auto bypassed = bypass.commit().value();
+    REQUIRE(engine.load(bypassed));
+    backend.run(250);  // the first note-off, before the next note-on
+    model::EditTxn resume(bypassed, 3);
+    resume.modify<model::FxInstance>(fx, [](auto& value) { value.bypass = false; });
+    REQUIRE(engine.load(resume.commit().value()));
+    backend.run(20);
+    float peak = 0;
+    for (std::size_t i = 251 * 64; i < 271 * 64; ++i)
+        peak = std::max(peak, std::fabs(backend.capture().channels[0][i]));
+    CHECK(peak == 0);  // the held voice was released while bypassed
+    engine.stop();
+}
+
+TEST_CASE("pause resets DSP and its owned voice tracker together") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    REQUIRE(engine.load(synthSession()));
+    engine.play();
+    backend.run(1);
+    const auto& plan = EngineTestAccess::latestPlan(engine);
+    CHECK(std::any_of(plan.nodes.begin(), plan.nodes.end(), [](const auto& node) {
+        return !node.chain.empty() && !node.chain[0].voices.empty();
+    }));
+    engine.pause();
+    backend.run(1);
+    for (const auto& node : plan.nodes) {
+        for (const auto& stage : node.chain) CHECK(stage.voices.empty());
+        CHECK(
+            std::all_of(node.held.begin(), node.held.end(), [](auto count) { return count == 0; }));
+    }
+    engine.stop();
+}

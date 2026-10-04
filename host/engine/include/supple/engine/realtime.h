@@ -254,6 +254,21 @@ struct EngineOptions {
     int workers = -1;                  // helper threads; -1: every core but three
 };
 
+// Output values remain in the host event domain (VST3 normalized). Main-thread
+// consumers convert them, honor DontRecord and never echo them back to DSP.
+struct PluginOutput {
+    model::Id fx;
+    std::uint64_t planGeneration = 0, epoch = 0;
+    std::int64_t timelineSample = 0, streamSample = 0;
+    host::OutputEvent event;
+    bool idle = false, anticipative = false;
+};
+struct PluginOutputs {
+    std::vector<PluginOutput> events;
+    std::uint64_t dropped = 0;       // cumulative since this Engine was constructed
+    std::uint64_t voiceDropped = 0;  // voice tracking capacity, same lifetime
+};
+
 class Engine {
   public:
     Engine(InstancePool& plugins, MediaCache& media, EngineOptions options = {});
@@ -324,6 +339,11 @@ class Engine {
     // Main thread, regularly: frees retired plans; once the newest plan is
     // live, destroys instances whose fx left the session.
     void service();
+    // Main thread: FIFO per executor; no ordering is implied between executor
+    // queues and idle flushes. Metadata identifies the plan and transport epoch.
+    PluginOutputs takePluginOutputs();
+    std::uint64_t planGeneration() const { return publishedGen_; }  // main thread
+    std::uint64_t pluginOutputDrops() const { return outputDrops_.load() + idleOutputDrops_; }
 
     std::uint32_t outputLatency() const { return outputLatency_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
@@ -438,9 +458,17 @@ class Engine {
                     const void* self) SUPPLE_RT;
     void startFree(std::vector<host::Instance*>& owned, const std::vector<host::Instance*>* next,
                    const void* self) SUPPLE_RT;
-    static void resetOwned(const std::vector<host::Instance*>& owned) SUPPLE_RT;
+    static void resetOwned(const std::vector<host::Instance*>& owned, detail::Plan* plan) SUPPLE_RT;
     void collectPlans();
+    void publishPluginOutputs(detail::Plan& plan, bool renderer, std::uint64_t epoch,
+                              std::int64_t pos, std::int64_t stream) SUPPLE_RT;
 
+    using OutputQueue = SpscRing<PluginOutput, 4096>;
+    std::unique_ptr<OutputQueue> rendererOutputs_, callbackOutputs_;
+    std::vector<PluginOutput> idleOutputs_;  // bounded main-thread queue
+    std::atomic<std::uint64_t> outputDrops_{0}, voiceDrops_{0};
+    std::uint64_t idleOutputDrops_ = 0;
+    bool notificationReload_ = false;
     InstancePool& plugins_;
     MediaCache& media_;
     EngineOptions options_;

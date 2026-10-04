@@ -596,6 +596,8 @@ struct Edge {
     std::uint8_t config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
     int timerCalls = 0, activations = 0;
+    std::atomic<int> processCalls{0};
+    std::atomic<bool> removed{false};
     clap_id timers[2] = {CLAP_INVALID_ID, CLAP_INVALID_ID};
     // A display-free editor (gap log #39): it records the parent window it is
     // given (read back as parameter 8) and asks for a resize when shown.
@@ -605,12 +607,12 @@ struct Edge {
 };
 Edge* E(const clap_plugin_t* p) { return static_cast<Edge*>(p->plugin_data); }
 
-uint32_t CLAP_ABI edgeParamCount(const clap_plugin_t*) { return 2; }
-bool CLAP_ABI edgeParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
+uint32_t CLAP_ABI edgeParamCount(const clap_plugin_t* pl) { return E(pl)->removed ? 1 : 2; }
+bool CLAP_ABI edgeParamInfo(const clap_plugin_t* pl, uint32_t index, clap_param_info_t* info) {
     if (index > 1) return false;
     std::memset(info, 0, sizeof(*info));
-    info->id = index == 0 ? 7 : 8;
-    info->flags = CLAP_PARAM_IS_READONLY;
+    info->id = index == 0 && !E(pl)->removed ? 7 : 8;
+    info->flags = E(pl)->config[0] >= 11 ? CLAP_PARAM_IS_AUTOMATABLE : CLAP_PARAM_IS_READONLY;
     std::snprintf(info->name, sizeof(info->name), index == 0 ? "Flushes" : "Editor parent");
     info->max_value = index == 0 ? 1e9 : 1e15;
     return true;
@@ -770,8 +772,33 @@ void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
     }
 }
 const clap_plugin_timer_support_t kEdgeTimer = {edgeTimer};
+struct EdgeControl {
+    void (*requestProcess)(const clap_plugin_t*);
+    void (*rescan)(const clap_plugin_t*, bool);
+    void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
+    void (*restart)(const clap_plugin_t*);
+};
+void edgeRequestProcess(const clap_plugin_t* pl) { E(pl)->host->request_process(E(pl)->host); }
+void edgeRescan(const clap_plugin_t* pl, bool removed) {
+    E(pl)->removed = removed;
+    const auto* hp = static_cast<const clap_host_params_t*>(
+        E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
+    hp->rescan(E(pl)->host, CLAP_PARAM_RESCAN_ALL);
+}
+void edgeClear(const clap_plugin_t* pl, clap_id id, clap_param_clear_flags flags) {
+    const auto* hp = static_cast<const clap_host_params_t*>(
+        E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
+    hp->clear(E(pl)->host, id, flags);
+}
+void edgeRestart(const clap_plugin_t* pl) { E(pl)->host->request_restart(E(pl)->host); }
+const EdgeControl kEdgeControl = {edgeRequestProcess, edgeRescan, edgeClear, edgeRestart};
+uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) { return E(pl)->config[0] == 5 ? 64 : 0; }
+const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
+
 const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
+    if (!std::strcmp(id, "supple.test.edge-control")) return &kEdgeControl;
+    if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kEdgeLatency;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kEdgeTimer;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
@@ -783,27 +810,59 @@ const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
 bool CLAP_ABI edgeActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) {
     return ++E(pl)->activations == 1 || E(pl)->config[0] != 5;
 }
-bool CLAP_ABI edgeStart(const clap_plugin_t* pl) { return E(pl)->config[0] == 0; }
-clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_process_t* p) {
+bool CLAP_ABI edgeStart(const clap_plugin_t* pl) {
+    return E(pl)->config[0] == 0 || E(pl)->config[0] >= 11;
+}
+clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_process_t* p) {
+    const auto calls = ++E(pl)->processCalls;
     clap_event_param_value_t param{};
     param.header = {sizeof(param), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
                     CLAP_EVENT_DONT_RECORD | CLAP_EVENT_IS_LIVE};
     param.param_id = 7;
     param.value = 42;
     param.note_id = param.port_index = param.channel = param.key = -1;
-    p->out_events->try_push(p->out_events, &param.header);
+    if (E(pl)->config[0] == 11) param.value = calls;
+    if (E(pl)->config[0] == 13) {
+        param.note_id = 4;
+        param.port_index = 1;
+        param.channel = 2;
+        param.key = 3;
+        for (int repeat = 0; repeat < 300; ++repeat) {
+            clap_event_param_gesture_t gesture{};
+            gesture.header = {sizeof(gesture), 1, CLAP_CORE_EVENT_SPACE_ID,
+                              CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_IS_LIVE};
+            gesture.param_id = 7;
+            p->out_events->try_push(p->out_events, &gesture.header);
+            param.header.time = 1;
+            p->out_events->try_push(p->out_events, &param.header);
+            gesture.header.time = 1;
+            gesture.header.type = CLAP_EVENT_PARAM_GESTURE_END;
+            p->out_events->try_push(p->out_events, &gesture.header);
+        }
+    } else
+        p->out_events->try_push(p->out_events, &param.header);
     for (uint32_t i = 0; i < p->in_events->size(p->in_events); ++i) {
         const auto* event = p->in_events->get(p->in_events, i);
-        if (event->space_id != CLAP_CORE_EVENT_SPACE_ID || event->type != CLAP_EVENT_NOTE_OFF)
+        if (event->space_id != CLAP_CORE_EVENT_SPACE_ID ||
+            (event->type != CLAP_EVENT_NOTE_OFF &&
+             !(E(pl)->config[0] == 14 && event->type == CLAP_EVENT_NOTE_ON &&
+               reinterpret_cast<const clap_event_note_t*>(event)->note_id == E(pl)->config[1])))
             continue;
         auto end = *reinterpret_cast<const clap_event_note_t*>(event);
         end.header.type = CLAP_EVENT_NOTE_END;
+        if (E(pl)->config[0] == 14) {
+            const auto mask = E(pl)->config[2];
+            if (mask & 1) end.note_id = -1;
+            if (mask & 2) end.port_index = -1;
+            if (mask & 4) end.channel = -1;
+            if (mask & 8) end.key = -1;
+        }
         p->out_events->try_push(p->out_events, &end.header);
     }
     for (uint32_t c = 0; c < 2; ++c)
         for (uint32_t i = 0; i < p->frames_count; ++i)
             p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i];
-    return CLAP_PROCESS_CONTINUE;
+    return E(pl)->config[0] == 11 ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
 
 // --- key mix (sidechain fixture, ADR-0018) --------------------------------------------------

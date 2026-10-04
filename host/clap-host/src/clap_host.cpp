@@ -130,7 +130,8 @@ struct Instance::HostState {
     std::atomic<bool> tailChanged{false};
     std::atomic<std::uint32_t> droppedEvents{0};  // input events that did not fit the arena
     std::atomic<std::uint32_t> rescanFlags{0};
-    std::atomic<bool> rescanned{false};
+    std::atomic<bool> rescanned{false}, sleeping{false};
+    std::vector<Notifications::ParamClear> paramsClear;  // main thread only
 
     struct Timer {
         clap_id id;
@@ -224,10 +225,14 @@ struct HostCallbacks {
 
     // clap.params
     static void CLAP_ABI paramsRescan(const clap_host_t* h, clap_param_rescan_flags flags) {
+        S(h)->paramsClear.clear();  // a later rescan re-enables earlier clears
         S(h)->rescanFlags.fetch_or(flags);
         S(h)->rescanned = true;
     }
-    static void CLAP_ABI paramsClear(const clap_host_t*, clap_id, clap_param_clear_flags) {}
+    static void CLAP_ABI paramsClear(const clap_host_t* h, clap_id id,
+                                     clap_param_clear_flags flags) {
+        S(h)->paramsClear.push_back({id, flags});
+    }
     static void CLAP_ABI paramsRequestFlush(const clap_host_t* h) { S(h)->flushRequested = true; }
 
     // clap.state
@@ -958,6 +963,7 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
     if (!hostState_->paramQueue.push(id, clapValue))
         return Error("host.param_queue", "too many queued parameter changes", {},
                      "render or flush first");
+    hostState_->processRequested.store(true, std::memory_order_release);
     return okStatus();
 }
 
@@ -1220,6 +1226,7 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
     const clap_process_status status = plugin_->process(plugin_, &p);
     h.outSink = nullptr;
     h.eventCount = 0;
+    h.sleeping.store(status == CLAP_PROCESS_SLEEP, std::memory_order_relaxed);
     return status != CLAP_PROCESS_ERROR;
 }
 
@@ -1541,6 +1548,18 @@ int Instance::nextTimerMs() const {
     return static_cast<int>(std::max<std::int64_t>(0, ms));
 }
 
+bool Instance::processRequested() const SUPPLE_RT {
+    return hostState_ && hostState_->processRequested.load(std::memory_order_acquire);
+}
+
+bool Instance::takeProcessRequest() SUPPLE_RT {
+    return hostState_ && hostState_->processRequested.exchange(false, std::memory_order_acq_rel);
+}
+
+bool Instance::sleeping() const SUPPLE_RT {
+    return hostState_ && hostState_->sleeping.load(std::memory_order_relaxed);
+}
+
 Instance::Notifications Instance::takeNotifications() {
     if (vst3_) return vst3_->takeNotifications();
     if (remote_) return std::exchange(remoteNotes_, Notifications{});
@@ -1554,6 +1573,7 @@ Instance::Notifications Instance::takeNotifications() {
     n.droppedEvents = h.droppedEvents.exchange(0);
     n.paramsRescan = h.rescanned.exchange(false);
     n.paramsRescanFlags = h.rescanFlags.exchange(0);
+    n.paramsClear = std::exchange(h.paramsClear, {});
     return n;
 }
 

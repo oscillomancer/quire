@@ -58,6 +58,17 @@ class InstancePool {
     // Isolated instances whose bridge crashed or hung, with the reason.
     std::vector<std::pair<model::Id, std::string>> failed() const;
     host::Instance* find(model::Id id) const;
+    // Main thread: service and retain restart failures until fx.restart/replacement.
+    host::Instance::Notifications service(model::Id id);
+    std::vector<std::pair<model::Id, Error>> failedErrors() const;
+    const Error* failure(model::Id id) const;
+    std::uint32_t rememberedLatency(model::Id id) const;
+    bool automationCleared(model::Id id, std::uint32_t param) const;
+    void resetAutomation(model::Id id);  // explicit model reload
+    // Main thread, only after applying plug-in-originated values to its model
+    // patch: acknowledge that patch without sending it back on the next get().
+    void acknowledgeOutputPatch(model::Id id, const json::Value& patch);
+
     std::size_t retired() const { return retired_.size(); }
     std::size_t size() const { return instances_.size(); }
 
@@ -66,6 +77,9 @@ class InstancePool {
         std::unique_ptr<host::Instance> instance;
         std::string pluginId;
         model::Isolation isolation = model::Isolation::InProcess;
+        std::uint32_t latency = 0;
+        std::optional<Error> failure;
+        std::vector<std::uint32_t> clearedAutomation;
         std::string appliedState;  // canonical patch text or blob hash last applied
     };
     Resolver resolve_;
