@@ -26,11 +26,11 @@ namespace fs = std::filesystem;
 
 struct Args {
     std::optional<std::string> branch, pattern, name, mode, tap, format, operation, master;
-    std::optional<json::Value> normalize;
+    std::optional<json::Value> normalize, secondary;
     std::optional<std::vector<std::string>> tracks, regions;
     std::optional<double> startBeat, endBeat, tailS, target, limitTruePeakDb;
     std::optional<std::int64_t> bitDepth;
-    std::optional<std::int64_t> sampleRate, channels;
+    std::optional<std::int64_t> sampleRate, channels, version;
     bool job = false;
     bool addToProject = false;
 };
@@ -182,7 +182,16 @@ Result<std::string> expand(std::string_view pattern, const PatternData& d) {
     return out;
 }
 
-Result<model::Session> sessionFor(EngineApp& app, const std::optional<std::string>& branch) {
+Result<model::Session> sessionFor(EngineApp& app, const std::optional<std::string>& branch,
+                                  std::optional<std::int64_t> version = std::nullopt) {
+    if (version) {
+        if (branch) return Error("render.source", "give branch or version, not both", "/version");
+        const model::Version* v = app.versions().version(static_cast<std::uint64_t>(*version));
+        if (!v || !v->session)
+            return Error("history.version", "no version " + std::to_string(*version), "/version",
+                         "history.list shows the versions");
+        return *v->session;
+    }
     if (!branch) return app.view();
     auto head = app.versions().head(*branch);
     if (!head)
@@ -204,22 +213,17 @@ Result<model::Id> regionId(const model::Session& s, const std::string& text) {
 
 double lastBeat(const model::Session& s) { return model::lastItemBeat(s); }
 Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, const Args& a) {
-    auto source = sessionFor(app, a.branch);
+    auto source = sessionFor(app, a.branch, a.version);
     if (!source) return std::move(source).error();
     model::Session s = *source;
     const json::Value& defaults = s.project->render;
     auto setting = [&](std::string_view key) -> const json::Value* {
         return defaults.isObject() ? defaults.find(key) : nullptr;
     };
-    const auto* formatSetting = setting("format");
-    const std::string formatName = a.format.value_or(
-        formatSetting && formatSetting->isString() ? formatSetting->asString()
-        : formatSetting && formatSetting->isObject() && formatSetting->find("container") &&
-                formatSetting->find("container")->isString()
-            ? formatSetting->find("container")->asString()
-            : "wav");
-    if (formatName != "wav")
-        return Error("render.format", "only WAV encoding is available", "/format");
+    auto encoding = renderEncoding(*s.project, a.format, a.bitDepth);
+    if (!encoding) return std::move(encoding).error();
+    SUPPLE_TRY(secondaryEncoding(*s.project, a.secondary));  // refused before rendering
+    const std::string formatName = encoding->container;
     std::string pattern = a.name.value_or(a.pattern.value_or(
         setting("pattern") && setting("pattern")->isString() ? setting("pattern")->asString()
         : command == "render.mix"                            ? "mix-v" + std::to_string(s.version)
@@ -330,17 +334,12 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         data.sampleRate = static_cast<int>(a.sampleRate.value_or(
             rate && rate->isNumber() ? rate->asInt()
                                      : static_cast<std::int64_t>(s.project->sampleRate)));
-        const auto* formatDefault = setting("format");
-        const auto* depth = formatDefault && formatDefault->isObject()
-                                ? formatDefault->find("bit_depth")
-                                : setting("bit_depth");
-        data.bitDepth =
-            static_cast<int>(a.bitDepth.value_or(depth && depth->isNumber() ? depth->asInt() : 32));
+        data.bitDepth = encoding->bits();
         data.format = formatName;
         data.counter = static_cast<int>(tasks.size() + 1);
         auto name = expand(pattern, data);
         if (!name) return std::move(name).error();
-        fs::path rel = fs::path(*name + ".wav").lexically_normal();
+        fs::path rel = fs::path(*name + encoding->extension()).lexically_normal();
         if (rel.is_absolute() || rel.empty() || *rel.begin() == "..")
             return Error("render.path", "render name escapes directory", "/pattern");
         task.path = app.rendersDir() / rel;
@@ -469,14 +468,19 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
                             : app.renderSession(task.session, settings);
         if (!rendered) return std::move(rendered).error();
         auto& audio = rendered->audio;
-        RenderOutputArgs output{args.format,   args.normalize,  args.target,  args.limitTruePeakDb,
-                                args.bitDepth, args.sampleRate, args.channels};
-        auto wav = finishRenderAudio(audio, *task.session.project, output);
-        if (!wav) return std::move(wav).error();
+        RenderOutputArgs output{args.format,   args.normalize,  args.target,   args.limitTruePeakDb,
+                                args.bitDepth, args.sampleRate, args.channels, args.secondary};
+        auto encoded = finishRenderAudio(audio, *task.session.project, output);
+        if (!encoded) return std::move(encoded).error();
         if (jobs && jobs->cancelled(job)) return Error("job.cancelled", "render cancelled");
-        SUPPLE_TRY(audio::writeWav(task.path, audio, *wav));
+        SUPPLE_TRY(writeRender(task.path, audio, encoded->primary));
         json::Value entry = json::Value::object();
         entry["path"] = task.path.string();
+        if (encoded->secondary) {
+            const fs::path second = secondaryPath(task.path, encoded->primary, *encoded->secondary);
+            SUPPLE_TRY(writeRender(second, audio, *encoded->secondary));
+            entry["secondary_path"] = second.string();
+        }
         entry["render"] = app.rememberRender(task.path);
         entry["start_beat"] = task.session.timeMap->beatAt(task.settings.startSeconds);
         entry["seconds"] = audio.seconds();
@@ -511,7 +515,11 @@ schema::Schema<Args> argsSchema() {
                                     "processing) or through_master (the others muted)"))
         .field("tap", &Args::tap,
                schema::string().doc("Stems: post_fader (default), pre_fader or pre_fx"))
-        .field("format", &Args::format, schema::string().doc("wav (FLAC is not available)"))
+        .field("format", &Args::format, schema::string().doc("wav (default) or flac (16/24 bit)"))
+        .field("secondary", &Args::secondary,
+               schema::any().doc("A second file of the same render beside the first: "
+                                 "{format: wav|flac, bit_depth}, or \"none\"; default: the "
+                                 "project's render settings"))
         .field("normalize", &Args::normalize,
                schema::any().doc("none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or "
                                  "{mode, target, limit_true_peak_db}"))
@@ -534,6 +542,9 @@ schema::Schema<Args> argsSchema() {
         .field("bit_depth", &Args::bitDepth, schema::integer().range(16, 32))
         .field("sample_rate", &Args::sampleRate, schema::integer().range(8000, 384000))
         .field("channels", &Args::channels, schema::integer().range(1, 2))
+        .field("version", &Args::version,
+               schema::integer().min(0).doc("Render the session as of this version "
+                                            "(history.list); the render queue pins its renders"))
         .field("job", &Args::job, schema::boolean())
         .defaultValue(false)
         .field("add_to_project", &Args::addToProject, schema::boolean())
@@ -652,8 +663,8 @@ Status normalizeRenderAudio(audio::AudioData& data, std::string_view mode, doubl
     return okStatus();
 }
 
-Result<audio::WavOptions> finishRenderAudio(audio::AudioData& audio, const model::Project& project,
-                                            const RenderOutputArgs& a) {
+Result<RenderOutput> finishRenderAudio(audio::AudioData& audio, const model::Project& project,
+                                       const RenderOutputArgs& a) {
     const json::Value& defaults = project.render;
     auto setting = [&](std::string_view key) -> const json::Value* {
         return defaults.isObject() ? defaults.find(key) : nullptr;
@@ -709,31 +720,115 @@ Result<audio::WavOptions> finishRenderAudio(audio::AudioData& audio, const model
             return Error("render.normalize", "normalize must be a mode or object", "/normalize");
     }
     SUPPLE_TRY(normalizeRenderAudio(audio, normMode, normTarget, limit));
-    audio::WavOptions wav;
+    RenderOutput out;
+    auto primary = renderEncoding(project, a.format, a.bitDepth);
+    if (!primary) return std::move(primary).error();
+    out.primary = std::move(*primary);
+    auto second = secondaryEncoding(project, a.secondary);
+    if (!second) return std::move(second).error();
+    out.secondary = std::move(*second);
+    return out;
+}
+
+int RenderEncoding::bits() const {
+    return wav.format == audio::SampleFormat::Pcm16   ? 16
+           : wav.format == audio::SampleFormat::Pcm24 ? 24
+                                                      : 32;
+}
+
+std::string RenderEncoding::extension() const { return container == "flac" ? ".flac" : ".wav"; }
+
+namespace {
+Result<RenderEncoding> encodingOf(const std::string& container, std::int64_t depth,
+                                  const json::Value* formatDefault, std::uint64_t seed,
+                                  const std::string& at) {
+    if (container != "wav" && container != "flac")
+        return Error("render.format", "unknown format \"" + container + "\"", at + "/format",
+                     "wav or flac");
+    if (container == "flac" && depth != 16 && depth != 24)
+        return Error("render.format", "FLAC is 16 or 24 bit", at + "/bit_depth",
+                     "use 16 or 24 (32-bit float is WAV only)");
+    if (depth != 16 && depth != 24 && depth != 32)
+        return Error("render.format", "bit_depth must be 16, 24, or 32", at + "/bit_depth");
+    RenderEncoding e;
+    e.container = container;
+    e.wav.format = depth == 16   ? audio::SampleFormat::Pcm16
+                   : depth == 24 ? audio::SampleFormat::Pcm24
+                                 : audio::SampleFormat::Float32;
+    e.wav.ditherSeed = seed;
+    if (formatDefault && formatDefault->isObject())
+        if (const auto* dither = formatDefault->find("dither"); dither && dither->isBool())
+            e.wav.dither = dither->asBool();
+    return e;
+}
+}  // namespace
+
+Result<RenderEncoding> renderEncoding(const model::Project& project,
+                                      const std::optional<std::string>& format,
+                                      std::optional<std::int64_t> bitDepth) {
+    const json::Value& defaults = project.render;
+    auto setting = [&](std::string_view key) -> const json::Value* {
+        return defaults.isObject() ? defaults.find(key) : nullptr;
+    };
     const auto* formatDefault = setting("format");
-    const std::string formatName = a.format.value_or(
+    const std::string container = format.value_or(
         formatDefault && formatDefault->isString() ? formatDefault->asString()
         : formatDefault && formatDefault->isObject() && formatDefault->find("container") &&
                 formatDefault->find("container")->isString()
             ? formatDefault->find("container")->asString()
             : "wav");
-    if (formatName != "wav")
-        return Error("render.format", "only WAV encoding is available", "/format");
     const json::Value* depthDefault = formatDefault && formatDefault->isObject()
                                           ? formatDefault->find("bit_depth")
                                           : setting("bit_depth");
-    const int depth = static_cast<int>(
-        a.bitDepth.value_or(depthDefault && depthDefault->isNumber() ? depthDefault->asInt() : 32));
-    if (depth != 16 && depth != 24 && depth != 32)
-        return Error("render.format", "bit_depth must be 16, 24, or 32", "/bit_depth");
-    wav.format = depth == 16   ? audio::SampleFormat::Pcm16
-                 : depth == 24 ? audio::SampleFormat::Pcm24
-                               : audio::SampleFormat::Float32;
-    wav.ditherSeed = project.seed;
-    if (formatDefault && formatDefault->isObject())
-        if (const auto* dither = formatDefault->find("dither"); dither && dither->isBool())
-            wav.dither = dither->asBool();
-    return wav;
+    const std::int64_t depth =
+        bitDepth.value_or(depthDefault && depthDefault->isNumber() ? depthDefault->asInt()
+                          : container == "flac"                    ? 24
+                                                                   : 32);
+    return encodingOf(container, depth, formatDefault, project.seed, "");
+}
+
+Result<std::optional<RenderEncoding>> secondaryEncoding(
+    const model::Project& project, const std::optional<json::Value>& secondary) {
+    const json::Value* spec = secondary ? &*secondary : nullptr;
+    if (!spec && project.render.isObject()) spec = project.render.find("secondary");
+    if (!spec || spec->isNull() || (spec->isString() && spec->asString() == "none"))
+        return std::optional<RenderEncoding>{};
+    if (!spec->isObject())
+        return Error("render.secondary", "secondary must be {format, bit_depth} or \"none\"",
+                     "/secondary", "e.g. {\"format\": \"flac\", \"bit_depth\": 16}");
+    const auto* f = spec->find("format");
+    if (!f || !f->isString())
+        return Error("render.secondary", "secondary needs a format", "/secondary/format",
+                     "wav or flac");
+    const auto* d = spec->find("bit_depth");
+    if (d && !d->isNumber())
+        return Error("render.secondary", "bit_depth must be a number", "/secondary/bit_depth");
+    const std::int64_t depth = d ? d->asInt() : f->asString() == "flac" ? 24 : 32;
+    auto e = encodingOf(f->asString(), depth, nullptr, project.seed, "/secondary");
+    if (!e) return std::move(e).error();
+    return std::optional<RenderEncoding>(std::move(*e));
+}
+
+std::filesystem::path secondaryPath(const std::filesystem::path& primary,
+                                    const RenderEncoding& first, const RenderEncoding& second) {
+    std::filesystem::path p = primary;
+    if (first.container == second.container)
+        p.replace_extension("." + std::to_string(second.bits()) + second.extension());
+    else
+        p.replace_extension(second.extension());
+    return p;
+}
+
+Status writeRender(const std::filesystem::path& path, const audio::AudioData& data,
+                   const RenderEncoding& encoding) {
+    if (encoding.container == "flac") {
+        audio::FlacOptions flac;
+        flac.bitsPerSample = encoding.bits();
+        flac.dither = encoding.wav.dither;
+        flac.ditherSeed = encoding.wav.ditherSeed;
+        return audio::writeFlac(path, data, flac);
+    }
+    return audio::writeWav(path, data, encoding.wav);
 }
 
 Result<std::string> expandRenderPattern(std::string_view pattern,
@@ -774,6 +869,271 @@ void postAddToProject(cmd::Dispatcher& dispatcher, const cmd::Origin& origin,
     });
 }
 
+namespace {
+
+struct QueueAddArgs {
+    std::string command;
+    json::Value args = json::Value::object();
+    std::optional<std::string> label;
+};
+struct QueueRemoveArgs {
+    std::optional<std::string> id;
+    bool all = false;
+};
+struct QueueRunArgs {
+    bool job = false;
+};
+
+json::Value queueEntry(const EngineApp::QueuedRender& q) {
+    json::Value e = json::Value::object();
+    e["id"] = q.id;
+    e["command"] = q.command;
+    e["label"] = q.label;
+    e["version"] = static_cast<std::int64_t>(q.version);
+    e["files"] = q.files;
+    e["args"] = q.args;
+    return e;
+}
+
+// One queued render ready to run: its stored arguments decoded and planned.
+struct QueuedWork {
+    std::string id, label;
+    Args args;
+    std::vector<RenderTask> tasks;
+};
+
+Result<QueuedWork> planQueued(EngineApp& app, const EngineApp::QueuedRender& q) {
+    auto decoded = argsSchema().decode(q.args);
+    if (!decoded) return std::move(decoded).error();
+    QueuedWork w{q.id, q.label, std::move(*decoded), {}};
+    w.args.job = false;
+    auto tasks = plan(app, q.command, w.args);
+    if (!tasks) return std::move(tasks).error();
+    w.tasks = std::move(*tasks);
+    return w;
+}
+
+void registerQueueCommands(cmd::Registry& registry) {
+    {
+        Command<QueueAddArgs, json::Value> c;
+        c.name = "render.queue.add";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Queue a render (mix, stems or regions) to run later with render.queue.run.";
+        c.description =
+            "args: the render command's arguments (as for render.mix/stems/regions). The queued "
+            "render is pinned to the session as it is now (its version; a branch's head when "
+            "branch is given), so later edits do not change it; a dry run lists its files now. "
+            "The queue is transport-like state: not an undo step, not saved with the project.";
+        c.tags = {"render"};
+        c.args = schema::object<QueueAddArgs>("render_queue_add_args")
+                     .field("command", &QueueAddArgs::command,
+                            schema::string().pattern("^render\\.(mix|stems|regions)$",
+                                                     "render.mix, render.stems or render.regions"))
+                     .field("args", &QueueAddArgs::args, schema::any())
+                     .field("label", &QueueAddArgs::label, schema::string())
+                     .build();
+        c.result = schema::any();
+        c.errors = {{"render.empty", "the render would write nothing", "add items or a range"}};
+        c.examples = {{"Queue the mix as it is now",
+                       obj(R"({"command":"render.mix","args":{"end_beat":1,"name":"queued"}})"),
+                       obj(R"({"id":"q1","command":"render.mix","label":"<any>","version":"<any>",
+                               "files":"<any>","args":"<any>"})"),
+                       "song"}};
+        c.run = [](const QueueAddArgs& a, Context& ctx) -> Result<json::Value> {
+            auto& app = ctx.service<EngineApp>();
+            auto decoded = argsSchema().decode(a.args);
+            if (!decoded) return std::move(decoded).error().at("/args");
+            Args args = std::move(*decoded);
+            args.job = false;
+            if (!args.version) {  // pin it: later edits must not change what renders
+                auto source = sessionFor(app, args.branch);
+                if (!source) return std::move(source).error().at("/args");
+                args.version = static_cast<std::int64_t>(source->version);
+                args.branch.reset();
+            }
+            auto tasks = plan(app, a.command, args);
+            if (!tasks) return std::move(tasks).error();
+            EngineApp::QueuedRender q;
+            q.id = app.nextQueueId();
+            q.command = a.command;
+            q.version = static_cast<std::uint64_t>(*args.version);
+            q.args = argsSchema().encode(args);
+            q.files = json::Value::array();
+            const json::Value planned = fileList(*tasks);  // (kept alive for the loop)
+            for (const auto& f : planned.asArray()) q.files.push_back(f.find("path")->asString());
+            const std::string what = a.command.substr(std::string_view("render.").size());
+            q.label = a.label.value_or(what + " @ v" + std::to_string(q.version) + " (" +
+                                       std::to_string(tasks->size()) +
+                                       (tasks->size() == 1 ? " file)" : " files)"));
+            json::Value out = queueEntry(q);
+            app.renderQueue().push_back(std::move(q));
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<cmd::NoArgs, json::Value> c;
+        c.name = "render.queue.list";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "The queued renders, in the order render.queue.run runs them.";
+        c.tags = {"render"};
+        c.args = schema::object<cmd::NoArgs>("no_args").build();
+        c.result = schema::any();
+        c.examples = {{"Empty", obj("{}"), obj(R"({"queue":[]})"), "empty"}};
+        c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<json::Value> {
+            json::Value list = json::Value::array();
+            for (const auto& q : ctx.service<EngineApp>().renderQueue())
+                list.push_back(queueEntry(q));
+            json::Value out = json::Value::object();
+            out["queue"] = std::move(list);
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<QueueRemoveArgs, json::Value> c;
+        c.name = "render.queue.remove";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Take a render off the queue (id), or clear it (all: true).";
+        c.tags = {"render"};
+        c.args = schema::object<QueueRemoveArgs>("render_queue_remove_args")
+                     .field("id", &QueueRemoveArgs::id, schema::string())
+                     .field("all", &QueueRemoveArgs::all, schema::boolean())
+                     .defaultValue(false)
+                     .build();
+        c.result = schema::any();
+        c.errors = {{"render.queue_unknown", "no queued render with that id",
+                     "render.queue.list shows them"}};
+        c.examples = {{"Clear", obj(R"({"all":true})"), obj(R"({"removed":0})"), "empty"}};
+        c.run = [](const QueueRemoveArgs& a, Context& ctx) -> Result<json::Value> {
+            auto& queue = ctx.service<EngineApp>().renderQueue();
+            json::Value out = json::Value::object();
+            if (a.all) {
+                out["removed"] = static_cast<std::int64_t>(queue.size());
+                queue.clear();
+                return out;
+            }
+            if (!a.id)
+                return Error("render.queue_unknown", "give id or all", "/id",
+                             "render.queue.list shows the ids");
+            const auto before = queue.size();
+            std::erase_if(queue, [&](const auto& q) { return q.id == *a.id; });
+            if (queue.size() == before)
+                return Error("render.queue_unknown", "no queued render " + *a.id, "/id",
+                             "render.queue.list shows the ids");
+            out["removed"] = 1;
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<QueueRunArgs, json::Value> c;
+        c.name = "render.queue.run";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Run every queued render in order; each one leaves the queue when it is done.";
+        c.description =
+            "Each render renders the version it was queued at. job: true runs them as one job "
+            "(job.get for progress). The result lists each render's files under its id.";
+        c.tags = {"render"};
+        c.args = schema::object<QueueRunArgs>("render_queue_run_args")
+                     .field("job", &QueueRunArgs::job, schema::boolean())
+                     .defaultValue(false)
+                     .build();
+        c.result = schema::any();
+        c.errors = {{"render.queue_empty", "nothing is queued", "render.queue.add first"}};
+        c.examples = {
+            {"Render the queue", obj("{}"), obj(R"({"renders":"<any>"})"), "render_queued"}};
+        c.run = [](const QueueRunArgs& a, Context& ctx) -> Result<json::Value> {
+            auto& app = ctx.service<EngineApp>();
+            if (app.renderQueue().empty())
+                return Error("render.queue_empty", "the render queue is empty", {},
+                             "render.queue.add a render first");
+            std::vector<QueuedWork> work;
+            for (const auto& q : app.renderQueue()) {  // all planned before any renders
+                auto w = planQueued(app, q);
+                if (!w) return std::move(w).error();
+                work.push_back(std::move(*w));
+            }
+            auto& dispatcher = ctx.service<cmd::Dispatcher>();
+            const cmd::Origin origin = ctx.origin();
+            if (!a.job) {
+                json::Value renders = json::Value::array();
+                for (auto& w : work) {
+                    auto result = runTasks(app, w.tasks, w.args);
+                    if (!result) return std::move(result).error();
+                    std::erase_if(app.renderQueue(), [&](const auto& q) { return q.id == w.id; });
+                    if (w.args.addToProject)
+                        postAddToProject(dispatcher, origin, *result->find("files"));
+                    json::Value entry = json::Value::object();
+                    entry["id"] = w.id;
+                    entry["label"] = w.label;
+                    entry["files"] = *result->find("files");
+                    renders.push_back(std::move(entry));
+                }
+                json::Value out = json::Value::object();
+                out["renders"] = std::move(renders);
+                return out;
+            }
+            auto available = app.plugins();
+            if (!available) return std::move(available).error();
+            std::vector<host::PluginInfo> catalogue(available->begin(), available->end());
+            const auto identity = app.options().identity;
+            auto& jobs = ctx.service<cmd::JobManager>();
+            const std::string id = jobs.create();
+            app.startJob([&app, &jobs, &dispatcher, origin, id, work = std::move(work),
+                          catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                json::Value renders = json::Value::array();
+                std::vector<std::string> done;
+                for (const auto& w : work) {
+                    if (stop.stop_requested() || jobs.cancelled(id)) return;
+                    auto result =
+                        runTasks(app, w.tasks, w.args, &jobs, id, &catalogue, &identity, stop);
+                    if (!result) {
+                        if (!jobs.cancelled(id)) (void)jobs.fail(id, std::move(result).error());
+                        // What finished leaves the queue (on the model thread).
+                        dispatcher.post("render.queue.done", [&app, done]() -> Status {
+                            std::erase_if(app.renderQueue(), [&](const auto& q) {
+                                return std::find(done.begin(), done.end(), q.id) != done.end();
+                            });
+                            return {};
+                        });
+                        return;
+                    }
+                    if (w.args.addToProject)
+                        postAddToProject(dispatcher, origin, *result->find("files"));
+                    json::Value entry = json::Value::object();
+                    entry["id"] = w.id;
+                    entry["label"] = w.label;
+                    entry["files"] = *result->find("files");
+                    renders.push_back(std::move(entry));
+                    done.push_back(w.id);
+                }
+                json::Value out = json::Value::object();
+                out["renders"] = std::move(renders);
+                (void)jobs.completeWith(id, std::move(out), [&] {
+                    dispatcher.post("render.queue.done", [&app, done]() -> Status {
+                        std::erase_if(app.renderQueue(), [&](const auto& q) {
+                            return std::find(done.begin(), done.end(), q.id) != done.end();
+                        });
+                        return {};
+                    });
+                });
+            });
+            json::Value out = json::Value::object();
+            out["job"] = id;
+            out["status"] = "running";
+            return out;
+        };
+        registry.add(std::move(c));
+    }
+}
+
+}  // namespace
+
 void registerRenderCommands(cmd::Registry& registry) {
     for (const char* name : {"render.stems", "render.regions", "render.dry-run"}) {
         Command<Args, json::Value> c;
@@ -813,8 +1173,6 @@ void registerRenderCommands(cmd::Registry& registry) {
                 out["files"] = fileList(*tasks);
                 return out;
             }
-            if (a.format && *a.format != "wav")
-                return Error("render.format", "only WAV encoding is available", "/format");
             auto& dispatcher = ctx.service<cmd::Dispatcher>();
             const cmd::Origin origin = ctx.origin();
             if (!a.job) {
@@ -904,5 +1262,6 @@ void registerRenderCommands(cmd::Registry& registry) {
         return out;
     };
     registry.add(std::move(ab));
+    registerQueueCommands(registry);
 }
 }  // namespace supple::engine

@@ -3,7 +3,7 @@
 // Reading: WAV (PCM 8/16/24/32, float 32/64, RF64/BW64), FLAC and MP3, detected
 // by content (not extension), decoded to planar float at the file's own rate.
 // Writing: RIFF WAV or RF64 beyond 4 GiB as 16/24-bit PCM with seeded TPDF
-// dither, or 32-bit float.
+// dither, or 32-bit float; FLAC at 16 or 24 bits.
 // Writes are atomic (temporary file + rename, see writeFileAtomic). PCM
 // encoding maps NaN to 0 and clamps infinities to full scale; float32 stores
 // samples unchanged. A WAV whose data is shorter than its header declares
@@ -79,5 +79,19 @@ Result<std::vector<std::uint8_t>> wavHeader(std::uint64_t frames, std::uint32_t 
 Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOptions& options = {});
 Status writeWav(const std::filesystem::path& path, const AudioData& data,
                 const WavOptions& options = {});
+
+// FLAC (an original encoder: fixed predictors, Rice coding, stereo
+// decorrelation, MD5 in STREAMINFO). 16- or 24-bit, quantized and dithered
+// exactly as encodeWav does for the same options, so the two decode alike.
+struct FlacOptions {
+    int bitsPerSample = 24;  // 16 or 24
+    bool dither = true;
+    std::uint64_t ditherSeed = 0;
+    int blockSize = 4096;
+};
+Result<std::vector<std::uint8_t>> encodeFlac(const AudioData& data,
+                                             const FlacOptions& options = {});
+Status writeFlac(const std::filesystem::path& path, const AudioData& data,
+                 const FlacOptions& options = {});
 
 }  // namespace supple::audio

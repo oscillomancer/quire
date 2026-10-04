@@ -1612,6 +1612,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         run("env.add",
             R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})");
     if (fixture == "song_with_render") run("render.mix", R"({"name":"example"})");
+    if (fixture == "render_queued")  // + q1: the mix of the first beat
+        run("render.queue.add",
+            R"({"command": "render.mix", "args": {"end_beat": 1, "name": "queued"}})");
 }
 
 }  // namespace supple::engine

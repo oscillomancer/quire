@@ -3181,7 +3181,10 @@
         },
         "format": {
           "type": "string",
-          "description": "wav (FLAC is not available)"
+          "description": "wav (default) or flac (16/24 bit)"
+        },
+        "secondary": {
+          "description": "A second file of the same render beside the first: {format: wav|flac, bit_depth}, or \"none\"; default: the project's render settings"
         },
         "normalize": {
           "description": "none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}"
@@ -3237,6 +3240,11 @@
           "type": "integer",
           "minimum": 1.0,
           "maximum": 2.0
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0.0,
+          "description": "Render the session as of this version (history.list); the render queue pins its renders"
         },
         "job": {
           "type": "boolean",
@@ -3293,7 +3301,11 @@
           "type": "string"
         },
         "format": {
-          "type": "string"
+          "type": "string",
+          "description": "wav (default) or flac (16/24 bit)"
+        },
+        "secondary": {
+          "description": "A second file beside the first: {format: wav|flac, bit_depth}, or \"none\""
         },
         "bit_depth": {
           "type": "integer",
@@ -3336,6 +3348,9 @@
         "path": {
           "type": "string"
         },
+        "secondary_path": {
+          "type": "string"
+        },
         "seconds": {
           "type": "number"
         },
@@ -3361,6 +3376,97 @@
       },
       "additionalProperties": false
     },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_queue_add",
+    "title": "Queue a render (mix, stems or regions) to run later with render.queue.run.",
+    "description": "Queue a render (mix, stems or regions) to run later with render.queue.run. args: the render command's arguments (as for render.mix/stems/regions). The queued render is pinned to the session as it is now (its version; a branch's head when branch is given), so later edits do not change it; a dry run lists its files now. The queue is transport-like state: not an undo step, not saved with the project. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_queue_add_args",
+      "properties": {
+        "command": {
+          "type": "string",
+          "pattern": "^render\\.(mix|stems|regions)$"
+        },
+        "args": {},
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": ["command", "args"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_queue_list",
+    "title": "The queued renders, in the order render.queue.run runs them.",
+    "description": "The queued renders, in the order render.queue.run runs them.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_queue_remove",
+    "title": "Take a render off the queue (id), or clear it (all: true).",
+    "description": "Take a render off the queue (id), or clear it (all: true).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_queue_remove_args",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "all": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "render_queue_run",
+    "title": "Run every queued render in order; each one leaves the queue when it is done.",
+    "description": "Run every queued render in order; each one leaves the queue when it is done. Each render renders the version it was queued at. job: true runs them as one job (job.get for progress). The result lists each render's files under its id. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "render_queue_run_args",
+      "properties": {
+        "job": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -3400,7 +3506,10 @@
         },
         "format": {
           "type": "string",
-          "description": "wav (FLAC is not available)"
+          "description": "wav (default) or flac (16/24 bit)"
+        },
+        "secondary": {
+          "description": "A second file of the same render beside the first: {format: wav|flac, bit_depth}, or \"none\"; default: the project's render settings"
         },
         "normalize": {
           "description": "none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}"
@@ -3456,6 +3565,11 @@
           "type": "integer",
           "minimum": 1.0,
           "maximum": 2.0
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0.0,
+          "description": "Render the session as of this version (history.list); the render queue pins its renders"
         },
         "job": {
           "type": "boolean",
@@ -3508,7 +3622,10 @@
         },
         "format": {
           "type": "string",
-          "description": "wav (FLAC is not available)"
+          "description": "wav (default) or flac (16/24 bit)"
+        },
+        "secondary": {
+          "description": "A second file of the same render beside the first: {format: wav|flac, bit_depth}, or \"none\"; default: the project's render settings"
         },
         "normalize": {
           "description": "none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}"
@@ -3564,6 +3681,11 @@
           "type": "integer",
           "minimum": 1.0,
           "maximum": 2.0
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0.0,
+          "description": "Render the session as of this version (history.list); the render queue pins its renders"
         },
         "job": {
           "type": "boolean",

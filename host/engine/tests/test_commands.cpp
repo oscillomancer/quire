@@ -927,3 +927,66 @@ TEST_CASE("timebase: items keep their place when it changes, and follow it when 
     CHECK(app->head().project->timebase == model::Timebase::Beats);
     CHECK(app->head().items.find(c)->position == doctest::Approx(2.0));
 }
+
+TEST_CASE("renders: FLAC files, a secondary format, and a queue pinned to its versions") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Synth"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","position":0,"length":4,"notation":"1: C4:w"})");
+    // A FLAC mix with a 16-bit WAV beside it.
+    const auto mix = run(bus, "render.mix",
+                         R"({"name":"song","end_beat":2,"format":"flac","bit_depth":24,
+                             "secondary":{"format":"wav","bit_depth":16}})");
+    const fs::path flac = mix.find("path")->asString();
+    const fs::path wav = mix.find("secondary_path")->asString();
+    CHECK(flac.extension() == ".flac");
+    CHECK(wav.filename() == "song.wav");
+    auto a = audio::readAudio(flac);
+    auto b = audio::readAudio(wav);
+    REQUIRE(a);
+    REQUIRE(b);
+    CHECK(audio::inspect(flac)->container == audio::Container::Flac);
+    CHECK(a->frames() == b->frames());
+    CHECK(peak(flac) == doctest::Approx(peak(wav)).epsilon(1e-3));
+    CHECK(peak(flac) > 0.05);
+    // Stems as FLAC; a same-container secondary carries its depth in the name.
+    const auto stems = run(bus, "render.stems",
+                           R"({"pattern":"stem-{track}","end_beat":2,"format":"flac","bit_depth":16,
+                               "secondary":{"format":"flac","bit_depth":24}})");
+    const auto& file = stems.find("files")->at(0);
+    CHECK(fs::path(file.find("path")->asString()).filename() == "stem-Synth.flac");
+    CHECK(fs::path(file.find("secondary_path")->asString()).filename() == "stem-Synth.24.flac");
+    CHECK(fs::exists(file.find("secondary_path")->asString()));
+    // FLAC is 16 or 24 bit.
+    auto refused = bus.execute({"render.mix", j(R"({"format":"flac","bit_depth":32})"), kOrigin});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "render.format");
+    // The queue: q1 now, then the track 12 dB down and q2; q1 still renders loud.
+    const auto q1 = run(bus, "render.queue.add",
+                        R"({"command":"render.mix","args":{"name":"before","end_beat":2}})");
+    CHECK(q1.find("id")->asString() == "q1");
+    run(bus, "track.set", R"({"track":"tr_1","volume_db":-12})");
+    run(bus, "render.queue.add",
+        R"({"command":"render.stems","args":{"pattern":"after-{track}","end_beat":2},"label":"stems"})");
+    CHECK(run(bus, "render.queue.list", "{}").find("queue")->size() == 2);
+    const auto ran = run(bus, "render.queue.run", "{}");
+    REQUIRE(ran.find("renders")->size() == 2);
+    const fs::path before =
+        ran.find("renders")->at(0).find("files")->at(0).find("path")->asString();
+    const fs::path after = ran.find("renders")->at(1).find("files")->at(0).find("path")->asString();
+    CHECK(before.filename() == "before.wav");
+    CHECK(ran.find("renders")->at(1).find("label")->asString() == "stems");
+    CHECK(peak(before) / peak(after) == doctest::Approx(std::pow(10.0, 12.0 / 20.0)).epsilon(0.02));
+    CHECK(run(bus, "render.queue.list", "{}").find("queue")->size() == 0);  // done: off the queue
+    // Remove and clear.
+    run(bus, "render.queue.add", R"({"command":"render.mix","args":{"end_beat":1}})");
+    run(bus, "render.queue.add", R"({"command":"render.mix","args":{"end_beat":1,"name":"x"}})");
+    run(bus, "render.queue.remove", R"({"id":"q3"})");
+    CHECK(run(bus, "render.queue.list", "{}").find("queue")->size() == 1);
+    CHECK(run(bus, "render.queue.remove", R"({"all":true})").find("removed")->asInt() == 1);
+    CHECK(bus.execute({"render.queue.run", j("{}"), kOrigin}).error().code == "render.queue_empty");
+}

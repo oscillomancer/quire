@@ -4655,7 +4655,8 @@ Kind: `query`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
 | `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
 | `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
-| `format` | string |  |  |  | wav (FLAC is not available) |
+| `format` | string |  |  |  | wav (default) or flac (16/24 bit) |
+| `secondary` | value |  |  |  | A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings |
 | `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
 | `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
 | `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
@@ -4668,6 +4669,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | `bit_depth` | integer |  | 16.0..32.0 |  |  |
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
+| `version` | integer |  | 0.0.. |  | Render the session as of this version (history.list); the render queue pins its renders |
 | `job` | boolean |  |  | false |  |
 | `add_to_project` | boolean |  |  | false |  |
 
@@ -4718,7 +4720,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  |  |
 | `pattern` | string |  |  |  |  |
 | `branch` | string |  |  |  |  |
-| `format` | string |  |  |  |  |
+| `format` | string |  |  |  | wav (default) or flac (16/24 bit) |
+| `secondary` | value |  |  |  | A second file beside the first: {format: wav|flac, bit_depth}, or "none" |
 | `bit_depth` | integer |  | 16.0..32.0 |  |  |
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
@@ -4738,6 +4741,9 @@ Kind: `action`. Exposure: `mcp-tool`.
       "type": "string"
     },
     "path": {
+      "type": "string"
+    },
+    "secondary_path": {
       "type": "string"
     },
     "seconds": {
@@ -4792,6 +4798,189 @@ Result:
 
 ```
 
+## `render.queue.add@1`
+
+Queue a render (mix, stems or regions) to run later with render.queue.run.
+
+args: the render command's arguments (as for render.mix/stems/regions). The queued render is pinned to the session as it is now (its version; a branch's head when branch is given), so later edits do not change it; a dry run lists its files now. The queue is transport-like state: not an undo step, not saved with the project.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `command` | string |  |  |  |  |
+| `args` | value |  |  |  |  |
+| `label` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `render.empty`: the render would write nothing Hint: add items or a range
+
+### Examples
+
+**Queue the mix as it is now** (`song`)
+
+```json
+{
+  "command": "render.mix",
+  "args": {
+    "end_beat": 1,
+    "name": "queued"
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "id": "q1",
+  "command": "render.mix",
+  "label": "<any>",
+  "version": "<any>",
+  "files": "<any>",
+  "args": "<any>"
+}
+
+```
+
+## `render.queue.list@1`
+
+The queued renders, in the order render.queue.run runs them.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
+**Empty** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "queue": []
+}
+
+```
+
+## `render.queue.remove@1`
+
+Take a render off the queue (id), or clear it (all: true).
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | string |  |  |  |  |
+| `all` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `render.queue_unknown`: no queued render with that id Hint: render.queue.list shows them
+
+### Examples
+
+**Clear** (`empty`)
+
+```json
+{
+  "all": true
+}
+
+```
+
+Result:
+
+```json
+{
+  "removed": 0
+}
+
+```
+
+## `render.queue.run@1`
+
+Run every queued render in order; each one leaves the queue when it is done.
+
+Each render renders the version it was queued at. job: true runs them as one job (job.get for progress). The result lists each render's files under its id.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `job` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `render.queue_empty`: nothing is queued Hint: render.queue.add first
+
+### Examples
+
+**Render the queue** (`render_queued`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "renders": "<any>"
+}
+
+```
+
 ## `render.regions@1`
 
 Render each region (or the render matrix's tracks per region) to files.
@@ -4810,7 +4999,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
 | `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
 | `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
-| `format` | string |  |  |  | wav (FLAC is not available) |
+| `format` | string |  |  |  | wav (default) or flac (16/24 bit) |
+| `secondary` | value |  |  |  | A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings |
 | `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
 | `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
 | `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
@@ -4823,6 +5013,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `bit_depth` | integer |  | 16.0..32.0 |  |  |
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
+| `version` | integer |  | 0.0.. |  | Render the session as of this version (history.list); the render queue pins its renders |
 | `job` | boolean |  |  | false |  |
 | `add_to_project` | boolean |  |  | false |  |
 
@@ -4872,7 +5063,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  | A fixed file name instead of a pattern |
 | `mode` | string |  |  |  | Stems: isolated (default; the track alone, no master processing) or through_master (the others muted) |
 | `tap` | string |  |  |  | Stems: post_fader (default), pre_fader or pre_fx |
-| `format` | string |  |  |  | wav (FLAC is not available) |
+| `format` | string |  |  |  | wav (default) or flac (16/24 bit) |
+| `secondary` | value |  |  |  | A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings |
 | `normalize` | value |  |  |  | none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db} |
 | `operation` | string |  |  |  | Dry run: mix, stems or regions (default from the other arguments) |
 | `tracks` | array |  |  |  | Stems: track ids (default: every top-level track) |
@@ -4885,6 +5077,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `bit_depth` | integer |  | 16.0..32.0 |  |  |
 | `sample_rate` | integer |  | 8000.0..384000.0 |  |  |
 | `channels` | integer |  | 1.0..2.0 |  |  |
+| `version` | integer |  | 0.0.. |  | Render the session as of this version (history.list); the render queue pins its renders |
 | `job` | boolean |  |  | false |  |
 | `add_to_project` | boolean |  |  | false |  |
 

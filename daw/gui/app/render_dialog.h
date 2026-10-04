@@ -52,6 +52,11 @@ class RenderDialog {
     // Start a render as a job; the id is empty when the command failed.
     const std::string& job() const { return job_; }
     void run();
+    // The render queue (gap log #33): queue what the dialog would render now
+    // (pinned to this version), show the queue, run it as one job.
+    void addToQueue();
+    void openQueue();
+    void runQueue();
     std::vector<std::string> resultFiles() const { return resultFiles_; }
     void setField(const std::string& id, const std::string& text);  // tests/scripts
 
@@ -60,6 +65,9 @@ class RenderDialog {
     // The project's render defaults, as the placeholder for an empty field.
     std::string defaultFor(std::string_view key) const;
     json::Value args(bool forJob) const;
+    // Format, bit depth and the second file, shared by args() and the queue.
+    void outputArgs(json::Value& a) const;
+    void refreshQueueButton();
     json::Value previewArgs() const;
     void markDirty();
     void setStatus(std::string text);
@@ -70,8 +78,8 @@ class RenderDialog {
     ui::Root& root_;
     Source source_ = Source::Master;
     bool addToProject_ = false;
-    std::string pattern_, start_, end_, tail_, sampleRate_, bitDepth_, channels_, normalize_,
-        target_, limit_, mode_, tap_;
+    std::string pattern_, start_, end_, tail_, sampleRate_, bitDepth_, format_, secondary_,
+        channels_, normalize_, target_, limit_, mode_, tap_;
     std::string previewText_, statusText_, job_;
     std::vector<std::string> resultFiles_;
     bool dirty_ = true;
@@ -89,6 +97,7 @@ class RenderDialog {
     ui::TextField* modeField_ = nullptr;
     ui::TextField* tapField_ = nullptr;
     ui::Button* addButton_ = nullptr;
+    ui::Button* queueButton_ = nullptr;
 };
 
 }  // namespace supple::gui

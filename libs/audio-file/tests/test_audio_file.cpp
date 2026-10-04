@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 
@@ -324,4 +325,69 @@ TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") 
     CHECK(inspect(dir / "junk.bin").error().code == "audio.format");
     CHECK(inspect(dir / "missing.wav").error().code == "audio.open");
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("FLAC encoding decodes to exactly what the same WAV holds (16 and 24 bit, mono to 3)") {
+    for (const int bits : {16, 24}) {
+        for (const std::size_t channels : {std::size_t{1}, std::size_t{2}, std::size_t{3}}) {
+            INFO("bits " << bits << ", channels " << channels);
+            AudioData data;
+            data.sampleRate = 44100;
+            const std::size_t frames = 10000;  // two full blocks and a short one
+            data.channels.assign(channels, std::vector<float>(frames));
+            for (std::size_t i = 0; i < frames; ++i) {
+                const double t = static_cast<double>(i) / 44100.0;
+                data.channels[0][i] = static_cast<float>(0.5 * std::sin(2 * M_PI * 220 * t));
+                if (channels > 1)  // near the left: side coding pays
+                    data.channels[1][i] =
+                        static_cast<float>(0.48 * std::sin(2 * M_PI * 220 * t + 0.01));
+                if (channels > 2)  // noise: verbatim or high-order subframes
+                    data.channels[2][i] =
+                        static_cast<float>((static_cast<int>(i * 7919 % 2003) - 1001) / 1200.0);
+            }
+            data.channels[0][100] = 2.0f;  // clipped
+            data.channels[0][101] = -2.0f;
+            for (std::size_t i = 5000; i < 5200; ++i) data.channels[0][i] = 0.25f;  // constant run
+            FlacOptions flac;
+            flac.bitsPerSample = bits;
+            flac.ditherSeed = 7;
+            auto bytes = encodeFlac(data, flac);
+            REQUIRE(bytes);
+            CHECK(detect(*bytes) == Container::Flac);
+            // For checking with the reference decoder (flac -t: CRCs and MD5).
+            if (const char* dir = std::getenv("SUPPLE_FLAC_OUT"))
+                REQUIRE(supple::writeFileAtomic(
+                    std::filesystem::path(dir) /
+                        ("t" + std::to_string(bits) + "-" + std::to_string(channels) + ".flac"),
+                    *bytes));
+            WavOptions wav;
+            wav.format = bits == 16 ? SampleFormat::Pcm16 : SampleFormat::Pcm24;
+            wav.ditherSeed = 7;
+            auto wavBytes = encodeWav(data, wav);
+            REQUIRE(wavBytes);
+            auto fromFlac = readAudio(*bytes);
+            auto fromWav = readAudio(*wavBytes);
+            REQUIRE(fromFlac);
+            REQUIRE(fromWav);
+            CHECK(fromFlac->sampleRate == 44100);
+            REQUIRE(fromFlac->channelCount() == channels);
+            REQUIRE(fromFlac->frames() == frames);
+            std::size_t diffs = 0;
+            for (std::size_t c = 0; c < channels; ++c)
+                for (std::size_t i = 0; i < frames; ++i)
+                    diffs += fromFlac->channels[c][i] != fromWav->channels[c][i];
+            CHECK(diffs == 0);
+            // Smaller than the PCM it holds (the sine compresses).
+            if (channels == 2) CHECK(bytes->size() < wavBytes->size() / 2);
+        }
+    }
+    // Silence and a file shorter than one block.
+    AudioData tiny;
+    tiny.channels.assign(2, std::vector<float>(37, 0.0f));
+    auto bytes = encodeFlac(tiny);
+    REQUIRE(bytes);
+    auto back = readAudio(*bytes);
+    REQUIRE(back);
+    CHECK(back->frames() == 37);
+    CHECK(encodeFlac(tiny, {.bitsPerSample = 20}).error().code == "audio.encode");
 }

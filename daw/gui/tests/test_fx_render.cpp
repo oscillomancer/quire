@@ -594,6 +594,48 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     CHECK(f.historyCount() == historyBefore + 1);
 }
 
+TEST_CASE("the render dialog: FLAC, a second file, and the render queue") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 1));
+    f.render->open();
+    f.render->setField("render.end", "4");
+    f.render->setField("render.pattern", "q-{counter:02}");
+    f.render->setField("render.format", "flac");
+    f.render->setField("render.bit_depth", "24");
+    f.render->setField("render.secondary", "wav 16");
+    f.render->refreshPreview();
+    CHECK(f.render->preview().find("q-01.flac") != std::string::npos);  // the extension follows
+    // Queue it, change the pattern, queue again: two pinned renders.
+    f.click("render.queue.add");
+    CHECK(f.app->renderQueue().size() == 1);
+    CHECK(f.root->find("render.queue")->valueText() == "Queue (1)");
+    f.render->setField("render.pattern", "r-{counter:02}");
+    f.render->setField("render.secondary", "");
+    f.click("render.queue.add");
+    REQUIRE(f.app->renderQueue().size() == 2);
+    // The queue panel lists both; Render all runs them as one job.
+    f.click("render.queue");
+    f.frame();
+    REQUIRE(f.root->find("render.queue.list"));
+    CHECK(f.root->find("render.queue.list")->valueText().find("q-01.flac") != std::string::npos);
+    f.click("render.queue.run");
+    REQUIRE_FALSE(f.render->job().empty());
+    for (int i = 0; i < 6000 && !f.render->job().empty(); ++i) {
+        f.render->tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    f.dispatcher->flushJobEvents();  // finished renders leave the queue on the model thread
+    REQUIRE(f.render->resultFiles().size() == 2);
+    CHECK(f.render->resultFiles()[0].ends_with("q-01.flac"));
+    CHECK(f.render->resultFiles()[1].ends_with("r-01.flac"));
+    CHECK(std::filesystem::exists(f.app->rendersDir() / "q-01.wav"));  // its second file
+    CHECK_FALSE(std::filesystem::exists(f.app->rendersDir() / "r-01.wav"));
+    CHECK(f.app->renderQueue().empty());
+    f.render->tick();
+    CHECK(f.root->find("render.queue")->valueText() == "Queue");
+}
+
 TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bus") {
     Fixture f;
     if (!f.ok || !f.stockPlugins()) {

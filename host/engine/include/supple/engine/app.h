@@ -188,6 +188,17 @@ class EngineApp : public cmd::Host {
     std::string rememberRender(const std::filesystem::path& path);
     std::string reserveRenderId();
     void publishRender(std::string id, const std::filesystem::path& path);
+    // The render queue (gap log #33): renders set up now, each pinned to the
+    // version it was queued at, run later in one go (render.queue.*).
+    // Transport-like state: not versioned, not saved with the project.
+    struct QueuedRender {
+        std::string id, command, label;
+        json::Value args;  // the render command's arguments
+        std::uint64_t version = 0;
+        json::Value files;  // what a dry run said it would write
+    };
+    std::vector<QueuedRender>& renderQueue() { return renderQueue_; }
+    std::string nextQueueId() { return "q" + std::to_string(++queueCounter_); }
     Result<std::filesystem::path> renderPath(std::string_view reference) const;
     void startJob(std::function<void(std::stop_token)> work);
     void stopJobs() override;
@@ -292,7 +303,7 @@ class EngineApp : public cmd::Host {
     // on fx_2 gain), song_undone,
     // engine_running (the dummy backend), engine_armed (+ tr_1 armed),
     // recording_interrupted (tr_1 + rec/Vocal-1.wav left by a crash), meter_change
-    // (3/4 from bar 9), and the
+    // (3/4 from bar 9), render_queued (song_with_fx + q1, a queued mix), and the
     // bus's job_running. Built by running commands.
     void setupFixture(cmd::Dispatcher& dispatcher, std::string_view fixture) override;
     // Relative project paths resolve against the work directory.
@@ -331,6 +342,8 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
     std::map<std::string, std::filesystem::path> renders_;
+    std::vector<QueuedRender> renderQueue_;
+    std::uint64_t queueCounter_ = 0;
     mutable std::mutex rendersMutex_;
     std::uint64_t nextRender_ = 1;
     struct JobThread {

@@ -548,32 +548,38 @@ struct RenderMixArgs {
     std::optional<std::string> pattern;
     std::optional<std::string> branch;
     std::optional<RenderAnalyze> analyze;
-    std::optional<json::Value> normalize;
+    std::optional<json::Value> normalize, secondary;
     std::optional<std::int64_t> bitDepth, sampleRate, channels;
     std::optional<std::string> format;
     bool job = false;
     bool addToProject = false;
 };
 struct RenderMixResult {
-    std::optional<std::string> render, path;
+    std::optional<std::string> render, path, secondaryPath;
     std::optional<double> seconds, peakDbfs;
     std::optional<std::int64_t> outputLatency;
     std::optional<std::vector<std::string>> warnings;
     std::optional<json::Value> analysis;
     std::optional<std::string> job, status;
 };
-Status prepareMixAudio(audio::AudioData& data, audio::WavOptions& wav,
-                       const model::Project& project, const RenderMixArgs& args) {
+// Prepares the audio and writes the mix (and its secondary file); returns the
+// secondary file's path, if any.
+Result<std::optional<fs::path>> writeMix(audio::AudioData& data, const model::Project& project,
+                                         const RenderMixArgs& args, const fs::path& path) {
     RenderOutputArgs output;
     output.format = args.format;
     output.normalize = args.normalize;
     output.bitDepth = args.bitDepth;
     output.sampleRate = args.sampleRate;
     output.channels = args.channels;
+    output.secondary = args.secondary;
     auto finished = finishRenderAudio(data, project, output);
     if (!finished) return std::move(finished).error();
-    wav = *finished;
-    return okStatus();
+    SUPPLE_TRY(writeRender(path, data, finished->primary));
+    if (!finished->secondary) return std::optional<fs::path>{};
+    const fs::path second = secondaryPath(path, finished->primary, *finished->secondary);
+    SUPPLE_TRY(writeRender(second, data, *finished->secondary));
+    return std::optional<fs::path>(second);
 }
 
 Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
@@ -589,20 +595,19 @@ Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
     context.startBeats = args.startBeat.value_or(0);
     context.startSeconds = session.timeMap->secondsAt(context.startBeats);
     const auto* rateSetting = defaults.isObject() ? defaults.find("sample_rate") : nullptr;
-    const auto* formatSetting = defaults.isObject() ? defaults.find("format") : nullptr;
-    const auto* depthSetting = formatSetting && formatSetting->isObject()
-                                   ? formatSetting->find("bit_depth")
-                               : defaults.isObject() ? defaults.find("bit_depth")
-                                                     : nullptr;
+
     context.sampleRate = static_cast<int>(
         args.sampleRate.value_or(rateSetting && rateSetting->isNumber()
                                      ? rateSetting->asInt()
                                      : static_cast<std::int64_t>(session.project->sampleRate)));
-    context.bitDepth = static_cast<int>(args.bitDepth.value_or(
-        depthSetting && depthSetting->isNumber() ? depthSetting->asInt() : 32));
+    auto encoding = renderEncoding(*session.project, args.format, args.bitDepth);
+    if (!encoding) return std::move(encoding).error();
+    SUPPLE_TRY(secondaryEncoding(*session.project, args.secondary));  // refused before rendering
+    context.bitDepth = encoding->bits();
+    context.format = encoding->container;
     auto expanded = expandRenderPattern(pattern, context);
     if (!expanded) return std::move(expanded).error();
-    const fs::path path = app.rendersDir() / (*expanded + ".wav");
+    const fs::path path = app.rendersDir() / (*expanded + encoding->extension());
     std::error_code ec;
     const auto root = fs::weakly_canonical(app.rendersDir(), ec);
     if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
@@ -2182,7 +2187,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                                                      "a file-name-safe name"))
                      .field("pattern", &RenderMixArgs::pattern, schema::string())
                      .field("branch", &RenderMixArgs::branch, schema::string())
-                     .field("format", &RenderMixArgs::format, schema::string())
+                     .field("format", &RenderMixArgs::format,
+                            schema::string().doc("wav (default) or flac (16/24 bit)"))
+                     .field("secondary", &RenderMixArgs::secondary,
+                            schema::any().doc("A second file beside the first: {format: "
+                                              "wav|flac, bit_depth}, or \"none\""))
                      .field("bit_depth", &RenderMixArgs::bitDepth, schema::integer().range(16, 32))
                      .field("sample_rate", &RenderMixArgs::sampleRate,
                             schema::integer().range(8000, 384000))
@@ -2200,6 +2209,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             schema::object<RenderMixResult>("render_mix")
                 .field("render", &RenderMixResult::render, schema::string())
                 .field("path", &RenderMixResult::path, schema::string())
+                .field("secondary_path", &RenderMixResult::secondaryPath, schema::string())
                 .field("seconds", &RenderMixResult::seconds, schema::number())
                 .field("peak_dbfs", &RenderMixResult::peakDbfs, schema::number())
                 .field("output_latency", &RenderMixResult::outputLatency, schema::integer())
@@ -2275,20 +2285,15 @@ void registerEngineCommands(cmd::Registry& registry) {
                         (void)jobs.fail(id, std::move(r).error());
                         return;
                     }
-                    audio::WavOptions wav;
-                    auto prepared = prepareMixAudio(r->audio, wav, *s.project, a);
-                    if (!prepared) {
-                        (void)jobs.fail(id, std::move(prepared).error());
-                        return;
-                    }
                     if (stop.stop_requested() || jobs.cancelled(id)) return;
-                    auto written = audio::writeWav(path, r->audio, wav);
+                    auto written = writeMix(r->audio, *s.project, a, path);
                     if (!written) {
                         (void)jobs.fail(id, std::move(written).error());
                         return;
                     }
                     json::Value result = json::Value::object();
                     result["path"] = path.string();
+                    if (*written) result["secondary_path"] = (*written)->string();
                     result["seconds"] = r->audio.seconds();
                     result["render"] = renderId;
                     float peak = 0;
@@ -2315,15 +2320,15 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             auto r = app.renderSession(s, o);
             if (!r) return std::move(r).error();
-            audio::WavOptions wav;
-            SUPPLE_TRY(prepareMixAudio(r->audio, wav, *s.project, a));
-            SUPPLE_TRY(audio::writeWav(path, r->audio, wav));
+            auto written = writeMix(r->audio, *s.project, a, path);
+            if (!written) return std::move(written).error();
             float peak = 0;
             for (const auto& ch : r->audio.channels)
                 for (float v : ch) peak = std::max(peak, std::fabs(v));
             RenderMixResult out;
             out.render = app.rememberRender(path);
             out.path = path.string();
+            if (*written) out.secondaryPath = (*written)->string();
             out.seconds = std::round(r->audio.seconds() * 1e4) / 1e4;
             out.peakDbfs =
                 peak > 0 ? std::round(20.0 * std::log10(static_cast<double>(peak)) * 100) / 100

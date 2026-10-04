@@ -508,7 +508,8 @@ q = nil
 ---@field name? string A fixed file name instead of a pattern
 ---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
 ---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
----@field format? string wav (FLAC is not available)
+---@field format? string wav (default) or flac (16/24 bit)
+---@field secondary? any A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings
 ---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
 ---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
 ---@field tracks? string[] Stems: track ids (default: every top-level track)
@@ -521,6 +522,7 @@ q = nil
 ---@field bit_depth? integer
 ---@field sample_rate? integer
 ---@field channels? integer
+---@field version? integer Render the session as of this version (history.list); the render queue pins its renders
 ---@field job? boolean (default: false)
 ---@field add_to_project? boolean (default: false)
 
@@ -532,7 +534,8 @@ q = nil
 ---@field name? string
 ---@field pattern? string
 ---@field branch? string
----@field format? string
+---@field format? string wav (default) or flac (16/24 bit)
+---@field secondary? any A second file beside the first: {format: wav|flac, bit_depth}, or "none"
 ---@field bit_depth? integer
 ---@field sample_rate? integer
 ---@field channels? integer
@@ -544,6 +547,7 @@ q = nil
 ---@class Quire.render_mix_result
 ---@field render? string
 ---@field path? string
+---@field secondary_path? string
 ---@field seconds? number
 ---@field peak_dbfs? number
 ---@field output_latency? integer
@@ -552,6 +556,18 @@ q = nil
 ---@field job? string
 ---@field status? string
 
+---@class Quire.render_queue_add_args
+---@field command string
+---@field args any
+---@field label? string
+
+---@class Quire.render_queue_remove_args
+---@field id? string
+---@field all? boolean (default: false)
+
+---@class Quire.render_queue_run_args
+---@field job? boolean (default: false)
+
 ---@class Quire.render_regions_args
 ---@field master? string
 ---@field branch? string
@@ -559,7 +575,8 @@ q = nil
 ---@field name? string A fixed file name instead of a pattern
 ---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
 ---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
----@field format? string wav (FLAC is not available)
+---@field format? string wav (default) or flac (16/24 bit)
+---@field secondary? any A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings
 ---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
 ---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
 ---@field tracks? string[] Stems: track ids (default: every top-level track)
@@ -572,6 +589,7 @@ q = nil
 ---@field bit_depth? integer
 ---@field sample_rate? integer
 ---@field channels? integer
+---@field version? integer Render the session as of this version (history.list); the render queue pins its renders
 ---@field job? boolean (default: false)
 ---@field add_to_project? boolean (default: false)
 
@@ -582,7 +600,8 @@ q = nil
 ---@field name? string A fixed file name instead of a pattern
 ---@field mode? string Stems: isolated (default; the track alone, no master processing) or through_master (the others muted)
 ---@field tap? string Stems: post_fader (default), pre_fader or pre_fx
----@field format? string wav (FLAC is not available)
+---@field format? string wav (default) or flac (16/24 bit)
+---@field secondary? any A second file of the same render beside the first: {format: wav|flac, bit_depth}, or "none"; default: the project's render settings
 ---@field normalize? any none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms; or {mode, target, limit_true_peak_db}
 ---@field operation? string Dry run: mix, stems or regions (default from the other arguments)
 ---@field tracks? string[] Stems: track ids (default: every top-level track)
@@ -595,6 +614,7 @@ q = nil
 ---@field bit_depth? integer
 ---@field sample_rate? integer
 ---@field channels? integer
+---@field version? integer Render the session as of this version (history.list); the render queue pins its renders
 ---@field job? boolean (default: false)
 ---@field add_to_project? boolean (default: false)
 
@@ -990,6 +1010,12 @@ q = nil
 ---@field mix fun(args?: Quire.render_mix_args): Quire.render_mix_result Render the mix offline to a float WAV (default: start to the last item's end).
 ---@field regions fun(args?: Quire.render_regions_args): table Render each region (or the render matrix's tracks per region) to files.
 ---@field stems fun(args?: Quire.render_stems_args): table Render each selected track to its own file (stems).
+
+---@class Quire.render.queue
+---@field add fun(args: Quire.render_queue_add_args): table Queue a render (mix, stems or regions) to run later with render.queue.run.
+---@field list fun(): table The queued renders, in the order render.queue.run runs them.
+---@field remove fun(args?: Quire.render_queue_remove_args): table Take a render off the queue (id), or clear it (all: true).
+---@field run fun(args?: Quire.render_queue_run_args): table Run every queued render in order; each one leaves the queue when it is done.
 
 ---@class Quire.route
 ---@field add fun(args: Quire.route_add_args): Quire.route_add_result Send one track to another track, bus, the master, or a plug-in's key.

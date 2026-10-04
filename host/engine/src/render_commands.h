@@ -20,10 +20,38 @@ struct RenderOutputArgs {
     std::optional<json::Value> normalize;
     std::optional<double> target, limitTruePeakDb;
     std::optional<std::int64_t> bitDepth, sampleRate, channels;
+    std::optional<json::Value> secondary;  // {format, bit_depth} | "none"
+};
+// How a render file is written: the container (wav | flac) and its sample
+// format; `wav` carries the format, dither and seed for both containers.
+struct RenderEncoding {
+    std::string container = "wav";
+    audio::WavOptions wav;
+    int bits() const;               // 16, 24 or 32 (float, WAV only)
+    std::string extension() const;  // ".wav" / ".flac"
+};
+// The primary encoding from the command's format/bit_depth, else the project's
+// render settings (FLAC defaults to 24 bits, WAV to 32-bit float).
+Result<RenderEncoding> renderEncoding(const model::Project& project,
+                                      const std::optional<std::string>& format,
+                                      std::optional<std::int64_t> bitDepth);
+// A second file of the same audio (session-model §1.10 `secondary`), if any.
+Result<std::optional<RenderEncoding>> secondaryEncoding(
+    const model::Project& project, const std::optional<json::Value>& secondary);
+// Beside the primary file: its stem with the secondary's extension, and the
+// bit depth before it when both are the same container ("mix.16.wav").
+std::filesystem::path secondaryPath(const std::filesystem::path& primary,
+                                    const RenderEncoding& first, const RenderEncoding& second);
+Status writeRender(const std::filesystem::path& path, const audio::AudioData& data,
+                   const RenderEncoding& encoding);
+// What finishRenderAudio decided: the file encodings.
+struct RenderOutput {
+    RenderEncoding primary;
+    std::optional<RenderEncoding> secondary;
 };
 // Resamples, downmixes and normalizes `data` in place and returns how to write it.
-Result<audio::WavOptions> finishRenderAudio(audio::AudioData& data, const model::Project& project,
-                                            const RenderOutputArgs& args);
+Result<RenderOutput> finishRenderAudio(audio::AudioData& data, const model::Project& project,
+                                       const RenderOutputArgs& args);
 Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSettings settings,
                                      const std::vector<host::PluginInfo>& catalogue,
                                      const host::HostIdentity& identity);

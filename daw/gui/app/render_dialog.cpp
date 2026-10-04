@@ -55,6 +55,14 @@ std::string RenderDialog::defaultFor(std::string_view key) const {
         return v && v->isNumber() ? v->asDouble() : fallback;
     };
     char buf[64];
+    if (key == "format") {  // wav unless the project's render settings say otherwise
+        const json::Value* f = setting("format");
+        if (f && f->isString()) return f->asString();
+        if (f && f->isObject())
+            if (const json::Value* c = f->find("container"); c && c->isString())
+                return c->asString();
+        return "wav";
+    }
     if (key == "end_beat") {
         const double last = model::lastItemBeat(s);
         std::snprintf(buf, sizeof buf, "last item end (%.2f)", last);
@@ -102,7 +110,7 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     page_ = page.get();
     page->layout.dir = ui::Layout::Dir::Column;
     page->layout.width = ui::SizeRule::fixed(780);
-    page->layout.height = ui::SizeRule::fixed(600);
+    page->layout.height = ui::SizeRule::fixed(670);
     page->layout.padding = ui::Insets::all(12);
     page->layout.gap = 8;
     auto& header = page->emplace<ui::Node>("render.header");
@@ -161,6 +169,10 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
           [this](const std::string& t) { sampleRate_ = t; });
     field("Bit depth", "render.bit_depth", bitDepth_, 70, defaultFor("bit_depth"),
           [this](const std::string& t) { bitDepth_ = t; });
+    field("Format", "render.format", format_, 70, defaultFor("format"),
+          [this](const std::string& t) { format_ = t; });
+    field("Second file", "render.secondary", secondary_, 110, "none",
+          [this](const std::string& t) { secondary_ = t; });
     field("Channels", "render.channels", channels_, 70, defaultFor("channels"),
           [this](const std::string& t) { channels_ = t; });
     field("Normalize", "render.normalize", normalize_, 110, defaultFor("normalize"),
@@ -204,6 +216,8 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     actions.emplace<ui::Button>("render.run", "Render", [this] { run(); });
     addButton_ = &actions.emplace<ui::Button>("render.add", "[ ] Add to project",
                                               [this] { setAddToProject(!addToProject_); });
+    actions.emplace<ui::Button>("render.queue.add", "Add to queue", [this] { addToQueue(); });
+    queueButton_ = &actions.emplace<ui::Button>("render.queue", "Queue", [this] { openQueue(); });
     status_ =
         &actions.emplace<ui::Label>("render.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
@@ -215,6 +229,7 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
         &page->emplace<ui::TextBlock>("render.results", "", ui::Font::Mono, "caption", "ink-quiet");
     resultsBlock_->layout.height = ui::SizeRule::fixed(70);
     setSource(Source::Master);
+    refreshQueueButton();
     return page;
 }
 
@@ -232,6 +247,8 @@ void RenderDialog::open() {
         tapLabel_ = nullptr;
         modeField_ = nullptr;
         tapField_ = nullptr;
+        addButton_ = nullptr;
+        queueButton_ = nullptr;
     });
     dirty_ = true;
     lastEditMs_ = nowMs();
@@ -288,6 +305,10 @@ void RenderDialog::setField(const std::string& id, const std::string& text) {
         set(bitDepth_);
     else if (id == "render.channels")
         set(channels_);
+    else if (id == "render.format")
+        set(format_);
+    else if (id == "render.secondary")
+        set(secondary_);
     else if (id == "render.normalize")
         set(normalize_);
     else if (id == "render.target")
@@ -313,7 +334,23 @@ json::Value RenderDialog::previewArgs() const {
         if (!mode_.empty()) a["mode"] = mode_;
         if (!tap_.empty()) a["tap"] = tap_;
     }
+    outputArgs(a);  // the extension follows the format
     return a;
+}
+
+void RenderDialog::outputArgs(json::Value& a) const {
+    if (!format_.empty()) a["format"] = format_;
+    if (auto v = integer(bitDepth_)) a["bit_depth"] = *v;
+    // "flac 16", "wav 24", "flac" (its default depth) or none.
+    std::string spec = secondary_;
+    while (!spec.empty() && spec.back() == ' ') spec.pop_back();
+    if (spec.empty() || spec == "none") return;
+    json::Value second = json::Value::object();
+    const auto space = spec.find(' ');
+    second["format"] = spec.substr(0, space);
+    if (space != std::string::npos)
+        if (auto v = integer(spec.substr(space + 1))) second["bit_depth"] = *v;
+    a["secondary"] = std::move(second);
 }
 
 json::Value RenderDialog::args(bool forJob) const {
@@ -323,7 +360,7 @@ json::Value RenderDialog::args(bool forJob) const {
     if (auto v = number(end_)) a["end_beat"] = *v;
     if (auto v = number(tail_)) a["tail_s"] = *v;
     if (auto v = integer(sampleRate_)) a["sample_rate"] = *v;
-    if (auto v = integer(bitDepth_)) a["bit_depth"] = *v;
+    outputArgs(a);
     if (auto v = integer(channels_)) a["channels"] = *v;
     if (!normalize_.empty() && normalize_ != "none") {
         json::Value norm = json::Value::object();
@@ -407,6 +444,86 @@ void RenderDialog::run() {
     }
 }
 
+void RenderDialog::addToQueue() {
+    const char* command = source_ == Source::Master  ? "render.mix"
+                          : source_ == Source::Stems ? "render.stems"
+                                                     : "render.regions";
+    json::Value a = args(false);
+    if (json::Object* o = a.isObject() ? &a.asObject() : nullptr) o->erase("analyze");
+    json::Value q = json::Value::object();
+    q["command"] = command;
+    q["args"] = std::move(a);
+    auto result = dispatcher_.execute({"render.queue.add", std::move(q), kUiOrigin});
+    if (!result) {
+        setStatus("queue: " + result.error().message);
+        return;
+    }
+    const json::Value* label = result->find("label");
+    setStatus("queued " + (label && label->isString() ? label->asString() : std::string()));
+    refreshQueueButton();
+}
+
+void RenderDialog::refreshQueueButton() {
+    if (!queueButton_) return;
+    const std::size_t n = app_.renderQueue().size();
+    queueButton_->setText(n ? "Queue (" + std::to_string(n) + ")" : "Queue");
+}
+
+void RenderDialog::openQueue() {
+    auto panel = std::make_unique<ui::Node>("render.queue.panel");
+    panel->layout.dir = ui::Layout::Dir::Column;
+    panel->layout.width = ui::SizeRule::fixed(520);
+    panel->layout.padding = ui::Insets::all(12);
+    panel->layout.gap = 8;
+    panel->emplace<ui::Label>("render.queue.title", "Render queue", ui::Font::UiBold, "title");
+    std::string text;
+    for (const auto& q : app_.renderQueue()) {
+        text += (text.empty() ? "" : "\n") + q.id + "  " + q.label;
+        if (q.files.isArray())
+            for (const json::Value& f : q.files.asArray())
+                if (f.isString()) text += "\n    " + baseName(f.asString());
+    }
+    auto& list = panel->emplace<ui::TextBlock>(
+        "render.queue.list", text.empty() ? "Nothing queued: Add to queue sets one up." : text,
+        ui::Font::Mono, "caption", "ink");
+    list.layout.height = ui::SizeRule::fixed(180);
+    auto& row = panel->emplace<ui::Node>("render.queue.buttons");
+    row.layout.dir = ui::Layout::Dir::Row;
+    row.layout.height = ui::SizeRule::fixed(26);
+    row.layout.gap = 6;
+    auto& go = row.emplace<ui::Button>("render.queue.run", "Render all", [this] {
+        root_.closePopup();
+        runQueue();
+    });
+    go.enabled = !app_.renderQueue().empty();
+    row.emplace<ui::Button>("render.queue.clear", "Clear", [this] {
+        json::Value a = json::Value::object();
+        a["all"] = true;
+        (void)dispatcher_.execute({"render.queue.remove", std::move(a), kUiOrigin});
+        root_.closePopup();
+        refreshQueueButton();
+        setStatus("queue cleared");
+    });
+    row.emplace<ui::Button>("render.queue.close", "Close", [this] { root_.closePopup(); });
+    root_.openPopup(std::move(panel), {}, ui::Placement::Center);
+}
+
+void RenderDialog::runQueue() {
+    json::Value a = json::Value::object();
+    a["job"] = true;
+    auto result = dispatcher_.execute({"render.queue.run", std::move(a), kUiOrigin});
+    if (!result) {
+        setStatus("queue: " + result.error().message);
+        return;
+    }
+    if (const json::Value* id = result->find("job"); id && id->isString()) {
+        job_ = id->asString();
+        resultFiles_.clear();
+        setStatus("rendering the queue…");
+        if (resultsBlock_) resultsBlock_->setText("");
+    }
+}
+
 void RenderDialog::pollJob() {
     if (job_.empty()) return;
     json::Value argsJson = json::Value::object();
@@ -470,13 +587,18 @@ void RenderDialog::pollJob() {
     };
     const json::Value* result = status->find("result");
     if (result && result->isObject()) {
-        if (const json::Value* files = result->find("files"); files && files->isArray())
+        if (const json::Value* renders = result->find("renders"); renders && renders->isArray()) {
+            for (const json::Value& r : renders->asArray())  // the queue: each render's files
+                if (const json::Value* files = r.find("files"); files && files->isArray())
+                    for (const json::Value& f : files->asArray()) addFile(f);
+        } else if (const json::Value* files = result->find("files"); files && files->isArray())
             for (const json::Value& f : files->asArray()) addFile(f);
         else if (result->find("path"))
             addFile(*result);
     }
     setStatus(std::to_string(resultFiles_.size()) +
               (resultFiles_.size() == 1 ? " file rendered" : " files rendered"));
+    refreshQueueButton();
     if (resultsBlock_) resultsBlock_->setText(text.empty() ? "no files" : text);
     root_.damageAll();
 }
