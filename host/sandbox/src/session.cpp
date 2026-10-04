@@ -234,7 +234,7 @@ Result<std::span<const host::PluginInfo>> Session::plugins(bool rescan) {
     if (!catalogue_ || rescan) {
         const auto path =
             options_.pluginPath.empty() ? host::defaultSearchPath() : options_.pluginPath;
-        auto list = host::scan(path);
+        auto list = host::scan(path, host::ScanOptions{}, &scanReport_);
         if (!list) return std::move(list).error();
         host::orderCatalogue(*list);  // the first location on the path wins an id
         catalogue_ = std::move(*list);

@@ -100,6 +100,7 @@ class Session {
     // --- plugins ---------------------------------------------------------------
     // The scanned catalogue (scanned on first use; `rescan` forces it).
     Result<std::span<const host::PluginInfo>> plugins(bool rescan = false);
+    const host::ScanReport& pluginScanReport() const { return scanReport_; }
     // Resolves a plugin id (exact, then case-insensitive) or a .clap path.
     // Error "sandbox.unknown_plugin" with the closest ids in the hint.
     Result<host::PluginInfo> findPlugin(std::string_view idOrPath);
@@ -222,6 +223,7 @@ class Session {
     SessionOptions options_;
     SessionSettings settings_;
     std::optional<std::vector<host::PluginInfo>> catalogue_;
+    host::ScanReport scanReport_;
     std::map<std::string, std::unique_ptr<Loaded>> instances_;
     std::vector<std::string> chain_;
     std::map<std::string, RenderRecord> renders_;

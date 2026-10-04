@@ -24,7 +24,7 @@ struct PluginInfo {
     bool semantic;                       // implements com.suppleaudio.semantic-params/1
 };
 
-Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);   // dlopen, read factory, dlclose
+Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);   // supervised third-party probes; ADR-0013
 std::vector<std::filesystem::path> defaultSearchPath();   // $CLAP_PATH, ~/.clap, /usr/lib/clap, /usr/local/lib/clap, + build dirs passed by the app
 
 class Instance {   // owns one plugin instance; main-thread object

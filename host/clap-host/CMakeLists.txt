@@ -1,5 +1,5 @@
 supple_add_library(clap-host
-  SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp
+  SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
 
@@ -17,10 +17,25 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(clap-host-fixtures)
   target_compile_options(clap-host-fixtures PRIVATE -Wno-old-style-cast)
 
-  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp LABELS rt)
+  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp tests/test_scan.cpp LABELS rt)
   add_dependencies(clap-host.tests clap-host-fixtures ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
+
+  foreach(_mode good crash hang)
+    add_library(clap-scan-${_mode} MODULE tests/fixture_scan.cpp)
+    target_link_libraries(clap-scan-${_mode} PRIVATE supple::clap)
+    set_target_properties(clap-scan-${_mode} PROPERTIES PREFIX "" SUFFIX ".clap")
+    supple_target_defaults(clap-scan-${_mode})
+    add_dependencies(clap-host.tests clap-scan-${_mode})
+  endforeach()
+  target_compile_definitions(clap-scan-good PRIVATE SCAN_MODE=0)
+  target_compile_definitions(clap-scan-crash PRIVATE SCAN_MODE=1)
+  target_compile_definitions(clap-scan-hang PRIVATE SCAN_MODE=2)
+  target_compile_definitions(clap-host.tests PRIVATE
+    SCAN_GOOD_PATH="$<TARGET_FILE:clap-scan-good>"
+    SCAN_CRASH_PATH="$<TARGET_FILE:clap-scan-crash>"
+    SCAN_HANG_PATH="$<TARGET_FILE:clap-scan-hang>")
 
   set(_vst3_fixture_sdk ${CMAKE_SOURCE_DIR}/third_party/vst3sdk-v3.8.0_build_66/public.sdk/source/vst)
   file(GLOB _vst3_fixture_base
