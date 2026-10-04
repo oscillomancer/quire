@@ -94,6 +94,13 @@ class VersionStore {
     Result<std::uint64_t> commit(Session session, TxnRecord txn, std::vector<Change> changes,
                                  std::vector<Id> created, std::uint64_t timeMs = 0);
 
+    // Model-thread metadata completion: no version, revision or undo step.
+    // Drop if branch no longer has an item using the expected media. Update
+    // every stored version with that id and file identity; leased snapshots
+    // remain immutable.
+    bool updateMediaHash(Id id, const MediaSource& expected, std::string_view hash,
+                         std::string_view branch);
+
     bool canUndo() const;
     bool canRedo() const;
     Status undo();  // history.nothing_to_undo
@@ -128,6 +135,9 @@ class VersionStore {
     std::uint64_t forkPoint(std::uint64_t a, std::uint64_t b) const;
 
     std::map<std::uint64_t, Version> versions_;
+    // Metadata replacements must keep versions addressable while an older
+    // immutable snapshot is still leased.
+    std::map<std::uint64_t, std::vector<std::weak_ptr<const Session>>> metadataLeases_;
     std::map<std::string, Branch, std::less<>> branches_;
     std::string current_ = "main";
     std::uint64_t next_ = 1;

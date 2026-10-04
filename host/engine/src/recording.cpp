@@ -5,7 +5,6 @@
 #include <cmath>
 
 #include "supple/base/files.h"
-#include "supple/base/sha256.h"
 #include "supple/json/json.h"
 
 namespace supple::engine::detail {
@@ -22,6 +21,7 @@ Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info)
     v["track"] = info.track.str();
     v["start_sample"] = static_cast<long long>(info.startSample);
     v["sample_rate"] = info.sampleRate;
+    if (!info.hash.empty()) v["hash"] = info.hash;
     if (info.segments.size() > 1) {
         json::Value segs = json::Value::array();
         for (const RecordedSegment& sg : info.segments) {
@@ -309,9 +309,27 @@ void Recorder::writerLoop() {
     writeSidecars();
     for (auto& t : tracks_) drain(*t, scratch);    // what arrived before the stop
     for (auto& t : tracks_) padTo(*t, captured_);  // a final dropped tail has no next timestamp
+    // Persist complete placement before finish returns, so recovery of a
+    // stopped-but-unhashed loop take still has every pass. No main-thread I/O.
+    if (started_.load(std::memory_order_acquire)) {
+        const auto start = start_.load(std::memory_order_relaxed);
+        const auto count = segmentCount_.load(std::memory_order_acquire);
+        for (auto& t : tracks_) {
+            RecordingInfo info{t->target.track,   start, rate_, {{0, start}}, finishingLoop_.start,
+                               finishingLoop_.end};
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto frame = segments_[i].fileFrame + latency_;
+                if (frame < static_cast<std::int64_t>(t->writer.frames()))
+                    info.segments.push_back({frame, segments_[i].timeline});
+            }
+            if (info.segments.size() > 1)
+                rememberError(*t, writeSidecar(t->target.file, info), true);
+        }
+    }
 }
 
 std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
+    finishingLoop_ = loop;
     stop_.store(true, std::memory_order_release);
     if (writer_.joinable()) writer_.join();
     std::vector<RecordedTake> out;
@@ -369,22 +387,6 @@ std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
         r.loop = {loop.start, loop.end};
         r.overflowFrames = t->overflow.load();
         rememberError(*t, t->writer.close());
-        // The file's bytes are final now that it is closed, so hash them here:
-        // the commit then never reads the recording back. (An incremental hash
-        // of the write stream cannot be the file's digest — close() rewrites the
-        // header's sizes — so this one read is what "the file's bytes" costs.)
-        if (t->writeError.ok()) {
-            auto hash = sha256File(t->target.file);
-            if (hash)
-                r.hash = *hash;
-            else
-                rememberError(*t, std::move(hash).error());
-        }
-        if (r.segments.size() > 1 && started_.load(std::memory_order_relaxed)) {
-            // Where each pass belongs, for recovery of an unsaved take.
-            RecordingInfo info{t->target.track, start, rate_, r.segments, loop.start, loop.end};
-            rememberError(*t, writeSidecar(t->target.file, info), true);
-        }
         if (!t->firstError) r.error = t->firstError.error().toString();
         if (runsFull_)
             r.warnings.emplace_back(

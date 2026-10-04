@@ -71,8 +71,8 @@ struct RecordedSegment {
 struct RecordedTake {
     model::Id track;
     std::filesystem::path file;
-    // "sha256:<hex>" of the file's bytes, taken when the recorder closed it
-    // (audio takes only; empty for MIDI and for a failed write).
+    // Optional known digest (e.g. a recovered take). stopRecording leaves it
+    // empty: EngineApp hashes closed audio files in a background job.
     std::string hash;
     std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
     std::int64_t frames = 0;

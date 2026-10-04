@@ -19,6 +19,7 @@
 #include <atomic>
 #include "fake_jack.h"
 #include "history_sequence.h"
+#include "recording.h"
 #include "render_commands.h"
 
 using namespace supple;
@@ -556,11 +557,7 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     CHECK(take.find("lost_frames")->asInt() == 0);
     CHECK(fs::exists(take.find("file")->asString()));
     CHECK(app->head().items.size() == 1);
-    // The committed source carries the recording's hash: the recorder took the
-    // bytes when it closed the take, so the commit read nothing back.
-    REQUIRE(app->head().media.size() == 1);
-    CHECK(app->head().media.begin()->value->hash ==
-          sha256File(fs::path(take.find("file")->asString())).value());
+    REQUIRE(app->head().media.size() == 1);  // hash completion covered below
     app->stopEngine();
 
     // The take plays back in a render: the sine, centred (-3 dB).
@@ -574,6 +571,165 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
     // One version: undo removes the take.
     call("history.undo", "{}");
     CHECK(app->head().items.size() == 0);
+}
+
+TEST_CASE("recording commits before hashing and completes without an undo step") {
+    Root root;
+    std::atomic<bool> entered{false}, release{false};
+    std::atomic<int> completed{0}, startedJobs{0};
+    std::atomic<bool> holdFinalizer{false}, finalizeRelease{false};
+    AppOptions options;
+    options.workdir = root.path;
+    options.scratchDir = root.path / "scratch";
+    options.pluginPath = {kFixture};
+    options.jobStartedHook = [&] {
+        const int number = startedJobs.fetch_add(1) + 1;
+        startedJobs.notify_all();
+        if (number == 1) {
+            entered.store(true);
+            entered.notify_one();
+            release.wait(false);
+        } else if (holdFinalizer.load()) {
+            finalizeRelease.wait(false);
+        }
+    };
+    options.jobFinishedHook = [&] {
+        completed.fetch_add(1);
+        completed.notify_all();
+    };
+    auto waitCompleted = [&](int count) {
+        for (int value = completed.load(); value < count; value = completed.load())
+            completed.wait(value);
+    };
+    // Release the barrier even if an assertion unwinds before the job is released.
+    struct Release {
+        std::atomic<bool>& flag;
+        std::atomic<bool>& finalizer;
+        ~Release() {
+            flag.store(true);
+            flag.notify_all();
+            finalizer.store(true);
+            finalizer.notify_all();
+        }
+    };
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    auto created = EngineApp::create(std::move(options), {.console9 = false});
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    Release unblock{release, finalizeRelease};
+    auto call = [&](std::string name, json::Value args = json::Value::object()) {
+        auto result = d.execute({std::move(name), std::move(args), kTest});
+        REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
+        return *result;
+    };
+    call("track.add", j(R"({"name":"Vocal"})"));
+    call("track.set", j(R"({"track":"tr_1","armed":true,"record_input":[1]})"));
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 1},
+                             {.anticipative = false}));
+    const auto before = app->versions().history().size();
+    call("transport.record");
+    backend.run(8);
+    auto stopped = call("transport.stop");  // returns while worker is held
+    entered.wait(false);
+    REQUIRE(stopped["recorded"].size() == 1);
+    REQUIRE(app->head().items.size() == 1);
+    REQUIRE(app->head().media.size() == 1);
+    CHECK(app->head().media.begin()->value->hash.empty());
+    CHECK(app->versions().history().size() == before + 1);
+    CHECK(app->versions().history(1).front()->txn.label == "record");
+    const auto recordedVersion = app->head().version;
+    const auto immutable = app->versions().pin(recordedVersion);
+    const auto source = app->head().media.begin()->id;
+    bool dropped = false, saveDuringFinalization = false;
+    SUBCASE("hash reaches every stored version, including redo and other branches") {
+        call("branch.create", j(R"({"name":"copy","switch":false})"));
+        call("track.set", j(R"({"track":"tr_1","name":"Edited"})"));
+        call("history.undo");  // redo references another version with the source
+    }
+    SUBCASE("undo before the job finishes drops the metadata") {
+        call("history.undo");
+        CHECK(app->head().items.empty());
+        dropped = true;
+    }
+    SUBCASE("deleting the take drops the metadata even if its media source remains") {
+        call("item.remove", j(R"({"item":"it_1"})"));
+        REQUIRE(app->head().media.find(source));
+        dropped = true;
+    }
+    SUBCASE("a first save before hashing relocates the file and writes a valid empty hash") {
+        call("project.save", j(R"({"path":"saved/project.supple"})"));
+        auto reopened = makeApp(root.path);
+        cmd::Dispatcher reader(registry, *reopened);
+        REQUIRE(reader.execute({"project.open", j(R"({"path":"saved/project.supple"})"), kTest}));
+        CHECK(reopened->head().media.find(source)->hash.empty());
+    }
+    SUBCASE("a first save during sidecar finalization retries at the relocated path") {
+        holdFinalizer.store(true);
+        saveDuringFinalization = true;
+    }
+    SUBCASE("a replaced project drops the old completion") {
+        release.store(true);
+        release.notify_all();
+        waitCompleted(1);
+        call("project.new");
+        dropped = true;
+    }
+    const auto history = app->versions().history().size();
+    const auto next = app->versions().nextVersion();
+    release.store(true);
+    release.notify_all();
+    waitCompleted(1);
+    d.flushJobEvents();  // hash result schedules finalization if the source still exists
+    if (saveDuringFinalization) {
+        for (int value = startedJobs.load(); value < 2; value = startedJobs.load())
+            startedJobs.wait(value);
+        call("project.save", j(R"({"path":"saved/project.supple"})"));
+        CHECK(app->head().media.find(source)->hash.empty());
+        finalizeRelease.store(true);
+        finalizeRelease.notify_all();
+    }
+    if (app->head().media.find(source)) {
+        waitCompleted(2);
+        d.flushJobEvents();
+        if (saveDuringFinalization) {
+            waitCompleted(3);
+            d.flushJobEvents();
+            CHECK_FALSE(fs::exists(root.path / "scratch"));
+        }
+    }
+    CHECK(app->versions().history().size() == history);
+    CHECK(app->versions().nextVersion() == next);
+    if (!dropped) {
+        const auto* media = app->head().media.find(source);
+        const auto file = fs::path(media->path).is_absolute()
+                              ? fs::path(media->path)
+                              : app->projectDir() / app->head().project->mediaDir / media->path;
+        const auto digest = sha256File(file);
+        REQUIRE(digest);
+        CHECK(media->hash == *digest);
+        CHECK(app->versions().version(recordedVersion)->session->media.find(source)->hash ==
+              *digest);
+        app->versions().forEachVersion([&](const model::Version& version) {
+            if (const auto* stored = version.session->media.find(source))
+                CHECK(stored->hash == *digest);
+        });
+        auto side = readTextFile(detail::sidecarPath(file));
+        REQUIRE(side);
+        CHECK(j(*side)["hash"].asString() == *digest);
+        CHECK(immutable->media.find(source)->hash.empty());  // no reader mutation
+        call("history.undo");
+        CHECK(app->head().items.empty());
+    } else {
+        CHECK(app->head().items.empty());
+        app->versions().forEachVersion([&](const model::Version& version) {
+            if (const auto* stored = version.session->media.find(source))
+                CHECK(stored->hash.empty());
+        });
+    }
+    app->stopEngine();
 }
 
 TEST_CASE("recordings a crash left out are listed and recovered in place, whole") {

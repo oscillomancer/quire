@@ -143,7 +143,11 @@ the overlap), `takes` [tk id], `active_take`, `snap_offset`, `group`,
   hash (SHA-256 of file bytes), format, sample_rate, channels, frames}`.
   Decoding and resampling to the engine rate are cached by the engine keyed
   by `(hash, rate)`; peak pyramids are cached outside the project (never in
-  diffs). Missing files are reported, never fatal.
+  diffs). Recording sources may initially have an empty hash. A background
+  completion replaces matching media metadata in stored sessions without a
+  version/undo step or revision change; existing reader leases remain immutable
+  and retain their versions. An undone/deleted take drops its completion.
+  Missing files are reported, never fatal.
 - **MIDI** `mi_*`: `{ppq, length (ticks), notes, controls, sysex, pooled:
   bool}` — a `midi::Sequence` (notation spec Part A). Several takes may
   reference one pooled source (edits affect all); unpooled sources belong to

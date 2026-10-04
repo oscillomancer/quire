@@ -12,7 +12,6 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
-#include <supple/base/sha256.h>
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
 #include <supple/host/clap_host.h>
@@ -150,7 +149,7 @@ TEST_CASE("a failed recording target leaves other targets writing") {
     CHECK(takes[1].error.empty());
     CHECK(takes[1].frames == 32);
     CHECK(takes[1].overflowFrames == 0);
-    CHECK_FALSE(takes[1].hash.empty());
+    CHECK(takes[1].hash.empty());
     const auto decoded = audio::readAudio(takes[1].file);
     REQUIRE(decoded);
     CHECK(decoded->channels[0] == std::vector<float>(32, .5f));
@@ -1113,11 +1112,8 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
                 ++breaks;  // wraps at 1000
             if (audio->channels[1][i] != -audio->channels[0][i]) ++breaks;
         }
-        CHECK(breaks == 0);  // contiguous: nothing lost, nothing doubled
-        // The recorder hashed the file it closed, so the commit never reads the
-        // recording back and the hash names the bytes on disk.
-        CHECK(t.hash == sha256File(t.file).value());
-        CHECK(t.hash.size() == 7 + 64);
+        CHECK(breaks == 0);     // contiguous: nothing lost, nothing doubled
+        CHECK(t.hash.empty());  // header finalized; hashing belongs to the app worker
         engine.stop();
         std::filesystem::remove_all(dir);
     }

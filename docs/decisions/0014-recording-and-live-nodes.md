@@ -28,7 +28,16 @@ streaming, crash recovery) and live paths at 64 frames.
    last rewrite. Files are named from the track and take number. On stop the
    main thread commits one version: an audio source, a take (and the item
    if new) per armed track, positioned at the capture start; punch ranges
-   and loop passes (one take per pass) come with `transport.loop`.
+   and loop passes (one take per pass) come with `transport.loop`. The source
+   initially has no hash. A background job rereads the closed file, finalizes
+   the sidecar, and posts a model-thread metadata completion. Matching stored
+   versions receive the hash without a new version or undo step; leased
+   snapshots remain immutable. Undo/deletion on the originating branch or
+   project replacement drops the update. Saving before completion is valid
+   with an empty hash. The job retains a file handle across scratch relocation
+   and resolves the current sidecar location on the model thread before its
+   worker writes it. Placement/loop metadata remains recoverable while the
+   hash is pending.
 3. **Crash recovery:** on project open, files in `media/rec/` not referenced
    by the model are offered as recovered takes (`project.recover` lists and
    imports them); the header rewrite makes them readable.
