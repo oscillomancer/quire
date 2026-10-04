@@ -110,6 +110,8 @@ class LaneLabels : public ui::Node {
         const float x0 = std::max(area.x, bounds().x),
                     x1 = std::min(area.right(), bounds().right());
         if (x1 <= x0) return;
+        c.save();
+        c.clip(full);
         for (const auto& e : s.envelopes) {
             const model::Envelope& env = *e.value;
             if (env.target.object != *item.activeTake || !env.visible) continue;
@@ -139,6 +141,7 @@ class LaneLabels : public ui::Node {
                 c.fillRect({x - 3, yOf(pt.value) - 3, 6, 6}, ink);
             }
         }
+        c.restore();
     }
 
     Lanes& lanes_;
@@ -157,8 +160,10 @@ Lanes::Lanes(peaks::PeakService& peaks, Resolve resolve, const TrackLayout& rowL
 }
 
 void Lanes::rebuild() {
+    ++indexStats_.rebuilds;
     const model::Session& s = layout_.session();
     rowItems_.assign(layout_.rowCount(), {});
+    indexStats_.items += s.items.size();
     for (const auto& e : s.items) {  // indexOf: the track's own row, never its lanes
         if (auto row = layout_.indexOf(e.value->track)) rowItems_[*row].push_back(e.id);
     }
@@ -168,6 +173,41 @@ void Lanes::rebuild() {
                    model::itemSpan(s, *s.items.find(b)).startSec;
         });
     invalidate();
+}
+
+void Lanes::updateIndex(const model::Session& before, const std::set<model::Id>& items,
+                        const std::set<model::Id>& tracks) {
+    const auto& after = layout_.session();
+    std::set<std::size_t> dirty;
+    for (auto id : items) {
+        const auto* old = before.items.find(id);
+        const auto* now = after.items.find(id);
+        if (old && now && old->track == now->track &&
+            model::itemSpan(before, *old).startSec == model::itemSpan(after, *now).startSec)
+            continue;
+        if (old)
+            if (auto row = layout_.indexOf(old->track)) {
+                std::erase(rowItems_[*row], id);
+                dirty.insert(*row);
+            }
+        if (now)
+            if (auto row = layout_.indexOf(now->track)) {
+                rowItems_[*row].push_back(id);
+                dirty.insert(*row);
+            }
+    }
+    for (auto track : tracks)
+        if (auto row = layout_.indexOf(track)) dirty.insert(*row);
+    if (dirty.empty()) return;
+    ++indexStats_.rebuilds;
+    for (auto row : dirty) {
+        auto& ids = rowItems_[row];
+        indexStats_.items += ids.size();
+        std::sort(ids.begin(), ids.end(), [&](auto a, auto b) {
+            return model::itemSpan(after, *after.items.find(a)).startSec <
+                   model::itemSpan(after, *after.items.find(b)).startSec;
+        });
+    }
 }
 
 void Lanes::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
@@ -188,6 +228,8 @@ ui::Rect Lanes::itemRect(std::size_t row, const model::Item& item) const {
 }
 
 void Lanes::paint(ui::Canvas& c) {
+    c.save();
+    c.clip(bounds());
     theme_ = &c.theme();
     const ui::Theme& t = c.theme();
     c.fillRect(bounds(), t.color("ground"));
@@ -196,12 +238,16 @@ void Lanes::paint(ui::Canvas& c) {
         if (r.bottom() < bounds().y) continue;
         if (r.y > bounds().bottom()) break;
         if (layout_.rows()[i].env) {
+            c.save();
+            c.clip(r);  // curve glyphs and text must stay inside their own lane
             drawEnvelope(c, i, r);
+            c.restore();
             continue;
         }
         if (i % 2) c.fillRect(r, t.color("panel").withAlpha(0.5f));
         c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.6f));
     }
+    c.restore();
 }
 
 // An automation lane: the envelope's curve sampled every few pixels (so the

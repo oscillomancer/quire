@@ -50,7 +50,13 @@ view keeps a **view model** keyed by stable object ids (`tr_12`, `it_7`…)
 and, on a version change, diffs the objects it shows (the model's
 `diff(versionA, versionB)` already exists for ADR-0008) and invalidates only
 the affected nodes. A view never caches pixels across versions without a
-key that includes the object's content revision.
+key that includes the object's content revision. The arrange view uses the
+version store's change list for adjacent edits and undo; branch jumps compare
+shared object identities. Track geometry changes rebuild the rows; other
+edits update affected controls, item indexes and old/new item footprints.
+Unrelated FX parameter edits preserve TCP control/capture identity and do
+not rebuild or repaint the arrange view. Envelope glyphs stay within their
+lane or take's item.
 
 ### 1.2 UI state is not session state
 
@@ -229,7 +235,10 @@ human and the agent see the same names and units. Stock plugin editors are
 the template's Pugl editors. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
-cannot remain open.
+cannot remain open. Plugin show/hide requests change the parent window's
+visibility while retaining the editor and its timer/FD service. Close takes
+precedence; when show and hide are coalesced together, hide takes precedence.
+Opening an existing hidden editor shows and raises that same window.
 Commands: `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix

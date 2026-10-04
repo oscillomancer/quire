@@ -139,6 +139,8 @@ void Window::forceCurrent() const {
 
 void Window::show() { SDL_ShowWindow(window_); }
 
+void Window::hide() { SDL_HideWindow(window_); }
+
 void Window::beginFrame(std::uint32_t rgb) {
     SDL_GL_MakeCurrent(window_, static_cast<SDL_GLContext>(context_));
     int pw = 0, ph = 0;

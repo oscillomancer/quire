@@ -15,6 +15,15 @@
 
 namespace supple::gui {
 
+void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests) {
+    if (requests.closed) return;
+    if (requests.resize)
+        window.setSize(static_cast<int>(requests.width), static_cast<int>(requests.height));
+    if (requests.show) window.show();
+    // Both requests can be coalesced by the host; hide wins in that case.
+    if (requests.hide) window.hide();
+}
+
 // --- FdWatcher
 
 Result<std::unique_ptr<FdWatcher>> FdWatcher::create(std::function<void()> wake, Pipe pipe,
@@ -183,6 +192,7 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
 Status PluginWindows::open(model::Id fx) {
     for (const Editor& e : editors_)
         if (e.fx == fx) {
+            e.window->show();
             SDL_RaiseWindow(e.window->sdl());
             return {};
         }
@@ -289,8 +299,7 @@ int PluginWindows::service() {
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
-        if (requests.resize)
-            e.window->setSize(static_cast<int>(requests.width), static_cast<int>(requests.height));
+        applyEditorRequests(*e.window, requests);
     }
     // Ready descriptors go to their plugin, then are watched again.
     for (const auto& [fd, flags] : watcher_ && !watcherError_

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include "supple/model/session.h"
@@ -27,6 +28,11 @@ class Lanes : public ui::Node {
     // Rebuilds the per-row item index from the layout's session, then
     // invalidates (the controller calls this after TrackLayout::show).
     void rebuild();
+    // Adjust only changed items and rows whose timebase changed. Geometry must
+    // be unchanged; visual-only edits do not touch the position index.
+    void updateIndex(const model::Session& before, const std::set<model::Id>& items,
+                     const std::set<model::Id>& tracks);
+    const std::vector<model::Id>& itemsInRow(std::size_t row) const { return rowItems_[row]; }
 
     // Time <-> x inside the lanes (the arrange controller and the ruler share
     // this mapping, so the ruler lines up with the items).
@@ -66,6 +72,10 @@ class Lanes : public ui::Node {
         std::size_t rows = 0, items = 0, columns = 0, notes = 0, pending = 0, fades = 0;
     };
     const Stats& stats() const { return stats_; }
+    struct IndexStats {
+        std::uint64_t rebuilds = 0, items = 0;
+    };
+    const IndexStats& indexStats() const { return indexStats_; }
 
   private:
     friend class LaneLabels;
@@ -86,6 +96,7 @@ class Lanes : public ui::Node {
     bool glFailed_ = false;
     const ui::Theme* theme_ = nullptr;  // from the last paint (paintGl has no canvas)
     Stats stats_;
+    IndexStats indexStats_;
 };
 
 }  // namespace supple::views

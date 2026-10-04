@@ -23,6 +23,10 @@ union SDL_Event;
 
 namespace supple::gui {
 
+// Applies coalesced host requests without destroying a hidden editor. Closed
+// editors are removed by the owner; close takes precedence over other flags.
+void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests);
+
 // Polls plugin file descriptors on a thread and wakes the UI thread when one
 // is ready; a ready descriptor is not polled again until the UI thread has
 // dispatched it (so a level-triggered fd cannot spin).
