@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <csignal>
 #include <thread>
 #include <vector>
 
@@ -487,6 +489,56 @@ TEST_CASE("lifecycle: request_flush while active is served on the audio thread")
     REQUIRE(p.process(buf.block(32)));
     CHECK_FALSE(p.needsAudioFlush());
     p.stopProcessing();
+}
+
+TEST_CASE("an editor opens in process and through the bridge; a dead bridge closes it (gap #39)") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+        REQUIRE(made);
+        Instance& p = **made;
+        REQUIRE(p.hasEditor());
+        // The parent window id reaches the plug-in (across the process boundary).
+        auto size = p.openEditor(0x5a17, 1.0);
+        REQUIRE_MESSAGE(size, (size ? "" : size.error().toString()));
+        CHECK(size->width == 300);
+        CHECK(size->height == 200);
+        CHECK(size->resizable);
+        CHECK(p.editorOpen());
+        CHECK(p.paramValue(8).value() == 0x5a17);
+        // The resize it asked for when shown arrives (polled through the bridge).
+        Instance::EditorRequests q;
+        for (int i = 0; i < 100 && !q.resize; ++i) {
+            q = p.takeEditorRequests();
+            if (!q.resize) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        CHECK(q.resize);
+        CHECK(q.width == 320);
+        CHECK(q.height == 240);
+        CHECK(p.nextTimerMs() >= -1);
+        // A host-driven resize is adjusted by the plug-in.
+        auto resized = p.resizeEditor(50, 400);
+        REQUIRE(resized);
+        CHECK(resized->width == 100);
+        CHECK(resized->height == 400);
+        p.closeEditor();
+        CHECK_FALSE(p.editorOpen());
+        CHECK(p.paramValue(8).value() == 0);
+        if (!isolated) continue;
+        // The bridge dies with the editor open: the next poll reports it closed.
+        REQUIRE(p.openEditor(0x5a18, 1.0));
+        REQUIRE(p.bridgePid() > 0);
+        ::kill(p.bridgePid(), SIGKILL);
+        q = {};
+        for (int i = 0; i < 200 && !q.closed; ++i) {
+            q = p.takeEditorRequests();
+            if (!q.closed) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        CHECK(q.closed);
+        CHECK_FALSE(p.editorOpen());
+        CHECK_FALSE(p.hasEditor());
+    }
 }
 
 TEST_CASE("lifecycle: refused start_processing blocks process(); tail is reported") {

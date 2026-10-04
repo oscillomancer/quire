@@ -37,6 +37,23 @@ void setBridgeExecutable(std::filesystem::path path) {
     gBridgeExecutable = std::move(path);
 }
 
+bool locateBridgeExecutable(std::string_view name) {
+    std::error_code ec;
+    const std::filesystem::path self = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec) return false;
+    const std::filesystem::path dir = self.parent_path();
+    // Installed: beside it. Build tree: host/engine/tools -> host/clap-host,
+    // daw/gui -> host/clap-host.
+    for (const std::filesystem::path& candidate :
+         {dir / name, dir.parent_path() / "clap-host" / name,
+          dir.parent_path().parent_path() / "host" / "clap-host" / name})
+        if (std::filesystem::exists(candidate, ec)) {
+            setBridgeExecutable(candidate);
+            return true;
+        }
+    return false;
+}
+
 std::filesystem::path bridgeExecutable() {
     std::lock_guard lock(gBridgeMutex);
     return gBridgeExecutable;
@@ -107,6 +124,7 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     ports.acceptsNotes = r.u8() != 0;
     ports.semantic = r.u8() != 0;
     ports.keyChannels = r.u32();
+    ports.editor = r.u8() != 0;
     if (!r.ok() || !self->instanceId_)
         return Error("host.bridge", "malformed reply from the plugin bridge");
     return self;
@@ -373,6 +391,57 @@ Status RemoteInstance::loadState(std::span<const std::uint8_t> bytes) {
     auto reply = call(Op::LoadState, w);
     if (!reply) return std::move(reply).error();
     return okStatus();
+}
+
+namespace {
+Result<Instance::EditorSize> editorSize(Result<std::vector<std::uint8_t>> reply) {
+    if (!reply) return std::move(reply).error();
+    Reader r(reply->data(), reply->size());
+    Instance::EditorSize size;
+    size.width = r.u32();
+    size.height = r.u32();
+    size.resizable = r.u8() != 0;
+    if (!r.ok()) return Error("host.bridge", "malformed editor reply from the plugin bridge");
+    return size;
+}
+}  // namespace
+
+Result<Instance::EditorSize> RemoteInstance::openEditor(unsigned long x11Parent, double scale) {
+    Writer w;
+    w.u64(x11Parent);
+    w.f64(scale);
+    return editorSize(call(Op::EditorOpen, w));
+}
+
+Result<Instance::EditorSize> RemoteInstance::resizeEditor(std::uint32_t width,
+                                                          std::uint32_t height) {
+    Writer w;
+    w.u32(width);
+    w.u32(height);
+    return editorSize(call(Op::EditorResize, w));
+}
+
+void RemoteInstance::closeEditor() {
+    if (!failed()) (void)call(Op::EditorClose, Writer{}, -1, 2000);
+}
+
+Instance::EditorRequests RemoteInstance::editorRequests() {
+    Instance::EditorRequests q;
+    if (failed()) {  // the bridge is gone, and the editor with it
+        q.closed = true;
+        return q;
+    }
+    auto reply = call(Op::EditorRequests, Writer{});
+    if (!reply) {
+        q.closed = failed();
+        return q;
+    }
+    Reader r(reply->data(), reply->size());
+    q.resize = r.u8() != 0;
+    q.closed = r.u8() != 0;
+    q.width = r.u32();
+    q.height = r.u32();
+    return q;
 }
 
 bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::string>& log) {

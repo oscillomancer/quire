@@ -136,6 +136,10 @@ class Vst3Instance;    // local VST3 backing
 
 // The bridge executable for isolated instances (process-wide, set at startup).
 void setBridgeExecutable(std::filesystem::path path);
+// Finds the bridge named `name` (<slug>-bridge) next to the running
+// executable (installed) or in the build tree's host/clap-host directory, and
+// sets it. False when there is none.
+bool locateBridgeExecutable(std::string_view name);
 Result<std::shared_ptr<BridgeProcess>> createBridgeProcess();
 bool bridgeProcessFailed(const std::shared_ptr<BridgeProcess>& process);
 
@@ -250,7 +254,9 @@ class Instance {
     Notifications takeNotifications();
 
     // --- editor (main thread): the plugin's GUI embedded in an X11 window
-    // (CLAP gui extension). VST3 and isolated instances: not yet.
+    // (CLAP gui extension, VST3 IPlugView). An isolated instance's editor is
+    // embedded by its bridge process into the same window (X11 window ids are
+    // the server's); its requests are polled through the bridge (gap log #39).
     struct EditorSize {
         std::uint32_t width = 0, height = 0;
         bool resizable = false;
@@ -310,6 +316,8 @@ class Instance {
     std::atomic<const void*> owner_{nullptr};
     Notifications remoteNotes_;
     std::vector<std::string> remoteLog_;
+    bool remoteEditor_ = false;        // the bridged plugin has an embeddable editor
+    std::int64_t remotePolledMs_ = 0;  // when its editor requests were last asked for
 };
 
 }  // namespace supple::host

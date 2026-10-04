@@ -346,6 +346,9 @@ int main(int argc, char** argv) {
         publish();
     });
 
+    // The plugin bridge for isolated fx (and their editors, gap log #39).
+    if (!host::locateBridgeExecutable(std::string(product::kSlug) + "-bridge"))
+        std::fprintf(stderr, "no plugin bridge found: isolated fx will not start\n");
     peaks::PeakService peaks(peaks::defaultCacheDir(product::kSlug),
                              [&](std::function<void()> f) { loop.post(std::move(f)); });
     // One meter feed for both views (the TCP and the mixer), filled from what
@@ -453,14 +456,6 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
         return fxWindow.openToAdd(uiState, v);
     });
-    // Mouse modifiers (gap log #37): loaded into the arrange view below.
-    const fs::path mouseFile = views::MouseMap::defaultFile(product::kSlug);
-    gui::MouseDialog mouseDialog(root, shell.arrange()->gestures().mouse,
-                                 o.offscreen ? fs::path{} : mouseFile);
-    mouseDialog.onError = [](const std::string& message) {
-        std::fprintf(stderr, "%s\n", message.c_str());
-    };
-    appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
     gui::RenderDialog renderDialog(**app, dispatcher, root);
     appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
@@ -485,6 +480,14 @@ int main(int argc, char** argv) {
     }
     // Arrange editing gestures (P5.6): one transaction per gesture; a later
     // step may use an earlier one's result ("$step0.track").
+    // Mouse modifiers (gap log #37): the arrange view's map, from the user's file.
+    const fs::path mouseFile = views::MouseMap::defaultFile(product::kSlug);
+    gui::MouseDialog mouseDialog(root, shell.arrange()->gestures().mouse,
+                                 o.offscreen ? fs::path{} : mouseFile);
+    mouseDialog.onError = [](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+    };
+    appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
     {
         views::ItemGestures& g = shell.arrange()->gestures();
         const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};

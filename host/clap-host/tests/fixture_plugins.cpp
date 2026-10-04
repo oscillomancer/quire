@@ -563,20 +563,29 @@ struct Edge {
     const clap_host_t* host = nullptr;
     std::uint8_t config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
+    // A display-free editor (gap log #39): it records the parent window it is
+    // given (read back as parameter 8) and asks for a resize when shown.
+    bool guiCreated = false, guiShown = false;
+    std::uint64_t guiParent = 0;
+    std::uint32_t guiWidth = 300, guiHeight = 200;
 };
 Edge* E(const clap_plugin_t* p) { return static_cast<Edge*>(p->plugin_data); }
 
-uint32_t CLAP_ABI edgeParamCount(const clap_plugin_t*) { return 1; }
+uint32_t CLAP_ABI edgeParamCount(const clap_plugin_t*) { return 2; }
 bool CLAP_ABI edgeParamInfo(const clap_plugin_t*, uint32_t index, clap_param_info_t* info) {
-    if (index != 0) return false;
+    if (index > 1) return false;
     std::memset(info, 0, sizeof(*info));
-    info->id = 7;
+    info->id = index == 0 ? 7 : 8;
     info->flags = CLAP_PARAM_IS_READONLY;
-    std::snprintf(info->name, sizeof(info->name), "Flushes");
-    info->max_value = 1e9;
+    std::snprintf(info->name, sizeof(info->name), index == 0 ? "Flushes" : "Editor parent");
+    info->max_value = index == 0 ? 1e9 : 1e15;
     return true;
 }
 bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+    if (id == 8) {
+        *out = static_cast<double>(E(pl)->guiParent);
+        return true;
+    }
     if (id != 7) return false;
     *out = E(pl)->flushes.load();
     return true;
@@ -611,7 +620,68 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     return true;
 }
 const clap_plugin_state_t kEdgeState = {edgeStateSave, edgeStateLoad};
+bool CLAP_ABI edgeGuiApi(const clap_plugin_t*, const char* api, bool floating) {
+    return !floating && !std::strcmp(api, CLAP_WINDOW_API_X11);
+}
+bool CLAP_ABI edgeGuiPreferred(const clap_plugin_t*, const char** api, bool* floating) {
+    *api = CLAP_WINDOW_API_X11;
+    *floating = false;
+    return true;
+}
+bool CLAP_ABI edgeGuiCreate(const clap_plugin_t* pl, const char* api, bool floating) {
+    if (!edgeGuiApi(pl, api, floating) || E(pl)->guiCreated) return false;
+    E(pl)->guiCreated = true;
+    return true;
+}
+void CLAP_ABI edgeGuiDestroy(const clap_plugin_t* pl) {
+    E(pl)->guiCreated = E(pl)->guiShown = false;
+    E(pl)->guiParent = 0;
+}
+bool CLAP_ABI edgeGuiScale(const clap_plugin_t*, double) { return true; }
+bool CLAP_ABI edgeGuiGetSize(const clap_plugin_t* pl, uint32_t* w, uint32_t* h) {
+    *w = E(pl)->guiWidth;
+    *h = E(pl)->guiHeight;
+    return true;
+}
+bool CLAP_ABI edgeGuiCanResize(const clap_plugin_t*) { return true; }
+bool CLAP_ABI edgeGuiHints(const clap_plugin_t*, clap_gui_resize_hints_t* hints) {
+    *hints = {true, true, false, 0, 0};
+    return true;
+}
+bool CLAP_ABI edgeGuiAdjust(const clap_plugin_t*, uint32_t* w, uint32_t* h) {
+    *w = std::max<uint32_t>(*w, 100);
+    *h = std::max<uint32_t>(*h, 100);
+    return true;
+}
+bool CLAP_ABI edgeGuiSetSize(const clap_plugin_t* pl, uint32_t w, uint32_t h) {
+    E(pl)->guiWidth = w;
+    E(pl)->guiHeight = h;
+    return true;
+}
+bool CLAP_ABI edgeGuiParent(const clap_plugin_t* pl, const clap_window_t* window) {
+    if (!E(pl)->guiCreated || std::strcmp(window->api, CLAP_WINDOW_API_X11) != 0) return false;
+    E(pl)->guiParent = window->x11;
+    return true;
+}
+bool CLAP_ABI edgeGuiTransient(const clap_plugin_t*, const clap_window_t*) { return false; }
+void CLAP_ABI edgeGuiTitle(const clap_plugin_t*, const char*) {}
+bool CLAP_ABI edgeGuiShow(const clap_plugin_t* pl) {
+    E(pl)->guiShown = true;
+    const auto* gui =
+        static_cast<const clap_host_gui_t*>(E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_GUI));
+    if (gui) gui->request_resize(E(pl)->host, 320, 240);
+    return true;
+}
+bool CLAP_ABI edgeGuiHide(const clap_plugin_t* pl) {
+    E(pl)->guiShown = false;
+    return true;
+}
+const clap_plugin_gui_t kEdgeGui = {
+    edgeGuiApi,     edgeGuiPreferred, edgeGuiCreate, edgeGuiDestroy, edgeGuiScale,
+    edgeGuiGetSize, edgeGuiCanResize, edgeGuiHints,  edgeGuiAdjust,  edgeGuiSetSize,
+    edgeGuiParent,  edgeGuiTransient, edgeGuiTitle,  edgeGuiShow,    edgeGuiHide};
 const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
     if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kEdgeTail;
     if (!std::strcmp(id, CLAP_EXT_STATE)) return &kEdgeState;

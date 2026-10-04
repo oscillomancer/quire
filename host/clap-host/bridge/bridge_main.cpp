@@ -16,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "../src/bridge_protocol.h"
 #include "supple/host/clap_host.h"
@@ -161,6 +162,11 @@ struct Bridge {
         return reply(w);
     }
     bool replyStatus(const supple::Status& st) { return st ? reply(Writer{}) : fail(st.error()); }
+    static void writeSize(Writer& w, const Instance::EditorSize& size) {
+        w.u32(size.width);
+        w.u32(size.height);
+        w.u8(size.resizable ? 1 : 0);
+    }
 
     // Returns false to exit.
     bool handle(Op op, std::uint32_t instanceId, Reader& r, int fd) {
@@ -190,6 +196,7 @@ struct Bridge {
             w.u8(slot->instance->acceptsNotes() ? 1 : 0);
             w.u8(slot->instance->info().semantic ? 1 : 0);
             w.u32(slot->instance->sidechainChannels());
+            w.u8(slot->instance->hasEditor() ? 1 : 0);
             instances.emplace(newId, std::move(slot));
             return reply(w);
         }
@@ -343,8 +350,31 @@ struct Bridge {
                 w.u8(instance->reportsTail() ? 1 : 0);
                 return reply(w);
             }
+            case Op::EditorOpen: {
+                const auto parent = static_cast<unsigned long>(r.u64());
+                const double scale = r.f64();
+                if (!r.ok()) return fail(Error("bridge.editor", "malformed EditorOpen request"));
+                return replyOr(instance->openEditor(parent, scale), writeSize);
+            }
+            case Op::EditorResize: {
+                const std::uint32_t width = r.u32(), height = r.u32();
+                return replyOr(instance->resizeEditor(width, height), writeSize);
+            }
+            case Op::EditorClose:
+                instance->closeEditor();
+                return reply(Writer{});
+            case Op::EditorRequests: {
+                const auto q = instance->takeEditorRequests();
+                Writer w;
+                w.u8(q.resize ? 1 : 0);
+                w.u8(q.closed ? 1 : 0);
+                w.u32(q.width);
+                w.u32(q.height);
+                return reply(w);
+            }
             case Op::Destroy:
                 stopAudio();
+                instance->closeEditor();
                 if (instance->processing()) instance->stopProcessing();
                 instance.reset();
                 unmap();
@@ -363,10 +393,40 @@ int main(int argc, char** argv) {
     Bridge b;
     for (int i = 1; i + 1 < argc; ++i)
         if (std::string(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);
+    std::vector<pollfd> polled;
+    std::vector<std::uint32_t> owners;  // the instance of each editor descriptor
     for (;;) {
-        pollfd p{b.sock, POLLIN, 0};
-        const int ready = ::poll(&p, 1, 10);
-        if (ready == 0) {  // idle: the plugin's own main-thread work (timers, callbacks)
+        // The control socket, and the descriptors open editors watch
+        // (clap.posix-fd-support / the VST3 run loop) with their timers.
+        polled.assign(1, pollfd{b.sock, POLLIN, 0});
+        owners.assign(1, 0);
+        int timeout = 10;
+        for (auto& [id, slot] : b.instances) {
+            if (!slot->instance->editorOpen()) continue;
+            for (const auto& [fd, flags] : slot->instance->watchedFds()) {
+                short events = 0;
+                if (flags & CLAP_POSIX_FD_READ) events |= POLLIN;
+                if (flags & CLAP_POSIX_FD_WRITE) events |= POLLOUT;
+                polled.push_back(pollfd{fd, events, 0});
+                owners.push_back(id);
+            }
+            const int due = slot->instance->nextTimerMs();
+            if (due >= 0) timeout = std::min(timeout, due);
+        }
+        const int ready = ::poll(polled.data(), polled.size(), timeout);
+        for (std::size_t i = 1; ready > 0 && i < polled.size(); ++i) {
+            if (!polled[i].revents) continue;
+            const auto it = b.instances.find(owners[i]);
+            if (it == b.instances.end()) continue;
+            std::uint32_t flags = 0;
+            if (polled[i].revents & POLLIN) flags |= CLAP_POSIX_FD_READ;
+            if (polled[i].revents & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
+            if (polled[i].revents & (POLLERR | POLLHUP)) flags |= CLAP_POSIX_FD_ERROR;
+            std::lock_guard lock(it->second->lifecycle);
+            it->second->instance->onFd(polled[i].fd, flags);
+        }
+        if (!(polled[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+            // idle: the plugin's own main-thread work (timers, callbacks)
             for (auto& [id, slot] : b.instances) {
                 (void)id;
                 std::lock_guard lock(slot->lifecycle);
@@ -385,6 +445,7 @@ int main(int argc, char** argv) {
     for (auto& [id, slot] : b.instances) {
         (void)id;
         slot->stopAudio();
+        if (slot->instance) slot->instance->closeEditor();
         if (slot->instance && slot->instance->processing()) slot->instance->stopProcessing();
         slot->instance.reset();
         slot->unmap();

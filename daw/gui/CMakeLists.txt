@@ -56,6 +56,7 @@ supple_target_defaults(gui-app)
 
 add_executable(${PRODUCT_SLUG} app/main.cpp)
 target_link_libraries(${PRODUCT_SLUG} PRIVATE gui-app)
+add_dependencies(${PRODUCT_SLUG} ${PRODUCT_SLUG}-bridge)  # isolated fx run in it
 target_compile_definitions(${PRODUCT_SLUG} PRIVATE
   SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts")
 supple_target_defaults(${PRODUCT_SLUG})
@@ -80,7 +81,9 @@ if(SUPPLE_BUILD_TESTS)
                    tests/test_midi_editor.cpp tests/test_fx_render.cpp tests/test_ruler.cpp tests/test_tcp_sends.cpp LABELS gui tsan-skip)
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
                              SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
+                             SUPPLE_BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>"
                              SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
+  add_dependencies(gui-app.tests ${PRODUCT_SLUG}-bridge)
   target_include_directories(gui-app.tests PRIVATE ${PROJECT_SOURCE_DIR}/daw/agent-panel/tests)
   set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)

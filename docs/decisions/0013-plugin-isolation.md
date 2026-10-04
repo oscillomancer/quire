@@ -113,5 +113,14 @@ syscalls per block for the data, not just the wake-up).
   control request stalls control calls for the other instances; a timeout
   fails the whole shared process. Use `dedicated` for plugins whose slow
   control callbacks need isolation from other effects.
-- Not yet: GUI embedding across processes, the pipelined mode, B6 overhead
-  benchmark.
+- Editors (protocol v5, gap log #39): `EditorOpen {parent XID, scale}`,
+  `EditorResize`, `EditorClose`, `EditorRequests`. The bridge embeds the
+  plug-in's editor (CLAP gui or VST3 IPlugView) straight into the host's X11
+  window — window ids are the X server's, so no reparenting proxy is needed —
+  and runs the editor's timers and watched descriptors in its own poll loop.
+  The host polls the editor's requests (resize, closed) every 30 ms while it is
+  open; a failed bridge reports the editor closed, and the window goes with it.
+  `Create` replies whether the plug-in has an embeddable editor. Both apps find
+  `<slug>-bridge` beside themselves or in the build tree
+  (`locateBridgeExecutable`).
+- Not yet: the pipelined mode, B6 overhead benchmark.

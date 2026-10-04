@@ -84,21 +84,6 @@ fs::path defaultWorkdir() {
 
 std::atomic<bool> g_interrupted{false};
 
-// The plugin bridge (isolated fx): next to this executable when installed,
-// in the clap-host build directory in a build tree.
-void configureBridge() {
-    std::error_code ec;
-    const fs::path self = fs::read_symlink("/proc/self/exe", ec);
-    if (ec) return;
-    const std::string name = std::string(product::kSlug) + "-bridge";
-    for (const fs::path& candidate :
-         {self.parent_path() / name, self.parent_path().parent_path() / "clap-host" / name})
-        if (fs::exists(candidate)) {
-            host::setBridgeExecutable(candidate);
-            return;
-        }
-}
-
 engine::AppOptions cliOptions() {
     engine::AppOptions options;
     options.identity.name = std::string(product::kName);
@@ -185,7 +170,8 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
 int main(int argc, char** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) return usage();
-    configureBridge();
+    // The plugin bridge (isolated fx).
+    (void)host::locateBridgeExecutable(std::string(product::kSlug) + "-bridge");
     cmd::Registry registry;
     engine::registerEngineCommands(registry);
     if (args[0] == "--mcp" || args[0] == "serve") {

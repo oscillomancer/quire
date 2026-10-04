@@ -18,7 +18,7 @@ namespace supple::host {
 
 struct RemotePorts {
     std::uint32_t inChannels = 0, outChannels = 0, keyChannels = 0;
-    bool acceptsNotes = false, semantic = false;
+    bool acceptsNotes = false, semantic = false, editor = false;
 };
 
 class BridgeProcess {
@@ -78,6 +78,11 @@ class RemoteInstance {
     // serviceMainThread + notifications + log in one round trip.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
     bool needsAudioFlush() const { return needsAudioFlush_; }
+    // The plug-in's editor, embedded by the bridge into `x11Parent` (gap log #39).
+    Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);
+    Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    void closeEditor();
+    Instance::EditorRequests editorRequests();
 
     // audio thread
     bool startProcessing() SUPPLE_RT;

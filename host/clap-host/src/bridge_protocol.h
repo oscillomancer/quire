@@ -27,8 +27,9 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-inline constexpr std::uint32_t kVersion = 4;  // 3: Create carries the format; 4: the key (ADR-0018)
-inline constexpr int kControlFd = 3;          // the bridge's end of the socketpair
+// 3: Create carries the format; 4: the key (ADR-0018); 5: editors (gap log #39)
+inline constexpr std::uint32_t kVersion = 5;
+inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
 inline constexpr std::uint32_t kMaxOutEvents = 1024;
@@ -59,6 +60,12 @@ enum class Op : std::uint32_t {
     // so the numbers of the ops above do not change.
     NormalizedParam,  // id, plain → normalized
     PlainParam,       // id, normalized → plain
+    // The plug-in's editor, embedded by the bridge into the host's X11 window
+    // (window ids are the X server's, not a process's).
+    EditorOpen,      // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
+    EditorResize,    // u32 width, u32 height → the accepted size (as EditorOpen)
+    EditorClose,     // → ok
+    EditorRequests,  // → u8 resize, u8 closed, u32 width, u32 height
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };
@@ -69,6 +76,7 @@ class Writer {
     std::vector<std::uint8_t> bytes;
     void u8(std::uint8_t v) { bytes.push_back(v); }
     void u32(std::uint32_t v) { raw(&v, 4); }
+    void u64(std::uint64_t v) { raw(&v, 8); }
     void i64(std::int64_t v) { raw(&v, 8); }
     void f64(double v) { raw(&v, 8); }
     void str(std::string_view s) {
@@ -109,6 +117,11 @@ class Reader {
     }
     std::int64_t i64() {
         std::int64_t v = 0;
+        raw(&v, 8);
+        return v;
+    }
+    std::uint64_t u64() {
+        std::uint64_t v = 0;
         raw(&v, 8);
         return v;
     }

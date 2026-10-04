@@ -568,6 +568,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->outChannels_ = ports.outChannels;
         self->keyChannels_ = ports.keyChannels;
         self->acceptsNotes_ = ports.acceptsNotes;
+        self->remoteEditor_ = ports.editor;
         self->hostState_ = std::make_unique<HostState>();
         self->remote_ = std::move(*remote);
         return self;
@@ -1300,8 +1301,19 @@ bool Instance::serviceMainThread() {
     return did;
 }
 
+namespace {
+// A bridged editor's requests are asked for this often (a round trip each).
+constexpr int kRemoteEditorPollMs = 30;
+std::int64_t steadyMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+}  // namespace
+
 bool Instance::hasEditor() const {
     if (vst3_) return vst3_->hasEditor();
+    if (remote_) return remoteEditor_ && !remote_->failed();
     return plugin_ && !remote_ && extGui_ &&
            extGui_->is_api_supported(plugin_, CLAP_WINDOW_API_X11, false);
 }
@@ -1312,10 +1324,16 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
         if (size) editorOpen_ = true;
         return size;
     }
-    if (remote_)
-        return Error("host.editor", "editors of isolated plugins are not supported yet", "",
-                     "run the plugin in-process to open its editor");
     if (!hasEditor()) return Error("host.editor", "this plugin has no embeddable X11 editor");
+    if (remote_) {
+        if (editorOpen_) closeEditor();
+        auto size = remote_->openEditor(x11Parent, scale);
+        if (size) {
+            editorOpen_ = true;
+            remotePolledMs_ = steadyMs();
+        }
+        return size;
+    }
     if (editorOpen_) closeEditor();
     if (!extGui_->create(plugin_, CLAP_WINDOW_API_X11, false))
         return Error("host.editor", "the plugin could not create its editor");
@@ -1330,16 +1348,18 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
     EditorSize size;
     (void)extGui_->get_size(plugin_, &size.width, &size.height);
     size.resizable = extGui_->can_resize(plugin_);
-    (void)extGui_->show(plugin_);
-    editorOpen_ = true;
+    // Cleared before show: a resize the plug-in asks for while showing stands.
     hostState_->guiClosed = false;
     hostState_->guiResize = false;
+    (void)extGui_->show(plugin_);
+    editorOpen_ = true;
     return size;
 }
 
 Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {
     if (!editorOpen_) return Error("host.editor", "no editor is open");
     if (vst3_) return vst3_->resizeEditor(width, height);
+    if (remote_) return remote_->resizeEditor(width, height);
     EditorSize size{width, height, extGui_->can_resize(plugin_)};
     if (size.resizable) {
         (void)extGui_->adjust_size(plugin_, &size.width, &size.height);
@@ -1356,6 +1376,11 @@ void Instance::closeEditor() {
         editorOpen_ = false;
         return;
     }
+    if (remote_) {
+        remote_->closeEditor();
+        editorOpen_ = false;
+        return;
+    }
     (void)extGui_->hide(plugin_);
     extGui_->destroy(plugin_);
     editorOpen_ = false;
@@ -1363,6 +1388,15 @@ void Instance::closeEditor() {
 
 Instance::EditorRequests Instance::takeEditorRequests() {
     if (vst3_) return vst3_->takeEditorRequests();
+    if (remote_) {
+        if (!editorOpen_) return {};
+        // A failed bridge answers at once (closed); otherwise not every pass.
+        if (!remote_->failed() && steadyMs() - remotePolledMs_ < kRemoteEditorPollMs) return {};
+        remotePolledMs_ = steadyMs();
+        EditorRequests q = remote_->editorRequests();
+        if (q.closed) editorOpen_ = false;  // the bridge released it
+        return q;
+    }
     EditorRequests r;
     if (!hostState_) return r;
     HostState& h = *hostState_;
@@ -1393,6 +1427,11 @@ void Instance::onFd(int fd, std::uint32_t flags) {
 
 int Instance::nextTimerMs() const {
     if (vst3_) return vst3_->nextTimerMs();
+    if (remote_) {  // the bridge runs the plug-in's timers; this paces the request polls
+        if (!editorOpen_) return -1;
+        return static_cast<int>(
+            std::max<std::int64_t>(0, kRemoteEditorPollMs - (steadyMs() - remotePolledMs_)));
+    }
     if (!hostState_ || !extTimer_ || hostState_->timers.empty()) return -1;
     const auto now = std::chrono::steady_clock::now();
     auto next = hostState_->timers.front().next;

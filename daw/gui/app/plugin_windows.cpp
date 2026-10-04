@@ -100,7 +100,7 @@ bool PluginWindows::isOpen(model::Id fx) const {
 Status PluginWindows::attach(Editor editor, const std::string& title) {
     if (!editor.instance->hasEditor())
         return Error("gui.editor", title + " has no editor this host can embed", "",
-                     "VST3 and isolated plugins open their editors in a later version");
+                     "the plugin offers no X11 editor (or its bridge process failed: restart it)");
     WindowOptions options;
     options.title = title;
     options.width = 640;
