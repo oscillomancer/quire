@@ -291,3 +291,56 @@ TEST_CASE("merge remaps only schema-declared IDs (review round 3)") {
     CHECK(out["item"]["value"].asString() == "tr_2");
     CHECK(remapIds(text, schema, remap)["item"]["value"].asString() == "tr_1");
 }
+
+TEST_CASE("unreachable redo and deleted branch versions release storage, leases keep them live") {
+    VersionStore vs(Session::create());
+    const auto a = run(vs, {inv("track.add", R"({"name":"A"})")});
+    const auto abandoned = run(vs, {inv("track.set", R"({"track":"tr_1","name":"discarded"})")});
+    std::weak_ptr<const Session> weak = vs.pin(abandoned);
+    REQUIRE(vs.undo());
+    run(vs, {inv("track.set", R"({"track":"tr_1","name":"new"})")});
+    CHECK_FALSE(vs.version(abandoned));
+    CHECK(weak.expired());
+    REQUIRE(vs.version(a));
+    REQUIRE(vs.createBranch("scratch", "main"));
+    REQUIRE(vs.switchBranch("scratch"));
+    const auto branchVersion = run(vs, {inv("track.set", R"({"track":"tr_1","name":"pinned"})")});
+    auto lease = vs.pin(branchVersion);
+    weak = lease;
+    REQUIRE(vs.switchBranch("main"));
+    REQUIRE(vs.deleteBranch("scratch"));
+    REQUIRE(vs.version(branchVersion));
+    CHECK_FALSE(weak.expired());
+    lease.reset();
+    vs.collectUnused();
+    CHECK_FALSE(vs.version(branchVersion));
+    CHECK(weak.expired());
+    CHECK_FALSE(vs.pin(branchVersion));
+}
+
+TEST_CASE("an open branch retains its fork history after another branch discards redo") {
+    VersionStore vs(Session::create());
+    run(vs, {inv("track.add", R"({"name":"A"})")});
+    const auto fork = run(vs, {inv("track.set", R"({"track":"tr_1","name":"fork"})")});
+    REQUIRE(vs.createBranch("open", "main"));
+    REQUIRE(vs.undo());
+    run(vs, {inv("track.set", R"({"track":"tr_1","name":"other"})")});
+    REQUIRE(vs.version(fork));
+    REQUIRE(vs.deleteBranch("open"));
+    CHECK_FALSE(vs.version(fork));
+}
+
+TEST_CASE("coalescing retains leased old versions without adding an undo step") {
+    VersionStore vs(Session::create());
+    run(vs, {inv("track.add", R"({"name":"A"})")});
+    const auto old = run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-3})")}, "gesture");
+    auto lease = vs.pin(old);
+    run(vs, {inv("track.set", R"({"track":"tr_1","volume_db":-6})")}, "gesture");
+    REQUIRE(vs.version(old));
+    CHECK(vs.history().size() == 3);
+    REQUIRE(vs.undo());
+    CHECK(track(vs, "main", "tr_1")->volumeDb == 0);
+    lease.reset();
+    vs.collectUnused();
+    CHECK_FALSE(vs.version(old));
+}

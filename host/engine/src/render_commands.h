@@ -64,6 +64,8 @@ struct RenderOutput {
 // Resamples, downmixes and normalizes `data` in place and returns how to write it.
 Result<RenderOutput> finishRenderAudio(audio::AudioData& data, const model::Project& project,
                                        const RenderOutputArgs& args);
+Status checkRenderRange(const model::Session& session, const OfflineSettings& settings,
+                        std::optional<std::int64_t> sampleRate = {});
 Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSettings settings,
                                      const std::vector<host::PluginInfo>& catalogue,
                                      const host::HostIdentity& identity);

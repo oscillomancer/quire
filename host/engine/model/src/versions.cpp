@@ -289,6 +289,31 @@ void VersionStore::forEachVersion(const std::function<void(const Version&)>& vis
     for (const auto& [id, v] : versions_) visit(v);
 }
 
+std::shared_ptr<const Session> VersionStore::pin(std::uint64_t id) const {
+    const auto* found = version(id);
+    return found ? found->session : nullptr;
+}
+
+void VersionStore::collectUnused() {
+    std::vector<std::uint64_t> pending;
+    for (const auto& [name, branch] : branches_) {
+        pending.push_back(branch.head);
+        pending.push_back(branch.base);
+        pending.insert(pending.end(), branch.redo.begin(), branch.redo.end());
+    }
+    for (const auto& [id, version] : versions_)
+        if (version.session.use_count() > 1) pending.push_back(id);
+    std::set<std::uint64_t> reachable;
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        if (!reachable.insert(id).second) continue;
+        if (const auto* found = version(id))
+            pending.insert(pending.end(), found->parents.begin(), found->parents.end());
+    }
+    std::erase_if(versions_, [&](const auto& entry) { return !reachable.count(entry.first); });
+}
+
 Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                            std::vector<Change> changes, std::vector<Id> created,
                                            std::uint64_t timeMs) {
@@ -297,6 +322,7 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                             std::to_string(session.version) + ", expected " +
                                             std::to_string(next_));
     Branch& b = branches_.at(current_);
+    b.view.reset();
     for (std::size_t k = 0; k < kKindCount; ++k) {
         b.allocated.next[k] = std::max(b.allocated.next[k], session.next.next[k]);
         session.next.next[k] = b.allocated.next[k];
@@ -333,10 +359,8 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         std::vector<Invocation> inv = head.txn.invocations;
         inv.insert(inv.end(), v.txn.invocations.begin(), v.txn.invocations.end());
         v.txn.invocations = std::move(inv);
-        const std::uint64_t replaced = b.head;
         b.head = v.id;
         versions_.emplace(v.id, std::move(v));
-        versions_.erase(replaced);
     } else {
         v.parents = {b.head};
         v.changes = std::move(changes);
@@ -345,6 +369,7 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         b.redo.clear();
         versions_.emplace(v.id, std::move(v));
     }
+    collectUnused();
     return b.head;
 }
 
@@ -357,6 +382,7 @@ bool VersionStore::canRedo() const { return !branches_.at(current_).redo.empty()
 
 Status VersionStore::undo() {
     Branch& b = branches_.at(current_);
+    b.view.reset();
     if (b.head == b.base)
         return Error("history.nothing_to_undo", "nothing to undo on branch " + current_);
     b.redo.push_back(b.head);
@@ -366,6 +392,7 @@ Status VersionStore::undo() {
 
 Status VersionStore::redo() {
     Branch& b = branches_.at(current_);
+    b.view.reset();
     if (b.redo.empty())
         return Error("history.nothing_to_redo", "nothing to redo on branch " + current_);
     b.head = b.redo.back();
@@ -413,6 +440,7 @@ Status VersionStore::deleteBranch(std::string_view name) {
     auto b = find(name);
     if (!b) return std::move(b).error();
     branches_.erase(branches_.find(name));
+    collectUnused();
     return okStatus();
 }
 
@@ -467,11 +495,13 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
     }
     if (fork == dst.head) {
         dst.head = src->head;
+        dst.view.reset();
         for (std::size_t k = 0; k < kKindCount; ++k)
             dst.allocated.next[k] = std::max(dst.allocated.next[k], src->allocated.next[k]);
         dst.redo.clear();
         out.head = dst.head;
         out.fastForward = true;
+        collectUnused();
         return out;
     }
     // The source's transactions since the fork, oldest first (first-parent chain).
@@ -586,6 +616,8 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
         dst.allocated.next[k] = std::max(dst.allocated.next[k], state->next.next[k]);
     dst.redo.clear();
     out.head = dst.head;
+    dst.view.reset();
+    collectUnused();
     return out;
 }
 

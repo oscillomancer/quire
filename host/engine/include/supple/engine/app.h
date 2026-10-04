@@ -70,11 +70,16 @@ struct EngineStatus {
     std::vector<std::string> failedFx;  // isolated instances whose bridge crashed or hung
 };
 
+struct RecordingWarning {
+    std::string code, message, path, hint, track, file;
+};
+
 struct RecordedInfo {
     std::string track, item, take, file;  // take: the active one
     double seconds = 0;
     std::int64_t lostFrames = 0;     // input lost (the disk fell behind, playback dropped out)
     std::vector<std::string> takes;  // every take (one per loop pass)
+    std::optional<std::vector<RecordingWarning>> warnings;
 };
 
 // A transport range (loop or punch), in seconds (ADR-0015).
@@ -202,6 +207,7 @@ class EngineApp : public cmd::Host {
         std::string id, command, label;
         json::Value args;  // the render command's arguments
         std::uint64_t version = 0;
+        std::shared_ptr<const model::Session> pin;
         json::Value files;  // what a dry run said it would write
     };
     std::vector<QueuedRender>& renderQueue() { return renderQueue_; }
@@ -242,13 +248,15 @@ class EngineApp : public cmd::Host {
     std::filesystem::path recordDir() const { return mediaDir() / "rec"; }
     // Recordings in recordDir() with a sidecar that no version uses and that
     // are not being recorded now, oldest name first.
-    std::vector<RecoverableInfo> recoverable() const;
+    std::vector<RecoverableInfo> recoverable(
+        std::vector<RecordingWarning>* warnings = nullptr) const;
     // Repairs their headers (the frames written after the last rewrite count)
     // and commits them as one version ("recover"), each on its sidecar's track
     // (or `track`) at its recorded position. `files` as recoverable() lists
     // them; empty: all.
     Result<std::vector<RecordedInfo>> recover(const std::vector<std::string>& files,
-                                              std::optional<model::Id> track);
+                                              std::optional<model::Id> track,
+                                              std::vector<RecordingWarning>* warnings = nullptr);
     // The real-time engine's instance of `fx` (tests and tools), or null.
     host::Instance* instanceOf(model::Id fx) const { return pool_ ? pool_->find(fx) : nullptr; }
     // Transport requests. With a device, each waits (at most a second) until

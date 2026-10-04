@@ -101,6 +101,10 @@ class VersionStore {
     // The current branch's versions, newest first (up to `limit`).
     std::vector<const Version*> history(std::size_t limit = 50) const;
     const Version* version(std::uint64_t id) const;
+    // Model-thread lease for a render/clipboard snapshot. Holding it keeps the
+    // version addressable even after its branch/redo tail is discarded.
+    std::shared_ptr<const Session> pin(std::uint64_t id) const;
+    void collectUnused();  // reclaim unreachable versions without active leases
     // Every version on every branch, oldest first.
     void forEachVersion(const std::function<void(const Version&)>& visit) const;
 

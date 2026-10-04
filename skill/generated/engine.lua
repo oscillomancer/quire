@@ -493,8 +493,10 @@ q = nil
 
 ---@class Quire.project_recover_result
 ---@field recovered table[]
+---@field warnings? table[]
 
 ---@class Quire.project_recoverable_result
+---@field warnings? table[]
 ---@field recordings table[]
 
 ---@class Quire.project_save_args

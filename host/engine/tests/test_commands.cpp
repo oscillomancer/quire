@@ -1421,3 +1421,150 @@ TEST_CASE("ruler lists expose timebase and descriptions convert seconds to beats
     CHECK(description.find("Second bar\" bar 2") != std::string::npos);
     CHECK(description.find("Region\" bar 2") != std::string::npos);
 }
+
+TEST_CASE("unheaded notation follows the item's project meter through later changes") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Meter"})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"3/4"})");
+    run(bus, "timesig.set", R"({"bar":3,"meter":"5/8"})");
+    auto item = run(bus, "item.add",
+                    R"({"track":"tr_1","bar":2,"notation":"voice a; 1: C4:q r:* | D4:e r:*"})");
+    CHECK(item["position"].asDouble() == 3);
+    CHECK(item["length"].asDouble() == 5.5);
+    const auto text = run(bus, "midi.get", R"({"item":"it_1"})")["text"].asString();
+    json::Value write = json::Value::object();
+    write["item"] = "it_1";
+    write["notation"] = text;
+    auto rewritten = bus.execute({"midi.write", write, kOrigin});
+    REQUIRE_MESSAGE(rewritten, (rewritten ? "" : rewritten.error().toString()));
+    CHECK(model::itemLengthBeats(app->head(), *app->head().items.find(*model::Id::parse("it_1"))) ==
+          5.5);
+}
+
+TEST_CASE("commands reject numeric overflow and impossible derived work without edits") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Numbers"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    run(bus, "autoitem.add",
+        R"({"env":"en_1","position":0,"length":4,"points":[{"beat":0,"value":0}]})");
+    for (const auto& [command, args] : std::vector<std::pair<std::string, std::string>>{
+             {"time.convert", R"({"seconds":1e300})"},
+             {"time.convert", R"({"bar":2147483648})"},
+             {"transport.seek", R"({"beat":1e300})"},
+             {"transport.loop", R"({"start_seconds":0,"end_seconds":1e300})"},
+             {"transport.punch", R"({"start_bar":1,"end_bar":2147483648})"},
+             {"item.add", R"({"track":"tr_1","bar":2147483648})"},
+             {"item.add", R"({"track":"tr_1","position":1e300})"},
+             {"item.set", R"({"item":"it_1","length":1e300})"},
+             {"item.move", R"({"item":"it_1","position":1e300})"},
+             {"item.duplicate", R"({"item":"it_1","to":1e300})"},
+             {"item.set", R"({"item":"it_1","fade_in":1e300})"},
+             {"take.set", R"({"take":"tk_1","start_offset":1e300})"},
+             {"timesig.set", R"({"bar":2147483648,"meter":"4/4"})"},
+             {"tempo.set", R"({"points":[{"beat":0,"bpm":120},{"beat":1e300,"bpm":120}]})"},
+             {"marker.add", R"({"pos":1e300})"},
+             {"region.add", R"({"start":0,"end":1e300})"},
+             {"env.points.set", R"({"env":"en_1","points":[{"beat":1e300,"value":0}]})"},
+             {"env.points.set", R"({"env":"en_1","points":[{"beat":0,"value":1e300}]})"},
+             {"autoitem.set", R"({"item":"ai_1","length":1e300})"},
+             {"autoitem.duplicate", R"({"item":"ai_1","position":1e300})"},
+             {"render.mix", R"({"end_beat":1e300})"},
+             {"render.dry-run", R"({"end_beat":1e300})"},
+             {"render.mix", R"({"end_beat":20000,"sample_rate":384000})"},
+             {"project.set", R"({"render":{"sample_rate":1e300}})"},
+             {"project.set", R"({"render":{"tail_ms":1e300}})"}}) {
+        const auto before = model::serializeProject(app->head());
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_MESSAGE(!result, (command + " accepted " + args));
+        CHECK_MESSAGE(!result.error().path.empty(), (command + ": " + result.error().toString()));
+        CHECK(model::serializeProject(app->head()) == before);
+    }
+}
+
+TEST_CASE("a queued render keeps a discarded redo version until the queue releases it") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Pinned"})");
+    run(bus, "item.add", R"({"track":"tr_1","length":1})");
+    const auto queuedVersion = app->head().version;
+    std::weak_ptr<const model::Session> weak = app->versions().pin(queuedVersion);
+    run(bus, "render.queue.add",
+        R"({"command":"render.mix","args":{"end_beat":1,"name":"pinned"}})");
+    run(bus, "history.undo", "{}");
+    run(bus, "track.set", R"({"track":"tr_1","name":"Discard redo"})");
+    REQUIRE(app->versions().version(queuedVersion));
+    REQUIRE(run(bus, "render.queue.run", "{}").find("renders"));
+    app->versions().collectUnused();
+    CHECK_FALSE(app->versions().version(queuedVersion));
+    CHECK(weak.expired());
+    auto nested = bus.execute(
+        {"render.queue.add", j(R"({"command":"render.mix","args":{"end_beat":1e300}})"), kOrigin});
+    REQUIRE_FALSE(nested);
+    CHECK(nested.error().path == "/args/args/end_beat");
+}
+
+TEST_CASE("numeric sample bounds use the actual rate and recheck device-rate changes") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "project.new", R"({"sample_rate":8000})");
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":1}]})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"64/1"})");
+    // Fits signed samples at 8 kHz and int bars; exceeds samples at 384 kHz.
+    run(bus, "marker.add", R"({"pos":500000000000})");
+    auto converted = run(bus, "time.convert", R"({"beat":500000000000})");
+    CHECK(converted["seconds"].asDouble() == 30000000000000.0);
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    auto started =
+        app->startEngine(backend, {.sampleRate = 384000, .blockSize = 64}, {.anticipative = false});
+    REQUIRE_FALSE(started);
+    CHECK(started.error().path == "/rulers/markers/mk_1/pos");
+    CHECK_FALSE(app->engine());
+    run(bus, "project.new", R"({"sample_rate":8000})");
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":1}]})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"64/1"})");
+    REQUIRE(app->startEngine(backend, {.sampleRate = 384000, .blockSize = 64},
+                             {.anticipative = false}));
+    const auto before = model::serializeProject(app->head());
+    auto edit = bus.execute({"marker.add", j(R"({"pos":500000000000})"), kOrigin});
+    REQUIRE_FALSE(edit);
+    CHECK(edit.error().path == "/args/pos");
+    CHECK(model::serializeProject(app->head()) == before);
+    app->stopEngine();
+}
+
+TEST_CASE("automation duplication refuses pool-id overflow without changing either item") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Pools"})");
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    run(bus, "autoitem.add", R"({"env":"en_1","position":0,"length":4})");
+    run(bus, "autoitem.add", R"({"env":"en_1","position":4,"length":4})");
+    auto txn = app->beginTransaction(kOrigin, "pool fixture");
+    REQUIRE(txn);
+    app->txn().modify<model::AutomationItem>(
+        *model::Id::parse("ai_1"), [](auto& ai) { ai.pool = std::numeric_limits<int>::max(); });
+    REQUIRE(app->commitTransaction(*txn));
+    const auto before = model::serializeProject(app->head());
+    auto r = bus.execute({"autoitem.duplicate", j(R"({"item":"ai_2"})"), kOrigin});
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code == "autoitem.pool");
+    CHECK(model::serializeProject(app->head()) == before);
+}

@@ -388,9 +388,31 @@ void installBindings(lua_State* L, ScriptImpl& impl) {
 // The sandbox (ADR-0006): the base library and string, table, math, utf8 and
 // coroutine, and nothing else. io, os, debug and package are not even linked
 // in, so a script cannot reach the filesystem, the clock or the process.
+int safeSetMetatable(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    if (!lua_isnil(L, 2)) {
+        luaL_checktype(L, 2, LUA_TTABLE);
+        lua_pushliteral(L, "__gc");
+        lua_rawget(L, 2);
+        const bool finalizer = !lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (finalizer)
+            return raiseError(L, Error("script.finalizer", "scripts cannot install finalizers",
+                                       "/metatable/__gc", "remove __gc; clean up explicitly"));
+    }
+    lua_settop(L, 2);
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, 2, 1);
+    return 1;
+}
+
 void openSandbox(lua_State* L, ScriptImpl& impl) {
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);
     lua_pop(L, 1);
+    lua_getglobal(L, "setmetatable");
+    lua_pushcclosure(L, safeSetMetatable, 1);
+    lua_setglobal(L, "setmetatable");
     luaL_requiref(L, LUA_STRLIBNAME, luaopen_string, 1);
     lua_pop(L, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);

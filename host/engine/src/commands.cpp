@@ -1,9 +1,12 @@
+#include "command_validation.h"
+#include "supple/model/numeric.h"
 // The engine's command catalogue (session-model §7) — the core set. Every
 // command is a thin, typed wrapper: validate references with helpful errors,
 // edit through the open EditTxn (edits) or read the view (queries), return
 // IDs and the few fields an agent needs next.
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <set>
 
@@ -119,6 +122,7 @@ ProjectInfo projectInfo(EngineApp& app, const model::Session& s) {
 
 struct RecoverableList {
     std::vector<RecoverableInfo> recordings;
+    std::optional<std::vector<RecordingWarning>> warnings;
 };
 struct RecoverArgs {
     std::optional<std::vector<std::string>> files;
@@ -126,6 +130,7 @@ struct RecoverArgs {
 };
 struct RecoverResult {
     std::vector<RecordedInfo> recovered;
+    std::optional<std::vector<RecordingWarning>> warnings;
 };
 struct ProjectSetArgs {
     std::optional<std::string> name, title, author, notes;
@@ -188,6 +193,17 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .build();
 }
 
+schema::Schema<RecordingWarning> recordingWarningSchema() {
+    return schema::object<RecordingWarning>("recording_warning")
+        .field("code", &RecordingWarning::code, schema::string())
+        .field("message", &RecordingWarning::message, schema::string())
+        .field("path", &RecordingWarning::path, schema::string())
+        .field("hint", &RecordingWarning::hint, schema::string())
+        .field("track", &RecordingWarning::track, schema::string())
+        .field("file", &RecordingWarning::file, schema::string())
+        .build();
+}
+
 schema::Schema<RecordedInfo> recordedSchema() {
     return schema::object<RecordedInfo>("recorded_take")
         .field("track", &RecordedInfo::track, schema::string())
@@ -197,6 +213,7 @@ schema::Schema<RecordedInfo> recordedSchema() {
         .field("seconds", &RecordedInfo::seconds, schema::number())
         .field("lost_frames", &RecordedInfo::lostFrames, schema::integer())
         .field("takes", &RecordedInfo::takes, schema::arrayOf(schema::string()))
+        .field("warnings", &RecordedInfo::warnings, schema::arrayOf(recordingWarningSchema()))
         .build();
 }
 
@@ -288,7 +305,8 @@ schema::Schema<model::EnvMode> envModeSchema() {
 schema::Schema<EnvPointArg> envPointSchema() {
     return schema::object<EnvPointArg>("env_point_arg")
         .field("beat", &EnvPointArg::beat, schema::number().min(0))
-        .field("bar", &EnvPointArg::bar, schema::integer().min(1))
+        .field("bar", &EnvPointArg::bar,
+               schema::integer().range(1, std::numeric_limits<int>::max()))
         .field("seconds", &EnvPointArg::seconds, schema::number().min(0))
         .field("value", &EnvPointArg::value, schema::any())
         .field("shape", &EnvPointArg::shape, pointShapeSchema())
@@ -390,6 +408,10 @@ Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const En
                      ? s.timeMap->beatAt(*a.seconds)
                      : beatsOf(s, a.beat,
                                a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt);
+        SUPPLE_TRY(model::checkedBeat(s, pt.pos,
+                                      at + (a.seconds ? "/seconds"
+                                            : a.bar   ? "/bar"
+                                                      : "/beat")));
         auto v = envValue(d, a.value, at + "/value");
         if (!v) return std::move(v).error();
         pt.value = *v;
@@ -689,18 +711,28 @@ std::optional<model::Id> legacyMediaSourceFor(const model::Session& s, const fs:
 }
 
 // Compiles notation into a MIDI source; the length in beats is the item's.
+std::function<midi::Meter(int)> meterContext(const model::Session& s, double atBeat) {
+    const auto map = s.timeMap;
+    const int first = map->barBeat(std::max(0.0, atBeat)).bar;
+    return [map, first](int bar) {
+        const auto absolute = std::clamp<std::int64_t>(std::int64_t(first) + bar - 1, 1, INT_MAX);
+        const auto meter = map->meterAt(static_cast<int>(absolute));
+        return midi::Meter{meter.numerator, meter.denominator};
+    };
+}
+
 Result<std::pair<model::MidiSource, double>> compileNotation(const model::Session& s,
                                                              const std::string& text,
                                                              double atBeat) {
     notation::CompileContext cc;
     cc.ppq = s.project->ppq;
+    cc.meterAt = meterContext(s, atBeat);
     auto compiled = notation::compile(text, cc);
     if (!compiled) {
         Error e = std::move(compiled).error();
         if (e.path.empty() || e.path.front() != '/') e.path = "/notation";
         return e;
     }
-    (void)atBeat;
     model::MidiSource src;
     src.sequence = std::move(compiled->sequence);
     const double beats = static_cast<double>(src.sequence.length) / src.sequence.ppq;
@@ -736,7 +768,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             EngineApp& app = A(ctx);
             return projectInfo(app, app.view());
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- project.set
     {
@@ -818,7 +850,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             t.setProject(std::move(p));
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- project.save / project.open
     {
@@ -847,7 +879,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             SUPPLE_TRY(app.save(p));
             return PathResult{app.projectPath().string()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<PathArgs, ProjectInfo> c;
@@ -880,7 +912,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!warnings.empty()) info.warnings = std::move(warnings);
             return info;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- project.new
     {
@@ -915,7 +947,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             SUPPLE_TRY(app.newProject(std::move(p)));
             return projectInfo(app, app.head());
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- project.recoverable /
     // project.recover
@@ -933,6 +965,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<NoArgs>("no_args").build();
         c.result =
             schema::object<RecoverableList>("recoverable_list")
+                .field("warnings", &RecoverableList::warnings,
+                       schema::arrayOf(recordingWarningSchema()))
                 .field("recordings", &RecoverableList::recordings,
                        schema::arrayOf(
                            schema::object<RecoverableInfo>("recoverable_recording")
@@ -950,9 +984,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                        "recording_interrupted"},
                       {"Nothing to recover", obj("{}"), obj(R"({"recordings": []})"), "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<RecoverableList> {
-            return RecoverableList{A(ctx).recoverable()};
+            std::vector<RecordingWarning> warnings;
+            RecoverableList out;
+            out.recordings = A(ctx).recoverable(&warnings);
+            if (!warnings.empty()) out.warnings = std::move(warnings);
+            return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<RecoverArgs, RecoverResult> c;
@@ -971,6 +1009,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result =
             schema::object<RecoverResult>("recover_result")
                 .field("recovered", &RecoverResult::recovered, schema::arrayOf(recordedSchema()))
+                .field("warnings", &RecoverResult::warnings,
+                       schema::arrayOf(recordingWarningSchema()))
                 .build();
         c.errors = {{"recover.nothing", "there is nothing to recover", "project.recoverable"},
                     {"recover.unknown_file", "a file is not a recording to recover",
@@ -990,11 +1030,15 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (!id) return std::move(id).error();
                 track = *id;
             }
-            auto r = app.recover(a.files.value_or(std::vector<std::string>{}), track);
+            std::vector<RecordingWarning> warnings;
+            auto r = app.recover(a.files.value_or(std::vector<std::string>{}), track, &warnings);
             if (!r) return std::move(r).error();
-            return RecoverResult{std::move(*r)};
+            RecoverResult out;
+            out.recovered = std::move(*r);
+            if (!warnings.empty()) out.warnings = std::move(warnings);
+            return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- session.describe
     {
@@ -1014,7 +1058,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const NoArgs&, Context& ctx) -> Result<TextResult> {
             return TextResult{describeSession(A(ctx).view())};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- tempo.set / timesig.set
     {
@@ -1061,7 +1105,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (const auto& p : a.points) t.create(model::TempoPointObj{p.beat, p.bpm, p.ramp});
             return CountResult{static_cast<std::int64_t>(a.points.size())};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TimesigSetArgs, Empty> c;
@@ -1096,7 +1140,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 t.create(model::MeterObj{a.bar, n, d});
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- timesig.remove
     {
@@ -1124,7 +1168,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             t.remove<model::MeterObj>(*at);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- track.add
     {
@@ -1191,7 +1235,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 });
             return TrackRef{id.str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- track.remove
     {
@@ -1263,7 +1307,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             t.remove<model::Track>(id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- track.set
     {
@@ -1482,7 +1526,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- track.list
     {
@@ -1533,7 +1577,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (Id master : s.project->masters) walk(master, 0);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- item.add
     {
@@ -1554,7 +1598,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("track", &ItemAddArgs::track, idArg("tr", "Track"))
                 .field("position", &ItemAddArgs::position, schema::number().min(0).doc("Beats."))
                 .field("bar", &ItemAddArgs::bar,
-                       schema::integer().min(1).doc("Start at this bar (1-based)."))
+                       schema::integer()
+                           .range(1, std::numeric_limits<int>::max())
+                           .doc("Start at this bar (1-based)."))
                 .field("length", &ItemAddArgs::length,
                        schema::number().exclusiveMin(0).doc("Beats."))
                 .field("notation", &ItemAddArgs::notation, schema::string())
@@ -1590,6 +1636,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 return Error("item.source", "give notation or audio_file, not both");
             const double pos = beatsOf(
                 s, a.position, a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt);
+            SUPPLE_TRY(model::checkedBeat(s, pos, a.bar ? "/bar" : "/position"));
+            if (a.length) SUPPLE_TRY(model::checkedBeat(s, pos + *a.length, "/length"));
             model::EditTxn& t = app.txn();
             model::Take take;
             take.name = a.name.value_or("");
@@ -1659,7 +1707,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             r.length = length;
             return r;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- item.remove / item.move
     {
@@ -1707,7 +1755,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             t.remove<model::Item>(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemMoveArgs, Empty> c;
@@ -1719,7 +1767,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<ItemMoveArgs>("item_move_args")
                      .field("item", &ItemMoveArgs::item, idArg("it", "Item"))
                      .field("position", &ItemMoveArgs::position, schema::number().min(0))
-                     .field("bar", &ItemMoveArgs::bar, schema::integer().min(1))
+                     .field("bar", &ItemMoveArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .field("track", &ItemMoveArgs::track, idArg("tr", "Track"))
                      .build();
         c.result = emptySchema();
@@ -1750,7 +1799,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- midi.write / midi.get
     {
@@ -1790,7 +1839,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                                         [](model::Take& tk) { tk.startOffset = 0; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<MidiGetArgs, TextResult> c;
@@ -1815,11 +1864,13 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Take* take = it.activeTake ? s.takes.find(*it.activeTake) : nullptr;
             if (!take || !take->source || take->source->kind != model::Kind::Midi)
                 return Error("midi.not_midi", a.item + " has no MIDI take", "/item");
-            auto text = notation::decompile(s.midi.find(*take->source)->sequence);
+            notation::DecompileOptions options;
+            options.meterAt = meterContext(s, model::itemSpan(s, it).startBeat);
+            auto text = notation::decompile(s.midi.find(*take->source)->sequence, options);
             if (!text) return std::move(text).error();
             return TextResult{std::move(*text)};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- fx.add
     {
@@ -1927,7 +1978,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (Id f : chain) r.chain.push_back(f.str());
             return r;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- fx.remove / fx.set
     {
@@ -1972,7 +2023,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             t.remove<model::FxInstance>(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxSetArgs, Empty> c;
@@ -2043,7 +2094,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxRef, Empty> c;
@@ -2067,7 +2118,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             app.restartFx(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- fx.patch.merge /
     // fx.param.set
@@ -2127,7 +2178,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [mergeRun](const FxPatchArgs& a, Context& ctx) {
             return mergeRun(A(ctx), a.fx, a.patch, "/patch");
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxParamSetArgs, MergeResult> c;
@@ -2174,7 +2225,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             return merged;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- fx.describe
     {
@@ -2266,7 +2317,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             return r;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- render.mix
     {
@@ -2359,6 +2410,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             o.tailSeconds = a.tailS.value_or(
                 tailDefault && tailDefault->isNumber() ? tailDefault->asDouble() / 1000.0 : 0.0);
             o.projectDir = app.projectDir();
+            SUPPLE_TRY(checkRenderRange(s, o, a.sampleRate));
             auto resolvedPath = mixPath(app, s, a);
             if (!resolvedPath) return std::move(resolvedPath).error();
             const fs::path path = *resolvedPath;
@@ -2381,9 +2433,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                 auto& jobs = ctx.service<cmd::JobManager>();
                 const std::string id = jobs.create();
                 const std::string renderId = app.reserveRenderId();
-                app.startJob([&app, &dispatcher, &jobs, target, id, renderId, s = std::move(s), o,
-                              path, a, addFile, catalogue = std::move(catalogue),
-                              identity](std::stop_token stop) {
+                auto pin = app.versions().pin(s.version);
+                app.startJob([&app, &dispatcher, &jobs, target, id, renderId, pin = std::move(pin),
+                              s = std::move(s), o, path, a, addFile,
+                              catalogue = std::move(catalogue), identity](std::stop_token stop) {
                     if (stop.stop_requested() || jobs.cancelled(id)) return;
                     OfflineSettings settings = o;
                     settings.cancelFlag = jobs.cancellationFlag(id);
@@ -2456,7 +2509,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     registerRenderCommands(registry);
     registerEngineAnalysisCommands(registry);
@@ -2487,7 +2540,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 app.versions().version(app.versions().headVersion(app.versions().branch()));
             return HistoryResult{static_cast<std::int64_t>(v->id), v->txn.label};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, HistoryList> c;
@@ -2520,7 +2573,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             out.canRedo = app.versions().canRedo();
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- branches
     struct BranchCreateArgs {
@@ -2591,7 +2644,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.switchTo) SUPPLE_TRY(app.switchBranch(a.name));
             return BranchName{a.name};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<BranchName, BranchName> c;
@@ -2612,7 +2665,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             SUPPLE_TRY(A(ctx).switchBranch(a.name));
             return BranchName{a.name};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, BranchList> c;
@@ -2632,7 +2685,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             EngineApp& app = A(ctx);
             return BranchList{app.versions().branches(), app.versions().branch()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<BranchDiffArgs, BranchDiff> c;
@@ -2668,7 +2721,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                     {kOps[static_cast<int>(d.op)], d.id.str(), std::move(d.fields)});
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<BranchMergeArgs, BranchMergeResult> c;
@@ -2724,7 +2777,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             for (const auto& [from, to] : out.remap) r.remapped[from.str()] = to.str();
             return r;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<BranchName, Empty> c;
@@ -2743,7 +2796,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             SUPPLE_TRY(A(ctx).versions().deleteBranch(a.name));
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- env.*
     {
@@ -2838,7 +2891,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             const Id id = app.txn().create(env);
             return EnvAddResult{id.str(), static_cast<std::int64_t>(env.points.size())};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<EnvPointsSetArgs, EnvCount> c;
@@ -2886,7 +2939,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 *id, [&](model::Envelope& e) { e.points = std::move(next); });
             return EnvCount{count};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<EnvSetArgs, Empty> c;
@@ -2918,7 +2971,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<EnvRef, Empty> c;
@@ -2939,7 +2992,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             app.txn().remove<model::Envelope>(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<EnvListArgs, EnvList> c;
@@ -2982,7 +3035,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- autoitem.* (gap log #28)
     {
@@ -3100,7 +3153,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 schema::object<AutoItemAddArgs>("autoitem_add_args")
                     .field("env", &AutoItemAddArgs::env, idArg("en", "Envelope"))
                     .field("position", &AutoItemAddArgs::position, schema::number().min(0))
-                    .field("bar", &AutoItemAddArgs::bar, schema::integer().min(1))
+                    .field("bar", &AutoItemAddArgs::bar,
+                           schema::integer().range(1, std::numeric_limits<int>::max()))
                     .field("length", &AutoItemAddArgs::length, schema::number().exclusiveMin(0))
                     .defaultValue(4.0)
                     .field("points", &AutoItemAddArgs::points, schema::arrayOf(pointArgSchema()))
@@ -3157,7 +3211,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 const Id id = app.txn().create(ai);
                 return entryOf(id, ai);
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<AutoItemSetArgs, json::Value> c;
@@ -3211,7 +3265,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.points || a.sourceLength) propagate(t, s, *id, ai);
                 return entryOf(*id, ai);
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<AutoItemDupArgs, json::Value> c;
@@ -3240,6 +3294,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.pooled && copy.pool == 0) {  // a new pool for the two
                     int top = 0;
                     for (const auto& e : s.autoItems) top = std::max(top, e.value->pool);
+                    if (top == std::numeric_limits<int>::max())
+                        return Error("autoitem.pool", "pool id space is exhausted", "/pooled",
+                                     "duplicate unpooled or remove the highest pool");
                     copy.pool = top + 1;
                     t.modify<model::AutomationItem>(
                         *id, [&](model::AutomationItem& x) { x.pool = copy.pool; });
@@ -3250,7 +3307,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 const Id fresh = t.create(copy);
                 return entryOf(fresh, copy);
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         for (const bool unpool : {false, true}) {
             Command<AutoItemRef, Empty> c;
@@ -3277,7 +3334,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                     app.txn().remove<model::AutomationItem>(*id);
                 return Empty{};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             struct ListArgs {
@@ -3304,7 +3361,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 out["items"] = std::move(items);
                 return out;
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
     }
     // ---------------------------------------------------------------- engine.*
@@ -3349,7 +3406,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                                        a.anticipative.value_or(true)));
             return app.engineStatus();
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, Empty> c;
@@ -3365,7 +3422,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             A(ctx).stopEngine();
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, json::Value> c;
@@ -3407,7 +3464,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             out["midi"] = std::move(midi);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, EngineStatus> c;
@@ -3435,7 +3492,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     // ---------------------------------------------------------------- transport.*
     for (const auto& [action, summary, playing] :
@@ -3467,7 +3524,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [act = std::string(action)](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport(act);
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<SeekArgs, TransportInfo> c;
@@ -3479,7 +3536,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<SeekArgs>("seek_args")
                      .field("seconds", &SeekArgs::seconds, schema::number().min(0))
                      .field("beat", &SeekArgs::beat, schema::number().min(0))
-                     .field("bar", &SeekArgs::bar, schema::integer().min(1))
+                     .field("bar", &SeekArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .build();
         c.result = transportSchema();
         c.errors = {
@@ -3502,9 +3560,15 @@ void registerEngineCommands(cmd::Registry& registry) {
                     : s.timeMap->secondsAt(beatsOf(
                           s, a.beat,
                           a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt));
+            SUPPLE_TRY(model::checkedSeconds(
+                s, seconds,
+                a.seconds ? "/seconds"
+                : a.bar   ? "/bar"
+                          : "/beat",
+                app.engine() ? app.engine()->config().sampleRate : s.project->sampleRate));
             return app.transport("seek", seconds);
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<NoArgs, TransportInfo> c;
@@ -3526,7 +3590,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport("get");
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         struct MetronomeArgs {
@@ -3583,7 +3647,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             app.setMetronome(m);
             return m;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     for (const bool loop : {true, false}) {
         Command<RangeArgs, TransportRange> c;
@@ -3605,10 +3669,12 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("enabled", &RangeArgs::enabled, schema::boolean())
                      .field("start_seconds", &RangeArgs::startSeconds, schema::number().min(0))
                      .field("start_beat", &RangeArgs::startBeat, schema::number().min(0))
-                     .field("start_bar", &RangeArgs::startBar, schema::integer().min(1))
+                     .field("start_bar", &RangeArgs::startBar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .field("end_seconds", &RangeArgs::endSeconds, schema::number().min(0))
                      .field("end_beat", &RangeArgs::endBeat, schema::number().min(0))
-                     .field("end_bar", &RangeArgs::endBar, schema::integer().min(1))
+                     .field("end_bar", &RangeArgs::endBar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .build();
         c.result = rangeSchema(loop ? "loop" : "punch");
         c.errors = {{"transport.range", "not one start and one end, or end not after start",
@@ -3638,6 +3704,18 @@ void registerEngineCommands(cmd::Registry& registry) {
                 };
                 const double start = at(a.startSeconds, a.startBeat, a.startBar);
                 const double end = at(a.endSeconds, a.endBeat, a.endBar);
+                SUPPLE_TRY(model::checkedSeconds(
+                    s, start,
+                    a.startSeconds ? "/start_seconds"
+                    : a.startBar   ? "/start_bar"
+                                   : "/start_beat",
+                    app.engine() ? app.engine()->config().sampleRate : s.project->sampleRate));
+                SUPPLE_TRY(model::checkedSeconds(
+                    s, end,
+                    a.endSeconds ? "/end_seconds"
+                    : a.endBar   ? "/end_bar"
+                                 : "/end_beat",
+                    app.engine() ? app.engine()->config().sampleRate : s.project->sampleRate));
                 if (!(end > start))
                     return Error("transport.range", "the end must come after the start", "/end");
                 r.start = start;
@@ -3655,7 +3733,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 app.setPunch(r);
             return r;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 

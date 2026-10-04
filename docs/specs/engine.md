@@ -528,3 +528,15 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   crossfades for structural changes (inserting/removing plugins), B1/B2
   real-device acceptance measurements (tooling: tools/bench/README.md;
   historical Orrery-only measurements: docs/benchmarks/b1-preliminary.md).
+
+### Recording diagnostics (2026-10-04)
+
+A committed recording may carry a `warnings` array with structured
+`code`, `message`, `path`, `hint`, `track` and `file` fields.
+`recording.loop_runs_full` is forwarded to `transport.stop` / pause callers
+and the `record.warning` event while retained passes still commit.
+`project.recoverable` and `project.recover` expose skipped invalid-sidecar
+diagnostics in the same optional `warnings` shape (`record.sidecar`). Recovery
+skips corrupt selections and continues with valid recordings; an unknown path
+still fails, and a directory with no recordings or diagnostics reports
+`recover.nothing`.

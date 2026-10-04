@@ -531,3 +531,30 @@ TEST_CASE("named arrays resolve JSON pointer refs and preserve an empty Lua arra
     // succeeds only if the argument converted as the named array.
     CHECK(cmd::luaStubs(registry).find("values integer[]") != std::string::npos);
 }
+
+TEST_CASE("sandbox refuses finalizers before installation, including under an instruction cap") {
+    ScriptOptions options;
+    options.instructionLimit = 1000;
+    Scene scene(options);
+    auto loop = scene.run("setmetatable({}, {__gc=function() while true do end end})");
+    REQUIRE_FALSE(loop);
+    CHECK(loop.error().code == "script.finalizer");
+    CHECK(loop.error().path == "/metatable/__gc");
+    auto caught = scene.run(R"(
+        local ok, e = pcall(setmetatable, {}, {__gc=false})
+        assert(not ok and e.code == 'script.finalizer' and e.hint ~= '')
+        local t, mt = {}, {}
+        setmetatable(t, mt, 'ignored extra argument')
+        mt.__gc = function() while true do end end
+        local ok2, e2 = pcall(setmetatable, {}, mt)
+        assert(not ok2 and e2.code == 'script.finalizer')
+        t = nil
+        collectgarbage('collect')
+        return getmetatable(setmetatable({}, {__index={x=3}})).__index.x
+    )");
+    REQUIRE(caught);
+    CHECK(caught->result.asInt() == 3);
+    auto budget = scene.run("while true do end");
+    REQUIRE_FALSE(budget);
+    CHECK(budget.error().code == "script.budget");
+}

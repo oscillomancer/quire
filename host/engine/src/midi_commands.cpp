@@ -1,3 +1,4 @@
+#include "command_validation.h"
 // Note-level MIDI editing (the piano roll's commands, and an agent's when
 // notation is the wrong tool): midi.notes reads an item's notes and CCs in
 // beats from the item's start, midi.edit applies ordered operations to them.
@@ -365,7 +366,7 @@ void registerMidiCommands(cmd::Registry& registry) {
             if (!t) return std::move(t).error();
             return describe(s, *t);
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<EditArgs, json::Value> c;
@@ -465,7 +466,7 @@ void registerMidiCommands(cmd::Registry& registry) {
             out["notes"] = std::move(selected);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 

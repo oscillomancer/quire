@@ -1,4 +1,5 @@
 #include "supple/engine/app.h"
+#include "supple/model/numeric.h"
 
 #include <algorithm>
 #include <cctype>
@@ -633,6 +634,22 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
         engine_.reset();
         return st;
     }
+    model::Session atRate = head();
+    auto project = *atRate.project;
+    project.sampleRate = engine_->config().sampleRate;
+    atRate.project = std::make_shared<const model::Project>(std::move(project));
+    auto numeric = model::validateNumeric(atRate);
+    if (numeric)
+        for (const auto& range : {loop_, punch_})
+            if (range.end > range.start) {
+                numeric = model::checkedSeconds(atRate, range.end, "/end_seconds");
+                if (!numeric) break;
+            }
+    if (!numeric) {
+        engine_->stop();
+        engine_.reset();
+        return numeric.error();
+    }
     backend_ = &backend;
     restartBackend_ = &backend;  // a caller-supplied backend: reuse it
     restartConfig_ = engine_->config();
@@ -1237,6 +1254,55 @@ void appendRecorded(midi::Sequence& seq, const RecordedTake& r, std::size_t run,
     while (!open.empty()) close(open.begin()->first, runEnd, 0);  // still held
 }
 
+Status recordingBounds(const model::Session& s, const detail::RecordingInfo& side,
+                       std::uint64_t frames, double fileRate = 0) {
+    auto invalid = [](std::string path) {
+        return Error("record.sidecar", "recording positions exceed the finite timeline range",
+                     std::move(path), "restore valid recording positions or skip this file");
+    };
+    if (!std::isfinite(side.sampleRate) || side.sampleRate < 8000 || side.sampleRate > 384000 ||
+        (fileRate > 0 && side.sampleRate != fileRate) || frames > INT64_MAX)
+        return invalid("/sample_rate");
+    auto run = [&](std::int64_t start, std::uint64_t count, const std::string& path) -> Status {
+        const long double end = static_cast<long double>(start) + static_cast<long double>(count);
+        if (std::abs(end) > model::kSampleLimit ||
+            !model::checkedSamples(
+                static_cast<long double>(start) / static_cast<long double>(side.sampleRate),
+                side.sampleRate, path))
+            return invalid(path);
+        // A negative start is valid latency preroll; only its positive end enters the session.
+        if (end > 0 && !model::checkedSeconds(
+                           s, static_cast<double>(end / static_cast<long double>(side.sampleRate)),
+                           path, side.sampleRate))
+            return invalid(path);
+        return {};
+    };
+    if (side.segments.empty()) return run(side.startSample, frames, "/start_sample");
+    if (!model::checkedSeconds(s, static_cast<double>(side.loopStart) / side.sampleRate, "/loop/0",
+                               side.sampleRate) ||
+        !model::checkedSeconds(s, static_cast<double>(side.loopEnd) / side.sampleRate, "/loop/1",
+                               side.sampleRate))
+        return invalid("/loop");
+    for (std::size_t i = 0; i < side.segments.size(); ++i) {
+        const auto& seg = side.segments[i];
+        const auto from = static_cast<std::uint64_t>(seg.fileFrame);
+        const auto to =
+            i + 1 < side.segments.size()
+                ? std::min(frames, static_cast<std::uint64_t>(side.segments[i + 1].fileFrame))
+                : frames;
+        if (from < to) SUPPLE_TRY(run(seg.timeline, to - from, "/segments/" + std::to_string(i)));
+    }
+    return {};
+}
+
+std::optional<std::vector<RecordingWarning>> recordingWarnings(const RecordedTake& r) {
+    if (r.warnings.empty()) return {};
+    std::vector<RecordingWarning> out;
+    for (const auto& e : r.warnings)
+        out.push_back({e.code, e.message, e.path, e.hint, r.track.str(), r.file.string()});
+    return out;
+}
+
 // midi_overdub (ADR-0016): the recording merges into the MIDI item under its
 // first heard position, as a new take (the old one stays for undo and take
 // switching). False when there is no such item (a new item is made then).
@@ -1278,6 +1344,7 @@ Result<bool> overdubMidi(model::EditTxn& t, const model::Session& s, const Recor
             x.activeTake = tk;
         });
         RecordedInfo info;
+        info.warnings = recordingWarnings(r);
         info.track = r.track.str();
         info.item = e.id.str();
         info.take = tk.str();
@@ -1291,6 +1358,7 @@ Result<bool> overdubMidi(model::EditTxn& t, const model::Session& s, const Recor
 }
 
 // MIDI (ADR-0016): a source per take in the project's PPQ from the item start.
+
 Status commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
                       const std::vector<Run>& runs, const std::vector<ItemPlan>& items, double rate,
                       std::vector<RecordedInfo>& out) {
@@ -1313,6 +1381,7 @@ Status commitMidiTake(model::EditTxn& t, const model::Session& s, const Recorded
                 (s.timeMap->beatAt(static_cast<double>(sample) / rate) - startBeat) * ppq));
         };
         RecordedInfo info;
+        info.warnings = recordingWarnings(r);
         std::optional<Id> active;
         for (std::size_t k = 0; k < ip.takes.size(); ++k) {
             const Run& run = runs[ip.takes[k].run];
@@ -1351,6 +1420,14 @@ Status commitMidiTake(model::EditTxn& t, const model::Session& s, const Recorded
 Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes,
                                                          std::string_view label) {
     std::vector<RecordedInfo> out;
+    const model::Session initial = view();
+    for (const auto& r : takes) {
+        if (r.frames <= 0) continue;
+        const double rate = r.sampleRate == 0 ? initial.project->sampleRate : r.sampleRate;
+        detail::RecordingInfo side{r.track,    r.startSample, rate,
+                                   r.segments, r.loop.start,  r.loop.end};
+        SUPPLE_TRY(recordingBounds(initial, side, static_cast<std::uint64_t>(r.frames)));
+    }
     auto txnId = beginTransaction({cmd::Origin::Type::Internal, "engine", ""}, label);
     if (!txnId) return std::move(txnId).error();
     const model::Session s = view();
@@ -1358,6 +1435,16 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
     // scratch folder), so a first save can move the files and keep the paths.
     const fs::path media = projectDir().empty() ? fs::path() : projectDir() / s.project->mediaDir;
     for (const RecordedTake& r : takes) {
+        for (const Error& e : r.warnings) {
+            json::Value ev = json::Value::object();
+            ev["code"] = e.code;
+            ev["message"] = e.message;
+            ev["path"] = e.path;
+            ev["hint"] = e.hint;
+            ev["track"] = r.track.str();
+            ev["file"] = r.file.string();
+            emit("record.warning", std::move(ev));
+        }
         if (!r.error.empty()) {
             json::Value ev = json::Value::object();
             ev["track"] = r.track.str();
@@ -1446,6 +1533,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             const double end = static_cast<double>(ip.end) / rate;
             model::placeItemSeconds(s, item, start, end);  // in the track's timebase
             RecordedInfo info;
+            info.warnings = recordingWarnings(r);
             std::optional<Id> active;
             for (std::size_t k = 0; k < ip.takes.size(); ++k) {
                 model::Take take;
@@ -1617,7 +1705,7 @@ bool EngineApp::inRecordDir(const fs::path& file) const {
            fs::equivalent(file.parent_path(), dir, ec) && !ec;
 }
 
-std::vector<RecoverableInfo> EngineApp::recoverable() const {
+std::vector<RecoverableInfo> EngineApp::recoverable(std::vector<RecordingWarning>* warnings) const {
     std::vector<RecoverableInfo> out;
     const fs::path dir = recordDir();
     std::error_code ec;
@@ -1646,9 +1734,36 @@ std::vector<RecoverableInfo> EngineApp::recoverable() const {
     for (const fs::path& f : files) {
         if (!inRecordDir(f) || used.count(comparable(f))) continue;
         auto side = detail::readSidecar(f);  // none: not a recording, or capture never began
-        if (!side || !(side->sampleRate > 0)) continue;
+        if (!side) {
+            if (warnings && fs::exists(detail::sidecarPath(f), ec)) {
+                const auto& e = side.error();
+                warnings->push_back({"record.sidecar", e.message, e.path.empty() ? "/" : e.path,
+                                     e.hint.empty()
+                                         ? "restore a valid recording sidecar or skip this file"
+                                         : e.hint,
+                                     "", f.lexically_relative(media).string()});
+            }
+            continue;
+        }
         auto info = audio::inspectWavStream(f);
-        if (!info || info->fileFrames == 0) continue;
+        if (!info) {
+            const auto& e = info.error();
+            if (warnings)
+                warnings->push_back(
+                    {e.code, e.message, e.path.empty() ? "/file" : e.path,
+                     e.hint.empty() ? "restore the recording audio or skip this file" : e.hint,
+                     side->track.str(), f.lexically_relative(media).string()});
+            continue;
+        }
+        if (info->fileFrames == 0) continue;
+        if (auto valid = recordingBounds(head(), *side, info->fileFrames, info->sampleRate);
+            !valid) {
+            const auto& e = valid.error();
+            if (warnings)
+                warnings->push_back({e.code, e.message, e.path, e.hint, side->track.str(),
+                                     f.lexically_relative(media).string()});
+            continue;
+        }
         RecoverableInfo r;
         r.file = f.lexically_relative(media).string();
         r.track = side->track.str();
@@ -1661,17 +1776,29 @@ std::vector<RecoverableInfo> EngineApp::recoverable() const {
 }
 
 Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::string>& files,
-                                                     std::optional<Id> track) {
-    const std::vector<RecoverableInfo> all = recoverable();
+                                                     std::optional<Id> track,
+                                                     std::vector<RecordingWarning>* warnings) {
+    std::vector<RecordingWarning> skipped;
+    const std::vector<RecoverableInfo> all = recoverable(&skipped);
+    if (warnings) warnings->insert(warnings->end(), skipped.begin(), skipped.end());
+    auto warn = [&](const Error& e, const fs::path& file, std::string trackName = {}) {
+        skipped.push_back({e.code, e.message, e.path, e.hint, std::move(trackName), file.string()});
+        if (warnings) warnings->push_back(skipped.back());
+    };
     std::vector<const RecoverableInfo*> chosen;
     if (files.empty()) {
         for (const RecoverableInfo& r : all) chosen.push_back(&r);
-        if (chosen.empty()) return Error("recover.nothing", "there are no recordings to recover");
+        if (chosen.empty() && skipped.empty())
+            return Error("recover.nothing", "there are no recordings to recover");
     }
     for (std::size_t i = 0; i < files.size(); ++i) {
         const fs::path want = fs::path(files[i]).lexically_normal();
         auto it = std::find_if(all.begin(), all.end(),
                                [&](const RecoverableInfo& r) { return fs::path(r.file) == want; });
+        if (it == all.end() &&
+            std::any_of(skipped.begin(), skipped.end(),
+                        [&](const RecordingWarning& w) { return fs::path(w.file) == want; }))
+            continue;
         if (it == all.end())
             return Error("recover.unknown_file", files[i] + " is not a recording to recover",
                          "/files/" + std::to_string(i), "project.recoverable lists them");
@@ -1686,7 +1813,21 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
         RecordedTake t;
         t.file = mediaDir() / r->file;
         auto side = detail::readSidecar(t.file);
-        if (!side) return std::move(side).error();
+        if (!side) {
+            Error e = side.error();
+            e.code = "record.sidecar";
+            warn(e, r->file, r->track);
+            continue;
+        }
+        auto info = audio::inspectWavStream(t.file);
+        if (!info) {
+            warn(info.error(), r->file, r->track);
+            continue;
+        }
+        if (auto valid = recordingBounds(s, *side, info->fileFrames, info->sampleRate); !valid) {
+            warn(valid.error(), r->file, r->track);
+            continue;
+        }
         t.track = track.value_or(side->track);
         if (!s.tracks.find(t.track))
             return Error("recover.no_track",
@@ -1701,13 +1842,19 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
         t.loop = {side->loopStart, side->loopEnd};
         takes.push_back(std::move(t));
     }
-    for (RecordedTake& t : takes) {
+    for (auto it = takes.begin(); it != takes.end();) {
+        RecordedTake& t = *it;
         if (!inRecordDir(t.file))  // replaced since it was listed
             return Error("recover.unknown_file",
                          t.file.string() + " is not a recording to recover");
         auto frames = audio::repairWavStream(t.file);
-        if (!frames) return std::move(frames).error();
+        if (!frames) {
+            warn(frames.error(), t.file.lexically_relative(mediaDir()), t.track.str());
+            it = takes.erase(it);
+            continue;
+        }
         t.frames = static_cast<std::int64_t>(*frames);
+        ++it;
     }
     return commitTakes(takes, "recover");
 }

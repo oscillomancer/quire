@@ -112,3 +112,12 @@ model code and a reconciler between model versions and live plugin instances.
 - **Coalescing.** Continuous gestures (a fader drag, an agent sweeping a
   value through many `fx.param.set` calls in one batch) coalesce into one
   version per gesture/batch, not one per event.
+
+### Unreachable history reclamation (2026-10-04)
+
+Versions outside every branch head/base/redo ancestry are reclaimed after
+edits and branch deletion. Render jobs and the clipboard hold explicit session
+leases (`VersionStore::pin`); these retain their version and ancestry until the
+lease is released and the next collection runs. An open branch retains its
+history. This first step does not squash reachable undo history or implement
+the configurable memory budget described above.

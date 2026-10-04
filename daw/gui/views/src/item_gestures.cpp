@@ -348,6 +348,7 @@ ItemGestures::Clip ItemGestures::clip() const {
     Clip c;
     const model::Session& s = view_.session();
     c.version = s.version;
+    if (pinVersion) c.pin = pinVersion(c.version);
     std::vector<model::Id> channels;
     for (const auto& row : view_.trackLayout().rows())
         if (!row.env && row.type == model::StripType::Channel) channels.push_back(row.track);

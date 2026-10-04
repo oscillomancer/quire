@@ -1,4 +1,5 @@
 #include "render_commands.h"
+#include "supple/model/numeric.h"
 
 #include <algorithm>
 #include <array>
@@ -41,13 +42,14 @@ struct AbArgs {
 using PatternData = RenderPatternContext;
 struct RenderTask {
     model::Session session;
+    std::shared_ptr<const model::Session> pin;
     OfflineSettings settings;
     fs::path path;
     std::string label;
 };
 
 json::Value obj(std::string_view s) { return json::parse(s).value(); }
-std::string pad(int n, int width) {
+std::string pad(std::int64_t n, int width) {
     std::ostringstream out;
     out << std::setw(width) << std::setfill('0') << n;
     return out.str();
@@ -94,7 +96,9 @@ Result<std::string> token(std::string_view name, const PatternData& d) {
         if (arg == "beats") return compact(d.startBeats);
         if (arg == "seconds") return compact(d.startSeconds);
         if (arg == "timecode") {
-            const int sec = static_cast<int>(d.startSeconds);
+            if (!model::checkedSamples(d.startSeconds, 1, "/start_beat") || d.startSeconds < 0)
+                return model::numericError("/start_beat");
+            const auto sec = static_cast<std::int64_t>(d.startSeconds);
             return pad(sec / 3600, 2) + "-" + pad((sec / 60) % 60, 2) + "-" + pad(sec % 60, 2);
         }
     }
@@ -252,6 +256,7 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
                          "add items or set an end beat");
         RenderTask task;
         task.session = s;
+        task.pin = app.versions().pin(s.version);
         task.settings.startSeconds = s.timeMap->secondsAt(first);
         task.settings.endSeconds = s.timeMap->secondsAt(last);
         task.settings.projectDir = app.projectDir();
@@ -259,6 +264,7 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
             a.tailS.value_or(setting("tail_ms") && setting("tail_ms")->isNumber()
                                  ? setting("tail_ms")->asDouble() / 1000.0
                                  : 0.0);
+        SUPPLE_TRY(checkRenderRange(s, task.settings, a.sampleRate));
         if (task.settings.tailSeconds < 0 || task.settings.tailSeconds > 600)
             return Error("render.tail", "invalid tail", "/tail_s");
         if (!track && a.master) {
@@ -561,9 +567,40 @@ schema::Schema<Args> argsSchema() {
 }
 }  // namespace
 
+Status checkRenderRange(const model::Session& s, const OfflineSettings& settings,
+                        std::optional<std::int64_t> sampleRate) {
+    SUPPLE_TRY(model::checkedSeconds(s, settings.startSeconds, "/start_beat"));
+    SUPPLE_TRY(model::checkedSeconds(s, settings.endSeconds, "/end_beat"));
+    if (!std::isfinite(settings.tailSeconds) || settings.tailSeconds < 0 ||
+        settings.tailSeconds > 600)
+        return model::numericError("/tail_s");
+    SUPPLE_TRY(model::checkedSeconds(s, settings.endSeconds + settings.tailSeconds, "/tail_s"));
+    const auto* rateDefault = s.project->render.find("sample_rate");
+    const double rate = sampleRate    ? static_cast<double>(*sampleRate)
+                        : rateDefault ? rateDefault->asDouble()
+                                      : s.project->sampleRate;
+    if (!std::isfinite(rate) || rate < 8000 || rate > 384000)
+        return model::numericError("/sample_rate");
+    SUPPLE_TRY(model::checkedSeconds(s, settings.endSeconds + settings.tailSeconds, "/end_beat",
+                                     std::max(rate, s.project->sampleRate)));
+    const long double duration = static_cast<long double>(settings.endSeconds) -
+                                 static_cast<long double>(settings.startSeconds) +
+                                 static_cast<long double>(settings.tailSeconds);
+    if (!(settings.endSeconds > settings.startSeconds) || !(duration > 0))
+        return Error("render.empty", "the end must come after the start", "/end_beat");
+    // Match the engine's existing in-memory output/variant capacity, including resampling.
+    const long double frames =
+        std::ceil(duration * static_cast<long double>(std::max(rate, s.project->sampleRate)));
+    if (!std::isfinite(frames) || frames > (std::int64_t{1} << 28) - 8192)
+        return Error("render.budget", "render exceeds the in-memory frame budget", "/end_beat",
+                     "render a shorter range or use a lower sample rate");
+    return {};
+}
+
 Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSettings settings,
                                      const std::vector<host::PluginInfo>& catalogue,
                                      const host::HostIdentity& identity) {
+    SUPPLE_TRY(checkRenderRange(session, settings));
     InstancePool pool(
         [&catalogue](const model::PluginRef& ref) -> Result<host::PluginInfo> {
             for (const auto& plugin : catalogue)
@@ -957,6 +994,15 @@ Result<QueuedWork> planQueued(EngineApp& app, const EngineApp::QueuedRender& q) 
     return w;
 }
 
+Error queueArgsError(Error error) {
+    auto prefix = [](auto&& self, Error& e) -> void {
+        e.path = "/args/args" + e.path;
+        for (auto& detail : e.details) self(self, detail);
+    };
+    prefix(prefix, error);
+    return error;
+}
+
 void registerQueueCommands(cmd::Registry& registry) {
     {
         Command<QueueAddArgs, json::Value> c;
@@ -987,21 +1033,22 @@ void registerQueueCommands(cmd::Registry& registry) {
         c.run = [](const QueueAddArgs& a, Context& ctx) -> Result<json::Value> {
             auto& app = ctx.service<EngineApp>();
             auto decoded = argsSchema().decode(a.args);
-            if (!decoded) return std::move(decoded).error().at("/args");
+            if (!decoded) return queueArgsError(std::move(decoded).error());
             Args args = std::move(*decoded);
             args.job = false;
             if (!args.version) {  // pin it: later edits must not change what renders
                 auto source = sessionFor(app, args.branch);
-                if (!source) return std::move(source).error().at("/args");
+                if (!source) return queueArgsError(std::move(source).error());
                 args.version = static_cast<std::int64_t>(source->version);
                 args.branch.reset();
             }
             auto tasks = plan(app, a.command, args);
-            if (!tasks) return std::move(tasks).error();
+            if (!tasks) return queueArgsError(std::move(tasks).error());
             EngineApp::QueuedRender q;
             q.id = app.nextQueueId();
             q.command = a.command;
             q.version = static_cast<std::uint64_t>(*args.version);
+            q.pin = app.versions().pin(q.version);
             q.args = argsSchema().encode(args);
             q.files = json::Value::array();
             const json::Value planned = fileList(*tasks);  // (kept alive for the loop)

@@ -28,6 +28,13 @@ e.g. `"supple.synth-patch/1.0"`, `"supple.project/1.0"`,
   "did you mean" hint — this catches LLM typos (`"cuttoff"`).
 - Same major, newer minor: accepted; unknown members are ignored with
   warnings (forward compatibility within a major).
+- Project-container exception (2026-10-04): known fields and containers remain
+  type-strict for every minor; unknown fields inside known objects are dropped
+  with path warnings even for the current minor. Unknown top-level sections and
+  the top-level `extensions` object survive load/save verbatim. A newer minor
+  also emits a version warning. Project `ui` is ignored with a sidecar warning;
+  unsupported `groups` is preserved with a warning (session-model §5). Other
+  document types retain the general strict-minor policy above.
 - Older major: migrated by a chain of pure `vN -> vN+1` functions over JSON,
   each with fixture tests. Newer major: refused with a clear error.
 - Writers always emit the current version.

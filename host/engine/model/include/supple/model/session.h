@@ -38,6 +38,9 @@ struct Session {
     IdMap<Marker> markers;
     IdMap<Region> regions;
     std::map<std::string, std::shared_ptr<const Blob>> blobs;  // "sha256:<hex>"
+    // Unknown top-level project sections (including extensions/groups) survive
+    // load/save; UI state belongs to the separate .ui.json sidecar.
+    json::Value extraSections = json::Value::object();
     std::uint64_t version = 0;  // the version that produced this state
 
     // A new project: master track tr_0, 120 BPM at beat 0 (tp_1), 4/4 at

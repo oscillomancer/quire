@@ -1,3 +1,5 @@
+#include "command_validation.h"
+#include "supple/model/numeric.h"
 // Additional session edits and queries from session-model §7.
 #include <algorithm>
 #include <functional>
@@ -462,7 +464,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!r) return std::move(r).error();
             return IdResult{app(ctx).txn().create(std::move(*r)).str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<RouteSetArgs, Empty> c;
@@ -495,7 +497,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.mute) app(ctx).recordAutomation(*id, "mute", *a.mute ? 1.0 : 0.0);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<RouteRef, Empty> c;
@@ -523,7 +525,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.remove<model::Route>(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, RouteList> c;
@@ -566,7 +568,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         struct LogArgs {
@@ -641,7 +643,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             out["last_seq"] = static_cast<std::int64_t>(records.empty() ? 0 : records.back().seq);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, json::Value> c;
@@ -762,7 +764,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             out["cycles"] = std::move(cycles);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 
     {
@@ -844,7 +846,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.modify<model::Track>(*id, [&](model::Track& tr) { tr.parent = target; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 
     auto rulerCommands = [&]<bool Region>() {
@@ -881,7 +883,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (a.color) o.color = *a.color;
                 return IdResult{app(ctx).txn().create(std::move(o)).str()};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<RulerSetArgs, Empty> c;
@@ -913,7 +915,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 app(ctx).txn().put<Object>(*id, std::move(o));
                 return Empty{};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<RulerRef, Empty> c;
@@ -934,7 +936,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 app(ctx).txn().remove<Object>(*id);
                 return Empty{};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<cmd::NoArgs, RulerList> c;
@@ -966,7 +968,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 }
                 return out;
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
     };
     rulerCommands.template operator()<false>();
@@ -1017,7 +1019,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, PluginList> c;
@@ -1055,7 +1057,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TimeArgs, TimeResult> c;
@@ -1067,7 +1069,8 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<TimeArgs>("time_convert_args")
                      .field("seconds", &TimeArgs::seconds, schema::number().min(0))
                      .field("beat", &TimeArgs::beat, schema::number().min(0))
-                     .field("bar", &TimeArgs::bar, schema::integer().min(1))
+                     .field("bar", &TimeArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .build();
         c.result = schema::object<TimeResult>("time_position")
                        .field("seconds", &TimeResult::seconds, schema::number())
@@ -1083,14 +1086,19 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.seconds.has_value() + a.beat.has_value() + a.bar.has_value() != 1)
                 return Error("time.input", "give exactly one of seconds, beat, or bar", "",
                              "remove the other time inputs");
-            const auto map = app(ctx).view().timeMap;
+            const auto s = app(ctx).view();
+            const auto map = s.timeMap;
             const double beat = a.seconds ? map->beatAt(*a.seconds)
                                 : a.bar   ? map->beatOfBar(static_cast<int>(*a.bar))
                                           : *a.beat;
+            SUPPLE_TRY(model::checkedBeat(s, beat,
+                                          a.seconds ? "/seconds"
+                                          : a.bar   ? "/bar"
+                                                    : "/beat"));
             const auto bb = map->barBeat(beat);
             return TimeResult{map->secondsAt(beat), beat, bb.bar, bb.beat, bb.fraction};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemSetArgs, Empty> c;
@@ -1108,7 +1116,8 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<ItemSetArgs>("item_set_args")
                      .field("item", &ItemSetArgs::item, idSchema("it"))
                      .field("position", &ItemSetArgs::position, schema::number().min(0))
-                     .field("bar", &ItemSetArgs::bar, schema::integer().min(1))
+                     .field("bar", &ItemSetArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .field("length", &ItemSetArgs::length, schema::number().min(0))
                      .field("mute", &ItemSetArgs::mute, schema::boolean())
                      .field("loop", &ItemSetArgs::loop, schema::boolean())
@@ -1176,7 +1185,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.put<model::Item>(*id, std::move(it));
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemDuplicateArgs, IdResult> c;
@@ -1214,7 +1223,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return IdResult{txn.create(std::move(copy)).str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemPasteArgs, ItemPasteResult> c;
@@ -1319,7 +1328,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemSplitArgs, SplitResult> c;
@@ -1405,7 +1414,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             Id fresh = txn.create(std::move(right));
             return SplitResult{id->str(), fresh.str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeAddArgs, IdResult> c;
@@ -1452,7 +1461,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             });
             return IdResult{fresh.str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeActivateArgs, Empty> c;
@@ -1499,7 +1508,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                                                [&](model::Item& it) { it.activeTake = *take; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeSetArgs, Empty> c;
@@ -1574,7 +1583,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemQuery, TakeList> c;
@@ -1621,7 +1630,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxMoveArgs, Empty> c;
@@ -1720,7 +1729,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             txn.modify<model::Track>(target, [&](model::Track& tr) { tr.chain = targetChain; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxPatchGetArgs, FxPatchResult> c;
@@ -1757,7 +1766,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return FxPatchResult{std::move(*effective)};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxPatchSetArgs, FxPatchResult> c;
@@ -1791,7 +1800,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 *id, [&](model::FxInstance& fx) { fx.patch = *patch; });
             return FxPatchResult{std::move(*patch)};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxParamGetArgs, FxParamResult> c;
@@ -1825,7 +1834,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Error("fx.param", "no saved parameter " + a.param, "/param",
                          "use fx.describe {full:true} for parameter names");
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 

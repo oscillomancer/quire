@@ -52,6 +52,8 @@ class ItemGestures {
     ~ItemGestures();
 
     Runner run;
+    // Keep the copied version available to item.paste until the clipboard changes.
+    std::function<std::shared_ptr<const model::Session>(std::uint64_t)> pinVersion;
     std::function<void(const std::vector<model::Id>&)> onSelection;  // after every change
     std::function<void(model::Id item)> onOpenMidi;                  // double-click on a MIDI item
     std::function<void(model::Id take)> onTakeFx;  // the item menu's Take FX… (the app's FX window)
@@ -190,6 +192,7 @@ class ItemGestures {
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it
     struct Clip {
         std::uint64_t version = 0;
+        std::shared_ptr<const model::Session> pin;
         std::optional<model::Id> anchorTrack;
         struct Entry {
             model::Id item;

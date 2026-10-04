@@ -2188,3 +2188,86 @@ TEST_CASE("plain plugin parameter setters validate names ids text and saved stat
     REQUIRE_FALSE(readonly);
     CHECK(readonly.error().code == "fx.param_readonly");
 }
+
+TEST_CASE("recovery reports corrupt sidecars and recovers the valid selection") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");
+    const auto corrupt = app->recordDir() / "Broken-1.wav";
+    fs::copy_file(app->recordDir() / "Vocal-1.wav", corrupt);
+    auto sidecar = corrupt;
+    sidecar.replace_extension(".rec.json");
+    REQUIRE(writeFileAtomic(sidecar, "{broken"));
+    auto listed = d.execute({"project.recoverable", j("{}"), kTest});
+    REQUIRE(listed);
+    REQUIRE((*listed)["recordings"].size() == 1);
+    REQUIRE((*listed)["warnings"].size() == 1);
+    CHECK((*listed)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK((*listed)["warnings"].at(0).find("file")->asString() == "rec/Broken-1.wav");
+    auto recovered = d.execute(
+        {"project.recover", j(R"({"files":["rec/Broken-1.wav","rec/Vocal-1.wav"]})"), kTest});
+    REQUIRE(recovered);
+    REQUIRE((*recovered)["recovered"].size() == 1);
+    REQUIRE((*recovered)["warnings"].size() == 1);
+    CHECK((*recovered)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK_FALSE((*recovered)["warnings"].at(0).find("hint")->asString().empty());
+    CHECK(app->head().items.size() == 1);
+}
+
+TEST_CASE("recording loop capacity warning reaches transport.stop and retained passes commit") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    REQUIRE(d.execute({"track.add", j(R"({"name":"Input"})"), kTest}));
+    REQUIRE(
+        d.execute({"track.set", j(R"({"track":"tr_1","armed":true,"record_input":[1]})"), kTest}));
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 1},
+                             {.anticipative = false}));
+    REQUIRE(d.execute({"transport.loop",
+                       j(R"({"start_seconds":0,"end_seconds":0.0013333333333333333})"), kTest}));
+    REQUIRE(d.execute({"transport.record", j("{}"), kTest}));
+    backend.run(4100);
+    auto stopped = d.execute({"transport.stop", j("{}"), kTest});
+    REQUIRE_MESSAGE(stopped, (stopped ? "" : stopped.error().toString()));
+    REQUIRE((*stopped)["recorded"].size() == 1);
+    auto info = (*stopped)["recorded"].at(0);
+    REQUIRE(info["warnings"].size() == 1);
+    auto warning = info["warnings"].at(0);
+    CHECK(warning["code"].asString() == "recording.loop_runs_full");
+    CHECK(warning["path"].asString() == "/recording");
+    CHECK_FALSE(warning["hint"].asString().empty());
+    CHECK(warning["track"].asString() == "tr_1");
+    CHECK_FALSE(warning["file"].asString().empty());
+    CHECK(info["takes"].size() > 1);
+    CHECK(app->head().items.size() == 1);
+    app->stopEngine();
+}
+
+TEST_CASE("recovery skips an overflowing recording start beside a valid file") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");
+    const auto invalid = app->recordDir() / "Overflow-1.wav";
+    fs::copy_file(app->recordDir() / "Vocal-1.wav", invalid);
+    auto sidecar = invalid;
+    sidecar.replace_extension(".rec.json");
+    REQUIRE(writeFileAtomic(
+        sidecar,
+        R"({"schema":"supple.recording/1.0","track":"tr_1","sample_rate":48000,"start_sample":9223372036854775807})"));
+    auto r = d.execute({"project.recover", j("{}"), kTest});
+    REQUIRE(r);
+    REQUIRE((*r)["warnings"].size() == 1);
+    CHECK((*r)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK((*r)["warnings"].at(0).find("path")->asString() == "/start_sample");
+    REQUIRE((*r)["recovered"].size() == 1);
+    CHECK(app->head().items.size() == 1);
+}

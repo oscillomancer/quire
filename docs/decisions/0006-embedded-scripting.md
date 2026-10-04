@@ -53,6 +53,13 @@ scripting is a separate, JIT-compiled language: Phase 7, its own ADR.)
   keep raising even if Lua catches the first error. Tests can set an instruction
   cap. Sandbox initialization and JSON pushes run in protected calls, and error
   tables are read raw without executing metamethods.
+- Scripts cannot install finalizers: the base `setmetatable` wrapper refuses any
+  metatable with a raw non-nil `__gc` member (`script.finalizer`, including false).
+  The original setter is private to its C closure; no debug library, registry or
+  userdata-metatable setter is exposed. Adding `__gc` after installation does not
+  mark a table for finalization, and reinstalling that metatable is refused.
+  This keeps cleanup outside Lua finalizers, where instruction hooks cannot
+  enforce the execution budget reliably. Ordinary metatables remain available.
 - Schema references resolve as bounded JSON Pointers against the root; named
   arrays keep their array form. LuaLS uses the same references and the namespace
   from product metadata.
