@@ -215,7 +215,6 @@ class HostContext : public vst::HostApplication {
     std::string name_;
 };
 
-bool isVst3(const fs::path& p) { return p.extension() == ".vst3"; }
 std::string classId(const VST3::Hosting::ClassInfo& info) { return "vst3:" + info.ID().toString(); }
 
 // Steinberg's moduleinfo writer emits JSON5 comments and trailing commas.
@@ -1088,54 +1087,28 @@ Instance::Notifications Vst3Instance::takeNotifications() {
     return n;
 }
 
-Result<std::vector<PluginInfo>> scanVst3(std::span<const fs::path> paths) {
-    std::vector<fs::path> bundles;
-    for (const auto& root : paths) {
-        std::vector<fs::path> found;
-        std::error_code ec;
-        if (isVst3(root) && fs::is_directory(root, ec)) {
-            found.push_back(root);
-        } else if (fs::is_directory(root, ec)) {
-            for (auto it = fs::recursive_directory_iterator(
-                     root, fs::directory_options::skip_permission_denied, ec);
-                 it != fs::recursive_directory_iterator(); it.increment(ec)) {
-                if (ec) break;
-                if (it->is_directory(ec) && isVst3(it->path())) {
-                    found.push_back(it->path());
-                    it.disable_recursion_pending();
-                }
-            }
-        }
-        std::sort(found.begin(), found.end());
-        for (const auto& path : found)
-            if (std::find(bundles.begin(), bundles.end(), path) == bundles.end())
-                bundles.push_back(path);
-    }
+Result<std::vector<PluginInfo>> scanVst3Module(const fs::path& path) {
+    if (auto listed = scanModuleInfo(path)) return std::move(*listed);
     std::vector<PluginInfo> result;
-    for (const auto& path : bundles) {
-        if (auto listed = scanModuleInfo(path)) {
-            result.insert(result.end(), std::make_move_iterator(listed->begin()),
-                          std::make_move_iterator(listed->end()));
-            continue;
-        }
-        auto module = moduleFor(path);
-        if (!module) continue;
-        auto factory = module->getFactory();
-        const auto vendor = factory.info().vendor();
-        for (const auto& cls : factory.classInfos()) {
-            if (cls.category() != "Audio Module Class") continue;
-            PluginInfo info;
-            info.format = "vst3";
-            info.id = classId(cls);
-            info.path = path;
-            info.name = cls.name();
-            info.vendor = cls.vendor().empty() ? vendor : cls.vendor();
-            info.version = cls.version();
-            info.features = cls.subCategories();
-            info.instrument = std::find(info.features.begin(), info.features.end(), "Instrument") !=
-                              info.features.end();
-            result.push_back(std::move(info));
-        }
+    auto module = moduleFor(path);
+    if (!module)
+        return Error("host.scan.load", "cannot load VST3 bundle " + path.string(), "/path",
+                     "check that the bundle is built for this platform");
+    auto factory = module->getFactory();
+    const auto vendor = factory.info().vendor();
+    for (const auto& cls : factory.classInfos()) {
+        if (cls.category() != "Audio Module Class") continue;
+        PluginInfo info;
+        info.format = "vst3";
+        info.id = classId(cls);
+        info.path = path;
+        info.name = cls.name();
+        info.vendor = cls.vendor().empty() ? vendor : cls.vendor();
+        info.version = cls.version();
+        info.features = cls.subCategories();
+        info.instrument = std::find(info.features.begin(), info.features.end(), "Instrument") !=
+                          info.features.end();
+        result.push_back(std::move(info));
     }
     return result;
 }

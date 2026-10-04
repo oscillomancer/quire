@@ -154,3 +154,53 @@ syscalls per block for the data, not just the wake-up).
   through with their compensated delay, and the plan warns with the FX id and
   `isolation: in_process` for monitoring. Offline and rendered-ahead processing
   remain synchronous. Not yet: pipelined live bridging, B6 overhead benchmark.
+
+## Supervised discovery (2026-10-04)
+
+Third-party discovery also uses the bridge: `<slug>-bridge --scan <module>`
+loads one CLAP binary or inspects one VST3 bundle on its main thread and writes
+a canonical `supple.plugin-scan/1.0` JSON reply (`plugins` or structured `error`).
+This scan-only mode does not create a control socket, audio thread or shared
+memory. Plugin stdout is redirected to `/dev/null`; the reply uses a saved
+stdout descriptor so plugin init/deinit logging cannot corrupt it.
+
+The parent starts one child per canonical module in search-path order with
+`posix_spawn`, a private process group and no inherited descriptors above
+stderr. Stdin/stderr use `/dev/null`. It drains stdout nonblocking, bounded at
+1 MiB by default, with one steady-clock deadline (default 5 seconds, configurable
+through `host::ScanOptions`). A signal exit, deadline, excessive output or
+invalid JSON/metadata is a structured per-module failure, not a failure of the
+whole catalogue. Every exit path closes the pipe, kills the process group
+(including descendants holding stdout), and reaps the leader. The leader is
+observed using `waitid(WNOWAIT)` and remains unreaped until cleanup, preventing
+its PID from being recycled before the group kill.
+
+Successes and persistent failures are atomically cached as canonical JSON in
+`$XDG_CACHE_HOME/<slug>/plugin-scan` (fallback `$HOME/.cache/<slug>/plugin-scan`).
+Records compare the complete canonical module path, file size and mtime. VST3
+bundles compare a sorted manifest of regular files with sizes and mtimes,
+including the binary and `moduleinfo.json`; linked folders are followed with
+directory-cycle detection. A filename hash is only an index:
+the record's full key must match. VST3 load paths retain the discovered bundle
+alias: the SDK derives the binary filename from its bundle name, so blindly
+loading its canonical directory can break a symlinked install. Cache metadata
+uses canonical paths internally and is rebound to the current alias after
+validation. Corrupt cache records cause a rescan; module changes during a probe
+prevent writing its result to the cache. Spawn/I/O
+failures are transient and are not cached. Cached failed modules are skipped
+until a file change, including when the bridge is later unavailable.
+
+The build's own stock binaries beside the app can still scan in process.
+`ScanOptions::forceInProcess` is a test hook that bypasses supervision and the
+cache. If the executable is missing/non-executable, new probes fall back to
+in-process scanning with a stderr warning and a structured warning in the
+report, preserving the available catalogue.
+
+The compatible `scan(paths)` result still contains only available plugins.
+`scan(paths, options, report)` and `lastScanReport()` expose failed module paths,
+structured reasons, whether each failure was cached, warnings, and the number
+of cache hits. Catalogue owners must retain the report alongside their plugin
+list and expose failures/warnings to callers; a later unrelated scan on the
+same thread replaces `lastScanReport()`. Sandbox `Session::pluginScanReport()`
+retains its catalogue report. Engine and command catalogue serialization are
+integration work owned by the lead/commands reviewer.

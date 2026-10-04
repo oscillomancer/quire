@@ -3,6 +3,7 @@
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread
 // commands arrive in per-instance shared memory sent with Activate and run on
 // that instance's audio thread. Exits when the host closes the control socket.
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
@@ -10,6 +11,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -20,6 +22,7 @@
 #include <vector>
 
 #include "../src/bridge_protocol.h"
+#include "../src/scan.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
 
@@ -418,6 +421,37 @@ struct Bridge {
 
 int main(int argc, char** argv) {
     ::signal(SIGPIPE, SIG_IGN);
+    if (argc == 3 && std::string_view(argv[1]) == "--scan") {
+        // Keep plugin printf/cout (including background threads and unload
+        // destructors) away from the protocol stream. Only our saved fd writes it.
+        const int output = ::fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
+        const int null = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+        if (output < 0 || null < 0 || ::dup2(null, STDOUT_FILENO) < 0) {
+            if (output >= 0) ::close(output);
+            if (null >= 0) ::close(null);
+            return 1;
+        }
+        ::close(null);
+        std::error_code ec;
+        const auto path = std::filesystem::absolute(argv[2], ec).lexically_normal();
+        const Result<std::vector<PluginInfo>> result =
+            ec ? Result<std::vector<PluginInfo>>(
+                     Error("host.scan.load", "cannot resolve plugin path"))
+               : scanModuleInProcess(path);
+        const auto text = json::writeCanonical(scanReply(result));
+        std::size_t offset = 0;
+        while (offset < text.size()) {
+            const auto n = ::write(output, text.data() + offset, text.size() - offset);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) {
+                ::close(output);
+                return 1;
+            }
+            offset += static_cast<std::size_t>(n);
+        }
+        ::close(output);
+        return result ? 0 : 1;
+    }
     Bridge b;
     for (int i = 1; i + 1 < argc; ++i)
         if (std::string(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);

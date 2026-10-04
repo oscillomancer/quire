@@ -40,7 +40,34 @@ struct PluginInfo {
 };
 
 // Scans files or directories (recursively) for .clap binaries and .vst3 bundles.
+// Third-party modules run in one supervised bridge child per module (ADR-0013).
+// Successful and failed scans are cached until the module changes.
 Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles);
+struct ScanOptions {
+    int timeoutMs = 5000;
+    std::size_t maxOutputBytes = 1u << 20;
+    // Empty uses XDG_CACHE_HOME (or HOME/.cache), with the product slug.
+    std::filesystem::path cacheDirectory;
+    // Empty discovers the configured/build/installed bridge.
+    std::filesystem::path bridgeExecutable;
+    // Test-only: bypass supervision and the cache, like trusted stock modules.
+    bool forceInProcess = false;
+};
+struct ScanFailure {
+    std::filesystem::path module;
+    Error reason;
+    bool cached = false;
+};
+struct ScanReport {
+    std::vector<ScanFailure> failures;
+    std::vector<Error> warnings;
+    std::size_t cachedModules = 0;
+};
+Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirsOrFiles,
+                                     const ScanOptions& options, ScanReport* report = nullptr);
+// Report for the last scan on this thread, including the compatible one-argument API.
+// Catalogue owners should retain it alongside the returned available plugins.
+const ScanReport& lastScanReport();
 // CLAP and VST3 standard search paths, plus CLAP_PATH/VST3_PATH (existing only).
 std::vector<std::filesystem::path> defaultSearchPath();
 // The stock plugins built beside the running binary: build/<preset>/plugins/clap,

@@ -49,6 +49,30 @@ midi::Sequence twoNotes() {
 
 }  // namespace
 
+TEST_CASE("sandbox retains scan diagnostics with its cached catalogue") {
+    TempDir dir("scan-report");
+    const auto bad = dir.path / "bad.clap";
+    REQUIRE(writeFileAtomic(bad, "not a plugin"));
+    SessionOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {kFixture, bad};
+    auto opened = Session::open(options);
+    REQUIRE(opened);
+    auto& session = **opened;
+    auto catalogue = session.plugins();
+    REQUIRE(catalogue);
+    CHECK_FALSE(catalogue->empty());
+    REQUIRE(session.pluginScanReport().failures.size() == 1);
+    CHECK(session.pluginScanReport().failures.front().module == fs::canonical(bad));
+    CHECK(session.pluginScanReport().failures.front().reason.code == "host.load");
+    // Other probes on this thread overwrite lastScanReport, not this catalogue's report.
+    const std::vector<fs::path> empty;
+    REQUIRE(host::scan(empty));
+    CHECK(host::lastScanReport().failures.empty());
+    REQUIRE(session.plugins());
+    CHECK(session.pluginScanReport().failures.size() == 1);
+}
+
 TEST_CASE("evaluation MIDI sidecars retain compiler note data and follow render lifetime") {
     TempDir dir("eval-midi");
     SessionOptions options;

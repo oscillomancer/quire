@@ -54,7 +54,7 @@ class Vst3Instance {
     std::unique_ptr<State> state_;
 };
 
-Result<std::vector<PluginInfo>> scanVst3(std::span<const std::filesystem::path> paths);
+Result<std::vector<PluginInfo>> scanVst3Module(const std::filesystem::path& path);
 std::vector<std::filesystem::path> defaultVst3SearchPath();
 
 }  // namespace supple::host
