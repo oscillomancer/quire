@@ -458,3 +458,90 @@ TEST_CASE("squashed edits that return to the fork value still conflict with targ
     CHECK(vs.headVersion("main") == target);
     CHECK(track(vs, "main", "tr_1")->volumeDb == -6);
 }
+
+TEST_CASE("media hash completion preserves snapshots, revisions, caches and open transactions") {
+    VersionStore vs(Session::create());
+    run(vs, {inv("track.add", R"({"name":"Recorded"})")});
+    REQUIRE(vs.createBranch("unrelated", "main"));
+    EditTxn recording(*vs.head(), vs.nextVersion());
+    MediaSource media{"rec/take.wav", "", "wav", 48000, 1, 48000};
+    const Id source = recording.create(media);
+    Take take;
+    take.source = source;
+    const Id takeId = recording.create(take);
+    Item item;
+    item.track = *Id::parse("tr_1");
+    item.takes = {takeId};
+    item.activeTake = takeId;
+    item.length = 1;
+    recording.create(item);
+    const auto recordVersion = vs.nextVersion();
+    auto recorded = recording.commit();
+    REQUIRE(recorded);
+    REQUIRE(vs.commit(std::move(*recorded), {"record", "test", {}, {}}, recording.changes(),
+                      recording.created()));
+    const auto snapshot = vs.pin(recordVersion);
+    const auto revision = snapshot->media.entry(source)->rev;
+    REQUIRE(vs.createBranch("copy", "main"));
+    REQUIRE(vs.createBranch("temporary", "main"));
+    REQUIRE(vs.switchBranch("temporary"));
+    const auto leasedVersion = run(vs, {inv("track.set", R"({"track":"tr_1","mute":true})")});
+    auto lease = vs.pin(leasedVersion);
+    // An unrelated lineage can reuse md_1 for a different file.
+    REQUIRE(vs.switchBranch("unrelated"));
+    EditTxn other(*vs.head(), vs.nextVersion());
+    MediaSource different = media;
+    different.path = "rec/other.wav";
+    CHECK(other.create(different) == source);
+    auto otherSession = other.commit();
+    REQUIRE(otherSession);
+    REQUIRE(vs.commit(std::move(*otherSession), {"other", "test", {}, {}}, other.changes(),
+                      other.created()));
+    REQUIRE(vs.switchBranch("main"));
+    // Force a cached head view: undo retains the allocator high-water marks.
+    run(vs, {inv("track.add", R"({"name":"Temporary"})")});
+    REQUIRE(vs.undo());
+    const auto cached = vs.head();
+    CHECK(cached != snapshot);
+    EditTxn pending(*cached, vs.nextVersion());
+    pending.modify<Track>(*Id::parse("tr_1"), [](Track& track) { track.mute = true; });
+    const auto next = vs.nextVersion();
+    const auto history = vs.history().size();
+    const std::string hash = "sha256:" + std::string(64, 'a');
+    CHECK(vs.updateMediaHash(source, media, hash, "main"));
+    CHECK(vs.nextVersion() == next);
+    CHECK(vs.history().size() == history);
+    CHECK(vs.canRedo());
+    CHECK(vs.head()->media.find(source)->hash == hash);
+    CHECK(vs.head("copy")->media.find(source)->hash == hash);
+    CHECK(vs.head("unrelated")->media.find(source)->hash.empty());
+    CHECK(vs.head()->media.entry(source)->rev == revision);
+    REQUIRE(vs.deleteBranch("temporary"));
+    CHECK(vs.version(leasedVersion));  // old snapshot still leases the rewritten version
+    CHECK(lease->media.find(source)->hash.empty());
+    lease.reset();
+    vs.collectUnused();
+    CHECK_FALSE(vs.version(leasedVersion));
+
+    CHECK(snapshot->media.find(source)->hash.empty());
+    CHECK(cached->media.find(source)->hash.empty());
+    auto committed = pending.commit();
+    REQUIRE(committed);
+    REQUIRE(vs.commit(std::move(*committed), {"mute", "test", {}, {}}, pending.changes(), {}));
+    CHECK(vs.head()->media.find(source)->hash == hash);
+    REQUIRE(vs.undo());
+    CHECK(vs.head()->media.find(source)->hash == hash);
+    REQUIRE(vs.undo());  // remove the record step
+    CHECK_FALSE(vs.updateMediaHash(source, media, hash, "main"));
+    // An import can have already populated the head while the recording job
+    // was pending. Its older stored version still needs the same completion.
+    VersionStore imported(*snapshot);
+    EditTxn known(*imported.head(), imported.nextVersion());
+    known.modify<MediaSource>(source, [&](auto& value) { value.hash = hash; });
+    auto knownSession = known.commit();
+    REQUIRE(knownSession);
+    REQUIRE(
+        imported.commit(std::move(*knownSession), {"import", "test", {}, {}}, known.changes(), {}));
+    CHECK(imported.updateMediaHash(source, media, hash, "main"));
+    CHECK(imported.version(recordVersion)->session->media.find(source)->hash == hash);
+}

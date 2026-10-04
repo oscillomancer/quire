@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <numbers>
 #include <string_view>
 #include <thread>
@@ -605,10 +606,11 @@ void EngineApp::startJob(std::function<void(std::stop_token)> work) {
             ++it;
     }
     auto finished = std::make_shared<std::atomic<bool>>(false);
-    jobs_.push_back({std::jthread([hook = options_.jobStartedHook, work = std::move(work),
-                                   finished](std::stop_token stop) {
+    jobs_.push_back({std::jthread([hook = options_.jobStartedHook, done = options_.jobFinishedHook,
+                                   work = std::move(work), finished](std::stop_token stop) {
                          if (hook) hook();
                          work(stop);
+                         if (done) done();
                          finished->store(true, std::memory_order_release);
                      }),
                      finished});
@@ -1420,6 +1422,7 @@ Status commitMidiTake(model::EditTxn& t, const model::Session& s, const Recorded
 Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<RecordedTake>& takes,
                                                          std::string_view label) {
     std::vector<RecordedInfo> out;
+    std::vector<std::pair<Id, RecordedTake>> pendingHashes;
     const model::Session initial = view();
     for (const auto& r : takes) {
         if (r.frames <= 0) continue;
@@ -1505,9 +1508,8 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             if (!r.midi.empty()) SUPPLE_TRY(commitMidiTake(txn(), s, r, runs, items, rate, out));
             continue;
         }
-        // The recorder hashed the take's file when it closed it (realtime.h
-        // RecordedTake::hash), so a re-recorded or recovered file with the same
-        // bytes reuses the source the session already has.
+        // Known hashes may reuse a source; freshly closed files commit now
+        // with an empty hash and complete their metadata in the background.
         model::EditTxn& t = txn();
         Id source;
         if (const auto known = model::mediaSourceWithHash(s, r.hash)) {
@@ -1525,6 +1527,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
                 md.channels = static_cast<int>(head->channels);
             md.frames = r.frames;
             source = t.create(std::move(md));
+            if (r.hash.empty() && commands_) pendingHashes.emplace_back(source, r);
         }
         for (const ItemPlan& ip : items) {
             model::Item item;
@@ -1560,7 +1563,106 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         }
     }
     SUPPLE_TRY(commitTransaction(*txnId));
+    for (auto& [source, take] : pendingHashes) {
+        // Open only; all reads happen on the worker. The handle survives a
+        // first save moving the scratch file before the job gets to run.
+        auto input = std::make_shared<std::ifstream>(take.file, std::ios::binary);
+        const model::MediaSource expected = *head().media.find(source);
+        take.sampleRate = expected.sampleRate;
+        const auto generation = projectGeneration();
+        const auto branch = versions_->branch();
+        auto* dispatcher = commands_;
+        startJob([this, dispatcher, source, expected, take = std::move(take), input, generation,
+                  branch](std::stop_token stop) mutable {
+            Result<std::string> result =
+                Error("file.open", "cannot open recording for hashing", take.file.string(),
+                      "restore a readable file and reimport it to retry hashing");
+            if (*input) {
+                Sha256 digest;
+                std::array<std::uint8_t, 65536> buffer{};
+                while (!stop.stop_requested() && *input) {
+                    input->read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+                    digest.update(
+                        std::span(buffer.data(), static_cast<std::size_t>(input->gcount())));
+                }
+                if (!input->eof())
+                    result =
+                        Error("file.read", "cannot read recording for hashing", take.file.string(),
+                              "restore a readable file and reimport it to retry hashing");
+                else
+                    result = "sha256:" + sha256Hex(digest.finish());
+            }
+            if (stop.stop_requested()) return;
+            dispatcher->post("record.hash",
+                             [this, source, expected, take = std::move(take),
+                              result = std::move(result), generation, branch]() mutable -> Status {
+                                 if (projectGeneration() != generation) return {};
+                                 if (!result) return std::move(result).error();
+                                 finalizeRecordingHash(source, expected, std::move(take),
+                                                       std::move(*result), branch, generation);
+                                 return {};
+                             });
+        });
+    }
+
     return out;
+}
+
+// On the model thread: resolve the current location before the worker
+// finalizes the sidecar. A save can relocate scratch files while hashing.
+void EngineApp::finalizeRecordingHash(Id source, model::MediaSource expected, RecordedTake take,
+                                      std::string hash, std::string branch,
+                                      std::uint64_t generation) {
+    const auto current = versions_->head(branch);
+    if (!current || !current->media.find(source)) return;
+    const fs::path base = projectDir().empty() ? options_.workdir : projectDir();
+    const fs::path path = fs::path(expected.path).is_absolute()
+                              ? fs::path(expected.path)
+                              : base / current->project->mediaDir / expected.path;
+    auto* dispatcher = commands_;
+    startJob([this, dispatcher, source, expected, take = std::move(take), hash = std::move(hash),
+              branch = std::move(branch), generation, path](std::stop_token stop) mutable {
+        if (stop.stop_requested()) return;
+        detail::RecordingInfo side{take.track,    take.startSample, take.sampleRate,
+                                   take.segments, take.loop.start,  take.loop.end,
+                                   hash};
+        Status finalized;
+        {
+            std::lock_guard lock(recordingFinalizeMutex_);
+            std::error_code ec;
+            finalized =
+                fs::is_regular_file(path, ec)
+                    ? detail::writeSidecar(path, side)
+                    : Status{Error("file.open", "recording moved or disappeared", path.string())};
+        }
+        if (stop.stop_requested()) return;
+        dispatcher->post(
+            "record.finalize",
+            [this, source, expected, take = std::move(take), hash = std::move(hash),
+             branch = std::move(branch), generation, path,
+             finalized = std::move(finalized)]() mutable -> Status {
+                if (projectGeneration() != generation) return {};
+                const auto latest = versions_->head(branch);
+                if (!latest || !latest->media.find(source)) return {};
+                const fs::path folder = projectDir().empty() ? options_.workdir : projectDir();
+                const fs::path now = fs::path(expected.path).is_absolute()
+                                         ? fs::path(expected.path)
+                                         : folder / latest->project->mediaDir / expected.path;
+                if (now != path) {
+                    finalizeRecordingHash(source, expected, std::move(take), std::move(hash),
+                                          branch, generation);
+                    return {};
+                }
+                SUPPLE_TRY(finalized);
+                if (versions_->updateMediaHash(source, expected, hash, branch)) {
+                    json::Value event = json::Value::object();
+                    event["version"] = versions_->headVersion(branch);
+                    event["branch"] = branch;
+                    emit("session.changed", std::move(event));
+                }
+                return {};
+            });
+    });
 }
 
 // --- recordings (crash recovery) ------------------------------------------------------------
@@ -1596,6 +1698,7 @@ void EngineApp::clearScratch() {
 // First save: stage and verify copies while the scratch originals remain.
 // Failed relocation/publication removes only files this operation created.
 Status EngineApp::moveScratchMedia(const fs::path& dest, const std::function<Status()>& publish) {
+    std::lock_guard lock(recordingFinalizeMutex_);
     const fs::path from = options_.scratchDir / head().project->mediaDir;
     std::error_code ec;
     if (!fs::exists(from, ec))

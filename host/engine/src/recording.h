@@ -50,6 +50,7 @@ struct RecordingInfo {
     // Written when the recording ends (loop passes, ADR-0015); empty before.
     std::vector<RecordedSegment> segments;
     std::int64_t loopStart = 0, loopEnd = 0;
+    std::string hash = {};  // optional; finalized by the background recording job
 };
 std::filesystem::path sidecarPath(const std::filesystem::path& wav);
 Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info);
@@ -123,6 +124,7 @@ class Recorder {
     static constexpr std::size_t kMaxSegments = 4096;
     std::array<RecordedSegment, kMaxSegments> segments_{};
     std::atomic<std::size_t> segmentCount_{0};
+    LoopRange finishingLoop_;  // published to the writer by stop_ (capture already stopped)
     std::atomic<bool> stop_{false};
     std::atomic<bool> writerStalled_{false}, writerStallAck_{false};  // test access
     std::thread writer_;

@@ -256,10 +256,19 @@ preset's engine tests (with the dummy backend).
 - **Peaks**: min/max pyramids built on I/O threads, cached by content hash,
   never in project diffs.
 - **Content hash**: `MediaSource.hash` is `"sha256:<hex>"` of a file's bytes —
-  read with the file when it is imported (`item.add`, media import) and by the
-  recorder's I/O thread as it closes each take, so a commit never reads a
-  recording back. Adding the same bytes again reuses the media source it already
-  has. Metadata for an import comes from the container's header
+  read with the file when it is imported (`item.add`, media import). Recording
+  stop drains capture and closes the WAV (final header sizes only); it commits
+  takes immediately as one "record" undo step with empty hashes. An existing
+  job worker rereads the closed file, then a worker finalizes its sidecar at
+  the current location (including a first save moving scratch media). The
+  model-thread completion fills matching media in every stored version without
+  changing version IDs, object revisions or undo/redo history; already leased
+  snapshots stay immutable. Transactions opened before completion retain the
+  hash on commit. If the originating branch has undone/deleted the take, or the
+  project was replaced, the update is dropped. A save while the job is pending
+  writes a valid empty hash. Hash/read/sidecar failures leave it empty and emit
+  `bus.post_failed` with a structured error. Adding the same bytes again reuses
+  a media source whose hash is already known. Metadata for an import comes from the container's header
   (`audio::inspect`), never a decode: adding one file to many items costs one
   header read at a time. Projects saved before the hash existed keep their empty
   hashes (the peak cache falls back to path + size + mtime); adding one of their
@@ -281,7 +290,10 @@ preset's engine tests (with the dummy backend).
   structured `recording.loop_runs_full` warning for the commit. Sidecars require
   `supple.recording/1.0`, a track id, a positive finite sample rate, and complete,
   ordered loop runs beginning at file frame zero; invalid sidecars return a
-  structured error and must be skipped during recovery.
+  structured error and must be skipped during recovery. Placement sidecars
+  survive pending hash jobs (including finalized loop runs at stop); the
+  background finalization adds an optional `hash` without changing their
+  recovery contract.
 - **Backends** (ADR-0004): JACK (dlopen), dummy, offline in P4; buffer-size,
   sample-rate and device changes stop the engine cleanly, rebuild the plan,
   and restart; xruns are counted (backend callbacks + our own deadline

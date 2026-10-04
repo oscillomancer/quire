@@ -3,11 +3,17 @@
 #include "supple/model/schemas.h"
 
 #include <algorithm>
+#include <optional>
 #include <set>
 
 namespace supple::model {
 
 namespace {
+
+bool sameMediaFile(const MediaSource& a, const MediaSource& b) {
+    return a.path == b.path && a.format == b.format && a.sampleRate == b.sampleRate &&
+           a.channels == b.channels && a.frames == b.frames;
+}
 
 // Coalesces two change lists (a then b) per object, like EditTxn does.
 std::vector<Change> coalesce(const std::vector<Change>& a, const std::vector<Change>& b) {
@@ -275,6 +281,38 @@ std::shared_ptr<const Session> VersionStore::head(std::string_view name) const {
     return b->view;
 }
 
+bool VersionStore::updateMediaHash(Id id, const MediaSource& expected, std::string_view hash,
+                                   std::string_view branch) {
+    auto matches = [&](const MediaSource* media) {
+        return media && sameMediaFile(*media, expected) && media->hash.empty();
+    };
+    const auto current = head(branch);
+    const auto* present = current ? current->media.find(id) : nullptr;
+    if (hash.empty() || !present || !sameMediaFile(*present, expected) ||
+        (!present->hash.empty() && present->hash != hash))
+        return false;
+    bool used = false;
+    for (const auto& item : current->items)
+        for (Id takeId : item.value->takes)
+            if (const auto* take = current->takes.find(takeId); take && take->source == id)
+                used = true;
+    if (!used) return false;
+    auto updatedMedia = std::make_shared<MediaSource>(expected);
+    updatedMedia->hash = hash;
+    bool updated = false;
+    for (auto& [versionId, version] : versions_) {
+        const auto* entry = version.session->media.entry(id);
+        if (!entry || !matches(entry->value.get())) continue;
+        if (version.session.use_count() > 1) metadataLeases_[versionId].push_back(version.session);
+        auto session = std::make_shared<Session>(*version.session);
+        session->media = session->media.with(id, entry->rev, updatedMedia);
+        version.session = std::move(session);
+        updated = true;
+    }
+    for (auto& [name, branchState] : branches_) branchState.view.reset();
+    return updated;
+}
+
 std::uint64_t VersionStore::headVersion(std::string_view name) const {
     const Branch* b = lookup(name);
     return b ? b->head : 0;
@@ -303,6 +341,11 @@ void VersionStore::collectUnused() {
     }
     for (const auto& [id, version] : versions_)
         if (version.session.use_count() > 1) pending.push_back(id);
+    for (auto& [id, leases] : metadataLeases_) {
+        std::erase_if(leases, [](const auto& lease) { return lease.expired(); });
+        if (!leases.empty()) pending.push_back(id);
+    }
+    std::erase_if(metadataLeases_, [](const auto& entry) { return entry.second.empty(); });
     std::set<std::uint64_t> reachable;
     while (!pending.empty()) {
         const auto id = pending.back();
@@ -510,6 +553,23 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         session.next.next[k] = b.allocated.next[k];
     }
     const Version& head = versions_.at(b.head);
+    // A transaction may have opened before a metadata completion. Retain
+    // that completion when committing its still-unhashed copy of the source.
+    // Rebuild only when something needs it: unchanged maps keep their shared
+    // storage (history size estimates and change detection rely on it).
+    std::optional<IdMap<MediaSource>::Builder> media;
+    if (!session.media.sameStorage(head.session->media))
+        for (const auto& entry : session.media) {
+            const auto* known = head.session->media.find(entry.id);
+            if (entry.value->hash.empty() && known && !known->hash.empty() &&
+                sameMediaFile(*entry.value, *known)) {
+                if (!media) media.emplace(session.media);
+                auto updated = std::make_shared<MediaSource>(*entry.value);
+                updated->hash = known->hash;
+                media->put(entry.id, entry.rev, std::move(updated));
+            }
+        }
+    if (media) session.media = media->build();
     Version v;
     v.id = next_++;
     v.txn = std::move(txn);

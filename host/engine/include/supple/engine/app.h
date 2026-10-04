@@ -46,6 +46,7 @@ struct AppOptions {
     std::filesystem::path scratchDir;
     std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
     std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
+    std::function<void()> jobFinishedHook;     // worker completion notification for tests
 };
 
 // Meter entries a full ring dropped (P5.3c): the renderer's ring and the audio
@@ -336,6 +337,8 @@ class EngineApp : public cmd::Host {
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
   private:
+    void finalizeRecordingHash(model::Id source, model::MediaSource expected, RecordedTake take,
+                               std::string hash, std::string branch, std::uint64_t generation);
     void startPlaying(int countInBars);  // engine play(), after a count-in when > 0
     explicit EngineApp(AppOptions options);
     Result<host::Instance*> scratch(const model::FxInstance& fx);
@@ -375,6 +378,7 @@ class EngineApp : public cmd::Host {
         std::shared_ptr<std::atomic<bool>> finished;
     };
     std::vector<JobThread> jobs_;
+    std::mutex recordingFinalizeMutex_;  // sidecar publication vs scratch relocation, never RT
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
     Status moveScratchMedia(const std::filesystem::path& dest,
                             const std::function<Status()>& publish);
