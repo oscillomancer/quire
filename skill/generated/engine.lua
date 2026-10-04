@@ -296,6 +296,7 @@ q = nil
 ---@field wet? number|string Quantity strings are range-checked by the server.
 ---@field label? string
 ---@field isolation? "inherit"|"in_process"|"shared_bridge"|"dedicated"
+---@field pins? table
 
 ---@class Quire.history_list_result
 ---@field versions table[]
@@ -798,6 +799,7 @@ q = nil
 ---@field monitor? "off"|"on"|"auto"
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 ---@field timebase? "project"|"time"|"beats"|"beats_position" What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now
+---@field channels? integer 1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 for routes and plug-in pins (a detector on 3/4), outside the fader, pan and parent send
 
 ---@class Quire.track_template_list_result
 ---@field templates table[]
@@ -975,7 +977,7 @@ q = nil
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
 ---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).
----@field set fun(args: Quire.fx_set_args): table Set instance options: bypass, offline, wet (%), label, isolation.
+---@field set fun(args: Quire.fx_set_args): table Set instance options: bypass, offline, wet (%), label, isolation, pins.
 
 ---@class Quire.fx.chain
 ---@field list fun(): Quire.fx_chain_list_result List saved FX chain presets by name, path and effect count.

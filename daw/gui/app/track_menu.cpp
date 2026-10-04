@@ -41,6 +41,10 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
         m.run = [this, track, anchor] { openTimebase(track, anchor); };
         items.push_back(std::move(m));
     }
+    m = {};
+    m.label = "Channels…";
+    m.run = [this, track, anchor] { openChannels(track, anchor); };
+    items.push_back(std::move(m));
     items.push_back({"", "", {}, true, true});  // separator
     m = {};
     m.label = "Delete";
@@ -85,6 +89,32 @@ Status TrackMenu::openColors(const model::Id& track, const ui::Rect& anchor) con
         ui::makeMenu("track.color." + track.str(), std::move(items), [this] { root.closePopup(); }),
         anchor, anchor.w > 0 ? ui::Placement::Below : ui::Placement::Center);
     return {};
+}
+
+void TrackMenu::openChannels(const model::Id& track, const ui::Rect& anchor) const {
+    const model::Track* tr = app.head().tracks.find(track);
+    if (!tr) return;
+    std::vector<ui::MenuItem> items;
+    for (auto [label, count] : {std::pair{"Mono (1)", 1},
+                                {"Stereo (2)", 2},
+                                {"4: aux 3/4", 4},
+                                {"6: aux 3-6", 6},
+                                {"8: aux 3-8", 8}}) {
+        ui::MenuItem m;
+        m.label = label;
+        m.checked = tr->channels == count;
+        m.enabled = count >= 2 || tr->type == model::StripType::Channel;
+        m.run = [this, track, count] {
+            json::Value args = json::Value::object();
+            args["track"] = track.str();
+            args["channels"] = static_cast<std::int64_t>(count);
+            commit("track.set", std::move(args));
+        };
+        items.push_back(std::move(m));
+    }
+    root.openPopup(ui::makeMenu("track.channels." + track.str(), std::move(items),
+                                [this] { root.closePopup(); }),
+                   anchor, anchor.w > 0 ? ui::Placement::Below : ui::Placement::Center);
 }
 
 void TrackMenu::openTimebase(const model::Id& track, const ui::Rect& anchor) const {

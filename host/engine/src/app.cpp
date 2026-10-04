@@ -1593,9 +1593,12 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
             run("track.template.save", R"({"track":"tr_1","name":"Bass"})");
         return;
     }
-    if (fixture == "song_with_keymix") {  // + tr_2 "Keyed" with fx_1, a key mix (ADR-0018)
+    if (fixture == "song_with_keymix" || fixture == "song_with_keymix_4ch") {
+        // + tr_2 "Keyed" with fx_1, a key mix (ADR-0018); 4ch: tr_2 has channels 3/4 (ADR-0020)
         run("track.add", R"({"name": "Keyed"})");
         run("fx.add", R"({"track": "tr_2", "plugin": "com.suppleaudio.test.keymix"})");
+        if (fixture == "song_with_keymix_4ch")
+            run("track.set", R"({"track": "tr_2", "channels": 4})");
         return;
     }
     if (fixture == "song_with_route") {

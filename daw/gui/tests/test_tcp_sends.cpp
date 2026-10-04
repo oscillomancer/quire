@@ -322,7 +322,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
         f.root->pointer(e);
         f.root->frame(false);
     };
-    // Menu rows are 26 px: Rename, Color…, Timebase…, (separator), Delete.
+    // Menu rows are 26 px: Rename, Color…, Timebase…, Channels…, (separator), Delete.
     auto pickRow = [&](const std::string& menu, int index) {
         ui::Node* m = f.root->find(menu);
         REQUIRE(m);
@@ -360,10 +360,18 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     pickRow("track.timebase." + f.a.str(), 2);
     CHECK(f.app->head().tracks.find(f.a)->timebase == model::TrackTimebase::Time);
     CHECK(f.history() == before + 1);
+    // Channels…: four gives it aux channels 3/4 (the third choice).
+    before = f.history();
+    rightClick();
+    pickRow(menu, 3);
+    REQUIRE(f.root->find("track.channels." + f.a.str()));
+    pickRow("track.channels." + f.a.str(), 2);
+    CHECK(f.app->head().tracks.find(f.a)->channels == 4);
+    CHECK(f.history() == before + 1);
     // Delete removes it.
     before = f.history();
     rightClick();
-    pickRow(menu, 4);
+    pickRow(menu, 5);
     CHECK_FALSE(f.app->head().tracks.find(f.a));
     CHECK(f.history() == before + 1);
 }

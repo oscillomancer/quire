@@ -446,6 +446,7 @@ struct TrackSetArgs {
     std::optional<model::Monitor> monitor;
     std::optional<bool> parentSend;
     std::optional<model::TrackTimebase> timebase;
+    std::optional<std::int64_t> channels;
 };
 struct TrackEntry {
     std::string id, name, parent;
@@ -516,6 +517,7 @@ struct FxSetArgs {
     std::optional<double> wet;
     std::optional<std::string> label;
     std::optional<model::Isolation> isolation;
+    std::optional<model::PinMap> pins;
 };
 struct FxPatchArgs {
     std::string fx;
@@ -1309,6 +1311,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                            "What this channel's items follow when the tempo changes (those "
                            "that inherit it): project, beats, time or beats_position; they keep "
                            "their place now"))
+                .field("channels", &TrackSetArgs::channels,
+                       schema::integer().range(1, 8).doc(
+                           "1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 "
+                           "for routes and plug-in pins (a detector on 3/4), outside the "
+                           "fader, pan and parent send"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1320,7 +1327,9 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"track": "tr_1", "parent_send": false})"), obj("{}"), "song"},
             {"Play and record a MIDI keyboard (any device, channel 1)",
              obj(R"({"track": "tr_1", "armed": true, "record_midi": "*", "midi_channel": 1, "monitor": "auto"})"),
-             obj("{}"), "song"}};
+             obj("{}"), "song"},
+            {"Four channels: a key signal can arrive on 3/4",
+             obj(R"({"track": "tr_1", "channels": 4})"), obj("{}"), "song"}};
         c.run = [](const TrackSetArgs& a, Context& ctx) -> Result<Empty> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
@@ -1418,6 +1427,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.mute) t.mute = *a.mute;
                 if (a.parentSend) t.parentSend.enabled = *a.parentSend;
                 if (a.timebase) t.timebase = *a.timebase;
+                if (a.channels) t.channels = static_cast<int>(*a.channels);
                 if (a.solo)
                     t.solo = *a.solo == "on"         ? model::Solo::On
                              : *a.solo == "in_place" ? model::Solo::InPlace
@@ -1960,11 +1970,14 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "fx.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set instance options: bypass, offline, wet (%), label, isolation.";
+        c.summary = "Set instance options: bypass, offline, wet (%), label, isolation, pins.";
         c.description =
             "isolation: in_process, dedicated (the plugin runs in a process of its own: a "
             "crash silences only it), shared_bridge (one process for all such plugins), "
-            "inherit (the project default: in_process).";
+            "inherit (the project default: in_process). pins: which of the track's channels "
+            "(1-based; track.set channels adds 3-8) the plugin reads ({in: [l, r]}), writes "
+            "({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin "
+            "with a sidechain input); {} restores 1/2 in and out.";
         c.tags = {"fx"};
         c.args = schema::object<FxSetArgs>("fx_set_args")
                      .field("fx", &FxSetArgs::fx, idArg("fx", "Plugin instance"))
@@ -1979,20 +1992,45 @@ void registerEngineCommands(cmd::Registry& registry) {
                                  {model::Isolation::InProcess, "in_process"},
                                  {model::Isolation::SharedBridge, "shared_bridge"},
                                  {model::Isolation::Dedicated, "dedicated"}}))
+                     .field("pins", &FxSetArgs::pins, model::pinMapSchema())
                      .build();
         c.result = emptySchema();
         c.examples = {
-            {"Half wet", obj(R"({"fx": "fx_1", "wet": "50%"})"), obj("{}"), "song_with_fx"}};
+            {"Half wet", obj(R"({"fx": "fx_1", "wet": "50%"})"), obj("{}"), "song_with_fx"},
+            {"Key the plugin from channels 3/4", obj(R"({"fx": "fx_1", "pins": {"key": [3, 4]}})"),
+             obj("{}"), "song_with_keymix_4ch"}};
         c.run = [](const FxSetArgs& a, Context& ctx) -> Result<Empty> {
             EngineApp& app = A(ctx);
             auto id = existing<model::FxInstance>(app.view(), a.fx, "/fx");
             if (!id) return std::move(id).error();
+            if (a.pins && !a.pins->empty()) {
+                const model::Session s = app.view();
+                const auto track = model::trackOfFx(s, *id);
+                if (!track)
+                    return Error("fx.pins", "pins are for a track's FX chain", "/pins",
+                                 "take FX and input FX are stereo");
+                const int channels = s.tracks.find(*track)->channels;
+                for (auto [list, name] :
+                     {std::pair{&a.pins->in, "in"}, {&a.pins->out, "out"}, {&a.pins->key, "key"}}) {
+                    if (list->size() > 2)
+                        return Error("fx.pins", std::string(name) + " names one or two channels",
+                                     std::string("/pins/") + name, "e.g. [3, 4]");
+                    for (std::size_t k = 0; k < list->size(); ++k)
+                        if ((*list)[k] > std::max(channels, 2))
+                            return Error("fx.pins",
+                                         "the track has " + std::to_string(std::max(channels, 2)) +
+                                             " channels",
+                                         std::string("/pins/") + name + "/" + std::to_string(k),
+                                         "track.set channels adds channels 3-8");
+                }
+            }
             app.txn().modify<model::FxInstance>(*id, [&](model::FxInstance& f) {
                 if (a.bypass) f.bypass = *a.bypass;
                 if (a.offline) f.offline = *a.offline;
                 if (a.wet) f.wet = *a.wet;
                 if (a.label) f.label = *a.label;
                 if (a.isolation) f.isolation = *a.isolation;
+                if (a.pins) f.pins = *a.pins;
             });
             return Empty{};
         };

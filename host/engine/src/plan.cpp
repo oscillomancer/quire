@@ -294,7 +294,44 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             }
             return st;
         };
-        for (Id fxId : t.chain) n.chain.push_back(makeStage(fxId));
+        n.auxCount = std::clamp(t.channels - 2, 0, 6);
+        const int channels = 2 + n.auxCount;
+        for (Id fxId : t.chain) {
+            Stage st = makeStage(fxId);
+            // Pins (ADR-0020): which track channels the plug-in reads, writes
+            // and keys from.
+            const model::PinMap& pins = s.fx.find(fxId)->pins;
+            auto valid = [&](const std::vector<int>& list, const char* what) {
+                for (int c : list)
+                    if (c < 1 || c > channels) {
+                        p.warnings.push_back(fxId.str() + ": " + what + " pin " +
+                                             std::to_string(c) + " is beyond the track's " +
+                                             std::to_string(channels) + " channels; ignored");
+                        return false;
+                    }
+                return !list.empty();
+            };
+            if (valid(pins.in, "input")) {
+                st.inPin[0] = pins.in[0] - 1;
+                st.inPin[1] = pins.in[pins.in.size() > 1 ? 1 : 0] - 1;
+            }
+            if (valid(pins.out, "output")) {
+                st.outPin[0] = pins.out[0] - 1;
+                st.outPin[1] = pins.out.size() > 1 ? pins.out[1] - 1 : -1;
+            }
+            st.pinned =
+                st.inPin[0] != 0 || st.inPin[1] != 1 || st.outPin[0] != 0 || st.outPin[1] != 1;
+            if (valid(pins.key, "key")) {
+                if (!st.instance || st.instance->sidechainChannels() == 0) {
+                    p.warnings.push_back(fxId.str() +
+                                         " has no sidechain input; its key pins are ignored");
+                } else {
+                    for (int c : pins.key) st.keyPins.push_back(c - 1);
+                    st.keyed = true;
+                }
+            }
+            n.chain.push_back(std::move(st));
+        }
         // Takes with FX or envelopes play through a chain of their own (gap log #22).
         for (const auto& e : s.items) {
             const model::Item& it = *e.value;
@@ -369,18 +406,32 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         ed.gainR = g * pr;
         ed.mono = r.mono;
         ed.invert = r.phaseInvert;
-        if (!r.channels.from.empty()) {  // stereo strips: channels 1 and 2
+        if (!r.channels.from.empty()) {
+            // Main pairs make the matrix; pairs that touch auxiliary channels
+            // become links (ADR-0020).
+            const int fromChannels = 2 + p.nodes[ed.from].auxCount;
+            const int toChannels = r.to.fx ? 2 : 2 + p.nodes[index.at(*toTrack)].auxCount;
             float m[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
+            bool anyMain = false;
             for (std::size_t k = 0; k < r.channels.from.size() && k < r.channels.to.size(); ++k) {
                 const int from = r.channels.from[k], to = r.channels.to[k];
-                if (from < 1 || from > 2 || to < 1 || to > 2) {
+                if (from < 1 || from > fromChannels || to < 1 || to > toChannels) {
                     p.warnings.push_back(e.id.str() + ": channel " +
                                          std::to_string(std::max(from, to)) +
-                                         " is beyond the strips' two; that pair is ignored");
+                                         " is beyond its strip's channels; that pair is ignored");
+                    continue;
+                }
+                if (from > 2 || to > 2) {
+                    Edge::AuxLink link;
+                    link.from = from - 1;
+                    link.to = to - 1;
+                    ed.auxLinks.push_back(std::move(link));
                     continue;
                 }
                 m[to - 1][from - 1] += 1.0f;
+                anyMain = true;
             }
+            ed.auxOnly = !anyMain && !ed.auxLinks.empty();
             ed.mapped = !(m[0][0] == 1 && m[0][1] == 0 && m[1][0] == 0 && m[1][1] == 1);
             std::copy(&m[0][0], &m[0][0] + 4, &ed.map[0][0]);
         }
@@ -561,12 +612,40 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         // A main-master key may feed later strips, which must stay with the live executor.
         for (Node& n : p.nodes)
             for (std::size_t edge : n.in) n.live = n.live || p.nodes[p.edges[edge].from].live;
+        // Auxiliary links do not cross the frontier (its rings carry the main
+        // pair): a strip that feeds a live strip's aux channels, or is fed
+        // from aux into a live one, plays live too, and what it feeds.
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (const Edge& e : p.edges)
+                if (!e.auxLinks.empty() && !p.nodes[e.from].live) {
+                    const auto to = static_cast<std::size_t>(
+                        std::find_if(p.nodes.begin(), p.nodes.end(),
+                                     [&](const Node& n) {
+                                         return std::find(n.in.begin(), n.in.end(),
+                                                          static_cast<std::size_t>(
+                                                              &e - p.edges.data())) != n.in.end();
+                                     }) -
+                        p.nodes.begin());
+                    if (to < p.nodes.size() && p.nodes[to].live) {
+                        p.nodes[e.from].live = true;
+                        changed = true;
+                    }
+                }
+            for (Node& n : p.nodes)
+                for (std::size_t edge : n.in)
+                    if (!n.live && p.nodes[p.edges[edge].from].live) {
+                        n.live = true;
+                        changed = true;
+                    }
+        }
     }
     for (Edge& e : p.edges) {
         if (e.stage >= 0) {
             e.stripPan = p.nodes[e.from].autoPan;
             continue;
         }
+        if (e.auxOnly) continue;  // nothing reaches the main pair
         e.encode = e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan || e.mono ||
                    e.invert || e.mapped || e.muted || e.autoVolume.active() || e.autoPan.active() ||
                    e.autoMute.active();
@@ -664,9 +743,16 @@ Status prepare(Plan& p, const Session& s) {
             st.key.init(st.keyed ? block : 0);
             st.outStorage.resize(256);
             st.outEvents.storage = st.outStorage;
+            st.chanDelay.clear();
+            if (st.pinned || n.auxCount > 0) {
+                st.chanDelay.resize(static_cast<std::size_t>(2 + n.auxCount));
+                for (MonoDelay& d : st.chanDelay) d.init(st.latency);
+                st.pinBuf.init(block);
+            }
             n.latChain += st.latency;
             ++stageIndex;
         }
+        n.aux.assign(static_cast<std::size_t>(n.auxCount), std::vector<float>(block, 0.0f));
         n.sum.init(block);
         n.preFx.init(block);
         n.preFader.init(block);
@@ -682,15 +768,28 @@ Status prepare(Plan& p, const Session& s) {
         auto at = [&](const Edge& ed) {
             return ed.stage < 0 ? std::int64_t{0} : before[static_cast<std::size_t>(ed.stage)];
         };
+        // An auxiliary link reads a source's aux channel after its chain, a
+        // main channel at the route's tap (ADR-0020).
+        auto linkLatency = [&](const Edge& ed, const Edge::AuxLink& link) {
+            return latTap(p.nodes[ed.from], link.from >= 2 ? model::Tap::PostFader : ed.tap);
+        };
         n.latIn = 0;
-        for (std::size_t e : n.in)
-            n.latIn = std::max(n.latIn,
-                               latTap(p.nodes[p.edges[e].from], p.edges[e].tap) - at(p.edges[e]));
+        for (std::size_t e : n.in) {
+            const Edge& ed = p.edges[e];
+            if (!ed.auxOnly) n.latIn = std::max(n.latIn, latTap(p.nodes[ed.from], ed.tap) - at(ed));
+            if (ed.stage < 0)
+                for (const Edge::AuxLink& link : ed.auxLinks)
+                    n.latIn = std::max(n.latIn, linkLatency(ed, link));
+        }
         for (std::size_t e : n.in) {
             Edge& ed = p.edges[e];
-            ed.delay.init(n.latIn + at(ed) - latTap(p.nodes[ed.from], ed.tap));
+            ed.delay.init(
+                std::max<std::int64_t>(0, n.latIn + at(ed) - latTap(p.nodes[ed.from], ed.tap)));
             ed.tmp.init(block);
             if (ed.encode) ed.encoded.init(block);
+            for (Edge::AuxLink& link : ed.auxLinks)
+                link.delay.init(n.latIn - linkLatency(ed, link));
+            ed.auxTmp.assign(ed.auxLinks.empty() ? 0 : block, 0.0f);
         }
     }
     const Node& master = p.nodes[p.mainMaster];
@@ -963,6 +1062,10 @@ Status checkStrips(const Plan& p) {
                     return Error("engine.strip_edge", "key routes must bypass send encoders");
                 continue;
             }
+            if (e.auxOnly) {  // linear links into auxiliary channels (ADR-0020)
+                if (e.encode) return Error("engine.strip_edge", "aux-only routes are not encoded");
+                continue;
+            }
             if (e.encode &&
                 std::count(p.nodes[e.from].out.begin(), p.nodes[e.from].out.end(), ei) != 1)
                 return Error("engine.strip_edge", "send encoder is not owned by its source");
@@ -1181,6 +1284,37 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
     return true;
 }
 
+// A stage of a strip with auxiliary channels, or with pins (ADR-0020): the
+// plug-in reads its input pins and writes its output pins (its dry signal is
+// its input's); the channels it does not write are delayed by its latency. A
+// bypassed or idle pinned stage passes every channel through, delayed.
+bool runPinned(Plan& p, Node& node, Stage& st, std::uint32_t n, const host::Transport& transport,
+               std::int64_t pos, const void* self) SUPPLE_RT {
+    const int channels = 2 + node.auxCount;
+    if (!st.pinned) {  // the main pair as usual; the aux channels keep time
+        for (int c = 2; c < channels; ++c)
+            st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
+        return runStage(p, st, node.sum, n, transport, pos, self);
+    }
+    if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self) ||
+        st.bypass) {
+        for (int c = 0; c < channels; ++c)
+            st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
+        st.appliedWet = st.bypass ? 0.0f : -1.0f;
+        st.wetRampLeft = 0;
+        return true;
+    }
+    std::copy_n(node.channel(st.inPin[0]), n, st.pinBuf.l.begin());
+    std::copy_n(node.channel(st.inPin[1]), n, st.pinBuf.r.begin());
+    if (!runStage(p, st, st.pinBuf, n, transport, pos, self)) return false;
+    for (int c = 0; c < channels; ++c)
+        if (c != st.outPin[0] && c != st.outPin[1])
+            st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
+    std::copy_n(st.pinBuf.l.begin(), n, node.channel(st.outPin[0]));
+    if (st.outPin[1] >= 0) std::copy_n(st.pinBuf.r.begin(), n, node.channel(st.outPin[1]));
+    return true;
+}
+
 // A take chain's block (gap log #22): its source (the clip, or its MIDI for
 // its instrument) runs `latency` ahead through its stages; the output, cut to
 // the item's span with the item and take gain, pan, fades and the take's
@@ -1270,7 +1404,8 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // 1. Sum the inputs (fixed order), each through its compensation delay.
     node.sum.clear(n);
     for (std::size_t ei : node.in)
-        if (p.edges[ei].stage < 0) addEdge(p, p.edges[ei], -3.0, node.sum, pos, n);
+        if (p.edges[ei].stage < 0 && !p.edges[ei].auxOnly)
+            addEdge(p, p.edges[ei], -3.0, node.sum, pos, n);
     // Monitored device input enters with the inputs (spec §1.1).
     if (!node.monitorInputs.empty() && p.deviceIn) {
         const auto channel = [&](std::size_t k) -> const float* {
@@ -1286,6 +1421,31 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     if (node.decodeInput)
         for (std::uint32_t i = 0; i < n; ++i)
             node.decoder.sample(node.sum.l[i], node.sum.r[i], node.sum.l[i], node.sum.r[i]);
+    // Auxiliary links (ADR-0020), linear, after the decode.
+    for (auto& a : node.aux) std::fill_n(a.begin(), n, 0.0f);
+    for (std::size_t ei : node.in) {
+        Edge& e = p.edges[ei];
+        if (e.stage >= 0 || e.auxLinks.empty() || (p.split && e.frontier)) continue;
+        Node& src = p.nodes[e.from];
+        const bool post = e.tap == model::Tap::PostFader;
+        const double routeGain = e.muted ? 0.0 : dbToGain(e.volumeDb);
+        for (Edge::AuxLink& link : e.auxLinks) {
+            const float* from = nullptr;
+            double g = routeGain * (e.invert ? -1.0 : 1.0);
+            if (link.from >= 2) {
+                from = src.aux[static_cast<std::size_t>(link.from - 2)].data();
+            } else {
+                const Stereo& tap = e.tap == model::Tap::PreFx ? src.preFx : src.preFader;
+                from = link.from == 0 ? tap.l.data() : tap.r.data();
+                if (post) g *= src.mute || src.soloSilenced ? 0.0 : dbToGain(src.volumeDb);
+            }
+            std::copy_n(from, n, e.auxTmp.begin());
+            link.delay.process(e.auxTmp.data(), n);
+            float* to = node.channel(link.to);
+            const auto gain = static_cast<float>(g);
+            for (std::uint32_t i = 0; i < n; ++i) to[i] += e.auxTmp[i] * gain;
+        }
+    }
     node.preFx.copyFrom(node.sum, n);
     // Audio items play after the pre-FX tap, before the chain (not when stopped).
     for (const Clip& c : node.clips)
@@ -1382,11 +1542,24 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             st.key.clear(n);
             for (std::size_t ei : node.in)
                 if (p.edges[ei].stage == stageIndex) addEdge(p, p.edges[ei], -3.0, st.key, pos, n);
+            // Key pins: track channels into the detector (a key on 3/4).
+            if (!st.keyPins.empty()) {
+                const float* kl = node.channel(st.keyPins[0]);
+                const float* kr = node.channel(st.keyPins[st.keyPins.size() > 1 ? 1 : 0]);
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    st.key.l[i] += kl[i];
+                    st.key.r[i] += kr[i];
+                }
+            }
             if (st.keyChannels == 1)
                 for (std::uint32_t i = 0; i < n; ++i)
                     st.key.l[i] = 0.5f * (st.key.l[i] + st.key.r[i]);
         }
-        if (!runStage(p, st, node.sum, n, transport, pos, self)) return false;
+        if (st.chanDelay.empty()) {
+            if (!runStage(p, st, node.sum, n, transport, pos, self)) return false;
+        } else if (!runPinned(p, node, st, n, transport, pos, self)) {
+            return false;
+        }
     }
     node.preFader.copyFrom(node.sum, n);
     // Metering (P5.3c): a strip's meter shows the signal before the Console 9
@@ -1590,7 +1763,10 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
         if (!n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
-            if (!st.preserveDryOnLocate) st.dry.clear();
+            if (!st.preserveDryOnLocate) {
+                st.dry.clear();
+                for (MonoDelay& d : st.chanDelay) d.clear();
+            }
             st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
@@ -1600,6 +1776,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
             e.delay.clear();
+            for (Edge::AuxLink& link : e.auxLinks) link.delay.clear();
             if (!e.encode)
                 for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan})
                     a->cursor = 0;
@@ -1639,7 +1816,10 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
         if (!n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
-            if (!st.preserveDryOnLocate) st.dry.clear();
+            if (!st.preserveDryOnLocate) {
+                st.dry.clear();
+                for (MonoDelay& d : st.chanDelay) d.clear();
+            }
             st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
@@ -1649,6 +1829,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
     }
     for (Edge& e : p.edges) {
         e.delay.clear();
+        for (Edge::AuxLink& link : e.auxLinks) link.delay.clear();
         for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan}) a->cursor = 0;
     }
 }

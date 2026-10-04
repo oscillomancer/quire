@@ -363,17 +363,20 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
         if (m.from.size() != m.to.size())
             return Error("route.channels", "channels.from and channels.to differ in length",
                          "/channels", "pair them: {from: [1, 2], to: [2, 1]}");
-        // Strips are mono or stereo (session-model §1.4): channels 1 and 2.
-        const int sourceChannels = 2, targetChannels = 2;
+        // The main pair, plus a strip's auxiliary channels (ADR-0020).
+        const int sourceChannels = std::max(2, s.tracks.find(*r.from.track)->channels);
+        const int targetChannels = r.to.fx ? 2 : std::max(2, s.tracks.find(*target)->channels);
+        const std::string more = "track.set channels adds channels 3-8";
         for (std::size_t k = 0; k < m.from.size(); ++k) {
             if (m.from[k] > sourceChannels)
                 return Error("route.channels",
                              "the source has " + std::to_string(sourceChannels) + " channels",
-                             "/channels/from/" + std::to_string(k), "use 1 or 2");
+                             "/channels/from/" + std::to_string(k), more);
             if (m.to[k] > targetChannels)
                 return Error("route.channels",
                              "the destination has " + std::to_string(targetChannels) + " channels",
-                             "/channels/to/" + std::to_string(k), "use 1 or 2");
+                             "/channels/to/" + std::to_string(k),
+                             r.to.fx ? "a key takes 1 and 2; pins choose the plug-in's" : more);
         }
         const bool identity =
             m.from.empty() || (m.from == std::vector<int>{1, 2} && m.to == std::vector<int>{1, 2});

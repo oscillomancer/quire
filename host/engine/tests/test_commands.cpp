@@ -50,6 +50,47 @@ double peak(const fs::path& path) {
 }
 }  // namespace
 
+TEST_CASE("auxiliary channels over the bus: channels, routes to 3/4, key pins (ADR-0020)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Source"})");
+    run(bus, "track.add", R"({"name":"Bus","type":"buss"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "fx.add", R"({"track":"tr_2","plugin":"com.suppleaudio.test.keymix"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    run(bus, "track.set", R"({"track":"tr_1","parent_send":false})");
+    // A stereo buss has no channel 3.
+    auto narrow = bus.execute(
+        {"route.add", j(R"({"from":"tr_1","to":"tr_2","channels":{"from":[1,2],"to":[3,4]}})"),
+         kOrigin});
+    REQUIRE_FALSE(narrow);
+    CHECK(narrow.error().code == "route.channels");
+    CHECK(narrow.error().path == "/args/channels/to/0");
+    auto pins = bus.execute({"fx.set", j(R"({"fx":"fx_2","pins":{"key":[3,4]}})"), kOrigin});
+    REQUIRE_FALSE(pins);
+    CHECK(pins.error().code == "fx.pins");
+    // Four channels: the route lands on 3/4, unheard until a pin keys from it.
+    run(bus, "track.set", R"({"track":"tr_2","channels":4})");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_2"))->channels == 4);
+    run(bus, "route.add", R"({"from":"tr_1","to":"tr_2","channels":{"from":[1,2],"to":[3,4]}})");
+    const double unkeyed =
+        peak(run(bus, "render.mix", R"({"name":"unkeyed","end_beat":2})")["path"].asString());
+    CHECK(unkeyed < 1e-6);
+    run(bus, "fx.set", R"({"fx":"fx_2","pins":{"key":[3,4]}})");
+    CHECK(app->head().fx.find(*model::Id::parse("fx_2"))->pins.key == std::vector<int>{3, 4});
+    const double keyed =
+        peak(run(bus, "render.mix", R"({"name":"keyed","end_beat":2})")["path"].asString());
+    CHECK(keyed > 0.05);
+    // {} restores the default pins.
+    run(bus, "fx.set", R"({"fx":"fx_2","pins":{}})");
+    CHECK(app->head().fx.find(*model::Id::parse("fx_2"))->pins.empty());
+    // Strips stay within 1-8 channels.
+    CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":9})"), kOrigin}));
+}
+
 TEST_CASE("route sends through a gain bus, rejects cycles and replays in a branch merge") {
     Workdir dir;
     auto app = makeApp(dir.path);

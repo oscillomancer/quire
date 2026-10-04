@@ -65,6 +65,32 @@ struct Delay {
     }
 };
 
+// A fixed-length delay for one channel (an auxiliary channel, ADR-0020).
+struct MonoDelay {
+    std::vector<float> buf;
+    std::size_t pos = 0;
+    std::int64_t length = 0;
+    void init(std::int64_t n) {
+        length = n;
+        buf.assign(static_cast<std::size_t>(std::max<std::int64_t>(n, 1)), 0.0f);
+        pos = 0;
+    }
+    void clear() SUPPLE_RT {
+        std::fill(buf.begin(), buf.end(), 0.0f);
+        pos = 0;
+    }
+    void process(float* x, std::uint32_t frames) SUPPLE_RT {
+        if (length == 0) return;
+        const auto n = static_cast<std::size_t>(length);
+        for (std::uint32_t i = 0; i < frames; ++i) {
+            const float d = buf[pos];
+            buf[pos] = x[i];
+            x[i] = d;
+            pos = pos + 1 == n ? 0 : pos + 1;
+        }
+    }
+};
+
 struct Stereo {
     std::vector<float> l, r;
     void init(std::size_t n) {
@@ -210,6 +236,19 @@ struct Edge {
     Stereo encoded;
     Delay delay;
     Stereo tmp;
+    // Channel pairs that touch a strip's auxiliary channels (ADR-0020, 0-based
+    // channels: 0/1 the main pair): linear, at the route's level, mute and
+    // polarity (its envelopes act on the main pair). A source's auxiliary
+    // channel is read after its chain; a main channel at the route's tap
+    // (post fader: before the encode, at the strip's level). `auxOnly`: the
+    // route maps nothing between main pairs.
+    struct AuxLink {
+        int from = 0, to = 0;
+        MonoDelay delay;
+    };
+    std::vector<AuxLink> auxLinks;
+    bool auxOnly = false;
+    std::vector<float> auxTmp;
     // A frontier edge (anticipative source, live target): its source's tap
     // arrives through a ring, and the callback copies it here for the target.
     bool frontier = false;
@@ -252,6 +291,15 @@ struct Stage {
     bool keyed = false;
     std::uint32_t keyChannels = 0;  // the plug-in's (1: the key is mixed to mono)
     Stereo key;
+    // Pins (ADR-0020): the track channels (0-based) the plug-in reads, writes
+    // (-1: none) and keys from. Pinned stages, and every stage of a strip with
+    // auxiliary channels, delay the channels they do not write by their
+    // latency (chanDelay, one per track channel).
+    int inPin[2] = {0, 1}, outPin[2] = {0, 1};
+    std::vector<int> keyPins;
+    bool pinned = false;
+    std::vector<MonoDelay> chanDelay;
+    Stereo pinBuf;
     std::vector<host::Event> blockEvents;
     std::vector<host::OutputEvent> outStorage;
     host::OutputEvents outEvents;
@@ -302,6 +350,16 @@ struct TakeChain {
 
 struct Node {
     Id id;
+    // Auxiliary channels 3.. (ADR-0020): summed from routes, read and written
+    // by plug-in pins, read by routes after the chain; never faded, panned or
+    // sent to the parent.
+    int auxCount = 0;
+    std::vector<std::vector<float>> aux;
+    float* channel(int c) SUPPLE_RT {
+        return c == 0   ? sum.l.data()
+               : c == 1 ? sum.r.data()
+                        : aux[static_cast<std::size_t>(c - 2)].data();
+    }
     std::vector<std::size_t> in;   // incoming edges, in summation order
     std::vector<std::size_t> out;  // source-owned send encoders
     std::vector<Stage> chain;

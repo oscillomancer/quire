@@ -363,7 +363,7 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     channels_ = &details_->emplace<ui::Button>("routing.channels", "L/R", [this] {
         if (!selected_ || !channels_) return;
         struct Choice {
-            const char* label;
+            std::string label;
             std::vector<int> from, to;
             bool mono;
         };
@@ -374,8 +374,30 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
                                           {"Left only", {1}, {1}, false},
                                           {"Right only", {2}, {2}, false},
                                           {"Mono (sum)", {}, {}, true}};
+        std::vector<Choice> choices(std::begin(kChoices), std::end(kChoices));
+        // Pairs that reach auxiliary channels (ADR-0020), as far as the source
+        // and the destination have them.
+        for (const auto& x : model_.sends) {
+            if (x.id != *selected_) continue;
+            auto channelsOf = [&](const std::string& id) {
+                const auto tid = model::Id::parse(id);
+                const model::Track* t = tid ? app_.head().tracks.find(*tid) : nullptr;
+                return t ? std::max(2, t->channels) : 2;
+            };
+            const int from = channelsOf(x.from), to = channelsOf(x.to);
+            for (int a = 1; a + 1 <= from; a += 2)
+                for (int b = 1; b + 1 <= to; b += 2) {
+                    if (a == 1 && b == 1) continue;
+                    choices.push_back({std::to_string(a) + "/" + std::to_string(a + 1) +
+                                           " \u2192 " + std::to_string(b) + "/" +
+                                           std::to_string(b + 1),
+                                       {a, a + 1},
+                                       {b, b + 1},
+                                       false});
+                }
+        }
         std::vector<ui::MenuItem> items;
-        for (const Choice& c : kChoices) {
+        for (const Choice& c : choices) {
             ui::MenuItem m;
             m.label = c.label;
             m.run = [this, c] {
@@ -445,6 +467,10 @@ std::string RoutingMatrix::channelsText(const MatrixModel::Send& x) {
     if (x.mapFrom == V{2, 2} && x.mapTo == V{1, 2}) return "R to both";
     if (x.mapFrom == V{1} && x.mapTo == V{1}) return "L only";
     if (x.mapFrom == V{2} && x.mapTo == V{2}) return "R only";
+    if (x.mapFrom.size() == 2 && x.mapTo.size() == 2 && x.mapFrom[1] == x.mapFrom[0] + 1 &&
+        x.mapTo[1] == x.mapTo[0] + 1)  // a pair to a pair (auxiliary channels, ADR-0020)
+        return std::to_string(x.mapFrom[0]) + "/" + std::to_string(x.mapFrom[1]) + "\u2192" +
+               std::to_string(x.mapTo[0]) + "/" + std::to_string(x.mapTo[1]);
     return "Custom map";
 }
 

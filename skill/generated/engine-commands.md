@@ -2475,9 +2475,9 @@ Result:
 
 ## `fx.set@1`
 
-Set instance options: bypass, offline, wet (%), label, isolation.
+Set instance options: bypass, offline, wet (%), label, isolation, pins.
 
-isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process).
+isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). pins: which of the track's channels (1-based; track.set channels adds 3-8) the plugin reads ({in: [l, r]}), writes ({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin with a sidechain input); {} restores 1/2 in and out.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2491,6 +2491,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `wet` | value | % | 0.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `label` | string |  |  |  |  |
 | `isolation` | string |  |  |  |  |
+| `pins` | object |  |  |  |  |
 
 ### Result
 
@@ -2512,6 +2513,25 @@ Kind: `edit`. Exposure: `mcp-tool`.
 {
   "fx": "fx_1",
   "wet": "50%"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Key the plugin from channels 3/4** (`song_with_keymix_4ch`)
+
+```json
+{
+  "fx": "fx_1",
+  "pins": {
+    "key": [3, 4]
+  }
 }
 
 ```
@@ -6819,6 +6839,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `monitor` | string |  |  |  |  |
 | `parent_send` | boolean |  |  |  | The implicit send to the parent buss/master (off: only explicit sends leave the strip) |
 | `timebase` | string |  |  |  | What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now |
+| `channels` | integer |  | 1.0..8.0 |  | 1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 for routes and plug-in pins (a detector on 3/4), outside the fader, pan and parent send |
 
 ### Result
 
@@ -6896,6 +6917,23 @@ Result:
   "record_midi": "*",
   "midi_channel": 1,
   "monitor": "auto"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Four channels: a key signal can arrive on 3/4** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "channels": 4
 }
 
 ```

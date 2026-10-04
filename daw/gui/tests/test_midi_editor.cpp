@@ -403,6 +403,20 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     f.root->frame(false);
     CHECK(m.sendsAt(row(keys), col(drums)).front()->mapTo == std::vector<int>{2, 1});
     CHECK(f.root->find("routing.channels")->valueText() == "Swap R/L");
+    // A 4-channel destination offers its aux pair (ADR-0020): row 7, "1/2 -> 3/4".
+    f.exec("track.set", R"({"track":")" + drums + R"(","channels":4})");
+    matrix.sync();
+    REQUIRE(f.root->click("routing.channels"));
+    f.root->frame(false);
+    menu = f.root->find("routing.channels.menu");
+    REQUIRE(menu);
+    const ui::Point auxRow{menu->bounds().x + 30, menu->bounds().y + 7 * 26 + 13};
+    f.root->pointer({ui::PointerEvent::Type::Move, auxRow});
+    f.root->pointer({ui::PointerEvent::Type::Down, auxRow, 1});
+    f.root->pointer({ui::PointerEvent::Type::Up, auxRow, 1});
+    f.root->frame(false);
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->mapTo == std::vector<int>{3, 4});
+    CHECK(f.root->find("routing.channels")->valueText() == "1/2\u21923/4");
     REQUIRE(f.root->click("routing.phase"));
     CHECK(m.sendsAt(row(keys), col(drums)).front()->phaseInvert);
     f.snapshot("routing-channels.png");

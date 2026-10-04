@@ -79,6 +79,8 @@ struct Track {
     std::string name, color, notes;
     std::optional<Id> parent;  // empty exactly for masters
     std::vector<Id> children;
+    // 1-2: the strip's main pair; 3-8 add auxiliary channels (ADR-0020) that
+    // routes and plug-in pins address, outside the fader, pan and parent send.
     int channels = 2;
     double volumeDb = 0.0;
     double pan = 0.0;  // % -100..100
@@ -164,8 +166,18 @@ struct PluginRef {
     std::string id, name, vendor, version;
 };
 
+// Which of its track's channels (1-based, ADR-0020) a plug-in reads and
+// writes: its main input pair, its main output pair, and its sidechain (key)
+// input — a detector fed from, say, channels 3/4. Empty: 1/2 in and out, the
+// key from key routes only.
+struct PinMap {
+    std::vector<int> in, out, key;
+    bool empty() const { return in.empty() && out.empty() && key.empty(); }
+};
+
 struct FxInstance {
     PluginRef plugin;
+    PinMap pins;
     std::string label;
     bool bypass = false, offline = false;
     double wet = 100.0;  // %

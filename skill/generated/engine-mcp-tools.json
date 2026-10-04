@@ -1809,8 +1809,8 @@
   },
   {
     "name": "fx_set",
-    "title": "Set instance options: bypass, offline, wet (%), label, isolation.",
-    "description": "Set instance options: bypass, offline, wet (%), label, isolation. isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). See describe for errors and examples.",
+    "title": "Set instance options: bypass, offline, wet (%), label, isolation, pins.",
+    "description": "Set instance options: bypass, offline, wet (%), label, isolation, pins. isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). pins: which of the track's channels (1-based; track.set channels adds 3-8) the plugin reads ({in: [l, r]}), writes ({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin with a sidechain input); {} restores 1/2 in and out. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_set_args",
@@ -1848,6 +1848,40 @@
         "isolation": {
           "type": "string",
           "enum": ["inherit", "in_process", "shared_bridge", "dedicated"]
+        },
+        "pins": {
+          "type": "object",
+          "title": "pin_map",
+          "properties": {
+            "in": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 8.0
+              },
+              "default": []
+            },
+            "out": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 8.0
+              },
+              "default": []
+            },
+            "key": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 8.0
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": ["fx"],
@@ -5174,6 +5208,12 @@
           "type": "string",
           "enum": ["project", "time", "beats", "beats_position"],
           "description": "What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now"
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1.0,
+          "maximum": 8.0,
+          "description": "1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 for routes and plug-in pins (a detector on 3/4), outside the fader, pan and parent send"
         }
       },
       "required": ["track"],

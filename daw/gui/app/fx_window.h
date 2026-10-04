@@ -67,6 +67,10 @@ class FxWindow {
     // isolated), offline, and failed. Pure, so the composition is testable
     // without an engine that can crash a bridge.
     static std::string badgeText(const model::FxInstance& fx, bool failed);
+    // The pins button's text (ADR-0020): "pins 1/2", "3/4 → 1/2", "key 3/4".
+    static std::string pinsText(const model::PinMap& pins);
+    // The pins menu of a track-chain effect: input pair, output pair, key.
+    void openPinsMenu(model::Id fx, const ui::Rect& anchor);
     // Engine-reported failures (engine.status failed_fx), by effect id.
     const std::set<std::string>& failed() const { return failed_; }
     void select(model::Id fx);

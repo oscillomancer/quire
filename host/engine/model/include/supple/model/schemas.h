@@ -14,6 +14,7 @@ namespace supple::model {
 schema::Schema<StripType> stripTypeSchema();
 schema::Schema<RoutePan> routePanSchema();
 schema::Schema<Timebase> timebaseSchema();            // time | beats | beats_position
+schema::Schema<PinMap> pinMapSchema();                // {in, out, key}: 1-based track channels
 schema::Schema<TrackTimebase> trackTimebaseSchema();  // project | time | beats | beats_position
 schema::Schema<ItemTimebase> itemTimebaseSchema();    // track | time | beats | beats_position
 schema::Schema<Id> idSchema();                        // "tr_3"

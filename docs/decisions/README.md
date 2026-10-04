@@ -28,3 +28,4 @@ Format: Status · Context · Decision · Consequences · Alternatives considered
 | [0017](0017-vst3-hosting.md) | VST3 hosting | Accepted |
 | [0018](0018-sidechain-inputs.md) | Sidechain inputs | Accepted |
 | [0019](0019-console9-strips.md) | Typed strips with Console 9 summing | Accepted |
+| [0020](0020-auxiliary-channels.md) | Auxiliary channels and plug-in pins | Accepted |

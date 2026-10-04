@@ -505,6 +505,43 @@ TEST_CASE("the FX chain badges each effect's state, and a failed one offers a re
     CHECK(f.root->find("fx.restart." + fx.str()) == nullptr);
 }
 
+TEST_CASE(
+    "the FX chain's pins choose a plugin's channels on a strip with aux channels (ADR-0020)") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.addTrack("Guitar");
+    REQUIRE(f.fx->open(track));
+    f.click("fx.add");
+    f.type("Plumb");
+    f.key("Return");
+    REQUIRE(f.fx->chain().size() == 1);
+    const model::Id fx = f.fx->chain()[0];
+    // A stereo strip: no pins button.
+    CHECK(f.root->find("fx.pins." + fx.str()) == nullptr);
+    REQUIRE(f.run("track.set", f.args({{"track", track.str()}, {"channels", 4}})));
+    f.fx->refresh();
+    f.frame();
+    REQUIRE(f.root->find("fx.pins." + fx.str()));
+    CHECK(f.root->find("fx.pins." + fx.str())->valueText() == "pins 1/2");
+    // Rows: In 1/2, In 3/4, rule, Out 1/2, Out 3/4, rule, Key (routes), Key 1/2, Key 3/4.
+    auto pick = [&](int row) {
+        REQUIRE(f.click("fx.pins." + fx.str()));
+        ui::Node* menu = f.root->find("fx.pins.menu");
+        REQUIRE(menu);
+        const ui::Point p{menu->bounds().x + 30, menu->bounds().y + row * 26.0f + 13};
+        f.root->pointer({ui::PointerEvent::Type::Move, p});
+        f.root->pointer({ui::PointerEvent::Type::Down, p, 1});
+        f.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+        f.frame();
+    };
+    pick(1);
+    CHECK(f.app->head().fx.find(fx)->pins.in == std::vector<int>{3, 4});
+    CHECK(f.root->find("fx.pins." + fx.str())->valueText() == "3/4 → 1/2");
+    pick(0);  // back to 1/2: stored as the default
+    CHECK(f.app->head().fx.find(fx)->pins.empty());
+    CHECK(gui::FxWindow::pinsText({{3, 4}, {1, 2}, {3, 4}}) == "3/4 → 1/2 · key 3/4");
+}
+
 TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists its file") {
     Fixture f;
     if (!f.ok) return;

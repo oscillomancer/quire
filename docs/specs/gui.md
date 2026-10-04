@@ -296,7 +296,18 @@ attributed.
 - **Macros:** a sequence of actions (or a Lua script) run as one batch (one
   undo step), with typed prompts.
 - **Toolbars and menus:** built from actions; customizable; stored in user
-  config.
+  config (`menus.json`, supple.menus/1.0). Edited in the app: Ctrl+T in the
+  actions list puts the selected action on the toolbar (or takes it off),
+  Ctrl+M adds it to a menu or removes it; a toolbar button's right-click menu
+  moves or removes it, or resets menus and toolbar.
+- **Mouse modifiers:** a map per context of the arrange view — item drag
+  (move, copy, slip; each also off the grid), item edge (trim, stretch), item
+  click (select, toggle, extend), fade handle (drag, cycle shape), empty-lane
+  drag (select, add), automation lane (edit, delete), ruler markers/regions
+  (move, remove) and tempo points (toggle ramp) — from each modifier
+  combination to a behaviour. The defaults are the built-in gestures;
+  `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
+  Edit > Mouse modifiers edits the live map.
 
 ## 7. Visual identity
 

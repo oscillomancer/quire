@@ -1980,6 +1980,91 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
         }
 }
 
+TEST_CASE("auxiliary channels play in real time as offline, rendered ahead or live (ADR-0020)" *
+          doctest::description("rt")) {
+    // synthSession's track feeds channels 3/4 of a 4-channel buss whose key
+    // mix keys from them. Monitoring a channel under the buss makes the buss
+    // live; its aux source must then play live too (aux links stay within
+    // one executor).
+    for (const bool monitored : {false, true})
+        for (const EngineOptions& options :
+             {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}}) {
+            INFO("monitored " << monitored << ", anticipative " << options.anticipative
+                              << ", workers " << options.workers);
+            model::Session s = synthSession(-3.0, "com.suppleaudio.test.gain");
+            {
+                model::EditTxn t(s, 2);
+                auto project = t.project();
+                project.console9 = true;
+                project.seed = 4321;
+                t.setProject(project);
+                Id source;
+                for (const auto& e : s.tracks)
+                    if (e.id != kMaster) source = e.id;
+                model::Track bus;
+                bus.type = model::StripType::Buss;
+                bus.parent = kMaster;
+                bus.channels = 4;
+                const Id busId = t.create(bus);
+                t.modify<model::Track>(kMaster, [&](auto& m) { m.children.push_back(busId); });
+                model::FxInstance fx;
+                fx.plugin.id = "com.suppleaudio.test.keymix";
+                fx.pins.key = {3, 4};
+                const Id f = t.create(fx);
+                t.modify<model::Track>(busId, [&](model::Track& x) { x.chain.push_back(f); });
+                model::Track mon;
+                mon.name = "Mon";
+                mon.parent = busId;
+                const Id monId = t.create(mon);
+                t.modify<model::Track>(busId, [&](auto& b) { b.children.push_back(monId); });
+                model::Route aux;
+                aux.from.track = source;
+                aux.to.track = busId;
+                aux.tap = model::Tap::PreFader;
+                aux.volumeDb = -6;
+                aux.channels = {{1, 2}, {3, 4}};
+                t.create(aux);
+                s = t.commit().value();
+            }
+            if (monitored) s = monitoring(s);  // the last channel: "Mon", under the buss
+            auto pool = makePool();
+            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+            REQUIRE(offline.warnings.empty());
+            auto rtPool = makePool();
+            MediaCache media;
+            DummyBackend backend(
+                {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+            Engine engine(rtPool, media, options);
+            REQUIRE(
+                engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
+            REQUIRE(engine.load(s).ok());
+            if (options.anticipative) REQUIRE(engine.awaitPlan());
+            engine.play();
+            if (options.anticipative && !monitored)
+                runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+            else if (options.anticipative) {
+                engine.awaitTransport();
+                for (int i = 0; i < (48000 * 2 + 4096) / 128; i += 16) {
+                    REQUIRE(engine.awaitRendered(4096));
+                    backend.run(16);
+                }
+            } else {
+                backend.run((48000 * 2 + 4096) / 128);
+            }
+            engine.stop();
+            CHECK(engine.processErrors() == 0);
+            const std::uint32_t L = engine.outputLatency();
+            const auto& cap = backend.capture();
+            CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+            CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
+            double energy = 0;
+            for (std::size_t i = 0; i < 96000; ++i)
+                energy += static_cast<double>(offline.audio.channels[0][i]) *
+                          static_cast<double>(offline.audio.channels[0][i]);
+            CHECK(energy > 1.0);
+        }
+}
+
 TEST_CASE("multiple masters: real-time main output is independent of later roots" *
           doctest::description("rt")) {
     model::EditTxn t(synthSession(), 2);

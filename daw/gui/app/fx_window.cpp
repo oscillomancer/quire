@@ -9,6 +9,7 @@
 #include "app_actions.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
@@ -588,7 +589,100 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         char wetText[24];
         std::snprintf(wetText, sizeof wetText, "wet %3.0f%%", inst->wet);
         wetLabel->setText(wetText);
+        // Pins (ADR-0020): shown where there is a choice — a strip with
+        // auxiliary channels, or pins already set.
+        const auto owner = input ? std::nullopt : model::trackOfFx(app_.head(), fx);
+        const model::Track* tr = owner ? app_.head().tracks.find(*owner) : nullptr;
+        if (tr && (tr->channels > 2 || !inst->pins.empty())) {
+            auto& pins = l2.emplace<ui::Button>(prefix + "pins." + id, pinsText(inst->pins));
+            pins.onClick = [this, fx, at = &pins] { openPinsMenu(fx, at->bounds()); };
+        }
     }
+}
+
+std::string FxWindow::pinsText(const model::PinMap& pins) {
+    auto pair = [](const std::vector<int>& p) {
+        if (p.empty()) return std::string("1/2");
+        std::string s = std::to_string(p[0]);
+        for (std::size_t i = 1; i < p.size(); ++i) s += "/" + std::to_string(p[i]);
+        return s;
+    };
+    std::string text = pins.in.empty() && pins.out.empty()
+                           ? "pins 1/2"
+                           : pair(pins.in) + " \u2192 " + pair(pins.out);
+    if (!pins.key.empty()) text += " \u00b7 key " + pair(pins.key);
+    return text;
+}
+
+void FxWindow::openPinsMenu(model::Id fx, const ui::Rect& anchor) {
+    const model::Session& s = app_.head();
+    const model::FxInstance* inst = s.fx.find(fx);
+    const auto owner = model::trackOfFx(s, fx);
+    if (!inst || !owner) return;
+    const int channels = std::max(2, s.tracks.find(*owner)->channels);
+    const model::PinMap now = inst->pins;
+    auto set = [this, fx](model::PinMap pins) {
+        json::Value args = json::Value::object(), p = json::Value::object();
+        args["fx"] = fx.str();
+        for (auto [list, name] :
+             {std::pair{&pins.in, "in"}, {&pins.out, "out"}, {&pins.key, "key"}}) {
+            if (list->empty()) continue;
+            json::Value a = json::Value::array();
+            for (int c : *list) a.push_back(static_cast<std::int64_t>(c));
+            p[name] = std::move(a);
+        }
+        args["pins"] = std::move(p);
+        if (dispatch("fx.set", std::move(args))) refresh();
+    };
+    // A pair as stored: 1/2 is the default (empty).
+    auto pairOf = [](int first) {
+        return first == 1 ? std::vector<int>{} : std::vector<int>{first, first + 1};
+    };
+    std::vector<ui::MenuItem> items;
+    auto label = [](const char* what, int first) {
+        return std::string(what) + " " + std::to_string(first) + "/" + std::to_string(first + 1);
+    };
+    for (const char* part : {"In", "Out"}) {
+        for (int first = 1; first + 1 <= channels; first += 2) {
+            ui::MenuItem m;
+            m.label = label(part, first);
+            const std::vector<int>& cur = part[0] == 'I' ? now.in : now.out;
+            m.checked = cur == pairOf(first);
+            m.run = [set, now, first, pairOf, in = part[0] == 'I'] {
+                model::PinMap p = now;
+                (in ? p.in : p.out) = pairOf(first);
+                set(p);
+            };
+            items.push_back(std::move(m));
+        }
+        items.push_back({"", "", {}, true, true});
+    }
+    // Key pins need a sidechain input (when the engine runs it, it knows).
+    const host::Instance* running = app_.instanceOf(fx);
+    const bool keyable = !running || running->sidechainChannels() > 0;
+    ui::MenuItem routes;
+    routes.label = "Key: from key routes only";
+    routes.checked = now.key.empty();
+    routes.run = [set, now] {
+        model::PinMap p = now;
+        p.key.clear();
+        set(p);
+    };
+    items.push_back(std::move(routes));
+    for (int first = 1; first + 1 <= channels; first += 2) {
+        ui::MenuItem m;
+        m.label = label("Key", first);
+        m.checked = now.key == std::vector<int>{first, first + 1};
+        m.enabled = keyable;
+        m.run = [set, now, first] {
+            model::PinMap p = now;
+            p.key = {first, first + 1};
+            set(p);
+        };
+        items.push_back(std::move(m));
+    }
+    root_.openPopup(ui::makeMenu("fx.pins.menu", std::move(items), [this] { root_.closePopup(); }),
+                    anchor, ui::Placement::Below);
 }
 
 void FxWindow::buildParams(ui::Node& body) {

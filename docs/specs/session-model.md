@@ -104,7 +104,7 @@ Fields:
 | `name`, `color`, `notes` | string | |
 | `parent` | track id or null | a buss or master; null exactly for masters (the roots) |
 | `children` | [track id] | order among siblings; empty on channels |
-| `channels` | int | 1 or 2 (the engine is stereo end to end; a mono channel is placed by its pan) |
+| `channels` | int | 1-8 (busses and masters ≥ 2): 1/2 are the main pair (fader, pan, Console 9, meters, parent send); 3-8 are auxiliary channels that routes and plug-in pins address, never faded, panned or sent to the parent (ADR-0020). A mono channel is placed by its pan |
 | `volume` | dB (−inf..+12) | the fader: C9 Channel Fader on channels/busses (0 dB = native unity; +12.04 is the native top, clamped to +12), plain gain on masters |
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
@@ -156,8 +156,11 @@ the overlap), `takes` [tk id], `active_take`, `snap_offset`, `group`,
 version}`, `label` (instance name), `bypass` (processing skipped, latency
 kept), `offline` (unloaded; audio passes through), `wet` % (dry/wet),
 `isolation` (`inherit|in_process|shared_bridge|dedicated`), `oversampling`
-(1, 2, 4, 8), `pins` `{inputs: [[track channel, …] per plugin pin], outputs:
-[...]}` (default: identity on the first N channels), `parallel` (bool: run in
+(1, 2, 4, 8), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
+channels (1-based) a track-chain plug-in reads, writes and keys from (a
+detector on 3/4); one entry feeds both pins (in, key) or takes the left output
+(out); empty: 1/2 in and out, the key from key routes only (ADR-0020),
+`parallel` (bool: run in
 parallel with the previous instance in the chain, outputs summed), `pdc`
 (`compensate|ignore`), `auto_bypass_on_silence` (bool), `container` (for
 `plugin.format == "container"`: a nested `chain` array plus its own pins),
@@ -180,7 +183,7 @@ rendered).
 | `to` | `{track: id}`, `{fx: id}` (a plug-in's key, ADR-0018) or `{hw_output: {channels: [..]}}` |
 | `tap` | `post_fader` (default), `pre_fader` (post-FX), `pre_fx` |
 | `volume` dB, `pan` % or `follow` (default: the strip's pan), `mute`, `phase_invert`, `mono` | into a buss/master: realized by the send's own C9 Channel (ADR-0019 §3) |
-| `channels` | `{from: [..], to: [..]}` channel mapping (e.g. [1,2] → [3,4] for a sidechain) |
+| `channels` | `{from: [..], to: [..]}` channel mapping, 1-based up to each strip's channels (e.g. [1,2] → [3,4] for a detector on 3/4). Main pairs map the encoded send; pairs touching auxiliary channels are linear links at the route's level, mute and polarity (ADR-0020) |
 | `midi` | `{from_channel: all|1..16, to_channel: original|1..16}` or null (audio only) |
 
 Folder/master sends are the tracks' `parent_send`, not routes. Record inputs
@@ -204,9 +207,16 @@ envelope's time domain, sorted, with `shape` `linear|square|slow|fast_start|fast
 
 Values are in the target's physical unit (dB, %, Hz for stock plugin
 params, CLAP value for third-party params); interpolation happens in the
-target's normalized domain (ADR-0010). Automation items `ai_*`: `{position,
-length, pool (shared point data id), loop, stretch, points (when unpooled),
-baseline, amplitude}`.
+target's normalized domain (ADR-0010). Automation items `ai_*` (top level,
+`automation_items`, written only when there are any): `{envelope, position,
+length, source_length (beats), loop, pool (0: none; items of one pool share
+points and source_length), points (beats from the item's start), baseline,
+amplitude, name}`. An item replaces the envelope over its span: its points
+repeat every `source_length` while `loop`, values play as `baseline +
+amplitude × (value − baseline)`, a later item cuts an earlier one it
+overlaps, and the envelope steps at each edge (gap log #28). Take envelopes
+(`{take: id, param}`) use item-relative beats and move with the item; they
+take no automation items.
 
 ### 1.10 Rulers and render settings
 
@@ -428,14 +438,22 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `route.set`, `route.list` (q).
 - **automation**: `env.add {target}`, `env.remove`, `env.set {mode, active,
   …}`, `env.points.set {env, points, range?}`, `env.points.add`,
-  `env.points.remove {range}`, `env.item.add`, …
+  `env.points.remove {range}`, `env.add {take, param}` (take envelopes);
+  automation items `autoitem.add {env, position|bar, length, points?,
+  source_length, loop}` (no points: captures what plays there),
+  `autoitem.set` (points and source_length reach the pool),
+  `autoitem.duplicate {pooled}`, `autoitem.unpool`, `autoitem.remove`,
+  `autoitem.list` (q).
 - **rulers**: `marker.add/remove/set`, `region.add/remove/set`.
 - **transport** (a): `transport.play`, `transport.stop`, `transport.pause`,
   `transport.record`, `transport.seek {pos}`, `transport.loop {range}`,
-  `transport.get` (q).
+  `transport.punch {start, end}`, `transport.metronome {count_in_bars,
+  count_in_playback, …}` (a count-in before recording), `transport.get` (q).
 - **render** (a): `render.mix {master}` (default tr_0), `render.stems`, `render.regions` (matrix),
-  `render.items`, `render.dry-run` (q: resolved file list), `render.job.*`
-  (queue).
+  `render.items`, `render.dry-run` (q: resolved file list), `render.job.*`;
+  `format` (wav|flac), `secondary` (a second file in another format/bit depth
+  from the same render); `render.queue.add/list/remove/run` (renders queued
+  with their arguments, run in order).
 - **analysis** (q): `analyze.render {render}`, `analyze.track {track, range}`
   (renders the track's output offline, then analyzes), `analyze.compare`,
   `analyze.masking {masker_track, maskee_track, range}`.

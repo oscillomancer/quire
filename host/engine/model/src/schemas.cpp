@@ -383,7 +383,7 @@ const Schema<Track>& schemaOf<Track>() {
         b.field("parent", &Track::parent, idSchema());
         b.field("children", &Track::children, ids());
         dflt(b, d.children);
-        b.field("channels", &Track::channels, intS().range(1, 2));
+        b.field("channels", &Track::channels, intS().range(1, 8));
         dflt(b, d.channels);
         b.field("volume_db", &Track::volumeDb, num().range(kSilenceDb, 12));
         dflt(b, d.volumeDb);
@@ -564,6 +564,19 @@ const Schema<MidiSource>& schemaOf<MidiSource>() {
     return s;
 }
 
+Schema<PinMap> pinMapSchema() {
+    const PinMap d;
+    auto b = schema::object<PinMap>("pin_map");
+    auto pins = schema::arrayOf(intS().range(1, 8));
+    b.field("in", &PinMap::in, pins);
+    dflt(b, d.in);
+    b.field("out", &PinMap::out, pins);
+    dflt(b, d.out);
+    b.field("key", &PinMap::key, pins);
+    dflt(b, d.key);
+    return b.build();
+}
+
 template <>
 const Schema<FxInstance>& schemaOf<FxInstance>() {
     static const Schema<FxInstance> s = [] {
@@ -583,6 +596,8 @@ const Schema<FxInstance>& schemaOf<FxInstance>() {
                           .build();
         ObjectBuilder<FxInstance> b = schema::object<FxInstance>("fx");
         b.field("plugin", &FxInstance::plugin, plugin);
+        b.field("pins", &FxInstance::pins, pinMapSchema());
+        dflt(b, d.pins);
         b.field("label", &FxInstance::label, str());
         dflt(b, d.label);
         b.field("bypass", &FxInstance::bypass, boolean());

@@ -845,6 +845,100 @@ TEST_CASE("a key route feeds a plug-in's sidechain, aligned with its stage (ADR-
     }
 }
 
+TEST_CASE("auxiliary channels: a route to 3/4 keys a plug-in through its pins (ADR-0020)") {
+    // A plays a sine (not to its parent); B is a 4-channel buss with a key mix
+    // (out = main + key). Keyed by a key route (the reference), B outputs A's
+    // pre-fader signal through the route's centre pan law; keyed from B's
+    // channels 3/4, fed by a route mapping A's 1/2 there, the same signal
+    // arrives linear — so aux == reference / kCentre sample for sample, with
+    // latency at the source, before the keyed stage, or both.
+    constexpr const char* kKeyMix = "com.suppleaudio.test.keymix";
+    const json::Value latent =
+        json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+            .value();
+    for (int layout = 0; layout < 4; ++layout) {
+        CAPTURE(layout);
+        auto pool = makePool();
+        auto build = [&](bool aux) {
+            model::EditTxn t(model::Session::create({.console9 = false}), 1);
+            const Id b = addTrack(t, "B", kMaster, model::StripType::Buss);
+            const Id a = addTrack(t, "A");
+            t.modify<model::Track>(a, [](model::Track& x) { x.parentSend.enabled = false; });
+            t.modify<model::Track>(b, [](model::Track& x) { x.channels = 4; });
+            addFx(t, a, kSine);
+            if (layout & 1) addFx(t, a, kGain, latent);
+            if (layout & 2) addFx(t, b, kGain, latent);
+            const Id keyMix = addFx(t, b, kKeyMix);
+            addNote(t, a, 0.0, 1.0, 69);
+            model::Route route;
+            route.from.track = a;
+            route.tap = model::Tap::PreFader;
+            if (aux) {
+                route.to.track = b;
+                route.channels = {{1, 2}, {3, 4}};
+                t.modify<model::FxInstance>(keyMix,
+                                            [](model::FxInstance& f) { f.pins.key = {3, 4}; });
+            } else {
+                route.to.fx = keyMix;
+            }
+            t.create(route);
+            return commit(t);
+        };
+        const auto ref = render(build(false), pool, 0.5);
+        const auto aux = render(build(true), pool, 0.5);
+        REQUIRE(aux.warnings.empty());
+        REQUIRE(ref.audio.frames() == aux.audio.frames());
+        double worst = 0, energy = 0;
+        for (std::size_t i = 0; i < ref.audio.frames(); ++i) {
+            const double r = static_cast<double>(ref.audio.channels[0][i]);
+            const double x = static_cast<double>(aux.audio.channels[0][i]);
+            worst = std::max(worst, std::fabs(x - r / kCentre));
+            energy += x * x;
+        }
+        CHECK(energy > 1.0);
+        CHECK(worst < 1e-5);
+    }
+}
+
+TEST_CASE("auxiliary channels stay in their strip; pins move them to the main pair (ADR-0020)") {
+    auto pool = makePool();
+    // A's 1/2 into B's 3/4; B (4 channels) has `stage` pinned or not.
+    auto build = [](std::optional<model::PinMap> pins, int channels = 4) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id b = addTrack(t, "B", kMaster, model::StripType::Buss);
+        const Id a = addTrack(t, "A");
+        t.modify<model::Track>(a, [](model::Track& x) { x.parentSend.enabled = false; });
+        t.modify<model::Track>(b, [&](model::Track& x) { x.channels = channels; });
+        addFx(t, a, kSine);
+        addNote(t, a, 0.0, 1.0, 69);
+        if (pins) {
+            const Id g = addFx(t, b, kGain);
+            t.modify<model::FxInstance>(g, [&](model::FxInstance& f) { f.pins = *pins; });
+        }
+        model::Route route;
+        route.from.track = a;
+        route.to.track = b;
+        route.channels = {{1, 2}, {3, 4}};
+        t.create(route);
+        return commit(t);
+    };
+    // Nothing reads 3/4: the buss's parent hears nothing.
+    auto silent = render(build(std::nullopt), pool, 0.5);
+    REQUIRE(silent.warnings.empty());
+    CHECK(peak(silent.audio.channels[0]) < 1e-9);
+    // A plug-in at its default pins (1/2) does not hear them either.
+    CHECK(peak(render(build(model::PinMap{}), pool, 0.5).audio.channels[0]) < 1e-9);
+    // Reading 3/4 and writing 1/2 brings them to the main pair.
+    auto moved = render(build(model::PinMap{{3, 4}, {1, 2}, {}}), pool, 0.5);
+    REQUIRE(moved.warnings.empty());
+    CHECK(peak(moved.audio.channels[0]) > 0.05);
+    CHECK(peak(moved.audio.channels[1]) > 0.05);
+    // On a 2-channel buss both pairs and the pins are warned about and skipped.
+    auto narrow = render(build(model::PinMap{{3, 4}, {1, 2}, {}}, 2), pool, 0.5);
+    CHECK(narrow.warnings.size() == 3);
+    CHECK(peak(narrow.audio.channels[0]) < 1e-9);
+}
+
 TEST_CASE("key routes: a plug-in without a sidechain is warned about; cycles are invalid") {
     auto pool = makePool();
     model::EditTxn t(model::Session::create({.console9 = false}), 1);
