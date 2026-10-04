@@ -563,6 +563,8 @@ struct Edge {
     const clap_host_t* host = nullptr;
     std::uint8_t config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
+    int timerCalls = 0;
+    clap_id timers[2] = {CLAP_INVALID_ID, CLAP_INVALID_ID};
     // A display-free editor (gap log #39): it records the parent window it is
     // given (read back as parameter 8) and asks for a resize when shown.
     bool guiCreated = false, guiShown = false;
@@ -584,6 +586,10 @@ bool CLAP_ABI edgeParamInfo(const clap_plugin_t*, uint32_t index, clap_param_inf
 bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
     if (id == 8) {
         *out = static_cast<double>(E(pl)->guiParent);
+        return true;
+    }
+    if (id == 9) {
+        *out = E(pl)->timerCalls;
         return true;
     }
     if (id != 7) return false;
@@ -614,6 +620,12 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     std::uint8_t buf[4];
     if (is->read(is, buf, 4) != 4) return false;
     std::memcpy(E(pl)->config, buf, 4);
+    if (buf[0] == 2) {
+        const auto* timer = static_cast<const clap_host_timer_support_t*>(
+            E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_TIMER_SUPPORT));
+        timer->register_timer(E(pl)->host, 0, &E(pl)->timers[0]);
+        timer->register_timer(E(pl)->host, 0, &E(pl)->timers[1]);
+    }
     const auto* hp = static_cast<const clap_host_params_t*>(
         E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
     if (hp) hp->request_flush(E(pl)->host);
@@ -680,7 +692,20 @@ const clap_plugin_gui_t kEdgeGui = {
     edgeGuiApi,     edgeGuiPreferred, edgeGuiCreate, edgeGuiDestroy, edgeGuiScale,
     edgeGuiGetSize, edgeGuiCanResize, edgeGuiHints,  edgeGuiAdjust,  edgeGuiSetSize,
     edgeGuiParent,  edgeGuiTransient, edgeGuiTitle,  edgeGuiShow,    edgeGuiHide};
+void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
+    auto& edge = *E(pl);
+    const auto* timer = static_cast<const clap_host_timer_support_t*>(
+        edge.host->get_extension(edge.host, CLAP_EXT_TIMER_SUPPORT));
+    ++edge.timerCalls;
+    timer->unregister_timer(edge.host, id);
+    if (edge.timerCalls == 1) {
+        timer->unregister_timer(edge.host, edge.timers[1]);
+        timer->register_timer(edge.host, 0, &edge.timers[0]);
+    }
+}
+const clap_plugin_timer_support_t kEdgeTimer = {edgeTimer};
 const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kEdgeTimer;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
     if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kEdgeTail;

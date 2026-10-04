@@ -83,7 +83,6 @@ class Fft {
 
   private:
     std::size_t size_ = 0;
-    std::vector<double> input_;
     std::vector<std::complex<double>> scratch_, twiddles_;
     std::vector<std::size_t> bitReverse_;
 };

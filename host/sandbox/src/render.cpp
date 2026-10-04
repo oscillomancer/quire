@@ -113,6 +113,11 @@ void renderLoop(Job& j) SUPPLE_RT {
         // Collect the chain output; watch for the silent tail.
         float blockPeak = 0.0f;
         for (std::uint32_t i = 0; i < n; ++i) {
+            if (!std::isfinite(chainIn[0][i]) || !std::isfinite(chainIn[1][i])) {
+                j.error = true;
+                j.rendered = pos + i;
+                return;
+            }
             const auto at = static_cast<std::size_t>(pos) + i;
             j.outL[at] = chainIn[0][i];
             j.outR[at] = chainIn[1][i];
@@ -144,7 +149,16 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         return Error("render.sample_rate", "sample rate out of range", {}, "use 8000 .. 384000 Hz");
     if (settings.blockSize < 1 || settings.blockSize > 8192)
         return Error("render.block_size", "block size out of range", {}, "use 1 .. 8192 frames");
+    if (!(settings.tempo >= 1 && settings.tempo <= 999) || settings.numerator < 1 ||
+        settings.numerator > 64 || settings.denominator < 1 || settings.denominator > 64 ||
+        (settings.denominator & (settings.denominator - 1)))
+        return Error("render.transport", "tempo or time signature out of range", {},
+                     "use tempo 1 .. 999 and a valid time signature");
     for (std::size_t i = 0; i < chain.size(); ++i) {
+        if (!chain[i] || chain[i]->processing() ||
+            std::find(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(i), chain[i]) !=
+                chain.begin() + static_cast<std::ptrdiff_t>(i))
+            return Error("render.chain", "chain contains a null, processing or repeated instance");
         host::Instance& in = *chain[i];
         if (in.audioOutputChannels() != 2)
             return Error("render.layout", in.info().name + " does not have a stereo output", {},
@@ -177,6 +191,10 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         return Error("render.input_rate",
                      "input audio is at " + std::to_string(request.input->sampleRate) + " Hz", {},
                      "resample it to the session rate first");
+    if (request.input)
+        for (const auto& channel : request.input->channels)
+            if (channel.size() != request.input->frames())
+                return Error("render.input_layout", "input channels have different lengths");
 
     // Main-thread preparation: (re)activate, service pending restarts.
     for (host::Instance* in : chain) {

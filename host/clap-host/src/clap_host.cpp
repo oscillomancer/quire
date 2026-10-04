@@ -32,7 +32,12 @@ class Library {
         static std::mutex mutex;
         static std::map<std::string, std::weak_ptr<Library>> cache;
         std::lock_guard lock(mutex);
-        const std::string key = fs::weakly_canonical(path).string();
+        std::error_code ec;
+        const auto canonical = fs::weakly_canonical(path, ec);
+        if (ec)
+            return Error("host.load", "cannot resolve " + path.string() + ": " + ec.message(), {},
+                         "check the plugin path and its symlinks");
+        const std::string key = canonical.string();
         if (auto existing = cache[key].lock()) return existing;
 
         void* handle = ::dlopen(key.c_str(), RTLD_NOW | RTLD_LOCAL);
@@ -730,6 +735,9 @@ Status Instance::setSidechainActive(bool on) {
 }
 
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
+    if (!std::isfinite(sampleRate) || sampleRate <= 0 || minFrames == 0 || minFrames > maxFrames)
+        return Error("host.activate", "invalid sample rate or block-size range", {},
+                     "use a finite positive rate and 0 < minFrames <= maxFrames");
     if (vst3_) {
         SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames, keyActive_));
         // What the plug-in settled on (a bus it adapted): the engine sizes its
@@ -776,10 +784,10 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
         }
     }
     if (!plugin_->activate(plugin_, sampleRate, minFrames, maxFrames))
-        return Error("host.activate",
-                     "\"" + info_.id + "\" refused to activate at " +
-                         std::to_string(static_cast<int>(sampleRate)) + " Hz",
-                     {}, "try another sample rate or block size");
+        return Error(
+            "host.activate",
+            "\"" + info_.id + "\" refused to activate at " + std::to_string(sampleRate) + " Hz", {},
+            "try another sample rate or block size");
     active_ = true;
     sampleRate_ = sampleRate;
     maxFrames_ = maxFrames;
@@ -1021,6 +1029,7 @@ void Instance::reset() SUPPLE_RT {
 }
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
+    if (b.frames == 0 || b.frames > maxFrames_) return false;
     if (vst3_) return active_ && processing_ && vst3_->process(b, out);
     if (remote_) return active_ && processing_ && remote_->process(b, out);
     if (!active_ || !processing_) return false;
@@ -1290,10 +1299,14 @@ bool Instance::serviceMainThread() {
     }
     const auto now = std::chrono::steady_clock::now();
     if (extTimer_) {
-        for (auto& t : h.timers) {
+        const auto timers = h.timers;
+        for (const auto& t : timers) {
             if (now >= t.next) {
+                auto live = std::find_if(h.timers.begin(), h.timers.end(),
+                                         [&](const auto& timer) { return timer.id == t.id; });
+                if (live == h.timers.end()) continue;
+                live->next = now + std::chrono::milliseconds(t.periodMs);
                 extTimer_->on_timer(plugin_, t.id);
-                t.next = now + std::chrono::milliseconds(t.periodMs);
                 did = true;
             }
         }

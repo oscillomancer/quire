@@ -725,6 +725,9 @@ Result<RenderResult> Session::renderThrough(std::span<host::Instance* const> cha
     if (chain.empty())
         return Error("render.empty_chain", "nothing to render through", {},
                      "load a plugin first (plugin.load)");
+    if (!chain.front()) return Error("render.chain", "chain contains a null instance");
+    if (!(settings.sampleRate >= 8000 && settings.sampleRate <= 384000))
+        return Error("render.sample_rate", "sample rate out of range", {}, "use 8000 .. 384000 Hz");
     if (input.notes && input.audio)
         return Error("render.input", "give either notes or audio, not both");
     const double tempo = input.tempo.value_or(settings.tempo);
@@ -744,6 +747,17 @@ Result<RenderResult> Session::renderThrough(std::span<host::Instance* const> cha
                          "load an instrument first in the chain, or render audio_file input");
         const midi::Sequence& seq = *input.notes;
         if (seq.ppq < 1) return Error("render.input", "ppq must be positive");
+        const long double maxTicks = (std::int64_t(1) << 25) * static_cast<long double>(tempo) *
+                                     seq.ppq / (60 * static_cast<long double>(settings.sampleRate));
+        if (seq.length < 0 || seq.length > maxTicks)
+            return Error("render.too_long", "sequence length is negative or too long");
+        for (const auto& n : seq.notes) {
+            if (n.start < 0 || n.length < 0 || n.start > maxTicks || n.length > maxTicks - n.start)
+                return Error("render.event_time", "note time is negative or too long");
+        }
+        for (const auto& c : seq.controls)
+            if (c.tick < 0 || c.tick > maxTicks)
+                return Error("render.event_time", "control time is negative or too long");
         req.events = sequenceEvents(seq, tempo, settings.sampleRate);
         std::int64_t endTicks = seq.length;
         for (const auto& n : seq.notes) endTicks = std::max(endTicks, n.start + n.length);
@@ -902,6 +916,8 @@ json::Value Session::summary() const {
 }
 
 void Session::reset() {
+    stopJobs();
+    adoptBackgroundRenders();
     txn_.reset();
     chain_.clear();
     instances_.clear();

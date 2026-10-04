@@ -48,6 +48,7 @@ void LoudnessMeter::prepare(double sampleRate, Layout layout, Mode mode, double 
         exactShort_.clear();
     }
     weights_ = {1, 1, 1, 1.41, 1.41, 0};
+    if (layout == Layout::Surround51) weights_ = {1, 1, 1, 0, 1.41, 1.41};
     if (layout == Layout::Mono || layout == Layout::Stereo) weights_ = {1, 1, 0, 0, 0, 0};
     for (int c = 0; c < channels_; ++c) {
         shelf_[static_cast<std::size_t>(c)].set(dsp::kShelf(sampleRate));
@@ -81,7 +82,8 @@ void LoudnessMeter::reset() SUPPLE_RT {
     maxMomentaryEnergy_ = maxShortEnergy_ = 0;
 }
 void LoudnessMeter::process(std::span<const float* const> input, int frames) SUPPLE_RT {
-    if (input.size() < static_cast<std::size_t>(channels_) || frames <= 0) return;
+    if (ring_.empty() || input.size() < static_cast<std::size_t>(channels_) || frames <= 0) return;
+    dsp::DenormalGuard guard;
     std::array<double, 4> phases{};
     for (int i = 0; i < frames; ++i) {
         double energy = 0;

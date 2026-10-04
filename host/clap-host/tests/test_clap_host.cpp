@@ -3,17 +3,29 @@
 
 #include <dlfcn.h>
 
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstring>
+#include <limits>
 #include <thread>
 #include <vector>
+#include "../src/bridge_protocol.h"
 
 #include <supple/clap/semantic_params.h>
 #include <supple/host/clap_host.h>
 #include <supple/json/json.h>
+
+extern char** environ;
 
 using namespace supple;
 using namespace supple::host;
@@ -839,4 +851,220 @@ TEST_CASE("a plugin found in two places resolves to the first on the search path
     CHECK((*list)[firstOfId + 1].path.parent_path() == second);
     CHECK(host::shadowed(*list, firstOfId + 1));
     fs::remove_all(base);
+}
+
+TEST_CASE("CLAP timers may remove themselves and replace registrations") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    const std::array<std::uint8_t, 4> config{2, 0, 0, 0};
+    REQUIRE((*made)->loadState(config));
+    REQUIRE((*made)->serviceMainThread());
+    CHECK(*(*made)->paramValue(9) == 1);
+    REQUIRE((*made)->serviceMainThread());
+    CHECK(*(*made)->paramValue(9) == 2);
+    CHECK((*made)->nextTimerMs() == -1);
+}
+TEST_CASE("activation and process reject invalid dimensions before touching buffers") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+        REQUIRE(made);
+        auto& instance = **made;
+        for (double rate : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN()})
+            CHECK_FALSE(instance.activate(rate, 1, 64));
+        CHECK_FALSE(instance.activate(48000, 0, 64));
+        CHECK_FALSE(instance.activate(48000, 65, 64));
+        if (isolated) CHECK_FALSE(instance.activate(48000, 1, UINT32_MAX));
+        REQUIRE(instance.activate(48000, 1, 64));
+        REQUIRE(instance.startProcessing());
+        Buffers buffer(65);
+        std::fill(buffer.ol.begin(), buffer.ol.end(), 123.0f);
+        CHECK_FALSE(instance.process(buffer.block(65)));
+        CHECK_FALSE(instance.process(buffer.block(0)));
+        CHECK(buffer.ol.front() == 123.0f);
+        CHECK(buffer.ol.back() == 123.0f);
+        CHECK(instance.process(buffer.block(64)));
+        instance.stopProcessing();
+        instance.deactivate();
+    }
+}
+TEST_CASE("VST3 queue rejection preserves controller value and malformed MIDI is dropped") {
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto gain = std::find_if(found->begin(), found->end(),
+                             [](const auto& p) { return p.name == "Test VST3 Gain"; });
+    REQUIRE(gain != found->end());
+    auto made = Instance::create(*gain, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    CHECK_FALSE(instance.activate(48000, 1, UINT32_MAX));
+    bool full = false;
+    for (int i = 0; i < 4096; ++i) {
+        if (!instance.setParam(1, 0.25)) {
+            full = true;
+            break;
+        }
+    }
+    REQUIRE(full);
+    CHECK_FALSE(instance.setParam(1, 0.75));
+    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
+    REQUIRE(instance.activate(48000, 1, 64));
+    REQUIRE(instance.startProcessing());
+    Buffers buffer(64);
+    std::array<Event, 128> events{};
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        events[i].kind = Event::Kind::Midi;
+        events[i].midi[0] = 0xb0;
+        events[i].midi[1] = static_cast<std::uint8_t>(128 + i);
+        events[i].midi[2] = 127;
+    }
+    CHECK(instance.process(buffer.block(64, events)));
+    CHECK(instance.takeNotifications().droppedEvents == events.size());
+    instance.stopProcessing();
+    instance.deactivate();
+}
+TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bundles") {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / ("supple-vst3-order-" + std::to_string(getpid()));
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { fs::remove_all(path); }
+    } cleanup{root};
+    const auto first = root / "z-first" / "Fixture.vst3";
+    const auto second = root / "a-second" / "Fixture.vst3";
+    for (const auto& bundle : {first, second}) {
+        fs::create_directories(bundle / "Contents/Resources");
+        fs::copy_file(kVst3Fixture / "Contents/Resources/moduleinfo.json",
+                      bundle / "Contents/Resources/moduleinfo.json",
+                      fs::copy_options::overwrite_existing);
+    }
+    const std::array<fs::path, 3> paths{first.parent_path(), second.parent_path(), first};
+    auto found = scan(paths);
+    REQUIRE(found);
+    REQUIRE(found->size() == 8);
+    CHECK(found->front().path == first);
+    CHECK(found->back().path == second);
+}
+TEST_CASE("bridge rejected frames close received descriptors") {
+    int sockets[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+    int pipes[2];
+    REQUIRE(::pipe(pipes) == 0);
+    REQUIRE(::fcntl(pipes[0], F_SETFL, O_NONBLOCK) == 0);
+    struct Cleanup {
+        int* sockets;
+        int* pipes;
+        ~Cleanup() {
+            for (int i = 0; i < 2; ++i) {
+                ::close(sockets[i]);
+                ::close(pipes[i]);
+            }
+        }
+    } cleanup{sockets, pipes};
+    const std::uint32_t prefix[3] = {bridge::kMaxMessage + 1, 0, 0};
+    iovec iov{const_cast<std::uint32_t*>(prefix), sizeof(prefix)};
+    alignas(cmsghdr) char control[CMSG_SPACE(2 * sizeof(int))]{};
+    msghdr message{};
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control;
+    message.msg_controllen = sizeof(control);
+    auto* c = CMSG_FIRSTHDR(&message);
+    c->cmsg_level = SOL_SOCKET;
+    c->cmsg_type = SCM_RIGHTS;
+    c->cmsg_len = CMSG_LEN(2 * sizeof(int));
+    const int descriptors[2] = {pipes[1], pipes[1]};
+    std::memcpy(CMSG_DATA(c), descriptors, sizeof(descriptors));
+    REQUIRE(::sendmsg(sockets[0], &message, MSG_NOSIGNAL) == sizeof(prefix));
+    std::uint32_t head = 0, id = 0;
+    std::vector<std::uint8_t> payload;
+    int received = -1;
+    CHECK_FALSE(bridge::recvFrame(sockets[1], head, id, payload, &received, 100));
+    CHECK(received == -1);
+    ::close(pipes[1]);
+    pipes[1] = -1;
+    char byte;
+    CHECK(::read(pipes[0], &byte, 1) == 0);
+}
+
+TEST_CASE("bridge rejects undersized shared memory and unexpected descriptors without dying") {
+    int sockets[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+    posix_spawn_file_actions_t actions;
+    REQUIRE(posix_spawn_file_actions_init(&actions) == 0);
+    REQUIRE(posix_spawn_file_actions_adddup2(&actions, sockets[1], bridge::kControlFd) == 0);
+    std::string executable = BRIDGE_PATH;
+    std::string descriptor = std::to_string(bridge::kControlFd);
+    char controlArg[] = "--control-fd";
+    char* argv[] = {executable.data(), controlArg, descriptor.data(), nullptr};
+    pid_t pid = 0;
+    const int spawned = ::posix_spawn(&pid, executable.c_str(), &actions, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    ::close(sockets[1]);
+    REQUIRE(spawned == 0);
+    struct Cleanup {
+        int socket;
+        pid_t pid;
+        ~Cleanup() {
+            ::close(socket);
+            ::kill(pid, SIGKILL);
+            while (::waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {
+            }
+        }
+    } cleanup{sockets[0], pid};
+    bridge::Writer create;
+    create.str(kFixture.string());
+    create.str("com.suppleaudio.test.edge");
+    create.str("clap");
+    for (int i = 0; i < 4; ++i) create.str("");
+    REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(bridge::Op::Create), 0,
+                              create.bytes));
+    std::uint32_t status = 0, id = 0;
+    std::vector<std::uint8_t> reply;
+    REQUIRE(bridge::recvFrame(sockets[0], status, id, reply, nullptr, 2000));
+    REQUIRE(status == static_cast<std::uint32_t>(bridge::Reply::Ok));
+    bridge::Reader reader(reply.data(), reply.size());
+    const auto instance = reader.u32();
+    const int memory =
+        static_cast<int>(::syscall(SYS_memfd_create, "supple-test-shm", MFD_CLOEXEC));
+    REQUIRE(memory >= 0);
+    struct Memory {
+        int fd;
+        ~Memory() { ::close(fd); }
+    } memoryCleanup{memory};
+    bridge::Writer activate;
+    activate.f64(48000);
+    activate.u32(1);
+    activate.u32(64);
+    activate.u32(sizeof(bridge::Header));
+    REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(bridge::Op::Activate),
+                              instance, activate.bytes, memory));
+    REQUIRE(bridge::recvFrame(sockets[0], status, id, reply, nullptr, 2000));
+    CHECK(status == static_cast<std::uint32_t>(bridge::Reply::Error));
+    REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(bridge::Op::Params), instance,
+                              {}, memory));
+    REQUIRE(bridge::recvFrame(sockets[0], status, id, reply, nullptr, 2000));
+    CHECK(status == static_cast<std::uint32_t>(bridge::Reply::Error));
+    REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(bridge::Op::Params), instance,
+                              {}));
+    REQUIRE(bridge::recvFrame(sockets[0], status, id, reply, nullptr, 2000));
+    CHECK(status == static_cast<std::uint32_t>(bridge::Reply::Ok));
+}
+
+TEST_CASE("invalid CLAP symlink paths return a structured error instead of throwing") {
+    namespace fs = std::filesystem;
+    const auto path =
+        fs::temp_directory_path() / ("supple-clap-loop-" + std::to_string(getpid()) + ".clap");
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { fs::remove(path); }
+    } cleanup{path};
+    fs::remove(path);
+    fs::create_symlink(path.filename(), path);
+    auto info = find("com.suppleaudio.test.edge");
+    info.path = path;
+    auto made = Instance::create(info, {});
+    REQUIRE_FALSE(made);
+    CHECK(made.error().code == "host.load");
 }

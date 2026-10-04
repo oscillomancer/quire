@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <supple/clap/plugin_support.h>
+#include <supple/clap/semantic_model.h>
 
 #include <supple/json/json.h>
 #include <atomic>
@@ -227,4 +228,59 @@ TEST_CASE("semantic telemetry is appended optional and forwards stream failure")
     CHECK(live->get_telemetry(&plugin, &out));
     CHECK(called);
     CHECK_FALSE(live->get_telemetry(&plugin, nullptr));
+}
+
+TEST_CASE("semantic helpers reject invalid stream counts, callbacks and null patch text") {
+    patch::FlatPatchType type("stream-test", 1, 0, kT, false);
+    clapx::ParamStore store(kT);
+    clapx::FlatSemantic flat(type, store, "com.suppleaudio.test.stream", "", "", 0x12345678);
+    struct Model : clapx::SemanticModel {
+        params::Table table() const override { return kT; }
+        std::string patchTypeId() const override { return "supple.stream-test-patch/1.0"; }
+        json::Value patchSchema() const override { return json::Value::object(); }
+        std::string patchJson(bool) const override { return "{}"; }
+        Status apply(std::uint32_t, const json::Value&) override { return okStatus(); }
+        std::string describe(bool) const override { return "test"; }
+    } model;
+    clapx::SemanticAdapter adapter(model, {.id = "com.suppleaudio.test.stream",
+                                           .name = "Stream",
+                                           .version = "1",
+                                           .docs = "",
+                                           .stateMagic = 0x12345678});
+    clap_istream_t in{nullptr, [](const clap_istream_t*, void*, std::uint64_t size) {
+                          return static_cast<std::int64_t>(size + 1);
+                      }};
+    clap_ostream_t out{nullptr, [](const clap_ostream_t*, const void*, std::uint64_t size) {
+                           return static_cast<std::int64_t>(size + 1);
+                       }};
+    CHECK_FALSE(flat.loadState(&in));
+    CHECK_FALSE(adapter.loadState(&in));
+    CHECK_FALSE(flat.saveState(&out));
+    CHECK_FALSE(adapter.saveState(&out));
+    CHECK_FALSE(flat.getSchema(&out));
+    CHECK_FALSE(adapter.getSchema(&out));
+    CHECK_FALSE(flat.loadState(nullptr));
+    CHECK_FALSE(adapter.loadState(nullptr));
+    CHECK_FALSE(flat.saveState(nullptr));
+    CHECK_FALSE(adapter.saveState(nullptr));
+    in.read = nullptr;
+    out.write = nullptr;
+    CHECK_FALSE(flat.loadState(&in));
+    CHECK_FALSE(adapter.loadState(&in));
+    CHECK_FALSE(flat.getSchema(&out));
+    CHECK_FALSE(adapter.getSchema(&out));
+    CHECK_FALSE(flat.setPatch(CLAP_SUPPLE_SET_REPLACE, nullptr, 10, nullptr));
+    CHECK_FALSE(adapter.setPatch(CLAP_SUPPLE_SET_REPLACE, nullptr, 10, nullptr));
+}
+TEST_CASE("parameter events reject missing or undersized records") {
+    clapx::ParamStore store(kT);
+    clap_event_header_t header{sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID,
+                               CLAP_EVENT_PARAM_VALUE, 0};
+    clap_input_events_t input{
+        &header, [](const clap_input_events_t*) -> std::uint32_t { return 2; },
+        [](const clap_input_events_t* list, std::uint32_t index) -> const clap_event_header_t* {
+            return index == 0 ? static_cast<const clap_event_header_t*>(list->ctx) : nullptr;
+        }};
+    CHECK_FALSE(clapx::ClapParams::applyEvents(store, &input));
+    CHECK(store.get(0) == 1000);
 }

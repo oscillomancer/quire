@@ -18,11 +18,11 @@ them for VST3 process queues. Input and output event/parameter arenas have
 fixed capacities and are allocated before processing. The SDK's
 `ParameterChanges` helper is deliberately not used on the audio thread: its
 point vectors grow during `addPoint`. `EventList` uses storage allocated at
-construction. The host still calls a plugin's `plainParamToNormalized` for
-sample offset automation and `normalizedParamToPlain` for output edits on the
-audio thread; these plugin supplied methods need a threading audit for each
-third-party module. A plugin that allocates or locks inside its own `process`
-or conversion methods cannot be made RT safe by the host.
+construction. Controller conversions run on the main thread; process queues
+and output edits carry normalized values. The engine converts automation before
+processing; main-thread consumers must convert output edits before using plain values.
+A plugin that allocates or locks inside its own `process` cannot be made RT safe
+by the host.
 
 Modules are opened once and never unloaded (see ADR-0017's notes). Plug-ins
 get a host context for `initialize`; separate controllers are connected to

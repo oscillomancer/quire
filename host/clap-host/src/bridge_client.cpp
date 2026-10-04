@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <mutex>
 
 #include "supple/base/rt.h"
@@ -240,6 +241,9 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
     unmap();
     layout_ = Layout(maxFrames, std::min(in, kMaxChannels), std::min(out, kMaxChannels),
                      std::min(key, kMaxChannels));
+    if (layout_.size > std::numeric_limits<std::uint32_t>::max())
+        return Error("host.activate", "shared memory size exceeds the bridge protocol limit", {},
+                     "use a smaller maximum block size");
     const int fd = ::memfd_create("supple-bridge", MFD_CLOEXEC);
     if (fd < 0) return Error("host.bridge", "memfd_create failed");
     if (::ftruncate(fd, static_cast<off_t>(layout_.size)) != 0) {

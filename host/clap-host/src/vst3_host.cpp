@@ -508,6 +508,8 @@ std::uint32_t Vst3Instance::sidechainChannels() const {
 }
 
 Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidechainActive) {
+    if (maxFrames > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()))
+        return Error("host.activate", "maximum block size exceeds the VST3 limit");
     auto& s = *state_;
     if (s.active) return okStatus();
     // One arrangement per bus: the main buses stereo or mono, auxiliary buses
@@ -647,9 +649,9 @@ Status Vst3Instance::setParam(std::uint32_t id, double plain) {
         return Error("host.param", "parameter value is outside its range");
     // The conversion is a controller call: main thread, here, not in process().
     const double normalized = s.controller->plainParamToNormalized(id, plain);
-    s.controller->setParamNormalized(id, normalized);
     if (!s.changes.push({id, normalized}))
         return Error("host.param_queue", "too many queued parameter changes");
+    s.controller->setParamNormalized(id, normalized);
     return okStatus();
 }
 
@@ -763,6 +765,10 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
             continue;
         }
         if (event.kind == Event::Kind::Midi) {
+            if (event.midi[1] >= 128 || event.midi[2] >= 128) {
+                s.dropped.fetch_add(1);
+                continue;
+            }
             const auto channel = event.midi[0] & 15;
             const auto type = event.midi[0] & 0xf0;
             int control = -1;
@@ -1025,23 +1031,26 @@ Instance::Notifications Vst3Instance::takeNotifications() {
 Result<std::vector<PluginInfo>> scanVst3(std::span<const fs::path> paths) {
     std::vector<fs::path> bundles;
     for (const auto& root : paths) {
+        std::vector<fs::path> found;
         std::error_code ec;
         if (isVst3(root) && fs::is_directory(root, ec)) {
-            bundles.push_back(root);
-            continue;
-        }
-        if (!fs::is_directory(root, ec)) continue;
-        for (auto it = fs::recursive_directory_iterator(
-                 root, fs::directory_options::skip_permission_denied, ec);
-             it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) break;
-            if (it->is_directory(ec) && isVst3(it->path())) {
-                bundles.push_back(it->path());
-                it.disable_recursion_pending();
+            found.push_back(root);
+        } else if (fs::is_directory(root, ec)) {
+            for (auto it = fs::recursive_directory_iterator(
+                     root, fs::directory_options::skip_permission_denied, ec);
+                 it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (it->is_directory(ec) && isVst3(it->path())) {
+                    found.push_back(it->path());
+                    it.disable_recursion_pending();
+                }
             }
         }
+        std::sort(found.begin(), found.end());
+        for (const auto& path : found)
+            if (std::find(bundles.begin(), bundles.end(), path) == bundles.end())
+                bundles.push_back(path);
     }
-    std::sort(bundles.begin(), bundles.end());
     std::vector<PluginInfo> result;
     for (const auto& path : bundles) {
         if (auto listed = scanModuleInfo(path)) {

@@ -11,20 +11,22 @@ namespace supple::clapx {
 namespace {
 
 bool write(const clap_ostream_t* os, const std::string& s) {
+    if (!os || !os->write) return false;
     std::size_t off = 0;
     while (off < s.size()) {
         const int64_t n = os->write(os, s.data() + off, s.size() - off);
-        if (n <= 0) return false;
+        if (n <= 0 || static_cast<std::uint64_t>(n) > s.size() - off) return false;
         off += static_cast<std::size_t>(n);
     }
     return true;
 }
 
 bool readAll(const clap_istream_t* is, std::vector<std::uint8_t>& out) {
+    if (!is || !is->read) return false;
     std::uint8_t tmp[4096];
     for (;;) {
         const int64_t n = is->read(is, tmp, sizeof(tmp));
-        if (n < 0) return false;
+        if (n < 0 || n > static_cast<int64_t>(sizeof(tmp))) return false;
         if (n == 0) return true;
         if (out.size() + static_cast<std::size_t>(n) > patch::kMaxStateBytes + 12) return false;
         out.insert(out.end(), tmp, tmp + n);
@@ -189,7 +191,9 @@ bool ClapParams::applyEvents(ParamStore& store, const clap_input_events_t* in) S
     const uint32_t n = in ? in->size(in) : 0;
     for (uint32_t i = 0; i < n; ++i) {
         const clap_event_header_t* h = in->get(in, i);
-        if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE) continue;
+        if (!h || h->size < sizeof(clap_event_param_value_t) ||
+            h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
+            continue;
         const auto* e = reinterpret_cast<const clap_event_param_value_t*>(h);
         changed = store.setClap(e->param_id, e->value) || changed;
     }
@@ -242,6 +246,7 @@ bool FlatSemantic::setPatch(std::uint32_t mode, const char* text, std::uint32_t 
     };
     if (mode > CLAP_SUPPLE_SET_VALIDATE_ONLY)
         return fail(Error("patch.mode", "unknown set_patch mode " + std::to_string(mode)));
+    if (!text && size) return fail(Error("patch.input", "patch text is null"));
     auto doc = json::parse(std::string_view(text ? text : "", size));
     if (!doc) return fail(doc.error());
     const auto before = current();
@@ -265,13 +270,14 @@ bool FlatSemantic::describe(std::uint32_t detail, const clap_ostream_t* out) con
 }
 
 bool FlatSemantic::saveState(const clap_ostream_t* out) const {
+    if (!out || !out->write) return false;
     const auto framed = patch::encodeState(type_.serialize(current()), stateMagic_);
     if (!framed) return false;
     const auto& bytes = *framed;
     std::size_t off = 0;
     while (off < bytes.size()) {
         const int64_t n = out->write(out, bytes.data() + off, bytes.size() - off);
-        if (n <= 0) return false;
+        if (n <= 0 || static_cast<std::uint64_t>(n) > bytes.size() - off) return false;
         off += static_cast<std::size_t>(n);
     }
     return true;

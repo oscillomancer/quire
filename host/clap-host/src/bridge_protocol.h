@@ -169,7 +169,7 @@ class Reader {
     bool ok_ = true;
 };
 
-// Writes one whole frame ([u32 size][u32 head][payload]) with an optional
+// Writes one whole frame ([u32 size][u32 head][u32 instance][payload]) with an optional
 // file descriptor; reads one (size-checked). False when the peer is gone.
 bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
                const std::vector<std::uint8_t>& payload, int fd = -1);

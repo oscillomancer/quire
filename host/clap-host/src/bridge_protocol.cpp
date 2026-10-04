@@ -2,6 +2,7 @@
 
 #include <poll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include <cerrno>
 
@@ -65,9 +66,18 @@ bool readAll(int s, void* data, std::size_t n, int* fd, int timeoutMs) {
         }
         if (r == 0) return false;  // the peer is gone
         if (fd) {
-            for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c))
-                if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS)
-                    std::memcpy(fd, CMSG_DATA(c), sizeof(int));
+            for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
+                if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS) continue;
+                const auto count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+                for (std::size_t i = 0; i < count; ++i) {
+                    int received = -1;
+                    std::memcpy(&received, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
+                    if (*fd < 0)
+                        *fd = received;
+                    else
+                        ::close(received);
+                }
+            }
             fd = nullptr;  // only with the first bytes
         }
         p += r;
@@ -88,13 +98,22 @@ bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
 bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
                std::vector<std::uint8_t>& payload, int* fd, int timeoutMs) {
     if (fd) *fd = -1;
+    auto fail = [&] {
+        if (fd && *fd >= 0) {
+            ::close(*fd);
+            *fd = -1;
+        }
+        return false;
+    };
     std::uint32_t prefix[3] = {0, 0, 0};
-    if (!readAll(socket, prefix, sizeof prefix, fd, timeoutMs)) return false;
-    if (prefix[0] > kMaxMessage) return false;
+    if (!readAll(socket, prefix, sizeof prefix, fd, timeoutMs)) return fail();
+    if (prefix[0] > kMaxMessage) return fail();
     head = prefix[1];
     instance = prefix[2];
     payload.resize(prefix[0]);
-    return prefix[0] == 0 || readAll(socket, payload.data(), payload.size(), nullptr, timeoutMs);
+    if (prefix[0] && !readAll(socket, payload.data(), payload.size(), nullptr, timeoutMs))
+        return fail();
+    return true;
 }
 
 }  // namespace supple::host::bridge

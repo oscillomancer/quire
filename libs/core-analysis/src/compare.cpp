@@ -21,6 +21,7 @@ bool startsWith(std::string_view s, std::string_view prefix) {
 }
 
 std::string unitOf(std::string_view key) {
+    if (key.find("_per_oct") != std::string_view::npos) return "dB/oct";
     if (key.find("_lufs") != std::string_view::npos) return "LUFS";
     if (key.find("_lu") != std::string_view::npos) return "LU";
     if (key.find("_dbtp") != std::string_view::npos) return "dBTP";
@@ -31,7 +32,6 @@ std::string unitOf(std::string_view key) {
     if (key.find("_ms") != std::string_view::npos) return "ms";
     if (key.find("_pct") != std::string_view::npos) return "%";
     if (key.find("_cents") != std::string_view::npos) return "ct";
-    if (key.find("_per_oct") != std::string_view::npos) return "dB/oct";
     if (key.find("_per_s") != std::string_view::npos) return "/s";
     return "";
 }
@@ -408,6 +408,15 @@ Result<MaskingReport> masking(const Signal& masker, const Signal& maskee) {
         return Error("analysis.layout", "channel count does not match layout", "/channels");
     if (!(masker.sampleRate >= 22050.0 && masker.sampleRate <= 192000.0))
         return Error("analysis.sample_rate", "sample rate must be 22.05..192 kHz", {});
+    for (const Signal* signal : {&masker, &maskee}) {
+        for (const float* channel : signal->channels) {
+            if (!channel) return Error("analysis.samples", "channel data is null", "/channels");
+            for (std::int64_t i = 0; i < signal->frames; ++i)
+                if (!std::isfinite(channel[i]))
+                    return Error("analysis.samples", "audio contains nonfinite samples",
+                                 "/channels", "supply finite audio samples");
+        }
+    }
     const std::int64_t frames = std::max(masker.frames, maskee.frames);
     const double fs = masker.sampleRate;
     const auto n = static_cast<std::size_t>(1)

@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -171,6 +172,10 @@ struct Bridge {
     // Returns false to exit.
     bool handle(Op op, std::uint32_t instanceId, Reader& r, int fd) {
         replyId = instanceId;
+        if (fd >= 0 && op != Op::Activate) {
+            ::close(fd);
+            return fail(Error("bridge.fd", "unexpected descriptor for this operation"));
+        }
         if (op == Op::Create) {
             if (instanceId != 0)
                 return fail(Error("bridge.instance", "Create requires instance id 0"));
@@ -222,6 +227,12 @@ struct Bridge {
                 const double rate = r.f64();
                 const std::uint32_t minFrames = r.u32(), maxFrames = r.u32(), size = r.u32();
                 if (fd < 0) return fail(Error("bridge.activate", "no shared memory"));
+                struct stat backing{};
+                if (!r.ok() || size < sizeof(Header) || ::fstat(fd, &backing) != 0 ||
+                    backing.st_size < static_cast<off_t>(size)) {
+                    ::close(fd);
+                    return fail(Error("bridge.activate", "invalid shared memory size or request"));
+                }
                 stopAudio();
                 unmap();
                 map = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -235,6 +246,7 @@ struct Bridge {
                 layout =
                     Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels, hdr->keyChannels);
                 if (hdr->magic != kMagic || hdr->version != kVersion || layout.size > size ||
+                    hdr->maxFrames != maxFrames || maxFrames == 0 ||
                     hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels ||
                     hdr->keyChannels > kMaxChannels) {
                     unmap();

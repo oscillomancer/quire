@@ -458,3 +458,41 @@ TEST_CASE("the session tick adopts background work and drops finished job thread
     s->tick();
     CHECK(s->jobThreadCountForTests() == 0);
 }
+
+TEST_CASE("reset joins jobs and discards late background render records") {
+    TempDir dir("reset-jobs");
+    auto session = openSession(dir);
+    auto record = session->reserveRender("late");
+    session->startJob([&](std::stop_token stop) {
+        while (!stop.stop_requested()) std::this_thread::yield();
+        session->submitRender(std::move(record));
+    });
+    session->reset();
+    session->tick();
+    CHECK(session->renders().empty());
+}
+
+TEST_CASE("render rejects overflowing and negative MIDI times before converting samples") {
+    TempDir dir("invalid-times");
+    auto session = openSession(dir);
+    REQUIRE(session->load(kSine));
+    RenderInput input;
+    input.notes.emplace();
+    for (const midi::Note note : {midi::Note{INT64_MAX, 1}, midi::Note{1, INT64_MAX},
+                                  midi::Note{-1, 1}, midi::Note{0, -1}}) {
+        input.notes->notes = {note};
+        CHECK_FALSE(session->render(input));
+    }
+    input.notes->notes.clear();
+    input.notes->length = INT64_MAX;
+    CHECK_FALSE(session->render(input));
+    input.notes->length = 0;
+    input.notes->controls = {{INT64_MAX, midi::ControlKind::CC, 0, 1, 0}};
+    CHECK_FALSE(session->render(input));
+    auto instance = session->instance(session->chain().front());
+    REQUIRE(instance);
+    host::Instance* chain[] = {*instance};
+    SessionSettings settings;
+    settings.sampleRate = 0;
+    CHECK_FALSE(Session::renderThrough(chain, input, settings));
+}

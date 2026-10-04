@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <limits>
 
 #include <supple/clap/semantic_params.h>
 #include <supple/sandbox/render.h>
@@ -217,4 +218,40 @@ TEST_CASE("render validates sizes before allocating") {
     CHECK(render(chain, hold, req).error().code == "render.silence");
     req.lengthSamples = (std::int64_t(1) << 25) - 10;  // fits, but not with a 5 s tail
     CHECK(render(chain, RenderSettings{}, req).error().code == "render.too_long");
+}
+
+TEST_CASE("render rejects malformed transport, chain, input and nonfinite output") {
+    auto edge = make("com.suppleaudio.test.edge");
+    host::Instance* chain[] = {edge.get()};
+    RenderSettings settings;
+    settings.tailLimitSeconds = 0;
+    RenderRequest request;
+    request.lengthSamples = 64;
+    for (double tempo : {0.0, std::numeric_limits<double>::quiet_NaN()}) {
+        settings.tempo = tempo;
+        CHECK_FALSE(render(chain, settings, request));
+    }
+    settings.tempo = 120;
+    settings.denominator = 0;
+    CHECK_FALSE(render(chain, settings, request));
+    settings.denominator = 4;
+    host::Instance* invalid[] = {nullptr};
+    CHECK_FALSE(render(invalid, settings, request));
+    host::Instance* duplicate[] = {edge.get(), edge.get()};
+    CHECK_FALSE(render(duplicate, settings, request));
+    audio::AudioData input;
+    input.sampleRate = settings.sampleRate;
+    input.channels = {std::vector<float>(64), std::vector<float>(32)};
+    request.input = &input;
+    CHECK_FALSE(render(chain, settings, request));
+    input.channels[1].resize(64);
+    input.channels[0][0] = std::numeric_limits<float>::quiet_NaN();
+    auto result = render(chain, settings, request);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "render.process_error");
+    input.channels[0][0] = 0;
+    CHECK(render(chain, settings, request));
+    REQUIRE(edge->startProcessing());
+    CHECK_FALSE(render(chain, settings, request));
+    edge->stopProcessing();
 }
