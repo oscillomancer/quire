@@ -826,7 +826,14 @@
           "items": {
             "type": "string"
           }
-        }
+        },
+        "dropped": {
+          "type": "integer"
+        },
+        "voice_dropped": {
+          "type": "integer"
+        },
+        "failed_errors": {}
       },
       "required": [
         "running",
@@ -843,7 +850,10 @@
         "anticipative",
         "anticipation_misses",
         "meter_drops",
-        "failed_fx"
+        "failed_fx",
+        "dropped",
+        "voice_dropped",
+        "failed_errors"
       ],
       "additionalProperties": false
     },
@@ -856,7 +866,7 @@
   {
     "name": "engine_status",
     "title": "Real-time engine state: backend, rate, block, device period, latency, xruns.",
-    "description": "Real-time engine state: backend, rate, block, device period, latency, xruns. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them). See describe for errors and examples.",
+    "description": "Real-time engine state: backend, rate, block, device period, latency, xruns. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",
@@ -925,7 +935,14 @@
           "items": {
             "type": "string"
           }
-        }
+        },
+        "dropped": {
+          "type": "integer"
+        },
+        "voice_dropped": {
+          "type": "integer"
+        },
+        "failed_errors": {}
       },
       "required": [
         "running",
@@ -942,7 +959,10 @@
         "anticipative",
         "anticipation_misses",
         "meter_drops",
-        "failed_fx"
+        "failed_fx",
+        "dropped",
+        "voice_dropped",
+        "failed_errors"
       ],
       "additionalProperties": false
     },

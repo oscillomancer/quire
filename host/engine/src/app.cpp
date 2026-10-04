@@ -713,6 +713,11 @@ void EngineApp::haltEngine() {
     }
     backend_ = nullptr;
     ownedBackend_.reset();
+    outputGestures_.clear();
+    pendingOutputs_.clear();
+    outputGeneration_ = outputEpoch_ = 0;
+    outputDrops_ = voiceDrops_ = consumerDrops_ = 0;
+    outputOverflow_ = false;
 }
 
 void EngineApp::stopEngine() {
@@ -735,6 +740,7 @@ void EngineApp::tick() {
     }
     if (engine_) {
         engine_->service();
+        consumePluginOutputs();
         // Failures reach subscribers without a client asking.
         checkFailures();
         if (backend_) {
@@ -877,16 +883,6 @@ void EngineApp::autosave() {
     autosaveMarked_ = true;
 }
 
-void EngineApp::checkFailures() {
-    for (const auto& [id, why] : pool_->failed()) {
-        if (!reportedFailures_.insert(id).second) continue;
-        json::Value payload = json::Value::object();
-        payload["fx"] = id.str();
-        payload["reason"] = why;
-        emit("fx.failed", std::move(payload));
-    }
-}
-
 void EngineApp::restartFx(model::Id fx) {
     pool_->restart(fx);
     reportedFailures_.erase(fx);
@@ -896,7 +892,16 @@ void EngineApp::restartFx(model::Id fx) {
 EngineStatus EngineApp::engineStatus() {
     checkFailures();
     EngineStatus st;
-    for (const auto& [id, why] : pool_->failed()) st.failedFx.push_back(id.str());
+    st.dropped = static_cast<std::int64_t>(outputDrops_ + consumerDrops_);
+    st.voiceDropped = static_cast<std::int64_t>(voiceDrops_);
+    for (const auto& [id, error] : pool_->failedErrors()) {
+        st.failedFx.push_back(id.str());
+        auto failure = json::Value::object();
+        failure["fx"] = id.str();
+        failure["reason"] = error.message;
+        failure["error"] = pluginErrorJson(error);
+        st.failedErrors.asArray().push_back(std::move(failure));
+    }
     if (!engine_ || !backend_) return st;
     const BackendStatus b = backend_->status();
     st.running = true;
@@ -1085,6 +1090,11 @@ bool EngineApp::writesAutomation(model::Id object, const std::string& param) con
 
 void EngineApp::recordAutomation(model::Id object, const std::string& param, double value) {
     if (!engine_ || !txn_ || !engine_->transport().playing) return;
+    recordAutomationAt(object, param, value, view().timeMap->beatAt(engine_->transport().seconds));
+}
+
+void EngineApp::recordAutomationAt(model::Id object, const std::string& param, double value,
+                                   double beat) {
     const model::Session s = view();
     std::optional<model::Id> envId;
     for (const auto& e : s.envelopes)
@@ -1092,7 +1102,6 @@ void EngineApp::recordAutomation(model::Id object, const std::string& param, dou
             writingMode(e.value->mode))
             envId = e.id;
     if (!envId) return;
-    const double beat = s.timeMap->beatAt(engine_->transport().seconds);
     auto it = autoWrite_.find(*envId);
     const bool first = it == autoWrite_.end() || !it->second.touched;
     // A loop pass wraps: the erase window restarts at the write itself.

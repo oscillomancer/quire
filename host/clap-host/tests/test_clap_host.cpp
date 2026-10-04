@@ -1685,3 +1685,45 @@ TEST_CASE("CLAP process requests and ordered parameter clear notifications are o
     REQUIRE(notes.paramsClear.size() == 1);
     CHECK(notes.paramsClear[0].id == 8);
 }
+
+TEST_CASE("bridged process requests and ordered clears survive service and rescan") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, true);
+    REQUIRE(made);
+    auto& instance = **made;
+    CHECK_FALSE(instance.processRequested());
+    REQUIRE(instance.loadState(std::array<std::uint8_t, 4>{20, 0, 0, 0}));
+    instance.serviceMainThread();
+    CHECK(instance.processRequested());
+    CHECK(instance.takeProcessRequest());
+    instance.serviceMainThread();
+    CHECK_FALSE(instance.takeProcessRequest());
+    auto notes = instance.takeNotifications();
+    REQUIRE(notes.paramsClear.size() == 2);
+    CHECK(notes.paramsClear[0].id == 7);
+    CHECK(notes.paramsClear[0].flags == CLAP_PARAM_CLEAR_AUTOMATIONS);
+    CHECK(notes.paramsClear[1].id == 8);
+    CHECK(notes.paramsClear[1].flags == CLAP_PARAM_CLEAR_MODULATIONS);
+    REQUIRE(instance.loadState(std::array<std::uint8_t, 4>{20, 0, 0, 0}));
+    instance.serviceMainThread();  // leave earlier clears pending in the proxy
+    REQUIRE(instance.loadState(std::array<std::uint8_t, 4>{21, 0, 0, 0}));
+    instance.serviceMainThread();
+    notes = instance.takeNotifications();
+    CHECK(notes.paramsRescan);
+    CHECK(notes.paramsRescanFlags == CLAP_PARAM_RESCAN_ALL);
+    REQUIRE(notes.paramsClear.size() == 1);
+    CHECK(notes.paramsClear[0].id == 8);
+    CHECK(notes.paramsClear[0].flags == CLAP_PARAM_CLEAR_ALL);
+    CHECK(instance.takeNotifications().paramsClear.empty());
+}
+
+TEST_CASE("bridge service rejects oversized and truncated clear lists") {
+    for (const auto count : {bridge::kMaxParamClears + 1, 1U}) {
+        bridge::Writer w;
+        for (int i = 0; i < 6; ++i) w.u8(0);
+        w.u32(0);
+        w.u8(1);
+        w.u32(count);
+        CHECK_FALSE(bridge::validReply(bridge::Op::Service,
+                                       bridge::Reader(w.bytes.data(), w.bytes.size())));
+    }
+}

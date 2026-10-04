@@ -136,6 +136,12 @@ syscalls per block for the data, not just the wake-up).
   process, like a crash. Malformed requests receive a `bridge.malformed`
   error without invoking the operation. `Service` also carries an optional
   structured restart activation error; `EditorRequests` carries show/hide.
+  After `paramsRescanFlags`, `Service` carries `u8 processRequested`, then
+  `u32 clearCount` and ordered `{u32 paramId, u32 clearFlags}` pairs. The child
+  consumes the wake request; the proxy keeps it in an atomic until its audio
+  owner consumes it. Both the reply and pending proxy list are bounded at
+  4096 clears; exceeding the bound reports `bridge.notifications_limit`.
+  A rescan supersedes earlier clears, including those retained by the proxy.
   Each request uses a single steady-clock deadline across the complete send
   and reply, including partial transfers. A missed deadline kills and fails
   the process; it is never renewed when another fragment arrives.

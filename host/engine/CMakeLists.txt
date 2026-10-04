@@ -4,7 +4,7 @@ supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/recording.cpp
           src/stretch.cpp src/meters.cpp
           src/jack_backend.cpp
-          src/app.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
+          src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis

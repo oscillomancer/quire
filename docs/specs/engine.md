@@ -627,12 +627,20 @@ The app-side consumer belongs in `EngineApp::tick()` after engine main servicing
    call `InstancePool::acknowledgeOutputPatch` with the updated patch before a
    head-change rebuild, so `get()` does not echo it through `setPatch`. Only
    plug-in-originated parameter changes may use this acknowledgement; other
-   edits still follow normal validation and delivery. Automation write/touch/latch
-   recording and this app consumer remain integration work.
+   edits still follow normal validation and delivery. Plain outputs capture the
+   current opaque state and acknowledge its hash through
+   `InstancePool::acknowledgeOutputState`; numeric values remain display/diff
+   fields. Replay logs retain the resolved value edit and recorded envelope
+   points without executing a setter during output consumption. The consumer
+   bounds pending records (8192), gestures (128) and recording points per gesture
+   (4096); overflow discards missing recording intervals and resynchronizes
+   current values. Status exposes `dropped`, `voice_dropped`, and
+   `failed_errors` alongside legacy `failed_fx` IDs. Failure entries and
+   `fx.failed` retain `reason` and add structured `error` details.
 
-Bridge integration requires matching additions to the `Op::Service` response in
+Bridge integration carries matching additions to the `Op::Service` response in
 `host/clap-host/bridge/bridge_main.cpp` and `src/bridge_client.cpp`: carry the
 process-request bit and an ordered list of `{param id, clear flags}` after
 `paramsRescanFlags`, update both reader and writer together, and expose the
-received wake bit to the proxy's RT-safe wake API. This is a protocol change and
-is reported for the orchestrator rather than applied in this review.
+received wake bit to the proxy's RT-safe wake API. Both endpoints use the
+unreleased protocol v6 layout (ADR-0013).

@@ -79,6 +79,12 @@ class RemoteInstance {
     // serviceMainThread + notifications + log in one round trip.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
     bool needsAudioFlush() const { return needsAudioFlush_; }
+    bool processRequested() const SUPPLE_RT {
+        return processRequested_.load(std::memory_order_acquire);
+    }
+    bool takeProcessRequest() SUPPLE_RT {
+        return processRequested_.exchange(false, std::memory_order_acq_rel);
+    }
     Instance::IdleOutputs takeIdleOutputs();
     // The plug-in's editor, embedded by the bridge into `x11Parent` (gap log #39).
     Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);
@@ -114,6 +120,7 @@ class RemoteInstance {
     int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
     std::uint32_t latency_ = 0, tail_ = 0;
     bool reportsTail_ = false, needsAudioFlush_ = false;
+    std::atomic<bool> processRequested_{false};
 };
 
 std::filesystem::path bridgeExecutable();
