@@ -56,6 +56,8 @@ EntryInfo entryInfo(const Session& s, Id id) {
             return info(s.routes, id);
         case Kind::Envelope:
             return info(s.envelopes, id);
+        case Kind::AutoItem:
+            return info(s.autoItems, id);
         case Kind::Marker:
             return info(s.markers, id);
         case Kind::Region:
@@ -92,6 +94,8 @@ json::Value objectJson(const Session& s, Id id) {
             return enc(s.routes);
         case Kind::Envelope:
             return enc(s.envelopes);
+        case Kind::AutoItem:
+            return enc(s.autoItems);
         case Kind::Marker:
             return enc(s.markers);
         case Kind::Region:

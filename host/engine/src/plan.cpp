@@ -442,9 +442,12 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     std::map<host::Instance*, json::Value> schemas;  // semantic schemas, fetched once
     for (const auto& e : s.envelopes) {
         const model::Envelope& env = *e.value;
-        if (!env.active || env.points.empty()) continue;
+        // What plays: the envelope with its automation items (gap log #28).
+        const std::vector<model::EnvPoint> played =
+            env.target.object.kind == Kind::Take ? env.points : model::effectivePoints(s, e.id);
+        if (!env.active || played.empty()) continue;
         Automation a;
-        for (const model::EnvPoint& pt : env.points) {
+        for (const model::EnvPoint& pt : played) {
             const double sec =
                 env.timebase == model::Timebase::Time ? pt.pos : s.timeMap->secondsAt(pt.pos);
             a.points.push_back(

@@ -1626,9 +1626,12 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})");
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain"})");
-    if (fixture == "song_with_env")  // + en_1: fx_2 gain, two points
+    if (fixture == "song_with_env" || fixture == "song_with_autoitem")  // + en_1: fx_2 gain
         run("env.add",
             R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})");
+    if (fixture == "song_with_autoitem")  // + ai_1 on en_1: beats 4-8, a two-beat ramp, looped
+        run("autoitem.add",
+            R"({"env": "en_1", "position": 4, "length": 4, "source_length": 2, "points": [{"beat": 0, "value": -6}, {"beat": 2, "value": 0}]})");
     if (fixture == "song_with_render") run("render.mix", R"({"name":"example"})");
     if (fixture == "render_queued")  // + q1: the mix of the first beat
         run("render.queue.add",

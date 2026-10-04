@@ -216,12 +216,20 @@ class Ghost : public ui::Node {
                 break;
             case ItemGestures::Drag::EnvPoint: {
                 const model::Envelope* env = st.env ? s.envelopes.find(*st.env) : nullptr;
-                const auto frame = env ? envFrame(v, *st.env, *env) : std::nullopt;
+                auto frame = env ? envFrame(v, *st.env, *env) : std::nullopt;
                 if (!frame) break;
+                frame->offsetBeats += st.envOffset;
                 model::Envelope draft = *env;
                 draft.points = st.envDraft;
-                const float x0 = std::max(lanes.x, frame->area.x),
-                            x1 = std::min(lanes.right(), frame->area.right());
+                float x0 = std::max(lanes.x, frame->area.x),
+                      x1 = std::min(lanes.right(), frame->area.right());
+                if (const model::AutomationItem* ai =
+                        st.autoItem ? s.autoItems.find(*st.autoItem) : nullptr) {
+                    x0 = std::max(x0, v.xAt(s.timeMap->secondsAt(st.envOffset)));
+                    x1 = std::min(
+                        x1, v.xAt(s.timeMap->secondsAt(std::min(st.envOffset + ai->sourceLength,
+                                                                ai->position + ai->length))));
+                }
                 ui::Point prev{};
                 for (float x = x0; x <= x1; x += 3) {
                     const double beat =
@@ -238,6 +246,23 @@ class Ghost : public ui::Node {
                     c.text({at.x + 8, at.y - 16, 120, 14}, frame->scale.text(pt.value),
                            ui::Font::Mono, t.type("caption"), t.color("ink"));
                 }
+                break;
+            }
+            case ItemGestures::Drag::AutoItemMove:
+            case ItemGestures::Drag::AutoItemLength: {
+                const model::AutomationItem* ai =
+                    st.autoItem ? s.autoItems.find(*st.autoItem) : nullptr;
+                const auto row = ai ? v.trackLayout().indexOfEnv(ai->envelope) : std::nullopt;
+                if (!row) break;
+                const bool move = st.drag == ItemGestures::Drag::AutoItemMove;
+                const double from = ai->position + (move ? st.deltaBeats : 0.0);
+                const double to = ai->position + ai->length + st.deltaBeats;
+                const ui::Rect lane = v.rowRect(*row);
+                const float x0 = v.xAt(s.timeMap->secondsAt(from)),
+                            x1 = v.xAt(s.timeMap->secondsAt(to));
+                const ui::Rect box{x0, lane.y + 1, std::max(2.0f, x1 - x0), lane.h - 2};
+                c.fillRect(box, t.color("selection").withAlpha(0.25f));
+                c.strokeRect(box, t.color("focus"));
                 break;
             }
             case ItemGestures::Drag::Comp:
@@ -502,8 +527,21 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         free_ = (e.mods & ui::kShift) != 0;
         copy_ = (e.mods & ui::kCtrl) != 0;
         state_ = State{};
-        if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env)
-            return e.button == 1 ? envPress(*view_.trackLayout().rows()[*lane].env, e) : true;
+        if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env) {
+            const model::Id env = *view_.trackLayout().rows()[*lane].env;
+            const auto ai = autoItemAt(env, e.pos);
+            if (e.button == 3) {
+                openAutoItemMenu(env, e.pos);
+                return true;
+            }
+            if (ai && ai->zone != Drag::EnvPoint) {
+                state_.drag = ai->zone;
+                state_.autoItem = ai->item;
+                if (root_) root_->capture(&view_);
+                return true;
+            }
+            return envPress(env, e, ai);
+        }
         const auto h = hit(e.pos);
         // A take envelope drawn on the item takes the press near its line.
         if (e.button == 1 && h && e.clicks < 2)
@@ -544,6 +582,23 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                              !isMidi(activeTake(s, *itemOf(s, h->item)));
         }
         if (root_) root_->capture(&view_);
+        return true;
+    }
+    if (e.type == T::Move &&
+        (state_.drag == Drag::AutoItemMove || state_.drag == Drag::AutoItemLength)) {
+        moved_ = moved_ || std::abs(e.pos.x - press_.x) > 3;
+        const model::AutomationItem* ai =
+            state_.autoItem ? s.autoItems.find(*state_.autoItem) : nullptr;
+        if (ai) {
+            const double raw = beatAtX(e.pos.x) - beatAtX(press_.x);
+            if (state_.drag == Drag::AutoItemMove)
+                state_.deltaBeats = std::max(0.0, snap(ai->position + raw, free_)) - ai->position;
+            else
+                state_.deltaBeats = std::max(ai->position + kMinLength,
+                                             snap(ai->position + ai->length + raw, free_)) -
+                                    (ai->position + ai->length);
+        }
+        if (root_) root_->requestAnimationFrame();
         return true;
     }
     if (e.type == T::Move && state_.drag == Drag::EnvPoint) {
@@ -638,6 +693,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 }
                 break;
             case Drag::EnvPoint:
+            case Drag::AutoItemMove:
+            case Drag::AutoItemLength:
             case Drag::None:
                 break;
         }
@@ -775,6 +832,21 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
     if (state_.drag == Drag::EnvPoint) {
         if (moved_ || state_.envCreated)
             commitEnv(state_.envCreated ? "Add envelope point" : "Move envelope point");
+        return;
+    }
+    if ((state_.drag == Drag::AutoItemMove || state_.drag == Drag::AutoItemLength) &&
+        state_.autoItem && moved_ && std::abs(state_.deltaBeats) > 1e-9) {
+        if (const model::AutomationItem* ai = s.autoItems.find(*state_.autoItem)) {
+            json::Value args = json::Value::object();
+            args["item"] = state_.autoItem->str();
+            if (state_.drag == Drag::AutoItemMove)
+                args["position"] = ai->position + state_.deltaBeats;
+            else
+                args["length"] = ai->length + state_.deltaBeats;
+            runSteps(state_.drag == Drag::AutoItemMove ? "Move automation item"
+                                                       : "Resize automation item",
+                     {{"autoitem.set", std::move(args)}});
+        }
         return;
     }
     if (state_.drag == Drag::Comp && anchor && !anchor->locked) {
@@ -1029,6 +1101,8 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         }
         case Drag::Comp:
         case Drag::EnvPoint:
+        case Drag::AutoItemMove:
+        case Drag::AutoItemLength:
         case Drag::None:
             return;
     }
@@ -1055,18 +1129,28 @@ const char* shapeName(model::PointShape shape) {
 }
 }  // namespace
 
-bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e) {
+bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
+                            std::optional<AutoHit> autoItem) {
     const model::Session& s = view_.session();
     const model::Envelope* env = s.envelopes.find(envId);
-    const auto frame = env ? envFrame(view_, envId, *env) : std::nullopt;
+    auto frame = env ? envFrame(view_, envId, *env) : std::nullopt;
     if (!frame) return true;
     state_.drag = Drag::EnvPoint;
     state_.env = envId;
     state_.envDraft = env->points;
+    // Inside an automation item the press edits the item's points (as played,
+    // in the loop pass under the pointer); elsewhere the envelope's own.
+    if (const model::AutomationItem* ai = autoItem ? s.autoItems.find(autoItem->item) : nullptr) {
+        state_.autoItem = autoItem->item;
+        state_.envOffset = autoItem->passStart;
+        frame->offsetBeats += autoItem->passStart;
+        state_.envDraft = ai->points;
+        for (model::EnvPoint& pt : state_.envDraft) pt.value = Lanes::autoItemValue(*ai, pt.value);
+    }
     std::optional<std::size_t> nearest;
     float reach = 7;
-    for (std::size_t i = 0; i < env->points.size(); ++i) {
-        const model::EnvPoint& pt = env->points[i];
+    for (std::size_t i = 0; i < state_.envDraft.size(); ++i) {
+        const model::EnvPoint& pt = state_.envDraft[i];
         const float x = view_.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos));
         const float y = frame->y(pt.value);
         const float d = std::max(std::abs(x - e.pos.x), std::abs(y - e.pos.y));
@@ -1086,6 +1170,8 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e) {
     } else {  // a new point under the pointer
         model::EnvPoint pt;
         pt.pos = std::max(0.0, snap(beatAtX(e.pos.x), free_) - frame->offsetBeats);
+        if (state_.autoItem)
+            pt.pos = std::min(pt.pos, s.autoItems.find(*state_.autoItem)->sourceLength);
         pt.value = frame->value(e.pos.y);
         const auto at =
             std::upper_bound(state_.envDraft.begin(), state_.envDraft.end(), pt.pos,
@@ -1105,14 +1191,19 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e) {
 void ItemGestures::envDrag(const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
     const model::Envelope* env = state_.env ? s.envelopes.find(*state_.env) : nullptr;
-    const auto frame = env ? envFrame(view_, *state_.env, *env) : std::nullopt;
+    auto frame = env ? envFrame(view_, *state_.env, *env) : std::nullopt;
     if (!frame || state_.envIndex >= state_.envDraft.size()) return;
+    frame->offsetBeats += state_.envOffset;
+    const model::AutomationItem* ai =
+        state_.autoItem ? s.autoItems.find(*state_.autoItem) : nullptr;
     auto& pts = state_.envDraft;
     model::EnvPoint& pt = pts[state_.envIndex];
     // A mostly vertical drag keeps the point's time (snapping would move it).
     if (std::abs(e.pos.x - press_.x) >= 4) {
         const double lo = state_.envIndex > 0 ? pts[state_.envIndex - 1].pos : 0.0;
-        const double hi = state_.envIndex + 1 < pts.size() ? pts[state_.envIndex + 1].pos : 1e12;
+        const double hi = state_.envIndex + 1 < pts.size() ? pts[state_.envIndex + 1].pos
+                          : ai                             ? ai->sourceLength
+                                                           : 1e12;
         const double raw =
             frame->offsetBeats + state_.envOrigPos + beatAtX(e.pos.x) - beatAtX(press_.x);
         pt.pos = std::clamp(snap(raw, free_) - frame->offsetBeats, lo, hi);
@@ -1143,20 +1234,132 @@ std::optional<model::Id> ItemGestures::takeEnvelopeAt(model::Id item, ui::Point 
     return std::nullopt;
 }
 
+std::optional<ItemGestures::AutoHit> ItemGestures::autoItemAt(model::Id env, ui::Point p) const {
+    const model::Session& s = view_.session();
+    const auto row = view_.trackLayout().indexOfEnv(env);
+    if (!row) return std::nullopt;
+    const ui::Rect lane = view_.rowRect(*row);
+    if (!lane.contains(p)) return std::nullopt;
+    const double beat = beatAtX(p.x);
+    std::optional<AutoHit> found;
+    double foundStart = -1;
+    for (const auto& e : s.autoItems) {
+        const model::AutomationItem& ai = *e.value;
+        if (ai.envelope != env) continue;
+        const float x0 = view_.xAt(s.timeMap->secondsAt(ai.position)),
+                    x1 = view_.xAt(s.timeMap->secondsAt(ai.position + ai.length));
+        if (p.x < x0 || p.x > x1 + 3) continue;
+        if (ai.position < foundStart) continue;  // a later item covers an earlier one
+        foundStart = ai.position;
+        AutoHit h;
+        h.item = e.id;
+        h.zone = p.x >= x1 - kEdge                       ? Drag::AutoItemLength
+                 : p.y < lane.y + 1 + Lanes::kAutoHeader ? Drag::AutoItemMove
+                                                         : Drag::EnvPoint;
+        const double pass = ai.loop && ai.sourceLength > 0
+                                ? std::floor(std::max(0.0, beat - ai.position) / ai.sourceLength)
+                                : 0.0;
+        h.passStart = ai.position + pass * ai.sourceLength;
+        found = h;
+    }
+    return found;
+}
+
+void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
+    if (!root_) return;
+    const model::Session& s = view_.session();
+    const auto hitItem = autoItemAt(env, at);
+    const model::AutomationItem* ai = hitItem ? s.autoItems.find(hitItem->item) : nullptr;
+    std::vector<ui::MenuItem> items;
+    auto step = [this](std::string label, std::string command, json::Value args) {
+        return [this, label = std::move(label), command = std::move(command),
+                args = std::move(args)]() mutable {
+            if (!run) return;
+            if (auto r = run(label, {{command, std::move(args)}}); !r && onError)
+                onError(r.error());
+        };
+    };
+    ui::MenuItem insert;
+    insert.label = "Insert automation item";
+    {
+        json::Value args = json::Value::object();
+        args["env"] = env.str();
+        args["position"] = std::max(0.0, snap(beatAtX(at.x), free_));
+        args["length"] = 4.0;
+        insert.run = step("Insert automation item", "autoitem.add", std::move(args));
+    }
+    items.push_back(std::move(insert));
+    if (ai) {
+        const std::string id = hitItem->item.str();
+        auto ref = [&id] {
+            json::Value a = json::Value::object();
+            a["item"] = id;
+            return a;
+        };
+        ui::MenuItem rule;
+        rule.separator = true;
+        items.push_back(rule);
+        ui::MenuItem pooled;
+        pooled.label = "Duplicate (pooled)";
+        pooled.run = step("Duplicate automation item", "autoitem.duplicate", ref());
+        items.push_back(std::move(pooled));
+        ui::MenuItem copy;
+        copy.label = "Duplicate (unpooled copy)";
+        {
+            json::Value a = ref();
+            a["pooled"] = false;
+            copy.run = step("Duplicate automation item", "autoitem.duplicate", std::move(a));
+        }
+        items.push_back(std::move(copy));
+        if (ai->pool > 0) {
+            ui::MenuItem unpool;
+            unpool.label = "Unpool";
+            unpool.run = step("Unpool automation item", "autoitem.unpool", ref());
+            items.push_back(std::move(unpool));
+        }
+        ui::MenuItem loop;
+        loop.label = "Loop";
+        loop.checked = ai->loop;
+        {
+            json::Value a = ref();
+            a["loop"] = !ai->loop;
+            loop.run = step("Automation item loop", "autoitem.set", std::move(a));
+        }
+        items.push_back(std::move(loop));
+        items.push_back(rule);
+        ui::MenuItem del;
+        del.label = "Delete automation item";
+        del.run = step("Delete automation item", "autoitem.remove", ref());
+        items.push_back(std::move(del));
+    }
+    root_->openPopup(
+        ui::makeMenu("autoitem.menu", std::move(items), [this] { root_->closePopup(); }),
+        {at.x, at.y, 1, 1});
+}
+
 void ItemGestures::commitEnv(const std::string& label) {
     if (!run || !state_.env) return;
     json::Value args = json::Value::object(), points = json::Value::array();
-    args["env"] = state_.env->str();
+    const model::AutomationItem* ai =
+        state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
+    if (ai)
+        args["item"] = state_.autoItem->str();
+    else
+        args["env"] = state_.env->str();
     for (const model::EnvPoint& pt : state_.envDraft) {
         json::Value p = json::Value::object();
         p["beat"] = pt.pos;
-        p["value"] = pt.value;
+        // Back from the played value to the item's own (amplitude scales it).
+        p["value"] = ai && std::abs(ai->amplitude) > 1e-9
+                         ? ai->baseline + (pt.value - ai->baseline) / ai->amplitude
+                         : pt.value;
         p["shape"] = shapeName(pt.shape);
         if (pt.tension != 0) p["tension"] = pt.tension;
         points.push_back(std::move(p));
     }
     args["points"] = std::move(points);
-    if (auto r = run(label, {{"env.points.set", std::move(args)}}); !r && onError)
+    if (auto r = run(label, {{ai ? "autoitem.set" : "env.points.set", std::move(args)}});
+        !r && onError)
         onError(r.error());
 }
 

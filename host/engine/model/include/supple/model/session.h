@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "supple/base/result.h"
@@ -33,6 +34,7 @@ struct Session {
     IdMap<FxInstance> fx;
     IdMap<Route> routes;
     IdMap<Envelope> envelopes;
+    IdMap<AutomationItem> autoItems;
     IdMap<Marker> markers;
     IdMap<Region> regions;
     std::map<std::string, std::shared_ptr<const Blob>> blobs;  // "sha256:<hex>"
@@ -55,6 +57,7 @@ struct TxnBuilders {
     std::optional<IdMap<FxInstance>::Builder> fx;
     std::optional<IdMap<Route>::Builder> routes;
     std::optional<IdMap<Envelope>::Builder> envelopes;
+    std::optional<IdMap<AutomationItem>::Builder> autoItems;
     std::optional<IdMap<Marker>::Builder> markers;
     std::optional<IdMap<Region>::Builder> regions;
 };
@@ -80,6 +83,7 @@ SUPPLE_MODEL_TRAITS(MidiSource, Midi, midi)
 SUPPLE_MODEL_TRAITS(FxInstance, Fx, fx)
 SUPPLE_MODEL_TRAITS(Route, Route, routes)
 SUPPLE_MODEL_TRAITS(Envelope, Envelope, envelopes)
+SUPPLE_MODEL_TRAITS(AutomationItem, AutoItem, autoItems)
 SUPPLE_MODEL_TRAITS(Marker, Marker, markers)
 SUPPLE_MODEL_TRAITS(Region, Region, regions)
 #undef SUPPLE_MODEL_TRAITS
@@ -154,6 +158,7 @@ class EditTxn {
     bool remove(Id id) {
         if (!builder<T>().erase(id)) return false;
         record(Change::Op::Remove, id);
+        if constexpr (std::is_same_v<T, Envelope>) removeItemsOn(id);  // its automation items
         return true;
     }
 
@@ -175,6 +180,7 @@ class EditTxn {
     Result<Session> commit();
 
   private:
+    void removeItemsOn(Id envelope);
     template <class T>
     typename IdMap<T>::Builder& builder() const {
         auto& slot = Traits<T>::slot(builders_);
@@ -214,6 +220,14 @@ std::optional<Id> trackOfFx(const Session& s, Id fx);
 // The media source holding the bytes `hash` identifies ("sha256:<hex>"), if the
 // session has one: a file added twice is one source, not two.
 std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash);
+
+// The points an envelope plays (gap log #28): its own, with each automation
+// item on it replacing the span it covers (looped, scaled; a later item cuts
+// an earlier one it overlaps), a step at each edge. Absolute beats.
+std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope);
+// An envelope's value at `pos` from sorted points with their segment shapes
+// (`fallback` without points).
+double pointsValueAt(const std::vector<EnvPoint>& points, double pos, double fallback);
 
 // Where an item sits after resolving its timebase (item, then track, then
 // project): its start in beats and seconds and its end in seconds. The

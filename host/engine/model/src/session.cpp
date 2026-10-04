@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <functional>
 #include <set>
 
+#include "supple/model/env_shape.h"
 #include "supple/model/schemas.h"
 
 namespace supple::model {
@@ -104,6 +106,18 @@ void apply(Session& s, TxnBuilders& b) {
 }
 }  // namespace
 
+void EditTxn::removeItemsOn(Id envelope) {
+    std::vector<Id> on;
+    for (const auto& e : base_.autoItems)
+        if (const AutomationItem* ai = get<AutomationItem>(e.id); ai && ai->envelope == envelope)
+            on.push_back(e.id);
+    for (Id id : created_)
+        if (id.kind == Kind::AutoItem)
+            if (const AutomationItem* ai = get<AutomationItem>(id); ai && ai->envelope == envelope)
+                on.push_back(id);
+    for (Id id : on) remove<AutomationItem>(id);
+}
+
 Session EditTxn::preview() const {
     Session s = base_;
     apply<TempoPointObj>(s, builders_);
@@ -116,6 +130,7 @@ Session EditTxn::preview() const {
     apply<FxInstance>(s, builders_);
     apply<Route>(s, builders_);
     apply<Envelope>(s, builders_);
+    apply<AutomationItem>(s, builders_);
     apply<Marker>(s, builders_);
     apply<Region>(s, builders_);
     s.project = project_;
@@ -155,6 +170,7 @@ Result<Session> EditTxn::commit() {
     apply<FxInstance>(s, builders_);
     apply<Route>(s, builders_);
     apply<Envelope>(s, builders_);
+    apply<AutomationItem>(s, builders_);
     apply<Marker>(s, builders_);
     apply<Region>(s, builders_);
     s.project = project_;
@@ -219,6 +235,7 @@ struct Checker {
         check(s.fx, Kind::Fx);
         check(s.routes, Kind::Route);
         check(s.envelopes, Kind::Envelope);
+        check(s.autoItems, Kind::AutoItem);
         check(s.markers, Kind::Marker);
         check(s.regions, Kind::Region);
     }
@@ -402,6 +419,23 @@ struct Checker {
         for (const auto& e : s.regions)
             if (e.value->end < e.value->start)
                 fail(at("rulers/regions", e.id, "end"), "region ends before it starts");
+        for (const auto& e : s.autoItems) {
+            const AutomationItem& ai = *e.value;
+            const Envelope* env = s.envelopes.find(ai.envelope);
+            if (!env)
+                fail(at("automation_items", e.id, "envelope"),
+                     "envelope " + ai.envelope.str() + " does not exist");
+            else if (env->target.object.kind == Kind::Take)
+                fail(at("automation_items", e.id, "envelope"),
+                     "automation items sit on track, route and plugin envelopes");
+            if (!(ai.length > 0) || !(ai.sourceLength > 0))
+                fail(at("automation_items", e.id, "length"), "lengths must be positive");
+            for (std::size_t i = 1; i < ai.points.size(); ++i)
+                if (ai.points[i].pos < ai.points[i - 1].pos) {
+                    fail(at("automation_items", e.id, "points"), "points are not sorted");
+                    break;
+                }
+        }
     }
 };
 
@@ -483,6 +517,7 @@ std::vector<ObjectDiff> diff(const Session& a, const Session& b) {
     diffMap(a.midi, b.midi, out);
     diffMap(a.routes, b.routes, out);
     diffMap(a.envelopes, b.envelopes, out);
+    diffMap(a.autoItems, b.autoItems, out);
     return out;
 }
 
@@ -593,6 +628,75 @@ void retimeItem(const Session& s, Item& it, Timebase from, Timebase to) {
 
 ItemSpan itemSpan(const Session& s, const Item& it) {
     return spanAs(*s.timeMap, it, itemTimebase(s, it));
+}
+
+double pointsValueAt(const std::vector<EnvPoint>& pts, double pos, double fallback) {
+    if (pts.empty()) return fallback;
+    if (pos < pts.front().pos) return pts.front().value;
+    if (pos >= pts.back().pos) return pts.back().value;
+    const auto next = std::upper_bound(pts.begin(), pts.end(), pos,
+                                       [](double b, const EnvPoint& p) { return b < p.pos; });
+    const EnvPoint& b = *next;
+    const EnvPoint& a = *(next - 1);
+    if (b.pos <= a.pos) return b.value;
+    return a.value +
+           (b.value - a.value) * shapeCurve(a.shape, a.tension, (pos - a.pos) / (b.pos - a.pos));
+}
+
+std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
+    const Envelope* env = s.envelopes.find(envelope);
+    if (!env) return {};
+    std::vector<const AutomationItem*> items;
+    for (const auto& e : s.autoItems)
+        if (e.value->envelope == envelope) items.push_back(e.value.get());
+    if (items.empty()) return env->points;
+    std::stable_sort(
+        items.begin(), items.end(),
+        [](const AutomationItem* a, const AutomationItem* b) { return a->position < b->position; });
+    const std::vector<EnvPoint>& under = env->points;
+    std::vector<EnvPoint> out;
+    auto add = [&](double pos, double value, PointShape shape = PointShape::Linear,
+                   double tension = 0.0) { out.push_back({pos, value, shape, tension}); };
+    double prevEnd = -1e300;
+    for (std::size_t k = 0; k < items.size(); ++k) {
+        const AutomationItem& ai = *items[k];
+        const double start = std::max(ai.position, prevEnd);
+        double end = ai.position + ai.length;
+        if (k + 1 < items.size()) end = std::min(end, items[k + 1]->position);  // cut by the next
+        if (!(end > start)) continue;
+        for (const EnvPoint& p : under)  // the envelope between items
+            if (p.pos > prevEnd && p.pos < start) out.push_back(p);
+        if (!under.empty()) add(start, pointsValueAt(under, start, 0.0));
+        const double src = ai.sourceLength;
+        auto mapped = [&](double v) { return ai.baseline + ai.amplitude * (v - ai.baseline); };
+        auto local = [&](double x) {
+            return mapped(pointsValueAt(ai.points, std::min(x, src), ai.baseline));
+        };
+        const double span = end - ai.position;
+        const int reps = ai.loop ? std::max(1, static_cast<int>(std::ceil(span / src - 1e-9))) : 1;
+        for (int r = 0; r < reps; ++r) {
+            const double base = ai.position + r * src;
+            const double segEnd = ai.loop ? std::min(base + src, end) : end;
+            if (segEnd <= start) continue;
+            const double from = std::max(base, start);
+            add(from, local(from - base));
+            for (const EnvPoint& p : ai.points) {
+                const double at = base + p.pos;
+                if (at > from && at < segEnd && p.pos < src)
+                    add(at, mapped(p.value), p.shape, p.tension);
+                else if (at == from && p.pos < src) {  // the segment's first point keeps its shape
+                    out.back().shape = p.shape;
+                    out.back().tension = p.tension;
+                }
+            }
+            add(segEnd, local(segEnd - base));
+        }
+        if (!under.empty()) add(end, pointsValueAt(under, end, 0.0));  // back to the envelope
+        prevEnd = end;
+    }
+    for (const EnvPoint& p : under)
+        if (p.pos > prevEnd) out.push_back(p);
+    return out;
 }
 
 }  // namespace supple::model

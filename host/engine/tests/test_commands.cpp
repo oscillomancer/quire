@@ -1049,3 +1049,53 @@ TEST_CASE("take FX and take envelopes over the bus: add, reorder, copy with the 
     for (const auto& e : app->head().envelopes) left += e.value->target.object == rightTake;
     CHECK(left == 0);
 }
+
+TEST_CASE("automation items: an item replaces the envelope in a render; a pool edits together") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Synth"})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","position":0,"length":8,"notation":"1: A4:w | A4:w"})");
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume","points":[{"beat":0,"value":0}]})");
+    // Beats 2-4 (1-2 s at 120 BPM) silenced by an item over a flat 0 dB envelope.
+    const auto item =
+        run(bus, "autoitem.add",
+            R"({"env":"en_1","position":2,"length":2,"points":[{"beat":0,"value":"-150 dB"}]})");
+    CHECK(item.find("id")->asString() == "ai_1");
+    const auto mix = run(bus, "render.mix", R"({"name":"items","end_beat":8})");
+    auto audio = audio::readAudio(mix.find("path")->asString());
+    REQUIRE(audio);
+    auto windowPeak = [&](double from, double to) {
+        double p = 0;
+        for (std::size_t i = static_cast<std::size_t>(from * 48000);
+             i < static_cast<std::size_t>(to * 48000); ++i)
+            p = std::max(p, std::fabs(double(audio->channels[0][i])));
+        return p;
+    };
+    CHECK(windowPeak(0.2, 0.9) > 0.05);    // before it
+    CHECK(windowPeak(1.05, 1.95) < 1e-4);  // under it (past the fader's 10 ms ramp)
+    CHECK(windowPeak(2.1, 2.9) > 0.05);    // after it
+    // A pooled copy: rewriting the copy's points rewrites the original's.
+    const auto copy = run(bus, "autoitem.duplicate", R"({"item":"ai_1","position":6})");
+    CHECK(copy.find("pool")->asInt() == 1);
+    run(bus, "autoitem.set",
+        R"({"item":"ai_2","points":[{"beat":0,"value":"-6 dB"},{"beat":1,"value":0}]})");
+    const auto listed = run(bus, "autoitem.list", R"({"env":"en_1"})");
+    REQUIRE(listed.find("items")->size() == 2);
+    for (const auto& e : listed.find("items")->asArray()) {
+        REQUIRE(e.find("points")->size() == 2);
+        CHECK(e.find("points")->at(0).find("value")->asDouble() == doctest::Approx(-6.0));
+    }
+    // Unpooled, an edit stays with its item.
+    run(bus, "autoitem.unpool", R"({"item":"ai_2"})");
+    run(bus, "autoitem.set", R"({"item":"ai_2","points":[{"beat":0,"value":-3}]})");
+    CHECK(app->head().autoItems.find(*model::Id::parse("ai_1"))->points.size() == 2);
+    // An item on a take envelope is refused; removing the envelope removes its items.
+    run(bus, "env.remove", R"({"env":"en_1"})");
+    CHECK(app->head().autoItems.empty());
+    run(bus, "history.undo", "{}");
+    CHECK(app->head().autoItems.size() == 2);
+}

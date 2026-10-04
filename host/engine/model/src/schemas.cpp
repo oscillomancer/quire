@@ -660,6 +660,27 @@ const Schema<Route>& schemaOf<Route>() {
     return s;
 }
 
+namespace {
+Schema<EnvPoint> envPointSchema() {
+    return schema::object<EnvPoint>("env_point")
+        .field("pos", &EnvPoint::pos, num())
+        .field("value", &EnvPoint::value, num())
+        .field("shape", &EnvPoint::shape,
+               en<PointShape>({{PointShape::Linear, "linear"},
+                               {PointShape::Square, "square"},
+                               {PointShape::Slow, "slow"},
+                               {PointShape::FastStart, "fast_start"},
+                               {PointShape::FastEnd, "fast_end"},
+                               {PointShape::Bezier, "bezier"}}))
+        .defaultValue(PointShape::Linear)
+        .omitIfDefault()
+        .field("tension", &EnvPoint::tension, num().range(-1, 1))
+        .defaultValue(0.0)
+        .omitIfDefault()
+        .build();
+}
+}  // namespace
+
 template <>
 const Schema<Envelope>& schemaOf<Envelope>() {
     static const Schema<Envelope> s = [] {
@@ -668,22 +689,7 @@ const Schema<Envelope>& schemaOf<Envelope>() {
                           .field("object", &EnvTarget::object, idSchema())
                           .field("param", &EnvTarget::param, str().minLength(1))
                           .build();
-        auto point = schema::object<EnvPoint>("env_point")
-                         .field("pos", &EnvPoint::pos, num())
-                         .field("value", &EnvPoint::value, num())
-                         .field("shape", &EnvPoint::shape,
-                                en<PointShape>({{PointShape::Linear, "linear"},
-                                                {PointShape::Square, "square"},
-                                                {PointShape::Slow, "slow"},
-                                                {PointShape::FastStart, "fast_start"},
-                                                {PointShape::FastEnd, "fast_end"},
-                                                {PointShape::Bezier, "bezier"}}))
-                         .defaultValue(PointShape::Linear)
-                         .omitIfDefault()
-                         .field("tension", &EnvPoint::tension, num().range(-1, 1))
-                         .defaultValue(0.0)
-                         .omitIfDefault()
-                         .build();
+        auto point = envPointSchema();
         ObjectBuilder<Envelope> b = schema::object<Envelope>("envelope");
         b.field("target", &Envelope::target, target);
         b.field("mode", &Envelope::mode,
@@ -706,6 +712,32 @@ const Schema<Envelope>& schemaOf<Envelope>() {
         dflt(b, d.points);
         b.field("items", &Envelope::items, ids());
         dflt(b, d.items);
+        return b.build();
+    }();
+    return s;
+}
+
+template <>
+const Schema<AutomationItem>& schemaOf<AutomationItem>() {
+    static const Schema<AutomationItem> s = [] {
+        const AutomationItem d;
+        ObjectBuilder<AutomationItem> b = schema::object<AutomationItem>("automation_item");
+        b.field("envelope", &AutomationItem::envelope, idSchema());
+        b.field("position", &AutomationItem::position, num().min(0));
+        b.field("length", &AutomationItem::length, num().exclusiveMin(0));
+        b.field("source_length", &AutomationItem::sourceLength, num().exclusiveMin(0));
+        b.field("loop", &AutomationItem::loop, boolean());
+        dflt(b, d.loop);
+        b.field("pool", &AutomationItem::pool, intS().min(0));
+        dflt(b, d.pool);
+        b.field("points", &AutomationItem::points, schema::arrayOf(envPointSchema()));
+        dflt(b, d.points);
+        b.field("baseline", &AutomationItem::baseline, num());
+        dflt(b, d.baseline);
+        b.field("amplitude", &AutomationItem::amplitude, num());
+        dflt(b, d.amplitude);
+        b.field("name", &AutomationItem::name, str());
+        dflt(b, d.name);
         return b.build();
     }();
     return s;
@@ -818,6 +850,8 @@ json::Value projectToJson(const Session& s) {
     doc["sources"]["midi"] = mapToJson(s.midi);
     doc["routes"] = mapToJson(s.routes);
     doc["envelopes"] = mapToJson(s.envelopes);
+    // Written only when there are some: projects without them stay byte-identical.
+    if (!s.autoItems.empty()) doc["automation_items"] = mapToJson(s.autoItems);
     doc["groups"] = json::Value::object();
     json::Value blobs = json::Value::object();
     for (const auto& [hash, blob] : s.blobs) {
@@ -899,6 +933,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     IdMap<MidiSource>::Builder midis(s.midi);
     IdMap<Route>::Builder routes(s.routes);
     IdMap<Envelope>::Builder envelopes(s.envelopes);
+    IdMap<AutomationItem>::Builder autoItems(s.autoItems);
     mapFromJson<TempoPointObj>(sub("tempo", "points"), "/tempo/points", Kind::TempoPoint, tempo,
                                errors, options, warnings);
     mapFromJson<MeterObj>(sub("tempo", "meters"), "/tempo/meters", Kind::Meter, meters, errors,
@@ -921,6 +956,8 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
                        warnings);
     mapFromJson<Envelope>(sub("envelopes", nullptr), "/envelopes", Kind::Envelope, envelopes,
                           errors, options, warnings);
+    mapFromJson<AutomationItem>(sub("automation_items", nullptr), "/automation_items",
+                                Kind::AutoItem, autoItems, errors, options, warnings);
     // fx live under "fx" (a top-level collection keyed by fx id).
     IdMap<FxInstance>::Builder fx(s.fx);
     mapFromJson<FxInstance>(sub("fx", nullptr), "/fx", Kind::Fx, fx, errors, options, warnings);
@@ -959,6 +996,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     s.fx = fx.build();
     s.routes = routes.build();
     s.envelopes = envelopes.build();
+    s.autoItems = autoItems.build();
     // Derive the time map and validate everything through a no-op transaction.
     EditTxn txn(s, 0);
     return txn.commit();

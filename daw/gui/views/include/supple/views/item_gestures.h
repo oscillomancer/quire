@@ -105,7 +105,9 @@ class ItemGestures {
         FadeOut,
         Marquee,
         EnvPoint,
-        Comp
+        Comp,
+        AutoItemMove,
+        AutoItemLength
     };
     struct State {
         Drag drag = Drag::None;
@@ -125,6 +127,11 @@ class ItemGestures {
         std::size_t envIndex = 0;
         double envOrigPos = 0;
         bool envCreated = false;
+        // An automation item (gap log #28): its points being edited (envDraft
+        // holds them as played, in the loop pass `envOffset` beats in), or the
+        // item moved by its header / resized by its right edge (deltaBeats).
+        std::optional<model::Id> autoItem;
+        double envOffset = 0;
     };
     const State& state() const { return state_; }
 
@@ -142,6 +149,15 @@ class ItemGestures {
     // near its line), if any: a press there edits the envelope, not the item.
     std::optional<model::Id> takeEnvelopeAt(model::Id item, ui::Point p) const;
     std::optional<std::size_t> rowAt(float y) const;
+    // The automation item of envelope `env` under `p`, the part pressed
+    // (AutoItemMove: its header band, AutoItemLength: its right edge, EnvPoint:
+    // its body) and the beat its loop pass there starts at.
+    struct AutoHit {
+        model::Id item{};
+        Drag zone = Drag::None;
+        double passStart = 0;
+    };
+    std::optional<AutoHit> autoItemAt(model::Id env, ui::Point p) const;
     ArrangeView& view() { return view_; }
     const ArrangeView& view() const { return view_; }
 
@@ -149,7 +165,11 @@ class ItemGestures {
     double beatAtX(float x) const;
     // A right-click on an item (no drag): the menu of the selection (Delete).
     void openItemMenu(ui::Point at);
-    bool envPress(model::Id env, const ui::PointerEvent& e);
+    // A right-click on an automation lane: insert an item, or edit the one
+    // under the pointer (duplicate, unpool, loop, delete).
+    void openAutoItemMenu(model::Id env, ui::Point at);
+    bool envPress(model::Id env, const ui::PointerEvent& e,
+                  std::optional<AutoHit> autoItem = std::nullopt);
     void envDrag(const ui::PointerEvent& e);
     void commitEnv(const std::string& label);
     double snap(double beat, bool free) const;

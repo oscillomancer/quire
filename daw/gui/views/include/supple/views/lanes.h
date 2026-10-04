@@ -45,6 +45,13 @@ class Lanes : public ui::Node {
     static ui::Rect envArea(const ui::Rect& row);
     // Where a take's envelopes (gap log #22) are drawn over its item: under its label.
     static ui::Rect takeEnvArea(const ui::Rect& item);
+    // An automation lane's items (gap log #28): the header band that moves
+    // one, and the screen value of an item point (values scale about the
+    // item's baseline).
+    static constexpr float kAutoHeader = 10;
+    static double autoItemValue(const model::AutomationItem& ai, double value) {
+        return ai.baseline + ai.amplitude * (value - ai.baseline);
+    }
     // Take lanes (comping): an item with several takes, tall enough, shows
     // each take in its own lane under its label; the heard one is lit.
     static bool showsTakeLanes(const ui::Rect& item, std::size_t takes);

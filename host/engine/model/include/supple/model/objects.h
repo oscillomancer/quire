@@ -240,6 +240,24 @@ struct Envelope {
     std::vector<Id> items;         // automation items
 };
 
+// An automation item (gap log #28): a block of envelope on its lane that
+// replaces the envelope under its span. Its points are in beats from its
+// start over `sourceLength` beats, repeated while `loop` and the item is
+// longer; values play as baseline + amplitude x (value - baseline). Items with
+// the same `pool` (> 0) share their points and source length: an edit to one
+// is an edit to all.
+struct AutomationItem {
+    Id envelope = kMaster;  // en_*: its lane
+    double position = 0.0;  // beats
+    double length = 4.0;    // beats
+    double sourceLength = 4.0;
+    bool loop = true;
+    int pool = 0;  // 0: its own points
+    std::vector<EnvPoint> points;
+    double baseline = 0.0, amplitude = 1.0;
+    std::string name;
+};
+
 struct Marker {
     double pos = 0.0;
     Timebase timebase = Timebase::Beats;

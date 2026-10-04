@@ -147,6 +147,266 @@
     }
   },
   {
+    "name": "autoitem_add",
+    "title": "Put an automation item on an envelope: a block that replaces it there.",
+    "description": "Put an automation item on an envelope: a block that replaces it there. position (beat) or bar, length in beats. points (beats from the item's start, values in the envelope's units) over source_length beats (default: length), repeated while loop (default true) and the item is longer; without points it captures what the envelope plays over that range. Duplicate it pooled (autoitem.duplicate) to edit several at once. Track, route and plugin envelopes. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_add_args",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^en_[0-9]+$",
+          "description": "Envelope id, e.g. \"en_1\"."
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "bar": {
+          "type": "integer",
+          "minimum": 1.0
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "default": 4.0
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "item_point",
+            "properties": {
+              "beat": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "value": {},
+              "shape": {
+                "type": "string",
+                "enum": ["linear", "square", "slow", "fast_start", "fast_end", "bezier"]
+              },
+              "tension": {
+                "type": "number",
+                "minimum": -1.0,
+                "maximum": 1.0
+              }
+            },
+            "required": ["beat", "value"],
+            "additionalProperties": false
+          }
+        },
+        "source_length": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["env"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "autoitem_duplicate",
+    "title": "Copy an automation item (pooled by default: edits to either reach both).",
+    "description": "Copy an automation item (pooled by default: edits to either reach both). position: where the copy starts (default: right after the item). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_duplicate_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^ai_[0-9]+$",
+          "description": "Automation item id, e.g. \"ai_1\"."
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "pooled": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "autoitem_list",
+    "title": "List automation items (all, or one envelope's), with their points.",
+    "description": "List automation items (all, or one envelope's), with their points.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_list_args",
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^en_[0-9]+$",
+          "description": "Envelope id, e.g. \"en_1\"."
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "autoitem_remove",
+    "title": "Remove an automation item (the envelope under it plays again).",
+    "description": "Remove an automation item (the envelope under it plays again).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_remove",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^ai_[0-9]+$",
+          "description": "Automation item id, e.g. \"ai_1\"."
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "autoitem_set",
+    "title": "Move, resize, loop, scale or rewrite an automation item.",
+    "description": "Move, resize, loop, scale or rewrite an automation item. points and source_length reach every item of its pool; position, length, loop, baseline, amplitude (values play as baseline + amplitude x (value - baseline)) and name are the item's own. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_set_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^ai_[0-9]+$",
+          "description": "Automation item id, e.g. \"ai_1\"."
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "source_length": {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "baseline": {
+          "type": "number"
+        },
+        "amplitude": {
+          "type": "number",
+          "minimum": -2.0,
+          "maximum": 2.0
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "item_point",
+            "properties": {
+              "beat": {
+                "type": "number",
+                "minimum": 0.0
+              },
+              "value": {},
+              "shape": {
+                "type": "string",
+                "enum": ["linear", "square", "slow", "fast_start", "fast_end", "bezier"]
+              },
+              "tension": {
+                "type": "number",
+                "minimum": -1.0,
+                "maximum": 1.0
+              }
+            },
+            "required": ["beat", "value"],
+            "additionalProperties": false
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "autoitem_unpool",
+    "title": "Take an automation item out of its pool (its points stay).",
+    "description": "Take an automation item out of its pool (its points stay).  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "autoitem_unpool",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^ai_[0-9]+$",
+          "description": "Automation item id, e.g. \"ai_1\"."
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "batch",
     "title": "Run commands atomically.",
     "description": "Run commands atomically. Run commands atomically. See describe for errors and examples.",

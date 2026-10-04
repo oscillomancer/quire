@@ -2922,6 +2922,329 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
+    // ---------------------------------------------------------------- autoitem.* (gap log #28)
+    {
+        struct ItemPointArg {
+            double beat = 0;  // from the item's start
+            json::Value value;
+            std::optional<model::PointShape> shape;
+            std::optional<double> tension;
+        };
+        struct AutoItemAddArgs {
+            std::string env;
+            std::optional<double> position;
+            std::optional<std::int64_t> bar;
+            double length = 4;
+            std::optional<std::vector<ItemPointArg>> points;
+            std::optional<double> sourceLength;
+            std::optional<bool> loop;
+            std::optional<std::string> name;
+        };
+        struct AutoItemSetArgs {
+            std::string item;
+            std::optional<double> position, length, sourceLength, baseline, amplitude;
+            std::optional<bool> loop;
+            std::optional<std::vector<ItemPointArg>> points;
+            std::optional<std::string> name;
+        };
+        struct AutoItemRef {
+            std::string item;
+        };
+        struct AutoItemDupArgs {
+            std::string item;
+            std::optional<double> position;
+            bool pooled = true;
+        };
+        auto pointArgSchema = [] {
+            return schema::object<ItemPointArg>("item_point")
+                .field("beat", &ItemPointArg::beat, schema::number().min(0))
+                .field("value", &ItemPointArg::value, schema::any())
+                .field("shape", &ItemPointArg::shape,
+                       schema::enumeration<model::PointShape>(
+                           {{model::PointShape::Linear, "linear"},
+                            {model::PointShape::Square, "square"},
+                            {model::PointShape::Slow, "slow"},
+                            {model::PointShape::FastStart, "fast_start"},
+                            {model::PointShape::FastEnd, "fast_end"},
+                            {model::PointShape::Bezier, "bezier"}}))
+                .field("tension", &ItemPointArg::tension, schema::number().range(-1, 1))
+                .build();
+        };
+        // An item's points in its envelope's units, sorted.
+        auto itemPoints = [](EngineApp& app, const model::Session& s, const model::Envelope& env,
+                             const std::vector<ItemPointArg>& in,
+                             const std::string& path) -> Result<std::vector<model::EnvPoint>> {
+            auto domain = envDomain(app, s, env.target, path.c_str());
+            if (!domain) return std::move(domain).error();
+            std::vector<model::EnvPoint> out;
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                auto v = envValue(*domain, in[i].value, path + "/" + std::to_string(i) + "/value");
+                if (!v) return std::move(v).error();
+                out.push_back({in[i].beat, *v, in[i].shape.value_or(model::PointShape::Linear),
+                               in[i].tension.value_or(0.0)});
+            }
+            std::stable_sort(out.begin(), out.end(),
+                             [](const auto& a, const auto& b) { return a.pos < b.pos; });
+            return out;
+        };
+        // An edit to a pooled item's points or source length reaches its pool.
+        auto propagate = [](model::EditTxn& t, const model::Session& s, Id from,
+                            const model::AutomationItem& edited) {
+            if (edited.pool <= 0) return;
+            for (const auto& e : s.autoItems)
+                if (e.id != from && e.value->pool == edited.pool)
+                    t.modify<model::AutomationItem>(e.id, [&](model::AutomationItem& x) {
+                        x.points = edited.points;
+                        x.sourceLength = edited.sourceLength;
+                    });
+        };
+        auto entryOf = [](Id id, const model::AutomationItem& ai) {
+            json::Value e = json::Value::object();
+            e["id"] = id.str();
+            e["env"] = ai.envelope.str();
+            e["position"] = ai.position;
+            e["length"] = ai.length;
+            e["source_length"] = ai.sourceLength;
+            e["loop"] = ai.loop;
+            e["pool"] = static_cast<std::int64_t>(ai.pool);
+            e["baseline"] = ai.baseline;
+            e["amplitude"] = ai.amplitude;
+            e["name"] = ai.name;
+            json::Value pts = json::Value::array();
+            for (const auto& p : ai.points) {
+                json::Value pt = json::Value::object();
+                pt["beat"] = p.pos;
+                pt["value"] = p.value;
+                pts.push_back(std::move(pt));
+            }
+            e["points"] = std::move(pts);
+            return e;
+        };
+        {
+            Command<AutoItemAddArgs, json::Value> c;
+            c.name = "autoitem.add";
+            c.kind = Kind::Edit;
+            c.exposure = cmd::Exposure::McpTool;
+            c.summary = "Put an automation item on an envelope: a block that replaces it there.";
+            c.description =
+                "position (beat) or bar, length in beats. points (beats from the item's start, "
+                "values in the envelope's units) over source_length beats (default: length), "
+                "repeated while loop (default true) and the item is longer; without points it "
+                "captures what the envelope plays over that range. Duplicate it pooled "
+                "(autoitem.duplicate) to edit several at once. Track, route and plugin "
+                "envelopes.";
+            c.tags = {"automation"};
+            c.args =
+                schema::object<AutoItemAddArgs>("autoitem_add_args")
+                    .field("env", &AutoItemAddArgs::env, idArg("en", "Envelope"))
+                    .field("position", &AutoItemAddArgs::position, schema::number().min(0))
+                    .field("bar", &AutoItemAddArgs::bar, schema::integer().min(1))
+                    .field("length", &AutoItemAddArgs::length, schema::number().exclusiveMin(0))
+                    .defaultValue(4.0)
+                    .field("points", &AutoItemAddArgs::points, schema::arrayOf(pointArgSchema()))
+                    .field("source_length", &AutoItemAddArgs::sourceLength,
+                           schema::number().exclusiveMin(0))
+                    .field("loop", &AutoItemAddArgs::loop, schema::boolean())
+                    .field("name", &AutoItemAddArgs::name, schema::string())
+                    .build();
+            c.result = schema::any();
+            c.examples = {
+                {"A one-bar swell, looped over two bars",
+                 obj(R"({"env": "en_1", "bar": 1, "length": 8, "source_length": 4, "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})"),
+                 obj(R"({"id": "ai_1", "env": "en_1", "position": 0.0, "length": 8.0,
+                                   "source_length": 4.0, "loop": true, "pool": 0,
+                                   "baseline": 0.0, "amplitude": 1.0, "name": "",
+                                   "points": [{"beat": 0.0, "value": -12.0},
+                                              {"beat": 4.0, "value": 0.0}]})"),
+                 "song_with_env"}};
+            c.run = [itemPoints, entryOf](const AutoItemAddArgs& a,
+                                          Context& ctx) -> Result<json::Value> {
+                EngineApp& app = A(ctx);
+                const model::Session s = app.view();
+                auto en = existing<model::Envelope>(s, a.env, "/env");
+                if (!en) return std::move(en).error();
+                const model::Envelope& env = *s.envelopes.find(*en);
+                if (env.target.object.kind == model::Kind::Take)
+                    return Error("autoitem.take",
+                                 "automation items sit on track, route and "
+                                 "plugin envelopes",
+                                 "/env", "edit the take envelope's points");
+                if (a.position && a.bar)
+                    return Error("autoitem.position", "give position or bar", "/position");
+                model::AutomationItem ai;
+                ai.envelope = *en;
+                ai.position = a.bar ? s.timeMap->beatOfBar(static_cast<int>(*a.bar))
+                                    : a.position.value_or(0.0);
+                ai.length = a.length;
+                ai.sourceLength = a.sourceLength.value_or(a.length);
+                ai.loop = a.loop.value_or(true);
+                ai.name = a.name.value_or("");
+                if (a.points) {
+                    auto pts = itemPoints(app, s, env, *a.points, "/points");
+                    if (!pts) return std::move(pts).error();
+                    ai.points = std::move(*pts);
+                } else {  // capture what plays there now
+                    const auto played = model::effectivePoints(s, *en);
+                    const double end = ai.position + ai.sourceLength;
+                    ai.points.push_back({0.0, model::pointsValueAt(played, ai.position, 0.0)});
+                    for (const auto& p : played)
+                        if (p.pos > ai.position && p.pos < end)
+                            ai.points.push_back({p.pos - ai.position, p.value, p.shape, p.tension});
+                    ai.points.push_back({ai.sourceLength, model::pointsValueAt(played, end, 0.0)});
+                }
+                const Id id = app.txn().create(ai);
+                return entryOf(id, ai);
+            };
+            registry.add(std::move(c));
+        }
+        {
+            Command<AutoItemSetArgs, json::Value> c;
+            c.name = "autoitem.set";
+            c.kind = Kind::Edit;
+            c.exposure = cmd::Exposure::McpTool;
+            c.summary = "Move, resize, loop, scale or rewrite an automation item.";
+            c.description =
+                "points and source_length reach every item of its pool; position, length, loop, "
+                "baseline, amplitude (values play as baseline + amplitude x (value - baseline)) "
+                "and name are the item's own.";
+            c.tags = {"automation"};
+            c.args =
+                schema::object<AutoItemSetArgs>("autoitem_set_args")
+                    .field("item", &AutoItemSetArgs::item, idArg("ai", "Automation item"))
+                    .field("position", &AutoItemSetArgs::position, schema::number().min(0))
+                    .field("length", &AutoItemSetArgs::length, schema::number().exclusiveMin(0))
+                    .field("source_length", &AutoItemSetArgs::sourceLength,
+                           schema::number().exclusiveMin(0))
+                    .field("loop", &AutoItemSetArgs::loop, schema::boolean())
+                    .field("baseline", &AutoItemSetArgs::baseline, schema::number())
+                    .field("amplitude", &AutoItemSetArgs::amplitude, schema::number().range(-2, 2))
+                    .field("points", &AutoItemSetArgs::points, schema::arrayOf(pointArgSchema()))
+                    .field("name", &AutoItemSetArgs::name, schema::string())
+                    .build();
+            c.result = schema::any();
+            c.examples = {{"Two beats later", obj(R"({"item": "ai_1", "position": 2})"),
+                           obj(R"("<any>")"), "song_with_autoitem"}};
+            c.run = [itemPoints, propagate, entryOf](const AutoItemSetArgs& a,
+                                                     Context& ctx) -> Result<json::Value> {
+                EngineApp& app = A(ctx);
+                const model::Session s = app.view();
+                auto id = existing<model::AutomationItem>(s, a.item, "/item");
+                if (!id) return std::move(id).error();
+                model::AutomationItem ai = *s.autoItems.find(*id);
+                if (a.position) ai.position = *a.position;
+                if (a.length) ai.length = *a.length;
+                if (a.sourceLength) ai.sourceLength = *a.sourceLength;
+                if (a.loop) ai.loop = *a.loop;
+                if (a.baseline) ai.baseline = *a.baseline;
+                if (a.amplitude) ai.amplitude = *a.amplitude;
+                if (a.name) ai.name = *a.name;
+                if (a.points) {
+                    auto pts =
+                        itemPoints(app, s, *s.envelopes.find(ai.envelope), *a.points, "/points");
+                    if (!pts) return std::move(pts).error();
+                    ai.points = std::move(*pts);
+                }
+                auto& t = app.txn();
+                t.put<model::AutomationItem>(*id, ai);
+                if (a.points || a.sourceLength) propagate(t, s, *id, ai);
+                return entryOf(*id, ai);
+            };
+            registry.add(std::move(c));
+        }
+        {
+            Command<AutoItemDupArgs, json::Value> c;
+            c.name = "autoitem.duplicate";
+            c.kind = Kind::Edit;
+            c.exposure = cmd::Exposure::McpTool;
+            c.summary = "Copy an automation item (pooled by default: edits to either reach both).";
+            c.description = "position: where the copy starts (default: right after the item).";
+            c.tags = {"automation"};
+            c.args = schema::object<AutoItemDupArgs>("autoitem_duplicate_args")
+                         .field("item", &AutoItemDupArgs::item, idArg("ai", "Automation item"))
+                         .field("position", &AutoItemDupArgs::position, schema::number().min(0))
+                         .field("pooled", &AutoItemDupArgs::pooled, schema::boolean())
+                         .defaultValue(true)
+                         .build();
+            c.result = schema::any();
+            c.examples = {{"A pooled copy right after it", obj(R"({"item": "ai_1"})"),
+                           obj(R"("<any>")"), "song_with_autoitem"}};
+            c.run = [entryOf](const AutoItemDupArgs& a, Context& ctx) -> Result<json::Value> {
+                EngineApp& app = A(ctx);
+                const model::Session s = app.view();
+                auto id = existing<model::AutomationItem>(s, a.item, "/item");
+                if (!id) return std::move(id).error();
+                model::AutomationItem copy = *s.autoItems.find(*id);
+                auto& t = app.txn();
+                if (a.pooled && copy.pool == 0) {  // a new pool for the two
+                    int top = 0;
+                    for (const auto& e : s.autoItems) top = std::max(top, e.value->pool);
+                    copy.pool = top + 1;
+                    t.modify<model::AutomationItem>(
+                        *id, [&](model::AutomationItem& x) { x.pool = copy.pool; });
+                } else if (!a.pooled) {
+                    copy.pool = 0;
+                }
+                copy.position = a.position.value_or(copy.position + copy.length);
+                const Id fresh = t.create(copy);
+                return entryOf(fresh, copy);
+            };
+            registry.add(std::move(c));
+        }
+        for (const bool unpool : {false, true}) {
+            Command<AutoItemRef, Empty> c;
+            c.name = unpool ? "autoitem.unpool" : "autoitem.remove";
+            c.kind = Kind::Edit;
+            c.exposure = cmd::Exposure::McpTool;
+            c.summary = unpool ? "Take an automation item out of its pool (its points stay)."
+                               : "Remove an automation item (the envelope under it plays again).";
+            c.tags = {"automation"};
+            c.args = schema::object<AutoItemRef>(unpool ? "autoitem_unpool" : "autoitem_remove")
+                         .field("item", &AutoItemRef::item, idArg("ai", "Automation item"))
+                         .build();
+            c.result = emptySchema();
+            c.examples = {{unpool ? "Unpool" : "Remove", obj(R"({"item": "ai_1"})"), obj("{}"),
+                           "song_with_autoitem"}};
+            c.run = [unpool](const AutoItemRef& a, Context& ctx) -> Result<Empty> {
+                EngineApp& app = A(ctx);
+                auto id = existing<model::AutomationItem>(app.view(), a.item, "/item");
+                if (!id) return std::move(id).error();
+                if (unpool)
+                    app.txn().modify<model::AutomationItem>(
+                        *id, [](model::AutomationItem& x) { x.pool = 0; });
+                else
+                    app.txn().remove<model::AutomationItem>(*id);
+                return Empty{};
+            };
+            registry.add(std::move(c));
+        }
+        {
+            struct ListArgs {
+                std::optional<std::string> env;
+            };
+            Command<ListArgs, json::Value> c;
+            c.name = "autoitem.list";
+            c.kind = Kind::Query;
+            c.exposure = cmd::Exposure::McpTool;
+            c.summary = "List automation items (all, or one envelope's), with their points.";
+            c.tags = {"automation"};
+            c.args = schema::object<ListArgs>("autoitem_list_args")
+                         .field("env", &ListArgs::env, idArg("en", "Envelope"))
+                         .build();
+            c.result = schema::any();
+            c.examples = {{"None yet", obj("{}"), obj(R"({"items": []})"), "empty"}};
+            c.run = [entryOf](const ListArgs& a, Context& ctx) -> Result<json::Value> {
+                const model::Session s = A(ctx).view();
+                json::Value items = json::Value::array();
+                for (const auto& e : s.autoItems)
+                    if (!a.env || e.value->envelope.str() == *a.env)
+                        items.push_back(entryOf(e.id, *e.value));
+                json::Value out = json::Value::object();
+                out["items"] = std::move(items);
+                return out;
+            };
+            registry.add(std::move(c));
+        }
+    }
     // ---------------------------------------------------------------- engine.*
     {
         Command<EngineStartArgs, EngineStatus> c;

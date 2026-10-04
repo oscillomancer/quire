@@ -402,6 +402,84 @@ TEST_CASE("automation lanes: shown under their strip, points added, moved and de
     CHECK_FALSE(f.view->trackLayout().indexOfEnv(env));
 }
 
+TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pooled, deleted") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"track":")" + track.str() +
+                     R"(","param":"volume","points":[{"beat":0,"value":0},{"beat":32,"value":0}]})")
+             .value(),
+         kUi});
+    REQUIRE(added);
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    f.sync();
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    const ui::Rect laneRect = f.view->rowRect(*lane);
+    const ui::Rect area = views::Lanes::envArea(laneRect);
+    auto xOfBeat = [&](double beat) { return f.view->xAt(f.app->head().timeMap->secondsAt(beat)); };
+    auto items = [&] {
+        std::vector<std::pair<model::Id, model::AutomationItem>> out;
+        for (const auto& e : f.app->head().autoItems) out.emplace_back(e.id, *e.value);
+        return out;
+    };
+    auto rightClick = [&](ui::Point p) {
+        f.pointer(ui::PointerEvent::Type::Down, p, 3);
+        f.pointer(ui::PointerEvent::Type::Up, p, 3);
+        f.sync();
+        REQUIRE(f.root->find("autoitem.menu"));
+    };
+    const float body = area.y + area.h * 0.6f;
+    // Insert: a 4-beat item at the pointer, capturing the flat envelope.
+    rightClick({xOfBeat(4) + 1, body});
+    f.menuRow("autoitem.menu", 0);
+    REQUIRE(items().size() == 1);
+    const model::Id ai = items()[0].first;
+    CHECK(items()[0].second.position == doctest::Approx(4));
+    CHECK(items()[0].second.length == doctest::Approx(4));
+    // A click in its body adds a point to the item, not the envelope (above unity).
+    auto steps = f.steps();
+    const std::size_t pointsBefore = items()[0].second.points.size();
+    const float above = area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(1.0)) * area.h;
+    REQUIRE(above > laneRect.y + 1 + views::Lanes::kAutoHeader);
+    f.click({xOfBeat(6) + 1, above});
+    CHECK(f.steps() == steps + 1);
+    REQUIRE(items()[0].second.points.size() == pointsBefore + 1);
+    CHECK(f.app->head().envelopes.find(env)->points.size() == 2);
+    const auto played = model::effectivePoints(f.app->head(), env);
+    CHECK(model::pointsValueAt(played, 6.0, 0.0) > 0);
+    // Its header moves it (snapped), its right edge resizes it.
+    const float header = laneRect.y + 1 + views::Lanes::kAutoHeader / 2;
+    f.drag({xOfBeat(5), header}, {xOfBeat(9), header});
+    CHECK(f.app->head().autoItems.find(ai)->position == doctest::Approx(8));
+    f.drag({xOfBeat(12) - 2, body}, {xOfBeat(14) - 2, body});
+    CHECK(f.app->head().autoItems.find(ai)->length == doctest::Approx(6));
+    // Rows: Insert, rule, Duplicate (pooled), Duplicate (copy), Loop, rule, Delete.
+    rightClick({xOfBeat(9), body});
+    f.menuRow("autoitem.menu", 2);
+    REQUIRE(items().size() == 2);
+    for (const auto& [id, it] : items()) CHECK(it.pool == 1);
+    // Editing points in the copy edits the pool.
+    model::Id copy = items()[0].first == ai ? items()[1].first : items()[0].first;
+    CHECK(f.app->head().autoItems.find(copy)->position == doctest::Approx(14));
+    f.click({xOfBeat(15) + 1, area.y + area.h * 0.9f});
+    CHECK(f.app->head().autoItems.find(ai)->points.size() ==
+          f.app->head().autoItems.find(copy)->points.size());
+    CHECK(f.app->head().autoItems.find(ai)->points.size() == pointsBefore + 2);
+    // Unpool appears for a pooled item: Insert, rule, dup, dup, Unpool, Loop, rule, Delete.
+    rightClick({xOfBeat(15) + 1, body});
+    f.menuRow("autoitem.menu", 4);
+    CHECK(f.app->head().autoItems.find(copy)->pool == 0);
+    rightClick({xOfBeat(15) + 1, body});
+    f.menuRow("autoitem.menu", 4);
+    CHECK_FALSE(f.app->head().autoItems.find(copy)->loop);
+    rightClick({xOfBeat(15) + 1, body});
+    f.menuRow("autoitem.menu", 6);
+    CHECK(items().size() == 1);
+}
+
 TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length and play rate)") {
     Fixture f;
     if (!f.ok) return;

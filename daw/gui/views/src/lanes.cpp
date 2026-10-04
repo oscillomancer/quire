@@ -260,13 +260,50 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
         t.color(typeToken(layout_.rows()[row].type)).withAlpha(env->active ? 1.0f : 0.35f);
     // The unity / centre line for orientation.
     c.fillRect({a.x, yOf(scale->reference()), a.w, 1}, t.color("rule").withAlpha(0.35f));
+    const model::Id envId = *layout_.rows()[row].env;
+    // Automation items replace the envelope where they sit: their boxes under
+    // the curve, a header band (name or pool), a tick at each loop pass.
+    std::vector<std::pair<double, double>> covered;
+    for (const auto& e : s.autoItems) {
+        const model::AutomationItem& ai = *e.value;
+        if (ai.envelope != envId) continue;
+        covered.emplace_back(ai.position, ai.position + ai.length);
+        const float ix0 = xAt(s.timeMap->secondsAt(ai.position)),
+                    ix1 = xAt(s.timeMap->secondsAt(ai.position + ai.length));
+        if (ix1 < bounds().x || ix0 > bounds().right()) continue;
+        const ui::Rect box{ix0, r.y + 1, std::max(2.0f, ix1 - ix0), r.h - 2};
+        c.fillRect(box, ink.withAlpha(0.10f));
+        c.strokeRect(box, ink.withAlpha(0.5f));
+        c.fillRect({box.x, box.y, box.w, kAutoHeader}, ink.withAlpha(0.28f));
+        std::string label = ai.name.empty() ? "item" : ai.name;
+        if (ai.pool > 0) label += "  pool " + std::to_string(ai.pool);
+        c.text({box.x + 4, box.y - 1, std::max(0.0f, box.w - 6), kAutoHeader}, label, ui::Font::Ui,
+               t.type("caption"), t.color("ink"));
+        if (ai.loop && ai.sourceLength > 0)
+            for (double k = ai.position + ai.sourceLength; k < ai.position + ai.length - 1e-9;
+                 k += ai.sourceLength) {
+                const float x = xAt(s.timeMap->secondsAt(k));
+                c.fillRect({x, box.y + kAutoHeader, 1, box.h - kAutoHeader}, ink.withAlpha(0.4f));
+            }
+        const int passes =
+            ai.loop ? std::max(1, static_cast<int>(std::ceil(ai.length / ai.sourceLength - 1e-9)))
+                    : 1;
+        for (int k = 0; k < passes; ++k)
+            for (const model::EnvPoint& pt : ai.points) {
+                const double at = ai.position + k * ai.sourceLength + pt.pos;
+                if (pt.pos > ai.sourceLength || at > ai.position + ai.length + 1e-9) continue;
+                const float x = xAt(s.timeMap->secondsAt(at));
+                c.strokeRect({x - 3, yOf(autoItemValue(ai, pt.value)) - 3, 6, 6}, ink);
+            }
+    }
+    const std::vector<model::EnvPoint> played = model::effectivePoints(s, envId);
     const float x0 = std::max(a.x, bounds().x), x1 = std::min(a.right(), bounds().right());
     ui::Point prev{};
     bool have = false;
     for (float x = x0; x <= x1 + 3; x += 3) {
         const float px = std::min(x, x1);
         const double beat = s.timeMap->beatAt(std::max(0.0, timeAt(px)));
-        const ui::Point p{px, yOf(envValueAt(*env, beat, fallback))};
+        const ui::Point p{px, yOf(model::pointsValueAt(played, beat, fallback))};
         if (have) c.line(prev, p, ink, 1.5f);
         prev = p;
         have = true;
@@ -275,6 +312,10 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
     for (const model::EnvPoint& pt : env->points) {
         const float x = xAt(s.timeMap->secondsAt(pt.pos));
         if (x < x0 - 4 || x > x1 + 4) continue;
+        if (std::any_of(covered.begin(), covered.end(), [&](const auto& span) {
+                return pt.pos > span.first && pt.pos < span.second;
+            }))
+            continue;  // under an item: not what plays
         c.fillRect({x - 3, yOf(pt.value) - 3, 6, 6}, ink);
     }
     c.text({r.x + 6, r.y, 200, 14}, envTitle(*env) + (env->active ? "" : " (off)"), ui::Font::Ui,

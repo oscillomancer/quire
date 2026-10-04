@@ -417,3 +417,71 @@ TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     doc["schema"] = "supple.project/2.0";
     CHECK_FALSE(projectFromJson(doc));
 }
+
+TEST_CASE("automation items replace the envelope under them: loop, scale, overlap, file") {
+    model::EditTxn t(model::Session::create(), 1);
+    model::Envelope env;
+    env.target = {model::kMaster, "volume"};
+    env.points = {{0.0, 0.0}, {16.0, -16.0}};  // -1 dB a beat
+    const model::Id en = t.create(env);
+    model::AutomationItem ai;
+    ai.envelope = en;
+    ai.position = 4.0;
+    ai.length = 4.0;  // two passes of a two-beat source
+    ai.sourceLength = 2.0;
+    ai.points = {{0.0, -20.0}, {1.0, -10.0}};
+    ai.loop = true;
+    const model::Id a = t.create(ai);
+    auto s = t.commit();
+    REQUIRE_MESSAGE(s, (s ? std::string() : s.error().toString()));
+    const auto pts = model::effectivePoints(*s, en);
+    auto at = [&](double beat) { return model::pointsValueAt(pts, beat, 0.0); };
+    CHECK(at(2.0) == doctest::Approx(-2.0));   // the envelope before the item
+    CHECK(at(4.0) == doctest::Approx(-20.0));  // the item from its first beat (a step)
+    CHECK(at(4.5) == doctest::Approx(-15.0));  // its ramp
+    CHECK(at(5.5) == doctest::Approx(-10.0));  // its last value held to the source end
+    CHECK(at(6.0) == doctest::Approx(-20.0));  // the second pass
+    CHECK(at(6.5) == doctest::Approx(-15.0));
+    CHECK(at(8.0) == doctest::Approx(-8.0));  // back on the envelope after it
+    CHECK(at(12.0) == doctest::Approx(-12.0));
+    // Baseline and amplitude scale its values; unlooped, its last value holds.
+    model::EditTxn t2(*s, 2);
+    t2.modify<model::AutomationItem>(a, [](model::AutomationItem& x) {
+        x.loop = false;
+        x.baseline = -10.0;
+        x.amplitude = 0.5;
+    });
+    auto s2 = t2.commit();
+    REQUIRE(s2);
+    const auto pts2 = model::effectivePoints(*s2, en);
+    CHECK(model::pointsValueAt(pts2, 4.0, 0.0) == doctest::Approx(-15.0));  // -10 + 0.5 x -10
+    CHECK(model::pointsValueAt(pts2, 7.0, 0.0) == doctest::Approx(-10.0));  // held, unlooped
+    // A later item cuts an earlier one it overlaps.
+    model::EditTxn t3(*s2, 3);
+    model::AutomationItem b;
+    b.envelope = en;
+    b.position = 6.0;
+    b.length = 1.0;
+    b.sourceLength = 1.0;
+    b.points = {{0.0, 6.0}};
+    t3.create(b);
+    auto s3 = t3.commit();
+    REQUIRE(s3);
+    const auto pts3 = model::effectivePoints(*s3, en);
+    CHECK(model::pointsValueAt(pts3, 6.5, 0.0) == doctest::Approx(6.0));
+    CHECK(model::pointsValueAt(pts3, 4.5, 0.0) == doctest::Approx(-12.5));  // the first, scaled
+    CHECK(model::pointsValueAt(pts3, 7.5, 0.0) == doctest::Approx(-7.5));   // the envelope again
+    // Through the project file and back; a project without them has no key.
+    auto back = model::parseProject(model::serializeProject(*s3));
+    REQUIRE_MESSAGE(back, (back ? std::string() : back.error().toString()));
+    CHECK(back->autoItems.size() == 2);
+    CHECK(model::serializeProject(*back) == model::serializeProject(*s3));
+    CHECK(model::serializeProject(model::Session::create()).find("automation_items") ==
+          std::string::npos);
+    // An item on a take's envelope, or on no envelope, is invalid.
+    model::EditTxn t4(*s3, 4);
+    model::AutomationItem stray;
+    stray.envelope = model::Id{model::Kind::Envelope, 99};
+    t4.create(stray);
+    CHECK_FALSE(t4.commit());
+}

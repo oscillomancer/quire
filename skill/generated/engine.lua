@@ -34,6 +34,41 @@ q = nil
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx" (default: "post_fader")
 ---@field detail? "summary"|"standard"|"full" summary: key scalars; standard: + percentiles and spectrum; full: + time series. (default: "summary")
 
+---@class Quire.autoitem_add_args
+---@field env string Envelope id, e.g. "en_1".
+---@field position? number
+---@field bar? integer
+---@field length? number (default: 4.0)
+---@field points? table[]
+---@field source_length? number
+---@field loop? boolean
+---@field name? string
+
+---@class Quire.autoitem_duplicate_args
+---@field item string Automation item id, e.g. "ai_1".
+---@field position? number
+---@field pooled? boolean (default: true)
+
+---@class Quire.autoitem_list_args
+---@field env? string Envelope id, e.g. "en_1".
+
+---@class Quire.autoitem_remove_args
+---@field item string Automation item id, e.g. "ai_1".
+
+---@class Quire.autoitem_set_args
+---@field item string Automation item id, e.g. "ai_1".
+---@field position? number
+---@field length? number
+---@field source_length? number
+---@field loop? boolean
+---@field baseline? number
+---@field amplitude? number
+---@field points? table[]
+---@field name? string
+
+---@class Quire.autoitem_unpool_args
+---@field item string Automation item id, e.g. "ai_1".
+
 ---@class Quire.branch_create_args
 ---@field name string
 ---@field from? string
@@ -902,6 +937,14 @@ q = nil
 ---@field render fun(args: Quire.analyze_render_args): table Analyze a render id or audio path: loudness, spectrum, envelope and stereo.
 ---@field track fun(args: Quire.analyze_track_args): table Render one track's output offline and analyze it.
 
+---@class Quire.autoitem
+---@field add fun(args: Quire.autoitem_add_args): table Put an automation item on an envelope: a block that replaces it there.
+---@field duplicate fun(args: Quire.autoitem_duplicate_args): table Copy an automation item (pooled by default: edits to either reach both).
+---@field list fun(args?: Quire.autoitem_list_args): table List automation items (all, or one envelope's), with their points.
+---@field remove fun(args: Quire.autoitem_remove_args): table Remove an automation item (the envelope under it plays again).
+---@field set fun(args: Quire.autoitem_set_args): table Move, resize, loop, scale or rewrite an automation item.
+---@field unpool fun(args: Quire.autoitem_unpool_args): table Take an automation item out of its pool (its points stay).
+
 ---@class Quire.branch
 ---@field create fun(args: Quire.branch_create_args): Quire.branch_create_result Start a branch from a branch's head (default: the current one) and switch to it.
 ---@field delete fun(args: Quire.branch_delete_args): table Delete a branch (not main, not the current one).
@@ -1073,6 +1116,7 @@ q = nil
 
 ---@class Quire
 ---@field analyze Quire.analyze Commands named analyze.*
+---@field autoitem Quire.autoitem Commands named autoitem.*
 ---@field branch Quire.branch Commands named branch.*
 ---@field engine Quire.engine Commands named engine.*
 ---@field env Quire.env Commands named env.*
