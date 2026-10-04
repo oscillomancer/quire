@@ -41,11 +41,13 @@ class TransportBar {
     ui::Button* loop_ = nullptr;
     ui::Button* punch_ = nullptr;
     ui::Button* click_ = nullptr;  // the metronome
+    ui::Button* count_ = nullptr;  // count-in bars before recording
     ui::Button* tempo_ = nullptr;
     ui::Button* meter_ = nullptr;
     ui::Label* position_ = nullptr;
     ui::Label* time_ = nullptr;
     ui::Label* engine_ = nullptr;
+    ui::Label* recordPath_ = nullptr;  // where recordings go, while a track is armed
     double lastStatusMs_ = -1e9;
 };
 

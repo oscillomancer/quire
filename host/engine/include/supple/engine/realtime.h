@@ -238,6 +238,7 @@ struct LoopRange {
 
 struct TransportState {
     bool playing = false;
+    bool countingIn = false;  // playing, but the count-in still holds the position
     std::int64_t sample = 0;  // render position
     double seconds = 0.0;
     LoopRange loop;
@@ -279,6 +280,13 @@ class Engine {
     // plays, the bar's first accented. Live output only (renders and
     // recordings never hear it); any thread.
     void setMetronome(bool on, double gainDb);
+    // play() after a count-in: `frames` of clicks (a beat every `beatFrames`,
+    // a bar every `beatsPerBar` beats, the first of each accented) while the
+    // transport holds its position — nothing plays or records, monitored
+    // inputs are heard as when stopped — then playback starts at the frame the
+    // count ends. The clicks sound with the metronome off too (at its level).
+    // pause() cancels it. Live output only.
+    void playCountIn(std::int64_t frames, std::int64_t beatFrames, int beatsPerBar);
     // The backend's MIDI input ports (ADR-0016); empty when stopped.
     std::vector<std::string> midiPorts() const {
         return backend_ ? backend_->midiPorts() : std::vector<std::string>{};
@@ -346,9 +354,13 @@ class Engine {
   private:
     friend struct EngineTestAccess;  // defined by the tests alone
     void cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT;
+    // One part of a device cycle (a count-in splits a cycle where it ends):
+    // `midiBase` is where the part starts in the cycle's device MIDI.
+    void cycleBody(const float* const* in, float* const* out, std::uint32_t frames,
+                   std::uint32_t midiBase) SUPPLE_RT;
     // Anticipative: the callback's work — the master ring, or the live nodes.
-    void anticipativeCycle(const float* const* in, float* const* out,
-                           std::uint32_t frames) SUPPLE_RT;
+    void anticipativeCycle(const float* const* in, float* const* out, std::uint32_t frames,
+                           std::uint32_t midiBase) SUPPLE_RT;
     // Returns the frames rendered (fewer than asked at a loop wrap).
     // `offset`: where this part starts in the cycle (for the device MIDI).
     // Mixes the metronome into device output: `k` frames at `out[c] + offset`
@@ -361,6 +373,23 @@ class Engine {
     std::int64_t clickAge_ = -1, clickLength_ = 0;
     double clickPhase_ = 0, clickStep_ = 0;
     float clickAmp_ = 0, clickEnv_ = 0, clickDecay_ = 0;
+    void startClick(bool accent, double rate) SUPPLE_RT;
+    float clickSample() SUPPLE_RT;  // the sounding click's next sample (0 when none)
+    // Count-in (playCountIn): requested by the main thread under countSeq_,
+    // taken by the audio thread at the start of a cycle.
+    std::atomic<std::int64_t> countFrames_{0}, countBeat_{1};
+    std::atomic<int> countBar_{4};
+    std::atomic<std::uint64_t> countSeq_{0};
+    std::atomic<bool> counting_{false};
+    void countClicks(float* const* out, std::uint32_t k) SUPPLE_RT;
+    // Audio thread: the count in progress, and the play request this cycle
+    // acts on (read once, before the count request, so a count-in is never
+    // missed by a cycle that already sees its play()).
+    std::uint64_t countSeen_ = 0;
+    std::int64_t countLeft_ = 0, countPos_ = 0, countBeatA_ = 1;
+    int countBarA_ = 4;
+    bool want_ = false, countHold_ = false;
+    bool wantNow() const SUPPLE_RT { return want_ && !countHold_; }
     std::uint32_t liveRender(const float* const* in, float* const* out, std::uint32_t frames,
                              std::uint32_t offset) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;

@@ -4836,6 +4836,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -4915,7 +4918,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -4988,7 +5000,7 @@
   {
     "name": "transport_metronome",
     "title": "Turn the metronome on or off and set its level; returns the settings.",
-    "description": "Turn the metronome on or off and set its level; returns the settings. A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. Transport state: not an undo step, not saved in the project. No arguments: the current settings. See describe for errors and examples.",
+    "description": "Turn the metronome on or off and set its level; returns the settings. A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. count_in_bars: that many bars of clicks (at the meter and tempo where playback starts) before transport.record begins — the position holds and nothing is recorded until the count ends; count_in_playback counts in before transport.play too. The count clicks even with the metronome off. Transport state: not an undo step, not saved in the project. No arguments: the current settings. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "metronome_args",
@@ -5011,6 +5023,14 @@
           "x-unit": "dB",
           "x-unit-strings": true,
           "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "count_in_bars": {
+          "type": "integer",
+          "minimum": 0.0,
+          "maximum": 8.0
+        },
+        "count_in_playback": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -5024,9 +5044,15 @@
         },
         "volume_db": {
           "type": "number"
+        },
+        "count_in_bars": {
+          "type": "integer"
+        },
+        "count_in_playback": {
+          "type": "boolean"
         }
       },
-      "required": ["enabled", "volume_db"],
+      "required": ["enabled", "volume_db", "count_in_bars", "count_in_playback"],
       "additionalProperties": false
     },
     "annotations": {
@@ -5055,6 +5081,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -5134,7 +5163,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -5163,6 +5201,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -5242,7 +5283,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -5332,6 +5382,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -5411,7 +5464,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -5453,6 +5515,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -5532,7 +5597,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {
@@ -5561,6 +5635,9 @@
         "recording": {
           "type": "boolean"
         },
+        "counting_in": {
+          "type": "boolean"
+        },
         "seconds": {
           "type": "number"
         },
@@ -5640,7 +5717,16 @@
           }
         }
       },
-      "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+      "required": [
+        "playing",
+        "recording",
+        "counting_in",
+        "seconds",
+        "beat",
+        "sample",
+        "loop",
+        "punch"
+      ],
       "additionalProperties": false
     },
     "annotations": {

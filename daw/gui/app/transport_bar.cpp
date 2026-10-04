@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
 #include "supple/time/timeline.h"
@@ -63,6 +64,22 @@ void setIfChanged(ui::Button* button, const std::string& text) {
     if (button && button->valueText() != text) button->setText(text);
 }
 
+std::string countText(int bars) { return bars > 0 ? "count " + std::to_string(bars) : "count"; }
+
+// A folder for a narrow label: the home directory as ~, the middle elided.
+std::string shortPath(const std::filesystem::path& path, std::size_t max = 44) {
+    std::string text = path.string();
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        const std::string h = home;
+        if (text.rfind(h + "/", 0) == 0) text = "~" + text.substr(h.size());
+    }
+    if (text.size() > max) {
+        const std::size_t keep = max - 1, head = keep / 3;
+        text = text.substr(0, head) + "\u2026" + text.substr(text.size() - (keep - head));
+    }
+    return text;
+}
+
 }  // namespace
 
 TransportBar::TransportBar(engine::EngineApp& app, AppActions& actions, cmd::Dispatcher& dispatcher,
@@ -107,6 +124,20 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     });
     click_->layout.width = ui::SizeRule::fixed(56);
     click_->layout.height = ui::SizeRule::fixed(24);
+    // Count-in before recording: none, 1, 2 or 4 bars (transport.metronome).
+    count_ = &bar->emplace<ui::Button>("transport.count", countText(0), [this] {
+        const int now = app_.metronome().countInBars;
+        json::Value args = json::Value::object();
+        args["count_in_bars"] = static_cast<std::int64_t>(now == 0  ? 1
+                                                          : now < 2 ? 2
+                                                          : now < 4 ? 4
+                                                                    : 0);
+        auto r = dispatcher_.execute({"transport.metronome", std::move(args), kOrigin});
+        if (!r && actions_.onError) actions_.onError(r.error().message);
+        sync();
+    });
+    count_->layout.width = ui::SizeRule::fixed(64);
+    count_->layout.height = ui::SizeRule::fixed(24);
     bar->emplace<ui::Node>("transport.gap").layout.width = ui::SizeRule::fixed(10);
     position_ = &bar->emplace<ui::Label>("transport.position", "1.1.000", ui::Font::MonoBold,
                                          "title", "ink");
@@ -119,6 +150,8 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     meter_->layout.width = ui::SizeRule::fixed(48);
     meter_->layout.height = ui::SizeRule::fixed(22);
     bar->emplace<ui::Node>("transport.spacer");  // takes the rest
+    recordPath_ =
+        &bar->emplace<ui::Label>("transport.recpath", "", ui::Font::Mono, "small", "armed");
     engine_ =
         &bar->emplace<ui::Label>("transport.engine", "", ui::Font::Mono, "small", "ink-quiet");
     return bar;
@@ -133,12 +166,18 @@ void TransportBar::sync() {
     if (tempo_) setIfChanged(tempo_, bpmText(*s.timeMap));
     if (meter_) setIfChanged(meter_, meterText(*s.timeMap));
     if (play_) setIfChanged(play_, info.playing ? "stop" : "play");
+    if (record_) setIfChanged(record_, info.countingIn ? "count" : "rec");
+    if (count_) setIfChanged(count_, countText(app_.metronome().countInBars));
     if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
     const double now = nowMs();
     if (engine_ && now - lastStatusMs_ >= 250.0) {  // ≤ 4 Hz
         lastStatusMs_ = now;
+        // Where a recording will go, shown before it starts (and during it).
+        bool armed = info.recording;
+        for (const auto& e : s.tracks) armed = armed || e.value->record.armed;
+        setIfChanged(recordPath_, armed ? "rec: " + shortPath(app_.recordDir()) : "");
         const engine::EngineStatus st = app_.engineStatus();
         if (!st.running) {
             setIfChanged(engine_, "engine stopped");

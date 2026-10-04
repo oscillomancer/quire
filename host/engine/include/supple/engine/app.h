@@ -87,6 +87,8 @@ struct TransportRange {
 struct MetronomeSettings {
     bool enabled = false;
     double volumeDb = -6.0;
+    int countInBars = 0;           // clicks before a recording starts (0 = none)
+    bool countInPlayback = false;  // and before plain playback
 };
 
 // A recording no version of the session uses (after a crash: a take that
@@ -101,6 +103,7 @@ struct RecoverableInfo {
 
 struct TransportInfo {
     bool playing = false, recording = false;
+    bool countingIn = false;
     double seconds = 0, beat = 0;
     std::int64_t sample = 0;
     TransportRange loop, punch;
@@ -303,6 +306,7 @@ class EngineApp : public cmd::Host {
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
   private:
+    void startPlaying(int countInBars);  // engine play(), after a count-in when > 0
     explicit EngineApp(AppOptions options);
     Result<host::Instance*> scratch(const model::FxInstance& fx);
     bool inRecordDir(const std::filesystem::path& file) const;

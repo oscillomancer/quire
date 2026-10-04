@@ -757,6 +757,7 @@ q = nil
 ---@class Quire.transport_get_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer
@@ -781,14 +782,19 @@ q = nil
 ---@class Quire.transport_metronome_args
 ---@field enabled? boolean
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
+---@field count_in_bars? integer
+---@field count_in_playback? boolean
 
 ---@class Quire.transport_metronome_result
 ---@field enabled boolean
 ---@field volume_db number
+---@field count_in_bars integer
+---@field count_in_playback boolean
 
 ---@class Quire.transport_pause_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer
@@ -799,6 +805,7 @@ q = nil
 ---@class Quire.transport_play_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer
@@ -823,6 +830,7 @@ q = nil
 ---@class Quire.transport_record_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer
@@ -838,6 +846,7 @@ q = nil
 ---@class Quire.transport_seek_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer
@@ -848,6 +857,7 @@ q = nil
 ---@class Quire.transport_stop_result
 ---@field playing boolean
 ---@field recording boolean
+---@field counting_in boolean
 ---@field seconds number
 ---@field beat number
 ---@field sample integer

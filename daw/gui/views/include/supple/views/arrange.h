@@ -41,6 +41,8 @@ struct Transport {
     double seconds = 0;
     bool loopEnabled = false;
     double loopStart = 0, loopEnd = 0;
+    bool punchEnabled = false;
+    double punchStart = 0, punchEnd = 0;
 };
 
 using TransportSource = std::function<Transport()>;
@@ -100,6 +102,10 @@ class ArrangeView : public ui::Node {
     bool loopEnabled() const { return transport_.loopEnabled; }
     double loopStart() const { return transport_.loopStart; }
     double loopEnd() const { return transport_.loopEnd; }
+    void setPunchRange(double start, double end, bool on);
+    bool punchEnabled() const { return transport_.punchEnabled; }
+    double punchStart() const { return transport_.punchStart; }
+    double punchEnd() const { return transport_.punchEnd; }
     bool installOverlay(ui::Root& root);  // the playhead node; false if none
 
     Lanes& lanes() { return *lanes_; }

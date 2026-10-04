@@ -209,6 +209,7 @@ schema::Schema<TransportInfo> transportSchema() {
     return schema::object<TransportInfo>("transport")
         .field("playing", &TransportInfo::playing, schema::boolean())
         .field("recording", &TransportInfo::recording, schema::boolean())
+        .field("counting_in", &TransportInfo::countingIn, schema::boolean())
         .field("seconds", &TransportInfo::seconds, schema::number())
         .field("beat", &TransportInfo::beat, schema::number())
         .field("sample", &TransportInfo::sample, schema::integer())
@@ -2956,7 +2957,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +
                            R"(, "recording": )" + (rec ? "true" : "false") +
                            R"(, "seconds": "<any>", "beat": "<any>", "sample": "<any>",)"
-                           R"( "loop": "<any>", "punch": "<any>"})"),
+                           R"( "loop": "<any>", "punch": "<any>", "counting_in": false})"),
                        rec ? "engine_armed" : "engine_running"}};
         c.run = [act = std::string(action)](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport(act);
@@ -2982,7 +2983,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.examples = {
             {"To bar 2 (120 BPM, 4/4)", obj(R"({"bar": 2})"),
              obj(R"({"playing": false, "recording": false, "seconds": 2.0, "beat": 4.0, "sample": 96000,
-                    "loop": "<any>", "punch": "<any>"})"),
+                    "loop": "<any>", "punch": "<any>", "counting_in": false})"),
              "engine_running"}};
         c.run = [](const SeekArgs& a, Context& ctx) -> Result<TransportInfo> {
             EngineApp& app = A(ctx);
@@ -3014,7 +3015,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"Stopped at the start", obj("{}"),
              obj(R"({"playing": false, "recording": false, "seconds": 0.0, "beat": 0.0, "sample": 0,
                     "loop": {"enabled": false, "start_seconds": 0.0, "end_seconds": 0.0},
-                    "punch": {"enabled": false, "start_seconds": 0.0, "end_seconds": 0.0}})"),
+                    "punch": {"enabled": false, "start_seconds": 0.0, "end_seconds": 0.0},
+                    "counting_in": false})"),
              "engine_running"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<TransportInfo> {
             return A(ctx).transport("get");
@@ -3025,6 +3027,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         struct MetronomeArgs {
             std::optional<bool> enabled;
             std::optional<double> volumeDb;
+            std::optional<int> countInBars;
+            std::optional<bool> countInPlayback;
         };
         Command<MetronomeArgs, MetronomeSettings> c;
         c.name = "transport.metronome";
@@ -3034,6 +3038,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "A click on every beat of the meter while the transport plays (the bar's first "
             "accented), in the live output only: renders and recordings never contain it. "
+            "count_in_bars: that many bars of clicks (at the meter and tempo where playback "
+            "starts) before transport.record begins — the position holds and nothing is "
+            "recorded until the count ends; count_in_playback counts in before transport.play "
+            "too. The count clicks even with the metronome off. "
             "Transport state: not an undo step, not saved in the project. No arguments: the "
             "current settings.";
         c.tags = {"transport", "recording"};
@@ -3041,18 +3049,32 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("enabled", &MetronomeArgs::enabled, schema::boolean())
                      .field("volume_db", &MetronomeArgs::volumeDb,
                             schema::number().range(-60, 6).unit(units::Unit::dB))
+                     .field("count_in_bars", &MetronomeArgs::countInBars,
+                            schema::integerOf<int>().range(0, 8))
+                     .field("count_in_playback", &MetronomeArgs::countInPlayback, schema::boolean())
                      .build();
-        c.result = schema::object<MetronomeSettings>("metronome")
-                       .field("enabled", &MetronomeSettings::enabled, schema::boolean())
-                       .field("volume_db", &MetronomeSettings::volumeDb, schema::number())
-                       .build();
+        c.result =
+            schema::object<MetronomeSettings>("metronome")
+                .field("enabled", &MetronomeSettings::enabled, schema::boolean())
+                .field("volume_db", &MetronomeSettings::volumeDb, schema::number())
+                .field("count_in_bars", &MetronomeSettings::countInBars, schema::integerOf<int>())
+                .field("count_in_playback", &MetronomeSettings::countInPlayback, schema::boolean())
+                .build();
         c.examples = {{"On", obj(R"({"enabled": true})"),
-                       obj(R"({"enabled": true, "volume_db": -6.0})"), "empty"}};
+                       obj(R"({"enabled": true, "volume_db": -6.0, "count_in_bars": 0,
+                               "count_in_playback": false})"),
+                       "empty"},
+                      {"Two bars of count-in before recording", obj(R"({"count_in_bars": 2})"),
+                       obj(R"({"enabled": false, "volume_db": -6.0, "count_in_bars": 2,
+                               "count_in_playback": false})"),
+                       "empty"}};
         c.run = [](const MetronomeArgs& a, Context& ctx) -> Result<MetronomeSettings> {
             EngineApp& app = A(ctx);
             MetronomeSettings m = app.metronome();
             if (a.enabled) m.enabled = *a.enabled;
             if (a.volumeDb) m.volumeDb = *a.volumeDb;
+            if (a.countInBars) m.countInBars = *a.countInBars;
+            if (a.countInPlayback) m.countInPlayback = *a.countInPlayback;
             app.setMetronome(m);
             return m;
         };

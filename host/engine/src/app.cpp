@@ -714,11 +714,11 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         SUPPLE_TRY(engine_->startRecording(std::move(targets)));
         recordingFiles_ = std::move(files);
         playStart_ = engine_->transport().seconds;
-        engine_->play();
+        startPlaying(metronome_.countInBars);
     } else if (action == "play") {
         playStart_ = engine_->transport().seconds;
         beginAutomationPass(view().timeMap->beatAt(playStart_));
-        engine_->play();
+        startPlaying(metronome_.countInPlayback ? metronome_.countInBars : 0);
     } else if (action == "pause" || action == "stop") {
         const double stopBeat = view().timeMap->beatAt(engine_->transport().seconds);
         const bool wasPlaying = engine_->transport().playing;
@@ -744,6 +744,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     TransportInfo info;
     info.playing = t.playing;
     info.recording = engine_->recording();
+    info.countingIn = t.countingIn;
     info.seconds = t.seconds;
     info.beat = view().timeMap->beatAt(t.seconds);
     info.sample = t.sample;
@@ -881,6 +882,21 @@ Status EngineApp::finishAutomationPass(double stopBeat) {
             insertPoint(env.points, stopBeat, w.lastValue);
         });
     return commitTransaction(*txnId);
+}
+
+void EngineApp::startPlaying(int countInBars) {
+    if (countInBars <= 0) {
+        engine_->play();
+        return;
+    }
+    // Whole bars of the meter at the start position, at its tempo.
+    const time::TimeMap& tm = *view().timeMap;
+    const double beat = tm.beatAt(engine_->transport().seconds);
+    const time::MeterChange m = tm.meterAt(tm.barBeat(beat).bar);
+    const double beatSeconds = 4.0 / static_cast<double>(m.denominator) * 60.0 / tm.bpmAt(beat);
+    const auto beatFrames =
+        static_cast<std::int64_t>(std::llround(beatSeconds * engine_->config().sampleRate));
+    engine_->playCountIn(beatFrames * m.numerator * countInBars, beatFrames, m.numerator);
 }
 
 void EngineApp::setMetronome(const MetronomeSettings& m) {

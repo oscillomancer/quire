@@ -103,6 +103,9 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
             t.loopEnabled = app.loop().enabled;
             t.loopStart = app.loop().start;
             t.loopEnd = app.loop().end;
+            t.punchEnabled = app.punch().enabled;
+            t.punchStart = app.punch().start;
+            t.punchEnd = app.punch().end;
             if (engine::Engine* e = app.engine()) {
                 const engine::TransportState st = e->transport();
                 t.playing = st.playing;

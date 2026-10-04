@@ -423,6 +423,7 @@ std::int64_t Engine::playedStream(std::uint64_t epoch) const {
 TransportState Engine::transport() const {
     TransportState t;
     t.playing = reportedPlaying_.load();
+    t.countingIn = counting_.load(std::memory_order_relaxed);
     t.sample = options_.anticipative ? playedPosition(epoch_.load(), epochStart_.load())
                                      : reportedPos_.load();
     t.seconds = static_cast<double>(t.sample) / config_.sampleRate;
@@ -433,8 +434,9 @@ TransportState Engine::transport() const {
 Engine::MeterClock Engine::meterClock() const {
     MeterClock clock;
     clock.epoch = epoch_.load(std::memory_order_acquire);
-    if (!wantPlaying_.load(std::memory_order_acquire)) {
-        // Stopped: the renderer renders nothing ahead, and what the callback
+    if (!wantPlaying_.load(std::memory_order_acquire) ||
+        counting_.load(std::memory_order_relaxed)) {
+        // Stopped (or counting in): the renderer renders nothing ahead, and what the callback
         // plays is monitored input, heard as it is produced.
         clock.heardStream = std::numeric_limits<std::int64_t>::max();
         return clock;
@@ -605,8 +607,44 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         }
         return;
     }
+    // The play request first, then a count-in request (playCountIn stores them
+    // in the other order), so this cycle cannot play past a count it missed.
+    want_ = wantPlaying_.load(std::memory_order_acquire);
+    if (const std::uint64_t seq = countSeq_.load(std::memory_order_acquire); seq != countSeen_) {
+        countSeen_ = seq;
+        countLeft_ = countFrames_.load(std::memory_order_relaxed);
+        countBeatA_ = countBeat_.load(std::memory_order_relaxed);
+        countBarA_ = countBar_.load(std::memory_order_relaxed);
+        countPos_ = 0;
+    }
+    if (!want_) countLeft_ = 0;  // a stop cancels the count
+    if (countLeft_ > 0) {
+        // The count holds the transport for its part of this cycle (heard as
+        // stopped, plus the clicks); the rest of the cycle plays.
+        counting_.store(true, std::memory_order_relaxed);
+        const auto k = static_cast<std::uint32_t>(std::min<std::int64_t>(countLeft_, frames));
+        countHold_ = true;
+        cycleBody(in, out, k, 0);
+        countHold_ = false;
+        countClicks(out, k);
+        countLeft_ -= k;
+        if (k < frames) {
+            std::array<const float*, 64> inAt{};
+            for (std::uint32_t c = 0; c < deviceInputs_ && c < inAt.size(); ++c)
+                inAt[c] = in && in[c] ? in[c] + k : nullptr;
+            float* outAt[2] = {out[0] + k, out[1] + k};
+            cycleBody(in ? inAt.data() : nullptr, outAt, frames - k, k);
+        }
+        counting_.store(countLeft_ > 0, std::memory_order_relaxed);
+        return;
+    }
+    cycleBody(in, out, frames, 0);
+}
+
+void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t frames,
+                       std::uint32_t midiBase) SUPPLE_RT {
     if (ring_) {  // anticipative: the renderer has done most of the work
-        anticipativeCycle(in, out, frames);
+        anticipativeCycle(in, out, frames, midiBase);
         cycles_.fetch_add(1, std::memory_order_release);
         return;
     }
@@ -646,7 +684,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             resetOwned(processing_);
         }
     }
-    if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
+    if (const bool want = wantNow(); want != playing_) {
         playing_ = want;
         if (!want) resetOwned(processing_);  // no hanging notes
     }
@@ -668,7 +706,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         plan->deviceIn = in;
         plan->deviceInChannels = deviceInputs_;
         plan->deviceMidi = midiSource_->midiInput();
-        plan->deviceMidiOffset = 0;
+        plan->deviceMidiOffset = midiBase;
     }
     if (plan && !playing_ && plan->anyLive && !shutDown_.load() && frames <= plan->block) {
         // Stopped, but a track monitors its input: plugins run, nothing plays.
@@ -703,7 +741,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
             inAt[c] = in && in[c] ? in[c] + done : nullptr;
         const float* const* ins = in ? inAt.data() : nullptr;
         plan->deviceIn = ins;  // monitored input for this part of the cycle
-        plan->deviceMidiOffset = done;
+        plan->deviceMidiOffset = midiBase + done;
         if (!detail::processBlock(*plan, pos_, k, true, &loopC_)) {
             ok = false;
             break;
@@ -714,7 +752,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         addClicks(*plan, out, done, pos_, k);
         if (detail::Recorder* r = recorder_.load()) {
             r->capture(ins, deviceInputs_, k, pos_);
-            r->captureMidi(plan->deviceMidi, done, k, pos_);
+            r->captureMidi(plan->deviceMidi, midiBase + done, k, pos_);
         }
         // Metering (P5.3c): no anticipation here, so the callback renders and
         // plays in step; its own stream is the position a reader aligns to.
@@ -749,6 +787,44 @@ void Engine::setMetronome(bool on, double gainDb) {
     metroOn_.store(on, std::memory_order_release);
 }
 
+void Engine::playCountIn(std::int64_t frames, std::int64_t beatFrames, int beatsPerBar) {
+    countFrames_.store(std::max<std::int64_t>(0, frames), std::memory_order_relaxed);
+    countBeat_.store(std::max<std::int64_t>(1, beatFrames), std::memory_order_relaxed);
+    countBar_.store(std::max(1, beatsPerBar), std::memory_order_relaxed);
+    countSeq_.fetch_add(1, std::memory_order_release);
+    play();  // after the request: a cycle that sees this play() sees the count too
+}
+
+void Engine::startClick(bool accent, double rate) SUPPLE_RT {  // a 40 ms decaying sine
+    clickAge_ = 0;
+    clickLength_ = static_cast<std::int64_t>(0.04 * rate);
+    clickPhase_ = 0;
+    clickStep_ = 2.0 * std::numbers::pi * (accent ? 1600.0 : 1100.0) / rate;
+    clickAmp_ = accent ? 1.0f : 0.6f;
+    clickEnv_ = 1.0f;
+    clickDecay_ = static_cast<float>(std::exp(-1.0 / (0.008 * rate)));
+}
+
+float Engine::clickSample() SUPPLE_RT {
+    if (clickAge_ < 0) return 0.0f;
+    const float v = clickAmp_ * clickEnv_ * static_cast<float>(std::sin(clickPhase_));
+    clickPhase_ += clickStep_;
+    clickEnv_ *= clickDecay_;
+    if (++clickAge_ >= clickLength_) clickAge_ = -1;
+    return v;
+}
+
+void Engine::countClicks(float* const* out, std::uint32_t k) SUPPLE_RT {
+    const float gain = metroGain_.load(std::memory_order_relaxed);
+    for (std::uint32_t i = 0; i < k; ++i, ++countPos_) {
+        if (countPos_ % countBeatA_ == 0)
+            startClick((countPos_ / countBeatA_) % countBarA_ == 0, config_.sampleRate);
+        const float v = gain * clickSample();
+        out[0][i] += v;
+        out[1][i] += v;
+    }
+}
+
 void Engine::addClicks(const detail::Plan& p, float* const* out, std::uint32_t offset,
                        std::int64_t pos, std::uint32_t k) SUPPLE_RT {
     const bool on = metroOn_.load(std::memory_order_acquire);
@@ -780,23 +856,11 @@ void Engine::addClicks(const detail::Plan& p, float* const* out, std::uint32_t o
     const float gain = metroGain_.load(std::memory_order_relaxed);
     std::size_t next = 0;
     for (std::uint32_t i = 0; i < k; ++i) {
-        for (; next < n && starts[next] == i; ++next) {  // a 40 ms decaying sine
-            const bool accent = accents[next];
-            clickAge_ = 0;
-            clickLength_ = static_cast<std::int64_t>(0.04 * p.rate);
-            clickPhase_ = 0;
-            clickStep_ = 2.0 * std::numbers::pi * (accent ? 1600.0 : 1100.0) / p.rate;
-            clickAmp_ = accent ? 1.0f : 0.6f;
-            clickEnv_ = 1.0f;
-            clickDecay_ = static_cast<float>(std::exp(-1.0 / (0.008 * p.rate)));
-        }
+        for (; next < n && starts[next] == i; ++next) startClick(accents[next], p.rate);
         if (clickAge_ < 0) continue;
-        const float v = gain * clickAmp_ * clickEnv_ * static_cast<float>(std::sin(clickPhase_));
+        const float v = gain * clickSample();
         out[0][offset + i] += v;
         out[1][offset + i] += v;
-        clickPhase_ += clickStep_;
-        clickEnv_ *= clickDecay_;
-        if (++clickAge_ >= clickLength_) clickAge_ = -1;
     }
 }
 
@@ -1055,8 +1119,8 @@ void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
     callbackGen_.store(next->generation, std::memory_order_release);
 }
 
-void Engine::anticipativeCycle(const float* const* in, float* const* out,
-                               std::uint32_t frames) SUPPLE_RT {
+void Engine::anticipativeCycle(const float* const* in, float* const* out, std::uint32_t frames,
+                               std::uint32_t midiBase) SUPPLE_RT {
     TransportSnapshot xport;
     if (epoch_.load(std::memory_order_acquire) != rtEpoch_ &&
         readTransport(xport,
@@ -1068,7 +1132,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         rtEpochSeen_.store(rtEpoch_, std::memory_order_release);
     }
     const std::uint64_t e = rtEpoch_;
-    const bool playing = wantPlaying_.load(std::memory_order_acquire);
+    const bool playing = wantNow();
     std::array<const float*, 64> inAt{};
     const std::uint32_t inputs = deviceInputs_;
     for (std::uint32_t done = 0; done < frames;) {
@@ -1086,7 +1150,10 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
         float* outAt[2] = {out[0] + done, out[1] + done};
         const float* const* ins = in ? inAt.data() : nullptr;
         if (livePlan_ && livePlan_->split) {
-            k = liveRender(ins, outAt, k, done);
+            k = liveRender(ins, outAt, k, midiBase + done);
+        } else if (countHold_) {  // counting in: the rendered audio waits
+            std::fill_n(outAt[0], k, 0.0f);
+            std::fill_n(outAt[1], k, 0.0f);
         } else {
             const Pulled played = pullAhead(outAt, k);
             if (played.wrapped) k = played.frames;  // the rest continues at the loop start
@@ -1097,7 +1164,8 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out,
             if (detail::Recorder* r = recorder_.load()) {
                 if (played.first != kNothingPlayed) {
                     r->capture(ins, inputs, played.frames, played.first);
-                    r->captureMidi(midiSource_->midiInput(), done, played.frames, played.first);
+                    r->captureMidi(midiSource_->midiInput(), midiBase + done, played.frames,
+                                   played.first);
                     r->lose(k - played.frames);
                 } else if (playing) {
                     r->lose(k);
@@ -1127,7 +1195,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     startFree(liveProcessing_, &p.liveInstances, self);  // let go by the renderer
     // The frontier: what the renderer made for this position. Before its
     // first chunk (pre-roll) time holds still; the monitored input is heard.
-    bool playing = wantPlaying_.load(std::memory_order_acquire);
+    bool playing = wantNow();
     if (playing) k = loopC_.until(livePos_, k);  // stop at a loop wrap
     std::uint32_t found = k;
     for (std::size_t j = 0; j < p.frontier.size(); ++j) {
@@ -1159,7 +1227,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     // Metering (P5.3c): the callback measures the live nodes it just played, at
     // the position it played them from. While the transport is stopped nothing
     // is rendered ahead, so a monitored input is heard as it is produced.
-    if (meters_ && (playing || !wantPlaying_))
+    if (meters_ && (playing || !wantNow()))
         pushMeters(*meters_, p, p.liveMeterNodes, rtEpoch_, liveStream_, k, false);
     const detail::Node& master = p.nodes[p.mainMaster];
     std::copy_n(master.post.l.begin(), k, out[0]);

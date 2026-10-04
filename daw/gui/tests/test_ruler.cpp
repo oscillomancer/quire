@@ -91,6 +91,8 @@ struct RulerFixture {
         view->show(app->head());
         const auto loop = app->loop();
         view->setLoopRange(loop.start, loop.end, loop.enabled);
+        const auto punch = app->punch();
+        view->setPunchRange(punch.start, punch.end, punch.enabled);
         root->frame(false);
     }
     void exec(const std::string& command, json::Value args) {
@@ -467,5 +469,48 @@ TEST_CASE("ruler: a right-click deletes a tempo change, a meter change, a region
     pick(1);
     CHECK(f.app->head().markers.size() == 0);
     CHECK(f.history() == n + 2);
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("ruler: a drag in the time row sets the punch range; the menu copies ranges") {
+    RulerFixture f;
+    const auto n = f.history();
+    // Bars 2-3 at 120 BPM: 2 s .. 6 s; the time row is y 22..37.
+    f.drag(f.at(4.0, 30), f.at(12.0, 30));
+    auto punch = f.app->punch();
+    CHECK(punch.enabled);  // a new punch range is meant to be used
+    CHECK(punch.start == doctest::Approx(2.0));
+    CHECK(punch.end == doctest::Approx(6.0));
+    CHECK(f.view->punchEnd() == doctest::Approx(6.0));
+    CHECK_FALSE(f.app->loop().end > f.app->loop().start);  // the loop is untouched
+    // Its right edge moves it.
+    f.drag(f.at(12.0, 30), f.at(16.0, 30));
+    CHECK(f.app->punch().end == doctest::Approx(8.0));
+    CHECK(f.app->punch().start == doctest::Approx(2.0));
+    // A bars-row drag still sets the loop.
+    f.drag(f.at(16.0, 10), f.at(20.0, 10));
+    CHECK(f.app->loop().start == doctest::Approx(8.0));
+    CHECK(f.app->loop().end == doctest::Approx(10.0));
+    // Right-click in the time row: "Punch range = loop range" (row 2).
+    ui::PointerEvent e;
+    e.type = Pointer::Down;
+    e.pos = f.at(1.0, 30);
+    e.button = 3;
+    f.root->pointer(e);
+    e.type = Pointer::Up;
+    f.root->pointer(e);
+    f.root->frame(false);
+    ui::Node* menu = f.root->find("ruler.menu");
+    REQUIRE(menu);
+    const ui::Point row{menu->bounds().x + 30, menu->bounds().y + 2 * 26 + 13};
+    f.pointer(Pointer::Move, row);
+    f.pointer(Pointer::Down, row);
+    f.pointer(Pointer::Up, row);
+    f.sync();
+    punch = f.app->punch();
+    CHECK(punch.start == doctest::Approx(8.0));
+    CHECK(punch.end == doctest::Approx(10.0));
+    CHECK(punch.enabled);
+    CHECK(f.history() == n);  // transport state, never an undo step
     CHECK(f.errors.empty());
 }

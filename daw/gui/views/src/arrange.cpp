@@ -8,7 +8,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
@@ -140,8 +142,9 @@ class Ruler : public ui::Node {
 
         // The loop range shades the whole ruler, with a bar along the top.
         const bool loopDrag = isLoop();
-        const double loopStart = loopDrag && moved_ ? tm.secondsAt(draftStart_) : view_.loopStart();
-        const double loopEnd = loopDrag && moved_ ? tm.secondsAt(draftEnd_) : view_.loopEnd();
+        const bool loopGhost = loopDrag && !punch_ && moved_;
+        const double loopStart = loopGhost ? tm.secondsAt(draftStart_) : view_.loopStart();
+        const double loopEnd = loopGhost ? tm.secondsAt(draftEnd_) : view_.loopEnd();
         if (loopEnd > loopStart) {
             const float lx0 = std::max(x0, view_.xAt(loopStart));
             const float lx1 = std::min(x1, view_.xAt(loopEnd));
@@ -149,6 +152,24 @@ class Ruler : public ui::Node {
                 c.fillRect({lx0, bounds().y, lx1 - lx0, bounds().h},
                            t.color("accent").withAlpha(view_.loopEnabled() ? 0.12f : 0.06f));
                 c.fillRect({lx0, bounds().y, lx1 - lx0, 3}, t.color("accent"));
+            }
+        }
+
+        // The punch range: a record-coloured band in the time row, with a bar
+        // along its foot (drag in the time row to set it).
+        const bool punchDrag = loopDrag && punch_;
+        const double punchStart =
+            punchDrag && moved_ ? tm.secondsAt(draftStart_) : view_.punchStart();
+        const double punchEnd = punchDrag && moved_ ? tm.secondsAt(draftEnd_) : view_.punchEnd();
+        if (punchEnd > punchStart) {
+            const float px0 = std::max(x0, view_.xAt(punchStart));
+            const float px1 = std::min(x1, view_.xAt(punchEnd));
+            if (px1 > px0) {
+                const ui::Color rec = t.color("armed");
+                c.fillRect({px0, timeRow.y, px1 - px0, timeRow.h - 1},
+                           rec.withAlpha(view_.punchEnabled() ? 0.22f : 0.08f));
+                c.fillRect({px0, timeRow.bottom() - 3, px1 - px0, 2},
+                           rec.withAlpha(view_.punchEnabled() ? 1.0f : 0.45f));
             }
         }
 
@@ -345,6 +366,23 @@ class Ruler : public ui::Node {
             items.push_back(std::move(m));
         };
         const float tempoTop = kBeatRowH + kTimeRowH;
+        if (y < tempoTop) {  // the loop (bars) and punch (time) rows
+            const double ls = view_.loopStart(), le = view_.loopEnd();
+            const double ps = view_.punchStart(), pe = view_.punchEnd();
+            add(
+                view_.loopEnabled() ? "Loop off" : "Loop on",
+                [this, on = !view_.loopEnabled()] { setRange(false, std::nullopt, on); }, le > ls);
+            add(
+                view_.punchEnabled() ? "Punch off" : "Punch on",
+                [this, on = !view_.punchEnabled()] { setRange(true, std::nullopt, on); }, pe > ps);
+            add(
+                "Punch range = loop range",
+                [this, ls, le] { setRange(true, std::pair{ls, le}, true); }, le > ls);
+            add(
+                "Loop range = punch range",
+                [this, ps, pe] { setRange(false, std::pair{ps, pe}, view_.loopEnabled()); },
+                pe > ps);
+        }
         if (y >= tempoTop && y < tempoTop + kTempoRowH / 2.0f) {
             const time::TempoPoint* hit = nullptr;
             float distance = 1e9f;
@@ -412,6 +450,22 @@ class Ruler : public ui::Node {
                                        }),
                           {at.x, at.y, 1, 1});
         return true;
+    }
+    // transport.loop / transport.punch: a new range (seconds) and/or the switch.
+    void setRange(bool punch, std::optional<std::pair<double, double>> range, bool on) {
+        json::Value args = json::Value::object();
+        if (range) {
+            args["start_seconds"] = range->first;
+            args["end_seconds"] = range->second;
+        }
+        args["enabled"] = on;
+        if (!execute(punch ? "transport.punch" : "transport.loop", std::move(args))) return;
+        const double start = range ? range->first : punch ? view_.punchStart() : view_.loopStart();
+        const double end = range ? range->second : punch ? view_.punchEnd() : view_.loopEnd();
+        if (punch)
+            view_.setPunchRange(start, end, on);
+        else
+            view_.setLoopRange(start, end, on);
     }
     void remove(const std::string& stem, model::Id id) {
         json::Value args = json::Value::object();
@@ -488,6 +542,7 @@ class Ruler : public ui::Node {
     ui::Point press_{};
     double originalStart_ = 0, originalEnd_ = 0, draftStart_ = 0, draftEnd_ = 0;
     bool moved_ = false, loopEnabled_ = false;
+    bool punch_ = false;  // the range gesture edits the punch range (time row), not the loop
 };
 
 bool Ruler::onPointer(const ui::PointerEvent& e) {
@@ -504,11 +559,16 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
         const auto& tm = *s.timeMap;
         const float y = e.pos.y - bounds().y;
         const bool free = (e.mods & ui::kShift) != 0;
+        punch_ = false;
         if (y < kBeatRowH + kTimeRowH) {
-            originalStart_ = tm.beatAt(view_.loopStart());
-            originalEnd_ = tm.beatAt(view_.loopEnd());
-            loopEnabled_ = view_.loopEnabled();
-            const float left = view_.xAt(view_.loopStart()), right = view_.xAt(view_.loopEnd());
+            // The bars row sets the loop range, the time row the punch range.
+            punch_ = y >= kBeatRowH;
+            const double rangeStart = punch_ ? view_.punchStart() : view_.loopStart();
+            const double rangeEnd = punch_ ? view_.punchEnd() : view_.loopEnd();
+            originalStart_ = tm.beatAt(rangeStart);
+            originalEnd_ = tm.beatAt(rangeEnd);
+            loopEnabled_ = punch_ ? view_.punchEnabled() : view_.loopEnabled();
+            const float left = view_.xAt(rangeStart), right = view_.xAt(rangeEnd);
             drag_ = Drag::LoopNew;
             if (originalEnd_ > originalStart_) {
                 if (std::abs(e.pos.x - left) <= 5)
@@ -684,9 +744,15 @@ bool Ruler::onPointer(const ui::PointerEvent& e) {
                 const double start = tm.secondsAt(draftStart_), end = tm.secondsAt(draftEnd_);
                 args["start_seconds"] = start;
                 args["end_seconds"] = end;
-                args["enabled"] = loopEnabled_;
-                if (execute("transport.loop", std::move(args)))
-                    view_.setLoopRange(start, end, loopEnabled_);
+                // A new punch range turns punch on: it is set to be used.
+                const bool on = punch_ ? (loopEnabled_ || drag_ == Drag::LoopNew) : loopEnabled_;
+                args["enabled"] = on;
+                if (execute(punch_ ? "transport.punch" : "transport.loop", std::move(args))) {
+                    if (punch_)
+                        view_.setPunchRange(start, end, on);
+                    else
+                        view_.setLoopRange(start, end, on);
+                }
             } else if (moved_ && (drag_ == Drag::Marker || isRegion()) &&
                        (draftStart_ != originalStart_ || draftEnd_ != originalEnd_)) {
                 args["id"] = id_.str();
@@ -887,7 +953,12 @@ bool ArrangeView::poll() {
     lastPollMs_ = now;
     const Transport t = transportSource_();
     const bool wasPlaying = transport_.playing;
+    const bool rangesChanged =
+        t.loopEnabled != transport_.loopEnabled || t.loopStart != transport_.loopStart ||
+        t.loopEnd != transport_.loopEnd || t.punchEnabled != transport_.punchEnabled ||
+        t.punchStart != transport_.punchStart || t.punchEnd != transport_.punchEnd;
     transport_ = t;
+    if (rangesChanged && ruler_) ruler_->invalidate();
     if (t.seconds != playhead_) {
         setPlayhead(t.seconds);
         return true;
@@ -908,6 +979,16 @@ void ArrangeView::setLoopRange(double start, double end, bool on) {
     transport_.loopEnabled = on;
     transport_.loopStart = start;
     transport_.loopEnd = end;
+    if (ruler_) ruler_->invalidate();
+}
+
+void ArrangeView::setPunchRange(double start, double end, bool on) {
+    if (transport_.punchStart == start && transport_.punchEnd == end &&
+        transport_.punchEnabled == on)
+        return;
+    transport_.punchEnabled = on;
+    transport_.punchStart = start;
+    transport_.punchEnd = end;
     if (ruler_) ruler_->invalidate();
 }
 

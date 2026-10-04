@@ -6483,6 +6483,9 @@ Kind: `query`. Exposure: `mcp-tool`.
     "recording": {
       "type": "boolean"
     },
+    "counting_in": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -6562,7 +6565,7 @@ Kind: `query`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -6599,7 +6602,8 @@ Result:
     "enabled": false,
     "start_seconds": 0.0,
     "end_seconds": 0.0
-  }
+  },
+  "counting_in": false
 }
 
 ```
@@ -6678,7 +6682,7 @@ Result:
 
 Turn the metronome on or off and set its level; returns the settings.
 
-A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. Transport state: not an undo step, not saved in the project. No arguments: the current settings.
+A click on every beat of the meter while the transport plays (the bar's first accented), in the live output only: renders and recordings never contain it. count_in_bars: that many bars of clicks (at the meter and tempo where playback starts) before transport.record begins — the position holds and nothing is recorded until the count ends; count_in_playback counts in before transport.play too. The count clicks even with the metronome off. Transport state: not an undo step, not saved in the project. No arguments: the current settings.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -6688,6 +6692,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `enabled` | boolean |  |  |  |  |
 | `volume_db` | value | dB | -60.0..6.0 |  | Quantity strings are range-checked by the server. |
+| `count_in_bars` | integer |  | 0.0..8.0 |  |  |
+| `count_in_playback` | boolean |  |  |  |  |
 
 ### Result
 
@@ -6701,9 +6707,15 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "volume_db": {
       "type": "number"
+    },
+    "count_in_bars": {
+      "type": "integer"
+    },
+    "count_in_playback": {
+      "type": "boolean"
     }
   },
-  "required": ["enabled", "volume_db"],
+  "required": ["enabled", "volume_db", "count_in_bars", "count_in_playback"],
   "additionalProperties": false
 }
 
@@ -6725,7 +6737,30 @@ Result:
 ```json
 {
   "enabled": true,
-  "volume_db": -6.0
+  "volume_db": -6.0,
+  "count_in_bars": 0,
+  "count_in_playback": false
+}
+
+```
+
+**Two bars of count-in before recording** (`empty`)
+
+```json
+{
+  "count_in_bars": 2
+}
+
+```
+
+Result:
+
+```json
+{
+  "enabled": false,
+  "volume_db": -6.0,
+  "count_in_bars": 2,
+  "count_in_playback": false
 }
 
 ```
@@ -6756,6 +6791,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "recording": {
       "type": "boolean"
     },
+    "counting_in": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -6835,7 +6873,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -6866,7 +6904,8 @@ Result:
   "beat": "<any>",
   "sample": "<any>",
   "loop": "<any>",
-  "punch": "<any>"
+  "punch": "<any>",
+  "counting_in": false
 }
 
 ```
@@ -6895,6 +6934,9 @@ Kind: `action`. Exposure: `mcp-tool`.
       "type": "boolean"
     },
     "recording": {
+      "type": "boolean"
+    },
+    "counting_in": {
       "type": "boolean"
     },
     "seconds": {
@@ -6976,7 +7018,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -7007,7 +7049,8 @@ Result:
   "beat": "<any>",
   "sample": "<any>",
   "loop": "<any>",
-  "punch": "<any>"
+  "punch": "<any>",
+  "counting_in": false
 }
 
 ```
@@ -7108,6 +7151,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "recording": {
       "type": "boolean"
     },
+    "counting_in": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -7187,7 +7233,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -7218,7 +7264,8 @@ Result:
   "beat": "<any>",
   "sample": "<any>",
   "loop": "<any>",
-  "punch": "<any>"
+  "punch": "<any>",
+  "counting_in": false
 }
 
 ```
@@ -7252,6 +7299,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "recording": {
       "type": "boolean"
     },
+    "counting_in": {
+      "type": "boolean"
+    },
     "seconds": {
       "type": "number"
     },
@@ -7331,7 +7381,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -7363,7 +7413,8 @@ Result:
   "beat": 4.0,
   "sample": 96000,
   "loop": "<any>",
-  "punch": "<any>"
+  "punch": "<any>",
+  "counting_in": false
 }
 
 ```
@@ -7392,6 +7443,9 @@ Kind: `action`. Exposure: `mcp-tool`.
       "type": "boolean"
     },
     "recording": {
+      "type": "boolean"
+    },
+    "counting_in": {
       "type": "boolean"
     },
     "seconds": {
@@ -7473,7 +7527,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["playing", "recording", "seconds", "beat", "sample", "loop", "punch"],
+  "required": ["playing", "recording", "counting_in", "seconds", "beat", "sample", "loop", "punch"],
   "additionalProperties": false
 }
 
@@ -7504,7 +7558,8 @@ Result:
   "beat": "<any>",
   "sample": "<any>",
   "loop": "<any>",
-  "punch": "<any>"
+  "punch": "<any>",
+  "counting_in": false
 }
 
 ```

@@ -2173,6 +2173,102 @@ TEST_CASE("meters show a monitored input while the transport is stopped" *
     engine.stop();
 }
 
+TEST_CASE("a count-in clicks a bar while the position holds, then plays and records on time" *
+          doctest::description("rt")) {
+    // 120 BPM 4/4 at 48 kHz: a beat is 24000 frames, the bar 96000. Block 333
+    // splits a cycle where the count ends.
+    constexpr std::uint32_t kBlock = 333;
+    constexpr std::int64_t kBar = 96000, kTotal = 130000, kCycles = kTotal / kBlock + 1;
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto runOnce = [&](bool countIn, std::vector<float>& out, RecordedTake* recorded) {
+            auto pool = makePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                                  .captureFrames = kCycles * kBlock,
+                                  .input = [](float* const* in, std::uint32_t channels,
+                                              std::uint32_t n, std::int64_t frame) {
+                                      for (std::uint32_t c = 0; c < channels; ++c)
+                                          for (std::uint32_t i = 0; i < n; ++i)
+                                              in[c][i] = static_cast<float>(frame + i);
+                                  }});
+            Engine engine(pool, media, options);
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = kBlock, .inputs = 2})
+                        .ok());
+            const model::Session s = synthSession(0.0);
+            REQUIRE(engine.load(s).ok());
+            engine.setMetronome(false, 0.0);  // the count clicks regardless
+            const auto dir = std::filesystem::temp_directory_path() /
+                             ("supple-count-" + std::to_string(::getpid()));
+            std::filesystem::remove_all(dir);
+            if (recorded) {
+                Id track;
+                for (const auto& e : s.tracks)
+                    if (e.value->type == model::StripType::Channel) track = e.id;
+                REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}).ok());
+            }
+            if (countIn)
+                engine.playCountIn(kBar, kBar / 4, 4);
+            else
+                engine.play();
+            const std::int64_t half = kBar / 2 / kBlock;  // mid-count
+            if (options.anticipative)
+                runAhead(engine, backend, half, kBlock);
+            else
+                backend.run(half);
+            if (countIn) {
+                const TransportState mid = engine.transport();
+                CHECK(mid.countingIn);
+                CHECK(mid.sample == 0);
+            }
+            if (options.anticipative)
+                runAhead(engine, backend, kCycles - half, kBlock);
+            else
+                backend.run(kCycles - half);
+            CHECK_FALSE(engine.transport().countingIn);
+            if (recorded) {
+                auto takes = engine.stopRecording();
+                REQUIRE(takes);
+                REQUIRE(takes->size() == 1);
+                *recorded = (*takes)[0];
+                auto audio = audio::readAudio(recorded->file);
+                REQUIRE(audio);
+                REQUIRE(audio->frames() > 0);
+                // The take's first frame is the input heard when the count ended.
+                CHECK(audio->channels[0][0] == static_cast<float>(kBar));
+            }
+            engine.stop();
+            out = backend.capture().channels[0];
+            std::filesystem::remove_all(dir);
+        };
+        std::vector<float> reference, counted;
+        runOnce(false, reference, nullptr);
+        RecordedTake take;
+        runOnce(true, counted, &take);
+        REQUIRE(counted.size() >= static_cast<std::size_t>(kTotal));
+        // Four clicks, the first accented, then silence to the end of the bar.
+        std::vector<std::size_t> onsets;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(kBar); ++i)
+            if (std::fabs(counted[i]) > 0.05f && (onsets.empty() || i > onsets.back() + 4000))
+                onsets.push_back(i);
+        REQUIRE(onsets.size() == 4);
+        for (std::size_t b = 0; b < 4; ++b)  // (a click starts at phase 0: its second sample)
+            CHECK(onsets[b] - b * 24000 <= 2);
+        float accent = 0, other = 0;
+        for (std::size_t i = 0; i < 1920; ++i) {
+            accent = std::max(accent, std::fabs(counted[i]));
+            other = std::max(other, std::fabs(counted[24000 + i]));
+        }
+        CHECK(accent > other);
+        for (std::size_t i = 74000; i < static_cast<std::size_t>(kBar); ++i)
+            REQUIRE(counted[i] == 0.0f);
+        // Then the session plays exactly as it does without a count, from frame 0.
+        CHECK(maxDiff(counted, kBar, reference, kTotal - kBar) == 0.0);
+        CHECK(take.startSample == 0);
+        CHECK(take.frames == kCycles * kBlock - kBar);
+    }
+}
+
 TEST_CASE("the metronome clicks every beat in the live output, accented on the bar" *
           doctest::description("rt")) {
     for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {

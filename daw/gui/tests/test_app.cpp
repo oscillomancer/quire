@@ -4,8 +4,10 @@
 #include <doctest/doctest.h>
 
 #include <unistd.h>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <thread>
 
 #include "actions_list.h"
 #include "agent_panel.h"
@@ -455,6 +457,21 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     input.push_back(2);
     arm["record_input"] = std::move(input);
     REQUIRE(a.dispatcher->execute({"track.set", std::move(arm), ui}));
+    // An armed track: the bar says where the recording will go, before it starts.
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));  // the ≤ 4 Hz readouts
+    bar->sync();
+    const std::string recPath = a.root->find("transport.recpath")->valueText();
+    CHECK(recPath.rfind("rec: ", 0) == 0);
+    CHECK(recPath.find("/rec", 5) != std::string::npos);
+    // The count-in button cycles none, 1, 2, 4 bars (transport.metronome).
+    CHECK(a.root->find("transport.count")->valueText() == "count");
+    a.root->click("transport.count");
+    CHECK(a.app->metronome().countInBars == 1);
+    CHECK(a.root->find("transport.count")->valueText() == "count 1");
+    for (int expected : {2, 4, 0}) {
+        a.root->click("transport.count");
+        CHECK(a.app->metronome().countInBars == expected);
+    }
     a.root->click("transport.record");
     CHECK(get()["recording"].asBool());
     // Loop and punch need a range before they can be switched on (the bar only
@@ -495,6 +512,20 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     CHECK(a.app->head().timeMap->meterAt(1).numerator == 3);
     bar->sync();
     a.root->frame(false);
+    // Stop and disarm: the golden must not show this run's temporary folder.
+    a.root->click("transport.play");
+    CHECK_FALSE(get()["recording"].asBool());
+    json::Value disarm = json::Value::object();
+    disarm["track"] = track;
+    disarm["armed"] = false;
+    REQUIRE(a.dispatcher->execute({"track.set", std::move(disarm), ui}));
+    json::Value home = json::Value::object();
+    home["seconds"] = 0.0;
+    REQUIRE(a.dispatcher->execute({"transport.seek", std::move(home), ui}));
+    std::this_thread::sleep_for(std::chrono::milliseconds(260));
+    bar->sync();
+    a.root->frame(false);
+    CHECK(a.root->find("transport.recpath")->valueText().empty());
     // Golden: the transport bar as it reads with the engine running.
     const gui::Image image = a.root->readBack();
     const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / "transport-bar.png";
