@@ -1009,10 +1009,44 @@ Status SandboxHost::commitTransaction(std::uint64_t id) {
     return okStatus();
 }
 
-void SandboxHost::rollbackTransaction(std::uint64_t id) {
-    if (id != openTxn_) return;
-    session_->rollback();
+Status SandboxHost::rollbackTransaction(std::uint64_t id) {
+    if (id != openTxn_) return Error("sandbox.transaction", "no such open transaction");
+    auto result = session_->rollback();
     openTxn_ = 0;
+    return result;
+}
+
+std::function<void()> SandboxHost::invocationSavepoint() {
+    if (!session_->inTransaction()) return {};
+    auto report = [this](const Error& error) {
+        auto encode = [](auto&& self, const Error& e) -> json::Value {
+            json::Value value = json::Value::object();
+            value["code"] = e.code;
+            value["message"] = e.message;
+            value["path"] = e.path;
+            value["hint"] = e.hint;
+            if (!e.details.empty()) {
+                value["details"] = json::Value::array();
+                for (const auto& detail : e.details) value["details"].push_back(self(self, detail));
+            }
+            return value;
+        };
+        emit("sandbox.savepoint_failed", encode(encode, error));
+    };
+    auto saved = session_->invocationSavepoint();
+    if (!saved) {
+        report(saved.error());
+        return {};
+    }
+    const auto eventCount = events_.size();
+    auto restoreEvents = scripts_ ? scripts_->eventSavepoint() : std::function<void()>{};
+    return [this, restore = std::move(*saved), eventCount, restoreEvents = std::move(restoreEvents),
+            report] {
+        auto result = restore();
+        if (events_.size() > eventCount) events_.resize(eventCount);
+        if (restoreEvents) restoreEvents();
+        if (!result) report(result.error());
+    };
 }
 
 json::Value toJson(const cmd::LogRecord& r) {

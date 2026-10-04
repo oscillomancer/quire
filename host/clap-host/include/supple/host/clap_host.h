@@ -213,7 +213,10 @@ class Instance {
     Result<std::string> describe(bool changedOnly);
 
     // --- state (main thread) ---
+    // Inactive saves flush acknowledged main-thread edits into component state.
+    // Active saves require those edits to have been delivered by the audio consumer.
     Result<std::vector<std::uint8_t>> saveState();
+    // Restoring state invalidates edits queued before this call.
     Status loadState(std::span<const std::uint8_t> bytes);
 
     // --- processing (audio thread) ---
@@ -248,6 +251,7 @@ class Instance {
     struct Notifications {
         bool stateDirty = false, paramsRescan = false, latencyChanged = false,
              semanticChanged = false, tailChanged = false;
+        std::optional<Error> restartError;  // failed automatic reactivation, cleared on read
         std::uint32_t paramsRescanFlags = 0;
         std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
@@ -267,9 +271,9 @@ class Instance {
     Result<EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
     void closeEditor();
     bool editorOpen() const { return editorOpen_; }
-    // What the plugin asked for since the last call (resize, or it closed itself).
+    // What the plugin asked for since the last call; the window owner applies show/hide.
     struct EditorRequests {
-        bool resize = false, closed = false;
+        bool resize = false, closed = false, show = false, hide = false;
         std::uint32_t width = 0, height = 0;
     };
     EditorRequests takeEditorRequests();

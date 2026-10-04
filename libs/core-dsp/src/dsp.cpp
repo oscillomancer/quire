@@ -103,6 +103,7 @@ void PolyphaseUpsampler::reset() SUPPLE_RT {
     head_ = 0;
 }
 void PolyphaseUpsampler::process(float input, std::span<double> output) SUPPLE_RT {
+    if (coefficients_.empty() || output.size() < static_cast<std::size_t>(factor_)) return;
     delay_[static_cast<std::size_t>(head_)] = static_cast<double>(input);
     for (int p = 0; p < factor_; ++p) {
         double y = 0;

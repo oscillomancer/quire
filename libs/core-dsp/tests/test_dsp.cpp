@@ -117,3 +117,16 @@ TEST_CASE("resampler rejects nonfinite and unrepresentable rate ratios") {
     CHECK(resample(input, 1e300, 1e-300).empty());
     CHECK(resample(input, 48000, 1e-20).empty());
 }
+
+TEST_CASE("polyphase upsampler ignores short output spans without advancing history") {
+    PolyphaseUpsampler tested, reference;
+    tested.prepare(4);
+    reference.prepare(4);
+    std::array<double, 3> shortOutput{123, 123, 123};
+    tested.process(1, shortOutput);
+    CHECK(shortOutput == std::array<double, 3>{123, 123, 123});
+    std::array<double, 4> actual{}, expected{};
+    tested.process(0.5f, actual);
+    reference.process(0.5f, expected);
+    CHECK(actual == expected);
+}

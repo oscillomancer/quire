@@ -82,3 +82,11 @@ TEST_CASE("live silence and anti-phase keep finite report values") {
     REQUIRE(json.find("spectral"));
     CHECK(json.find("spectral")->find("ltas_db")->asArray().size() == 31);
 }
+
+TEST_CASE("an unprepared live meter ignores audio") {
+    analysis::LiveMeter meter;
+    const float sample = 0.5f;
+    const float* input[]{&sample, &sample};
+    meter.process(input, 1);
+    CHECK(meter.measurements().seconds == 0);
+}

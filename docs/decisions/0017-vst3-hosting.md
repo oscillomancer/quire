@@ -57,18 +57,23 @@ The VST3 SDK is MIT-licensed from 3.8.0 (ADR-0003, "re-verify at use").
      and no conversion happens on the audio thread (ADR-0010's semantic lanes
      already interpolate in their normalized domain).
    - Notes: CLAP-style note events become `NoteOnEvent`/`NoteOffEvent`
-     (note ids kept); raw MIDI CC/pitch bend/aftertouch map through
+     (note ids kept); raw MIDI note-on/off become the same note events, and
+     CC/pitch bend/aftertouch map through
      `IMidiMapping` to parameters (a VST3 has no raw MIDI input), unmapped
      ones are dropped. Notes the host delivered are remembered, because a
      VST3 cannot be asked to end them: `reset()` marks them and the next
      `process()` sends their note-offs first (the engine's "no hanging notes"
-     calls depend on it).
+     calls depend on it). Overlapping notes retain counts and ids; wildcard
+     note-off/choke expands to explicit offs for each tracked count.
    - Transport → `ProcessContext` (tempo, time signature, project time in
      samples and quarters, bar position, playing/looping flags and loop
      range from ADR-0015).
    - State: one blob = a small container (magic, version) holding the
      component state and the controller state, restored in that order with
-     `setComponentState` in between (the SDK's documented sequence).
+     `setComponentState` in between (the SDK's documented sequence). Loading
+     advances the queued-edit generation; only the audio thread consumes that
+     queue. Inactive saving first delivers pending edits via a zero-sample,
+     zero-bus processor flush, so component state includes controller edits.
    - Latency: `getLatencySamples()`, re-read after `restartComponent
      (kLatencyChanged)`; tail: `getTailSamples()` (`kInfiniteTail` →
      UINT32_MAX).

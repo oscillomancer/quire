@@ -38,3 +38,18 @@ notes, latency and isolated processing. The engine test checks a VST3 effect
 in a chain against the offline render. A VST3-specific crashing or hanging
 fixture is not included; the bridge's process-failure paths are exercised by
 the existing CLAP fixtures.
+
+A state load is a queued-edit barrier: it advances the edit generation, and
+only the audio consumer removes old queue entries. Saving an inactive
+instance first sends unconsumed edits through the VST3 zero-sample processor
+flush (no audio buses), then saves component and separate controller state.
+`setParam` followed by inactive `saveState` therefore persists the edit;
+active saves require the audio consumer to have delivered queued edits first.
+The fixture includes a separate-controller gain to exercise this distinction.
+
+Audio layouts are bounded at 16 buses per direction and 64 channels per bus;
+oversized declared or negotiated layouts fail with `host.layout`. Main widths
+are reported accurately; bridged main/key buses have a further 16-channel cap.
+Notes are tracked with counts and note ids in a bounded arena. Wildcard note
+ends and chokes expand to explicit offs; reset releases every tracked count.
+Run-loop snapshots dispatch only handlers that remain registered.

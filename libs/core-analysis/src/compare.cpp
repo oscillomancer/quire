@@ -114,21 +114,22 @@ double ltasRms(const std::array<double, kThirdOctaves>& a,
                const std::array<double, kThirdOctaves>& b,
                std::array<double, kThirdOctaves>* deltas) {
     double sum = 0.0;
-    int n = 0;
+    int n = 0, shared = 0;
     std::array<double, kThirdOctaves> d{};
     std::array<bool, kThirdOctaves> use{};
     for (int i = 0; i < kThirdOctaves; ++i) {
         const auto u = static_cast<std::size_t>(i);
-        d[u] = b[u] - a[u];
-        use[u] = a[u] > -100.0 && b[u] > -100.0;  // both bands carry signal
-        if (use[u]) {
+        d[u] = std::max(b[u], -100.0) - std::max(a[u], -100.0);
+        use[u] = a[u] > -100.0 || b[u] > -100.0;
+        if (use[u]) ++n;
+        if (a[u] > -100.0 && b[u] > -100.0) {
             sum += d[u];
-            ++n;
+            ++shared;
         }
     }
     if (deltas) *deltas = d;
     if (n == 0) return 0.0;
-    const double mean = sum / n;
+    const double mean = shared ? sum / shared : 0.0;
     double sq = 0.0;
     for (int i = 0; i < kThirdOctaves; ++i)
         if (use[static_cast<std::size_t>(i)])
@@ -272,7 +273,18 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
                      "profile schema must be supple.analysis-profile/1.0", "/schema");
     const auto values = flatten(report);
     ProfileResult r;
-    double weighted = 0.0, weights = 0.0;
+    double mean = 0.0, weights = 0.0, scale = 0.0;
+    auto accumulate = [&](double distance, double weight) {
+        if (weight == 0) return;
+        if (weight > scale) {
+            weights *= scale / weight;
+            scale = weight;
+        }
+        const double scaled = weight / scale;
+        const double next = weights + scaled;
+        mean = mean * (weights / next) + distance * (scaled / next);
+        weights = next;
+    };
     bool pass = true;
     if (const auto* targets = profile.find("targets")) {
         if (!targets->isObject())
@@ -339,8 +351,7 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
                 }
             }
             pass = pass && tr.pass;
-            weighted += weight * tr.distance;
-            weights += weight;
+            accumulate(tr.distance, weight);
             r.targets.push_back(tr);
         }
     }
@@ -363,11 +374,10 @@ Result<ProfileResult> evaluate(const Report& report, const json::Value& profile)
         tr.distance = tr.value / 3.0;  // 3 dB RMS = one tolerance
         tr.pass = tr.distance <= 1.0;
         pass = pass && tr.pass;
-        weighted += tr.distance;
-        weights += 1.0;
+        accumulate(tr.distance, 1.0);
         r.targets.push_back(tr);
     }
-    r.loss = weights > 0.0 ? weighted / weights : 0.0;
+    r.loss = mean;
     r.pass = pass;
     return r;
 }

@@ -140,6 +140,22 @@ const clap_plugin_descriptor_t* badCurveDescriptor() {
     return &d;
 }
 
+const clap_plugin_descriptor_t* malformedSchemaDescriptor() {
+    static clap_plugin_descriptor_t descriptor = *gainDescriptor();
+    descriptor.id = "com.suppleaudio.test.malformed-schema";
+    descriptor.name = "Malformed Schema";
+    return &descriptor;
+}
+
+const clap_plugin_descriptor_t* oversizedDescriptor(bool ports) {
+    static clap_plugin_descriptor_t descriptors[2] = {*gainDescriptor(), *gainDescriptor()};
+    descriptors[0].id = "com.suppleaudio.test.many-ports";
+    descriptors[0].name = "Too Many Ports";
+    descriptors[1].id = "com.suppleaudio.test.many-channels";
+    descriptors[1].name = "Too Many Channels";
+    return &descriptors[ports ? 0 : 1];
+}
+
 std::atomic<int> gThreadFailures{0};
 std::atomic<int> gPatchStarts{0};
 
@@ -155,6 +171,7 @@ struct Gain {
     bool enforceThread = false;
     bool rejectPatch = false;
     bool slowPatch = false;
+    bool malformedSchema = false;
     bool badCurve = false;
 
     void applyParam(clap_id id, double clapValue) {
@@ -278,16 +295,17 @@ bool checkedGain(const clap_plugin_t* p) {
            !std::strcmp(p->desc->id, badCurveDescriptor()->id);
 }
 uint32_t CLAP_ABI gainPortCount(const clap_plugin_t* p, bool input) {
+    if (!std::strcmp(p->desc->id, oversizedDescriptor(true)->id)) return 17;
     return input && checkedGain(p) ? 0 : 1;
 }
-bool CLAP_ABI gainPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
+bool CLAP_ABI gainPortGet(const clap_plugin_t* p, uint32_t index, bool isInput,
                           clap_audio_port_info_t* info) {
     if (index != 0) return false;
     std::memset(info, 0, sizeof(*info));
     info->id = 0;
     std::snprintf(info->name, sizeof(info->name), "%s", isInput ? "In" : "Out");
     info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-    info->channel_count = 2;
+    info->channel_count = !std::strcmp(p->desc->id, oversizedDescriptor(false)->id) ? 65 : 2;
     info->port_type = CLAP_PORT_STEREO;
     info->in_place_pair = CLAP_INVALID_ID;
     return true;
@@ -319,6 +337,7 @@ bool CLAP_ABI semSchema(const clap_plugin_t* pl, const clap_ostream_t* out) {
     doc["plugin"]["id"] = pl->desc->id;
     doc["patch_type"] = gainPatchType().schemaId();
     doc["params"] = *params::describeTable(kGainT).find("params");
+    if (G(pl)->malformedSchema) doc["params"]["gain"]["min"] = "bad";
     if (G(pl)->badCurve) doc["params"]["gain"]["curve"] = "pow:invalid";
     doc["patch"] = gainPatchType().jsonSchema();
     return writeString(out, json::writeCompact(doc));
@@ -334,6 +353,7 @@ bool CLAP_ABI semSetPatch(const clap_plugin_t* pl, uint32_t mode, const char* te
     if (!checkGainMain(pl)) return false;
     if (G(pl)->slowPatch) {
         gPatchStarts.fetch_add(1, std::memory_order_release);
+        gPatchStarts.notify_all();
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
     }
     if (G(pl)->rejectPatch) {
@@ -474,7 +494,17 @@ bool CLAP_ABI sineNoteGet(const clap_plugin_t*, uint32_t index, bool isInput,
     return true;
 }
 const clap_plugin_note_ports_t kSineNotes = {sineNoteCount, sineNoteGet};
+bool CLAP_ABI sineSave(const clap_plugin_t*, const clap_ostream_t* out) {
+    const std::uint8_t version = 1;
+    return out->write(out, &version, 1) == 1;
+}
+bool CLAP_ABI sineLoad(const clap_plugin_t*, const clap_istream_t* in) {
+    std::uint8_t version = 0;
+    return in->read(in, &version, 1) == 1 && version == 1;
+}
+const clap_plugin_state_t kSineState = {sineSave, sineLoad};
 const void* CLAP_ABI sineExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_STATE)) return &kSineState;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kSinePorts;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     return nullptr;
@@ -558,12 +588,14 @@ const clap_plugin_descriptor_t* edgeDescriptor() {
     return &d;
 }
 
+const clap_host_t* gEditorHost = nullptr;
+
 struct Edge {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
     std::uint8_t config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
-    int timerCalls = 0;
+    int timerCalls = 0, activations = 0;
     clap_id timers[2] = {CLAP_INVALID_ID, CLAP_INVALID_ID};
     // A display-free editor (gap log #39): it records the parent window it is
     // given (read back as parameter 8) and asks for a resize when shown.
@@ -614,9 +646,10 @@ uint32_t CLAP_ABI edgeTail(const clap_plugin_t* pl) {
 }
 const clap_plugin_tail_t kEdgeTail = {edgeTail};
 bool CLAP_ABI edgeStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
-    return os->write(os, E(pl)->config, 4) == 4;
+    return E(pl)->config[0] != 7 && os->write(os, E(pl)->config, 4) == 4;
 }
 bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
+    if (E(pl)->config[0] == 8) return false;
     std::uint8_t buf[4];
     if (is->read(is, buf, 4) != 4) return false;
     std::memcpy(E(pl)->config, buf, 4);
@@ -626,6 +659,7 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[0]);
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[1]);
     }
+    if (buf[0] == 5) E(pl)->host->request_restart(E(pl)->host);
     const auto* hp = static_cast<const clap_host_params_t*>(
         E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
     if (hp) hp->request_flush(E(pl)->host);
@@ -651,6 +685,7 @@ void CLAP_ABI edgeGuiDestroy(const clap_plugin_t* pl) {
 }
 bool CLAP_ABI edgeGuiScale(const clap_plugin_t*, double) { return true; }
 bool CLAP_ABI edgeGuiGetSize(const clap_plugin_t* pl, uint32_t* w, uint32_t* h) {
+    if (E(pl)->config[0] == 3) return false;
     *w = E(pl)->guiWidth;
     *h = E(pl)->guiHeight;
     return true;
@@ -678,10 +713,18 @@ bool CLAP_ABI edgeGuiParent(const clap_plugin_t* pl, const clap_window_t* window
 bool CLAP_ABI edgeGuiTransient(const clap_plugin_t*, const clap_window_t*) { return false; }
 void CLAP_ABI edgeGuiTitle(const clap_plugin_t*, const char*) {}
 bool CLAP_ABI edgeGuiShow(const clap_plugin_t* pl) {
+    if (E(pl)->config[0] == 4) return false;
     E(pl)->guiShown = true;
+    gEditorHost = E(pl)->host;
     const auto* gui =
         static_cast<const clap_host_gui_t*>(E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_GUI));
-    if (gui) gui->request_resize(E(pl)->host, 320, 240);
+    if (gui) {
+        gui->request_resize(E(pl)->host, 320, 240);
+        if (E(pl)->config[0] == 6) {
+            gui->request_show(E(pl)->host);
+            gui->request_hide(E(pl)->host);
+        }
+    }
     return true;
 }
 bool CLAP_ABI edgeGuiHide(const clap_plugin_t* pl) {
@@ -713,7 +756,9 @@ const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kGainPorts;
     return nullptr;
 }
-bool CLAP_ABI edgeActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
+bool CLAP_ABI edgeActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) {
+    return ++E(pl)->activations == 1 || E(pl)->config[0] != 5;
+}
 bool CLAP_ABI edgeStart(const clap_plugin_t* pl) { return E(pl)->config[0] == 0; }
 clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_process_t* p) {
     for (uint32_t c = 0; c < 2; ++c)
@@ -896,18 +941,21 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 9; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 12; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
-    return i == 0   ? gainDescriptor()
-           : i == 1 ? sineDescriptor()
-           : i == 2 ? edgeDescriptor()
-           : i == 3 ? crashDescriptor()
-           : i == 4 ? checkedGainDescriptor(false)
-           : i == 5 ? checkedGainDescriptor(true)
-           : i == 6 ? slowGainDescriptor()
-           : i == 7 ? badCurveDescriptor()
-           : i == 8 ? keyMixDescriptor()
-                    : nullptr;
+    return i == 0    ? gainDescriptor()
+           : i == 1  ? sineDescriptor()
+           : i == 2  ? edgeDescriptor()
+           : i == 3  ? crashDescriptor()
+           : i == 4  ? checkedGainDescriptor(false)
+           : i == 5  ? checkedGainDescriptor(true)
+           : i == 6  ? slowGainDescriptor()
+           : i == 7  ? badCurveDescriptor()
+           : i == 8  ? keyMixDescriptor()
+           : i == 9  ? malformedSchemaDescriptor()
+           : i == 10 ? oversizedDescriptor(true)
+           : i == 11 ? oversizedDescriptor(false)
+                     : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
                                             const char* id) {
@@ -933,6 +981,15 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
         mutablePlugin->deactivate = checkedGainDeactivate;
         mutablePlugin->destroy = checkedGainDestroy;
         return p;
+    }
+    for (bool ports : {true, false})
+        if (!std::strcmp(id, oversizedDescriptor(ports)->id))
+            return make<Gain>(host, oversizedDescriptor(ports), gainActivate, gainProcess, gainExt);
+    if (!std::strcmp(id, malformedSchemaDescriptor()->id)) {
+        const auto* plugin =
+            make<Gain>(host, malformedSchemaDescriptor(), gainActivate, gainProcess, gainExt);
+        G(plugin)->malformedSchema = true;
+        return plugin;
     }
     if (!std::strcmp(id, sineDescriptor()->id)) {
         const clap_plugin_t* p =
@@ -975,3 +1032,14 @@ extern "C" CLAP_EXPORT int supple_fixture_patch_starts() {
 
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {CLAP_VERSION_INIT, entryInit,
                                                                entryDeinit, entryFactory};
+
+extern "C" void supple_fixture_wait_patch_start(int previous) {
+    while (gPatchStarts.load(std::memory_order_acquire) == previous) gPatchStarts.wait(previous);
+}
+
+extern "C" void supple_fixture_resize_stress() {
+    const auto* gui =
+        static_cast<const clap_host_gui_t*>(gEditorHost->get_extension(gEditorHost, CLAP_EXT_GUI));
+    for (std::uint32_t width = 1; width <= 100000; ++width)
+        gui->request_resize(gEditorHost, width, width ^ UINT32_MAX);
+}

@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -27,8 +28,8 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-// 3: Create carries the format; 4: the key (ADR-0018); 5: editors (gap log #39)
-inline constexpr std::uint32_t kVersion = 5;
+// 6: structured error details and restart failures in notifications.
+inline constexpr std::uint32_t kVersion = 6;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
@@ -65,7 +66,7 @@ enum class Op : std::uint32_t {
     EditorOpen,      // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
     EditorResize,    // u32 width, u32 height → the accepted size (as EditorOpen)
     EditorClose,     // → ok
-    EditorRequests,  // → u8 resize, u8 closed, u32 width, u32 height
+    EditorRequests,  // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };
@@ -92,10 +93,13 @@ class Writer {
         str(e.message);
         str(e.path);
         str(e.hint);
+        u32(static_cast<std::uint32_t>(e.details.size()));
+        for (const auto& detail : e.details) error(detail);
     }
 
   private:
     void raw(const void* p, std::size_t n) {
+        if (!n) return;
         const auto* b = static_cast<const std::uint8_t*>(p);
         bytes.insert(bytes.end(), b, b + n);
     }
@@ -103,8 +107,20 @@ class Writer {
 
 class Reader {
   public:
-    Reader(const std::uint8_t* data, std::size_t size) : p_(data), end_(data + size) {}
+    Reader(const std::uint8_t* data, std::size_t size)
+        : p_(size ? data : &empty_), end_(p_ + size) {}
     bool ok() const { return ok_; }
+    bool done() const { return ok_ && p_ == end_; }
+    void skipString() {
+        const auto n = u32();
+        skip(n);
+    }
+    void skip(std::size_t n) {
+        if (!ok_ || static_cast<std::size_t>(end_ - p_) < n)
+            ok_ = false;
+        else
+            p_ += n;
+    }
     std::uint8_t u8() {
         std::uint8_t v = 0;
         raw(&v, 1);
@@ -150,9 +166,20 @@ class Reader {
         p_ += n;
         return b;
     }
-    Error error() {
+    Error error(unsigned depth = 0) {
+        if (depth >= 32) {
+            ok_ = false;
+            return {};
+        }
         std::string code = str(), message = str(), path = str(), hint = str();
-        return Error(std::move(code), std::move(message), std::move(path), std::move(hint));
+        Error result(std::move(code), std::move(message), std::move(path), std::move(hint));
+        const auto count = u32();
+        if (count > static_cast<std::size_t>(end_ - p_) / 20) {
+            ok_ = false;
+            return result;
+        }
+        for (std::uint32_t i = 0; i < count && ok_; ++i) result.details.push_back(error(depth + 1));
+        return result;
     }
 
   private:
@@ -164,17 +191,29 @@ class Reader {
         std::memcpy(out, p_, n);
         p_ += n;
     }
+    inline static constexpr std::uint8_t empty_ = 0;
     const std::uint8_t* p_;
     const std::uint8_t* end_;
     bool ok_ = true;
 };
 
+using Deadline = std::chrono::steady_clock::time_point;
+inline Deadline deadlineAfter(int timeoutMs) {
+    return timeoutMs < 0 ? Deadline::max()
+                         : std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+}
+bool validRequest(Op op, Reader r);
+bool validReply(Op op, Reader r);
+
 // Writes one whole frame ([u32 size][u32 head][u32 instance][payload]) with an optional
 // file descriptor; reads one (size-checked). False when the peer is gone.
 bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
-               const std::vector<std::uint8_t>& payload, int fd = -1);
+               const std::vector<std::uint8_t>& payload, int fd = -1,
+               Deadline deadline = Deadline::max());
 bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
                std::vector<std::uint8_t>& payload, int* fd = nullptr, int timeoutMs = -1);
+bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
+                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline);
 
 // --- data plane ---------------------------------------------------------------------
 

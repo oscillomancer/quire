@@ -45,7 +45,10 @@ struct Host : cmd::Host {
         return std::uint64_t{1};
     }
     Status commitTransaction(std::uint64_t) override { return {}; }
-    void rollbackTransaction(std::uint64_t) override { count = prior; }
+    Status rollbackTransaction(std::uint64_t) override {
+        count = prior;
+        return okStatus();
+    }
     void log(const cmd::LogRecord&) override {}
     void emit(std::string_view topic, json::Value payload) override {
         if (events) events(topic, payload);

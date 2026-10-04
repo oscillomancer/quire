@@ -1,6 +1,7 @@
 #include "supple/host/clap_host.h"
 
 #include "bridge_client.h"
+#include "pending_edits.h"
 #include "vst3_host.h"
 
 #include <dlfcn.h>
@@ -112,11 +113,6 @@ struct LogLine {
     char text[240];
 };
 
-struct ParamChange {
-    std::uint32_t id;
-    double value;
-};
-
 constexpr std::size_t kMaxInputEvents = 8192;
 
 }  // namespace
@@ -144,8 +140,9 @@ struct Instance::HostState {
     clap_id nextTimer = 1;
 
     // clap.gui requests ([thread-safe]: any thread may call them).
-    std::atomic<bool> guiResize{false}, guiClosed{false};
-    std::atomic<std::uint32_t> guiWidth{0}, guiHeight{0};
+    std::atomic<bool> guiResize{false}, guiClosed{false}, guiShow{false}, guiHide{false};
+    std::atomic<std::uint64_t> guiSize{0};
+    std::optional<Error> restartError;  // main thread only
     // clap.posix-fd-support (main thread).
     std::vector<std::pair<int, std::uint32_t>> fds;
 
@@ -153,7 +150,7 @@ struct Instance::HostState {
     std::mutex logMutex;              // any other thread
     std::vector<std::string> log;
 
-    SpscRing<ParamChange, 1024> paramQueue;  // main -> audio
+    PendingEdits paramQueue;  // main -> audio
 
     // Event conversion arena, sized at activation (never resized on the audio thread).
     std::vector<ClapEvent> events;
@@ -265,13 +262,18 @@ struct HostCallbacks {
     static void CLAP_ABI guiResizeHintsChanged(const clap_host_t*) {}
     static bool CLAP_ABI guiRequestResize(const clap_host_t* h, uint32_t width, uint32_t height) {
         auto* s = S(h);
-        s->guiWidth = width;
-        s->guiHeight = height;
+        s->guiSize.store((std::uint64_t(width) << 32) | height, std::memory_order_release);
         s->guiResize = true;
         return true;  // applied by the window owner on its next loop pass
     }
-    static bool CLAP_ABI guiRequestShow(const clap_host_t*) { return true; }
-    static bool CLAP_ABI guiRequestHide(const clap_host_t*) { return true; }
+    static bool CLAP_ABI guiRequestShow(const clap_host_t* h) {
+        S(h)->guiShow = true;
+        return true;
+    }
+    static bool CLAP_ABI guiRequestHide(const clap_host_t* h) {
+        S(h)->guiHide = true;
+        return true;
+    }
     static void CLAP_ABI guiClosed(const clap_host_t* h, bool) { S(h)->guiClosed = true; }
 
     // clap.posix-fd-support (main thread)
@@ -643,6 +645,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
                                   offsetof(clap_plugin_supple_semantic_params_t, get_telemetry))
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
+    if (self->extSemantic_) (void)self->semanticSchema();
 
     // Port configuration: prefer stereo main in/out (or stereo out for instruments).
     if (auto* cfg = static_cast<const clap_plugin_audio_ports_config_t*>(
@@ -676,11 +679,17 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         for (bool input : {true, false}) {
             auto& list = input ? h.inPorts : h.outPorts;
             int& main = input ? h.mainIn : h.mainOut;
-            const uint32_t n = std::min<uint32_t>(ports->count(self->plugin_, input), 16);
+            const uint32_t n = ports->count(self->plugin_, input);
+            if (n > 16)
+                return Error("host.layout", "CLAP layout exceeds 16 audio ports", {},
+                             "select a layout with at most 16 ports per direction");
             for (uint32_t i = 0; i < n; ++i) {
                 clap_audio_port_info_t p{};
                 const bool ok = ports->get(self->plugin_, i, input, &p);
-                list.push_back(ok ? std::min<uint32_t>(p.channel_count, 64) : 0);
+                if (ok && p.channel_count > 64)
+                    return Error("host.layout", "CLAP port exceeds 64 channels", {},
+                                 "select a layout with at most 64 channels per port");
+                list.push_back(ok ? p.channel_count : 0);
                 if (ok && main < 0 && (p.flags & CLAP_AUDIO_PORT_IS_MAIN))
                     main = static_cast<int>(i);
             }
@@ -900,12 +909,35 @@ Result<double> Instance::plainParam(std::uint32_t id, double normalized) const {
     return normalized;
 }
 
+namespace {
+void flushInactiveEdits(Instance::HostState& h, const clap_plugin_t* plugin,
+                        const clap_plugin_params_t* params) {
+    const auto edits = h.paramQueue.pending();
+    if (edits.empty() || !params) return;
+    if (h.events.size() < edits.size()) h.events.resize(edits.size());
+    h.eventCount = 0;
+    for (const auto& edit : edits) {
+        auto& e = h.events[h.eventCount++].param;
+        e = {};
+        e.header = {sizeof(e), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
+        e.param_id = edit.id;
+        e.value = edit.value;
+        e.note_id = e.port_index = e.channel = e.key = -1;
+    }
+    h.outSink = nullptr;
+    params->flush(plugin, &h.inEvents, &h.outEvents);
+    h.eventCount = 0;
+    h.paramQueue.barrier();
+}
+}  // namespace
+
 Status Instance::setParam(std::uint32_t id, double clapValue) {
     if (vst3_) return vst3_->setParam(id, clapValue);
     if (remote_) return remote_->setParam(id, clapValue);
     if (!extParams_) return Error("host.param", "the plugin has no parameters");
     if (!active_) {
         // Inactive: flush on the main thread.
+        flushInactiveEdits(*hostState_, plugin_, extParams_);
         HostState& h = *hostState_;
         h.eventCount = 1;
         auto& e = h.events.empty() ? (h.events.assign(1, ClapEvent{}), h.events[0]) : h.events[0];
@@ -923,7 +955,7 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
         h.eventCount = 0;
         return okStatus();
     }
-    if (!hostState_->paramQueue.push({id, clapValue}))
+    if (!hostState_->paramQueue.push(id, clapValue))
         return Error("host.param_queue", "too many queued parameter changes", {},
                      "render or flush first");
     return okStatus();
@@ -950,10 +982,9 @@ bool appendParam(Instance::HostState& h, std::uint32_t time, std::uint32_t id,
 // free; what does not fit stays queued for the next block/flush.
 void drainParamQueue(Instance::HostState& h, std::size_t reserve) SUPPLE_RT {
     const std::size_t limit = h.events.size() > reserve ? h.events.size() - reserve : 0;
-    ParamChange pc{};
-    while (h.eventCount < limit && h.paramQueue.peek(pc)) {
+    PendingEdits::Change pc{};
+    while (h.eventCount < limit && h.paramQueue.pop(pc)) {
         appendParam(h, 0, pc.id, pc.value);
-        h.paramQueue.consume();
     }
 }
 }  // namespace
@@ -1204,7 +1235,53 @@ Result<json::Value> Instance::semanticSchema() {
     StringSink sink;
     if (!extSemantic_->get_schema(plugin_, &sink.stream))
         return Error("host.semantic", "get_schema failed");
-    return json::parse(sink.text);
+    auto schema = json::parse(sink.text);
+    auto valid = [](const json::Value& document) {
+        const auto* entries = document.find("params");
+        if (!document.isObject() || !entries || !entries->isObject()) return false;
+        std::set<std::uint32_t> ids;
+        for (const auto& [key, entry] : entries->asObject()) {
+            const auto* id = entry.find("id");
+            const auto* name = entry.find("name");
+            const auto* type = entry.find("type");
+            if (key.empty() || !entry.isObject() || !id || !id->isNumber() ||
+                !std::isfinite(id->asDouble()) || id->asDouble() < 0 ||
+                id->asDouble() > UINT32_MAX || std::trunc(id->asDouble()) != id->asDouble() ||
+                !ids.insert(static_cast<std::uint32_t>(id->asDouble())).second || !name ||
+                !name->isString() || name->asString().empty() || !type || !type->isString())
+                return false;
+            const auto& kind = type->asString();
+            if (kind == "float" || kind == "int") {
+                const auto* min = entry.find("min");
+                const auto* max = entry.find("max");
+                if (!min || !max || !min->isNumber() || !max->isNumber() ||
+                    !std::isfinite(min->asDouble()) || !std::isfinite(max->asDouble()) ||
+                    min->asDouble() > max->asDouble())
+                    return false;
+                if (kind == "int" && (std::trunc(min->asDouble()) != min->asDouble() ||
+                                      std::trunc(max->asDouble()) != max->asDouble()))
+                    return false;
+            } else if (kind == "enum") {
+                const auto* choices = entry.find("choices");
+                if (!choices || !choices->isArray() || choices->size() == 0) return false;
+                std::set<std::string> seen;
+                for (const auto& choice : choices->asArray())
+                    if (!choice.isString() || choice.asString().empty() ||
+                        !seen.insert(choice.asString()).second)
+                        return false;
+            } else if (kind != "bool")
+                return false;
+        }
+        return true;
+    };
+    if (schema && valid(*schema)) return schema;
+    info_.semantic = false;
+    extSemantic_ = nullptr;
+    std::lock_guard logLock(hostState_->logMutex);
+    hostState_->log.push_back("warning: invalid semantic schema for " + info_.id +
+                              "; using plain CLAP parameters");
+    return Error("host.semantic.unsupported", "invalid semantic schema for " + info_.id, {},
+                 "use plain CLAP parameters");
 }
 
 Result<std::string> Instance::getPatch(bool changedOnly) {
@@ -1247,6 +1324,7 @@ Result<std::vector<std::uint8_t>> Instance::saveState() {
     if (vst3_) return vst3_->saveState();
     if (remote_) return remote_->saveState();
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
+    if (!active_) flushInactiveEdits(*hostState_, plugin_, extParams_);
     ByteSink sink;
     if (!extState_->save(plugin_, &sink.stream))
         return Error("host.state", info_.id + " failed to save its state");
@@ -1257,6 +1335,7 @@ Status Instance::loadState(std::span<const std::uint8_t> bytes) {
     if (vst3_) return vst3_->loadState(bytes);
     if (remote_) return remote_->loadState(bytes);
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
+    hostState_->paramQueue.barrier();
     ByteSource source{bytes};
     if (!extState_->load(plugin_, &source.stream))
         return Error("host.state", info_.id + " rejected the state", {},
@@ -1286,7 +1365,8 @@ bool Instance::serviceMainThread() {
         const double sr = sampleRate_;
         const std::uint32_t maxFrames = maxFrames_;
         deactivate();
-        (void)activate(sr, 1, maxFrames);
+        auto result = activate(sr, 1, maxFrames);
+        if (!result) h.restartError = result.error();
         did = true;
     }
     // While active, a requested flush is served by the next process() or
@@ -1359,12 +1439,19 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
         return Error("host.editor", "the plugin refused the parent window");
     }
     EditorSize size;
-    (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    if (!extGui_->get_size(plugin_, &size.width, &size.height)) {
+        extGui_->destroy(plugin_);
+        return Error("host.editor", "the plugin could not report its editor size");
+    }
     size.resizable = extGui_->can_resize(plugin_);
     // Cleared before show: a resize the plug-in asks for while showing stands.
     hostState_->guiClosed = false;
     hostState_->guiResize = false;
-    (void)extGui_->show(plugin_);
+    if (!extGui_->show(plugin_)) {
+        extGui_->destroy(plugin_);
+        hostState_->guiResize = false;
+        return Error("host.editor", "the plugin could not show its editor");
+    }
     editorOpen_ = true;
     return size;
 }
@@ -1415,9 +1502,12 @@ Instance::EditorRequests Instance::takeEditorRequests() {
     HostState& h = *hostState_;
     if (h.guiResize.exchange(false)) {
         r.resize = true;
-        r.width = h.guiWidth;
-        r.height = h.guiHeight;
+        const auto size = h.guiSize.load(std::memory_order_acquire);
+        r.width = static_cast<std::uint32_t>(size >> 32);
+        r.height = static_cast<std::uint32_t>(size);
     }
+    r.show = h.guiShow.exchange(false);
+    r.hide = h.guiHide.exchange(false);
     if (h.guiClosed.exchange(false)) {
         r.closed = true;
         if (editorOpen_) {  // the plugin closed its own window: release it
@@ -1458,6 +1548,7 @@ Instance::Notifications Instance::takeNotifications() {
     if (remote_) return std::exchange(remoteNotes_, Notifications{});
     HostState& h = *hostState_;
     Notifications n;
+    n.restartError = std::exchange(h.restartError, {});
     n.stateDirty = h.stateDirty.exchange(false);
     n.latencyChanged = h.latencyChanged.exchange(false);
     n.semanticChanged = h.semanticChanged.exchange(false);

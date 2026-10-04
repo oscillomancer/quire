@@ -172,6 +172,10 @@ struct Bridge {
     // Returns false to exit.
     bool handle(Op op, std::uint32_t instanceId, Reader& r, int fd) {
         replyId = instanceId;
+        if (!validRequest(op, r)) {
+            if (fd >= 0) ::close(fd);
+            return fail(Error("bridge.malformed", "malformed request to the plugin bridge"));
+        }
         if (fd >= 0 && op != Op::Activate) {
             ::close(fd);
             return fail(Error("bridge.fd", "unexpected descriptor for this operation"));
@@ -360,6 +364,8 @@ struct Bridge {
                 w.u32(instance->latency());  // a restart may have changed them silently
                 w.u32(instance->tail());
                 w.u8(instance->reportsTail() ? 1 : 0);
+                w.u8(n.restartError ? 1 : 0);
+                if (n.restartError) w.error(*n.restartError);
                 return reply(w);
             }
             case Op::EditorOpen: {
@@ -382,6 +388,8 @@ struct Bridge {
                 w.u8(q.closed ? 1 : 0);
                 w.u32(q.width);
                 w.u32(q.height);
+                w.u8(q.show ? 1 : 0);
+                w.u8(q.hide ? 1 : 0);
                 return reply(w);
             }
             case Op::Destroy:

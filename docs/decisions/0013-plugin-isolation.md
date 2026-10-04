@@ -27,7 +27,8 @@ renderer and worker threads, not in the device callback.
    inherited as a known fd), carrying length-prefixed binary messages for
    the main-thread API (create, activate/deactivate, params, text, semantic
    schema/patch/describe, state, latency/tail, notifications and log
-   drain). Requests are synchronous with a timeout; the bridge runs them on
+   drain). Requests have one monotonic end-to-end deadline covering nonblocking
+   socket sends and receives; the bridge runs them on
    its main thread and services its plugins' main-thread requests itself.
 4. **Data plane:** one `memfd` region per instance, mapped by both sides:
    a header (request/done sequence numbers, frames, flags, result), the
@@ -43,9 +44,9 @@ renderer and worker threads, not in the device callback.
    the done sequence — spinning briefly, then a futex wait bounded by a
    deadline (2 s for `process`, 7 s for lifecycle commands: long enough that
    a loaded machine never gets a healthy plugin killed). Output is bit-identical with the
-   in-process backing, and PDC is unchanged. (A pipelined mode with one block
-   of added latency, for live nodes in the device callback, comes with live
-   processing.)
+   in-process backing, and PDC is unchanged. Live nodes pass bridged stages through with a warning;
+   synchronous bridge calls never run in the device callback. A pipelined
+   live mode remains deferred.
 6. **Failure.** The parent watches each bridge with a `pidfd` and the control
    socket. A bridge that dies, or misses the deadline and is then found dead
    or killed, turns its instances *failed*: `process()` outputs silence and
@@ -113,12 +114,22 @@ syscalls per block for the data, not just the wake-up).
   control request stalls control calls for the other instances; a timeout
   fails the whole shared process. Use `dedicated` for plugins whose slow
   control callbacks need isolation from other effects.
-- Editors (protocol v5, gap log #39): `EditorOpen {parent XID, scale}`,
+- Protocol v6 retains the v5 operation numbers and shared-memory layout.
+  Error payloads carry `code`, `message`, `path`, `hint`, then a count and
+  recursively encoded `details` (decoder depth limited to 32). Malformed
+  replies fail the operation with `bridge.malformed` and fail the shared
+  process, like a crash. Malformed requests receive a `bridge.malformed`
+  error without invoking the operation. `Service` also carries an optional
+  structured restart activation error; `EditorRequests` carries show/hide.
+  Each request uses a single steady-clock deadline across the complete send
+  and reply, including partial transfers. A missed deadline kills and fails
+  the process; it is never renewed when another fragment arrives.
+- Editors (protocol v6, gap log #39): `EditorOpen {parent XID, scale}`,
   `EditorResize`, `EditorClose`, `EditorRequests`. The bridge embeds the
   plug-in's editor (CLAP gui or VST3 IPlugView) straight into the host's X11
   window — window ids are the X server's, so no reparenting proxy is needed —
   and runs the editor's timers and watched descriptors in its own poll loop.
-  The host polls the editor's requests (resize, closed) every 30 ms while it is
+  The host polls the editor's requests (resize, closed, show, hide) every 30 ms while it is
   open; a failed bridge reports the editor closed, and the window goes with it.
   `Create` replies whether the plug-in has an embeddable editor. Both apps find
   `<slug>-bridge` beside themselves or in the build tree

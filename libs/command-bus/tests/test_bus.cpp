@@ -30,6 +30,7 @@ struct JobStarted {
 };
 struct FakeHost : Host, RefResolver {
     Toy toy;
+    bool failRollback = false;
     int before = 0;
     int begins = 0, commits = 0, rollbacks = 0;
     std::vector<LogRecord> records;
@@ -49,9 +50,11 @@ struct FakeHost : Host, RefResolver {
         ++commits;
         return {};
     }
-    void rollbackTransaction(std::uint64_t) override {
+    Status rollbackTransaction(std::uint64_t) override {
         toy.count = before;
         ++rollbacks;
+        if (failRollback) return Error("test.rollback", "restore failed", "/instances/in_1");
+        return okStatus();
     }
     void log(const LogRecord& record) override { records.push_back(record); }
     void emit(std::string_view topic, json::Value) override { events.emplace_back(topic); }
@@ -391,4 +394,18 @@ TEST_CASE("references resolve before handlers and logs store IDs") {
     REQUIRE_FALSE(ambiguous);
     CHECK(ambiguous.error().code == "ref.ambiguous");
     CHECK(ambiguous.error().hint.find("toy_1") != std::string::npos);
+}
+
+TEST_CASE("transaction rollback failure preserves the initiating error") {
+    Registry registry;
+    FakeHost host;
+    Dispatcher dispatcher(registry, host);
+    host.failRollback = true;
+    auto result = dispatcher.transact("rollback", Origin{}, []() -> Result<json::Value> {
+        return Error("test.command", "command failed");
+    });
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "test.rollback");
+    REQUIRE(result.error().details.size() == 1);
+    CHECK(result.error().details[0].code == "test.command");
 }

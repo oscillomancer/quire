@@ -518,3 +518,31 @@ TEST_CASE("offline true peak includes the final interpolation filter response") 
     CHECK(shortReport->loudness->truePeak ==
           doctest::Approx(padded->loudness->truePeak).epsilon(1e-10));
 }
+
+TEST_CASE("LTAS compares the union of active bands, including silence") {
+    Report silent, signal;
+    silent.spectral.emplace();
+    signal.spectral.emplace();
+    silent.spectral->ltasDb.fill(-120);
+    signal.spectral->ltasDb.fill(-120);
+    signal.spectral->ltasDb[10] = -20;
+    CHECK(compare(silent, signal).ltasRmsDb == doctest::Approx(80));
+    CHECK(compare(signal, silent).ltasRmsDb == doctest::Approx(80));
+    CHECK(compare(silent, silent).ltasRmsDb == 0);
+    signal.spectral->ltasDb.fill(-20);
+    CHECK(compare(silent, signal).ltasRmsDb == doctest::Approx(80));
+}
+
+TEST_CASE("profile weighted means stay finite with very large valid weights") {
+    Report report;
+    report.spectral.emplace();
+    report.spectral->centroidHz.median = 1000;
+    report.spectral->rolloffHz.median = 2000;
+    auto profile = json::parse(R"({"schema":"supple.analysis-profile/1.0","targets":{
+        "spectral.centroid_hz.median":{"target":800,"tolerance":100,"weight":1e308},
+        "spectral.rolloff_hz.median":{"target":1700,"tolerance":100,"weight":1e308}}})");
+    REQUIRE(profile);
+    auto result = evaluate(report, *profile);
+    REQUIRE(result);
+    CHECK(result->loss == doctest::Approx(2.5));
+}

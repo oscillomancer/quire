@@ -7,6 +7,7 @@
 // subscriptions when the emitting command has finished (`deliver`).
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -45,6 +46,8 @@ class Runtime {
 
     // Events of the bus, in emission order, delivered by deliver().
     void event(std::string_view topic, json::Value payload);
+    // Restore queued events after a failed invocation; invoke at most once.
+    std::function<void()> eventSavepoint();
     void deliver();
     std::size_t pendingEvents() const { return pending_.size(); }
     // Events dropped because handlers kept emitting them (see kMaxDeliveryDepth).

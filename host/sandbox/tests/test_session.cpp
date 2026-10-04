@@ -87,7 +87,7 @@ TEST_CASE("evaluation MIDI sidecars retain compiler note data and follow render 
     auto rolledSidecar = (*rolledBack)->path;
     rolledSidecar.replace_extension(".midi.json");
     REQUIRE(fs::exists(rolledSidecar));
-    session.rollback();
+    REQUIRE(session.rollback());
     CHECK_FALSE(fs::exists(rolledSidecar));
     CHECK(fs::exists(sidecar));
     session.reset();
@@ -109,7 +109,7 @@ TEST_CASE("plugins: catalogue, lookup by id, case-insensitive id and path") {
     auto s = openSession(dir);
     auto list = s->plugins();
     REQUIRE(list);
-    CHECK(list->size() == 9);
+    CHECK(list->size() == 12);
     CHECK(s->findPlugin(kGain).value().name == "Test Gain");
     CHECK(s->findPlugin("COM.SUPPLEAUDIO.TEST.SINE").value().id == kSine);
     auto bad = s->findPlugin("com.suppleaudio.test.gian");
@@ -246,7 +246,8 @@ TEST_CASE("presets: save, list, load restores; names and plugins are checked") {
     CHECK(missing.error().hint.find("Down 3") != std::string::npos);
     // The sine fixture has no state extension: saving says so.
     const std::string sine = s->load(kSine).value();
-    CHECK(!s->presetSave(sine, "x").ok());
+    REQUIRE(s->presetSave(sine, "x"));
+    REQUIRE(s->presetLoad(sine, "x"));
 }
 
 TEST_CASE("render: notes through instrument + effect, WAV written, deterministic" *
@@ -341,7 +342,7 @@ TEST_CASE("transactions: rollback restores chain, state and renders; IDs stay un
     SessionSettings st = s->settings();
     st.tempo = 90;
     REQUIRE(s->setSettings(st).ok());
-    s->rollback();
+    REQUIRE(s->rollback());
 
     CHECK(s->chain() == std::vector<std::string>{sine, g});
     CHECK(!s->instance(g2).ok());
@@ -452,8 +453,7 @@ TEST_CASE("the session tick adopts background work and drops finished job thread
         finish = true;
     }
     cv.notify_all();
-    for (int i = 0; i < 200 && s->activeJobThreadCountForTests() > 0; ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    while (s->activeJobThreadCountForTests() != 0) std::this_thread::yield();
     REQUIRE(s->activeJobThreadCountForTests() == 0);
     s->tick();
     CHECK(s->jobThreadCountForTests() == 0);
@@ -495,4 +495,88 @@ TEST_CASE("render rejects overflowing and negative MIDI times before converting 
     SessionSettings settings;
     settings.sampleRate = 0;
     CHECK_FALSE(Session::renderThrough(chain, input, settings));
+}
+
+TEST_CASE("transactions refuse unsnapshotable instances and report failed restores") {
+    TempDir dir("transaction-errors");
+    auto session = openSession(dir);
+    auto id = session->load("com.suppleaudio.test.edge");
+    REQUIRE(id);
+    auto instance = session->instance(*id);
+    REQUIRE(instance);
+    const std::array<std::uint8_t, 4> cannotSave{7, 0, 0, 0};
+    REQUIRE((*instance)->loadState(cannotSave));
+    auto begin = session->begin();
+    REQUIRE_FALSE(begin);
+    CHECK(begin.error().code == "sandbox.snapshot_failed");
+    CHECK(begin.error().path == "/instances/" + *id);
+    REQUIRE(begin.error().details.size() == 1);
+    const std::array<std::uint8_t, 4> good{};
+    REQUIRE((*instance)->loadState(good));
+    REQUIRE(session->begin());
+    const std::array<std::uint8_t, 4> cannotRestore{8, 0, 0, 0};
+    REQUIRE((*instance)->loadState(cannotRestore));
+    auto rollback = session->rollback();
+    REQUIRE_FALSE(rollback);
+    CHECK(rollback.error().code == "sandbox.rollback_failed");
+    REQUIRE(rollback.error().details.size() == 1);
+    CHECK(rollback.error().details[0].path == "/instances/" + *id);
+}
+
+TEST_CASE("malformed semantic schemas load as plain parameter plugins") {
+    TempDir dir("schema-fallback");
+    auto session = openSession(dir);
+    auto id = session->load("com.suppleaudio.test.malformed-schema");
+    REQUIRE(id);
+    CHECK(session->schema(*id).isNull());
+    auto values = json::parse(R"({"0": 0.75})");
+    REQUIRE(values);
+    REQUIRE(session->paramSet(*id, *values));
+}
+
+TEST_CASE("preset schemas and versions reject future formats but allow legacy files") {
+    TempDir dir("preset-version");
+    auto session = openSession(dir);
+    auto id = session->load(kGain);
+    REQUIRE(id);
+    auto path = session->presetSave(*id, "Versioned");
+    REQUIRE(path);
+    auto text = readTextFile(*path);
+    REQUIRE(text);
+    auto document = json::parse(*text);
+    REQUIRE(document);
+    (*document)["schema"] = "supple.preset/2.0";
+    REQUIRE(writeFileAtomic(*path, json::writeCompact(*document)));
+    auto future = session->presetLoad(*id, "Versioned");
+    REQUIRE_FALSE(future);
+    CHECK(future.error().code == "sandbox.preset_schema");
+    (*document)["schema"] = "supple.preset/1.0";
+    (*document)["version"] = 2;
+    REQUIRE(writeFileAtomic(*path, json::writeCompact(*document)));
+    CHECK(session->presetLoad(*id, "Versioned").error().code == "sandbox.preset_version");
+    json::Value legacy = json::Value::object();
+    legacy["plugin"] = (*document)["plugin"];
+    legacy["patch"] = (*document)["patch"];
+    REQUIRE(writeFileAtomic(*path, json::writeCompact(legacy)));
+    REQUIRE(session->presetLoad(*id, "Versioned"));
+}
+
+TEST_CASE("invocation savepoints restore changes without closing the enclosing transaction") {
+    TempDir dir("savepoint");
+    auto session = openSession(dir);
+    auto original = session->load(kGain);
+    REQUIRE(original);
+    REQUIRE(session->begin());
+    auto added = session->load(kGain);
+    REQUIRE(added);
+    auto checkpoint = session->invocationSavepoint();
+    REQUIRE(checkpoint);
+    REQUIRE(session->remove(*original));
+    REQUIRE(session->remove(*added));
+    REQUIRE(session->load(kGain));
+    REQUIRE((*checkpoint)());
+    CHECK(session->inTransaction());
+    CHECK(session->chain() == std::vector<std::string>{*original, *added});
+    REQUIRE(session->rollback());
+    CHECK(session->chain() == std::vector<std::string>{*original});
 }

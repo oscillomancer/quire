@@ -26,6 +26,7 @@ struct Session::Txn {
     SessionSettings settings;
     std::vector<std::string> chain;
     std::set<std::string> instanceIds, renderIds;
+    std::map<std::string, host::PluginInfo> infos;
     std::map<std::string, std::vector<std::uint8_t>> states;  // saved at begin
     std::map<std::string, std::unique_ptr<Loaded>> removed;   // kept until commit
 };
@@ -328,7 +329,12 @@ const json::Value& Session::schema(std::string_view id) {
     // it here: a query-path call, and the plugin builds the document from its
     // own state.
     auto live = l.instance->semanticSchema();
-    if (live) l.schema = std::move(*live);
+    if (live)
+        l.schema = std::move(*live);
+    else if (!l.instance->info().semantic) {
+        l.info.semantic = false;
+        l.schema = {};
+    }
     return l.schema;
 }
 
@@ -367,9 +373,9 @@ Result<std::string> Session::load(std::string_view pluginIdOrPath,
     if (!made) return std::move(made).error();
     auto l = std::make_unique<Loaded>();
     l->id = "in_" + std::to_string(nextInstance_++);
-    l->info = *info;
     l->instance = std::move(*made);
-    if (info->semantic) {
+    l->info = l->instance->info();
+    if (l->info.semantic) {
         auto s = l->instance->semanticSchema();
         if (!s) return std::move(s).error();
         l->schema = std::move(*s);
@@ -667,6 +673,14 @@ Result<std::string> Session::presetLoad(std::string_view id, std::string_view na
     auto doc = json::parse(*text);
     if (!doc || !doc->isObject())
         return Error("sandbox.preset_corrupt", path.string() + " is not a valid preset file");
+    if (const auto* schema = doc->find("schema");
+        schema && (!schema->isString() || schema->asString() != "supple.preset/1.0"))
+        return Error("sandbox.preset_schema", "unsupported preset schema", "/schema",
+                     "use supple.preset/1.0 or a legacy preset without schema");
+    if (const auto* version = doc->find("version");
+        version && (!version->isNumber() || version->asDouble() != 1.0))
+        return Error("sandbox.preset_version", "unsupported preset version", "/version",
+                     "use version 1 or omit version for legacy presets");
     const json::Value* plugin = doc->find("plugin");
     if (!plugin || !plugin->isString() || plugin->asString() != l.info.id)
         return Error("sandbox.preset_plugin", "preset belongs to another plugin", "/name");
@@ -938,31 +952,87 @@ Status Session::begin() {
     if (txn_)
         return Error("sandbox.transaction_nested", "a transaction is already open", {},
                      "commit or roll back first");
+    auto t = snapshot();
+    if (!t) return t.error();
+    txn_ = std::move(*t);
+    return okStatus();
+}
+
+Result<std::unique_ptr<Session::Txn>> Session::snapshot() {
     auto t = std::make_unique<Txn>();
     t->settings = settings_;
     t->chain = chain_;
     for (const auto& [id, l] : instances_) {
         t->instanceIds.insert(id);
+        t->infos.emplace(id, l->info);
         auto s = l->instance->saveState();
-        if (s) t->states.emplace(id, std::move(*s));
+        if (!s) {
+            Error error("sandbox.snapshot_failed", "cannot snapshot instance " + id,
+                        "/instances/" + id, "repair or remove the instance and retry");
+            error.details.push_back(s.error());
+            return error;
+        }
+        t->states.emplace(id, std::move(*s));
     }
     for (const auto& [id, r] : renders_) t->renderIds.insert(id);
-    txn_ = std::move(t);
-    return okStatus();
+    return t;
 }
 
 void Session::commit() { txn_.reset(); }
 
-void Session::rollback() {
-    if (!txn_) return;
-    std::unique_ptr<Txn> t = std::move(txn_);
+Result<std::function<Status()>> Session::invocationSavepoint() {
+    auto captured = snapshot();
+    if (!captured) return captured.error();
+    std::shared_ptr<Txn> saved(std::move(*captured));
+    return std::function<Status()>([this, saved] { return restore(*saved); });
+}
+
+Status Session::rollback() {
+    if (!txn_) return okStatus();
+    auto t = std::move(txn_);
+    return restore(*t);
+}
+
+Status Session::restore(Txn& snapshotState) {
+    auto* t = &snapshotState;
+    Error error("sandbox.rollback_failed", "some instances could not be restored", {},
+                "reload the listed instances before continuing");
     // Drop instances loaded inside the transaction, bring back removed ones.
     for (auto it = instances_.begin(); it != instances_.end();)
         it = t->instanceIds.count(it->first) ? std::next(it) : instances_.erase(it);
     for (auto& [id, l] : t->removed) instances_.emplace(id, std::move(l));
+    for (const auto& [id, info] : t->infos) {
+        if (instances_.contains(id)) continue;
+        if (txn_) {
+            auto removed = txn_->removed.find(id);
+            if (removed != txn_->removed.end()) {
+                instances_.emplace(id, std::move(removed->second));
+                txn_->removed.erase(removed);
+                continue;
+            }
+        }
+        auto created = host::Instance::create(info, options_.identity);
+        if (!created) {
+            Error detail("sandbox.restore_failed", "cannot recreate instance " + id,
+                         "/instances/" + id);
+            detail.details.push_back(created.error());
+            error.details.push_back(std::move(detail));
+            continue;
+        }
+        auto loadedInstance = std::make_unique<Loaded>();
+        loadedInstance->id = id;
+        loadedInstance->info = (*created)->info();
+        loadedInstance->instance = std::move(*created);
+        instances_.emplace(id, std::move(loadedInstance));
+    }
     for (auto& [id, bytes] : t->states)
         if (auto it = instances_.find(id); it != instances_.end())
-            (void)it->second->instance->loadState(bytes);  // best effort: state saved at begin
+            if (auto restored = it->second->instance->loadState(bytes); !restored) {
+                Error detail("sandbox.restore_failed", "cannot restore instance " + id,
+                             "/instances/" + id);
+                detail.details.push_back(restored.error());
+                error.details.push_back(std::move(detail));
+            }
     std::error_code ec;
     for (auto it = renders_.begin(); it != renders_.end();) {
         if (t->renderIds.count(it->first)) {
@@ -982,6 +1052,8 @@ void Session::rollback() {
     if (reconfigure)
         for (auto& [id, l] : instances_)
             if (l->instance->active()) l->instance->deactivate();
+    if (!error.details.empty()) return error;
+    return okStatus();
 }
 
 Result<Session::CloneState> Session::snapshotInstance(std::string_view id) {

@@ -162,3 +162,59 @@ TEST_CASE("registry exports are deterministic and name every sandbox tool") {
     for (const char* t : {"plugin_load", "param_set", "patch_merge", "render", "session_get"})
         CHECK(names.find(t) != std::string::npos);
 }
+
+TEST_CASE("sandbox invocation hook restores state and discards failed invocation events") {
+    namespace fs = std::filesystem;
+    const auto root =
+        fs::temp_directory_path() / ("supple-savepoint-hook-" + std::to_string(getpid()));
+    struct Cleanup {
+        fs::path root;
+        ~Cleanup() { fs::remove_all(root); }
+    } cleanup{root};
+    fs::remove_all(root);
+    SessionOptions options;
+    options.workdir = root;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto opened = Session::open(options);
+    REQUIRE(opened);
+    SandboxHost host(std::move(*opened));
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher dispatcher(registry, host);
+    host.attachCommands(dispatcher);
+    REQUIRE(host.scripting()->run("watcher", R"(
+        seen = {}
+        q.on("test.changed", function(payload) seen[#seen + 1] = payload.value end)
+    )",
+                                  -1.0));
+    auto id = host.session().load("com.suppleaudio.test.gain");
+    REQUIRE(id);
+    auto transaction = host.beginTransaction(cmd::Origin{}, "savepoint");
+    REQUIRE(transaction);
+    host.emit("test.changed", j(R"({"value":"before"})"));
+    auto restore = host.invocationSavepoint();
+    REQUIRE(restore);
+    REQUIRE(host.session().patchMerge(*id, *json::parse(R"({"params":{"gain":-6}})")));
+    host.emit("test.changed", j(R"({"value":"failed"})"));
+    restore();
+    auto params = host.session().paramGet(*id);
+    REQUIRE(params);
+    CHECK((*params)["gain"]["value"].asDouble() == doctest::Approx(0));
+    const auto events = host.takeEvents();
+    REQUIRE(events.size() == 1);
+    CHECK(*events[0].second.find("value") == "before");
+    CHECK(host.scripting()->pendingEvents() == 1);
+    host.commandFinished();
+    auto seen = host.scripting()->run("watcher", "return seen", -1.0);
+    REQUIRE(seen);
+    REQUIRE(seen->result.size() == 1);
+    CHECK(seen->result.at(0) == "before");
+    host.emit("test.changed", j(R"({"value":"after"})"));
+    host.commandFinished();
+    seen = host.scripting()->run("watcher", "return seen", -1.0);
+    REQUIRE(seen);
+    REQUIRE(seen->result.size() == 2);
+    CHECK(seen->result.at(1) == "after");
+    REQUIRE(host.session().inTransaction());
+    REQUIRE(host.rollbackTransaction(*transaction));
+}

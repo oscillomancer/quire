@@ -290,7 +290,7 @@ class EngineApp : public cmd::Host {
     Result<std::uint64_t> beginTransaction(const cmd::Origin& origin,
                                            std::string_view label) override;
     Status commitTransaction(std::uint64_t id) override;
-    void rollbackTransaction(std::uint64_t id) override;
+    Status rollbackTransaction(std::uint64_t id) override;
     void log(const cmd::LogRecord& record) override;
     void emit(std::string_view topic, json::Value payload) override;
     void commandFinished() override;

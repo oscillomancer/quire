@@ -160,7 +160,24 @@ synth, `synth_and_render`).
 
 Transactions: the sandbox implements `beginTransaction` by snapshotting the
 state of affected instances (CLAP state + chain) and restores them on
-rollback. Renders created inside a failed batch are deleted.
+rollback. Begin fails with `sandbox.snapshot_failed` at `/instances/<id>`
+when any state cannot be saved; its `details` retain the plug-in error.
+Rollback returns `sandbox.rollback_failed` with `sandbox.restore_failed`
+details for each instance and nested plug-in errors. The command bus retains
+the initiating command/commit error as a final detail when rollback fails.
+Renders created inside a failed batch are deleted. Invocation savepoints are
+independent of that outer snapshot; a failed step restores its plug-in states,
+chain, settings, render set and pending Lua/host events while the transaction
+remains open. D4's void restore hook reports snapshot/restore failures as `sandbox.savepoint_failed`
+events with the same structured error fields.
+
+Preset documents accept `supple.preset/1.0` (optional numeric `version: 1`).
+An absent schema is legacy; unknown/newer schemas or explicit versions fail
+with `sandbox.preset_schema` or `sandbox.preset_version` before state changes.
+Semantic schema entries require a numeric id, name, recognized type and the
+range/choices for that type. Invalid schemas warn and fall back to plain CLAP
+parameters. State loads invalidate queued pre-restore edits; inactive saves
+flush acknowledged pending edits before writing plug-in state.
 
 ## 5. CLI
 

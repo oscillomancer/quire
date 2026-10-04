@@ -19,6 +19,7 @@
 #include <limits>
 #include <thread>
 #include <vector>
+#include "../src/bridge_client.h"
 #include "../src/bridge_protocol.h"
 
 #include <supple/clap/semantic_params.h>
@@ -29,6 +30,17 @@ extern char** environ;
 
 using namespace supple;
 using namespace supple::host;
+
+namespace supple::host {
+struct BridgeTestAccess {
+    static std::shared_ptr<BridgeProcess> adopt(int socket, pid_t pid) {
+        std::shared_ptr<BridgeProcess> process(new BridgeProcess);
+        process->sock_ = socket;
+        process->pid_ = pid;
+        return process;
+    }
+};
+}  // namespace supple::host
 
 namespace {
 
@@ -91,7 +103,7 @@ struct ControllerWatch {
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
-    REQUIRE(found->size() == 4);
+    REQUIRE(found->size() == 5);
     CHECK((*found)[0].format == "vst3");
     CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
     CHECK((*found)[0].version == "2.0");
@@ -283,7 +295,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 9);
+    REQUIRE(list->size() == 12);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -521,7 +533,7 @@ TEST_CASE("an editor opens in process and through the bridge; a dead bridge clos
         CHECK(p.paramValue(8).value() == 0x5a17);
         // The resize it asked for when shown arrives (polled through the bridge).
         Instance::EditorRequests q;
-        for (int i = 0; i < 100 && !q.resize; ++i) {
+        while (!q.resize) {
             q = p.takeEditorRequests();
             if (!q.resize) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -543,7 +555,7 @@ TEST_CASE("an editor opens in process and through the bridge; a dead bridge clos
         REQUIRE(p.bridgePid() > 0);
         ::kill(p.bridgePid(), SIGKILL);
         q = {};
-        for (int i = 0; i < 200 && !q.closed; ++i) {
+        while (!q.closed) {
             q = p.takeEditorRequests();
             if (!q.closed) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -942,7 +954,7 @@ TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bund
     const std::array<fs::path, 3> paths{first.parent_path(), second.parent_path(), first};
     auto found = scan(paths);
     REQUIRE(found);
-    REQUIRE(found->size() == 8);
+    REQUIRE(found->size() == 10);
     CHECK(found->front().path == first);
     CHECK(found->back().path == second);
 }
@@ -1026,6 +1038,12 @@ TEST_CASE("bridge rejects undersized shared memory and unexpected descriptors wi
     REQUIRE(status == static_cast<std::uint32_t>(bridge::Reply::Ok));
     bridge::Reader reader(reply.data(), reply.size());
     const auto instance = reader.u32();
+    REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(bridge::Op::SetParam),
+                              instance, {}));
+    REQUIRE(bridge::recvFrame(sockets[0], status, id, reply, nullptr, 2000));
+    REQUIRE(status == static_cast<std::uint32_t>(bridge::Reply::Error));
+    bridge::Reader malformed(reply.data(), reply.size());
+    CHECK(malformed.error().code == "bridge.malformed");
     const int memory =
         static_cast<int>(::syscall(SYS_memfd_create, "supple-test-shm", MFD_CLOEXEC));
     REQUIRE(memory >= 0);
@@ -1067,4 +1085,335 @@ TEST_CASE("invalid CLAP symlink paths return a structured error instead of throw
     auto made = Instance::create(info, {});
     REQUIRE_FALSE(made);
     CHECK(made.error().code == "host.load");
+}
+
+TEST_CASE("state restore is a queued-edit barrier and inactive saves flush edits") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool vst3 : {false, true})
+        for (bool isolated : {false, true}) {
+            CAPTURE(isolated);
+            CAPTURE(vst3);
+            PluginInfo info;
+            if (vst3) {
+                auto catalogue = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+                REQUIRE(catalogue);
+                const auto found =
+                    std::find_if(catalogue->begin(), catalogue->end(),
+                                 [](const auto& p) { return p.name == "Test VST3 Separate Gain"; });
+                REQUIRE(found != catalogue->end());
+                info = *found;
+            } else
+                info = find("com.suppleaudio.test.gain");
+            auto made = Instance::create(info, {}, isolated);
+            REQUIRE(made);
+            auto& instance = **made;
+            const auto id = vst3 ? 1u : 0u;
+            const double original = vst3 ? 0.25 : gainClap(-6);
+            const double edited = vst3 ? 0.75 : gainClap(0);
+            REQUIRE(instance.setParam(id, original).ok());
+            auto saved = instance.saveState();
+            REQUIRE_MESSAGE(saved, (saved ? "" : saved.error().toString()));
+            REQUIRE(instance.activate(48000, 1, 64).ok());
+            REQUIRE(instance.setParam(id, edited).ok());
+            REQUIRE(instance.loadState(*saved).ok());
+            REQUIRE(instance.startProcessing());
+            Buffers buffers(64);
+            std::fill(buffers.l.begin(), buffers.l.end(), 1.0f);
+            std::fill(buffers.r.begin(), buffers.r.end(), 1.0f);
+            REQUIRE(instance.process(buffers.block(64)));
+            CHECK(buffers.ol[0] == doctest::Approx(vst3 ? 0.25 : std::pow(10.0, -6.0 / 20.0)));
+            instance.stopProcessing();
+            REQUIRE(instance.setParam(id, edited).ok());
+            instance.deactivate();
+            auto flushed = instance.saveState();
+            REQUIRE(flushed);
+            auto restored = Instance::create(info, {}, isolated);
+            REQUIRE(restored);
+            REQUIRE((*restored)->loadState(*flushed).ok());
+            REQUIRE((*restored)->activate(48000, 1, 64).ok());
+            REQUIRE((*restored)->startProcessing());
+            REQUIRE((*restored)->process(buffers.block(64)));
+            CHECK(buffers.ol[0] == doctest::Approx(vst3 ? 0.75 : 1.0));
+            (*restored)->stopProcessing();
+            (*restored)->deactivate();
+        }
+}
+
+TEST_CASE("bridge requests fail when a scripted child stops reading") {
+    int sockets[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+    const auto pid = ::fork();
+    REQUIRE(pid >= 0);
+    if (pid == 0) {
+        ::close(sockets[0]);
+        for (;;) ::pause();
+    }
+    ::close(sockets[1]);
+    auto process = BridgeTestAccess::adopt(sockets[0], pid);
+    bridge::Writer request;
+    request.bytes.resize(1 << 20);
+    const auto reply = process->call(bridge::Op::LoadState, 1, request, -1, 20);
+    REQUIRE_FALSE(reply);
+    CHECK(reply.error().code == "host.bridge_failed");
+    CHECK(process->failed());
+    CHECK(process->failure().find("stopped responding") != std::string::npos);
+}
+
+TEST_CASE("malformed scripted bridge replies fail the whole process") {
+    for (const auto op : {bridge::Op::ParamValue, bridge::Op::Params, bridge::Op::SaveState,
+                          bridge::Op::Service, bridge::Op::Create}) {
+        for (bool errorReply : {false, true}) {
+            CAPTURE(op);
+            CAPTURE(errorReply);
+            int sockets[2];
+            REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+            auto process = BridgeTestAccess::adopt(sockets[0], -1);
+            std::thread peer([&] {
+                std::uint32_t head = 0, id = 0;
+                std::vector<std::uint8_t> payload;
+                if (bridge::recvFrame(sockets[1], head, id, payload))
+                    bridge::sendFrame(sockets[1], errorReply ? 1 : 0, id, {0xff});
+                ::close(sockets[1]);
+            });
+            auto reply = process->call(op, 1, bridge::Writer{});
+            peer.join();
+            REQUIRE_FALSE(reply);
+            CHECK(reply.error().code == "bridge.malformed");
+            CHECK(process->failed());
+        }
+    }
+}
+
+TEST_CASE("bridge protocol v6 retains nested structured error details") {
+    Error original("outer", "outer message", "/value", "retry");
+    original.details.emplace_back("inner", "inner message", "/id", "correct it");
+    original.details[0].details.emplace_back("leaf", "leaf message");
+    bridge::Writer writer;
+    writer.error(original);
+    bridge::Reader reader(writer.bytes.data(), writer.bytes.size());
+    const auto decoded = reader.error();
+    REQUIRE(reader.done());
+    REQUIRE(decoded.details.size() == 1);
+    CHECK(decoded.details[0].path == "/id");
+    CHECK(decoded.details[0].hint == "correct it");
+    REQUIRE(decoded.details[0].details.size() == 1);
+    CHECK(decoded.details[0].details[0].code == "leaf");
+    CHECK(bridge::kVersion == 6);
+}
+
+TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {
+    auto info = find("com.suppleaudio.test.malformed-schema");
+    CHECK_FALSE(info.semantic);
+    auto instance = Instance::create(info, {});
+    REQUIRE(instance);
+    CHECK_FALSE((*instance)->info().semantic);
+    CHECK_FALSE((*instance)->semanticSchema());
+    CHECK_FALSE((*instance)->params().empty());
+    REQUIRE((*instance)->setParam(0, gainClap(-3)));
+    CHECK(*(*instance)->paramValue(0) == doctest::Approx(gainClap(-3)));
+    const auto log = (*instance)->takeLog();
+    REQUIRE_FALSE(log.empty());
+    CHECK(log[0].find("invalid semantic schema") != std::string::npos);
+}
+
+TEST_CASE("editor failures destroy the partial editor and show-hide requests reach its owner") {
+    for (std::uint8_t mode : {3, 4}) {
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+        REQUIRE(made);
+        const std::array<std::uint8_t, 4> config{mode, 0, 0, 0};
+        REQUIRE((*made)->loadState(config));
+        CHECK_FALSE((*made)->openEditor(1234, 1));
+        CHECK_FALSE((*made)->editorOpen());
+        const std::array<std::uint8_t, 4> good{6, 0, 0, 0};
+        REQUIRE((*made)->loadState(good));
+        REQUIRE((*made)->openEditor(1234, 1));
+        auto requests = (*made)->takeEditorRequests();
+        CHECK(requests.show);
+        CHECK(requests.hide);
+        CHECK(requests.width == 320);
+        CHECK(requests.height == 240);
+        (*made)->closeEditor();
+    }
+}
+
+TEST_CASE("restart activation failures are structured notifications") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    REQUIRE((*made)->activate(48000, 1, 64));
+    const std::array<std::uint8_t, 4> config{5, 0, 0, 0};
+    REQUIRE((*made)->loadState(config));
+    REQUIRE((*made)->serviceMainThread());
+    CHECK_FALSE((*made)->active());
+    const auto notes = (*made)->takeNotifications();
+    REQUIRE(notes.restartError);
+    CHECK(notes.restartError->code == "host.activate");
+    CHECK_FALSE((*made)->takeNotifications().restartError);
+}
+
+TEST_CASE("VST3 run-loop callbacks skip handlers unregistered by an earlier callback") {
+    void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
+    REQUIRE(module);
+    struct Close {
+        void* module;
+        ~Close() { ::dlclose(module); }
+    } close{module};
+    auto removed = reinterpret_cast<int (*)()>(::dlsym(module, "fixtureRemovedHandlerCalls"));
+    auto timers = reinterpret_cast<int (*)()>(::dlsym(module, "fixtureTimerCalls"));
+    auto fds = reinterpret_cast<int (*)()>(::dlsym(module, "fixtureFdCalls"));
+    REQUIRE(removed);
+    REQUIRE(timers);
+    REQUIRE(fds);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
+        return p.name == "Test VST3 Separate Gain";
+    });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    const auto removedBefore = removed(), timerBefore = timers(), fdBefore = fds();
+    REQUIRE((*made)->openEditor(1234, 1));
+    (*made)->onFd(123, CLAP_POSIX_FD_READ);
+    CHECK(fds() == fdBefore + 1);
+    CHECK(removed() == removedBefore);
+    while (timers() == timerBefore) (*made)->serviceMainThread();
+    CHECK(timers() == timerBefore + 1);
+    CHECK(removed() == removedBefore);
+    (*made)->closeEditor();
+}
+
+TEST_CASE("VST3 notes preserve overlapping counts and ids and expand wildcard offs") {
+    void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
+    REQUIRE(module);
+    struct Close {
+        void* module;
+        ~Close() { ::dlclose(module); }
+    } close{module};
+    auto offs = reinterpret_cast<int (*)(int)>(::dlsym(module, "fixtureNoteOffs"));
+    REQUIRE(offs);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    auto info = std::find_if(list->begin(), list->end(),
+                             [](const auto& p) { return p.name == "Test VST3 Sine"; });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    REQUIRE((*made)->activate(48000, 1, 64));
+    REQUIRE((*made)->startProcessing());
+    Buffers buffers(64);
+    const int before = offs(-1), wildcards = offs(-2), id1 = offs(1), id2 = offs(2);
+    std::array<Event, 4> notes{};
+    for (auto& note : notes) note = {.kind = Event::Kind::NoteOn, .channel = 0, .key = 69};
+    notes[2].noteId = 1;
+    notes[3].noteId = 2;
+    REQUIRE((*made)->process(buffers.block(64, notes, false)));
+    Event stop{.kind = Event::Kind::NoteOff, .channel = 0, .key = 69, .noteId = 1};
+    REQUIRE((*made)->process(buffers.block(64, std::span(&stop, 1), false)));
+    CHECK(offs(1) == id1 + 1);
+    (*made)->reset();
+    REQUIRE((*made)->process(buffers.block(64, {}, false)));
+    CHECK(offs(-1) == before + 4);
+    CHECK(offs(2) == id2 + 1);
+    CHECK(offs(-2) == wildcards);
+    REQUIRE((*made)->process(buffers.block(64, notes, false)));
+    stop = {.kind = Event::Kind::NoteChoke, .port = -1, .channel = -1, .key = -1};
+    REQUIRE((*made)->process(buffers.block(64, std::span(&stop, 1), false)));
+    CHECK(offs(-1) == before + 8);
+    CHECK(offs(-2) == wildcards);
+    (*made)->stopProcessing();
+    (*made)->deactivate();
+}
+
+TEST_CASE("CLAP layouts beyond the supported port and channel limits are refused") {
+    for (const auto* id :
+         {"com.suppleaudio.test.many-ports", "com.suppleaudio.test.many-channels"}) {
+        auto made = Instance::create(find(id), {});
+        REQUIRE_FALSE(made);
+        CHECK(made.error().code == "host.layout");
+    }
+    RemotePorts ports;
+    auto remote = RemoteInstance::spawn(find("com.suppleaudio.test.gain"), {}, ports);
+    REQUIRE(remote);
+    auto activated = (*remote)->activate(48000, 1, 64, 17, 2);
+    REQUIRE_FALSE(activated);
+    CHECK(activated.error().code == "host.layout");
+}
+
+TEST_CASE("VST3 layouts beyond the supported bus and channel limits are refused") {
+    void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
+    REQUIRE(module);
+    auto mode = reinterpret_cast<void (*)(int)>(::dlsym(module, "fixtureLayoutMode"));
+    REQUIRE(mode);
+    struct Cleanup {
+        void* module;
+        void (*mode)(int);
+        ~Cleanup() {
+            mode(0);
+            ::dlclose(module);
+        }
+    } cleanup{module, mode};
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    for (int layout : {1, 2}) {
+        mode(layout);
+        auto made = Instance::create(list->front(), {});
+        REQUIRE_FALSE(made);
+        CHECK(made.error().code == "host.layout");
+    }
+}
+
+TEST_CASE("editor resize requests publish dimensions as one pair") {
+    void* module = ::dlopen(kFixture.c_str(), RTLD_NOW);
+    REQUIRE(module);
+    struct Close {
+        void* module;
+        ~Close() { ::dlclose(module); }
+    } close{module};
+    auto stress = reinterpret_cast<void (*)()>(::dlsym(module, "supple_fixture_resize_stress"));
+    REQUIRE(stress);
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    REQUIRE((*made)->openEditor(1234, 1));
+    (void)(*made)->takeEditorRequests();
+    std::atomic<bool> done{false};
+    std::thread producer([&] {
+        stress();
+        done.store(true, std::memory_order_release);
+    });
+    bool consistent = true;
+    auto check = [&] {
+        const auto request = (*made)->takeEditorRequests();
+        if (request.resize && request.height != (request.width ^ UINT32_MAX)) consistent = false;
+    };
+    while (!done.load(std::memory_order_acquire)) check();
+    producer.join();
+    check();
+    CHECK(consistent);
+    (*made)->closeEditor();
+}
+
+TEST_CASE("valid bridge errors preserve details without failing the process") {
+    int sockets[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+    auto process = BridgeTestAccess::adopt(sockets[0], -1);
+    std::thread peer([&] {
+        std::uint32_t head = 0, id = 0;
+        std::vector<std::uint8_t> payload;
+        if (bridge::recvFrame(sockets[1], head, id, payload)) {
+            Error error("test.invalid", "invalid value");
+            error.details.emplace_back("test.range", "out of range", "/gain", "use 0..1");
+            bridge::Writer writer;
+            writer.error(error);
+            bridge::sendFrame(sockets[1], 1, id, writer.bytes);
+        }
+        ::close(sockets[1]);
+    });
+    auto result = process->call(bridge::Op::SetParam, 1, bridge::Writer{});
+    peer.join();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "test.invalid");
+    REQUIRE(result.error().details.size() == 1);
+    CHECK(result.error().details[0].path == "/gain");
+    CHECK(result.error().details[0].hint == "use 0..1");
+    CHECK_FALSE(process->failed());
 }

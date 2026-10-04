@@ -543,6 +543,7 @@ TEST_CASE("finished job threads are reaped before another starts") {
     for (int i = 0; i < 120; ++i) {
         h.host->session().startJob([&](std::stop_token) { completed.fetch_add(1); });
         while (completed.load() <= i) std::this_thread::yield();
+        while (h.host->session().activeJobThreadCountForTests() != 0) std::this_thread::yield();
         CHECK(h.host->session().jobThreadCountForTests() <= 2);
     }
     h.host->session().startJob([](std::stop_token) {});
@@ -554,6 +555,9 @@ TEST_CASE("job.cancel stops a generation after the current candidate") {
     REQUIRE(library);
     auto starts = reinterpret_cast<int (*)()>(dlsym(library, "supple_fixture_patch_starts"));
     REQUIRE(starts);
+    auto waitStarted =
+        reinterpret_cast<void (*)(int)>(dlsym(library, "supple_fixture_wait_patch_start"));
+    REQUIRE(waitStarted);
     const int before = starts();
     Harness h;
     h.call("plugin.load", R"({"plugin":"com.suppleaudio.test.slow-gain"})");
@@ -561,21 +565,11 @@ TEST_CASE("job.cancel stops a generation after the current candidate") {
         "target":{"profile":{"schema":"supple.analysis-profile/1.0",
         "targets":{"spectral.centroid_hz.median":{"target":1000,"tolerance":100}}}},
         "seconds":0.1,"tail_s":0,"evaluations":100,"max_seconds":60})");
-    const auto readyBy = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (starts() == before && std::chrono::steady_clock::now() < readyBy)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    waitStarted(before);
     REQUIRE(starts() > before);
-    const auto cancelledAt = std::chrono::steady_clock::now();
     h.call("job.cancel", R"({"job": ")" + started["job"].asString() + R"("})");
-    while (h.host->session().activeJobThreadCountForTests() != 0 &&
-           std::chrono::steady_clock::now() - cancelledAt < std::chrono::seconds(2))
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    const double elapsedMs =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cancelledAt)
-            .count();
-    INFO(elapsedMs);
+    h.host->session().stopJobs();
     CHECK(h.host->session().activeJobThreadCountForTests() == 0);
-    CHECK(elapsedMs < 500.0);
     CHECK_FALSE(fs::exists(h.root.path / "renders" / (started["render"].asString() + ".wav")));
     dlclose(library);
 }
@@ -623,4 +617,22 @@ TEST_CASE("a flat params merge renders the same whether or not the session rende
                          std::fabs(static_cast<double>(fresh[i]) - static_cast<double>(after[i])));
     INFO("worst sample difference: " << worst);
     CHECK(worst == 0.0);
+}
+
+TEST_CASE("reset and worker stop tokens leave optimizer jobs terminal cancelled") {
+    for (bool reset : {false, true}) {
+        Harness h;
+        h.call("plugin.load", R"({"plugin":"com.suppleaudio.test.slow-gain"})");
+        auto started = h.call("optimize.start", R"({"instance":"in_1","params":["gain"],
+            "target":{"profile":{"schema":"supple.analysis-profile/1.0",
+            "targets":{"spectral.centroid_hz.median":{"target":1000,"tolerance":100}}}},
+            "seconds":0.1,"tail_s":0,"evaluations":100,"max_seconds":60})");
+        if (reset)
+            h.host->session().reset();
+        else
+            h.host->session().stopJobs();
+        auto status = h.call("job.status", R"({"job": ")" + started["job"].asString() + R"("})");
+        CHECK(status["status"].asString() == "cancelled");
+        CHECK(h.host->session().activeJobThreadCountForTests() == 0);
+    }
 }

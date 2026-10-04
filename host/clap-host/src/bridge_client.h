@@ -37,6 +37,7 @@ class BridgeProcess {
     pid_t pid() const { return pid_.load(); }
 
   private:
+    friend struct BridgeTestAccess;
     static constexpr int kHung = -2;
     BridgeProcess() = default;
     std::atomic<pid_t> pid_{-1};

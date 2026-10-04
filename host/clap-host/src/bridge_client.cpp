@@ -128,6 +128,10 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     ports.editor = r.u8() != 0;
     if (!r.ok() || !self->instanceId_)
         return Error("host.bridge", "malformed reply from the plugin bridge");
+    if (ports.inChannels > kMaxChannels || ports.outChannels > kMaxChannels ||
+        ports.keyChannels > kMaxChannels)
+        return Error("host.layout", "bridge layout exceeds 16 channels", {},
+                     "select a layout with at most 16 main and key channels");
     return self;
 }
 
@@ -204,12 +208,12 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
         reap();
         return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
     }
+    const auto deadline = deadlineAfter(timeoutMs);
     std::uint32_t status = 0;
     std::vector<std::uint8_t> reply;
     std::uint32_t returnedId = 0;
-    if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd) ||
-        !recvFrame(sock_, status, returnedId, reply, nullptr, timeoutMs) ||
-        returnedId != instance) {
+    if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd, deadline) ||
+        !recvFrameUntil(sock_, status, returnedId, reply, nullptr, deadline)) {
         // Gone, or not answering: either way the instance is lost.
         if (alive()) {
             killBridge();
@@ -223,11 +227,18 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
         }
         return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
     }
-    if (static_cast<Reply>(status) != Reply::Ok) {
-        Reader r(reply.data(), reply.size());
-        return r.error();
+    Reader r(reply.data(), reply.size());
+    if (returnedId == instance && status == static_cast<std::uint32_t>(Reply::Error)) {
+        auto error = r.error();
+        if (r.done()) return error;
+    } else if (returnedId == instance && status == static_cast<std::uint32_t>(Reply::Ok) &&
+               validReply(op, r)) {
+        return reply;
     }
-    return reply;
+    killBridge();
+    fail(-1);
+    return Error("bridge.malformed", "malformed reply from the plugin bridge", {},
+                 "fx.restart re-creates it");
 }
 
 Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, int fd,
@@ -238,9 +249,10 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, i
 Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                                 std::uint32_t in, std::uint32_t out, std::uint32_t key,
                                 bool keyActive) {
+    if (in > kMaxChannels || out > kMaxChannels || key > kMaxChannels)
+        return Error("host.layout", "bridge layout exceeds 16 channels");
     unmap();
-    layout_ = Layout(maxFrames, std::min(in, kMaxChannels), std::min(out, kMaxChannels),
-                     std::min(key, kMaxChannels));
+    layout_ = Layout(maxFrames, in, out, key);
     if (layout_.size > std::numeric_limits<std::uint32_t>::max())
         return Error("host.activate", "shared memory size exceeds the bridge protocol limit", {},
                      "use a smaller maximum block size");
@@ -445,6 +457,8 @@ Instance::EditorRequests RemoteInstance::editorRequests() {
     q.closed = r.u8() != 0;
     q.width = r.u32();
     q.height = r.u32();
+    q.show = r.u8() != 0;
+    q.hide = r.u8() != 0;
     return q;
 }
 
@@ -471,6 +485,7 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     latency_ = r.u32();
     tail_ = r.u32();
     reportsTail_ = r.u8() != 0;
+    if (r.u8()) notes.restartError = r.error();
     notes.stateDirty |= n.stateDirty;
     notes.paramsRescan |= n.paramsRescan;
     notes.latencyChanged |= n.latencyChanged;
