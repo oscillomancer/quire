@@ -1377,3 +1377,294 @@ TEST_CASE("MIDI loop source offsets wrap cyclically and cover the final partial 
     CHECK(has(156000, host::Event::Kind::NoteOn, 69));
     CHECK(has(192000, host::Event::Kind::NoteOff, 69));  // clipped at item end
 }
+
+namespace {
+struct EdgeControl {
+    void (*requestProcess)(const clap_plugin_t*);
+    void (*rescan)(const clap_plugin_t*, bool);
+    void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
+    void (*restart)(const clap_plugin_t*);
+};
+const EdgeControl& edgeControl(host::Instance& instance) {
+    const auto* control = static_cast<const EdgeControl*>(
+        instance.raw()->get_extension(instance.raw(), "supple.test.edge-control"));
+    REQUIRE(control);
+    return *control;
+}
+}  // namespace
+
+TEST_CASE("restart reactivation errors retain structured failed FX and compensated latency") {
+    auto pool = makePool();
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    const auto track = addTrack(edit, "Restart");
+    const auto fx = addFx(edit, track, "com.suppleaudio.test.edge");
+    const auto session = commit(edit);
+    auto* instance = pool.get(fx, *session.fx.find(fx), session).value();
+    const std::array<std::uint8_t, 4> config{5, 0, 0, 0};
+    REQUIRE(instance->loadState(config));
+    auto initial = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(initial, session));
+    CHECK(initial.outputLatency == 64);
+    edgeControl(*instance).restart(instance->raw());
+    auto next = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(next, session));
+    CHECK_FALSE(instance->active());
+    CHECK(next.instances.empty());
+    CHECK(next.outputLatency == 64);
+    const auto errors = pool.failedErrors();
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].first == fx);
+    CHECK(errors[0].second.code == "host.activate");
+    CHECK(errors[0].second.path == "/fx/" + fx.str());
+    CHECK_FALSE(errors[0].second.hint.empty());
+    CHECK(pool.failed().size() == 1);
+    // The failed stage still delays incoming audio exactly like a bypass.
+    auto& node =
+        *std::find_if(next.nodes.begin(), next.nodes.end(), [&](auto& n) { return n.id == track; });
+    std::array<float, 128> impulse{};
+    impulse[0] = 1;
+    const float* inputs[] = {impulse.data()};
+    node.monitorInputs = {0};
+    next.deviceIn = inputs;
+    next.deviceInChannels = 1;
+    REQUIRE(detail::processBlock(next, 0, 128, false));
+    CHECK(node.preFader.l[0] == 0);
+    CHECK(node.preFader.l[64] == 1);
+    // Neither another prepare nor another render retries the refused activation.
+    auto again = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(again, session));
+    CHECK(again.instances.empty());
+    auto offline = renderOffline(session, pool, {.endSeconds = .01, .threads = 1});
+    REQUIRE(offline);
+    CHECK(offline->outputLatency == 64);
+    CHECK_FALSE(offline->warnings.empty());
+    pool.restart(fx);
+    CHECK(pool.failedErrors().empty());
+}
+
+TEST_CASE("parameter clear and rescan retain envelopes and re-resolve orphaned automation") {
+    auto pool = makePool();
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    const auto track = addTrack(edit, "Dynamic parameters");
+    const auto fx = addFx(edit, track, "com.suppleaudio.test.edge");
+    model::Envelope envelope;
+    envelope.target = {fx, "7"};
+    envelope.points = {{0, 2, model::PointShape::Linear, 0}, {1, 3, model::PointShape::Linear, 0}};
+    const auto env = edit.create(envelope);
+    const auto session = commit(edit);
+    auto* instance = pool.get(fx, *session.fx.find(fx), session).value();
+    REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{12, 0, 0, 0}));
+    auto make = [&] {
+        auto plan = detail::compile(session, pool, 0, 128).value();
+        REQUIRE(detail::prepare(plan, session));
+        return plan;
+    };
+    auto lanes = [&](detail::Plan& plan) -> const auto& {
+        return std::find_if(plan.nodes.begin(), plan.nodes.end(),
+                            [&](auto& n) { return n.id == track; })
+            ->chain[0]
+            .lanes;
+    };
+    auto initial = make();
+    REQUIRE(lanes(initial).size() == 1);
+    edgeControl(*instance).clear(instance->raw(), 8, CLAP_PARAM_CLEAR_ALL);
+    auto unrelated = make();
+    CHECK(lanes(unrelated).size() == 1);
+    edgeControl(*instance).clear(instance->raw(), 7, CLAP_PARAM_CLEAR_MODULATIONS);
+    auto modulation = make();
+    CHECK(lanes(modulation).size() == 1);  // no modulation lane in this engine
+    edgeControl(*instance).clear(instance->raw(), 7, CLAP_PARAM_CLEAR_AUTOMATIONS);
+    auto cleared = make();
+    CHECK(lanes(cleared).empty());
+    CHECK_FALSE(cleared.warnings.empty());
+    CHECK(session.envelopes.find(env)->points.size() == 2);
+    instance->deactivate();
+    edgeControl(*instance).rescan(instance->raw(), false);
+    auto restored = make();
+    CHECK(lanes(restored).size() == 1);
+    instance->deactivate();
+    edgeControl(*instance).rescan(instance->raw(), true);
+    auto orphaned = make();
+    CHECK(lanes(orphaned).empty());
+    CHECK(std::any_of(orphaned.warnings.begin(), orphaned.warnings.end(), [&](const auto& warning) {
+        return warning.find(fx.str()) != std::string::npos &&
+               warning.find("orphaned automation parameter 7") != std::string::npos;
+    }));
+    REQUIRE(instance->startProcessing());
+    REQUIRE(detail::processBlock(orphaned, 0, 128));
+    for (const auto& node : orphaned.nodes)
+        for (const auto& stage : node.chain)
+            CHECK(std::none_of(
+                stage.blockEvents.begin(), stage.blockEvents.end(),
+                [](const auto& event) { return event.kind == host::Event::Kind::Param; }));
+    instance->stopProcessing();
+}
+
+TEST_CASE("NoteEnd matches overlapping voices by id tuple and wildcards") {
+    for (std::uint8_t mask : {0, 1, 3, 7, 15}) {
+        auto pool = makePool();
+        model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+        const auto track = addTrack(edit, "Voices");
+        const auto fx = addFx(edit, track, "com.suppleaudio.test.edge");
+        addNote(edit, track, 0, 2);
+        const auto base = commit(edit);
+        model::EditTxn notes(base, 2);
+        for (const auto& entry : base.midi)
+            notes.modify<model::MidiSource>(entry.id, [](auto& source) {
+                source.sequence.notes = {{0, 960, 0, 69, 127, 0},
+                                         {0, 960, 0, 69, 127, 0},
+                                         {0, 960, 1, 69, 127, 0},
+                                         {0, 960, 1, 72, 127, 0}};
+            });
+        const auto session = commit(notes);
+        auto* instance = pool.get(fx, *session.fx.find(fx), session).value();
+        REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{14, 0, mask, 0}));
+        auto plan = detail::compile(session, pool, 0, 128).value();
+        REQUIRE(detail::prepare(plan, session));
+        REQUIRE(instance->startProcessing());
+        REQUIRE(detail::processBlock(plan, 0, 128));
+        const auto node = std::find_if(plan.nodes.begin(), plan.nodes.end(),
+                                       [&](auto& n) { return n.id == track; });
+        REQUIRE(node != plan.nodes.end());
+        CHECK(node->held[69] == (mask == 0 ? 1 : 0));
+        CHECK(node->held[128 + 69] == (mask >= 7 ? 0 : 1));
+        CHECK(node->held[128 + 72] == (mask == 15 ? 0 : 1));
+        instance->stopProcessing();
+    }
+    const detail::HeldVoice voice{42, 2, 3, 69, false};
+    CHECK(detail::matchesVoice(voice, -1, -1, -1, 42));
+    CHECK_FALSE(detail::matchesVoice(voice, 1, -1, -1, 42));
+    CHECK_FALSE(detail::matchesVoice(voice, -1, -1, -1, 43));
+    CHECK(detail::matchesVoice(voice, 2, 3, 69, -1));
+    CHECK_FALSE(detail::matchesVoice(voice, 2, 3, 70, -1));
+}
+
+TEST_CASE("acknowledging output-derived patches prevents a parameter echo on reload") {
+    auto pool = makePool();
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    const auto track = addTrack(edit, "Output patch");
+    const auto fx = addFx(
+        edit, track, kGain,
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":0}})").value());
+    const auto session = commit(edit);
+    auto* instance = pool.get(fx, *session.fx.find(fx), session).value();
+    const auto before = instance->paramValue(0).value();
+    auto outputModel = *session.fx.find(fx);
+    // A different valid value makes accidental re-delivery observable. This
+    // method only acknowledges model state; it must never edit the instance.
+    outputModel.patch =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":-12}})").value();
+    pool.acknowledgeOutputPatch(fx, *outputModel.patch);
+    REQUIRE(pool.get(fx, outputModel, session));
+    CHECK(instance->paramValue(0).value() == before);
+    // An unrelated later user edit still takes the ordinary delivery path.
+    outputModel.patch =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":-6}})").value();
+    REQUIRE(pool.get(fx, outputModel, session));
+    CHECK(instance->paramValue(0).value() != before);
+}
+
+TEST_CASE("voice tracking overflow drops onsets before DSP and keeps loop releases addressable") {
+    auto pool = makePool();
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    const auto track = addTrack(edit, "Dense voices");
+    const auto fx = addFx(edit, track, "com.suppleaudio.test.edge");
+    addNote(edit, track, 0, 2);
+    const auto base = commit(edit);
+    model::EditTxn dense(base, 2);
+    for (const auto& entry : base.midi)
+        dense.modify<model::MidiSource>(entry.id, [](auto& source) {
+            source.sequence.notes.assign(4097, midi::Note{0, 960, 0, 69, 127, 0});
+        });
+    const auto session = commit(dense);
+    auto plan = detail::compile(session, pool, 0, 4096).value();
+    REQUIRE(detail::prepare(plan, session));
+    auto* instance = pool.find(fx);
+    REQUIRE(instance->startProcessing());
+    REQUIRE(detail::processBlock(plan, 0, 4096));
+    auto& node =
+        *std::find_if(plan.nodes.begin(), plan.nodes.end(), [&](auto& n) { return n.id == track; });
+    auto& stage = node.chain[0];
+    CHECK(stage.voices.size() == 4096);
+    CHECK(stage.voiceDropped == 1);
+    CHECK(std::count_if(stage.blockEvents.begin(), stage.blockEvents.end(),
+                        [](const auto& e) { return e.kind == host::Event::Kind::NoteOn; }) == 4096);
+    detail::wrapTo(plan, 0, -1);
+    REQUIRE(detail::processBlock(plan, 0, 4096));
+    CHECK(stage.voices.size() == 4096);
+    CHECK(stage.voiceDropped == 2);
+    CHECK(std::count_if(stage.blockEvents.begin(), stage.blockEvents.end(), [](const auto& e) {
+              return e.kind == host::Event::Kind::NoteOff;
+          }) == 4096);
+    CHECK(stage.voices.front().noteId == 4096);  // old NoteEnds cannot clear the new loop
+    instance->stopProcessing();
+}
+
+TEST_CASE("voice source identities survive MIDI renumbering and release removed notes") {
+    for (bool remove : {false, true}) {
+        auto pool = makePool();
+        model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+        const auto track = addTrack(edit, "Edited notes");
+        addFx(edit, track, kSine);
+        addNote(edit, track, 0, 2);
+        const auto session = commit(edit);
+        auto old = detail::compile(session, pool, 0, 128).value();
+        REQUIRE(detail::prepare(old, session));
+        for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+        REQUIRE(detail::processBlock(old, 0, 128));
+        model::EditTxn change(session, 2);
+        for (const auto& entry : session.midi)
+            change.modify<model::MidiSource>(entry.id, [&](auto& source) {
+                if (remove)
+                    source.sequence.notes.clear();
+                else
+                    source.sequence.notes.insert(source.sequence.notes.begin(),
+                                                 midi::Note{960, 100, 0, 72, 127, 0});
+            });
+        const auto edited = commit(change);
+        auto next = detail::compile(edited, pool, 0, 128).value();
+        REQUIRE(detail::prepare(next, edited));
+        detail::carryMix(old, next, -1);
+        detail::locate(next, 128, false);
+        auto& node = *std::find_if(next.nodes.begin(), next.nodes.end(),
+                                   [&](auto& n) { return n.id == track; });
+        REQUIRE(detail::processBlock(next, 128, 128));
+        CHECK(node.held[69] == (remove ? 0 : 1));
+        if (!remove) {
+            REQUIRE(node.chain[0].voices.size() == 1);
+            CHECK(node.chain[0].voices[0].sourceId == 1);  // the compiled source was renumbered
+            REQUIRE(detail::processBlock(next, 48000, 128));
+            CHECK(node.held[69] == 0);
+            CHECK(node.chain[0].voices.empty());
+        }
+        for (auto* instance : old.instances) instance->stopProcessing();
+    }
+}
+
+TEST_CASE("held musical source identities survive an in-span tempo edit") {
+    auto pool = makePool();
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    const auto track = addTrack(edit, "Tempo edits");
+    addFx(edit, track, kSine);
+    addNote(edit, track, 1, 4);
+    const auto session = commit(edit);
+    auto old = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(old, session));
+    for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+    REQUIRE(detail::processBlock(old, 24000, 128));
+    model::EditTxn tempo(session, 2);
+    for (const auto& point : session.tempo)
+        tempo.modify<model::TempoPointObj>(point.id, [](auto& value) { value.bpm = 90; });
+    const auto edited = commit(tempo);
+    auto next = detail::compile(edited, pool, 0, 128).value();
+    REQUIRE(detail::prepare(next, edited));
+    detail::carryMix(old, next, -1);
+    detail::locate(next, 48000, false);
+    REQUIRE(detail::processBlock(next, 48000, 128));
+    auto& node =
+        *std::find_if(next.nodes.begin(), next.nodes.end(), [&](auto& n) { return n.id == track; });
+    CHECK(node.held[69] == 1);  // onset sample changed, but the musical note is still current
+    REQUIRE(detail::processBlock(next, 160000, 128));
+    CHECK(node.held[69] == 0);
+    for (auto* instance : old.instances) instance->stopProcessing();
+}

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <set>
 
 #include "meters.h"
 #include "plan.h"
@@ -142,7 +143,12 @@ void DummyBackend::cycle() {
 // --- engine --------------------------------------------------------------------------
 
 Engine::Engine(InstancePool& plugins, MediaCache& media, EngineOptions options)
-    : plugins_(plugins), media_(media), options_(options) {
+    : rendererOutputs_(std::make_unique<OutputQueue>()),
+      callbackOutputs_(std::make_unique<OutputQueue>()),
+      plugins_(plugins),
+      media_(media),
+      options_(options) {
+    idleOutputs_.reserve(4096);
     options_.renderBlock = std::clamp<std::uint32_t>(options_.renderBlock, 64, 8192);
     options_.renderAheadMs = std::clamp(options_.renderAheadMs, 10.0, 2000.0);
     processing_.reserve(kMaxInstances);
@@ -247,6 +253,8 @@ void Engine::stop() {
 }
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
+    if (!notificationReload_)
+        for (const auto& fx : session.fx) plugins_.resetAutomation(fx.id);
     if (!backend_) return Error("engine.stopped", "start the engine first");
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
@@ -546,6 +554,58 @@ void Engine::collectPlans() {
 }
 
 void Engine::service() {
+    bool reload = false;
+    if (latest_) {
+        const auto clock = transport();
+        std::set<host::Instance*> serviced;
+        auto drainIdle = [&](host::Instance& instance, model::Id fx, std::uint64_t generation) {
+            auto idle = instance.takeIdleOutputs();
+            idleOutputDrops_ += idle.dropped;
+            for (const auto& event : idle.events) {
+                if (idleOutputs_.size() == 4096) {
+                    ++idleOutputDrops_;
+                    continue;
+                }
+                PluginOutput output;
+                output.fx = fx;
+                output.planGeneration = generation;
+                output.epoch = epoch_.load(std::memory_order_acquire);
+                output.timelineSample = clock.sample;
+                output.event = event;
+                output.idle = true;
+                idleOutputs_.push_back(output);
+            }
+        };
+        for (const auto& fx : latest_->fx) {
+            auto* instance = plugins_.find(fx.id);
+            if (!instance) continue;
+            serviced.insert(instance);
+            const bool active = instance->active();
+            auto notes = plugins_.service(fx.id);
+            reload |= notes.paramsRescan || !notes.paramsClear.empty() ||
+                      notes.restartError.has_value() || active != instance->active();
+            drainIdle(*instance, fx.id, publishedGen_);
+        }
+        // Replaced instances still belong to older executor plans. Keep their
+        // callbacks/timers and idle sinks serviced until both executors retire them.
+        for (auto it = plans_.rbegin(); it != plans_.rend(); ++it)
+            for (const auto& node : (*it)->nodes)
+                detail::forEachStage(node, [&](const detail::Stage& st) {
+                    if (!st.instance || !serviced.insert(st.instance).second) return;
+                    st.instance->serviceMainThread();
+                    st.instance->takeNotifications();
+                    drainIdle(*st.instance, st.fx, (*it)->generation);
+                });
+    }
+    if (reload && backend_ && latest_) {
+        const auto session = *latest_;
+        const auto dir = plans_.empty() ? std::filesystem::path{} : plans_.back()->projectDir;
+        notificationReload_ = true;
+        const auto loaded = load(session, dir);
+        notificationReload_ = false;
+        if (!loaded)
+            warnings_.push_back("plugin notification reload: " + loaded.error().toString());
+    }
     collectPlans();
     const std::uint64_t rendered = stoppedGen_.load(std::memory_order_acquire);
     const std::uint64_t live =
@@ -555,6 +615,48 @@ void Engine::service() {
         // Every executor has adopted the newest plan and stopped what it dropped.
         plugins_.prune(*latest_, live);
         prunePending_ = false;
+    }
+}
+
+PluginOutputs Engine::takePluginOutputs() {
+    PluginOutputs out;
+    out.events = std::move(idleOutputs_);
+    idleOutputs_.clear();
+    idleOutputs_.reserve(4096);
+    for (auto* queue : {rendererOutputs_.get(), callbackOutputs_.get()}) {
+        const auto count = queue->size();
+        PluginOutput event;
+        for (std::size_t i = 0; i < count && queue->pop(event); ++i) out.events.push_back(event);
+    }
+    out.dropped = pluginOutputDrops();
+    out.voiceDropped = voiceDrops_.load();
+    return out;
+}
+
+void Engine::publishPluginOutputs(detail::Plan& p, bool renderer, std::uint64_t epoch,
+                                  std::int64_t pos, std::int64_t stream) SUPPLE_RT {
+    auto& queue = renderer ? *rendererOutputs_ : *callbackOutputs_;
+    for (auto& node : p.nodes) {
+        if (options_.anticipative && node.live == renderer) continue;
+        detail::forEachStage(node, [&](detail::Stage& st) {
+            voiceDrops_.fetch_add(st.voiceDropped, std::memory_order_relaxed);
+            st.voiceDropped = 0;
+            outputDrops_.fetch_add(st.outEvents.dropped, std::memory_order_relaxed);
+            for (std::size_t i = 0; i < st.outEvents.count; ++i) {
+                const auto& event = st.outEvents.storage[i];
+                if (event.kind == host::OutputEvent::Kind::NoteEnd) continue;
+                PluginOutput output;
+                output.fx = st.fx;
+                output.planGeneration = p.generation;
+                output.epoch = epoch;
+                output.timelineSample =
+                    time::samplesAt(p.startSeconds, p.rate) + pos + event.time - st.inputLatency;
+                output.streamSample = stream + event.time;
+                output.event = event;
+                output.anticipative = renderer;
+                if (!queue.push(output)) outputDrops_.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
     }
 }
 
@@ -603,8 +705,31 @@ void Engine::startFree(std::vector<host::Instance*>& owned,
     }
 }
 
-void Engine::resetOwned(const std::vector<host::Instance*>& owned) SUPPLE_RT {
+void Engine::resetOwned(const std::vector<host::Instance*>& owned, detail::Plan* plan) SUPPLE_RT {
     for (host::Instance* in : owned) in->reset();
+    if (!plan) return;
+    auto owns = [&](host::Instance* in) {
+        return in &&
+               (in->owner() == &owned ||
+                (!in->processing() && std::find(owned.begin(), owned.end(), in) != owned.end()));
+    };
+    for (auto& node : plan->nodes) {
+        detail::forEachStage(node, [&](detail::Stage& st) {
+            if (!owns(st.instance)) return;
+            st.voices.clear();
+            st.pendingVoices.clear();
+            st.sleeping = false;
+        });
+        if (node.noteTarget >= 0 &&
+            owns(node.chain[static_cast<std::size_t>(node.noteTarget)].instance)) {
+            node.held.fill(0);
+            node.liveHeld.fill(0);
+        }
+        for (auto& take : node.takeChains)
+            if (take.noteTarget >= 0 &&
+                owns(take.chain[static_cast<std::size_t>(take.noteTarget)].instance))
+                take.held.fill(0);
+    }
 }
 
 void Engine::cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT {
@@ -707,12 +832,12 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         pos_ = xport.seekSample;
         if (plan) {
             detail::locate(*plan, pos_);
-            resetOwned(processing_);
+            resetOwned(processing_, plan);
         }
     }
     if (const bool want = wantNow(); want != playing_) {
         playing_ = want;
-        if (!want) resetOwned(processing_);  // no hanging notes
+        if (!want) resetOwned(processing_, plan);  // no hanging notes
     }
     if (xportNew) {
         xportSeen_ = xportSeq;
@@ -734,9 +859,15 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         plan->deviceMidi = midiSource_->midiInput();
         plan->deviceMidiOffset = midiBase;
     }
-    if (plan && !playing_ && plan->anyLive && !shutDown_.load() && frames <= plan->block) {
+    bool wake = false;
+    if (!playing_)
+        for (auto* instance : processing_)
+            wake |= instance->processRequested() || instance->needsAudioFlush();
+    if (plan && !playing_ && (plan->anyLive || wake) && !shutDown_.load() &&
+        frames <= plan->block) {
         // Stopped, but a track monitors its input: plugins run, nothing plays.
         if (detail::processBlock(*plan, pos_, frames, false)) {
+            publishPluginOutputs(*plan, false, rtEpoch_, pos_, rtStream_.load());
             const detail::Node& master = plan->nodes[plan->mainMaster];
             std::copy_n(master.post.l.begin(), frames, out[0]);
             std::copy_n(master.post.r.begin(), frames, out[1]);
@@ -772,6 +903,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
             ok = false;
             break;
         }
+        publishPluginOutputs(*plan, false, rtEpoch_, pos_, meterStream);
         const detail::Node& master = plan->nodes[plan->mainMaster];
         std::copy_n(master.post.l.begin(), k, out[0] + done);
         std::copy_n(master.post.r.begin(), k, out[1] + done);
@@ -1002,7 +1134,7 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
     }
     if (plan_) {
         detail::locateClass(*plan_, pos_, false);
-        resetOwned(processing_);
+        resetOwned(processing_, plan_);
     }
     epochStartLocal_ = pos_;
     epochStart_.store(pos_);
@@ -1054,12 +1186,22 @@ void Engine::rendererLoop(std::uint64_t seen) {
         if (epoch_.load(std::memory_order_acquire) != seen) seen = relocate(seen);
         if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
             playing_ = want;
-            if (!want) resetOwned(processing_);  // no hanging notes
+            if (!want) resetOwned(processing_, plan_);  // no hanging notes
             reportedPlaying_.store(playing_);
         }
         const std::int64_t ahead = streamLocal_ - playedStream(seen);
         const bool held = hold_.load(std::memory_order_acquire);
         if (held) holdSeen_.store(true, std::memory_order_release);
+        bool wake = false;
+        if (!playing_ && plan_)
+            for (auto* instance : plan_->rendererInstances)
+                wake |= instance->processRequested() || instance->needsAudioFlush();
+        if (wake && !held) {
+            const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block, self,
+                                                         &loopR_, false);
+            if (!ok) processErrors_.fetch_add(1);
+            publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
+        }
         bool room = playing_ && plan_ && !held && ahead < aheadFrames_;
         if (room && plan_->split) {
             room = !plan_->frontier.empty();  // nothing to hand over: all is live
@@ -1075,6 +1217,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
         const bool ok =
             detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
         if (!ok) processErrors_.fetch_add(1);
+        publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
         auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
             if (ok) {
                 std::copy_n(from.l.begin(), n, c->l.begin());
@@ -1216,7 +1359,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
         livePos_ = playedPosition(rtEpoch_, epochStart_.load());
         liveStream_ = playedStream(rtEpoch_);
         detail::locateClass(p, livePos_, true);
-        resetOwned(liveProcessing_);
+        resetOwned(liveProcessing_, &p);
         liveReady_ = true;
     }
     startFree(liveProcessing_, &p.liveInstances, self);  // let go by the renderer
@@ -1251,6 +1394,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     bool ok = true;
     for (std::size_t i : p.liveNodes) ok = detail::processNode(p, i, livePos_, k, t, self) && ok;
     if (!ok) processErrors_.fetch_add(1);
+    publishPluginOutputs(p, false, rtEpoch_, livePos_, liveStream_);
     // Metering (P5.3c): the callback measures the live nodes it just played, at
     // the position it played them from. While the transport is stopped nothing
     // is rendered ahead, so a monitored input is heard as it is produced.

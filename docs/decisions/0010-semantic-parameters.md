@@ -79,3 +79,18 @@ append/rename-with-migration only.
 Physical values as the CLAP domain (linear envelopes over log quantities in
 every generic host); normalized values on the bus (the anonymous-knob problem
 this project exists to fix).
+
+## Engine notification contract (review round 3)
+
+A parameter rescan re-resolves automation against the current list and schema
+on main, then publishes a new immutable plan. An orphaned lane stops sending
+and warns with FX id and parameter; its envelope remains available for repair.
+Clear ALL/AUTOMATIONS suppresses only that parameter until rescan or reload;
+clear MODULATIONS does not disable an automation lane. No clear deletes user data.
+
+The engine's bounded output-event queues carry complete flags and voice addresses
+into a main-thread take API. A future app consumer stores plain/physical values,
+combines gesture boundaries into one undo step, honors DontRecord, and never
+sends a received value back to DSP. It must acknowledge semantic patch updates
+in the instance pool before rebuilding a plan, and recover from counted overflow.
+See engine.md's plug-in notification contract for capacities and integration.

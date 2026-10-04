@@ -1646,3 +1646,42 @@ TEST_CASE("valid bridge errors preserve details without failing the process") {
     CHECK(result.error().details[0].hint == "use 0..1");
     CHECK_FALSE(process->failed());
 }
+
+TEST_CASE("CLAP process requests and ordered parameter clear notifications are observable") {
+    struct Control {
+        void (*requestProcess)(const clap_plugin_t*);
+        void (*rescan)(const clap_plugin_t*, bool);
+        void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
+        void (*restart)(const clap_plugin_t*);
+    };
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    auto& instance = **made;
+    const auto* plugin = instance.raw();
+    const auto* control =
+        static_cast<const Control*>(plugin->get_extension(plugin, "supple.test.edge-control"));
+    REQUIRE(control);
+    CHECK_FALSE(instance.processRequested());
+    control->requestProcess(plugin);
+    CHECK(instance.processRequested());
+    CHECK(instance.takeProcessRequest());
+    CHECK_FALSE(instance.takeProcessRequest());
+    control->clear(plugin, 7, CLAP_PARAM_CLEAR_AUTOMATIONS);
+    control->clear(plugin, 8, CLAP_PARAM_CLEAR_MODULATIONS);
+    auto notes = instance.takeNotifications();
+    REQUIRE(notes.paramsClear.size() == 2);
+    CHECK(notes.paramsClear[0].id == 7);
+    CHECK(notes.paramsClear[0].flags == CLAP_PARAM_CLEAR_AUTOMATIONS);
+    CHECK(notes.paramsClear[1].id == 8);
+    CHECK(notes.paramsClear[1].flags == CLAP_PARAM_CLEAR_MODULATIONS);
+    CHECK(instance.takeNotifications().paramsClear.empty());
+    // Rescan wins over earlier clears; a subsequent clear remains effective.
+    control->clear(plugin, 7, CLAP_PARAM_CLEAR_ALL);
+    control->rescan(plugin, false);
+    control->clear(plugin, 8, CLAP_PARAM_CLEAR_ALL);
+    notes = instance.takeNotifications();
+    CHECK(notes.paramsRescan);
+    CHECK(notes.paramsRescanFlags == CLAP_PARAM_RESCAN_ALL);
+    REQUIRE(notes.paramsClear.size() == 1);
+    CHECK(notes.paramsClear[0].id == 8);
+}

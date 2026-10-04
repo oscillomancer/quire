@@ -528,3 +528,99 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   crossfades for structural changes (inserting/removing plugins), B1/B2
   real-device acceptance measurements (tooling: tools/bench/README.md;
   historical Orrery-only measurements: docs/benchmarks/b1-preliminary.md).
+
+### Plug-in notifications and output events (review round 3)
+
+The shared `model::SourceBeatMapping` defines MIDI take offset and playrate
+conversion for playback and thumbnails. Looped offsets are cyclic modulo the
+source length; playback includes the preceding cycle's crossing notes, chases
+notes held at item start, and clips releases to the item end. Drawing retains
+its bounded visible-pass enumeration; that drawing limit does not cap playback.
+
+`InstancePool::service(fx)` services owned instances on main and drains
+`restartError`. A refused reactivation is retained in `failedErrors()` as
+`{fx, Error{code,message,path,hint}}`, also appearing in the existing string
+`failed()` API for compatibility. Its stage passes through with the last active
+latency; preparation does not retry it. `fx.restart` replaces it and clears the
+failure. The app still needs to publish the structured error in `fx.failed`
+and engine status (its current consumer publishes only the reason string).
+
+Local CLAP `request_process` is an atomic wake request. The audio owner consumes
+it at the next processed block. With `auto_bypass_on_silence`, a stage may idle
+only after `CLAP_PROCESS_SLEEP`, with exactly silent main/key inputs and no
+input events or pending flush. Notes, automation, nonzero input, queued main
+parameter changes and `request_process` resume it. A stopped transport also
+services a requested render block without advancing its position. An inactive
+instance is activated on main using its last activation configuration; a never
+activated instance is configured by plan preparation. Explicit bypass is kept; queued note/parameter events are still processed with
+compensated dry output so note releases are not lost while bypassed.
+Bridged wake and clear forwarding need the control-protocol extension below.
+
+Rescan requests rebuild an immutable plan from the current parameter list and
+schema; envelopes are resolved again, including their value-domain conversion.
+Missing/read-only parameters stop receiving events and produce a warning naming
+the FX and parameter. Clear `ALL`/`AUTOMATIONS` suppresses only the matching
+parameter's automation until a subsequent rescan or explicit engine load. Clear
+`MODULATIONS` has no automation effect (the engine has no modulation lanes).
+Envelopes remain in the model. A rescan after a clear in the same service batch
+re-enables it; a clear after a rescan remains effective. Changes are heard at
+normal plan-adoption boundaries, including the anticipative edit horizon.
+
+`Engine::takePluginOutputs()` is main-thread only. Each record contains FX id,
+plan generation, transport epoch, timeline sample, stream sample, the entire
+`host::OutputEvent`, and idle/anticipative markers. Timeline coordinates subtract
+the stage's input PDC; idle flush records use the service-time play position.
+Parameter values and gesture boundaries are copied after worker tasks finish,
+into separate preallocated 4096-entry SPSC rings for renderer and callback.
+Per-executor FIFO is preserved; there is no global ordering between these queues
+and idle flushes. Output arenas have 256 entries per stage and idle staging has
+4096 entries. Overflow drops newest records and is exposed as a cumulative
+`dropped` counter, including host flush/arena drops. This bounded transport is
+not the future reliable coalescing channel for automation recording. The consumer
+must detect loss and resynchronize values and incomplete gestures.
+
+NoteEnd is consumed on the audio side. Held voices match all specified
+`(port, channel, key, noteId)` fields; every `-1` is a wildcard, and id `-1`
+uses the tuple. Running note IDs differ from compiled IDs so an old loop's end
+cannot terminate a retriggered voice. Each note stage reserves 4096 held voices; excess onsets are dropped before DSP
+so every onset admitted by the engine has a release mapping;
+`voiceDropped` counts overflow cumulatively (offline renders report warnings).
+The engine tracks held input notes, not the plug-in's internal release tails.
+The host input arena has its own 8192-event cap; recovery for a dropped release
+there remains a reported policy/integration issue.
+Plan adoption carries running IDs and held addresses, rebinds compiled IDs by
+musical source origin/address/duplicate ordinal after MIDI or tempo edits, and
+releases removed or no-longer-current onsets. Loop releases use the running addresses. No output transport or voice tracking allocates, frees, locks,
+logs or dispatches from the audio path.
+
+The app-side consumer belongs in `EngineApp::tick()` after engine main servicing:
+
+1. Drain the take API and publish cumulative event/voice drop counts in
+   `engine.status` and `engine.stats`. On a changed drop count, close incomplete
+   gestures and resynchronize parameter values on main; do not invent missing
+   automation points. Reject removed FX and superseded plan/transport epochs.
+   For anticipative records, use `streamSample`/`playedStream(epoch)` to delay
+   timeline recording until that stream position has played (discard abandoned
+   seeks). Idle records apply immediately.
+2. Validate the parameter against the current instance. Global ParamValue
+   records (all address fields `-1`) update `FxInstance::params`; per-note values
+   retain their address and do not overwrite a global default. VST3 values are
+   normalized: call `Instance::plainParam` on main before storing them. Semantic
+   CLAP values also update the matching patch key using core-params' conversion
+   to physical units. Preserve flags: `DontRecord` prevents envelope recording,
+   while the current value may still be reflected in the model/UI.
+3. GestureBegin starts a pending model edit keyed by FX and parameter; values
+   update that pending edit; GestureEnd commits one undo version. Do not invoke
+   `fx.param.set`/`Instance::setParam` for these values. For semantic patch changes,
+   call `InstancePool::acknowledgeOutputPatch` with the updated patch before a
+   head-change rebuild, so `get()` does not echo it through `setPatch`. Only
+   plug-in-originated parameter changes may use this acknowledgement; other
+   edits still follow normal validation and delivery. Automation write/touch/latch
+   recording and this app consumer remain integration work.
+
+Bridge integration requires matching additions to the `Op::Service` response in
+`host/clap-host/bridge/bridge_main.cpp` and `src/bridge_client.cpp`: carry the
+process-request bit and an ordered list of `{param id, clear flags}` after
+`paramsRescanFlags`, update both reader and writer together, and expose the
+received wake bit to the proxy's RT-safe wake API. This is a protocol change and
+is reported for the orchestrator rather than applied in this review.

@@ -35,15 +35,18 @@ inline std::vector<double> visibleLoopPasses(double position, double length, dou
 struct SourceBeatMapping {
     double offset = 0, rate = 1, sourceLength = 0;
     double period() const { return sourceLength / rate; }
-    double itemBeat(double sourceBeat, double pass = 0) const {
-        return (sourceBeat - offset) / rate + pass * period();
+    double sourceOffset(bool loop) const {
+        return loop && sourceLength > 0 ? std::fmod(offset, sourceLength) : offset;
+    }
+    double itemBeat(double sourceBeat, double pass = 0, bool loop = false) const {
+        return (sourceBeat + pass * sourceLength - sourceOffset(loop)) / rate;
     }
     std::vector<double> visibleOrigins(double duration, bool loop, double from, double to) const {
         if (!(rate > 0) || !std::isfinite(rate) || !(period() > 0) || !std::isfinite(period()))
             return {};
         const double span = loop ? (1 + std::floor(duration / period())) * period() : period();
         if (!std::isfinite(span)) return {};
-        return visibleLoopPasses(-offset / rate, span, period(), loop, from, to);
+        return visibleLoopPasses(itemBeat(0, 0, loop), span, period(), loop, from, to);
     }
 };
 

@@ -259,10 +259,20 @@ class Instance {
         bool stateDirty = false, paramsRescan = false, latencyChanged = false,
              semanticChanged = false, tailChanged = false;
         std::optional<Error> restartError;  // failed automatic reactivation, cleared on read
+        struct ParamClear {
+            std::uint32_t id = CLAP_INVALID_ID, flags = 0;
+        };
+        std::vector<ParamClear> paramsClear;  // CLAP params.clear is main-thread only
         std::uint32_t paramsRescanFlags = 0;
         std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
     Notifications takeNotifications();
+    // Local CLAP request_process: main may inspect it to activate an inactive
+    // instance; its audio owner consumes it to wake a sleeping stage.
+    bool processRequested() const SUPPLE_RT;
+    bool takeProcessRequest() SUPPLE_RT;
+    bool sleeping() const SUPPLE_RT;
+
     struct IdleOutputs {
         static constexpr std::size_t kCapacity = 1024;
         std::vector<OutputEvent> events;

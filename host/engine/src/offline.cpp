@@ -135,6 +135,8 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
         e.pluginId = fx.plugin.id;
         e.isolation = fx.isolation;
         e.appliedState.clear();
+        e.failure.reset();
+        e.clearedAutomation.clear();
     }
     if (desired != e.appliedState && !desired.empty()) {
         if (fx.patch) {
@@ -149,6 +151,7 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
         }
         e.appliedState = desired;
     }
+    service(id);
     return e.instance.get();
 }
 
@@ -168,13 +171,84 @@ void InstancePool::restart(Id id) {
 std::vector<std::pair<Id, std::string>> InstancePool::failed() const {
     std::vector<std::pair<Id, std::string>> out;
     for (const auto& [id, e] : instances_)
-        if (e.instance && e.instance->failed()) out.emplace_back(id, e.instance->failure());
+        if (e.failure)
+            out.emplace_back(id, e.failure->message);
+        else if (e.instance && e.instance->failed())
+            out.emplace_back(id, e.instance->failure());
     return out;
 }
 
 host::Instance* InstancePool::find(Id id) const {
     auto it = instances_.find(id);
     return it == instances_.end() ? nullptr : it->second.instance.get();
+}
+
+host::Instance::Notifications InstancePool::service(Id id) {
+    auto it = instances_.find(id);
+    if (it == instances_.end() || !it->second.instance) return {};
+    auto& entry = it->second;
+    if (entry.instance->active()) entry.latency = entry.instance->latency();
+    entry.instance->serviceMainThread();
+    auto notes = entry.instance->takeNotifications();
+    if (!entry.instance->active() && !entry.failure && !notes.restartError &&
+        entry.instance->processRequested() && entry.instance->sampleRate() > 0 &&
+        entry.instance->maxFrames() > 0) {
+        auto activated =
+            entry.instance->activate(entry.instance->sampleRate(), 1, entry.instance->maxFrames());
+        if (!activated) notes.restartError = activated.error();
+    }
+    if (notes.restartError) {
+        entry.failure = notes.restartError;
+        entry.failure->path = "/fx/" + id.str();
+        entry.failure->hint = "Use fx.restart to recreate this instance from its saved state";
+    }
+    if (notes.paramsRescan) entry.clearedAutomation.clear();
+    for (const auto& clear : notes.paramsClear)
+        if (clear.flags & (CLAP_PARAM_CLEAR_ALL | CLAP_PARAM_CLEAR_AUTOMATIONS)) {
+            if (std::find(entry.clearedAutomation.begin(), entry.clearedAutomation.end(),
+                          clear.id) == entry.clearedAutomation.end())
+                entry.clearedAutomation.push_back(clear.id);
+        }
+    return notes;
+}
+
+std::uint32_t InstancePool::rememberedLatency(Id id) const {
+    auto it = instances_.find(id);
+    return it == instances_.end() ? 0 : it->second.latency;
+}
+
+const Error* InstancePool::failure(Id id) const {
+    auto it = instances_.find(id);
+    return it != instances_.end() && it->second.failure ? &*it->second.failure : nullptr;
+}
+
+std::vector<std::pair<Id, Error>> InstancePool::failedErrors() const {
+    std::vector<std::pair<Id, Error>> out;
+    for (const auto& [id, entry] : instances_) {
+        if (entry.failure)
+            out.emplace_back(id, *entry.failure);
+        else if (entry.instance && entry.instance->failed())
+            out.emplace_back(
+                id, Error("engine.bridge_failed", entry.instance->failure(), "/fx/" + id.str(),
+                          "Use fx.restart to recreate this instance"));
+    }
+    return out;
+}
+
+bool InstancePool::automationCleared(Id id, std::uint32_t param) const {
+    auto it = instances_.find(id);
+    return it != instances_.end() &&
+           std::find(it->second.clearedAutomation.begin(), it->second.clearedAutomation.end(),
+                     param) != it->second.clearedAutomation.end();
+}
+
+void InstancePool::acknowledgeOutputPatch(Id id, const json::Value& patch) {
+    if (auto it = instances_.find(id); it != instances_.end() && it->second.instance)
+        it->second.appliedState = "patch:" + json::writeCompact(patch);
+}
+
+void InstancePool::resetAutomation(Id id) {
+    if (auto it = instances_.find(id); it != instances_.end()) it->second.clearedAutomation.clear();
 }
 
 // --- media -----------------------------------------------------------------------------
@@ -350,8 +424,8 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     audio.join();
 
     OfflineResult r;
+    for (const auto& fx : s.fx) pool.service(fx.id);
     for (host::Instance* in : instances) {
-        in->serviceMainThread();
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
     if (startFailed) return Error("engine.start_failed", "a plugin refused to start processing");
@@ -373,6 +447,12 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     }
     r.outputLatency = static_cast<std::uint32_t>(outputLatency);
     r.warnings = std::move(p.warnings);
+    for (const auto& node : p.nodes)
+        forEachStage(node, [&](const Stage& st) {
+            if (st.voiceDropped)
+                r.warnings.push_back(st.fx.str() + ": voice tracking capacity exceeded: " +
+                                     std::to_string(st.voiceDropped));
+        });
     r.audio.sampleRate = p.rate;
     const auto skip = static_cast<std::ptrdiff_t>(outputLatency);
     r.audio.channels = {std::vector<float>(outL.begin() + skip, outL.end()),

@@ -79,3 +79,14 @@ block (no gain from parallelism, and the block's full cost lands in one
 callback); flushing rings on every edit (dropouts on every change); a lock
 between the callback and the renderer (priority inversion on the audio
 thread).
+
+## Output-event handoff (review round 3)
+
+Once a block's worker tasks finish, its owning executor copies parameter values
+and gestures into its own preallocated SPSC queue for main. Renderer and callback
+use separate queues: workers never concurrently publish to one SPSC producer.
+Records include FX id, plan generation, transport epoch, latency-corrected
+position and stream position; the main consumer can reject obsolete epochs and
+align anticipative recording to what has played. Overflow is counted; idle flush
+outputs join the main take API. A requested stopped render does not advance the
+transport or publish audio chunks. See engine.md for the app consumer contract.
