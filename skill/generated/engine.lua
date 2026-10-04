@@ -135,6 +135,9 @@ q = nil
 ---@field anticipation_misses integer
 ---@field meter_drops table
 ---@field failed_fx string[]
+---@field dropped integer
+---@field voice_dropped integer
+---@field failed_errors any
 
 ---@class Quire.engine_status_result
 ---@field running boolean
@@ -152,6 +155,9 @@ q = nil
 ---@field anticipation_misses integer
 ---@field meter_drops table
 ---@field failed_fx string[]
+---@field dropped integer
+---@field voice_dropped integer
+---@field failed_errors any
 
 ---@class Quire.env_add_args
 ---@field track? string Track id, e.g. "tr_1".

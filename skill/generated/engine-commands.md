@@ -1044,7 +1044,14 @@ Kind: `action`. Exposure: `mcp-tool`.
       "items": {
         "type": "string"
       }
-    }
+    },
+    "dropped": {
+      "type": "integer"
+    },
+    "voice_dropped": {
+      "type": "integer"
+    },
+    "failed_errors": {}
   },
   "required": [
     "running",
@@ -1061,7 +1068,10 @@ Kind: `action`. Exposure: `mcp-tool`.
     "anticipative",
     "anticipation_misses",
     "meter_drops",
-    "failed_fx"
+    "failed_fx",
+    "dropped",
+    "voice_dropped",
+    "failed_errors"
   ],
   "additionalProperties": false
 }
@@ -1107,7 +1117,10 @@ Result:
     "renderer": 0,
     "callback": 0
   },
-  "failed_fx": []
+  "failed_fx": [],
+  "dropped": 0,
+  "voice_dropped": 0,
+  "failed_errors": []
 }
 
 ```
@@ -1116,7 +1129,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -1190,7 +1203,14 @@ Kind: `query`. Exposure: `mcp-tool`.
       "items": {
         "type": "string"
       }
-    }
+    },
+    "dropped": {
+      "type": "integer"
+    },
+    "voice_dropped": {
+      "type": "integer"
+    },
+    "failed_errors": {}
   },
   "required": [
     "running",
@@ -1207,7 +1227,10 @@ Kind: `query`. Exposure: `mcp-tool`.
     "anticipative",
     "anticipation_misses",
     "meter_drops",
-    "failed_fx"
+    "failed_fx",
+    "dropped",
+    "voice_dropped",
+    "failed_errors"
   ],
   "additionalProperties": false
 }
@@ -1244,7 +1267,10 @@ Result:
     "renderer": 0,
     "callback": 0
   },
-  "failed_fx": []
+  "failed_fx": [],
+  "dropped": 0,
+  "voice_dropped": 0,
+  "failed_errors": []
 }
 
 ```

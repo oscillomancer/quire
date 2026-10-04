@@ -294,7 +294,7 @@ class Instance {
         std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
     Notifications takeNotifications();
-    // Local CLAP request_process: main may inspect it to activate an inactive
+    // CLAP request_process (local or bridged): main may inspect it to activate an inactive
     // instance; its audio owner consumes it to wake a sleeping stage.
     bool processRequested() const SUPPLE_RT;
     bool takeProcessRequest() SUPPLE_RT;

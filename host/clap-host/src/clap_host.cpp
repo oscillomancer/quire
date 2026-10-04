@@ -1549,10 +1549,12 @@ int Instance::nextTimerMs() const {
 }
 
 bool Instance::processRequested() const SUPPLE_RT {
+    if (remote_) return remote_->processRequested();
     return hostState_ && hostState_->processRequested.load(std::memory_order_acquire);
 }
 
 bool Instance::takeProcessRequest() SUPPLE_RT {
+    if (remote_) return remote_->takeProcessRequest();
     return hostState_ && hostState_->processRequested.exchange(false, std::memory_order_acq_rel);
 }
 

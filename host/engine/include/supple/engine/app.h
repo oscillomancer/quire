@@ -67,8 +67,10 @@ struct EngineStatus {
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;
-    MeterDrops meterDrops;              // meter entries dropped by a full ring
-    std::vector<std::string> failedFx;  // isolated instances whose bridge crashed or hung
+    MeterDrops meterDrops;                       // meter entries dropped by a full ring
+    std::vector<std::string> failedFx;           // isolated instances whose bridge crashed or hung
+    std::int64_t dropped = 0, voiceDropped = 0;  // plug-in output/voice transport
+    json::Value failedErrors = json::Value::array();
 };
 
 struct RecordingWarning {
@@ -393,6 +395,21 @@ class EngineApp : public cmd::Host {
         bool touched = false;
     };
     std::map<model::Id, AutoWrite> autoWrite_;
+    struct OutputGesture {
+        std::optional<PluginOutput> latest;
+        std::vector<PluginOutput> recording;
+        bool ended = false;
+    };
+    using OutputKey = std::pair<model::Id, std::uint32_t>;
+    std::map<OutputKey, OutputGesture> outputGestures_;
+    std::deque<PluginOutput> pendingOutputs_;
+    std::uint64_t outputGeneration_ = 0, outputEpoch_ = 0;
+    std::uint64_t outputDrops_ = 0, voiceDrops_ = 0, consumerDrops_ = 0;
+    bool outputOverflow_ = false;
+    static json::Value pluginErrorJson(const Error& error);
+    void consumePluginOutputs();
+    Status commitOutputGesture(const OutputKey& key, const OutputGesture& gesture);
+    void recordAutomationAt(model::Id object, const std::string& param, double value, double beat);
     void beginAutomationPass(double beat);
     Status finishAutomationPass(double stopBeat);
     TransportRange loop_, punch_;  // kept across engine restarts (not in the session)

@@ -247,6 +247,11 @@ void InstancePool::acknowledgeOutputPatch(Id id, const json::Value& patch) {
         it->second.appliedState = "patch:" + json::writeCompact(patch);
 }
 
+void InstancePool::acknowledgeOutputState(Id id, const std::string& hash) {
+    if (auto it = instances_.find(id); it != instances_.end() && it->second.instance)
+        it->second.appliedState = "blob:" + hash;
+}
+
 void InstancePool::resetAutomation(Id id) {
     if (auto it = instances_.find(id); it != instances_.end()) it->second.clearedAutomation.clear();
 }

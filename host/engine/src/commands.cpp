@@ -191,6 +191,9 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
         .field("meter_drops", &EngineStatus::meterDrops, meterDropsSchema())
         .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
+        .field("dropped", &EngineStatus::dropped, schema::integer())
+        .field("voice_dropped", &EngineStatus::voiceDropped, schema::integer())
+        .field("failed_errors", &EngineStatus::failedErrors, schema::any())
         .build();
 }
 
@@ -3415,7 +3418,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0,
-                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
+                     "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
@@ -3496,7 +3500,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
             "away; engine.stop and engine.start again. meter_drops: meter entries a full ring "
             "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
-            "never audio. failed_fx: isolated plugins whose "
+            "never audio. dropped/voice_dropped count lost plug-in output/voice records. "
+            "failed_errors adds structured code, message, path and hint to each failure. "
+            "failed_fx: isolated plugins whose "
             "process crashed or hung (silent now; fx.restart re-creates them).";
         c.tags = {"engine"};
         c.args = schema::object<NoArgs>("no_args").build();
@@ -3506,7 +3512,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0,
-                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": []})"),
+                     "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
+                     "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<EngineStatus> {
             return A(ctx).engineStatus();

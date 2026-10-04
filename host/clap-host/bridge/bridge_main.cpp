@@ -368,6 +368,14 @@ struct Bridge {
                 w.u8(n.semanticChanged ? 1 : 0);
                 w.u8(n.tailChanged ? 1 : 0);
                 w.u32(n.paramsRescanFlags);
+                w.u8(instance->takeProcessRequest() ? 1 : 0);
+                if (n.paramsClear.size() > kMaxParamClears)
+                    return fail(Error("bridge.notifications_limit", "too many parameter clears"));
+                w.u32(static_cast<std::uint32_t>(n.paramsClear.size()));
+                for (const auto& clear : n.paramsClear) {
+                    w.u32(clear.id);
+                    w.u32(clear.flags);
+                }
                 w.u32(n.droppedEvents);
                 w.u8(instance->needsAudioFlush() ? 1 : 0);
                 w.u32(static_cast<std::uint32_t>(log.size()));

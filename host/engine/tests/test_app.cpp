@@ -374,11 +374,22 @@ TEST_CASE("an isolated plugin that crashes is reported and restarted over the bu
     auto status = call("engine.status", "{}");
     REQUIRE(status["failed_fx"].size() == 1);
     CHECK(status["failed_fx"].at(0).asString() == "fx_2");
+    REQUIRE(status["failed_errors"].size() == 1);
+    const auto& failure = status["failed_errors"].at(0);
+    CHECK(failure.find("fx")->asString() == "fx_2");
+    CHECK(failure.find("error")->find("code")->asString() == "engine.bridge_failed");
+    CHECK(failure.find("reason")->asString() == failure.find("error")->find("message")->asString());
     CHECK(status["running"].asBool());  // the engine plays on
     bool reported = false;
     for (const auto& [topic, payload] : app->takeEvents())
-        if (topic == "fx.failed") reported = payload.find("fx")->asString() == "fx_2";
+        if (topic == "fx.failed") {
+            reported = payload.find("fx")->asString() == "fx_2";
+            REQUIRE(payload.find("error"));
+            CHECK(payload.find("error")->find("code")->asString() == "engine.bridge_failed");
+        }
     CHECK(reported);
+    app->tick();
+    for (const auto& event : app->takeEvents()) CHECK(event.first != "fx.failed");
     call("fx.restart", R"({"fx": "fx_2"})");
     CHECK(call("engine.status", "{}")["failed_fx"].size() == 0);
     host::Instance* again = app->instanceOf(crashFx);
@@ -2426,4 +2437,268 @@ TEST_CASE("recovery skips an overflowing recording start beside a valid file") {
     CHECK((*r)["warnings"].at(0).find("path")->asString() == "/start_sample");
     REQUIRE((*r)["recovered"].size() == 1);
     CHECK(app->head().items.size() == 1);
+}
+
+TEST_CASE("app consumes editor gestures as one undo step without echoing to the live instance") {
+    for (std::uint8_t mode : {30, 31, 32, 35}) {
+        Root root;
+        auto app = makeApp(root.path);
+        cmd::Registry registry;
+        registerEngineCommands(registry);
+        cmd::Dispatcher bus(registry, *app);
+        auto call = [&](std::string command, std::string_view args) {
+            auto r = bus.execute({std::move(command), j(args), kTest});
+            REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+            return *r;
+        };
+        call("track.add", R"({"name":"Editor"})");
+        call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})");
+        const auto fx = *model::Id::parse("fx_1");
+        auto setup = app->beginTransaction(kTest, "Fixture mode");
+        REQUIRE(setup);
+        std::vector<std::uint8_t> state{mode, 0, 0, 0};
+        const auto hash = "sha256:" + sha256Hex(state);
+        app->txn().putBlob(hash, std::make_shared<const model::Blob>(model::Blob{state}));
+        app->txn().modify<model::FxInstance>(fx, [&](auto& f) { f.state = hash; });
+        REQUIRE(app->commitTransaction(*setup));
+        if (mode == 31 || mode == 35) {
+            call("env.add", R"({"fx":"fx_1","param":"7","points":[{"beat":0,"value":0}]})");
+            call("env.set", R"({"env":"en_1","mode":"touch"})");
+        }
+        if (mode == 35) call("branch.create", R"({"name":"editor"})");
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64},
+                                 {.anticipative = false}));
+        REQUIRE(app->transport("play"));
+        backend.run(1);
+        app->tick();
+        auto* instance = app->instanceOf(fx);
+        REQUIRE(instance);
+        REQUIRE(instance->openEditor(1234, 1));  // display-free fixture editor
+        const auto version = app->head().version;
+        const auto history = app->versions().history().size();
+        const auto deliveries = *instance->paramValue(8);
+        backend.run(1);
+        app->tick();
+        if (mode != 32) CHECK(app->head().version == version);  // unfinished gesture
+        backend.run(1);
+        app->tick();
+        REQUIRE(app->head().fx.find(fx)->params.count(7));
+        CHECK(app->head().fx.find(fx)->params.at(7) == 10);
+        CHECK(app->instanceOf(fx) == instance);  // saved output state was acknowledged
+        if (mode != 32) CHECK(app->versions().history().size() == history + 1);
+        if (mode == 30) CHECK(*instance->paramValue(8) == deliveries);
+        if (mode == 31) {
+            REQUIRE(app->head().envelopes.size() == 1);
+            CHECK(app->head().envelopes.begin()->value->points.size() == 1);
+        }
+        if (mode == 35) {
+            REQUIRE(app->head().envelopes.size() == 1);
+            const auto& points = app->head().envelopes.begin()->value->points;
+            REQUIRE(points.size() > 1);
+            CHECK(points.back().value == 10);
+            CHECK(points.back().pos == doctest::Approx(128.0 / 24000));
+        }
+        if (mode == 32) CHECK(app->engineStatus().dropped > 0);
+        instance->closeEditor();
+        app->stopEngine();
+        if (mode == 35) {
+            call("branch.switch", R"({"name":"main"})");
+            call("track.set", R"({"track":"tr_1","name":"Concurrent unrelated edit"})");
+            call("branch.merge", R"({"from":"editor"})");
+            CHECK(app->head().fx.find(fx)->params.at(7) == 10);
+            CHECK(app->head().envelopes.begin()->value->points.back().value == 10);
+        }
+        if (mode != 32) {
+            call("history.undo", "{}");
+            CHECK(app->head().fx.find(fx)->params.count(7) == 0);
+            call("history.redo", "{}");
+            CHECK(app->head().fx.find(fx)->params.at(7) == 10);
+        }
+    }
+}
+
+TEST_CASE("app applies stopped editor flushes immediately and discards obsolete gesture outputs") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Editor"})"), kTest}));
+    REQUIRE(bus.execute(
+        {"fx.add", j(R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})"), kTest}));
+    const auto fx = *model::Id::parse("fx_1");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    auto* instance = app->instanceOf(fx);
+    instance->deactivate();  // inactive params.flush is the main-thread idle path
+    REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{30, 0, 0, 0}));
+    REQUIRE(instance->openEditor(1234, 1));
+    const auto version = app->head().version;
+    app->tick();
+    CHECK(app->head().version != version);
+    REQUIRE(app->head().fx.find(fx)->params.count(7));
+    CHECK(app->head().fx.find(fx)->params.at(7) == 10);
+    CHECK(app->instanceOf(fx) == instance);
+    CHECK(*instance->paramValue(8) == 0);
+    instance->closeEditor();
+    REQUIRE(app->transport("play"));
+    backend.run(1);
+    REQUIRE(instance->openEditor(1234, 1));
+    backend.run(1);  // queued begin/value, then a seek abandons this epoch
+    REQUIRE(app->transport("seek", 2));
+    const auto afterSeek = app->head().version;
+    app->tick();
+    CHECK(app->head().version == afterSeek);
+    instance->closeEditor();
+    app->stopEngine();
+}
+
+TEST_CASE("app keeps read-only plug-in outputs out of the model and history") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Meter"})"), kTest}));
+    REQUIRE(bus.execute(
+        {"fx.add", j(R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})"), kTest}));
+    const auto fx = *model::Id::parse("fx_1");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    auto* instance = app->instanceOf(fx);
+    instance->deactivate();
+    REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{33, 0, 0, 0}));
+    REQUIRE(instance->openEditor(1234, 1));
+    const auto version = app->head().version;
+    app->tick();  // the editor's idle flush reports the read-only parameter
+    CHECK(app->head().version == version);
+    CHECK_FALSE(app->head().fx.find(fx)->params.count(7));
+    instance->closeEditor();
+    app->stopEngine();
+}
+
+TEST_CASE("app converts semantic output values to physical patches without setter feedback") {
+    struct Control {
+        void (*edit)(const clap_plugin_t*, double, std::uint32_t);
+        std::uint32_t (*deliveries)(const clap_plugin_t*);
+    };
+    for (bool playing : {false, true}) {
+        Root root;
+        auto app = makeApp(root.path);
+        cmd::Registry registry;
+        registerEngineCommands(registry);
+        cmd::Dispatcher bus(registry, *app);
+        REQUIRE(bus.execute({"track.add", j(R"({"name":"Gain"})"), kTest}));
+        REQUIRE(bus.execute({"fx.add", j(R"({"track":"tr_1","plugin":"Test Gain"})"), kTest}));
+        const auto fx = *model::Id::parse("fx_1");
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64},
+                                 {.anticipative = false}));
+        if (playing) {
+            REQUIRE(app->transport("play"));
+            backend.run(1);
+            app->tick();
+        }
+        auto* instance = app->instanceOf(fx);
+        const auto* plugin = instance->raw();
+        const auto* control =
+            static_cast<const Control*>(plugin->get_extension(plugin, "supple.test.gain-control"));
+        REQUIRE(control);
+        const auto deliveries = control->deliveries(plugin);
+        const auto history = app->versions().history().size();
+        control->edit(plugin, -12, host::OutputEvent::IsLive | host::OutputEvent::DontRecord);
+        backend.run(1);  // active stopped flushes also need their audio owner
+        app->tick();
+        for (const auto& [topic, payload] : app->takeEvents()) {
+            if (topic == "engine.error") MESSAGE(json::writeCompact(payload));
+        }
+        CAPTURE(playing);
+        REQUIRE(app->head().fx.find(fx)->patch);
+        CHECK(app->head().fx.find(fx)->patch->find("params")->find("gain")->asDouble() ==
+              doctest::Approx(-12));
+        CHECK(app->versions().history().size() == history + 1);
+        CHECK(control->deliveries(plugin) == deliveries);
+        app->stopEngine();
+    }
+}
+
+TEST_CASE("app rejects plug-in outputs from a replaced plan and a removed FX") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Editor"})"), kTest}));
+    REQUIRE(bus.execute(
+        {"fx.add", j(R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})"), kTest}));
+    const auto fx = *model::Id::parse("fx_1");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    auto* instance = app->instanceOf(fx);
+    REQUIRE(instance->loadState(std::array<std::uint8_t, 4>{30, 0, 0, 0}));
+    REQUIRE(app->transport("play"));
+    backend.run(1);
+    REQUIRE(instance->openEditor(1234, 1));
+    backend.run(1);  // an undrained begin/value belongs to the older plan
+    REQUIRE(bus.execute({"track.set", j(R"({"track":"tr_1","name":"New plan"})"), kTest}));
+    const auto version = app->head().version;
+    app->tick();
+    CHECK(app->head().version == version);
+    CHECK(app->head().fx.find(fx)->params.empty());
+    backend.run(1);
+    REQUIRE(bus.execute({"fx.remove", j(R"({"fx":"fx_1"})"), kTest}));
+    const auto removed = app->head().version;
+    app->tick();
+    CHECK(app->head().version == removed);
+    CHECK_FALSE(app->head().fx.contains(fx));
+    app->stopEngine();
+}
+
+TEST_CASE("app holds anticipative plug-in edits until their stream position has played") {
+    struct Control {
+        void (*edit)(const clap_plugin_t*, double, std::uint32_t);
+        std::uint32_t (*deliveries)(const clap_plugin_t*);
+    };
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Ahead"})"), kTest}));
+    REQUIRE(bus.execute({"fx.add", j(R"({"track":"tr_1","plugin":"Test Gain"})"), kTest}));
+    const auto fx = *model::Id::parse("fx_1");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->startEngine(
+        backend, {.sampleRate = 48000, .blockSize = 64},
+        {.anticipative = true, .renderBlock = 64, .renderAheadMs = 4, .workers = 0}));
+    REQUIRE(app->transport("play"));
+    auto& engine = *app->engine();
+    REQUIRE(engine.awaitRendered(1 << 20));
+    engine.holdRenderer(true);
+    REQUIRE(engine.awaitRendererHeld());
+    backend.run(1);
+    auto* instance = app->instanceOf(fx);
+    const auto* plugin = instance->raw();
+    const auto* control =
+        static_cast<const Control*>(plugin->get_extension(plugin, "supple.test.gain-control"));
+    REQUIRE(control);
+    control->edit(plugin, -9, host::OutputEvent::IsLive);
+    engine.holdRenderer(false);
+    REQUIRE(engine.awaitRendered(1 << 20));
+    engine.holdRenderer(true);
+    REQUIRE(engine.awaitRendererHeld());
+    const auto version = app->head().version;
+    app->tick();
+    CHECK(app->head().version == version);  // output was rendered ahead
+    backend.run(16);                        // renderer clamps render-ahead to at least 10 ms
+    app->tick();
+    REQUIRE(app->head().fx.find(fx)->patch);
+    CHECK(app->head().fx.find(fx)->patch->find("params")->find("gain")->asDouble() ==
+          doctest::Approx(-9));
+    engine.holdRenderer(false);
+    app->stopEngine();
 }

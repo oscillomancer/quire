@@ -68,6 +68,8 @@ class InstancePool {
     // Main thread, only after applying plug-in-originated values to its model
     // patch: acknowledge that patch without sending it back on the next get().
     void acknowledgeOutputPatch(model::Id id, const json::Value& patch);
+    // The equivalent acknowledgement for captured opaque state.
+    void acknowledgeOutputState(model::Id id, const std::string& hash);
 
     std::size_t retired() const { return retired_.size(); }
     std::size_t size() const { return instances_.size(); }

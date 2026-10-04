@@ -250,7 +250,12 @@ bool validReply(Op op, Reader r) {
             r.skip(9);
             break;
         case Op::Service: {
-            r.skip(15);
+            r.skip(10);                    // work/flags and paramsRescanFlags
+            if (r.u8() > 1) return false;  // consumed request_process
+            const auto clears = r.u32();
+            if (clears > kMaxParamClears) return false;
+            r.skip(static_cast<std::size_t>(clears) * 8);
+            r.skip(5);  // droppedEvents, needsAudioFlush
             const auto lines = r.u32();
             for (std::uint32_t i = 0; i < lines && r.ok(); ++i) r.skipString();
             r.skip(9);

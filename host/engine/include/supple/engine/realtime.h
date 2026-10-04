@@ -342,6 +342,8 @@ class Engine {
     // Main thread: FIFO per executor; no ordering is implied between executor
     // queues and idle flushes. Metadata identifies the plan and transport epoch.
     PluginOutputs takePluginOutputs();
+    // Main-thread watermark for deferring anticipative output recording.
+    std::int64_t playedStream(std::uint64_t epoch) const;
     std::uint64_t planGeneration() const { return publishedGen_; }  // main thread
     std::uint64_t pluginOutputDrops() const { return outputDrops_.load() + idleOutputDrops_; }
 
@@ -434,7 +436,6 @@ class Engine {
     std::uint64_t relocate(std::uint64_t previous);  // returns the epoch it relocated for
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
     // Frames the callback has played in `epoch` (0 before its first).
-    std::int64_t playedStream(std::uint64_t epoch) const;
     // The epoch with its seek target and loop, read under xportSeq_: the
     // audio thread gives up after `tries` (a write in progress) and keeps
     // what it has for another cycle; the renderer relocates with the same

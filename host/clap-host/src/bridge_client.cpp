@@ -468,7 +468,10 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
         return false;
     }
     auto reply = call(Op::Service, Writer{});
-    if (!reply) return false;
+    if (!reply) {
+        notes.restartError = reply.error();
+        return false;
+    }
     Reader r(reply->data(), reply->size());
     const bool didWork = r.u8() != 0;
     Instance::Notifications n;
@@ -478,6 +481,9 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     n.semanticChanged = r.u8() != 0;
     n.tailChanged = r.u8() != 0;
     n.paramsRescanFlags = r.u32();
+    if (r.u8()) processRequested_.store(true, std::memory_order_release);
+    const auto clears = r.u32();  // validated by call()
+    for (std::uint32_t i = 0; i < clears; ++i) n.paramsClear.push_back({r.u32(), r.u32()});
     n.droppedEvents = r.u32();
     needsAudioFlush_ = r.u8() != 0;
     const std::uint32_t lines = r.u32();
@@ -487,6 +493,13 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     reportsTail_ = r.u8() != 0;
     if (r.u8()) notes.restartError = r.error();
     notes.stateDirty |= n.stateDirty;
+    if (n.paramsRescan) notes.paramsClear.clear();
+    if (notes.paramsClear.size() + n.paramsClear.size() > bridge::kMaxParamClears) {
+        notes.restartError =
+            Error("bridge.notifications_limit", "too many pending parameter clears");
+        return false;
+    }
+    notes.paramsClear.insert(notes.paramsClear.end(), n.paramsClear.begin(), n.paramsClear.end());
     notes.paramsRescan |= n.paramsRescan;
     notes.latencyChanged |= n.latencyChanged;
     notes.semanticChanged |= n.semanticChanged;
