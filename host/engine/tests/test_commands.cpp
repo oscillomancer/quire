@@ -990,3 +990,62 @@ TEST_CASE("renders: FLAC files, a secondary format, and a queue pinned to its ve
     CHECK(run(bus, "render.queue.remove", R"({"all":true})").find("removed")->asInt() == 1);
     CHECK(bus.execute({"render.queue.run", j("{}"), kOrigin}).error().code == "render.queue_empty");
 }
+
+TEST_CASE("take FX and take envelopes over the bus: add, reorder, copy with the item, remove") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Synth"})");
+    run(bus, "item.add", R"({"track":"tr_1","position":0,"length":4,"notation":"1: C4:w"})");
+    // A MIDI take's envelope needs an instrument in its take FX.
+    auto refused = bus.execute({"env.add", j(R"({"take":"tk_1","param":"volume"})"), kOrigin});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "env.take_midi");
+    run(bus, "fx.add", R"({"take":"tk_1","plugin":"Test Sine"})");                  // fx_1
+    run(bus, "fx.add", R"({"take":"tk_1","plugin":"com.suppleaudio.test.gain"})");  // fx_2
+    const model::Id tk1 = *model::Id::parse("tk_1");
+    CHECK(app->head().takes.find(tk1)->chain.size() == 2);
+    run(bus, "fx.move", R"({"fx":"fx_2","index":0})");
+    CHECK(app->head().takes.find(tk1)->chain.front() == *model::Id::parse("fx_2"));
+    CHECK(bus.execute({"fx.move", j(R"({"fx":"fx_2","track":"tr_1","index":0})"), kOrigin})
+              .error()
+              .code == "fx.chain");
+    // Points are beats from the item's start; bars are refused.
+    CHECK(bus.execute({"env.add",
+                       j(R"({"take":"tk_1","param":"volume","points":[{"bar":1,"value":0}]})"),
+                       kOrigin})
+              .error()
+              .code == "env.position");
+    run(bus, "env.add",
+        R"({"take":"tk_1","param":"volume","points":[{"beat":0,"value":0},{"beat":4,"value":-12}]})");
+    run(bus, "env.add", R"({"fx":"fx_2","param":"gain","points":[{"beat":0,"value":0}]})");
+    // The item renders through its take chain (the track has no instrument).
+    const auto mix = run(bus, "render.mix", R"({"name":"take","end_beat":4})");
+    CHECK(peak(mix.find("path")->asString()) > 0.01);
+    // A split's right side gets copies: its take FX and its envelope, from its start.
+    const auto split = run(bus, "item.split", R"({"item":"it_1","at":2})");
+    const model::Id right = *model::Id::parse(split.find("right")->asString());
+    const model::Session& s = app->head();
+    const model::Id rightTake = *s.items.find(right)->activeTake;
+    CHECK(s.takes.find(rightTake)->chain.size() == 2);
+    CHECK(s.takes.find(rightTake)->chain != s.takes.find(tk1)->chain);  // copies, not shared
+    const model::Envelope* copied = nullptr;
+    for (const auto& e : s.envelopes)
+        if (e.value->target.object == rightTake) copied = e.value.get();
+    REQUIRE(copied);
+    REQUIRE(copied->points.size() == 2);
+    CHECK(copied->points[0].pos == doctest::Approx(0.0));
+    CHECK(copied->points[0].value == doctest::Approx(-6.0));  // halfway down the ramp
+    CHECK(copied->points[1].pos == doctest::Approx(2.0));
+    std::size_t fxEnvelopes = 0;
+    for (const auto& e : s.envelopes) fxEnvelopes += e.value->target.object.kind == model::Kind::Fx;
+    CHECK(fxEnvelopes == 2);  // the take FX envelope was copied with its plug-in
+    // Removing the item removes its takes' FX and envelopes.
+    const std::string removeArgs = R"({"item":")" + split.find("right")->asString() + R"("})";
+    run(bus, "item.remove", removeArgs);
+    std::size_t left = 0;
+    for (const auto& e : app->head().envelopes) left += e.value->target.object == rightTake;
+    CHECK(left == 0);
+}

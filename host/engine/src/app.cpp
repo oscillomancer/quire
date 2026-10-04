@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <numbers>
 #include <string_view>
 #include <thread>
 
@@ -1550,6 +1551,23 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
                 : st;
         assert(st && "fixture recording failed");
         (void)st;
+        return;
+    }
+    if (fixture == "song_with_audio") {  // tr_1 "Audio" + it_1/tk_1: four beats of a 0.5 tone
+        run("track.add", R"({"name": "Audio"})");
+        const fs::path file = mediaDir() / "tone.wav";
+        audio::AudioData tone;
+        tone.sampleRate = head().project->sampleRate;
+        tone.channels.assign(2, std::vector<float>(static_cast<std::size_t>(2 * tone.sampleRate)));
+        for (std::size_t i = 0; i < tone.frames(); ++i)
+            tone.channels[0][i] = tone.channels[1][i] =
+                static_cast<float>(0.5 * std::sin(2 * std::numbers::pi * 440.0 *
+                                                  static_cast<double>(i) / tone.sampleRate));
+        const Status st = audio::writeWav(file, tone);
+        assert(st && "fixture audio failed");
+        (void)st;
+        run("item.add",
+            R"({"track": "tr_1", "position": 0, "audio_file": ")" + file.string() + R"("})");
         return;
     }
     if (fixture == "meter_change") {  // 3/4 from bar 9

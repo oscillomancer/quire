@@ -230,7 +230,7 @@ struct EnvPointArg {
     std::optional<double> tension;
 };
 struct EnvAddArgs {
-    std::optional<std::string> track, fx, route;
+    std::optional<std::string> track, fx, route, take;
     std::string param;
     std::optional<std::vector<EnvPointArg>> points;
 };
@@ -369,13 +369,17 @@ Result<double> envValue(const EnvDomain& d, const json::Value& v, const std::str
     return std::clamp(v.asDouble(), d.clapRange->first, d.clapRange->second);
 }
 
+// `itemRelative`: a take's envelope, positions in beats from its item's start.
 Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const EnvDomain& d,
                                                const std::vector<EnvPointArg>& in,
-                                               const std::string& path) {
+                                               const std::string& path, bool itemRelative = false) {
     std::vector<model::EnvPoint> out;
     for (std::size_t i = 0; i < in.size(); ++i) {
         const EnvPointArg& a = in[i];
         const std::string at = path + "/" + std::to_string(i);
+        if (itemRelative && !a.beat)
+            return Error("env.position", "a take's envelope takes beats from the item's start", at,
+                         "e.g. {\"beat\": 0, \"value\": -6} at the item's start");
         const int given = a.beat.has_value() + a.bar.has_value() + a.seconds.has_value();
         if (given != 1) return Error("env.position", "give one of beat, bar or seconds", at);
         model::EnvPoint pt;
@@ -492,7 +496,8 @@ struct MidiGetArgs {
 // --- fx ------------------------------------------------------------------------------------
 
 struct FxAddArgs {
-    std::string track, plugin;
+    std::optional<std::string> track, take;
+    std::string plugin;
     std::optional<std::int64_t> index;
     std::optional<json::Value> patch;
     std::optional<std::string> chain;  // "main" (default) or "input"
@@ -1207,20 +1212,24 @@ void registerEngineCommands(cmd::Registry& registry) {
                     "tr.has_children",
                     a.track + " is a folder with " + std::to_string(tr.children.size()) + " tracks",
                     "/track", "move or remove its children first");
+            std::set<Id> gone(tr.chain.begin(), tr.chain.end());
+            gone.insert(id);
             for (const auto& e : s.items)
                 if (e.value->track == id) {
                     for (Id tk : e.value->takes) {
                         const model::Take* take = s.takes.find(tk);
                         if (take)
-                            for (Id f : take->chain) t.remove<model::FxInstance>(f);
+                            for (Id f : take->chain) {
+                                t.remove<model::FxInstance>(f);
+                                gone.insert(f);
+                            }
                         t.remove<model::Take>(tk);
+                        gone.insert(tk);  // its envelopes go too
                     }
                     t.remove<model::Item>(e.id);
                 }
             for (Id f : tr.chain) t.remove<model::FxInstance>(f);
             for (Id f : tr.inputChain) t.remove<model::FxInstance>(f);
-            std::set<Id> gone(tr.chain.begin(), tr.chain.end());
-            gone.insert(id);
             for (const auto& e : s.routes)
                 if ((e.value->from.track && *e.value->from.track == id) ||
                     (e.value->to.track && *e.value->to.track == id) ||
@@ -1669,6 +1678,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                 }
                 t.remove<model::Take>(tk);
             }
+            // Envelopes on its takes and their take FX.
+            std::set<Id> gone(s.items.find(*id)->takes.begin(), s.items.find(*id)->takes.end());
+            for (Id tk : s.items.find(*id)->takes)
+                if (const model::Take* take = s.takes.find(tk))
+                    gone.insert(take->chain.begin(), take->chain.end());
+            for (const auto& e : s.envelopes)
+                if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
             t.remove<model::Item>(*id);
             return Empty{};
         };
@@ -1792,14 +1808,17 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "fx.add";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Insert a plugin into a track's FX chain and return its id.";
+        c.summary = "Insert a plugin into a track's (or a take's) FX chain and return its id.";
         c.description =
             "plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic "
             "plugins. chain: main (default; the track's effects) or input (the recorded-input "
-            "chain).";
+            "chain). take instead of track: the take's own chain (take FX) — the item plays "
+            "through it before the track's input, cut to the item; an instrument there plays a "
+            "MIDI take on its own.";
         c.tags = {"fx"};
         c.args = schema::object<FxAddArgs>("fx_add_args")
                      .field("track", &FxAddArgs::track, idArg("tr", "Track"))
+                     .field("take", &FxAddArgs::take, idArg("tk", "Take"))
                      .field("plugin", &FxAddArgs::plugin, schema::string().minLength(1))
                      .field("index", &FxAddArgs::index, schema::integer().min(0))
                      .field("patch", &FxAddArgs::patch, schema::any())
@@ -1822,12 +1841,29 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"An effect in the track's input chain",
              obj(R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain", "chain": "input"})"),
              obj(R"({"fx": "fx_1", "name": "<any>", "semantic": "<any>", "chain": ["fx_1"]})"),
-             "song"}};
+             "song"},
+            {"Take FX: a gain on the take of an item",
+             obj(R"({"take": "tk_1", "plugin": "com.suppleaudio.test.gain"})"),
+             obj(R"({"fx": "fx_1", "name": "<any>", "semantic": "<any>", "chain": ["fx_1"]})"),
+             "song_with_item"}};
         c.run = [](const FxAddArgs& a, Context& ctx) -> Result<FxAddResult> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
-            auto track = existing<model::Track>(s, a.track, "/track");
-            if (!track) return std::move(track).error();
+            if (a.track.has_value() == a.take.has_value())
+                return Error("fx.target", "give track or take", "/track",
+                             "track: a track's chain; take: a take's own chain (take FX)");
+            std::optional<Id> track, take;
+            if (a.track) {
+                auto t = existing<model::Track>(s, *a.track, "/track");
+                if (!t) return std::move(t).error();
+                track = *t;
+            } else {
+                auto t = existing<model::Take>(s, *a.take, "/take");
+                if (!t) return std::move(t).error();
+                take = *t;
+                if (a.chain && *a.chain == "input")
+                    return Error("fx.chain", "a take has one chain", "/chain", "leave chain out");
+            }
             auto info = app.findPlugin(a.plugin);
             if (!info) return std::move(info).error().at("/plugin");
             model::FxInstance fx;
@@ -1844,6 +1880,18 @@ void registerEngineCommands(cmd::Registry& registry) {
             const bool input = a.chain && *a.chain == "input";
             model::EditTxn& t = app.txn();
             const Id id = t.create(std::move(fx));
+            if (take) {  // take FX keep the caller's order
+                std::vector<Id> chain = s.takes.find(*take)->chain;
+                const std::size_t at =
+                    a.index
+                        ? std::min<std::size_t>(static_cast<std::size_t>(*a.index), chain.size())
+                        : chain.size();
+                chain.insert(chain.begin() + static_cast<std::ptrdiff_t>(at), id);
+                t.modify<model::Take>(*take, [&](model::Take& tk) { tk.chain = chain; });
+                FxAddResult r{id.str(), info->name, info->semantic, {}};
+                for (Id f : chain) r.chain.push_back(f.str());
+                return r;
+            }
             const model::Track* strip = s.tracks.find(*track);
             std::vector<Id> chain = input ? strip->inputChain : strip->chain;
             std::size_t at =
@@ -2648,10 +2696,14 @@ void registerEngineCommands(cmd::Registry& registry) {
             "CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; "
             "values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for "
             "plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values "
-            "move along the parameter's curve (a log cutoff sweeps evenly in pitch).";
+            "move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param "
+            "volume|pan|mute): a take envelope, its points in beats from the item's start (it "
+            "moves with the item); it shapes the take after its take FX (a MIDI take needs an "
+            "instrument in its take FX).";
         c.tags = {"automation"};
         c.args = schema::object<EnvAddArgs>("env_add_args")
                      .field("track", &EnvAddArgs::track, idArg("tr", "Track"))
+                     .field("take", &EnvAddArgs::take, idArg("tk", "Take"))
                      .field("fx", &EnvAddArgs::fx, idArg("fx", "Plugin instance"))
                      .field("route", &EnvAddArgs::route, idArg("sd", "Route"))
                      .field("param", &EnvAddArgs::param, schema::string())
@@ -2667,15 +2719,36 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"env": "en_1", "points": 2})"), "song"},
             {"Sweep a plugin parameter",
              obj(R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": "-12 dB", "shape": "slow"}, {"beat": 4, "value": 0}]})"),
-             obj(R"({"env": "en_1", "points": 2})"), "song_with_fx"}};
+             obj(R"({"env": "en_1", "points": 2})"), "song_with_fx"},
+            {"Duck a take halfway through its item",
+             obj(R"({"take": "tk_1", "param": "volume", "points": [{"beat": 0, "value": 0}, {"beat": 2, "value": "-12 dB"}]})"),
+             obj(R"({"env": "en_1", "points": 2})"), "song_with_audio"}};
         c.run = [](const EnvAddArgs& a, Context& ctx) -> Result<EnvAddResult> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
-            if (a.track.has_value() + a.fx.has_value() + a.route.has_value() != 1)
-                return Error("env.target", "give one of track, fx or route", "",
+            if (a.track.has_value() + a.fx.has_value() + a.route.has_value() + a.take.has_value() !=
+                1)
+                return Error("env.target", "give one of track, fx, route or take", "",
                              "e.g. {\"fx\": \"fx_1\", \"param\": \"filter1.cutoff\"}");
             model::Envelope env;
-            if (a.track) {
+            if (a.take) {
+                auto id = existing<model::Take>(s, *a.take, "/take");
+                if (!id) return std::move(id).error();
+                const model::Take& take = *s.takes.find(*id);
+                if (take.source && take.source->kind == model::Kind::Midi) {
+                    bool instrument = false;
+                    for (Id f : take.chain)
+                        if (auto info = app.findPlugin(s.fx.find(f)->plugin.id))
+                            instrument = instrument || info->instrument;
+                    if (!instrument)
+                        return Error("env.take_midi",
+                                     "a MIDI take's envelope needs an instrument in its take FX",
+                                     "/take",
+                                     "fx.add {take, plugin: an instrument} first, or automate "
+                                     "the track");
+                }
+                env.target.object = *id;
+            } else if (a.track) {
                 auto id = existing<model::Track>(s, *a.track, "/track");
                 if (!id) return std::move(id).error();
                 env.target.object = *id;
@@ -2696,7 +2769,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             auto domain = envDomain(app, s, env.target, "/param");
             if (!domain) return std::move(domain).error();
             if (a.points) {
-                auto pts = envPoints(s, *domain, *a.points, "/points");
+                auto pts = envPoints(s, *domain, *a.points, "/points", a.take.has_value());
                 if (!pts) return std::move(pts).error();
                 env.points = std::move(*pts);
             }
@@ -2734,7 +2807,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Envelope& env = *s.envelopes.find(*id);
             auto domain = envDomain(app, s, env.target, "/env");
             if (!domain) return std::move(domain).error();
-            auto pts = envPoints(s, *domain, a.points, "/points");
+            auto pts = envPoints(s, *domain, a.points, "/points",
+                                 env.target.object.kind == model::Kind::Take);
             if (!pts) return std::move(pts).error();
             std::vector<model::EnvPoint> next;
             if (a.fromBeat || a.toBeat) {

@@ -23,6 +23,41 @@ double lengthBeats(const model::Session& s, const model::Item& it) {
     return model::itemLengthBeats(s, it);
 }
 
+// Where an envelope's points live on screen: its lane (track, route and
+// plugin envelopes) or its item (a take's, gap log #22: positions are beats
+// from the item's start).
+struct EnvFrame {
+    ui::Rect area;
+    double offsetBeats = 0;
+    EnvScale scale;
+    float y(double value) const {
+        return area.bottom() - static_cast<float>(scale.toNorm(value)) * area.h;
+    }
+    double value(float yPos) const {
+        return scale.fromNorm(static_cast<double>((area.bottom() - yPos) / area.h));
+    }
+};
+std::optional<EnvFrame> envFrame(const ArrangeView& v, model::Id id, const model::Envelope& env) {
+    const model::Session& s = v.session();
+    if (env.target.object.kind == model::Kind::Take) {
+        const auto scale = envScale(env);
+        if (!scale) return std::nullopt;
+        for (const auto& e : s.items) {
+            if (e.value->activeTake != env.target.object) continue;
+            const auto row = v.trackLayout().indexOf(e.value->track);
+            if (!row) return std::nullopt;
+            const ui::Rect item = const_cast<ArrangeView&>(v).lanes().itemRect(*row, *e.value);
+            return EnvFrame{Lanes::takeEnvArea(item), model::itemSpan(s, *e.value).startBeat,
+                            *scale};
+        }
+        return std::nullopt;
+    }
+    const auto row = v.trackLayout().indexOfEnv(id);
+    const auto scale = v.trackLayout().scaleOf(env);
+    if (!row || !scale) return std::nullopt;
+    return EnvFrame{Lanes::envArea(v.rowRect(*row)), 0.0, *scale};
+}
+
 constexpr float kEdge = 6;               // px at an item's ends that trim it
 constexpr float kHandle = 9;             // the fade handles' square at the top corners
 constexpr double kMinLength = 1.0 / 64;  // beats
@@ -180,29 +215,28 @@ class Ghost : public ui::Node {
                 c.strokeRect(st.marquee, t.color("focus"));
                 break;
             case ItemGestures::Drag::EnvPoint: {
-                const auto row = st.env ? v.trackLayout().indexOfEnv(*st.env) : std::nullopt;
                 const model::Envelope* env = st.env ? s.envelopes.find(*st.env) : nullptr;
-                const auto scale = env ? v.trackLayout().scaleOf(*env) : std::nullopt;
-                if (!row || !scale) break;
+                const auto frame = env ? envFrame(v, *st.env, *env) : std::nullopt;
+                if (!frame) break;
                 model::Envelope draft = *env;
                 draft.points = st.envDraft;
-                const ui::Rect area = Lanes::envArea(v.rowRect(*row));
-                auto yOf = [&](double value) {
-                    return area.bottom() - static_cast<float>(scale->toNorm(value)) * area.h;
-                };
+                const float x0 = std::max(lanes.x, frame->area.x),
+                            x1 = std::min(lanes.right(), frame->area.right());
                 ui::Point prev{};
-                for (float x = lanes.x; x <= lanes.right(); x += 3) {
-                    const double beat = s.timeMap->beatAt(std::max(0.0, v.timeAt(x)));
-                    const ui::Point p{x, yOf(envValueAt(draft, beat, 0.0))};
-                    if (x > lanes.x) c.line(prev, p, t.color("focus"), 2);
+                for (float x = x0; x <= x1; x += 3) {
+                    const double beat =
+                        s.timeMap->beatAt(std::max(0.0, v.timeAt(x))) - frame->offsetBeats;
+                    const ui::Point p{x, frame->y(envValueAt(draft, beat, 0.0))};
+                    if (x > x0) c.line(prev, p, t.color("focus"), 2);
                     prev = p;
                 }
                 if (st.envIndex < st.envDraft.size()) {
                     const model::EnvPoint& pt = st.envDraft[st.envIndex];
-                    const ui::Point at{v.xAt(s.timeMap->secondsAt(pt.pos)), yOf(pt.value)};
+                    const ui::Point at{v.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos)),
+                                       frame->y(pt.value)};
                     c.fillRect({at.x - 4, at.y - 4, 8, 8}, t.color("focus"));
-                    c.text({at.x + 8, at.y - 16, 120, 14}, scale->text(pt.value), ui::Font::Mono,
-                           t.type("caption"), t.color("ink"));
+                    c.text({at.x + 8, at.y - 16, 120, 14}, frame->scale.text(pt.value),
+                           ui::Font::Mono, t.type("caption"), t.color("ink"));
                 }
                 break;
             }
@@ -469,8 +503,11 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         copy_ = (e.mods & ui::kCtrl) != 0;
         state_ = State{};
         if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env)
-            return e.button == 1 ? envPress(*lane, e) : true;
+            return e.button == 1 ? envPress(*view_.trackLayout().rows()[*lane].env, e) : true;
         const auto h = hit(e.pos);
+        // A take envelope drawn on the item takes the press near its line.
+        if (e.button == 1 && h && e.clicks < 2)
+            if (const auto env = takeEnvelopeAt(h->item, e.pos)) return envPress(*env, e);
         pressRow_ = rowAt(e.pos.y).value_or(0);
         if (e.button == 1 && e.clicks >= 2 && !h) {  // empty space on a channel: a new MIDI item
             if (const auto row = rowAt(e.pos.y)) {
@@ -671,6 +708,57 @@ void ItemGestures::openItemMenu(ui::Point at) {
             if (auto r = run("Item timebase", steps); !r && onError) onError(r.error());
         };
         items.push_back(std::move(m));
+    }
+    // The active take's own chain and envelopes (gap log #22).
+    const model::Item* item =
+        itemOf(s, state_.anchor.kind == model::Kind::Item ? state_.anchor : selection_.front());
+    if (item && item->activeTake) {
+        const model::Id take = *item->activeTake;
+        items.push_back(rule);
+        ui::MenuItem fx;
+        fx.label = "Take FX\u2026";
+        fx.run = [this, take] {
+            if (onTakeFx) onTakeFx(take);
+        };
+        items.push_back(std::move(fx));
+        for (auto [label, param] : {std::pair{"Take volume envelope", "volume"},
+                                    {"Take pan envelope", "pan"},
+                                    {"Take mute envelope", "mute"}}) {
+            std::optional<model::Id> env;
+            bool shown = false;
+            for (const auto& e : s.envelopes)
+                if (e.value->target.object == take && e.value->target.param == param) {
+                    env = e.id;
+                    shown = e.value->visible;
+                }
+            ui::MenuItem m;
+            m.label = label;
+            m.checked = env && shown;
+            m.run = [this, take, env, shown, param = std::string(param)] {
+                if (!run) return;
+                json::Value args = json::Value::object();
+                std::string command;
+                if (env) {  // show or hide it
+                    command = "env.set";
+                    args["env"] = env->str();
+                    args["visible"] = !shown;
+                } else {  // a new one, flat at its neutral value from the item's start
+                    command = "env.add";
+                    args["take"] = take.str();
+                    args["param"] = param;
+                    json::Value points = json::Value::array(), first = json::Value::object();
+                    first["beat"] = 0.0;
+                    first["value"] = 0.0;
+                    points.push_back(std::move(first));
+                    args["points"] = std::move(points);
+                }
+                if (auto r = run(env ? "Take envelope" : "Add take envelope",
+                                 {{command, std::move(args)}});
+                    !r && onError)
+                    onError(r.error());
+            };
+            items.push_back(std::move(m));
+        }
     }
     root_->openPopup(ui::makeMenu("item.menu", std::move(items), [this] { root_->closePopup(); }),
                      {at.x, at.y, 1, 1});
@@ -967,13 +1055,11 @@ const char* shapeName(model::PointShape shape) {
 }
 }  // namespace
 
-bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
+bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
-    const model::Id envId = *view_.trackLayout().rows()[row].env;
     const model::Envelope* env = s.envelopes.find(envId);
-    const auto scale = env ? view_.trackLayout().scaleOf(*env) : std::nullopt;
-    if (!scale) return true;
-    const ui::Rect area = Lanes::envArea(view_.rowRect(row));
+    const auto frame = env ? envFrame(view_, envId, *env) : std::nullopt;
+    if (!frame) return true;
     state_.drag = Drag::EnvPoint;
     state_.env = envId;
     state_.envDraft = env->points;
@@ -981,8 +1067,8 @@ bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
     float reach = 7;
     for (std::size_t i = 0; i < env->points.size(); ++i) {
         const model::EnvPoint& pt = env->points[i];
-        const float x = view_.xAt(s.timeMap->secondsAt(pt.pos));
-        const float y = area.bottom() - static_cast<float>(scale->toNorm(pt.value)) * area.h;
+        const float x = view_.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos));
+        const float y = frame->y(pt.value);
         const float d = std::max(std::abs(x - e.pos.x), std::abs(y - e.pos.y));
         if (d < reach) {
             reach = d;
@@ -999,8 +1085,8 @@ bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
         state_.envIndex = *nearest;
     } else {  // a new point under the pointer
         model::EnvPoint pt;
-        pt.pos = std::max(0.0, snap(beatAtX(e.pos.x), free_));
-        pt.value = scale->fromNorm(static_cast<double>((area.bottom() - e.pos.y) / area.h));
+        pt.pos = std::max(0.0, snap(beatAtX(e.pos.x), free_) - frame->offsetBeats);
+        pt.value = frame->value(e.pos.y);
         const auto at =
             std::upper_bound(state_.envDraft.begin(), state_.envDraft.end(), pt.pos,
                              [](double b, const model::EnvPoint& p) { return b < p.pos; });
@@ -1018,23 +1104,43 @@ bool ItemGestures::envPress(std::size_t row, const ui::PointerEvent& e) {
 
 void ItemGestures::envDrag(const ui::PointerEvent& e) {
     const model::Session& s = view_.session();
-    const auto row = view_.trackLayout().indexOfEnv(*state_.env);
-    const model::Envelope* env = s.envelopes.find(*state_.env);
-    const auto scale = env ? view_.trackLayout().scaleOf(*env) : std::nullopt;
-    if (!row || !scale || state_.envIndex >= state_.envDraft.size()) return;
-    const ui::Rect area = Lanes::envArea(view_.rowRect(*row));
+    const model::Envelope* env = state_.env ? s.envelopes.find(*state_.env) : nullptr;
+    const auto frame = env ? envFrame(view_, *state_.env, *env) : std::nullopt;
+    if (!frame || state_.envIndex >= state_.envDraft.size()) return;
     auto& pts = state_.envDraft;
     model::EnvPoint& pt = pts[state_.envIndex];
     // A mostly vertical drag keeps the point's time (snapping would move it).
     if (std::abs(e.pos.x - press_.x) >= 4) {
         const double lo = state_.envIndex > 0 ? pts[state_.envIndex - 1].pos : 0.0;
         const double hi = state_.envIndex + 1 < pts.size() ? pts[state_.envIndex + 1].pos : 1e12;
-        const double raw = state_.envOrigPos + beatAtX(e.pos.x) - beatAtX(press_.x);
-        pt.pos = std::clamp(snap(raw, free_), lo, hi);
+        const double raw =
+            frame->offsetBeats + state_.envOrigPos + beatAtX(e.pos.x) - beatAtX(press_.x);
+        pt.pos = std::clamp(snap(raw, free_) - frame->offsetBeats, lo, hi);
     } else {
         pt.pos = state_.envOrigPos;
     }
-    pt.value = scale->fromNorm(static_cast<double>((area.bottom() - e.pos.y) / area.h));
+    pt.value = frame->value(e.pos.y);
+}
+
+std::optional<model::Id> ItemGestures::takeEnvelopeAt(model::Id item, ui::Point p) const {
+    const model::Session& s = view_.session();
+    const model::Item* it = itemOf(s, item);
+    if (!it || !it->activeTake) return std::nullopt;
+    for (const auto& e : s.envelopes) {
+        const model::Envelope& env = *e.value;
+        if (env.target.object != *it->activeTake || !env.visible) continue;
+        const auto frame = envFrame(view_, e.id, env);
+        if (!frame || !frame->area.contains(p)) continue;
+        // Near one of its points, or near its line at the pointer's time.
+        for (const model::EnvPoint& pt : env.points) {
+            const float x = view_.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos));
+            if (std::abs(x - p.x) < 7 && std::abs(frame->y(pt.value) - p.y) < 7) return e.id;
+        }
+        const double beat = beatAtX(p.x) - frame->offsetBeats;
+        if (std::abs(frame->y(envValueAt(env, beat, frame->scale.reference())) - p.y) < 5)
+            return e.id;
+    }
+    return std::nullopt;
 }
 
 void ItemGestures::commitEnv(const std::string& label) {

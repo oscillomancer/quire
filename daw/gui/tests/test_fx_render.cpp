@@ -699,3 +699,34 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     f.key("Return");
     CHECK(f.fxStatus() == "Saved Input");
 }
+
+TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input chain") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) {
+        MESSAGE("skipped: no GUI or stock plugins");
+        return;
+    }
+    const auto track = f.addTrack("Synth");
+    auto item = f.run(
+        "item.add",
+        f.args(
+            {{"track", track.str()}, {"position", 0.0}, {"length", 4.0}, {"notation", "1: C4:w"}}));
+    REQUIRE(item);
+    const auto take = *model::Id::parse((*item)["take"].asString());
+    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Plumb")}})));
+    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Facet")}})));
+    REQUIRE(f.fx->openTake(take));
+    f.frame();
+    REQUIRE(f.fx->take());
+    CHECK(f.root->find("fx.title")->valueText().rfind("Take FX: Synth", 0) == 0);
+    CHECK(f.fx->chain().size() == 2);
+    CHECK(f.fx->inputChain().empty());
+    CHECK(f.root->find("fx.add.input") == nullptr);  // a take has no input chain
+    // Preset buttons are for track chains.
+    f.click("fx.chain.save");
+    CHECK(f.fxStatus() == "Chain presets are for track chains");
+    // Opening a track's chain leaves take mode.
+    REQUIRE(f.fx->open(track));
+    CHECK_FALSE(f.fx->take());
+    CHECK(f.fx->chain().empty());
+}

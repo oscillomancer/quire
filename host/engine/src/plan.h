@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -267,11 +268,36 @@ struct Clip {
     std::int64_t fadeIn = 0, fadeOut = 0;
     model::FadeShape fadeInShape = model::FadeShape::Linear,
                      fadeOutShape = model::FadeShape::Linear;
+    int takeChain = -1;  // >= 0: it plays into that take chain, not the track's sum
 };
 
 struct TimedEvent {
     std::int64_t sample;
     host::Event event;
+};
+
+// A take with its own FX chain or envelopes (gap log #22): the item plays
+// through it before it reaches the track's input. Its input runs `latency`
+// samples ahead (the chain's PDC), its output is cut to the item's span and
+// gets the item and take gain, pan, fades and the take's envelopes there.
+struct TakeChain {
+    Id item, take;
+    std::int64_t start = 0, end = 0;  // the item's span, track timeline (PDC-shifted)
+    std::int64_t latency = 0;         // the chain's
+    int clip = -1;                    // its audio (an index into Node::clips), or -1
+    std::vector<TimedEvent> events;   // a MIDI take's, for its instrument, input side
+    std::size_t nextEvent = 0;
+    int noteTarget = -1;
+    std::array<std::uint8_t, 16 * 128> held{};
+    bool releaseHeld = false;
+    std::vector<Stage> chain;
+    double gainL = 1.0, gainR = 1.0;  // item gain x take gain, take pan
+    std::int64_t fadeIn = 0, fadeOut = 0;
+    model::FadeShape fadeInShape = model::FadeShape::Linear,
+                     fadeOutShape = model::FadeShape::Linear;
+    Automation volume, pan, mute;  // the take's envelopes (dB, %, 0/1), output side
+    Stereo buf;
+    bool active = false;  // processed in the last block: the chain is fresh at each entry
 };
 
 struct Node {
@@ -288,6 +314,7 @@ struct Node {
     std::array<std::uint8_t, 16 * 128> held{};
     bool releaseHeld = false;
     std::vector<Clip> clips;
+    std::vector<TakeChain> takeChains;
     int noteTarget = -1;  // chain index receiving note events
     double volumeDb = 0.0, pan = 0.0;
     double staticGain = 1, staticPan = .5;
@@ -319,6 +346,14 @@ struct Node {
     float meterPeak[2] = {0.0f, 0.0f};
     float meterSumSq[2] = {0.0f, 0.0f};
 };
+
+// Every stage of a node: its chain's, then its take chains'.
+template <class N, class F>
+void forEachStage(N& node, F&& f) {
+    for (auto& st : node.chain) f(st);
+    for (auto& tc : node.takeChains)
+        for (auto& st : tc.chain) f(st);
+}
 
 struct Plan {
     std::uint64_t generation = 0;  // set by the real-time engine when it publishes the plan

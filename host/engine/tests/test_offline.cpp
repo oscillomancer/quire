@@ -901,3 +901,103 @@ TEST_CASE("Console 9 stems decode channel and buss outputs without promising exa
     REQUIRE(again);
     CHECK(again->audio.channels == busStem->audio.channels);
 }
+
+TEST_CASE(
+    "take FX: an instrument plays its MIDI take, a latent effect stays aligned, take "
+    "envelopes shape the take") {
+    auto pool = makePool();
+    // 1. A sine in the take's chain sounds exactly like the sine on the track.
+    auto midiSession = [](bool inTake) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id tr = addTrack(t, "Synth");
+        if (!inTake) addFx(t, tr, kSine);
+        addNote(t, tr, 1.0, 2.0);
+        if (inTake) {
+            model::FxInstance fx;
+            fx.plugin.id = kSine;
+            const Id f = t.create(fx);
+            for (const Id take : t.created())
+                if (take.kind == model::Kind::Take)
+                    t.modify<model::Take>(take, [&](model::Take& x) { x.chain = {f}; });
+        }
+        return commit(t);
+    };
+    auto onTrack = render(midiSession(false), pool, 2.0);
+    auto inTake = render(midiSession(true), pool, 2.0);
+    REQUIRE(inTake.warnings.empty());
+    REQUIRE(onTrack.audio.frames() == inTake.audio.frames());
+    CHECK(peak(inTake.audio.channels[0]) > 0.05);
+    double worst = 0;
+    for (std::size_t i = 0; i < onTrack.audio.frames(); ++i)
+        worst = std::max(worst, std::fabs(double(onTrack.audio.channels[0][i]) -
+                                          double(inTake.audio.channels[0][i])));
+    CHECK(worst == 0.0);
+    CHECK(firstNonZero(inTake.audio.channels[0]) == 24000 + 1);  // beat 1 at 120 BPM
+    CHECK(peak(inTake.audio.channels[0], 72001) == 0.0);         // cut at the item's end (beat 3)
+
+    // 2. Audio through a take chain with latency lines up with the plain take;
+    //    a take volume envelope halves its second half; take FX need no track FX.
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-takefx-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(48000));
+    for (std::size_t i = 0; i < 48000; ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(0.5 * std::sin(2 * M_PI * 440.0 * static_cast<double>(i) / 48000.0));
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    auto audioSession = [&](bool takeFx, bool envelope) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id tr = addTrack(t, "Audio");
+        const Id md = t.create(model::MediaSource{"tone.wav", "", "wav", 48000, 2, 48000});
+        model::Take take;
+        take.source = md;
+        if (takeFx) {
+            model::FxInstance fx;
+            fx.plugin.id = kGain;
+            fx.patch =
+                json::parse(
+                    R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+                    .value();
+            take.chain = {t.create(fx)};
+        }
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = tr;
+        item.position = 0.0;
+        item.length = 2.0;  // 1 s
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
+        if (envelope) {
+            model::Envelope env;
+            env.target = {tk, "volume"};
+            env.points = {{0.0, 0.0, model::PointShape::Square}, {1.0, -6.0206}};  // item beats
+            t.create(env);
+        }
+        return commit(t);
+    };
+    MediaCache media;
+    auto renderAt = [&](const model::Session& s) {
+        auto r = renderOffline(
+            s, pool, {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir, .media = &media});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        CHECK(r->warnings.empty());
+        return std::move(*r);
+    };
+    const auto plain = renderAt(audioSession(false, false));
+    const auto through = renderAt(audioSession(true, false));
+    CHECK(through.outputLatency == 0);  // the take's latency runs ahead of the track
+    double diff = 0;
+    for (std::size_t i = 100; i < 47900; ++i)
+        diff = std::max(diff, std::fabs(double(plain.audio.channels[0][i]) -
+                                        double(through.audio.channels[0][i])));
+    CHECK(diff < 1e-6);
+    const auto ducked = renderAt(audioSession(false, true));
+    CHECK(peak(ducked.audio.channels[0], 1000, 23000) ==
+          doctest::Approx(peak(plain.audio.channels[0], 1000, 23000)).epsilon(1e-4));
+    CHECK(peak(ducked.audio.channels[0], 25000, 47000) ==
+          doctest::Approx(0.5 * peak(plain.audio.channels[0], 25000, 47000)).epsilon(1e-3));
+    std::filesystem::remove_all(dir);
+}

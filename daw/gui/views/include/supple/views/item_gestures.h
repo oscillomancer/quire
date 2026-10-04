@@ -52,8 +52,9 @@ class ItemGestures {
     Runner run;
     std::function<void(const std::vector<model::Id>&)> onSelection;  // after every change
     std::function<void(model::Id item)> onOpenMidi;                  // double-click on a MIDI item
-    std::function<void(double seconds)> onSeek;                      // a click on empty space
-    std::function<void(const Error&)> onError;  // a refused gesture (status line)
+    std::function<void(model::Id take)> onTakeFx;  // the item menu's Take FX… (the app's FX window)
+    std::function<void(double seconds)> onSeek;    // a click on empty space
+    std::function<void(const Error&)> onError;     // a refused gesture (status line)
     // REAPER's default: a move, copy or trim that makes two items overlap on a
     // track fades both over the overlap (in the same transaction).
     bool autoCrossfade = true;
@@ -137,6 +138,9 @@ class ItemGestures {
         std::optional<std::size_t> takeLane;  // a take lane under the point (comping)
     };
     std::optional<Hit> hit(ui::Point p) const;
+    // A visible take envelope of the item's active take at `p` (on a point or
+    // near its line), if any: a press there edits the envelope, not the item.
+    std::optional<model::Id> takeEnvelopeAt(model::Id item, ui::Point p) const;
     std::optional<std::size_t> rowAt(float y) const;
     ArrangeView& view() { return view_; }
     const ArrangeView& view() const { return view_; }
@@ -145,7 +149,7 @@ class ItemGestures {
     double beatAtX(float x) const;
     // A right-click on an item (no drag): the menu of the selection (Delete).
     void openItemMenu(ui::Point at);
-    bool envPress(std::size_t row, const ui::PointerEvent& e);
+    bool envPress(model::Id env, const ui::PointerEvent& e);
     void envDrag(const ui::PointerEvent& e);
     void commitEnv(const std::string& label);
     double snap(double beat, bool free) const;

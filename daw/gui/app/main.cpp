@@ -507,6 +507,10 @@ int main(int argc, char** argv) {
             if (auto r = midiEditor.open(item.str()); !r)
                 std::fprintf(stderr, "midi: %s\n", r.error().toString().c_str());
         };
+        g.onTakeFx = [&](model::Id take) {
+            if (auto r = fxWindow.openTake(take); !r)
+                std::fprintf(stderr, "take fx: %s\n", r.error().toString().c_str());
+        };
         g.onError = [](const Error& e) {
             std::fprintf(stderr, "edit refused: %s\n", e.toString().c_str());
         };

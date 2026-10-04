@@ -304,10 +304,8 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                      p.linearConsole);
     bool failed = false, startFailed = false, cancelled = false;
 
-    std::vector<host::Instance*> instances;
-    for (Node& n : p.nodes)
-        for (Stage& st : n.chain)
-            if (st.instance) instances.push_back(st.instance);
+    // Every instance the plan processes (track and take chains), once each.
+    const std::vector<host::Instance*> instances = p.instances;
     detail::Workers workers(opt.threads == 0 ? detail::Workers::defaultHelpers()
                                              : std::min(opt.threads, 64u) - 1);
     std::thread audio([&] {

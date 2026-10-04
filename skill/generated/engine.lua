@@ -120,6 +120,7 @@ q = nil
 
 ---@class Quire.env_add_args
 ---@field track? string Track id, e.g. "tr_1".
+---@field take? string Take id, e.g. "tk_1".
 ---@field fx? string Plugin instance id, e.g. "fx_1".
 ---@field route? string Route id, e.g. "sd_1".
 ---@field param string
@@ -154,7 +155,8 @@ q = nil
 ---@field mode? "trim"|"read"|"touch"|"latch"|"latch_preview"|"write"
 
 ---@class Quire.fx_add_args
----@field track string Track id, e.g. "tr_1".
+---@field track? string Track id, e.g. "tr_1".
+---@field take? string Take id, e.g. "tk_1".
 ---@field plugin string
 ---@field index? integer
 ---@field patch? any
@@ -925,7 +927,7 @@ q = nil
 ---@field set fun(args: Quire.env_points_set_args): Quire.env_points_set_result Replace an envelope's points (all of them, or those in a beat range).
 
 ---@class Quire.fx
----@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's FX chain and return its id.
+---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's (or a take's) FX chain and return its id.
 ---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe a plugin instance in words; full adds its parameters and patch.
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).

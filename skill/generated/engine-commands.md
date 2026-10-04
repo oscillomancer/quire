@@ -998,7 +998,7 @@ Result:
 
 Automate a parameter: a track's or route's mixer control, or a plugin's.
 
-Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch).
+Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1007,6 +1007,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
+| `take` | string |  |  |  | Take id, e.g. "tk_1". |
 | `fx` | string |  |  |  | Plugin instance id, e.g. "fx_1". |
 | `route` | string |  |  |  | Route id, e.g. "sd_1". |
 | `param` | string |  |  |  |  |
@@ -1079,6 +1080,36 @@ Result:
     {
       "beat": 4,
       "value": 0
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "env": "en_1",
+  "points": 2
+}
+
+```
+
+**Duck a take halfway through its item** (`song_with_audio`)
+
+```json
+{
+  "take": "tk_1",
+  "param": "volume",
+  "points": [
+    {
+      "beat": 0,
+      "value": 0
+    },
+    {
+      "beat": 2,
+      "value": "-12 dB"
     }
   ]
 }
@@ -1346,9 +1377,9 @@ Result:
 
 ## `fx.add@1`
 
-Insert a plugin into a track's FX chain and return its id.
+Insert a plugin into a track's (or a take's) FX chain and return its id.
 
-plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain).
+plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). take instead of track: the take's own chain (take FX) — the item plays through it before the track's input, cut to the item; an instrument there plays a MIDI take on its own.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1357,6 +1388,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
+| `take` | string |  |  |  | Take id, e.g. "tk_1". |
 | `plugin` | string |  |  |  |  |
 | `index` | integer |  | 0.0.. |  |  |
 | `patch` | value |  |  |  |  |
@@ -1426,6 +1458,28 @@ Result:
   "track": "tr_1",
   "plugin": "com.suppleaudio.test.gain",
   "chain": "input"
+}
+
+```
+
+Result:
+
+```json
+{
+  "fx": "fx_1",
+  "name": "<any>",
+  "semantic": "<any>",
+  "chain": ["fx_1"]
+}
+
+```
+
+**Take FX: a gain on the take of an item** (`song_with_item`)
+
+```json
+{
+  "take": "tk_1",
+  "plugin": "com.suppleaudio.test.gain"
 }
 
 ```
@@ -1719,7 +1773,7 @@ Result:
 
 Move a plugin within a track chain or to another track.
 
-Works on the track's chain and on its input chain (an input-chain effect stays on its track).
+Works on the track's chain, on its input chain (an input-chain effect stays on its track) and on a take's chain (take FX stay on their take: index only).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 

@@ -207,6 +207,45 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
         }
 }
 
+TEST_CASE("take FX: real-time output equals the offline render" * doctest::description("rt")) {
+    // The synth session with its sine and a latent gain moved into the take's chain.
+    model::Session base = synthSession(-3.0, "com.suppleaudio.test.gain");
+    model::EditTxn t(base, 2);
+    Id track, take;
+    for (const auto& e : base.tracks)
+        if (e.value->type == model::StripType::Channel) track = e.id;
+    for (const auto& e : base.takes) take = e.id;
+    const auto chain = base.tracks.find(track)->chain;
+    t.modify<model::Track>(track, [](model::Track& x) { x.chain.clear(); });
+    t.modify<model::Take>(take, [&](model::Take& x) { x.chain = chain; });
+    const model::Session s = t.commit().value();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+        CHECK(offline.warnings.empty());
+        float loud = 0;
+        for (float v : offline.audio.channels[0]) loud = std::max(loud, std::fabs(v));
+        CHECK(loud > 0.05f);
+        auto rtPool = makePool();
+        MediaCache media;
+        DummyBackend backend(
+            {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+        Engine engine(rtPool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+        else
+            backend.run((48000 * 2 + 4096) / 128);
+        engine.stop();
+        CHECK(engine.outputLatency() == 0u);  // the take's latency runs ahead, inside the track
+        CHECK(engine.processErrors() == 0);
+        CHECK(maxDiff(backend.capture().channels[0], 0, offline.audio.channels[0], 96000) == 0.0);
+    }
+}
+
 TEST_CASE("a stretched take: real-time output equals the offline render" *
           doctest::description("rt")) {
     const auto dir = std::filesystem::temp_directory_path() /

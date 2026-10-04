@@ -1,9 +1,11 @@
 // Additional session edits and queries from session-model §7.
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <set>
 
 #include "supple/engine/app.h"
+#include "supple/model/env_shape.h"
 #include "supple/model/schemas.h"
 
 namespace supple::engine {
@@ -388,6 +390,37 @@ schema::Schema<model::FadeShape> fadeShapeSchema() {
                                                   {model::FadeShape::FastSlow, "fast_slow"},
                                                   {model::FadeShape::Cos, "cos"},
                                                   {model::FadeShape::Exp, "exp"}});
+}
+
+// A copied take brings its envelopes (gap log #22): the take's own (item-
+// relative beats, moved by `shift` for a split's right side: what falls before
+// the new start becomes one point at it) and those on its take FX, by `ids`
+// (old id -> its copy).
+void cloneEnvelopes(const model::Session& s, model::EditTxn& txn, const std::map<Id, Id>& ids,
+                    double shift = 0) {
+    for (const auto& e : s.envelopes) {
+        const auto to = ids.find(e.value->target.object);
+        if (to == ids.end()) continue;
+        model::Envelope env = *e.value;
+        env.target.object = to->second;
+        if (to->first.kind == model::Kind::Take && shift != 0 && !env.points.empty()) {
+            const auto& pts = e.value->points;
+            double at = pts.front().value;  // the value at the new start
+            for (std::size_t k = 0; k + 1 < pts.size(); ++k)
+                if (pts[k].pos <= shift && shift < pts[k + 1].pos) {
+                    const double t = (shift - pts[k].pos) / (pts[k + 1].pos - pts[k].pos);
+                    at = pts[k].value + (pts[k + 1].value - pts[k].value) *
+                                            model::shapeCurve(pts[k].shape, pts[k].tension, t);
+                }
+            if (shift >= pts.back().pos) at = pts.back().value;
+            env.points.clear();
+            env.points.push_back({0.0, at, model::PointShape::Linear, 0.0});
+            for (const auto& pt : pts)
+                if (pt.pos > shift)
+                    env.points.push_back({pt.pos - shift, pt.value, pt.shape, pt.tension});
+        }
+        txn.create(std::move(env));
+    }
 }
 
 void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
@@ -1199,12 +1232,16 @@ void registerExtraCommands(cmd::Registry& registry) {
                 model::Take tk = **old;
                 unpoolCopiedSource(tk, s, txn);
                 tk.chain.clear();
+                std::map<Id, Id> ids;
                 for (Id fx : (*old)->chain) {
                     auto chained = dangling<model::FxInstance>(s, fx, "/takes");
                     if (!chained) return std::move(chained).error();
                     tk.chain.push_back(txn.create(**chained));
+                    ids[fx] = tk.chain.back();
                 }
                 Id fresh = txn.create(std::move(tk));
+                ids[oldId] = fresh;
+                cloneEnvelopes(s, txn, ids);
                 copy.takes.push_back(fresh);
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
             }
@@ -1306,12 +1343,16 @@ void registerExtraCommands(cmd::Registry& registry) {
                         unpoolCopiedSource(tk, s, txn);
                     }
                     tk.chain.clear();
+                    std::map<Id, Id> ids;
                     for (Id fx : (*old)->chain) {
                         auto chained = dangling<model::FxInstance>(s, fx, at + "/item");
                         if (!chained) return std::move(chained).error();
                         tk.chain.push_back(txn.create(**chained));
+                        ids[fx] = tk.chain.back();
                     }
                     const Id fresh = txn.create(std::move(tk));
+                    ids[oldId] = fresh;
+                    cloneEnvelopes(s, txn, ids);
                     copy.takes.push_back(fresh);
                     if (original.activeTake == oldId) copy.activeTake = fresh;
                 }
@@ -1396,12 +1437,16 @@ void registerExtraCommands(cmd::Registry& registry) {
                 tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
                 tk.chain.clear();
+                std::map<Id, Id> ids;
                 for (Id fx : (*source)->chain) {
                     auto chained = dangling<model::FxInstance>(s, fx, "/takes");
                     if (!chained) return std::move(chained).error();
                     tk.chain.push_back(txn.create(**chained));
+                    ids[fx] = tk.chain.back();
                 }
                 Id fresh = txn.create(std::move(tk));
+                ids[oldTake] = fresh;
+                cloneEnvelopes(s, txn, ids, a.at - startBeat);  // from the right side's start
                 right.takes.push_back(fresh);
                 if (old.activeTake == oldTake) right.activeTake = fresh;
             }
@@ -1634,8 +1679,8 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Move a plugin within a track chain or to another track.";
         c.description =
-            "Works on the track's chain and on its input chain (an input-chain effect stays on "
-            "its track).";
+            "Works on the track's chain, on its input chain (an input-chain effect stays on its "
+            "track) and on a take's chain (take FX stay on their take: index only).";
         c.tags = {"fx"};
         c.args = schema::object<FxMoveArgs>("fx_move_args")
                      .field("fx", &FxMoveArgs::fx, idSchema("fx"))
@@ -1666,10 +1711,24 @@ void registerExtraCommands(cmd::Registry& registry) {
                     break;
                 }
             }
-            if (!source)
-                return Error("fx.chain", "this plugin is not in a track chain", "/fx",
-                             "fx.move reorders track chains; take chains are not "
-                             "editable yet");
+            if (!source) {  // a take's chain: reordered in place, never moved out
+                for (const auto& e : s.takes) {
+                    auto chain = e.value->chain;
+                    const auto at = std::find(chain.begin(), chain.end(), *id);
+                    if (at == chain.end()) continue;
+                    if (a.track)
+                        return Error("fx.chain", "a take FX stays on its take", "/track",
+                                     "give only index to reorder the take's chain");
+                    chain.erase(at);
+                    const std::size_t to =
+                        std::min<std::size_t>(static_cast<std::size_t>(a.index), chain.size());
+                    chain.insert(chain.begin() + static_cast<std::ptrdiff_t>(to), *id);
+                    app(ctx).txn().modify<model::Take>(e.id,
+                                                       [&](model::Take& tk) { tk.chain = chain; });
+                    return Empty{};
+                }
+                return Error("fx.chain", "this plugin is in no chain", "/fx", "fx.list");
+            }
             Id target = *source;
             if (a.track) {
                 auto tr = require<model::Track>(s, *a.track, "/track");

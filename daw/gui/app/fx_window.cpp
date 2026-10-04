@@ -190,8 +190,14 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     title_->layout.width = ui::SizeRule::fraction();
     presetChainButton_ = &header.emplace<ui::Button>(
         "fx.chain.target", "Main chain", [this] { choosePresetChain(presetChain_ != "input"); });
-    header.emplace<ui::Button>("fx.chain.save", "Save chain…", [this] { promptSaveChain(); });
-    header.emplace<LoadChainButton>([this](bool replace) { loadChainMenu(replace); });
+    header.emplace<ui::Button>("fx.chain.save", "Save chain…", [this] {
+        if (take_) return setStatus("Chain presets are for track chains");
+        promptSaveChain();
+    });
+    header.emplace<LoadChainButton>([this](bool replace) {
+        if (take_) return setStatus("Chain presets are for track chains");
+        loadChainMenu(replace);
+    });
     header.emplace<ui::Button>("fx.close", "Close", [this] { close(); });
 
     savePrompt_ = &page->emplace<ui::Node>("fx.chain.prompt");
@@ -235,6 +241,7 @@ Status FxWindow::open(model::Id track) {
     if (!app_.head().tracks.find(track))
         return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
     track_ = track;
+    take_.reset();
     selected_ = {};
     tab_ = Tab::Chain;
     presetChain_ = "main";
@@ -258,6 +265,20 @@ Status FxWindow::open(model::Id track) {
     });
     refresh();
     return {};
+}
+
+Status FxWindow::openTake(model::Id take) {
+    const model::Session& s = app_.head();
+    if (!s.takes.find(take))
+        return Error("take.unknown", "no take " + take.str(), "/take", "use take.list");
+    for (const auto& e : s.items)
+        if (std::find(e.value->takes.begin(), e.value->takes.end(), take) != e.value->takes.end()) {
+            SUPPLE_TRY(open(e.value->track));
+            take_ = take;
+            refresh();
+            return {};
+        }
+    return Error("take.orphan", take.str() + " belongs to no item", "/take");
 }
 
 Status FxWindow::openFor(const UiState& ui, const json::Value& prompt) {
@@ -288,11 +309,16 @@ void FxWindow::setStatus(std::string message) {
 }
 
 std::vector<model::Id> FxWindow::chain() const {
+    if (take_) {
+        const model::Take* tk = app_.head().takes.find(*take_);
+        return tk ? tk->chain : std::vector<model::Id>{};
+    }
     const model::Track* t = app_.head().tracks.find(track_);
     return t ? t->chain : std::vector<model::Id>{};
 }
 
 std::vector<model::Id> FxWindow::inputChain() const {
+    if (take_) return {};
     const model::Track* t = app_.head().tracks.find(track_);
     return t ? t->inputChain : std::vector<model::Id>{};
 }
@@ -401,14 +427,19 @@ void FxWindow::refresh() {
         setStatus("the track is gone");
         return;
     }
-    if (title_) title_->setText("FX: " + (track->name.empty() ? track_.str() : track->name));
+    const std::string trackName = track->name.empty() ? track_.str() : track->name;
+    if (take_ && !app_.head().takes.find(*take_)) take_.reset();  // the take is gone
+    if (title_)
+        title_->setText(take_ ? "Take FX: " + trackName + " / " + take_->str()
+                              : "FX: " + trackName);
     body_->clear();
     if (hasSelected() && !app_.head().fx.find(selected_)) selected_ = {};
     if (!hasSelected()) {
-        if (!track->chain.empty())
-            selected_ = track->chain.front();
-        else if (!track->inputChain.empty())
-            selected_ = track->inputChain.front();
+        const auto main = chain(), input = inputChain();
+        if (!main.empty())
+            selected_ = main.front();
+        else if (!input.empty())
+            selected_ = input.front();
     }
     if (tab_ == Tab::Chain)
         buildChain(*body_);
@@ -424,6 +455,16 @@ void FxWindow::refresh() {
 void FxWindow::buildChain(ui::Node& body) {
     const model::Track* track = app_.head().tracks.find(track_);
     if (!track) return;
+    if (take_) {  // a take has one chain, and no input chain
+        const auto takeChain = chain();
+        body.emplace<ui::Label>("fx.section.take", "Take chain (before the track's input)",
+                                ui::Font::UiBold, "caption", "ink-quiet");
+        if (takeChain.empty())
+            body.emplace<ui::Label>("fx.empty", "No take FX yet — use “Add plugin…”.", ui::Font::Ui,
+                                    "small", "ink-quiet");
+        for (std::size_t i = 0; i < takeChain.size(); ++i) buildRow(body, takeChain[i], i, false);
+        return;
+    }
     // The input chain (fx.add {chain:"input"}): always shown, so it can be
     // started from here.
     auto& inputHeader = body.emplace<ui::Node>("fx.input.header");
@@ -598,9 +639,12 @@ void FxWindow::moveFx(model::Id fx, int delta) {
 
 void FxWindow::addFx(const std::string& pluginId) {
     json::Value args = json::Value::object();
-    args["track"] = track_.str();
+    if (take_)
+        args["take"] = take_->str();
+    else
+        args["track"] = track_.str();
     args["plugin"] = pluginId;
-    if (pendingChain_ == "input") args["chain"] = "input";
+    if (pendingChain_ == "input" && !take_) args["chain"] = "input";
     auto result = dispatcher_.execute({"fx.add", std::move(args), kUiOrigin});
     if (!result) {
         setStatus("fx.add: " + result.error().message);

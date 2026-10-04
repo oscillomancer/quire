@@ -270,13 +270,14 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         // fresh one (ADR-0018). CLAP plug-ins hear the key or silence as is.
         bool keyChanged = false;
         for (const detail::Node& n : plan->nodes)
-            for (const detail::Stage& st : n.chain)
+            detail::forEachStage(n, [&](const detail::Stage& st) {
                 if (st.instance && st.instance->processing() && st.instance->sidechainChannels() &&
                     st.instance->info().format == "vst3" &&
                     st.instance->sidechainActive() != st.keyed) {
                     plugins_.restart(st.fx);
                     keyChanged = true;
                 }
+            });
         if (keyChanged) {
             auto again = build();
             if (!again) return std::move(again).error();
@@ -293,12 +294,13 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         bool moved = false;
         for (const detail::Node& n : plan->nodes) {
             if (n.live) continue;
-            for (const detail::Stage& st : n.chain)
+            detail::forEachStage(n, [&](const detail::Stage& st) {
                 if (st.instance && std::find(prev.liveInstances.begin(), prev.liveInstances.end(),
                                              st.instance) != prev.liveInstances.end()) {
                     plugins_.restart(st.fx);
                     moved = true;
                 }
+            });
         }
         if (moved) {
             auto again = build();
@@ -1113,7 +1115,8 @@ void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
             liveReady_ = false;  // entering the live mode: liveRender takes the position
             for (detail::Node& n : next->nodes)  // (not continuous: carry no dry signal)
                 if (n.live)
-                    for (detail::Stage& st : n.chain) st.preserveDryOnLocate = false;
+                    detail::forEachStage(n,
+                                         [](detail::Stage& st) { st.preserveDryOnLocate = false; });
         }
     }
     callbackGen_.store(next->generation, std::memory_order_release);

@@ -716,7 +716,7 @@
   {
     "name": "env_add",
     "title": "Automate a parameter: a track's or route's mixer control, or a plugin's.",
-    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). See describe for errors and examples.",
+    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "env_add_args",
@@ -725,6 +725,11 @@
           "type": "string",
           "pattern": "^tr_[0-9]+$",
           "description": "Track id, e.g. \"tr_1\"."
+        },
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$",
+          "description": "Take id, e.g. \"tk_1\"."
         },
         "fx": {
           "type": "string",
@@ -1001,8 +1006,8 @@
   },
   {
     "name": "fx_add",
-    "title": "Insert a plugin into a track's FX chain and return its id.",
-    "description": "Insert a plugin into a track's FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). See describe for errors and examples.",
+    "title": "Insert a plugin into a track's (or a take's) FX chain and return its id.",
+    "description": "Insert a plugin into a track's (or a take's) FX chain and return its id. plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). take instead of track: the take's own chain (take FX) — the item plays through it before the track's input, cut to the item; an instrument there plays a MIDI take on its own. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_add_args",
@@ -1011,6 +1016,11 @@
           "type": "string",
           "pattern": "^tr_[0-9]+$",
           "description": "Track id, e.g. \"tr_1\"."
+        },
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$",
+          "description": "Take id, e.g. \"tk_1\"."
         },
         "plugin": {
           "type": "string",
@@ -1026,7 +1036,7 @@
           "pattern": "^(main|input)$"
         }
       },
-      "required": ["track", "plugin"],
+      "required": ["plugin"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -1272,7 +1282,7 @@
   {
     "name": "fx_move",
     "title": "Move a plugin within a track chain or to another track.",
-    "description": "Move a plugin within a track chain or to another track. Works on the track's chain and on its input chain (an input-chain effect stays on its track). See describe for errors and examples.",
+    "description": "Move a plugin within a track chain or to another track. Works on the track's chain, on its input chain (an input-chain effect stays on its track) and on a take's chain (take FX stay on their take: index only). See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_move_args",

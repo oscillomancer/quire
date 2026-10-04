@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -43,6 +44,10 @@ class FxWindow {
     ~FxWindow();
 
     Status open(model::Id track);
+    // A take's own chain (take FX, gap log #22): the item plays through it
+    // before its track's input.
+    Status openTake(model::Id take);
+    std::optional<model::Id> take() const { return take_; }
     // The `ui.fx.chain` action: a track id in `prompt`, else the selected track.
     Status openFor(const UiState& ui, const json::Value& prompt);
     // The same, with the plugin browser open on top (ui.fx.add).
@@ -97,6 +102,7 @@ class FxWindow {
     ParamPanel params_;
 
     model::Id track_, selected_;
+    std::optional<model::Id> take_;  // set: the window shows that take's chain
     Tab tab_ = Tab::Chain;
     std::string gesture_;                         // the active slider drag
     std::string pendingChain_ = "main";           // where Add plugin… inserts

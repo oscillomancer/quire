@@ -65,7 +65,8 @@ std::string EnvScale::text(double value) const {
 
 std::optional<EnvScale> envScale(const model::Envelope& env) {
     const auto kind = env.target.object.kind;
-    if (kind != model::Kind::Track && kind != model::Kind::Route) return std::nullopt;
+    if (kind != model::Kind::Track && kind != model::Kind::Route && kind != model::Kind::Take)
+        return std::nullopt;
     EnvScale s;
     if (env.target.param == "volume")
         s.kind = EnvScale::Kind::Volume;

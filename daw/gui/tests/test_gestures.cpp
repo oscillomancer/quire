@@ -728,3 +728,65 @@ TEST_CASE("arrange gestures: the item menu sets what items follow; a time item m
     f.sync();
     CHECK(model::itemSpan(f.app->head(), f.item(audio)).startSec == doctest::Approx(before));
 }
+
+TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its item") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    std::vector<model::Id> takeFx;
+    g.onTakeFx = [&](model::Id take) { takeFx.push_back(take); };
+    const model::Id audio = f.itemOnRow(0);
+    const model::Id take = *f.item(audio).activeTake;
+    auto rightClick = [&] {
+        const ui::Rect r = f.rectOf(audio);
+        f.pointer(ui::PointerEvent::Type::Down, {r.x + r.w / 2, r.y + r.h / 2}, 3);
+        f.pointer(ui::PointerEvent::Type::Up, {r.x + r.w / 2, r.y + r.h / 2}, 3);
+        f.sync();
+        REQUIRE(f.root->find("item.menu"));
+    };
+    // Rows: Delete, rule, four timebases, rule, Take FX…, volume, pan, mute.
+    rightClick();
+    f.menuRow("item.menu", 7);
+    CHECK(takeFx == std::vector<model::Id>{take});
+    rightClick();
+    f.menuRow("item.menu", 8);
+    auto envelope = [&]() -> const model::Envelope* {
+        for (const auto& e : f.app->head().envelopes)
+            if (e.value->target.object == take && e.value->target.param == "volume")
+                return e.value.get();
+        return nullptr;
+    };
+    REQUIRE(envelope());
+    CHECK(envelope()->visible);
+    REQUIRE(envelope()->points.size() == 1);
+    // A click on its line in the item's middle adds a point there.
+    const ui::Rect r = f.rectOf(audio);
+    const ui::Rect area = views::Lanes::takeEnvArea(r);
+    const auto scale = views::envScale(*envelope());
+    REQUIRE(scale);
+    const float lineY = area.bottom() - static_cast<float>(scale->toNorm(0.0)) * area.h;
+    const ui::Point mid{r.x + r.w / 2, lineY};
+    const auto before = f.steps();
+    f.click(mid, ui::kShift);  // Shift: off the grid
+    REQUIRE(envelope()->points.size() == 2);
+    CHECK(f.steps() == before + 1);
+    CHECK(f.item(audio).position == doctest::Approx(f.item(audio).position));  // the item stays
+    const double pos = envelope()->points[1].pos;
+    const double startBeat = model::itemSpan(f.app->head(), f.item(audio)).startBeat;
+    CHECK(pos ==
+          doctest::Approx(f.view->session().timeMap->beatAt(f.view->timeAt(mid.x)) - startBeat)
+              .epsilon(1e-3));
+    // Dragging it down lowers it; Alt+click deletes it.
+    f.drag(mid, {mid.x, mid.y + 12}, ui::kShift);
+    REQUIRE(envelope()->points.size() == 2);
+    CHECK(envelope()->points[1].value < -1.0);
+    const float y =
+        area.bottom() - static_cast<float>(scale->toNorm(envelope()->points[1].value)) * area.h;
+    f.click({mid.x, y}, ui::kAlt);
+    CHECK(envelope()->points.size() == 1);
+    // Hidden from the menu, its line no longer takes the press: the item moves instead.
+    rightClick();
+    f.menuRow("item.menu", 8);
+    CHECK_FALSE(envelope()->visible);
+    CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
+}

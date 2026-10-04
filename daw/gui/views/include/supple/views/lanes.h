@@ -43,6 +43,8 @@ class Lanes : public ui::Node {
     ui::Rect itemRect(std::size_t row, const model::Item& item) const;
     // An automation lane's value area inside its row (gestures map y with it).
     static ui::Rect envArea(const ui::Rect& row);
+    // Where a take's envelopes (gap log #22) are drawn over its item: under its label.
+    static ui::Rect takeEnvArea(const ui::Rect& item);
     // Take lanes (comping): an item with several takes, tall enough, shows
     // each take in its own lane under its label; the heard one is lit.
     static bool showsTakeLanes(const ui::Rect& item, std::size_t takes);

@@ -124,11 +124,56 @@ class LaneLabels : public ui::Node {
                     c.strokeRect({r.x + 6, r.y + 6, 5, 6}, ink, 1.0f);
                     c.fillRect({r.x + 4, r.y + 12, 9, 7}, ink);
                 }
+                if (item->activeTake) paintTakeEnvelopes(c, i, *item);
             }
         }
     }
 
   private:
+    // The active take's visible envelopes over the item (gap log #22): the
+    // curve as the engine plays it, its points; volume, pan and mute each in
+    // a colour of their own.
+    void paintTakeEnvelopes(ui::Canvas& c, std::size_t row, const model::Item& item) {
+        const ui::Theme& t = c.theme();
+        const model::Session& s = lanes_.layout_.session();
+        const ui::Rect full = lanes_.itemRect(row, item);
+        const ui::Rect area = Lanes::takeEnvArea(full);
+        if (area.h < 8) return;
+        const double start = model::itemSpan(s, item).startBeat;
+        const float x0 = std::max(area.x, bounds().x),
+                    x1 = std::min(area.right(), bounds().right());
+        if (x1 <= x0) return;
+        for (const auto& e : s.envelopes) {
+            const model::Envelope& env = *e.value;
+            if (env.target.object != *item.activeTake || !env.visible) continue;
+            const auto scale = envScale(env);
+            if (!scale) continue;
+            const ui::Color ink = t.color(env.target.param == "volume" ? "accent"
+                                          : env.target.param == "pan"  ? "buss"
+                                                                       : "armed")
+                                      .withAlpha(env.active ? 1.0f : 0.4f);
+            auto yOf = [&](double v) {
+                return area.bottom() - static_cast<float>(scale->toNorm(v)) * area.h;
+            };
+            ui::Point prev{};
+            bool have = false;
+            for (float x = x0; x <= x1 + 3; x += 3) {
+                const float px = std::min(x, x1);
+                const double beat = s.timeMap->beatAt(std::max(0.0, lanes_.timeAt(px))) - start;
+                const ui::Point p{px, yOf(envValueAt(env, beat, scale->reference()))};
+                if (have) c.line(prev, p, ink, 1.5f);
+                prev = p;
+                have = true;
+                if (px >= x1) break;
+            }
+            for (const model::EnvPoint& pt : env.points) {
+                const float x = lanes_.xAt(s.timeMap->secondsAt(start + pt.pos));
+                if (x < x0 - 3 || x > x1 + 3) continue;
+                c.fillRect({x - 3, yOf(pt.value) - 3, 6, 6}, ink);
+            }
+        }
+    }
+
     Lanes& lanes_;
 };
 
@@ -244,6 +289,10 @@ ui::Rect Lanes::takeLaneRect(const ui::Rect& item, std::size_t takes, std::size_
     const float h =
         std::max(0.0f, item.h - 17.0f) / static_cast<float>(std::max<std::size_t>(1, takes));
     return {item.x, item.y + 15.0f + h * static_cast<float>(index), item.w, h};
+}
+
+ui::Rect Lanes::takeEnvArea(const ui::Rect& item) {
+    return {item.x, item.y + 16, item.w, std::max(1.0f, item.h - 19)};
 }
 
 ui::Rect Lanes::envArea(const ui::Rect& row) {

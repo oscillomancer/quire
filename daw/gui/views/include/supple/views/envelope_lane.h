@@ -25,7 +25,7 @@ struct EnvScale {
     double reference() const;  // the lane's guide line: unity, centre, default
 };
 
-// The scale of a track's (or route's) mixer envelope; nullopt for others.
+// The scale of a track's, route's or take's mixer envelope; nullopt for others.
 std::optional<EnvScale> envScale(const model::Envelope& env);
 // "Volume", "Pan", "Mute" (or the parameter key).
 std::string envTitle(const model::Envelope& env);
