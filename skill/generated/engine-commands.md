@@ -2165,9 +2165,9 @@ Result:
 
 ## `fx.param.set@1`
 
-Set plugin parameters by key in physical units: {"cutoff": "800 Hz"}.
+Set semantic parameters in units, or plain plugin parameters by name/id.
 
-
+Plain CLAP/VST3 values use the declared range or plugin text; read-only parameters refuse edits.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3506,6 +3506,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "id": {
             "type": "string"
           },
+          "timebase": {
+            "type": "string",
+            "enum": ["time", "beats", "beats_position"]
+          },
           "name": {
             "type": "string"
           },
@@ -3522,7 +3526,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "number"
           }
         },
-        "required": ["id", "name", "color"],
+        "required": ["id", "timebase", "name", "color"],
         "additionalProperties": false
       }
     }
@@ -4048,6 +4052,9 @@ Kind: `query`. Exposure: `mcp-tool`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4083,6 +4090,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4112,6 +4120,7 @@ Result:
   "meter": "4/4",
   "version": 0,
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4160,6 +4169,9 @@ Kind: `action`. Exposure: `mcp-exec`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4195,6 +4207,7 @@ Kind: `action`. Exposure: `mcp-exec`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4226,6 +4239,7 @@ Result:
   "meter": "<any>",
   "version": 0,
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4273,6 +4287,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4308,6 +4325,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4344,6 +4362,7 @@ Result:
   "meter": "<any>",
   "version": "<any>",
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4729,6 +4748,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "id": {
             "type": "string"
           },
+          "timebase": {
+            "type": "string",
+            "enum": ["time", "beats", "beats_position"]
+          },
           "name": {
             "type": "string"
           },
@@ -4745,7 +4768,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "number"
           }
         },
-        "required": ["id", "name", "color"],
+        "required": ["id", "timebase", "name", "color"],
         "additionalProperties": false
       }
     }
@@ -6572,7 +6595,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  |  |
 | `parent` | string |  |  |  | Parent track id, e.g. "tr_1". |
 | `index` | integer |  | 0.0.. |  |  |
-| `channels` | integer |  | 1.0..2.0 |  |  |
+| `channels` | integer |  | 1.0..8.0 |  |  |
 
 ### Result
 

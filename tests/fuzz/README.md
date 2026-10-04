@@ -1,11 +1,19 @@
 # Project and history fuzzing
 
-Configure the fuzz targets with Clang and run them against their seed corpora:
+Configure the fuzz targets with Clang and run them against their seed corpora.
+The fuzz tree instruments every library for coverage (`fuzzer-no-link` in the
+global compile flags), not only the harness executables: `project.fuzz` and
+`history.fuzz` link the ordinary engine/model libraries, and without it
+libFuzzer sees no edges inside them (configure warns when the flag is
+missing). `undefined` next to `address` makes signed overflow and other UB a
+finding:
 
 ```sh
 cmake -S . -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang \
   -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug \
-  -DSUPPLE_BUILD_FUZZERS=ON -DSUPPLE_SANITIZE=address \
+  -DCMAKE_C_FLAGS=-fsanitize=fuzzer-no-link \
+  -DCMAKE_CXX_FLAGS=-fsanitize=fuzzer-no-link \
+  -DSUPPLE_BUILD_FUZZERS=ON -DSUPPLE_SANITIZE=address,undefined \
   -DSUPPLE_BUILD_GUI=OFF -DSUPPLE_BUILD_PLUGINS=OFF
 cmake --build build/fuzz --target project.fuzz history.fuzz -j6
 ASAN_OPTIONS=detect_leaks=0 build/fuzz/tests/fuzz/project.fuzz \
@@ -28,6 +36,11 @@ did not move the head. At the end it undoes to the branch base, redoes to the
 final canonical text, then saves and reopens. The seeded property test in
 `engine.tests` uses the same sequence runner. Route edits are absent from the
 current engine command catalogue, so the project corpus covers routes.
+
+Fixture commands in the harnesses use checked arithmetic (`toy.add` refuses
+a total that would overflow with `toy.overflow`), so any sanitizer report is
+a finding in the code under test, never in the fixture.
+`bus-corpus/overflow.json` seeds that case.
 
 Clang ASan reports an allocation/deallocation mismatch in libstdc++'s
 `std::stable_sort` temporary buffer (`get_temporary_buffer` uses `operator

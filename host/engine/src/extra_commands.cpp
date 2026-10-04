@@ -105,6 +105,7 @@ struct RulerRef {
     std::string id;
 };
 struct RulerEntry {
+    model::Timebase timebase = model::Timebase::Beats;
     std::string id, name, color;
     std::optional<double> pos, start, end;
 };
@@ -395,37 +396,6 @@ schema::Schema<model::FadeShape> fadeShapeSchema() {
                                                   {model::FadeShape::Exp, "exp"}});
 }
 
-// A copied take brings its envelopes (gap log #22): the take's own (item-
-// relative beats, moved by `shift` for a split's right side: what falls before
-// the new start becomes one point at it) and those on its take FX, by `ids`
-// (old id -> its copy).
-void cloneEnvelopes(const model::Session& s, model::EditTxn& txn, const std::map<Id, Id>& ids,
-                    double shift = 0) {
-    for (const auto& e : s.envelopes) {
-        const auto to = ids.find(e.value->target.object);
-        if (to == ids.end()) continue;
-        model::Envelope env = *e.value;
-        env.target.object = to->second;
-        if (to->first.kind == model::Kind::Take && shift != 0 && !env.points.empty()) {
-            const auto& pts = e.value->points;
-            double at = pts.front().value;  // the value at the new start
-            for (std::size_t k = 0; k + 1 < pts.size(); ++k)
-                if (pts[k].pos <= shift && shift < pts[k + 1].pos) {
-                    const double t = (shift - pts[k].pos) / (pts[k + 1].pos - pts[k].pos);
-                    at = pts[k].value + (pts[k + 1].value - pts[k].value) *
-                                            model::shapeCurve(pts[k].shape, pts[k].tension, t);
-                }
-            if (shift >= pts.back().pos) at = pts.back().value;
-            env.points.clear();
-            env.points.push_back({0.0, at, model::PointShape::Linear, 0.0});
-            for (const auto& pt : pts)
-                if (pt.pos > shift)
-                    env.points.push_back({pt.pos - shift, pt.value, pt.shape, pt.tension});
-        }
-        txn.create(std::move(env));
-    }
-}
-
 void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
     if (!take.source || take.source->kind != model::Kind::Midi) return;
     const model::MidiSource* source = s.midi.find(*take.source);
@@ -450,6 +420,7 @@ schema::Schema<T> rulerArgsSchema(const char* name) {
 auto rulerListSchema(bool region) {
     auto entry = schema::object<RulerEntry>("ruler_entry")
                      .field("id", &RulerEntry::id, schema::string())
+                     .field("timebase", &RulerEntry::timebase, model::timebaseSchema())
                      .field("name", &RulerEntry::name, schema::string())
                      .field("color", &RulerEntry::color, schema::string())
                      .field("pos", &RulerEntry::pos, schema::number())
@@ -981,6 +952,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 const auto s = app(ctx).view();
                 for (const auto& e : model::Traits<Object>::map(s)) {
                     RulerEntry row;
+                    row.timebase = e.value->timebase;
                     row.id = e.id.str();
                     row.name = e.value->name;
                     row.color = e.value->color;
@@ -1234,17 +1206,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (!old) return std::move(old).error();
                 model::Take tk = **old;
                 unpoolCopiedSource(tk, s, txn);
-                tk.chain.clear();
-                std::map<Id, Id> ids;
-                for (Id fx : (*old)->chain) {
-                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
-                    if (!chained) return std::move(chained).error();
-                    tk.chain.push_back(txn.create(**chained));
-                    ids[fx] = tk.chain.back();
-                }
-                Id fresh = txn.create(std::move(tk));
-                ids[oldId] = fresh;
-                cloneEnvelopes(s, txn, ids);
+                auto cloned = copyTake(s, txn, oldId, std::move(tk));
+                if (!cloned) return std::move(cloned).error();
+                const Id fresh = *cloned;
                 copy.takes.push_back(fresh);
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
             }
@@ -1345,17 +1309,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                     } else {
                         unpoolCopiedSource(tk, s, txn);
                     }
-                    tk.chain.clear();
-                    std::map<Id, Id> ids;
-                    for (Id fx : (*old)->chain) {
-                        auto chained = dangling<model::FxInstance>(s, fx, at + "/item");
-                        if (!chained) return std::move(chained).error();
-                        tk.chain.push_back(txn.create(**chained));
-                        ids[fx] = tk.chain.back();
-                    }
-                    const Id fresh = txn.create(std::move(tk));
-                    ids[oldId] = fresh;
-                    cloneEnvelopes(s, txn, ids);
+                    auto cloned = copyTake(s, txn, oldId, std::move(tk));
+                    if (!cloned) return std::move(cloned).error();
+                    const Id fresh = *cloned;
                     copy.takes.push_back(fresh);
                     if (original.activeTake == oldId) copy.activeTake = fresh;
                 }
@@ -1439,17 +1395,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                                          : (splitSec - startSec) * tk.playrate;
                 tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
-                tk.chain.clear();
-                std::map<Id, Id> ids;
-                for (Id fx : (*source)->chain) {
-                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
-                    if (!chained) return std::move(chained).error();
-                    tk.chain.push_back(txn.create(**chained));
-                    ids[fx] = tk.chain.back();
-                }
-                Id fresh = txn.create(std::move(tk));
-                ids[oldTake] = fresh;
-                cloneEnvelopes(s, txn, ids, a.at - startBeat);  // from the right side's start
+                auto cloned = copyTake(s, txn, oldTake, std::move(tk), a.at - startBeat);
+                if (!cloned) return std::move(cloned).error();
+                const Id fresh = *cloned;
                 right.takes.push_back(fresh);
                 if (old.activeTake == oldTake) right.activeTake = fresh;
             }

@@ -844,8 +844,41 @@ Result<std::string> expandRenderPattern(std::string_view pattern,
     return expand(pattern, context);
 }
 
-void postAddToProject(cmd::Dispatcher& dispatcher, const cmd::Origin& origin,
-                      const json::Value& files) {
+RenderTarget renderTarget(const EngineApp& app) {
+    return {app.projectGeneration(), app.versions().branch()};
+}
+Status checkRenderTarget(const EngineApp& app, const RenderTarget& target) {
+    if (app.projectGeneration() != target.generation || app.versions().branch() != target.branch)
+        return Error("render.stale_target", "the render target project or branch changed", {},
+                     "files remain on disk; import them into the intended project manually");
+    return {};
+}
+void completeRenderJob(EngineApp& app, cmd::Dispatcher& dispatcher, cmd::JobManager& jobs,
+                       std::string id, RenderTarget target, json::Value result,
+                       std::function<void()> publish) {
+    dispatcher.post("render.complete",
+                    [&app, &jobs, id = std::move(id), target = std::move(target),
+                     result = std::move(result), publish = std::move(publish)]() mutable -> Status {
+                        if (auto valid = checkRenderTarget(app, target); !valid) {
+                            json::Value error = json::Value::object();
+                            error["code"] = valid.error().code;
+                            error["message"] = valid.error().message;
+                            error["path"] = valid.error().path;
+                            error["hint"] = valid.error().hint;
+                            result["status"] = "render.stale_target";
+                            result["error"] = std::move(error);
+                            app.emit("render.stale_target", result);
+                            // Project replacement may already have cancelled the job.
+                            if (jobs.cancelled(id)) return jobs.cancel(id, std::move(result));
+                            return jobs.complete(id, std::move(result));
+                        }
+                        if (jobs.cancelled(id)) return {};
+                        return jobs.completeWith(id, std::move(result), publish);
+                    });
+}
+
+void postAddToProject(EngineApp& app, RenderTarget target, cmd::Dispatcher& dispatcher,
+                      const cmd::Origin& origin, const json::Value& files) {
     std::vector<std::pair<std::string, double>> add;  // path, start beat
     if (files.isArray())
         for (const json::Value& f : files.asArray())
@@ -855,26 +888,29 @@ void postAddToProject(cmd::Dispatcher& dispatcher, const cmd::Origin& origin,
                                  start && start->isNumber() ? start->asDouble() : 0.0);
             }
     if (add.empty()) return;
-    dispatcher.post("render.add_to_project", [&dispatcher, origin, add]() -> Status {
-        auto done =
-            dispatcher.transact("Add renders to project", origin, [&]() -> Result<json::Value> {
-                for (const auto& [path, start] : add) {
-                    json::Value track = json::Value::object();
-                    track["name"] = fs::path(path).stem().string();
-                    auto t = dispatcher.execute({"track.add", std::move(track), origin});
-                    if (!t) return t;
-                    json::Value item = json::Value::object();
-                    item["track"] = (*t)["track"];
-                    item["position"] = start;
-                    item["audio_file"] = path;
-                    if (auto i = dispatcher.execute({"item.add", std::move(item), origin}); !i)
-                        return i;
-                }
-                return json::Value::object();
-            });
-        if (!done) return std::move(done).error();
-        return {};
-    });
+    dispatcher.post(
+        "render.add_to_project",
+        [&app, target = std::move(target), &dispatcher, origin, add]() -> Status {
+            SUPPLE_TRY(checkRenderTarget(app, target));
+            auto done =
+                dispatcher.transact("Add renders to project", origin, [&]() -> Result<json::Value> {
+                    for (const auto& [path, start] : add) {
+                        json::Value track = json::Value::object();
+                        track["name"] = fs::path(path).stem().string();
+                        auto t = dispatcher.execute({"track.add", std::move(track), origin});
+                        if (!t) return t;
+                        json::Value item = json::Value::object();
+                        item["track"] = (*t)["track"];
+                        item["position"] = start;
+                        item["audio_file"] = path;
+                        if (auto i = dispatcher.execute({"item.add", std::move(item), origin}); !i)
+                            return i;
+                    }
+                    return json::Value::object();
+                });
+            if (!done) return std::move(done).error();
+            return {};
+        });
 }
 
 namespace {
@@ -1068,6 +1104,7 @@ void registerQueueCommands(cmd::Registry& registry) {
             }
             auto& dispatcher = ctx.service<cmd::Dispatcher>();
             const cmd::Origin origin = ctx.origin();
+            const auto target = renderTarget(app);
             if (!a.job) {
                 json::Value renders = json::Value::array();
                 for (auto& w : work) {
@@ -1075,7 +1112,7 @@ void registerQueueCommands(cmd::Registry& registry) {
                     if (!result) return std::move(result).error();
                     std::erase_if(app.renderQueue(), [&](const auto& q) { return q.id == w.id; });
                     if (w.args.addToProject)
-                        postAddToProject(dispatcher, origin, *result->find("files"));
+                        postAddToProject(app, target, dispatcher, origin, *result->find("files"));
                     json::Value entry = json::Value::object();
                     entry["id"] = w.id;
                     entry["label"] = w.label;
@@ -1092,7 +1129,7 @@ void registerQueueCommands(cmd::Registry& registry) {
             const auto identity = app.options().identity;
             auto& jobs = ctx.service<cmd::JobManager>();
             const std::string id = jobs.create();
-            app.startJob([&app, &jobs, &dispatcher, origin, id, work = std::move(work),
+            app.startJob([&app, &jobs, &dispatcher, origin, target, id, work = std::move(work),
                           catalogue = std::move(catalogue), identity](std::stop_token stop) {
                 json::Value renders = json::Value::array();
                 std::vector<std::string> done;
@@ -1103,7 +1140,8 @@ void registerQueueCommands(cmd::Registry& registry) {
                     if (!result) {
                         if (!jobs.cancelled(id)) (void)jobs.fail(id, std::move(result).error());
                         // What finished leaves the queue (on the model thread).
-                        dispatcher.post("render.queue.done", [&app, done]() -> Status {
+                        dispatcher.post("render.queue.done", [&app, target, done]() -> Status {
+                            SUPPLE_TRY(checkRenderTarget(app, target));
                             std::erase_if(app.renderQueue(), [&](const auto& q) {
                                 return std::find(done.begin(), done.end(), q.id) != done.end();
                             });
@@ -1111,8 +1149,6 @@ void registerQueueCommands(cmd::Registry& registry) {
                         });
                         return;
                     }
-                    if (w.args.addToProject)
-                        postAddToProject(dispatcher, origin, *result->find("files"));
                     json::Value entry = json::Value::object();
                     entry["id"] = w.id;
                     entry["label"] = w.label;
@@ -1121,15 +1157,23 @@ void registerQueueCommands(cmd::Registry& registry) {
                     done.push_back(w.id);
                 }
                 json::Value out = json::Value::object();
+                const auto completedRenders = renders;
                 out["renders"] = std::move(renders);
-                (void)jobs.completeWith(id, std::move(out), [&] {
-                    dispatcher.post("render.queue.done", [&app, done]() -> Status {
-                        std::erase_if(app.renderQueue(), [&](const auto& q) {
-                            return std::find(done.begin(), done.end(), q.id) != done.end();
+                completeRenderJob(
+                    app, dispatcher, jobs, id, target, std::move(out),
+                    [&app, &dispatcher, target, done, origin, work, completedRenders] {
+                        for (std::size_t index = 0; index < work.size(); ++index)
+                            if (work[index].args.addToProject)
+                                postAddToProject(app, target, dispatcher, origin,
+                                                 *completedRenders.at(index).find("files"));
+                        dispatcher.post("render.queue.done", [&app, target, done]() -> Status {
+                            SUPPLE_TRY(checkRenderTarget(app, target));
+                            std::erase_if(app.renderQueue(), [&](const auto& q) {
+                                return std::find(done.begin(), done.end(), q.id) != done.end();
+                            });
+                            return {};
                         });
-                        return {};
                     });
-                });
             });
             json::Value out = json::Value::object();
             out["job"] = id;
@@ -1183,10 +1227,11 @@ void registerRenderCommands(cmd::Registry& registry) {
             }
             auto& dispatcher = ctx.service<cmd::Dispatcher>();
             const cmd::Origin origin = ctx.origin();
+            const auto target = renderTarget(app);
             if (!a.job) {
                 auto result = runTasks(app, *tasks, a);
                 if (result && a.addToProject)
-                    postAddToProject(dispatcher, origin, *result->find("files"));
+                    postAddToProject(app, target, dispatcher, origin, *result->find("files"));
                 return result;
             }
             auto available = app.plugins();
@@ -1195,15 +1240,18 @@ void registerRenderCommands(cmd::Registry& registry) {
             const auto identity = app.options().identity;
             auto& jobs = ctx.service<cmd::JobManager>();
             const std::string id = jobs.create();
-            app.startJob([&app, &jobs, &dispatcher, origin, id, tasks = std::move(*tasks), a,
-                          catalogue = std::move(catalogue), identity](std::stop_token stop) {
+            app.startJob([&app, &jobs, &dispatcher, origin, target, id, tasks = std::move(*tasks),
+                          a, catalogue = std::move(catalogue), identity](std::stop_token stop) {
                 if (stop.stop_requested() || jobs.cancelled(id)) return;
                 auto result = runTasks(app, tasks, a, &jobs, id, &catalogue, &identity, stop);
                 if (result) {
                     json::Value files = *result->find("files");
-                    (void)jobs.completeWith(id, std::move(*result), [&] {
-                        if (a.addToProject) postAddToProject(dispatcher, origin, files);
-                    });
+                    completeRenderJob(app, dispatcher, jobs, id, target, std::move(*result),
+                                      [&app, target, &dispatcher, origin, files, a] {
+                                          if (a.addToProject)
+                                              postAddToProject(app, target, dispatcher, origin,
+                                                               files);
+                                      });
                 } else if (!jobs.cancelled(id))
                     (void)jobs.fail(id, std::move(result).error());
             });

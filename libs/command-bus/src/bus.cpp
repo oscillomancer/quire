@@ -377,10 +377,30 @@ Registry::Registry() {
                              "a value above 30 is clamped to 30");
             return {};
         },
-        [](const json::Value& args, Context& ctx) {
-            auto* timeout = args.find("timeout_s");
-            return ctx.service<JobManager>().wait(stringField(args, "job"),
-                                                  timeout ? timeout->asDouble() : kMaxWaitSeconds);
+        [](const json::Value& args, Context& ctx) -> Result<json::Value> {
+            const auto* timeout = args.find("timeout_s");
+            const double requested = timeout ? timeout->asDouble() : kMaxWaitSeconds;
+            const double seconds = std::min(requested, kMaxWaitSeconds);
+            const auto until = std::chrono::steady_clock::now() +
+                               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                   std::chrono::duration<double>(seconds));
+            auto& jobs = ctx.service<JobManager>();
+            for (;;) {
+                // Worker completions can need model-thread publication/import.
+                // Service posted work during the wait so it can finish the job.
+                ctx.service<Dispatcher>().flushJobEvents();
+                auto status = jobs.wait(stringField(args, "job"), 0);
+                if (!status) return status.error();
+                const auto remaining =
+                    std::chrono::duration<double>(until - std::chrono::steady_clock::now()).count();
+                if (*status->find("status") != "running" || remaining <= 0) {
+                    if (requested > kMaxWaitSeconds)
+                        (*status)["timeout_clamped_s"] = kMaxWaitSeconds;
+                    return status;
+                }
+                auto waited = jobs.wait(stringField(args, "job"), std::min(0.01, remaining));
+                if (!waited) return waited.error();
+            }
         },
         {"Wait for job", json::Value::object(), json::Value::object(), "job_running"});
     addMeta(
@@ -497,7 +517,20 @@ std::uint64_t Host::clockMs() const {
                                           .count());
 }
 
-Dispatcher::~Dispatcher() { host_.stopJobs(); }
+Dispatcher::~Dispatcher() {
+    host_.stopJobs();
+    host_.dispatcherAttached(nullptr);
+}
+
+Result<json::Value> Dispatcher::guarded(Admission admission,
+                                        const std::function<Result<json::Value>()>& body) {
+    admissions_.push_back(std::move(admission));
+    struct Pop {
+        std::vector<Admission>& entries;
+        ~Pop() { entries.pop_back(); }
+    } pop{admissions_};
+    return body();
+}
 
 Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     auto result = dispatch(invocation, false);
@@ -550,6 +583,8 @@ Result<json::Value> Dispatcher::transact(std::string_view label, const Origin& o
     return result;
 }
 Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBatch, bool) {
+    for (const auto& admit : admissions_)
+        if (auto allowed = admit(invocation); !allowed) return allowed.error();
     inBatch = inBatch || transactionDepth_ > 0;
     const auto start = std::chrono::steady_clock::now();
     auto parsed = parseCommand(invocation.command);
@@ -618,6 +653,15 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
     context.provide<JobManager>(jobs_);
     context.provide<Dispatcher>(*this);
     auto invoke = [&]() -> Result<json::Value> {
+        auto savepoint = inBatch ? host_.invocationSavepoint() : std::function<void()>{};
+        bool succeeded = false;
+        struct Restore {
+            std::function<void()>& restore;
+            bool& succeeded;
+            ~Restore() {
+                if (!succeeded && restore) restore();
+            }
+        } guard{savepoint, succeeded};
         auto result = info->invoke(invocation.args, context);
         resolvedArgs = context.resolvedArgs();
         if (!result) {
@@ -636,6 +680,7 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
         }
         if (info->kind != Kind::Query)
             host_.invoked(name, info->version, resolvedArgs.value_or(invocation.args), info->kind);
+        succeeded = true;
         return result;
     };
     Result<json::Value> result = Error("command.internal", "unreachable");
@@ -904,14 +949,19 @@ std::string quoteLua(std::string_view text) {
     out += '"';
     return out;
 }
+const std::string kLuaNamespace = luaIdentifier(product::kName);
+
 // JSON Schema → a LuaLS type expression. Nested objects collapse to `table`:
 // naming every anonymous sub-object is not worth the noise.
-std::string luaType(const json::Value& schema) {
+std::string luaType(const json::Value& schema, const json::Value& root,
+                    const json::Value* scope = nullptr, int depth = 0) {
+    if (depth >= 32) return "any";
+    if (schema.find("$defs")) scope = &schema;
     if (!schema.isObject()) return "any";
     if (const auto* ref = schema.find("$ref"); ref && ref->isString()) {
-        if (const auto* defs = schema.find("$defs"); defs && defs->isObject())
-            if (const auto* target = defs->find(ref->asString()); target) return luaType(*target);
-        return "any";
+        auto target = json::resolveFragment(root, ref->asString());
+        if (!target && scope) target = json::resolveFragment(*scope, ref->asString());
+        return target ? luaType(*target, root, scope, depth + 1) : "any";
     }
     if (const auto* choices = schema.find("enum");
         choices && choices->isArray() && choices->size()) {
@@ -946,11 +996,11 @@ std::string luaType(const json::Value& schema) {
     const std::string& name = type->asString();
     if (name == "array") {
         const auto* items = schema.find("items");
-        return (items ? luaType(*items) : std::string("any")) + "[]";
+        return (items ? luaType(*items, root, scope, depth + 1) : std::string("any")) + "[]";
     }
     if (name == "object") {
         if (const auto* extra = schema.find("additionalProperties"); extra && extra->isObject())
-            return "table<string, " + luaType(*extra) + ">";
+            return "table<string, " + luaType(*extra, root, scope, depth + 1) + ">";
         return "table";
     }
     if (name == "integer" || name == "number" || name == "string" || name == "boolean") return name;
@@ -983,7 +1033,7 @@ std::string luaClass(const std::string& name, const json::Value& schema) {
     if (const auto* properties = schema.find("properties"); properties && properties->isObject())
         for (const auto& field : properties->asObject()) {
             out += "---@field " + luaFieldName(field.key) + (isRequired(field.key) ? " " : "? ") +
-                   luaType(field.value);
+                   luaType(field.value, schema);
             const std::string doc = fieldDoc(field.value);
             if (!doc.empty()) out += " " + doc;
             out += "\n";
@@ -998,14 +1048,14 @@ std::string luaSignature(const CommandInfo& info) {
         if (const auto* required = info.argsSchema.find("required");
             required && required->isArray())
             anyRequired = required->size() > 0;
-        args = "args" + std::string(anyRequired ? ": " : "?: ") + "Quire." +
+        args = "args" + std::string(anyRequired ? ": " : "?: ") + kLuaNamespace + "." +
                luaIdentifier(info.name) + "_args";
     } else if (const auto* properties = info.argsSchema.find("properties");
                properties && properties->isObject() && properties->size() > 0) {
         args = "args?: table";
     }
     const std::string result = hasProperties(info.resultSchema)
-                                   ? "Quire." + luaIdentifier(info.name) + "_result"
+                                   ? kLuaNamespace + "." + luaIdentifier(info.name) + "_result"
                                    : "table";
     return "fun(" + args + "): " + result;
 }
@@ -1023,22 +1073,24 @@ std::string luaStubs(const Registry& registry) {
         "-- function, `q.run(name, args)` reaches any of them by name, "
         "`q.batch(label, body)`\n";
     text += "-- is one transaction, and `q.on(topic, handler)` subscribes to bus events.\n\n";
-    text += "---@type Quire\nq = nil\n\n";
+    text += "---@type " + kLuaNamespace + "\nq = nil\n\n";
 
     // Arguments and results first, in registry order (name, then version).
     for (auto* info : registry.all()) {
         if (info->name == "batch") continue;              // q.batch is the transaction
         if (registry.find(info->name) != info) continue;  // only the newest version
         if (hasProperties(info->argsSchema))
-            text +=
-                luaClass("Quire." + luaIdentifier(info->name) + "_args", info->argsSchema) + "\n";
+            text += luaClass(kLuaNamespace + "." + luaIdentifier(info->name) + "_args",
+                             info->argsSchema) +
+                    "\n";
         if (hasProperties(info->resultSchema))
-            text += luaClass("Quire." + luaIdentifier(info->name) + "_result", info->resultSchema) +
+            text += luaClass(kLuaNamespace + "." + luaIdentifier(info->name) + "_result",
+                             info->resultSchema) +
                     "\n";
     }
 
     // One class per namespace of the bindings: q.fx.param.set is a field of
-    // Quire.fx.param. The names come from the command names, so a namespace
+    // product.fx.param. The names come from the command names, so a namespace
     // and a command of the same name would collide (none does today).
     std::map<std::string, std::vector<const CommandInfo*>> namespaces;
     std::vector<const CommandInfo*> roots;
@@ -1052,20 +1104,20 @@ std::string luaStubs(const Registry& registry) {
             namespaces[info->name.substr(0, dot)].push_back(info);
     }
     for (const auto& [path, commands] : namespaces) {
-        text += "---@class Quire." + path + "\n";
+        text += "---@class " + kLuaNamespace + "." + path + "\n";
         for (const auto* info : commands)
             text += "---@field " + luaFieldName(info->name.substr(info->name.rfind('.') + 1)) +
                     " " + luaSignature(*info) + " " + oneLine(info->summary) + "\n";
         text += "\n";
     }
 
-    text += "---@class Quire\n";
+    text += "---@class " + kLuaNamespace + "\n";
     for (const auto& [path, commands] : namespaces) {
         (void)commands;
         const auto dot = path.find('.');
         if (dot != std::string::npos) continue;  // only the top level is a field of q
-        text += "---@field " + luaFieldName(path) + " Quire." + path + " Commands named " + path +
-                ".*\n";
+        text += "---@field " + luaFieldName(path) + " " + kLuaNamespace + "." + path +
+                " Commands named " + path + ".*\n";
     }
     for (const auto* info : roots)
         text += "---@field " + luaFieldName(info->name) + " " + luaSignature(*info) + " " +

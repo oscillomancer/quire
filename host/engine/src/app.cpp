@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <numbers>
 #include <string_view>
@@ -12,6 +14,7 @@
 #include "supple/audio/wav_stream.h"
 #include "supple/base/closest.h"
 #include "supple/base/files.h"
+#include "supple/base/sha256.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/engine/jack.h"
 #include "supple/model/env_shape.h"
@@ -67,7 +70,7 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
     app->pool_ = std::make_unique<InstancePool>(
         [self](const model::PluginRef& ref) { return self->findPlugin(ref.id); },
         app->options_.identity);
-    app->newProject(std::move(project));
+    SUPPLE_TRY(app->newProject(std::move(project)));
     return app;
 }
 
@@ -146,6 +149,105 @@ Result<std::uint32_t> EngineApp::fxSidechainChannels(const model::FxInstance& fx
     return (*in)->sidechainChannels();
 }
 
+namespace {
+Status restoreFx(host::Instance& instance, const model::FxInstance& fx, const model::Session& s) {
+    if (fx.patch)
+        SUPPLE_TRY(instance.setPatch(json::writeCompact(*fx.patch), CLAP_SUPPLE_SET_REPLACE));
+    else if (fx.state) {
+        const auto blob = s.blobs.find(*fx.state);
+        if (blob == s.blobs.end())
+            return Error("fx.state", "the state blob is missing", "/fx/state");
+        SUPPLE_TRY(instance.loadState(blob->second->data));
+    }
+    for (const auto& [id, value] : fx.params) SUPPLE_TRY(instance.setParam(id, value));
+    return {};
+}
+}  // namespace
+
+Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& values) {
+    if (!values.isObject())
+        return Error("fx.params", "values must be an object", "/values",
+                     "map parameter names or ids to numbers or plugin text");
+    const auto s = view();
+    const auto* fx = s.fx.find(id);
+    if (!fx) return Error("fx.unknown", "the plugin instance is missing", "/fx");
+    auto info = findPlugin(fx->plugin.id);
+    if (!info) return info.error();
+    auto made = host::Instance::create(*info, options_.identity);
+    if (!made) return made.error();
+    auto& instance = **made;
+    SUPPLE_TRY(restoreFx(instance, *fx, s));
+    const auto params = instance.params();
+    std::map<std::uint32_t, double> pending;
+    json::Value changed = json::Value::object();
+    for (const auto& entry : values.asObject()) {
+        std::uint32_t numeric = 0;
+        const auto parsed =
+            std::from_chars(entry.key.data(), entry.key.data() + entry.key.size(), numeric);
+        const bool byId =
+            parsed.ec == std::errc{} && parsed.ptr == entry.key.data() + entry.key.size();
+        const host::ParamInfo* found = nullptr;
+        for (const auto& param : params)
+            if ((byId && param.id == numeric) || (!byId && iequals(param.name, entry.key))) {
+                if (found)
+                    return Error("fx.param_ambiguous", "parameter name is ambiguous",
+                                 "/values/" + entry.key,
+                                 "use the numeric id from fx.describe full");
+                found = &param;
+            }
+        const auto path = "/values/" + entry.key;
+        if (!found)
+            return Error("fx.param_unknown", "unknown parameter " + entry.key, path,
+                         "use a parameter name or id from fx.describe full");
+        if (found->flags & CLAP_PARAM_IS_READONLY)
+            return Error("fx.param_readonly", "parameter is read-only", path,
+                         "choose a writable parameter");
+        double value = 0;
+        if (entry.value.isNumber())
+            value = entry.value.asDouble();
+        else if (entry.value.isString()) {
+            auto parsedText = instance.paramFromText(found->id, entry.value.asString());
+            if (!parsedText) return std::move(parsedText).error().at(path);
+            value = *parsedText;
+        } else
+            return Error("fx.param_value", "value must be a number or plugin text", path);
+        if (!std::isfinite(value) || value < found->min || value > found->max)
+            return Error("fx.param_range", "parameter value is outside its declared range", path,
+                         "use " + std::to_string(found->min) + ".." + std::to_string(found->max));
+        if (found->flags & CLAP_PARAM_IS_STEPPED) value = std::round(value);
+        if (pending.contains(found->id))
+            return Error("fx.param_duplicate", "parameter appears twice", path,
+                         "use one name or id per parameter");
+        pending[found->id] = value;
+        changed[entry.key] = value;
+    }
+    for (const auto& [param, value] : pending) SUPPLE_TRY(instance.setParam(param, value));
+    // VST3 controllers enqueue processor changes: consume them on this private
+    // instance before saving the component state. No device is opened.
+    SUPPLE_TRY(instance.activate(s.project->sampleRate, 1, 1));
+    if (!instance.startProcessing()) return Error("fx.process", "plugin refused the state probe");
+    float left = 0, right = 0;
+    const float* inputs[]{&left, &right};
+    float* outputs[]{&left, &right};
+    const bool processed = instance.process({.inputs = inputs,
+                                             .inputChannels = 2,
+                                             .outputs = outputs,
+                                             .outputChannels = 2,
+                                             .frames = 1});
+    instance.stopProcessing();
+    instance.deactivate();
+    if (!processed) return Error("fx.process", "plugin failed the state probe");
+    auto state = instance.saveState();
+    if (!state) return state.error();
+    const auto hash = "sha256:" + sha256Hex(*state);
+    txn().putBlob(hash, std::make_shared<const model::Blob>(model::Blob{std::move(*state)}));
+    auto next = *fx;
+    next.state = hash;
+    for (const auto& [param, value] : pending) next.params[param] = value;
+    txn().put<model::FxInstance>(id, std::move(next));
+    return changed;
+}
+
 Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxInstance& fx) {
     // A running instance already knows the plan's rate and block. Otherwise
     // activate a throwaway instance at the project rate: a plugin reports its
@@ -156,8 +258,23 @@ Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxI
     auto made = host::Instance::create(*info, options_.identity);
     if (!made) return std::move(made).error();
     host::Instance& probe = **made;
+    SUPPLE_TRY(restoreFx(probe, fx, view()));
     constexpr std::uint32_t kProbeBlock = 512;  // OfflineSettings' default block
     SUPPLE_TRY(probe.activate(head().project->sampleRate, 1, kProbeBlock));
+    if (probe.paramsNormalized() && !fx.params.empty()) {
+        if (!probe.startProcessing())
+            return Error("fx.process", "plugin refused the latency probe");
+        float l = 0, r = 0;
+        const float* inputs[]{&l, &r};
+        float* outputs[]{&l, &r};
+        const bool processed = probe.process({.inputs = inputs,
+                                              .inputChannels = 2,
+                                              .outputs = outputs,
+                                              .outputChannels = 2,
+                                              .frames = 1});
+        probe.stopProcessing();
+        if (!processed) return Error("fx.process", "plugin failed the latency probe");
+    }
     const std::uint32_t latency = probe.latency();
     probe.deactivate();
     return latency;
@@ -199,15 +316,117 @@ Result<std::string> EngineApp::describeFx(const model::FxInstance& fx, bool chan
     return in.describe(changedOnly);
 }
 
+Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, model::Id original,
+                           model::Take copy, double shift) {
+    std::map<model::Id, model::Id> ids;
+    copy.chain.clear();
+    const auto* old = source.takes.find(original);
+    if (!old) return Error("item.take", "the copied take is missing", "/take");
+    for (model::Id id : old->chain) {
+        const auto* fx = source.fx.find(id);
+        if (!fx) return Error("item.fx", "the copied take FX is missing", "/take");
+        const auto fresh = txn.create(*fx);
+        ids[id] = fresh;
+        copy.chain.push_back(fresh);
+    }
+    const auto fresh = txn.create(std::move(copy));
+    ids[original] = fresh;
+    for (const auto& e : source.envelopes) {
+        const auto to = ids.find(e.value->target.object);
+        if (to == ids.end()) continue;
+        model::Envelope env = *e.value;
+        env.target.object = to->second;
+        const bool relative = to->first == original;
+        if (relative && shift != 0 && !env.points.empty()) {
+            const auto& points = e.value->points;
+            auto boundary = points.front();
+            for (std::size_t i = 0; i + 1 < points.size(); ++i)
+                if (points[i].pos <= shift && shift < points[i + 1].pos) {
+                    boundary = points[i];
+                    const double t = (shift - points[i].pos) / (points[i + 1].pos - points[i].pos);
+                    boundary.value += (points[i + 1].value - points[i].value) *
+                                      model::shapeCurve(boundary.shape, boundary.tension, t);
+                }
+            if (shift >= points.back().pos) boundary = points.back();
+            boundary.pos = 0;
+            env.points = {boundary};
+            for (const auto& point : points)
+                if (point.pos > shift) {
+                    auto right = point;
+                    right.pos -= shift;
+                    env.points.push_back(right);
+                }
+            auto left = points;
+            boundary.pos = shift;
+            std::erase_if(left, [&](const auto& point) { return point.pos >= shift; });
+            left.push_back(boundary);
+            txn.modify<model::Envelope>(e.id, [&](auto& lane) { lane.points = left; });
+        }
+        const auto lane = txn.create(std::move(env));
+        for (const auto& ai : source.autoItems)
+            if (ai.value->envelope == e.id) {
+                auto item = *ai.value;
+                item.envelope = lane;
+                if (relative) item.position -= shift;
+                txn.create(std::move(item));
+            }
+    }
+    return fresh;
+}
+
 // --- project files ----------------------------------------------------------------------
 
-void EngineApp::newProject(model::Project project) {
-    // An unsaved project being replaced is discarded (the GUI asked first).
+Status EngineApp::replaceProject(model::Session session, fs::path path) {
+    Backend* running = engine_ ? backend_ : nullptr;
+    const auto config = engine_ ? engine_->config() : BackendConfig{};
+    const auto settings = engine_ ? engine_->options() : EngineOptions{};
+    if (engine_) {
+        auto stopped = transport("stop");
+        if (!stopped) return stopped.error();
+    }
+    projectGeneration_.fetch_add(1, std::memory_order_acq_rel);
+    if (commands_) {
+        const auto jobs = commands_->jobs().list();
+        for (const auto& job : jobs.find("jobs")->asArray())
+            if (*job.find("status") == "running")
+                SUPPLE_TRY(commands_->jobs().cancel(job.find("job")->asString()));
+    }
+    stopJobs();
+    if (engine_) {
+        engine_->stop();
+        engine_.reset();
+        backend_ = nullptr;
+    }
     if (versions_ && projectPath_.empty()) clearScratch();
-    versions_ = std::make_unique<model::VersionStore>(model::Session::create(std::move(project)));
-    projectPath_.clear();
-    autosaveMarked_ = false;  // no file yet: nothing to autosave next to
+    loadedHead_.reset();
+    media_ = MediaCache{};
+    scratch_.clear();
+    reportedFailures_.clear();
+    recordingFiles_.clear();
+    autoWrite_.clear();
+    renderQueue_.clear();
+    {
+        std::lock_guard lock(rendersMutex_);
+        renders_.clear();
+    }
+    pool_ = std::make_unique<InstancePool>(
+        [this](const model::PluginRef& ref) { return findPlugin(ref.id); }, options_.identity);
+    if (scripts_) {
+        clearScripts_ = scripts_->active();
+        if (!clearScripts_) scripts_->clear();
+    }
+    versions_ = std::make_unique<model::VersionStore>(std::move(session));
+    projectPath_ = std::move(path);
+    autosaveMarked_ = !projectPath_.empty();
+    autosaveMs_ = clockMs();
+    autosaveVersion_ = head().version;
+    if (running) SUPPLE_TRY(startEngine(*running, config, settings));
     headChanged();
+    return {};
+}
+
+Status EngineApp::newProject(model::Project project) {
+    return replaceProject(model::Session::create(std::move(project)), {});
 }
 
 fs::path EngineApp::resolve(const fs::path& path) const {
@@ -221,9 +440,12 @@ Status EngineApp::save(const fs::path& where) {
     if (fromScratch && engine_ && engine_->recording())
         return Error("project.recording", "a recording is running", {},
                      "stop it before the project's first save (its files move then)");
-    SUPPLE_TRY(writeFileAtomic(path, model::serializeProject(head())));
+    auto publish = [&] { return writeFileAtomic(path, model::serializeProject(head())); };
+    if (fromScratch)
+        SUPPLE_TRY(moveScratchMedia(path.parent_path() / head().project->mediaDir, publish));
+    else
+        SUPPLE_TRY(publish());
     projectPath_ = path;
-    if (fromScratch) SUPPLE_TRY(moveScratchMedia(path.parent_path() / head().project->mediaDir));
     autosaveMarked_ = true;  // the file itself is the newest copy
     autosaveMs_ = clockMs();
     autosaveVersion_ = head().version;
@@ -236,14 +458,7 @@ Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warn
     if (!text) return std::move(text).error();
     auto s = model::parseProject(*text, warnings);
     if (!s) return std::move(s).error();
-    if (projectPath_.empty()) clearScratch();  // the unsaved project is discarded
-    versions_ = std::make_unique<model::VersionStore>(std::move(*s));
-    projectPath_ = path;
-    autosaveMarked_ = true;
-    autosaveMs_ = clockMs();
-    autosaveVersion_ = head().version;
-    headChanged();
-    return okStatus();
+    return replaceProject(std::move(*s), path);
 }
 
 // --- branches ----------------------------------------------------------------------------
@@ -288,6 +503,26 @@ Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const m
     if (!s) return std::move(s).error();
     out.session = std::move(*s);
     return out;
+}
+
+Status EngineApp::undo() {
+    SUPPLE_TRY(versions_->undo());
+    headChanged();
+    json::Value ev = json::Value::object();
+    ev["version"] = head().version;
+    ev["branch"] = versions_->branch();
+    emit("session.changed", std::move(ev));
+    return {};
+}
+
+Status EngineApp::redo() {
+    SUPPLE_TRY(versions_->redo());
+    headChanged();
+    json::Value ev = json::Value::object();
+    ev["version"] = head().version;
+    ev["branch"] = versions_->branch();
+    emit("session.changed", std::move(ev));
+    return {};
 }
 
 Status EngineApp::switchBranch(std::string_view name) {
@@ -407,7 +642,9 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     if (loop_.enabled || loop_.end > loop_.start)
         engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
     engine_->setMetronome(metronome_.enabled, metronome_.volumeDb);
-    return engine_->load(head(), projectDir());
+    auto loaded = engine_->load(head(), projectDir());
+    if (loaded) loadedHead_ = versions_->head();
+    return loaded;
 }
 
 Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative) {
@@ -475,6 +712,10 @@ constexpr std::uint64_t kRestartGiveUpMs = 30'000;
 }  // namespace
 
 void EngineApp::tick() {
+    if (clearScripts_ && scripts_ && !scripts_->active()) {
+        scripts_->clear();
+        clearScripts_ = false;
+    }
     if (engine_) {
         engine_->service();
         // Failures reach subscribers without a client asking.
@@ -492,7 +733,7 @@ void EngineApp::tick() {
     maybeAutosave();
     // What the tick emitted (fx.failed, engine.restarting, …) reaches scripts
     // now, not after some later command.
-    if (scripts_) scripts_->deliver();
+    if (scripts_ && !clearScripts_) scripts_->deliver();
 }
 
 void EngineApp::maybeAutosave() {
@@ -999,8 +1240,9 @@ void appendRecorded(midi::Sequence& seq, const RecordedTake& r, std::size_t run,
 // midi_overdub (ADR-0016): the recording merges into the MIDI item under its
 // first heard position, as a new take (the old one stays for undo and take
 // switching). False when there is no such item (a new item is made then).
-bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
-                 const std::vector<Run>& runs, double rate, std::vector<RecordedInfo>& out) {
+Result<bool> overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
+                         const std::vector<Run>& runs, double rate,
+                         std::vector<RecordedInfo>& out) {
     if (runs.empty()) return false;
     const double atBeat = s.timeMap->beatAt(static_cast<double>(runs.front().t0) / rate);
     for (const auto& e : s.items) {
@@ -1014,10 +1256,8 @@ bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake&
         midi::Sequence seq = s.midi.find(*old->source)->sequence;
         const double ppq = seq.ppq;
         auto tick = [&](std::int64_t sample) {
-            return static_cast<std::int64_t>(
-                std::llround((s.timeMap->beatAt(static_cast<double>(sample) / rate) -
-                              span.startBeat + old->startOffset) *
-                             ppq));
+            const double beat = s.timeMap->beatAt(static_cast<double>(sample) / rate);
+            return std::llround(((beat - span.startBeat) * old->playrate + old->startOffset) * ppq);
         };
         const auto from = static_cast<std::int64_t>(std::llround(span.startSec * rate));
         const auto to = static_cast<std::int64_t>(std::llround(span.endSec * rate));
@@ -1030,7 +1270,9 @@ bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake&
         model::Take take = *old;
         take.source = mi;
         take.name = (old->name.empty() ? std::string("MIDI") : old->name) + " overdub";
-        const Id tk = t.create(std::move(take));
+        auto copied = copyTake(s, t, *it.activeTake, std::move(take));
+        if (!copied) return copied.error();
+        const Id tk = *copied;
         t.modify<model::Item>(e.id, [&](model::Item& x) {
             x.takes.push_back(tk);
             x.activeTake = tk;
@@ -1049,13 +1291,15 @@ bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake&
 }
 
 // MIDI (ADR-0016): a source per take in the project's PPQ from the item start.
-void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
-                    const std::vector<Run>& runs, const std::vector<ItemPlan>& items, double rate,
-                    std::vector<RecordedInfo>& out) {
+Status commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTake& r,
+                      const std::vector<Run>& runs, const std::vector<ItemPlan>& items, double rate,
+                      std::vector<RecordedInfo>& out) {
     const model::Track* tr = s.tracks.find(r.track);
-    if (tr && tr->record.mode == model::RecordMode::MidiOverdub &&
-        overdubMidi(t, s, r, runs, rate, out))
-        return;
+    if (tr && tr->record.mode == model::RecordMode::MidiOverdub) {
+        auto overdub = overdubMidi(t, s, r, runs, rate, out);
+        if (!overdub) return overdub.error();
+        if (*overdub) return {};
+    }
     const int ppq = s.project->ppq;
     for (const ItemPlan& ip : items) {
         model::Item item;
@@ -1099,6 +1343,7 @@ void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTa
         info.lostFrames = static_cast<std::int64_t>(r.overflowFrames);  // events, for MIDI
         out.push_back(std::move(info));
     }
+    return {};
 }
 
 }  // namespace
@@ -1170,7 +1415,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         }
         if (items.empty()) continue;
         if (r.isMidi) {
-            if (!r.midi.empty()) commitMidiTake(txn(), s, r, runs, items, rate, out);
+            if (!r.midi.empty()) SUPPLE_TRY(commitMidiTake(txn(), s, r, runs, items, rate, out));
             continue;
         }
         // The recorder hashed the take's file when it closed it (realtime.h
@@ -1260,38 +1505,96 @@ void EngineApp::clearScratch() {
     fs::remove_all(scratch, ec);
 }
 
-// The first save of a project with a scratch folder: its media moves to
-// `dest` (beside the project file), keeping the relative paths it was
-// recorded under. Refuses (moving nothing) when a file of the same name is
-// already there.
-Status EngineApp::moveScratchMedia(const fs::path& dest) {
+// First save: stage and verify copies while the scratch originals remain.
+// Failed relocation/publication removes only files this operation created.
+Status EngineApp::moveScratchMedia(const fs::path& dest, const std::function<Status()>& publish) {
     const fs::path from = options_.scratchDir / head().project->mediaDir;
     std::error_code ec;
-    if (!fs::is_directory(from, ec)) return okStatus();
+    if (!fs::exists(from, ec))
+        return ec ? Status{Error("project.media_move", ec.message())} : publish();
+    if (fs::equivalent(from, dest, ec)) return publish();
+    ec.clear();
     std::vector<fs::path> files;
     for (auto it = fs::recursive_directory_iterator(from, ec); !ec && it != fs::end(it);
-         it.increment(ec))
-        if (it->is_regular_file(ec)) files.push_back(it->path().lexically_relative(from));
-    for (const fs::path& rel : files)
-        if (fs::exists(dest / rel, ec))
-            return Error("project.media_exists", (dest / rel).string() + " already exists", {},
-                         "save into another folder; the recordings stay in " + from.string());
-    for (const fs::path& rel : files) {
-        const fs::path to = dest / rel;
-        fs::create_directories(to.parent_path(), ec);
-        fs::rename(from / rel, to, ec);
-        if (ec) {  // another file system: copy, then remove
-            ec.clear();
-            fs::copy_file(from / rel, to, ec);
-            if (ec)
-                return Error("project.media_move",
-                             "could not move " + (from / rel).string() + ": " + ec.message(), {},
-                             "the recordings stay in " + from.string());
-            fs::remove(from / rel, ec);
-        }
+         it.increment(ec)) {
+        const auto status = it->symlink_status(ec);
+        if (ec) break;
+        if (fs::is_symlink(status))
+            return Error("project.media_move", "scratch media contains a symlink",
+                         it->path().string());
+        if (fs::is_regular_file(status)) files.push_back(it->path().lexically_relative(from));
     }
-    fs::remove_all(options_.scratchDir, ec);
-    return okStatus();
+    if (ec) return Error("project.media_move", ec.message(), from.string());
+    std::sort(files.begin(), files.end());
+    for (const auto& rel : files) {
+        const auto status = fs::symlink_status(dest / rel, ec);
+        if (ec && ec != std::errc::no_such_file_or_directory)
+            return Error("project.media_move", ec.message());
+        if (fs::exists(status))
+            return Error("project.media_exists", (dest / rel).string() + " already exists", {},
+                         "save into another folder; scratch media is unchanged");
+        ec.clear();
+    }
+    fs::create_directories(dest, ec);
+    if (ec) return Error("project.media_move", ec.message(), dest.string());
+    static std::atomic<std::uint64_t> nextStage{0};
+    fs::path stage;
+    for (;;) {
+        stage = dest / (".save-stage-" + std::to_string(clockMs()) + "-" +
+                        std::to_string(nextStage.fetch_add(1)));
+        if (fs::create_directory(stage, ec)) break;
+        if (ec) return Error("project.media_move", ec.message(), stage.string());
+    }
+    std::vector<fs::path> placed;
+    bool published = false;
+    struct Cleanup {
+        fs::path stage;
+        std::vector<fs::path>& placed;
+        bool& published;
+        ~Cleanup() {
+            std::error_code ignored;
+            if (!published)
+                for (const auto& path : placed) fs::remove(path, ignored);
+            fs::remove_all(stage, ignored);
+        }
+    } cleanup{stage, placed, published};
+    for (const auto& rel : files) {
+        const auto staged = stage / rel;
+        fs::create_directories(staged.parent_path(), ec);
+        if (!ec) fs::copy_file(from / rel, staged, fs::copy_options::none, ec);
+        if (ec) return Error("project.media_move", ec.message(), (from / rel).string());
+        auto original = sha256File(from / rel), copied = sha256File(staged);
+        if (!original || !copied || *original != *copied)
+            return Error("project.media_move", "staged media verification failed", rel.string());
+    }
+    for (const auto& rel : files) {
+        const auto target = dest / rel;
+        fs::create_directories(target.parent_path(), ec);
+        if (!ec) fs::create_hard_link(stage / rel, target, ec);
+        if (ec) return Error("project.media_move", ec.message(), target.string());
+        placed.push_back(target);
+    }
+    SUPPLE_TRY(publish());
+    published = true;
+    std::vector<fs::path> emptyDirs;
+    for (const auto& rel : files) {
+        ec.clear();
+        fs::remove(from / rel, ec);
+        for (auto parent = (from / rel).parent_path(); parent != from && within(parent, from);
+             parent = parent.parent_path())
+            emptyDirs.push_back(parent);
+    }
+    std::sort(emptyDirs.begin(), emptyDirs.end(),
+              [](const auto& a, const auto& b) { return a.native().size() > b.native().size(); });
+    for (const auto& dir : emptyDirs) {
+        ec.clear();
+        fs::remove(dir, ec);
+    }
+    ec.clear();
+    fs::remove(from, ec);
+    ec.clear();
+    fs::remove(options_.scratchDir, ec);  // only when empty
+    return {};
 }
 
 namespace {
@@ -1411,7 +1714,16 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
 
 void EngineApp::headChanged() {
     if (!engine_) return;
+    // Returning to a version before the first patch/state edit means defaults,
+    // rather than retaining the previous version's live plugin state.
+    if (loadedHead_)
+        for (const auto& e : head().fx)
+            if (!e.value->patch && !e.value->state)
+                if (const auto* before = loadedHead_->fx.find(e.id);
+                    before && (before->patch || before->state))
+                    pool_->restart(e.id);
     auto st = engine_->load(head(), projectDir());
+    if (st) loadedHead_ = versions_->head();
     if (!st) emit("engine.error", json::Value(st.error().toString()));
     engine_->service();
 }
@@ -1465,6 +1777,19 @@ void EngineApp::rollbackTransaction(std::uint64_t id) {
     if (id == txnId_) txn_.reset();
 }
 
+std::function<void()> EngineApp::invocationSavepoint() {
+    if (!txn_) return {};
+    auto scriptEvents = scripts_ ? scripts_->eventSavepoint() : std::function<void()>{};
+    return [this, saved = *txn_, record = record_, writing = autoWrite_, events = events_,
+            scriptEvents = std::move(scriptEvents)]() mutable {
+        *txn_ = std::move(saved);
+        record_ = std::move(record);
+        autoWrite_ = std::move(writing);
+        events_ = std::move(events);
+        if (scriptEvents) scriptEvents();
+    };
+}
+
 void EngineApp::log(const cmd::LogRecord& record) {
     if (record.command == "log.list") return;  // reading the log is not news
     records_.push_back(record);
@@ -1479,7 +1804,11 @@ void EngineApp::emit(std::string_view topic, json::Value payload) {
 }
 
 void EngineApp::commandFinished() {
-    if (scripts_) scripts_->deliver();
+    if (clearScripts_ && scripts_ && !scripts_->active()) {
+        scripts_->clear();
+        clearScripts_ = false;
+    }
+    if (scripts_ && !clearScripts_) scripts_->deliver();
 }
 
 std::vector<std::pair<std::string, json::Value>> EngineApp::takeEvents() {

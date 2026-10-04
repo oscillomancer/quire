@@ -3,6 +3,7 @@
 // local llama-server). Requests run on the caller's (worker) thread.
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <stop_token>
 #include <string>
@@ -60,10 +61,21 @@ struct Request {
     std::vector<ToolDef> tools;
 };
 
-// Streams one assistant turn; `onText` receives text as it arrives.
+// Streams one assistant turn; `onText` receives text as it arrives. The
+// stream is checked as it arrives: every event must have its provider's
+// types ("agent.stream"), the turn must end with the provider's completion
+// marker (Anthropic message_stop, OpenAI "data: [DONE]") and every tool call
+// must be complete with object arguments ("agent.stream_incomplete",
+// "agent.tool_arguments"), and the response is bounded
+// ("agent.stream_too_large"). Any of these fails the turn: a truncated tool
+// call never runs.
 Result<Turn> complete(const Endpoint& endpoint, const Request& request,
                       const std::function<void(std::string_view)>& onText,
                       std::stop_token stop = {});
+
+// The bytes one response may stream, and one event may span.
+inline constexpr std::size_t kMaxResponseBytes = std::size_t(64) << 20;
+inline constexpr std::size_t kMaxEventBytes = std::size_t(8) << 20;
 
 // The JSON bodies (exposed for tests).
 json::Value anthropicBody(const Endpoint& endpoint, const Request& request);
@@ -76,11 +88,12 @@ inline const json::Value& at(const json::Value& v, std::string_view key) {
     return found ? *found : null;
 }
 
-// Server-sent events: feed bytes, get (event, data) pairs.
+// Server-sent events: feed bytes, get (event, data) pairs. An event (or a
+// line) longer than kMaxEventBytes is "agent.stream_too_large".
 class SseParser {
   public:
-    void feed(std::string_view bytes,
-              const std::function<void(std::string_view event, std::string_view data)>& out);
+    Status feed(std::string_view bytes,
+                const std::function<void(std::string_view event, std::string_view data)>& out);
 
   private:
     std::string buffer_, event_, data_;

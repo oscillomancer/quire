@@ -393,3 +393,32 @@ Phase 2 demo committed to `docs/demos/`.
   rest of an oversized frame through newline (or EOF) and returns `-32600`.
   RPC distinguishes invalid top-level JSON values (`-32600`, null id) from
   malformed `params` (`-32602`, structured `rpc.invalid_params` data).
+
+## Follow-up boundary guarantees (2026-10-04)
+
+Each command invocation inside a transaction is atomic through a host savepoint;
+Lua `pcall` can catch an error without retaining that call's partial edits. Scoped
+dispatch admission applies to nested batch/Lua invocations too. The agent panel
+uses it to deny branch/project/engine lifecycle changes and save-as, pins each
+turn to the current branch/project generation, and invalidates queued tool calls
+on cancellation. Idle is reported after queued work has drained or been invalidated.
+
+Lua initialization, host JSON pushes and structured error decoding are protected
+against memory/stack failures; error fields are read raw. Once the instruction
+budget expires, every subsequent hook check raises until the outermost run returns.
+A deterministic instruction cap is available to embedding tests. Schema `$ref`s
+use bounded root JSON Pointer resolution (with the schema library's local `$defs`
+compatibility); named arrays convert as arrays. LuaLS types use the same references
+and derive their namespace from generated product metadata.
+
+RPC carries source `loc` with structured errors. Clients enforce the response
+size bound before parsing and disconnect after timeout/interruption/framing errors;
+the next call reconnects and repeats the handshake. Positive sub-millisecond waits
+round up, huge waits clamp. Timer cancellation on the model thread prevents later
+callbacks in the same due pass; cross-thread cancellation can leave one invocation
+that already passed its final check, so owner destruction must synchronize with the
+model thread.
+
+Provider SSE fields are type-checked and incomplete streams refuse unless the
+provider completion marker arrived. Credential configuration publishes through an
+exclusive 0600 temporary file and atomic rename.

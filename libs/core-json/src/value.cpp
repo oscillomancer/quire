@@ -129,17 +129,56 @@ void Value::push_back(Value v) {
 std::size_t Value::size() const {
     return isArray() ? asArray().size() : isObject() ? asObject().size() : 0;
 }
+namespace {
+constexpr std::size_t kIndexMin = 16;
+}
+Object::Object(Object&& other) noexcept
+    : members_(std::move(other.members_)), index_(std::move(other.index_)) {
+    other.members_.clear();
+    other.index_.clear();
+}
+Object& Object::operator=(const Object& other) {
+    if (this != &other) {
+        Object copy(other);
+        *this = std::move(copy);
+    }
+    return *this;
+}
+Object& Object::operator=(Object&& other) noexcept {
+    if (this != &other) {
+        members_ = std::move(other.members_);
+        index_ = std::move(other.index_);
+        other.members_.clear();
+        other.index_.clear();
+    }
+    return *this;
+}
 std::size_t Object::size() const { return members_.size(); }
 bool Object::empty() const { return members_.empty(); }
-void Object::ensureIndex() const {
-    if (indexValid_) return;
+void Object::rebuildIndex() {
     index_.clear();
+    if (members_.size() < kIndexMin) return;
+    index_.reserve(members_.size());
     for (std::size_t i = 0; i < members_.size(); ++i) index_.emplace(members_[i].key, i);
-    indexValid_ = true;
+}
+Value& Object::append(std::string key, Value v) {
+    if (members_.size() == members_.capacity()) {
+        // Grow by hand: vector's own reallocation would copy members (their
+        // move constructor is not noexcept), deep-copying every value.
+        std::vector<Member> grown;
+        grown.reserve(std::max<std::size_t>(4, members_.size() * 2));
+        for (auto& m : members_) grown.emplace_back(std::move(m));
+        members_.swap(grown);
+    }
+    members_.emplace_back(std::move(key), std::move(v));
+    if (members_.size() == kIndexMin)
+        rebuildIndex();
+    else if (members_.size() > kIndexMin)
+        index_.emplace(members_.back().key, members_.size() - 1);
+    return members_.back().value;
 }
 const Value* Object::find(std::string_view key) const {
-    if (members_.size() >= 16) {
-        ensureIndex();
+    if (!index_.empty()) {
         auto it = index_.find(std::string(key));
         return it == index_.end() ? nullptr : &members_[it->second].value;
     }
@@ -156,28 +195,41 @@ Value& Object::set(std::string key, Value v) {
         *p = std::move(v);
         return *p;
     }
-    members_.push_back({std::move(key), std::move(v)});
-    indexValid_ = false;
-    return members_.back().value;
+    return append(std::move(key), std::move(v));
 }
 bool Object::erase(std::string_view key) {
     auto it = std::find_if(members_.begin(), members_.end(),
                            [key](const Member& m) { return m.key == key; });
     if (it == members_.end()) return false;
-    members_.erase(it);
-    indexValid_ = false;
+    const auto pos = static_cast<std::size_t>(it - members_.begin());
+    std::vector<Member> kept;
+    kept.reserve(members_.capacity());
+    for (std::size_t i = 0; i < members_.size(); ++i)
+        if (i != pos) kept.emplace_back(std::move(members_[i]));
+    members_.swap(kept);
+    if (members_.size() < kIndexMin) {
+        index_.clear();
+    } else {
+        index_.erase(std::string(key));
+        for (auto& entry : index_)
+            if (entry.second > pos) --entry.second;
+    }
     return true;
 }
 Value& Object::operator[](std::string_view key) {
     if (auto* p = find(key)) return *p;
-    members_.push_back({std::string(key), {}});
-    indexValid_ = false;
-    return members_.back().value;
+    return append(std::string(key), {});
 }
 void Object::sortKeys() {
-    indexValid_ = false;
-    std::sort(members_.begin(), members_.end(),
-              [](const Member& a, const Member& b) { return a.key < b.key; });
+    std::vector<std::size_t> order(members_.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(),
+              [this](std::size_t a, std::size_t b) { return members_[a].key < members_[b].key; });
+    std::vector<Member> sorted;
+    sorted.reserve(members_.capacity());
+    for (auto i : order) sorted.emplace_back(std::move(members_[i]));
+    members_.swap(sorted);
+    rebuildIndex();
 }
 bool operator==(const Value& a, const Value& b) {
     if (a.isNumber() && b.isNumber()) {

@@ -203,7 +203,9 @@ edited through `tempo.*`, not envelopes); `mode`
 (`trim|read|touch|latch|latch_preview|write`); `active`, `armed`,
 `visible`; `points`: array of `[pos, value, shape, tension]` in the
 envelope's time domain, sorted, with `shape` `linear|square|slow|fast_start|fast_end|bezier`;
-`items`: [ai id].
+`items`: [ai id], derived at serialization from the authoritative
+`automation_items` map in numeric ID order. It is not a model field. On load,
+stale or mismatched lists are ignored with a `project.derived_items` warning.
 
 Values are in the target's physical unit (dB, %, Hz for stock plugin
 params, CLAP value for third-party params); interpolation happens in the
@@ -216,12 +218,16 @@ repeat every `source_length` while `loop`, values play as `baseline +
 amplitude × (value − baseline)`, a later item cuts an earlier one it
 overlaps, and the envelope steps at each edge (gap log #28). Take envelopes
 (`{take: id, param}`) use item-relative beats and move with the item; they
-take no automation items.
+take no automation items. Expansion is bounded to 100,000 repetitions/points
+per envelope; over-budget edits and files refuse with `automation.budget`.
+Copied takes clone their FX, envelopes and automation items with new IDs;
+automation items retain their pool. Splits insert the curve value at the cut
+and retain the segment shape on both sides. MIDI overdub uses the take's play rate.
 
 ### 1.10 Rulers and render settings
 
-Markers `mk_*` `{pos, name, color, lane}`; regions `rg_*` `{start, end,
-name, color, lane}`; ruler lanes `{id, name}`.
+Markers `mk_*` `{pos, timebase, name, color, lane}`; regions `rg_*` `{start, end,
+timebase, name, color, lane}`; ruler lanes `{id, name}`.
 
 Render settings (defaults for `render.*`): `format` (wav/flac, bit depth,
 dither), `sample_rate`, `channels`, `normalize` (`none` | `{mode: lufs_i|
@@ -488,3 +494,36 @@ random command sequences (fuzzed: random valid command streams, then undo
 all → initial state `identical`, redo all → final state); branch merge
 fast-forward, replay with ID remapping, both conflict kinds; memory-bound
 eviction; blob dedup.
+
+### Follow-up contracts (2026-10-04)
+
+- Undo/redo reloads the active engine plan and emits `session.changed` as
+  `{version, branch}`, like an edit. Per-lineage ID high-water counters survive
+  undo; adding after undo cannot reuse an ID. Independent branches may allocate
+  overlapping IDs; merge remaps each creation before replaying the next command,
+  including commands in the same batch.
+- Project fields are represented in changes/diffs by the singleton `project`.
+  Concurrent changes to the same project field conflict only when their new
+  values differ; disjoint fields replay normally.
+- Each invocation inside a batch has a savepoint. A caught failure restores
+  that invocation's model/history/event changes while successful siblings remain.
+- `project.new/open` stops and finishes recording, cancels and joins project jobs,
+  then increments `project.get.generation` and resets session caches/scripts.
+  Device and render-ahead settings persist. Deferred completions check generation;
+  stale completions emit an event and never mutate the replacement project.
+- First save stages and hashes scratch-media copies, publishes the media, then
+  atomically writes the project. A failure removes files created by that attempt;
+  scratch originals and the unsaved project identity remain intact.
+- Render completion/import is bound to the originating project generation and
+  current branch. A stale completion preserves files and reports
+  `render.stale_target` in the job result; no items are imported.
+  A job cancelled during project replacement keeps its cancelled status and
+  receives the stale result when its queued completion is serviced.
+- `track.add` and `track.set` accept 1..8 channels; busses/masters require at least 2.
+  `fx.param.set` keeps semantic parameter units and also supports plain CLAP/VST3
+  parameter names/IDs, declared ranges, writable flags and plugin text conversion.
+  Plain parameter edits save processor state after applying queued values on a
+  private probe. Latency probes restore patch/state/params before measuring.
+- Ruler lists include `timebase`; descriptions map seconds through the time map.
+  MIDI edits reject non-finite/oversized tick conversions and arithmetic before
+  rounding, including extreme deltas and impractically small quantization grids.

@@ -18,7 +18,9 @@ constexpr std::string_view kPrefixes[kKindCount] = {"tr", "it", "tk", "md", "mi"
                                                     "ai", "mk", "rg", "tp", "ts", "gr", "ln", "rj"};
 }
 
-std::string_view prefix(Kind kind) { return kPrefixes[static_cast<std::size_t>(kind)]; }
+std::string_view prefix(Kind kind) {
+    return kind == Kind::Project ? "project" : kPrefixes[static_cast<std::size_t>(kind)];
+}
 
 std::optional<Kind> kindFromPrefix(std::string_view p) {
     for (std::size_t i = 0; i < kKindCount; ++i)
@@ -26,9 +28,12 @@ std::optional<Kind> kindFromPrefix(std::string_view p) {
     return std::nullopt;
 }
 
-std::string Id::str() const { return std::string(prefix(kind)) + "_" + std::to_string(n); }
+std::string Id::str() const {
+    return *this == kProject ? "project" : std::string(prefix(kind)) + "_" + std::to_string(n);
+}
 
 std::optional<Id> Id::parse(std::string_view text) {
+    if (text == "project") return kProject;
     const auto us = text.find('_');
     if (us == std::string_view::npos || us + 1 >= text.size()) return std::nullopt;
     auto k = kindFromPrefix(text.substr(0, us));
@@ -95,6 +100,7 @@ std::vector<Change> EditTxn::changes() const {
     std::vector<Change> out;
     out.reserve(changes_.size());
     for (const auto& [id, op] : changes_) out.push_back({op, id});
+    if (projectChanged_) out.push_back({Change::Op::Update, kProject});
     return out;
 }
 
@@ -441,7 +447,36 @@ struct Checker {
 
 }  // namespace
 
+Status automationExpansionBudget(const Session& s) {
+    constexpr std::size_t limit = 100000;
+    std::map<Id, std::size_t> totals;
+    for (const auto& e : s.envelopes) {
+        if (e.value->points.size() > limit)
+            return Error("automation.budget", "envelope exceeds 100000 expanded points",
+                         "/envelopes/" + e.id.str() + "/points", "reduce the envelope points");
+        totals[e.id] = e.value->points.size();
+    }
+    for (const auto& e : s.autoItems) {
+        const auto& ai = *e.value;
+        const double reps = ai.loop ? std::ceil(ai.length / ai.sourceLength) : 1;
+        if (!std::isfinite(reps) || reps < 1 || reps > limit || ai.points.size() > limit)
+            return Error("automation.budget",
+                         "automation expansion exceeds 100000 repetitions/points",
+                         "/automation_items/" + e.id.str(),
+                         "increase source_length or reduce length/points");
+        const auto cost = static_cast<std::size_t>(reps) * (ai.points.size() + 2) + 2;
+        auto& total = totals[ai.envelope];
+        if (cost > limit || total > limit - cost)
+            return Error("automation.budget", "envelope exceeds 100000 expanded points",
+                         "/automation_items/" + e.id.str(),
+                         "reduce length/points or increase source_length");
+        total += cost;
+    }
+    return {};
+}
+
 Status checkInvariants(const Session& s) {
+    SUPPLE_TRY(automationExpansionBudget(s));
     Checker c{s, {}};
     if (!(s.project->sampleRate >= 8000 && s.project->sampleRate <= 384000))
         c.fail("/project/sample_rate", "sample rate out of range");
@@ -504,6 +539,15 @@ void diffMap(const IdMap<T>& a, const IdMap<T>& b, std::vector<ObjectDiff>& out)
 
 std::vector<ObjectDiff> diff(const Session& a, const Session& b) {
     std::vector<ObjectDiff> out;
+    const auto from = toJson(*a.project), to = toJson(*b.project);
+    std::vector<std::string> fields;
+    for (const auto& member : from.asObject()) {
+        const auto* after = to.find(member.key);
+        if (!after || member.value != *after) fields.push_back(member.key);
+    }
+    for (const auto& member : to.asObject())
+        if (!from.find(member.key)) fields.push_back(member.key);
+    if (!fields.empty()) out.push_back({Change::Op::Update, kProject, std::move(fields)});
     // Kind order as in session-model §1 (tempo, rulers, tracks, items, …).
     diffMap(a.tempo, b.tempo, out);
     diffMap(a.meters, b.meters, out);
@@ -644,6 +688,7 @@ double pointsValueAt(const std::vector<EnvPoint>& pts, double pos, double fallba
 }
 
 std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
+    if (!automationExpansionBudget(s)) return {};
     const Envelope* env = s.envelopes.find(envelope);
     if (!env) return {};
     std::vector<const AutomationItem*> items;

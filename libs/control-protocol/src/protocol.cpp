@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <supple/product.h>
+#include <supple/rpc/model_loop.h>
 #include <supple/rpc/protocol.h>
 #include <sys/file.h>
 #include <sys/socket.h>
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,6 +72,14 @@ Error errorFromJson(const json::Value& value) {
         return part && part->isString() ? part->asString() : std::string{};
     };
     Error error(get("code"), get("message"), get("path"), get("hint"));
+    auto position = [&](std::string_view key) -> std::optional<int> {
+        auto* part = value.find(key);
+        if (!part || !part->isInt() || part->asInt() < 0 || part->asInt() > INT_MAX)
+            return std::nullopt;
+        return static_cast<int>(part->asInt());
+    };
+    if (auto line = position("line"), column = position("column"); line && column)
+        error.loc = SourceLoc{*line, *column};
     if (auto* details = value.find("details"); details && details->isArray())
         for (const auto& detail : details->asArray())
             error.details.push_back(errorFromJson(detail));
@@ -607,37 +617,74 @@ Client::~Client() { close(); }
 Status Client::connect(const std::filesystem::path& path, std::string client, std::string agent,
                        bool mcp) {
     close();
-    fd_ = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd_ < 0) return Error("rpc.socket", std::strerror(errno));
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    auto pathString = path.string();
-    if (pathString.size() >= sizeof(address.sun_path)) {
-        close();
-        return Error("rpc.path", "socket path is too long", pathString);
-    }
-    std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
-    if (::connect(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-        auto message = std::strerror(errno);
-        close();
-        return Error("rpc.connect", message, pathString);
-    }
     json::Value hello = json::Value::object();
     hello["client"] = std::move(client);
     hello["agent"] = std::move(agent);
     hello["protocol"] = 1;
     hello["mcp"] = mcp;
-    auto result = call("rpc.hello", hello);
-    return result ? Status{} : Status{result.error()};
+    path_ = path;
+    hello_ = std::move(hello);
+    return open();
 }
-void Client::close() {
+Status Client::open() {
+    drop();
+    fd_ = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd_ < 0) return Error("rpc.socket", std::strerror(errno));
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    auto pathString = path_.string();
+    if (pathString.size() >= sizeof(address.sun_path)) {
+        drop();
+        return Error("rpc.path", "socket path is too long", pathString);
+    }
+    std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
+    if (::connect(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        auto message = std::strerror(errno);
+        drop();
+        return Error("rpc.connect", message, pathString);
+    }
+    auto result = exchange("rpc.hello", *hello_);
+    if (result) return {};
+    drop();  // a connection without a handshake cannot serve calls
+    return result.error();
+}
+void Client::drop() {
     if (fd_ >= 0) ::close(fd_);
     fd_ = -1;
     input_.clear();
     nextId_ = 1;
 }
+void Client::close() {
+    drop();
+    path_.clear();
+    hello_.reset();
+}
+void Client::setTimeout(std::chrono::milliseconds timeout) {
+    timeout_ = std::clamp(timeout, std::chrono::milliseconds(1),
+                          std::chrono::milliseconds(std::chrono::hours(24)));
+}
 Result<json::Value> Client::call(std::string_view method, const json::Value& params) {
-    if (fd_ < 0) return Error("rpc.connect", "client is not connected");
+    if (fd_ < 0) {
+        if (!hello_)
+            return Error("rpc.connect", "client is not connected", "", "call connect() first");
+        if (auto reopened = open(); !reopened) {
+            Error error("rpc.connect", "could not reconnect: " + reopened.error().message,
+                        path_.string(), "start the app, then retry the call");
+            error.details.push_back(reopened.error());
+            return error;
+        }
+    }
+    auto result = exchange(method, params);
+    if (result && method == "rpc.hello") hello_ = params;
+    return result;
+}
+Result<json::Value> Client::exchange(std::string_view method, const json::Value& params) {
+    // Any transport failure leaves the stream in an unknown state (a partial
+    // request, or a response still on its way): close it.
+    auto fail = [this](Error error) -> Result<json::Value> {
+        drop();
+        return error;
+    };
     auto id = nextId_++;
     json::Value request = json::Value::object();
     request["jsonrpc"] = "2.0";
@@ -649,36 +696,54 @@ Result<json::Value> Client::call(std::string_view method, const json::Value& par
     while (sent < output.size()) {
         auto n = ::send(fd_, output.data() + sent, output.size() - sent, MSG_NOSIGNAL);
         if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) return Error("rpc.write", std::strerror(errno));
+        if (n <= 0) return fail(Error("rpc.write", std::strerror(errno)));
         sent += static_cast<std::size_t>(n);
     }
+    using clock = std::chrono::steady_clock;
+    const auto deadline = clock::now() + timeout_;
+    std::size_t scanned = 0;  // input_ before this offset holds no newline
     while (true) {
-        auto newline = input_.find('\n');
+        auto newline = input_.find('\n', scanned);
+        // The size limit applies before parsing, also when the newline came
+        // with the chunk that crossed it.
+        if ((newline != std::string::npos && newline > kMaxMessageBytes) ||
+            (newline == std::string::npos && input_.size() > kMaxMessageBytes))
+            return fail(
+                Error("rpc.message_size", "response exceeds 16 MiB", "", "narrow the query"));
         if (newline != std::string::npos) {
             auto frame = input_.substr(0, newline);
             input_.erase(0, newline + 1);
+            scanned = 0;
             auto parsed = json::parse(frame);
-            if (!parsed) return parsed.error();
+            if (!parsed) return fail(parsed.error());
             auto* responseId = parsed->isObject() ? parsed->find("id") : nullptr;
             if (!responseId) continue;  // subscribed event
             if (!responseId->isInt() || responseId->asInt() != static_cast<std::int64_t>(id))
-                return Error("rpc.id", "unexpected response id");
+                return fail(Error("rpc.id", "unexpected response id"));
             if (auto* error = parsed->find("error")) {
                 auto* data = error->find("data");
                 return data ? errorFromJson(*data) : Error("rpc.remote", "remote command failed");
             }
             auto* result = parsed->find("result");
-            return result ? Result<json::Value>(*result)
-                          : Result<json::Value>(Error("rpc.response", "missing result"));
+            if (!result) return fail(Error("rpc.response", "missing result"));
+            return Result<json::Value>(*result);
         }
-        if (input_.size() > kMaxMessageBytes)
-            return Error("rpc.message_size", "response too large");
+        scanned = input_.size();
+        const auto remaining = deadline - clock::now();
+        if (remaining <= clock::duration::zero())
+            return fail(Error("rpc.timeout", "timed out waiting for response", "",
+                              "the call may still have run; check before repeating it"));
         pollfd pfd{fd_, POLLIN, 0};
-        if (::poll(&pfd, 1, 30000) <= 0)
-            return Error("rpc.timeout", "timed out waiting for response");
+        const int ready = ::poll(&pfd, 1, detail::waitMilliseconds(remaining));
+        if (ready < 0 && errno == EINTR)
+            return fail(Error("rpc.interrupted", "a signal interrupted the wait for the response",
+                              "", "the call may still have run; check before repeating it"));
+        if (ready < 0) return fail(Error("rpc.read", std::strerror(errno)));
+        if (ready == 0) continue;  // the deadline check above decides
         char bytes[8192];
         auto n = ::recv(fd_, bytes, sizeof(bytes), 0);
-        if (n <= 0) return Error("rpc.read", "socket closed while waiting for response");
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return fail(Error("rpc.read", "socket closed while waiting for response"));
         input_.append(bytes, static_cast<std::size_t>(n));
     }
 }

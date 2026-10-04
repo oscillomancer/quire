@@ -48,6 +48,14 @@ scripting is a separate, JIT-compiled language: Phase 7, its own ADR.)
   `skill/generated/{engine,sandbox}.lua` behind a drift test.
 - `q.batch` uses `cmd::Dispatcher::transact`, which wraps a run of commands in
   one host transaction — the same one-undo-step guarantee as the bus's `batch`.
+  Every invocation has a savepoint, so caught failures cannot retain partial edits.
+- Budget exhaustion stays sticky until the outermost run returns; hook checks
+  keep raising even if Lua catches the first error. Tests can set an instruction
+  cap. Sandbox initialization and JSON pushes run in protected calls, and error
+  tables are read raw without executing metamethods.
+- Schema references resolve as bounded JSON Pointers against the root; named
+  arrays keep their array form. LuaLS uses the same references and the namespace
+  from product metadata.
 
 ## Consequences
 

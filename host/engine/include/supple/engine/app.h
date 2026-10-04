@@ -134,6 +134,7 @@ class EngineApp : public cmd::Host {
     model::EditTxn& txn();        // the open transaction (edit commands only)
     bool inTransaction() const { return txn_ != nullptr; }
     model::VersionStore& versions() { return *versions_; }
+    const model::VersionStore& versions() const { return *versions_; }
     const AppOptions& options() const { return options_; }
     const std::filesystem::path& projectPath() const { return projectPath_; }
     // Where relative media paths resolve: the saved project's folder, or the
@@ -157,6 +158,7 @@ class EngineApp : public cmd::Host {
     Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input
     // The instance's reported latency in samples (the running one when there is
     // one, else a throwaway activation at the project rate).
+    Result<json::Value> setPlainParams(model::Id id, const json::Value& values);
     Result<std::uint32_t> fxLatencySamples(model::Id id, const model::FxInstance& fx);
     // fx's patch after applying `patch` (a merge patch, or a complete patch
     // when `replace`), validated by the plugin; the complete canonical patch.
@@ -168,7 +170,10 @@ class EngineApp : public cmd::Host {
     Status save(const std::filesystem::path& path);  // atomic; becomes the project path
     Status open(const std::filesystem::path& path,
                 std::vector<schema::Warning>* warnings = nullptr);  // replaces the history
-    void newProject(model::Project project);
+    Status newProject(model::Project project);
+    std::uint64_t projectGeneration() const {
+        return projectGeneration_.load(std::memory_order_acquire);
+    }
 
     // --- branches ------------------------------------------------------------------
     // Re-executes recorded invocations on `base` as `version` (the replayer
@@ -176,6 +181,8 @@ class EngineApp : public cmd::Host {
     Result<model::Replayed> replay(const cmd::Registry& registry, const model::Session& base,
                                    const std::vector<model::Invocation>& invocations,
                                    std::uint64_t version);
+    Status undo();  // moves history, reloads the engine and emits session.changed
+    Status redo();
     Status switchBranch(std::string_view name);  // reloads the engine
     model::MergeOutcome mergeBranch(const cmd::Registry& registry, std::string_view from,
                                     std::string_view into);
@@ -202,6 +209,7 @@ class EngineApp : public cmd::Host {
     Result<std::filesystem::path> renderPath(std::string_view reference) const;
     void startJob(std::function<void(std::stop_token)> work);
     void stopJobs() override;
+    void dispatcherAttached(cmd::Dispatcher* dispatcher) override { commands_ = dispatcher; }
 
     // --- real-time engine (optional) ------------------------------------------------
     Status startEngine(Backend& backend, const BackendConfig& config);
@@ -291,6 +299,7 @@ class EngineApp : public cmd::Host {
                                            std::string_view label) override;
     Status commitTransaction(std::uint64_t id) override;
     void rollbackTransaction(std::uint64_t id) override;
+    std::function<void()> invocationSavepoint() override;
     void log(const cmd::LogRecord& record) override;
     void emit(std::string_view topic, json::Value payload) override;
     void commandFinished() override;
@@ -334,7 +343,11 @@ class EngineApp : public cmd::Host {
     void autosave();
     void maybeAutosave();  // autosave() when the head changed and an interval passed
 
+    Status replaceProject(model::Session session, std::filesystem::path path);
     AppOptions options_;
+    std::atomic<std::uint64_t> projectGeneration_{0};
+    cmd::Dispatcher* commands_ = nullptr;
+    bool clearScripts_ = false;
     std::unique_ptr<model::VersionStore> versions_;
     std::unique_ptr<model::EditTxn> txn_;
     model::TxnRecord record_;
@@ -353,7 +366,9 @@ class EngineApp : public cmd::Host {
     };
     std::vector<JobThread> jobs_;
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
-    Status moveScratchMedia(const std::filesystem::path& dest);
+    Status moveScratchMedia(const std::filesystem::path& dest,
+                            const std::function<Status()>& publish);
+    std::shared_ptr<const model::Session> loadedHead_;
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
@@ -395,6 +410,11 @@ class EngineApp : public cmd::Host {
     std::uint64_t autosaveMs_ = 0;
     std::uint64_t autosaveVersion_ = 0;
 };
+
+// Clones a take and its owned FX/envelopes/automation. `copy` may already
+// have a new source/offset; `shift` clips its item-relative envelopes for a split.
+Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, model::Id original,
+                           model::Take copy, double shift = 0);
 
 // Registers the engine's command catalogue (session-model §7): project.*,
 // track.*, item.*, midi.*, fx.*, render.mix, history.*, session.describe, …

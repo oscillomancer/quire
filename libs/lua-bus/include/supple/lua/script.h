@@ -34,6 +34,10 @@ struct ScriptOptions {
     // instruction, which makes ScriptResult::instructions exact at some cost
     // in pure-Lua speed; raise it for scripts that do long Lua loops.
     std::uint64_t hookCount = 1;
+    // Instruction cap of one run on top of the time budget (0: none). It is
+    // deterministic where the time budget is not; either one spent ends the
+    // run with `script.budget`, and pcall cannot resume after it.
+    std::uint64_t instructionLimit = 0;
     // Log lines kept per script (the oldest are dropped).
     std::size_t logLimitLines = 1000;
 };
@@ -60,6 +64,7 @@ class Script {
     Script& operator=(const Script&) = delete;
 
     const ScriptOptions& options() const;
+    bool running() const;
     // The origin every call the script runs carries (Lua, `lua:<name>`).
     cmd::Origin origin() const;
 

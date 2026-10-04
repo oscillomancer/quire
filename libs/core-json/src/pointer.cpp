@@ -62,4 +62,23 @@ const Value* resolve(const Value& root, std::string_view pointer) {
     }
     return cur;
 }
+const Value* resolveFragment(const Value& root, std::string_view reference) {
+    if (reference.empty() || reference.front() != '#') return nullptr;
+    std::string pointer;
+    pointer.reserve(reference.size());
+    for (std::size_t i = 1; i < reference.size(); ++i) {
+        if (reference[i] != '%') {
+            pointer += reference[i];
+            continue;
+        }
+        unsigned byte = 0;
+        if (reference.size() - i < 3) return nullptr;
+        auto [end, ec] =
+            std::from_chars(reference.data() + i + 1, reference.data() + i + 3, byte, 16);
+        if (ec != std::errc{} || end != reference.data() + i + 3) return nullptr;
+        pointer += static_cast<char>(byte);
+        i += 2;
+    }
+    return resolve(root, pointer);
+}
 }  // namespace supple::json

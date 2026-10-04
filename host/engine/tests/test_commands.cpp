@@ -41,6 +41,15 @@ json::Value run(cmd::Dispatcher& bus, std::string name, std::string_view args) {
     REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
     return *result;
 }
+void checkUndoContent(const model::Session& current, const std::string& before) {
+    auto previous = model::parseProject(before);
+    REQUIRE(previous);
+    for (std::size_t k = 0; k < model::kKindCount; ++k)
+        CHECK(current.next.next[k] >= previous->next.next[k]);
+    auto content = current;
+    content.next = previous->next;
+    CHECK(model::serializeProject(content) == before);
+}
 double peak(const fs::path& path) {
     auto audio = audio::readAudio(path);
     REQUIRE(audio);
@@ -111,7 +120,7 @@ TEST_CASE("tempo and meter edits see previous steps in the same batch") {
     CHECK(app->head().meters.size() == 2);
     CHECK(app->head().timeMap->meterAt(9).numerator == 5);
     run(bus, "history.undo", "{}");
-    CHECK(model::serializeProject(app->head()) == before);
+    checkUndoContent(app->head(), before);
 }
 
 TEST_CASE("FX descriptions reset shared scratch instances") {
@@ -1204,7 +1213,7 @@ TEST_CASE("track removal cascades envelopes and automation items on input FX") {
     CHECK(app->head().autoItems.empty());
     CHECK(model::checkInvariants(app->head()));
     run(bus, "history.undo", "{}");
-    CHECK(model::serializeProject(app->head()) == before);
+    checkUndoContent(app->head(), before);
     run(bus, "history.redo", "{}");
     CHECK(app->head().autoItems.empty());
 }
@@ -1244,7 +1253,7 @@ TEST_CASE("audio item splits advance source offsets by the take play rate") {
     REQUIRE(right);
     CHECK(right->startOffset == doctest::Approx(2.25));
     run(bus, "history.undo", "{}");
-    CHECK(model::serializeProject(app->head()) == before);
+    checkUndoContent(app->head(), before);
 }
 
 TEST_CASE("MIDI queries report item length in beats for time-based items") {
@@ -1267,4 +1276,148 @@ TEST_CASE("MIDI queries report item length in beats for time-based items") {
     const auto& note = app->head().midi.find(*model::Id::parse("mi_1"))->sequence.notes[0];
     CHECK(note.start == 0);
     CHECK(note.length == 1);
+}
+
+TEST_CASE("merge remaps creations within a batch and versions project metadata") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "branch.create", R"({"name":"agent","switch":false})");
+    run(bus, "track.add", R"({"name":"Human"})");
+    run(bus, "project.set", R"({"author":"Human"})");
+    run(bus, "branch.switch", R"({"name":"agent"})");
+    run(bus, "batch", R"({"steps":[
+      {"command":"track.add","args":{"name":"Agent"}},
+      {"command":"track.set","args":{"track":"tr_1","volume_db":-9}},
+      {"command":"project.set","args":{"title":"Song"}}]})");
+    auto changes = run(bus, "branch.diff", R"({"a":"main","b":"agent"})");
+    CHECK(json::writeCompact(changes).find("project") != std::string::npos);
+    run(bus, "branch.merge", R"({"from":"agent","into":"main"})");
+    run(bus, "branch.switch", R"({"name":"main"})");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_1"))->volumeDb == 0);
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_2"))->volumeDb == -9);
+    CHECK(app->head().project->author == "Human");
+    CHECK(app->head().project->title == "Song");
+    run(bus, "branch.create", R"({"name":"other","switch":false})");
+    run(bus, "project.set", R"({"name":"Mine"})");
+    run(bus, "branch.switch", R"({"name":"other"})");
+    run(bus, "project.set", R"({"name":"Theirs"})");
+    auto conflict = bus.execute({"branch.merge", j(R"({"from":"other","into":"main"})"), kOrigin});
+    REQUIRE_FALSE(conflict);
+    CHECK(conflict.error().code == "branch.conflict");
+    REQUIRE(app->undo());
+    run(bus, "project.set", R"({"name":"Mine"})");
+    run(bus, "branch.merge", R"({"from":"other","into":"main"})");
+}
+
+TEST_CASE("track add accepts auxiliary channels and rejects mono busses") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"channels":8})");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_1"))->channels == 8);
+    auto bad = bus.execute({"track.add", j(R"({"type":"buss","channels":1})"), kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "track.channels");
+}
+
+TEST_CASE("MIDI extreme numbers and automation expansions refuse without edits") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const auto before = model::serializeProject(app->head());
+    for (
+        const auto* args :
+        {R"({"item":"it_1","ops":[{"op":"add","pitch":60,"start":1e300,"length":1}]})",
+         R"({"item":"it_1","ops":[{"op":"move","notes":[0],"beats":1e300}]})",
+         R"({"item":"it_1","ops":[{"op":"velocity","notes":[0],"velocity_delta":9223372036854775807}]})",
+         R"({"item":"it_1","ops":[{"op":"quantize","grid":1e-300}]})"}) {
+        REQUIRE_FALSE(bus.execute({"midi.edit", j(args), kOrigin}));
+        CHECK(model::serializeProject(app->head()) == before);
+    }
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    auto bad = bus.execute(
+        {"autoitem.add",
+         j(R"({"env":"en_1","position":0,"length":1e9,"source_length":0.000001,"loop":true})"),
+         kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "automation.budget");
+    CHECK(app->head().autoItems.empty());
+}
+
+TEST_CASE("take copies clone FX envelopes and pooled items and split shaped boundaries") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const auto source = app->head();
+    auto transaction = app->beginTransaction(kOrigin, "take automation");
+    REQUIRE(transaction);
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.gain";
+    const auto fxId = app->txn().create(fx);
+    const auto takeId = *source.items.begin()->value->activeTake;
+    app->txn().modify<model::Take>(takeId, [&](auto& take) { take.chain = {fxId}; });
+    model::Envelope env;
+    env.target = {takeId, "volume"};
+    env.points = {{0, -12, model::PointShape::FastStart, 0}, {4, 0}};
+    const auto envId = app->txn().create(env);
+    env.target = {fxId, "gain"};
+    const auto fxEnv = app->txn().create(env);
+    model::AutomationItem ai;
+    ai.envelope = fxEnv;
+    ai.length = 4;
+    ai.sourceLength = 4;
+    ai.pool = 7;
+    app->txn().create(ai);
+    REQUIRE(app->commitTransaction(*transaction));
+    const double boundary = model::pointsValueAt(app->head().envelopes.find(envId)->points, 2, 0);
+    run(bus, "item.duplicate", R"({"item":"it_1"})");
+    CHECK(app->head().fx.size() == 2);
+    CHECK(app->head().autoItems.size() == 2);
+    for (const auto& e : app->head().autoItems) CHECK(e.value->pool == 7);
+    run(bus, "item.split", R"({"item":"it_1","at":2})");
+    CHECK(app->head().fx.size() == 3);
+    CHECK(app->head().autoItems.size() == 3);
+    CHECK(app->head().envelopes.find(envId)->points.back().value == doctest::Approx(boundary));
+    CHECK(app->head().envelopes.find(envId)->points.back().shape == model::PointShape::FastStart);
+    int right = 0;
+    for (const auto& e : app->head().envelopes)
+        if (e.value->target.object.kind == model::Kind::Take &&
+            e.value->points.front().value == boundary) {
+            CHECK(e.value->points.front().pos == 0);
+            CHECK(e.value->points.front().shape == model::PointShape::FastStart);
+            ++right;
+        }
+    CHECK(right == 1);
+    REQUIRE(model::checkInvariants(app->head()));
+}
+
+TEST_CASE("ruler lists expose timebase and descriptions convert seconds to beats") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    auto transaction = app->beginTransaction(kOrigin, "time rulers");
+    REQUIRE(transaction);
+    app->txn().create(model::Marker{2, model::Timebase::Time, "Second bar", ""});
+    app->txn().create(model::Region{2, 4, model::Timebase::Time, "Region", ""});
+    REQUIRE(app->commitTransaction(*transaction));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    const auto markers = run(bus, "marker.list", "{}");
+    CHECK(*markers.find("markers")->at(0).find("timebase") == "time");
+    const auto description = describeSession(app->head());
+    CHECK(description.find("Second bar\" bar 2") != std::string::npos);
+    CHECK(description.find("Region\" bar 2") != std::string::npos);
 }

@@ -136,6 +136,41 @@ struct Working {
 Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, std::size_t original,
                midi::Sequence& seq, const Frame& f) {
     const std::string here = "/ops/" + std::to_string(at);
+    constexpr std::int64_t tickLimit = std::int64_t{1} << 56;
+    auto validBeat = [&](double beat, bool absolute) {
+        const double ticks = (beat * f.rate + (absolute ? f.offset : 0)) * f.ppq;
+        return std::isfinite(ticks) && std::abs(ticks) <= static_cast<double>(tickLimit);
+    };
+    const std::pair<const char*, std::optional<double>> numbers[] = {
+        {"start", op.start},
+        {"length", op.length},
+        {"beats", op.beats},
+        {"start_delta", op.startDelta},
+        {"length_delta", op.lengthDelta},
+        {"grid", op.grid},
+        {"from", op.from},
+        {"to", op.to},
+        {"strength", op.strength}};
+    for (const auto& [name, value] : numbers)
+        if (value && !validBeat(*value, true))
+            return Error("midi.range", "number exceeds the finite MIDI tick range",
+                         here + "/" + name, "use a smaller finite number");
+    if (op.grid && *op.grid < 1e-9)
+        return Error("midi.range", "grid is too small", here + "/grid", "use at least 1e-9 beats");
+    if ((op.semitones && (*op.semitones < -127 || *op.semitones > 127)) ||
+        (op.velocityDelta && (*op.velocityDelta < -127 || *op.velocityDelta > 127)))
+        return Error("midi.range", "pitch/velocity delta exceeds -127..127", here,
+                     "use a delta within the MIDI range");
+    for (const auto& n : notes)
+        if (n.note.start < 0 || n.note.start > tickLimit || n.note.length < 0 ||
+            n.note.length > tickLimit)
+            return Error("midi.range", "source notes exceed the MIDI tick range", "/item",
+                         "shorten the MIDI source");
+    if (op.points)
+        for (const auto& point : *op.points)
+            if (!validBeat(point.beat, true))
+                return Error("midi.range", "CC beat exceeds the finite MIDI tick range",
+                             here + "/points");
     auto selection = [&](bool allWhenAbsent) -> Result<std::vector<std::size_t>> {
         std::vector<std::size_t> out;
         if (!op.notes) {
@@ -247,6 +282,9 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
                 midi::Note& n = notes[i].note;
                 const double start = f.beatOf(n.start);
                 const double end = f.beatOf(n.start + n.length);
+                if (!validBeat(snap(start), true) || !validBeat(snap(end), true))
+                    return Error("midi.range", "quantized notes exceed the finite MIDI tick range",
+                                 here + "/grid");
                 const std::int64_t newStart = std::max<std::int64_t>(0, f.tickOf(snap(start)));
                 std::int64_t newEnd =
                     op.ends.value_or(false) ? f.tickOf(snap(end)) : newStart + n.length;

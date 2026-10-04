@@ -68,12 +68,23 @@ class Value {
     Storage data_;
 };
 
+// An object member. The key is const: iterating a mutable Object gives
+// write access to values only, so the member index can never go stale.
 struct Member {
-    std::string key;
+    const std::string key;
     Value value;
 };
+// Members keep insertion order. Objects with many members carry a key index
+// that every mutating operation maintains eagerly; const operations never
+// write, so a const Object is safe to read from several threads.
 class Object {
   public:
+    Object() = default;
+    Object(const Object&) = default;
+    Object(Object&& other) noexcept;
+    Object& operator=(const Object& other);
+    Object& operator=(Object&& other) noexcept;
+    ~Object() = default;
     std::size_t size() const;
     bool empty() const;
     const Value* find(std::string_view key) const;
@@ -89,10 +100,13 @@ class Object {
     void sortKeys();
 
   private:
+    // Members are never move-assigned (the key is const), so growth and
+    // removal rebuild the vector by construction instead.
     std::vector<Member> members_;
-    mutable std::unordered_map<std::string, std::size_t> index_;
-    mutable bool indexValid_ = false;
-    void ensureIndex() const;
+    // Key -> position; complete when members_.size() >= kIndexMin, else empty.
+    std::unordered_map<std::string, std::size_t> index_;
+    Value& append(std::string key, Value v);
+    void rebuildIndex();
 };
 // Unlike operator==, compares JSON types, object order, and double bits.
 bool identical(const Value& a, const Value& b);

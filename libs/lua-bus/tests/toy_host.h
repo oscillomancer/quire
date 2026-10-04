@@ -152,7 +152,11 @@ inline cmd::Registry toyRegistry(bool withScripts = true) {
     add.examples = {{"Add three", json::parse(R"({"value": 3})").value(),
                      json::parse(R"({"count": 3})").value(), "empty"}};
     add.run = [](const AddArgs& args, cmd::Context& context) -> Result<CountResult> {
-        toy(context).count += args.value;
+        std::int64_t next;
+        if (__builtin_add_overflow(toy(context).count, args.value, &next))
+            return Error("toy.overflow", "counter addition exceeds int64", "/value",
+                         "use a smaller value");
+        toy(context).count = next;
         return CountResult{toy(context).count};
     };
     registry.add(std::move(add));

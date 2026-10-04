@@ -249,7 +249,6 @@ struct Envelope {
     bool active = true, armed = false, visible = true;
     Timebase timebase = Timebase::Beats;
     std::vector<EnvPoint> points;  // sorted by pos
-    std::vector<Id> items;         // automation items
 };
 
 // An automation item (gap log #28): a block of envelope on its lane that

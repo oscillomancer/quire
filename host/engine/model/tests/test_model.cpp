@@ -531,3 +531,26 @@ TEST_CASE("project ID counters refuse narrowing and fractional values") {
     REQUIRE_FALSE(parsed);
     CHECK(parsed.error().path == "/project/next_ids");
 }
+
+TEST_CASE("automation item lists are derived from the authoritative map") {
+    auto s = richSession();
+    EditTxn txn(s, s.version + 1);
+    AutomationItem ai;
+    ai.envelope = s.envelopes.begin()->id;
+    ai.length = 4;
+    ai.sourceLength = 4;
+    const auto id = txn.create(ai);
+    auto committed = txn.commit();
+    REQUIRE(committed);
+    auto doc = projectToJson(*committed);
+    auto& items = doc["envelopes"][ai.envelope.str()]["items"];
+    REQUIRE(items.isArray());
+    CHECK(items.at(0) == id.str());
+    items.push_back("ai_999");
+    std::vector<schema::Warning> warnings;
+    auto loaded = projectFromJson(doc, &warnings);
+    REQUIRE(loaded);
+    REQUIRE(warnings.size() == 1);
+    CHECK(warnings[0].code == "project.derived_items");
+    CHECK(serializeProject(*loaded) == serializeProject(*committed));
+}

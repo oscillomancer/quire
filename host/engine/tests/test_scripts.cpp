@@ -90,3 +90,59 @@ TEST_CASE("a script's subscription sees a version after the edit that made it") 
     REQUIRE(seen["result"]["versions"].size() >= 1);
     CHECK(seen["result"]["versions"].at(0).asInt() > 0);
 }
+
+TEST_CASE("caught command failures restore only their invocation savepoint") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Command<cmd::NoArgs, cmd::NoArgs> fail;
+    fail.name = "test.partial";
+    fail.kind = cmd::Kind::Edit;
+    fail.exposure = cmd::Exposure::Internal;
+    fail.args = schema::object<cmd::NoArgs>("test_args").build();
+    fail.result = schema::object<cmd::NoArgs>("test_result").build();
+    fail.run = [](const cmd::NoArgs&, cmd::Context& ctx) -> Result<cmd::NoArgs> {
+        auto& txn = ctx.service<EngineApp>().txn();
+        txn.modify<model::Track>(model::kMaster, [](auto& tr) { tr.name = "partial"; });
+        auto project = txn.project();
+        project.name = "partial";
+        txn.setProject(std::move(project));
+        ctx.service<EngineApp>().emit("test.failed_event", json::Value::object());
+        return Error("test.failed", "deliberate failure after mutations");
+    };
+    registry.add(std::move(fail));
+    cmd::Dispatcher bus(registry, *app);
+    app->attachCommands(bus);
+    run(bus, "script.run",
+        R"lua({"name":"watcher","code":"seen=0; q.on('test.failed_event',function() seen=seen+1 end)"})lua");
+    const auto name = app->head().project->name;
+    auto out = run(
+        bus, "script.run",
+        R"lua({"code":"q.batch('caught', function() q.track.add{name='kept'}; local ok,err=pcall(q.test.partial,{}); assert(not ok and err.code=='test.failed'); q.track.add{name='also kept'} end)"})lua");
+    CHECK(out.isObject());
+    auto seen = run(bus, "script.run", R"lua({"name":"watcher","code":"return seen"})lua");
+    INFO(json::writeCompact(seen));
+    CHECK(seen["result"] == 0);
+    CHECK(app->head().tracks.size() == 3);
+    CHECK(app->head().tracks.find(model::kMaster)->name == "Master");
+    CHECK(app->head().project->name == name);
+    CHECK(app->versions().history().front()->txn.invocations.size() == 2);
+    run(bus, "history.undo", "{}");
+    CHECK(app->head().tracks.size() == 1);
+}
+
+TEST_CASE("replacing a project inside Lua clears scripts after the outer call returns") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    app->attachCommands(bus);
+    run(bus, "script.run", R"lua({"name":"old","code":"saved=42"})lua");
+    run(bus, "script.run",
+        R"lua({"name":"replace","code":"q.project.new{name='Fresh'}; return 7"})lua");
+    CHECK(app->head().project->name == "Fresh");
+    auto reset = run(bus, "script.run", R"lua({"name":"old","code":"return saved==nil"})lua");
+    CHECK(reset["result"] == true);
+}

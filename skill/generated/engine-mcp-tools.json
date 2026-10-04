@@ -1612,8 +1612,8 @@
   },
   {
     "name": "fx_param_set",
-    "title": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.",
-    "description": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.  See describe for errors and examples.",
+    "title": "Set semantic parameters in units, or plain plugin parameters by name/id.",
+    "description": "Set semantic parameters in units, or plain plugin parameters by name/id. Plain CLAP/VST3 values use the declared range or plugin text; read-only parameters refuse edits. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_param_set_args",
@@ -2479,6 +2479,10 @@
               "id": {
                 "type": "string"
               },
+              "timebase": {
+                "type": "string",
+                "enum": ["time", "beats", "beats_position"]
+              },
               "name": {
                 "type": "string"
               },
@@ -2495,7 +2499,7 @@
                 "type": "number"
               }
             },
-            "required": ["id", "name", "color"],
+            "required": ["id", "timebase", "name", "color"],
             "additionalProperties": false
           }
         }
@@ -2961,6 +2965,9 @@
         "version": {
           "type": "integer"
         },
+        "generation": {
+          "type": "integer"
+        },
         "recoverable": {
           "type": "integer"
         },
@@ -2996,6 +3003,7 @@
         "tempo",
         "meter",
         "version",
+        "generation",
         "recoverable",
         "autosave_available"
       ],
@@ -3046,6 +3054,9 @@
         "version": {
           "type": "integer"
         },
+        "generation": {
+          "type": "integer"
+        },
         "recoverable": {
           "type": "integer"
         },
@@ -3081,6 +3092,7 @@
         "tempo",
         "meter",
         "version",
+        "generation",
         "recoverable",
         "autosave_available"
       ],
@@ -3352,6 +3364,10 @@
               "id": {
                 "type": "string"
               },
+              "timebase": {
+                "type": "string",
+                "enum": ["time", "beats", "beats_position"]
+              },
               "name": {
                 "type": "string"
               },
@@ -3368,7 +3384,7 @@
                 "type": "number"
               }
             },
-            "required": ["id", "name", "color"],
+            "required": ["id", "timebase", "name", "color"],
             "additionalProperties": false
           }
         }
@@ -4938,7 +4954,7 @@
         "channels": {
           "type": "integer",
           "minimum": 1.0,
-          "maximum": 2.0
+          "maximum": 8.0
         }
       },
       "additionalProperties": false

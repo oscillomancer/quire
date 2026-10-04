@@ -100,7 +100,9 @@ TEST_CASE("undo and redo are linear per branch; a new edit clears redo") {
     REQUIRE(vs.undo().ok());
     REQUIRE(vs.undo().ok());
     CHECK(vs.head()->tracks.size() == 1);
-    CHECK(vs.head()->next[Kind::Track] == 1);  // back to the initial state, counters too
+    CHECK(vs.head()->next[Kind::Track] == 2);  // allocated ids survive undo
+    run(vs, {inv("track.add", R"({"name":"B"})")});
+    CHECK(vs.head()->tracks.contains(*Id::parse("tr_2")));
 }
 
 TEST_CASE("coalescing: one gesture is one undo step") {

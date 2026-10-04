@@ -52,6 +52,19 @@ add_test(NAME notation.fuzz-smoke COMMAND notation.fuzz -runs=100
 set_tests_properties(notation.fuzz-smoke PROPERTIES
   ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0")
 
+# Coverage instrumentation: the *-fuzzlib targets above compile their own
+# sources with -fsanitize=fuzzer-no-link, but every library they or the
+# project/history targets link from the ordinary tree (core-schema, engine,
+# model, ...) gets only SUPPLE_SANITIZE's flags, so libFuzzer sees no edges in
+# them. A campaign configures the whole fuzz tree with
+# -fsanitize=fuzzer-no-link in CMAKE_C_FLAGS/CMAKE_CXX_FLAGS (README.md).
+if(NOT CMAKE_CXX_FLAGS MATCHES "fuzzer-no-link")
+  message(WARNING "Fuzz targets link libraries without coverage instrumentation; "
+    "configure with -DCMAKE_CXX_FLAGS=-fsanitize=fuzzer-no-link "
+    "-DCMAKE_C_FLAGS=-fsanitize=fuzzer-no-link for a coverage-guided campaign "
+    "(tests/fuzz/README.md). The smoke tests are unaffected.")
+endif()
+
 # The project target calls the exact parse/validate path used by project.open.
 # The history target calls the real EngineApp command catalogue and saves/opens
 # its final session. Both link the engine/model libraries built by this tree.

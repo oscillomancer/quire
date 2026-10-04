@@ -74,6 +74,7 @@ struct ProjectInfo {
     double sampleRate = 0, tempo = 0;
     std::string meter;
     std::int64_t version = 0;
+    std::int64_t generation = 0;
     std::int64_t recoverable = 0;    // recordings project.recover can bring back
     bool autosaveAvailable = false;  // a newer autosave exists (not loaded)
     std::optional<std::vector<schema::Warning>> warnings;
@@ -88,6 +89,7 @@ schema::Schema<ProjectInfo> projectInfoSchema() {
         .field("tempo", &ProjectInfo::tempo, schema::number())
         .field("meter", &ProjectInfo::meter, schema::string())
         .field("version", &ProjectInfo::version, schema::integer())
+        .field("generation", &ProjectInfo::generation, schema::integer())
         .field("recoverable", &ProjectInfo::recoverable, schema::integer())
         .field("autosave_available", &ProjectInfo::autosaveAvailable, schema::boolean())
         .field("warnings", &ProjectInfo::warnings,
@@ -109,6 +111,7 @@ ProjectInfo projectInfo(EngineApp& app, const model::Session& s) {
                        s.timeMap->bpmAt(0),
                        std::to_string(m.numerator) + "/" + std::to_string(m.denominator),
                        static_cast<std::int64_t>(s.version),
+                       static_cast<std::int64_t>(app.projectGeneration()),
                        static_cast<std::int64_t>(app.recoverable().size()),
                        !app.newerAutosave(project).empty(),
                        std::nullopt};
@@ -727,7 +730,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result = projectInfoSchema();
         c.examples = {
             {"A new project", obj("{}"),
-             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0, "recoverable": 0, "autosave_available": false})"),
+             obj(R"({"name": "", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": 120.0, "meter": "4/4", "version": 0, "recoverable": 0, "generation": "<any>", "autosave_available": false})"),
              "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
@@ -865,7 +868,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                     {"schema.invalid", "the file has problems", "details list each with its path"}};
         c.examples = {
             {"Open", obj(R"({"path": "example-project.json"})"),
-             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>", "recoverable": 0, "autosave_available": false})"),
+             obj(R"({"name": "<any>", "path": "<any>", "branch": "main", "sample_rate": "<any>", "tempo": "<any>", "meter": "<any>", "version": "<any>", "recoverable": 0, "generation": "<any>", "autosave_available": false})"),
              "saved"}};
         c.run = [](const PathArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
@@ -902,14 +905,14 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result = projectInfoSchema();
         c.examples = {
             {"New", obj(R"({"name": "Sketch"})"),
-             obj(R"({"name": "Sketch", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": "<any>", "meter": "<any>", "version": 0, "recoverable": 0, "autosave_available": false})"),
+             obj(R"({"name": "Sketch", "path": "", "branch": "main", "sample_rate": 48000.0, "tempo": "<any>", "meter": "<any>", "version": 0, "recoverable": 0, "generation": "<any>", "autosave_available": false})"),
              "song"}};
         c.run = [](const NewArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
             model::Project p;
             if (a.name) p.name = *a.name;
             if (a.sampleRate) p.sampleRate = *a.sampleRate;
-            app.newProject(std::move(p));
+            SUPPLE_TRY(app.newProject(std::move(p)));
             return projectInfo(app, app.head());
         };
         registry.add(std::move(c));
@@ -1141,7 +1144,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("name", &TrackAddArgs::name, schema::string())
                      .field("parent", &TrackAddArgs::parent, idArg("tr", "Parent track"))
                      .field("index", &TrackAddArgs::index, schema::integer().min(0))
-                     .field("channels", &TrackAddArgs::channels, schema::integer().range(1, 2))
+                     .field("channels", &TrackAddArgs::channels, schema::integer().range(1, 8))
                      .build();
         c.result = schema::object<TrackRef>("track_ref")
                        .field("track", &TrackRef::track, schema::string())
@@ -1165,6 +1168,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 t.get<model::Track>(parent)->type == model::StripType::Channel)
                 return Error("track.strip_type", "a channel cannot have children", "/parent",
                              "add a buss and place the channels under it");
+            if (a.type != model::StripType::Channel && a.channels.value_or(2) < 2)
+                return Error("track.channels", "busses and masters require at least two channels",
+                             "/channels", "use 2..8 channels");
             model::Track tr;
             tr.type = a.type;
             tr.name = a.name.value_or("");
@@ -1347,6 +1353,12 @@ void registerEngineCommands(cmd::Registry& registry) {
                 a.type.value_or(s.tracks.find(*id)->type) != model::StripType::Channel)
                 return Error("track.strip_type", "only channels record or monitor", "/track",
                              "record or monitor on a child channel instead");
+            if (a.recordInput && a.recordMidi)
+                return Error("track.record_input", "record audio or MIDI, not both",
+                             "/record_midi");
+            if (a.parentSend && !s.tracks.find(*id)->parent)
+                return Error("track.parent_send", "a master has no parent", "/parent_send",
+                             "masters feed hardware outputs and renders");
             if (a.type && *a.type != s.tracks.find(*id)->type) {
                 if (*id == model::kMaster)
                     return Error("track.strip_type", "tr_0 cannot be retyped", "/type",
@@ -1370,12 +1382,6 @@ void registerEngineCommands(cmd::Registry& registry) {
                 }
                 txn.modify<model::Track>(*id, [&](auto& tr) { tr.type = *a.type; });
             }
-            if (a.recordInput && a.recordMidi)
-                return Error("track.record_input", "record audio or MIDI, not both",
-                             "/record_midi");
-            if (a.parentSend && !s.tracks.find(*id)->parent)
-                return Error("track.parent_send", "a master has no parent", "/parent_send",
-                             "masters feed hardware outputs and renders");
             // The record input is a route from the device inputs (hw_input).
             std::optional<Id> input = s.tracks.find(*id)->record.input;
             if (a.recordInput) {
@@ -2128,7 +2134,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "fx.param.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.";
+        c.summary = "Set semantic parameters in units, or plain plugin parameters by name/id.";
+        c.description =
+            "Plain CLAP/VST3 values use the declared range or plugin text; read-only parameters "
+            "refuse edits.";
         c.tags = {"fx", "params"};
         c.args = schema::object<FxParamSetArgs>("fx_param_set_args")
                      .field("fx", &FxParamSetArgs::fx, idArg("fx", "Plugin instance"))
@@ -2138,6 +2147,15 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.examples = {{"Set the gain", obj(R"({"fx": "fx_2", "values": {"gain": -3}})"),
                        obj(R"({"changed": "<any>", "description": "<any>"})"), "song_with_fx"}};
         c.run = [mergeRun](const FxParamSetArgs& a, Context& ctx) -> Result<MergeResult> {
+            auto id = existing<model::FxInstance>(A(ctx).view(), a.fx, "/fx");
+            if (!id) return id.error();
+            auto schema = A(ctx).fxSchema(*A(ctx).view().fx.find(*id));
+            if (!schema) return schema.error();
+            if (schema->isNull()) {
+                auto changed = A(ctx).setPlainParams(*id, a.values);
+                if (!changed) return changed.error();
+                return MergeResult{std::move(*changed), "Plugin parameters updated"};
+            }
             json::Value patch = json::Value::object();
             patch["params"] = a.values;
             auto merged = mergeRun(A(ctx), a.fx, patch, "/values");
@@ -2346,12 +2364,14 @@ void registerEngineCommands(cmd::Registry& registry) {
             const fs::path path = *resolvedPath;
             auto& dispatcher = ctx.service<cmd::Dispatcher>();
             const cmd::Origin origin = ctx.origin();
-            auto addFile = [&dispatcher, origin, path, start = a.startBeat.value_or(0.0)] {
+            const auto target = renderTarget(app);
+            auto addFile = [&app, target, &dispatcher, origin, path,
+                            start = a.startBeat.value_or(0.0)] {
                 json::Value files = json::Value::array(), f = json::Value::object();
                 f["path"] = path.string();
                 f["start_beat"] = start;
                 files.push_back(std::move(f));
-                postAddToProject(dispatcher, origin, files);
+                postAddToProject(app, target, dispatcher, origin, files);
             };
             if (a.job) {
                 auto available = app.plugins();
@@ -2361,8 +2381,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 auto& jobs = ctx.service<cmd::JobManager>();
                 const std::string id = jobs.create();
                 const std::string renderId = app.reserveRenderId();
-                app.startJob([&app, &jobs, id, renderId, s = std::move(s), o, path, a, addFile,
-                              catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                app.startJob([&app, &dispatcher, &jobs, target, id, renderId, s = std::move(s), o,
+                              path, a, addFile, catalogue = std::move(catalogue),
+                              identity](std::stop_token stop) {
                     if (stop.stop_requested() || jobs.cancelled(id)) return;
                     OfflineSettings settings = o;
                     settings.cancelFlag = jobs.cancellationFlag(id);
@@ -2397,10 +2418,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                                                                  : analysis::Detail::Summary);
                         if (report) result["analysis"] = std::move(*report);
                     }
-                    (void)jobs.completeWith(id, std::move(result), [&] {
-                        app.publishRender(renderId, path);
-                        if (a.addToProject) addFile();
-                    });
+                    completeRenderJob(app, dispatcher, jobs, id, target, std::move(result),
+                                      [&app, renderId, path, a, addFile] {
+                                          app.publishRender(renderId, path);
+                                          if (a.addToProject) addFile();
+                                      });
                 });
                 RenderMixResult started;
                 started.job = id;
@@ -2460,10 +2482,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                        undo ? "song" : "song_undone"}};
         c.run = [undo](const NoArgs&, Context& ctx) -> Result<HistoryResult> {
             EngineApp& app = A(ctx);
-            SUPPLE_TRY(undo ? app.versions().undo() : app.versions().redo());
+            SUPPLE_TRY(undo ? app.undo() : app.redo());
             const model::Version* v =
                 app.versions().version(app.versions().headVersion(app.versions().branch()));
-            app.emit("session.changed", json::Value(static_cast<std::int64_t>(v->id)));
             return HistoryResult{static_cast<std::int64_t>(v->id), v->txn.label};
         };
         registry.add(std::move(c));
@@ -3723,7 +3744,21 @@ std::string describeSession(const model::Session& s) {
     if (!s.markers.empty()) {
         out += "markers:";
         for (const auto& e : s.markers)
-            out += " " + e.id.str() + " \"" + e.value->name + "\" " + barOf(e.value->pos);
+            out +=
+                " " + e.id.str() + " \"" + e.value->name + "\" " +
+                barOf(e.value->timebase == model::Timebase::Time ? s.timeMap->beatAt(e.value->pos)
+                                                                 : e.value->pos);
+        out += "\n";
+    }
+    if (!s.regions.empty()) {
+        out += "regions:";
+        for (const auto& e : s.regions) {
+            const auto beat = [&](double pos) {
+                return e.value->timebase == model::Timebase::Time ? s.timeMap->beatAt(pos) : pos;
+            };
+            out += " " + e.id.str() + " \"" + e.value->name + "\" " + barOf(beat(e.value->start)) +
+                   "–" + barOf(beat(e.value->end));
+        }
         out += "\n";
     }
     return out;

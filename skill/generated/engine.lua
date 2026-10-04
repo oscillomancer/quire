@@ -449,6 +449,7 @@ q = nil
 ---@field tempo number
 ---@field meter string
 ---@field version integer
+---@field generation integer
 ---@field recoverable integer
 ---@field autosave_available boolean
 ---@field warnings? table[]
@@ -465,6 +466,7 @@ q = nil
 ---@field tempo number
 ---@field meter string
 ---@field version integer
+---@field generation integer
 ---@field recoverable integer
 ---@field autosave_available boolean
 ---@field warnings? table[]
@@ -480,6 +482,7 @@ q = nil
 ---@field tempo number
 ---@field meter string
 ---@field version integer
+---@field generation integer
 ---@field recoverable integer
 ---@field autosave_available boolean
 ---@field warnings? table[]
@@ -986,7 +989,7 @@ q = nil
 
 ---@class Quire.fx.param
 ---@field get fun(args: Quire.fx_param_get_args): Quire.fx_param_get_result Read one saved plugin parameter by semantic key or numeric CLAP id.
----@field set fun(args: Quire.fx_param_set_args): Quire.fx_param_set_result Set plugin parameters by key in physical units: {"cutoff": "800 Hz"}.
+---@field set fun(args: Quire.fx_param_set_args): Quire.fx_param_set_result Set semantic parameters in units, or plain plugin parameters by name/id.
 
 ---@class Quire.fx.patch
 ---@field get fun(args: Quire.fx_patch_get_args): Quire.fx_patch_get_result Read a semantic plugin's saved patch.

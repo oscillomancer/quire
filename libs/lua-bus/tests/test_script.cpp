@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -44,6 +45,20 @@ constexpr const char* kEcho = R"({text = "t", n = 3, freq = 2, flag = false, mod
                               R"(anything = false, move = {kind = "point", x = 0}, ref = "tr_1"})";
 
 }  // namespace
+
+TEST_CASE("the fuzz toy counter refuses overflow without changing its value") {
+    Scene scene;
+    scene.host.toy.count = std::numeric_limits<std::int64_t>::max();
+    auto high = scene.run("q.toy.add{value=1}");
+    REQUIRE_FALSE(high);
+    CHECK(high.error().code == "toy.overflow");
+    CHECK(scene.host.toy.count == std::numeric_limits<std::int64_t>::max());
+    scene.host.toy.count = std::numeric_limits<std::int64_t>::min();
+    auto low = scene.run("q.toy.add{value=-1}");
+    REQUIRE_FALSE(low);
+    CHECK(low.error().code == "toy.overflow");
+    CHECK(scene.host.toy.count == std::numeric_limits<std::int64_t>::min());
+}
 
 TEST_CASE("the sandbox has the five libraries and nothing else") {
     Scene scene;
@@ -87,15 +102,12 @@ TEST_CASE("print and q.log go to the script's log") {
 }
 
 TEST_CASE("the instruction budget stops a runaway script") {
-    Scene scene;
-    const auto started = std::chrono::steady_clock::now();
-    auto out = scene.run("while true do end", 50.0);
-    const auto spent =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
-            .count();
+    ScriptOptions options;
+    options.instructionLimit = 1000;
+    Scene scene(options);
+    auto out = scene.run("while true do pcall(function() while true do end end) end", 10000.0);
     REQUIRE(!out);
     CHECK(out.error().code == "script.budget");
-    CHECK(spent < 3000.0);  // it really stopped, and far sooner than "eventually"
     CHECK(out.error().hint.find("budget_ms") != std::string::npos);
 }
 
@@ -467,4 +479,55 @@ TEST_CASE("Lua JSON conversion bounds cyclic and deep tables and preserves binar
     auto healthy = scene.run("return 42");
     REQUIRE(healthy);
     CHECK(healthy->result == 42);
+}
+
+TEST_CASE("Lua initialization and argument pushes fail inside protected calls") {
+    ScriptOptions options;
+    options.memoryLimitBytes = 5000;
+    Scene tiny(options);
+    auto initialized = tiny.run("return 1");
+    REQUIRE_FALSE(initialized);
+    CHECK(initialized.error().code == "script.memory");
+    options.memoryLimitBytes = 192 * 1024;
+    Scene limited(options);
+    REQUIRE(limited.run("return 1"));
+    json::Value args = json::Value::object();
+    args["large"] = std::string(300000, 'x');
+    auto pushed = limited.runWith("return 1", args);
+    REQUIRE_FALSE(pushed);
+    CHECK(pushed.error().code == "script.memory");
+    REQUIRE(limited.run("return 2"));
+}
+TEST_CASE("Lua error tables are read raw without executing metamethods") {
+    Scene scene;
+    auto failed =
+        scene.run("error(setmetatable({}, {__index=function() error('metamethod ran') end}))");
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().message.find("metamethod ran") == std::string::npos);
+}
+
+TEST_CASE("named arrays resolve JSON pointer refs and preserve an empty Lua array") {
+    struct Arrays {
+        std::vector<std::int64_t> values;
+    };
+    auto shape = schema::object<Arrays>("arrays")
+                     .field("values", &Arrays::values,
+                            schema::named("numbers", schema::arrayOf(schema::integer())))
+                     .build();
+    cmd::Registry registry;
+    cmd::Command<Arrays, Arrays> echo;
+    echo.name = "test.arrays";
+    echo.exposure = cmd::Exposure::Internal;
+    echo.args = shape;
+    echo.result = shape;
+    echo.run = [](const Arrays& a, cmd::Context&) -> Result<Arrays> { return a; };
+    registry.add(std::move(echo));
+    ToyHost host;
+    cmd::Dispatcher bus(registry, host);
+    Script script(&registry, &bus);
+    auto result = script.run("return q.test.arrays{values={}}");
+    REQUIRE(result);
+    // Empty result tables have no schema on the return boundary; the command
+    // succeeds only if the argument converted as the named array.
+    CHECK(cmd::luaStubs(registry).find("values integer[]") != std::string::npos);
 }

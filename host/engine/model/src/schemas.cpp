@@ -751,8 +751,6 @@ const Schema<Envelope>& schemaOf<Envelope>() {
         dflt(b, d.timebase);
         b.field("points", &Envelope::points, schema::arrayOf(point));
         dflt(b, d.points);
-        b.field("items", &Envelope::items, ids());
-        dflt(b, d.items);
         return b.build();
     }();
     return s;
@@ -891,6 +889,12 @@ json::Value projectToJson(const Session& s) {
     doc["sources"]["midi"] = mapToJson(s.midi);
     doc["routes"] = mapToJson(s.routes);
     doc["envelopes"] = mapToJson(s.envelopes);
+    for (const auto& e : s.envelopes) {
+        auto list = json::Value::array();
+        for (const auto& item : s.autoItems)
+            if (item.value->envelope == e.id) list.push_back(item.id.str());
+        doc["envelopes"][e.id.str()]["items"] = std::move(list);
+    }
     // Written only when there are some: projects without them stay byte-identical.
     if (!s.autoItems.empty()) doc["automation_items"] = mapToJson(s.autoItems);
     doc["groups"] = json::Value::object();
@@ -912,6 +916,15 @@ std::string serializeProject(const Session& s) {
 
 Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Warning>* warnings) {
     json::Value doc = input;
+    if (!doc.isObject()) return Error("project.type", "a project is a JSON object");
+    std::map<std::string, json::Value> derivedItems;
+    if (auto* envs = doc.asObject().find("envelopes"); envs && envs->isObject())
+        for (auto& entry : envs->asObject())
+            if (entry.value.isObject())
+                if (auto* items = entry.value.find("items")) {
+                    derivedItems.emplace(entry.key, *items);
+                    entry.value.asObject().erase("items");
+                }
     if (!doc.isObject()) return Error("project.type", "a project is a JSON object");
     const json::Value* schemaId = doc.find("schema");
     if (!schemaId || !schemaId->isString())
@@ -1048,6 +1061,16 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     s.routes = routes.build();
     s.envelopes = envelopes.build();
     s.autoItems = autoItems.build();
+    if (warnings)
+        for (const auto& [envelope, given] : derivedItems) {
+            auto expected = json::Value::array();
+            for (const auto& item : s.autoItems)
+                if (item.value->envelope.str() == envelope) expected.push_back(item.id.str());
+            if (given != expected)
+                warnings->push_back({"project.derived_items",
+                                     "ignored stale envelope items; derived from automation_items",
+                                     json::pointerJoin("/envelopes", envelope) + "/items"});
+        }
     // Derive the time map and validate everything through a no-op transaction.
     EditTxn txn(s, 0);
     return txn.commit();

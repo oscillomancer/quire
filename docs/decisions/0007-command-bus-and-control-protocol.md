@@ -104,3 +104,12 @@ economy; `describe` restores it on demand (progressive disclosure).
   compiler and still export JSON Schema.
 - Length-prefixed framing (LSP style): NDJSON is simpler to debug with
   `socat` and every JSON writer we have emits single-line output on request.
+
+### Follow-up clarification (2026-10-04)
+
+Hosts provide invocation savepoints so caught errors inside a batch restore that
+call's edits. Scoped admission follows nested calls, including Lua, to enforce
+agent branch/project isolation. RPC preserves source locations, enforces framing
+bounds before parsing, and reconnects after invalidated calls. Model-loop timer
+cancellation guarantees are documented on `rpc::Timer`; cross-thread owner
+lifetime requires synchronization.

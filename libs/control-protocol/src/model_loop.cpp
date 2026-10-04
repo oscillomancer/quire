@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <climits>
 #include <deque>
 #include <exception>
 #include <mutex>
@@ -17,6 +18,11 @@ namespace {
 // (both are lock-free; the handler only stores and writes to the pipe).
 std::atomic<int> signalFd{-1};
 std::atomic<bool> stopping{false};
+using Clock = std::chrono::steady_clock;
+// `from + by`, saturating at the clock's end instead of overflowing.
+Clock::time_point later(Clock::time_point from, Clock::duration by) {
+    return by >= Clock::time_point::max() - from ? Clock::time_point::max() : from + by;
+}
 void onSignal(int) {
     stopping.store(true, std::memory_order_relaxed);
     const int fd = signalFd.load(std::memory_order_relaxed);
@@ -26,6 +32,12 @@ void onSignal(int) {
     }
 }
 }  // namespace
+
+int detail::waitMilliseconds(Clock::duration remaining) {
+    if (remaining <= Clock::duration::zero()) return 0;
+    const auto ms = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+    return ms.count() >= INT_MAX ? INT_MAX : static_cast<int>(ms.count());
+}
 
 detail::Wake::~Wake() {
     if (readFd >= 0) ::close(readFd);
@@ -63,26 +75,25 @@ struct ModelLoop::Impl {
     // Milliseconds until the nearest timer, or -1 when there is none. Called
     // with the lock held.
     int nextTimeoutMs() const {
-        using clock = std::chrono::steady_clock;
-        const auto now = clock::now();
+        const auto now = Clock::now();
         int best = -1;
         for (const auto& timer : timers) {
             if (timer->cancelled.load(std::memory_order_relaxed)) continue;
-            const auto wait =
-                std::chrono::duration_cast<std::chrono::milliseconds>(timer->next - now);
-            const int ms = wait.count() < 0 ? 0 : static_cast<int>(wait.count());
+            const int ms = detail::waitMilliseconds(timer->next - now);
             best = best < 0 ? ms : std::min(best, ms);
         }
         return best;
     }
 
     // Runs the timers that are due now, on this thread. Their callbacks may
-    // register or cancel more timers, so nothing is held while they run.
+    // register or cancel more timers, so nothing is held while they run. Each
+    // timer's cancellation is checked again right before its callback runs
+    // (the guarantee in model_loop.h).
     void runDueTimers() {
-        std::vector<std::function<void()>> due;
+        std::vector<std::shared_ptr<detail::TimerState>> due;
         {
             std::lock_guard lock(mutex);
-            const auto now = std::chrono::steady_clock::now();
+            const auto now = Clock::now();
             for (auto it = timers.begin(); it != timers.end();) {
                 const auto& timer = *it;
                 if (timer->cancelled.load(std::memory_order_acquire)) {
@@ -90,13 +101,14 @@ struct ModelLoop::Impl {
                     continue;
                 }
                 if (timer->next <= now) {
-                    due.push_back(timer->fn);
-                    timer->next = now + timer->interval;
+                    due.push_back(timer);
+                    timer->next = later(now, timer->interval);
                 }
                 ++it;
             }
         }
-        for (auto& fn : due) fn();
+        for (const auto& timer : due)
+            if (!timer->cancelled.load(std::memory_order_acquire)) timer->fn();
     }
 
     void drainTasks() {
@@ -148,8 +160,11 @@ ModelLoop::~ModelLoop() {
 
 Timer ModelLoop::every(std::chrono::milliseconds interval, std::function<void()> fn) {
     auto state = std::make_shared<detail::TimerState>();
-    state->interval = std::max(interval, std::chrono::milliseconds(1));
-    state->next = std::chrono::steady_clock::now() + state->interval;
+    // Converting to the clock's finer unit must not overflow either.
+    const auto longest =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::duration::max());
+    state->interval = std::clamp(interval, std::chrono::milliseconds(1), longest);
+    state->next = later(Clock::now(), state->interval);
     state->fn = std::move(fn);
     state->wake = impl_->wake;
     {

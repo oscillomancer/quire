@@ -311,14 +311,16 @@ TEST_CASE("job lifecycle, cancellation, timeout and event throttling") {
     CHECK(timed->find("status")->asString() == "running");
     Status workerStatus;
     std::thread worker([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        workerStatus = dispatcher.jobs().complete(id, obj("{\"count\":7}"));
+        dispatcher.post("test.complete", [&] {
+            workerStatus = dispatcher.jobs().complete(id, obj("{\"count\":7}"));
+            return workerStatus;
+        });
     });
     auto done = call(dispatcher, "job.wait", obj("{\"job\":\"jb_1\",\"timeout_s\":1}"));
     worker.join();
     CHECK(workerStatus);
     REQUIRE(done);
-    CHECK(done->find("status")->asString() == "done");
+    REQUIRE(done->find("status")->asString() == "done");
     CHECK(done->find("result")->find("count")->asInt() == 7);
     CHECK(host.events.back() == "job.done");
     // A too-long timeout is clamped, not rejected, and says so; the wait above
@@ -341,6 +343,13 @@ TEST_CASE("job lifecycle, cancellation, timeout and event throttling") {
     CHECK(call(dispatcher, "job.cancel", obj("{\"job\":\"jb_2\"}")));
     CHECK(dispatcher.jobs().cancelled(second));
     CHECK(dispatcher.jobs().status(second)->find("status")->asString() == "cancelled");
+    CHECK(dispatcher.jobs().status(second)->find("result") == nullptr);
+    CHECK(dispatcher.jobs().cancel(second, obj(R"({"status":"render.stale_target"})")));
+    auto annotated = dispatcher.jobs().status(second);
+    REQUIRE(annotated);
+    CHECK(*annotated->find("status") == "cancelled");
+    REQUIRE(annotated->find("result"));
+    CHECK(*annotated->find("result")->find("status") == "render.stale_target");
     CHECK_FALSE(dispatcher.jobs().complete(second, json::Value::object()));
     bool published = false;
     CHECK_FALSE(

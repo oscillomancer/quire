@@ -116,6 +116,8 @@ class VersionStore {
     struct Branch {
         std::uint64_t head = 0, base = 0;
         std::vector<std::uint64_t> redo;
+        Counters allocated;  // high-water marks in this branch lineage
+        mutable std::shared_ptr<const Session> view = {};
     };
     Result<Branch*> find(std::string_view name);
     const Branch* lookup(std::string_view name) const;

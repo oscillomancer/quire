@@ -12,22 +12,23 @@
 namespace supple::model {
 
 enum class Kind : std::uint8_t {
-    Track,       // tr
-    Item,        // it
-    Take,        // tk
-    Media,       // md  audio media source
-    Midi,        // mi  MIDI source
-    Fx,          // fx  plugin instance
-    Route,       // sd
-    Envelope,    // en
-    AutoItem,    // ai
-    Marker,      // mk
-    Region,      // rg
-    TempoPoint,  // tp
-    Meter,       // ts
-    Group,       // gr
-    Lane,        // ln
-    RenderJob,   // rj
+    Track,          // tr
+    Item,           // it
+    Take,           // tk
+    Media,          // md  audio media source
+    Midi,           // mi  MIDI source
+    Fx,             // fx  plugin instance
+    Route,          // sd
+    Envelope,       // en
+    AutoItem,       // ai
+    Marker,         // mk
+    Region,         // rg
+    TempoPoint,     // tp
+    Meter,          // ts
+    Group,          // gr
+    Lane,           // ln
+    RenderJob,      // rj
+    Project = 255,  // non-allocated singleton, used in changes/diffs
 };
 inline constexpr std::size_t kKindCount = 16;
 
@@ -45,6 +46,7 @@ struct Id {
 };
 
 inline constexpr Id kMaster{Kind::Track, 0};
+inline constexpr Id kProject{Kind::Project, 0};
 
 // Per-kind next-ID counters (session-model: project.next_ids).
 struct Counters {

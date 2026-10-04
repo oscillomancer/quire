@@ -5,6 +5,8 @@
 #include <lua.h>
 #include <lualib.h>
 
+#include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -32,32 +34,60 @@ Kind kindFromType(const json::Value& type) {
     return Kind::Any;
 }
 
-// A schema may be inline, a $ref into its own $defs (schema::named), or a
-// choice (anyOf for units, oneOf for a variant or a reference).
-const json::Value* resolve(const json::Value& schema) {
-    if (!schema.isObject()) return &schema;
-    if (const auto* ref = schema.find("$ref"); ref && ref->isString()) {
-        const std::string& name = ref->asString();
-        if (const auto* defs = schema.find("$defs"); defs && defs->isObject())
-            if (const auto* target = defs->find(name); target && target->isObject())
-                return resolve(*target);
-        return &schema;
+// A schema position: the node, the root its references resolve against, and
+// the nearest enclosing node with its own $defs. schema::named puts a
+// definition beside its reference ({"$ref": "#/$defs/x", "$defs": {...}}),
+// which may sit below the root; a reference the root cannot resolve is tried
+// there. A null node says nothing about the value.
+struct Node {
+    const json::Value* schema = nullptr;
+    const json::Value* root = nullptr;
+    const json::Value* scope = nullptr;
+};
+
+constexpr int kMaxReferenceHops = 32;  // a $ref chain longer than this is a cycle
+
+Node enter(Node node) {
+    if (node.schema && node.schema->isObject())
+        if (const auto* defs = node.schema->find("$defs"); defs && defs->isObject())
+            node.scope = node.schema;
+    return node;
+}
+
+// Follows $ref (a JSON Pointer fragment) to the schema it names. A reference
+// that does not resolve, or a cycle, says nothing about the value.
+Node resolve(Node node) {
+    node = enter(node);
+    for (int hop = 0; node.schema && node.schema->isObject(); ++hop) {
+        const auto* ref = node.schema->find("$ref");
+        if (!ref || !ref->isString()) return node;
+        if (hop == kMaxReferenceHops) return {nullptr, node.root, node.scope};
+        const json::Value* target =
+            node.root ? json::resolveFragment(*node.root, ref->asString()) : nullptr;
+        if (!target && node.scope) target = json::resolveFragment(*node.scope, ref->asString());
+        if (!target) return {nullptr, node.root, node.scope};
+        node = enter({target, node.root, node.scope});
     }
-    return &schema;
+    return node;
+}
+
+Node child(const Node& parent, const json::Value* schema) {
+    return {schema, parent.root, parent.scope};
 }
 
 // The kind of a Lua value at `index` as the schema sees it: a table is an
 // object unless the schema names an array (or a sequence with no schema).
-Kind kindOf(lua_State* L, int index, const json::Value* schema) {
-    const json::Value* s = schema ? resolve(*schema) : nullptr;
+Kind kindOf(lua_State* L, int index, const Node& at) {
+    const Node node = resolve(at);
+    const json::Value* s = node.schema;
     if (s && s->isObject()) {
         if (const auto* choices = s->find("oneOf"); choices && choices->isArray()) {
             // Prefer the alternative matching the value (a reference is an ID
             // string or a selector object).
             const Kind table = lua_istable(L, index) ? Kind::Object : Kind::Any;
             for (const auto& alternative : choices->asArray()) {
-                const json::Value* alt = resolve(alternative);
-                const auto* type = alt->find("type");
+                const json::Value* alt = resolve(child(node, &alternative)).schema;
+                const auto* type = alt && alt->isObject() ? alt->find("type") : nullptr;
                 Kind kind = type ? kindFromType(*type) : Kind::Any;
                 if (table == Kind::Object && kind == Kind::Object) return Kind::Object;
                 if (table == Kind::Object && kind == Kind::Array) return Kind::Array;
@@ -92,30 +122,32 @@ bool sequenceOnly(lua_State* L, int index, std::size_t len) {
     return !bad && seen == len;
 }
 
-const json::Value* memberSchema(const json::Value& schema, const std::string& key) {
-    const json::Value* s = resolve(schema);
-    if (s->isObject()) {
+Node memberSchema(const Node& at, const std::string& key) {
+    const Node node = resolve(at);
+    const json::Value* s = node.schema;
+    if (s && s->isObject()) {
         if (const auto* properties = s->find("properties"); properties && properties->isObject())
             if (const auto* member = properties->find(key); member && member->isObject())
-                return resolve(*member);
+                return resolve(child(node, member));
         if (const auto* extra = s->find("additionalProperties"); extra && extra->isObject())
-            return resolve(*extra);
+            return resolve(child(node, extra));
     }
-    return nullptr;
+    return child(node, nullptr);
 }
 
-const json::Value* itemSchema(const json::Value& schema) {
-    const json::Value* s = resolve(schema);
-    if (s->isObject())
+Node itemSchema(const Node& at) {
+    const Node node = resolve(at);
+    const json::Value* s = node.schema;
+    if (s && s->isObject())
         if (const auto* items = s->find("items"); items && items->isObject())
-            return resolve(*items);
-    return nullptr;
+            return resolve(child(node, items));
+    return child(node, nullptr);
 }
 
-Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* schema,
+Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
                                 const std::string& path, int depth);
 
-Result<json::Value> valueToJson(lua_State* L, int index, const json::Value* schema,
+Result<json::Value> valueToJson(lua_State* L, int index, const Node& schema,
                                 const std::string& path, int depth) {
     if (depth > 64 || !lua_checkstack(L, 4))
         return Error("script.value", "table nesting exceeds the JSON conversion limit", path,
@@ -153,7 +185,7 @@ Result<json::Value> valueToJson(lua_State* L, int index, const json::Value* sche
         "pass a string, number, boolean, table (or q.null)");
 }
 
-Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* schema,
+Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
                                 const std::string& path, int depth) {
     const int table = lua_absindex(L, index);
     const Kind kind = kindOf(L, table, schema);
@@ -164,7 +196,7 @@ Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* sche
                          "expected a sequence for " + (path.empty() ? "arguments" : path), path,
                          "use {value, value, ...} (a table with string keys is an object)");
         json::Value out = json::Value::array();
-        const json::Value* items = schema ? itemSchema(*schema) : nullptr;
+        const Node items = itemSchema(schema);
         for (std::size_t i = 1; i <= length; ++i) {
             lua_rawgeti(L, table, static_cast<lua_Integer>(i));
             auto item = valueToJson(L, -1, items, path + "/" + std::to_string(i - 1), depth + 1);
@@ -193,7 +225,7 @@ Result<json::Value> tableToJson(lua_State* L, int index, const json::Value* sche
         else
             return Error("script.table", "object keys must be strings", path,
                          "use {\"name\": value} with string keys");
-        const json::Value* member = schema ? memberSchema(*schema, key) : nullptr;
+        const Node member = memberSchema(schema, key);
         auto value = valueToJson(L, -1, member, json::pointerJoin(path, key), depth + 1);
         lua_pop(L, 1);
         if (!value) return value.error();
@@ -210,7 +242,16 @@ bool isNull(lua_State* L, int index) {
            lua_touserdata(L, index) == static_cast<void*>(&kNullSentinel);
 }
 
-void pushJson(lua_State* L, const json::Value& value) {
+namespace {
+void pushJsonAt(lua_State* L, const json::Value& value, int depth) {
+    if (depth > kMaxPushDepth) {
+        pushError(L, Error("script.value",
+                           "the JSON value nests deeper than " + std::to_string(kMaxPushDepth) +
+                               " levels",
+                           {}, "pass a flatter value"));
+        lua_error(L);
+    }
+    luaL_checkstack(L, 3, "converting a JSON value");
     switch (value.type()) {
         case json::Type::Null:
             pushNull(L);
@@ -228,21 +269,21 @@ void pushJson(lua_State* L, const json::Value& value) {
             lua_pushlstring(L, value.asString().data(), value.asString().size());
             return;
         case json::Type::Array: {
-            lua_createtable(L, static_cast<int>(value.size()), 0);
+            lua_createtable(L, static_cast<int>(std::min<std::size_t>(value.size(), INT_MAX)), 0);
             const int table = lua_gettop(L);
-            int position = 1;
+            lua_Integer position = 1;
             for (const auto& item : value.asArray()) {
-                pushJson(L, item);
+                pushJsonAt(L, item, depth + 1);
                 lua_rawseti(L, table, position++);
             }
             return;
         }
         case json::Type::Object: {
-            lua_createtable(L, 0, static_cast<int>(value.size()));
+            lua_createtable(L, 0, static_cast<int>(std::min<std::size_t>(value.size(), INT_MAX)));
             const int table = lua_gettop(L);
             for (const auto& member : value.asObject()) {
                 lua_pushlstring(L, member.key.data(), member.key.size());
-                pushJson(L, member.value);
+                pushJsonAt(L, member.value, depth + 1);
                 lua_rawset(L, table);
             }
             return;
@@ -250,12 +291,8 @@ void pushJson(lua_State* L, const json::Value& value) {
     }
 }
 
-Result<json::Value> toJson(lua_State* L, int index, const json::Value* schema,
-                           const std::string& path) {
-    return valueToJson(L, index, schema, path, 0);
-}
-
-void pushError(lua_State* L, const Error& error) {
+void pushErrorAt(lua_State* L, const Error& error, int depth) {
+    luaL_checkstack(L, 4, "building an error table");
     lua_createtable(L, 0, 5);
     const int table = lua_gettop(L);
     lua_pushlstring(L, error.code.data(), error.code.size());
@@ -266,17 +303,46 @@ void pushError(lua_State* L, const Error& error) {
     lua_setfield(L, table, "path");
     lua_pushlstring(L, error.hint.data(), error.hint.size());
     lua_setfield(L, table, "hint");
-    lua_createtable(L, static_cast<int>(error.details.size()), 0);
+    // Details deeper than a script could usefully read are left out rather
+    // than allowed to exhaust the stack.
+    const bool keep = depth < kMaxPushDepth;
+    lua_createtable(L, keep ? static_cast<int>(error.details.size()) : 0, 0);
     const int details = lua_gettop(L);
-    int position = 1;
-    for (const auto& detail : error.details) {
-        pushError(L, detail);
-        lua_rawseti(L, details, position++);
-    }
+    lua_Integer position = 1;
+    if (keep)
+        for (const auto& detail : error.details) {
+            pushErrorAt(L, detail, depth + 1);
+            lua_rawseti(L, details, position++);
+        }
     lua_setfield(L, table, "details");
 }
+}  // namespace
+
+void pushJson(lua_State* L, const json::Value& value) { pushJsonAt(L, value, 0); }
+
+Result<json::Value> toJson(lua_State* L, int index, const json::Value* schema,
+                           const std::string& path) {
+    return valueToJson(L, index, Node{schema, schema, nullptr}, path, 0);
+}
+
+void pushError(lua_State* L, const Error& error) { pushErrorAt(L, error, 0); }
 
 namespace {
+// Pushes t[name] without metamethods: an error table's __index must not run
+// while the host decodes it.
+int rawField(lua_State* L, int table, const char* name) {
+    lua_pushstring(L, name);
+    return lua_rawget(L, table);
+}
+
+std::string stringAt(lua_State* L, int index) {
+    std::size_t length = 0;
+    const char* text = lua_tolstring(L, index, &length);
+    return text ? std::string(text, length) : std::string();
+}
+
+// Runs in protected mode (errorFromLua): reads only raw fields and strings,
+// so no Lua code runs.
 Error errorFromLuaAt(lua_State* L, int index, int depth) {
     if (depth > 64 || !lua_checkstack(L, 4))
         return Error("script.error", "error details exceed the nesting limit", {},
@@ -284,20 +350,15 @@ Error errorFromLuaAt(lua_State* L, int index, int depth) {
     index = lua_absindex(L, index);
     if (lua_type(L, index) == LUA_TTABLE) {
         Error error;
-        lua_getfield(L, index, "code");
-        if (lua_type(L, -1) == LUA_TSTRING) error.code = lua_tostring(L, -1);
+        if (rawField(L, index, "code") == LUA_TSTRING) error.code = stringAt(L, -1);
         lua_pop(L, 1);
-        lua_getfield(L, index, "message");
-        if (lua_type(L, -1) == LUA_TSTRING) error.message = lua_tostring(L, -1);
+        if (rawField(L, index, "message") == LUA_TSTRING) error.message = stringAt(L, -1);
         lua_pop(L, 1);
-        lua_getfield(L, index, "path");
-        if (lua_type(L, -1) == LUA_TSTRING) error.path = lua_tostring(L, -1);
+        if (rawField(L, index, "path") == LUA_TSTRING) error.path = stringAt(L, -1);
         lua_pop(L, 1);
-        lua_getfield(L, index, "hint");
-        if (lua_type(L, -1) == LUA_TSTRING) error.hint = lua_tostring(L, -1);
+        if (rawField(L, index, "hint") == LUA_TSTRING) error.hint = stringAt(L, -1);
         lua_pop(L, 1);
-        lua_getfield(L, index, "details");
-        if (lua_type(L, -1) == LUA_TTABLE) {
+        if (rawField(L, index, "details") == LUA_TTABLE) {
             const std::size_t count = lua_rawlen(L, -1);
             for (std::size_t i = 1; i <= count; ++i) {
                 lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
@@ -310,13 +371,27 @@ Error errorFromLuaAt(lua_State* L, int index, int depth) {
             if (error.code.empty()) error.code = "script.error";
             return error;
         }
+        return Error("script.error", "the script raised a table error with no code or message");
     }
-    if (lua_type(L, index) == LUA_TSTRING) return Error("script.error", lua_tostring(L, index));
+    if (lua_type(L, index) == LUA_TSTRING) return Error("script.error", stringAt(L, index));
     return Error("script.error", "the script raised a non-string, non-table error value");
 }
 
 }  // namespace
 
-Error errorFromLua(lua_State* L, int index) { return errorFromLuaAt(L, index, 0); }
+Error errorFromLua(lua_State* L, int index) {
+    Error out("script.error", "the script's error could not be read (the state is out of memory)",
+              {}, "make the script hold less data");
+    const int top = lua_gettop(L);
+    if (!lua_checkstack(L, 1)) return out;
+    lua_pushvalue(L, index);
+    auto decode = [&out](lua_State* S) -> int {
+        out = errorFromLuaAt(S, 1, 0);
+        return 0;
+    };
+    (void)protectedCall(L, 1, 0, decode);
+    lua_settop(L, top);
+    return out;
+}
 
 }  // namespace supple::lua

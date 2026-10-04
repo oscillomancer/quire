@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <chrono>
 #include <future>
+#include <optional>
 #include <set>
-#include "supple/json/parse.h"
+#include <string_view>
 
 #include "supple/base/files.h"
+#include "supple/json/parse.h"
 #include "supple/json/write.h"
 #include "supple/mcp/server.h"
 #include "supple/product.h"
@@ -41,6 +43,50 @@ std::vector<std::string> skillTopics(const std::filesystem::path& dir) {
 
 json::Value schemaOf(const char* text) { return *json::parse(text); }
 
+json::Value errorJson(const Error& error) {
+    json::Value v = json::Value::object();
+    v["code"] = error.code;
+    v["message"] = error.message;
+    v["path"] = error.path;
+    v["hint"] = error.hint;
+    return v;
+}
+
+// Commands that change which project or branch the agent's edits land on, or
+// the app's lifecycle: the human's decisions (the panel's A/B, accept and
+// reject drive the branches).
+constexpr std::string_view kDenied[] = {"branch.create", "branch.delete", "branch.merge",
+                                        "branch.switch", "engine.start",  "engine.stop",
+                                        "project.new",   "project.open"};
+
+Status admitCommand(std::string_view command, const json::Value& args, const std::string& path) {
+    command = command.substr(0, command.find('@'));  // "name@version"
+    const bool saveAs = command == "project.save" && !at(args, "path").isNull();
+    if (!saveAs && std::find(std::begin(kDenied), std::end(kDenied), command) == std::end(kDenied))
+        return {};
+    return Error("agent.denied",
+                 std::string(command) + (saveAs ? " with a path" : "") +
+                     " is not available to the agent: the human manages branches, projects and "
+                     "the engine",
+                 path,
+                 "keep editing on your branch; the human A/Bs it, then accepts or rejects it");
+}
+
+// A batch's steps (malformed batches are left to the dispatcher).
+Status admitBatch(const json::Value& batch, const std::string& path) {
+    const json::Value& steps = at(batch, "steps");
+    if (!steps.isArray()) return {};
+    for (std::size_t i = 0; i < steps.asArray().size(); ++i) {
+        const json::Value& step = steps.asArray()[i];
+        if (!at(step, "command").isString()) continue;
+        if (auto ok = admitCommand(at(step, "command").asString(), at(step, "args"),
+                                   path + "/steps/" + std::to_string(i) + "/command");
+            !ok)
+            return ok;
+    }
+    return {};
+}
+
 constexpr const char* kPanelRules = R"(
 
 ## Working in the DAW's agent panel
@@ -67,6 +113,13 @@ Session::Session(Endpoint endpoint, const cmd::Registry& registry, cmd::Dispatch
       options_(std::move(options)),
       mcp_(std::make_unique<mcp::Server>(registry, dispatcher)) {
     mcp_->setOrigin({cmd::Origin::Type::Agent, options_.client, endpoint_.model});
+    // The MCP server's dedicated tools: one per mcp-tool command, dots as underscores.
+    for (const cmd::CommandInfo* info : registry.all())
+        if (registry.find(info->name) == info && info->exposure == cmd::Exposure::McpTool) {
+            std::string tool = info->name;
+            std::replace(tool.begin(), tool.end(), '.', '_');
+            toolCommands_[tool] = info->name;
+        }
     auto rpc = [this](const char* method, json::Value params) {
         json::Value req = json::Value::object();
         req["jsonrpc"] = "2.0";
@@ -150,6 +203,14 @@ bool Session::send(std::string prompt) {
         if (events.error) events.error("could not start a branch: " + b.error().message);
         return false;
     }
+    auto project = exec("project.get", json::Value::object());
+    if (!project) {
+        if (events.error) events.error("could not read the project: " + project.error().message);
+        return false;
+    }
+    projectGeneration_ =
+        at(*project, "generation").isInt() ? at(*project, "generation").asInt() : 0;
+    projectPath_ = at(*project, "path").isString() ? at(*project, "path").asString() : "";
     {
         std::lock_guard lock(mutex_);
         Message m;
@@ -160,15 +221,68 @@ bool Session::send(std::string prompt) {
         history_.push_back(std::move(m));
     }
     busy_ = true;
-    worker_ = std::jthread(
-        [this, alive = std::weak_ptr<int>(alive_)](std::stop_token stop) { work(stop, alive); });
+    worker_ = std::jthread([this, alive = std::weak_ptr<int>(alive_), generation = ++generation_](
+                               std::stop_token stop) { work(stop, alive, generation); });
     return true;
 }
 
-void Session::cancel() { worker_.request_stop(); }
+void Session::cancel() {
+    if (!busy_) return;
+    ++generation_;  // what the worker already posted for this turn becomes a no-op
+    worker_.request_stop();
+}
 
-ToolResult Session::call(const ToolCall& c) {
+Status Session::admit(const ToolCall& c) const {
+    if (c.name == "exec") {
+        if (const json::Value& batch = at(c.input, "batch"); !batch.isNull())
+            return admitBatch(batch, "/arguments/batch");
+        if (!at(c.input, "command").isString()) return {};
+        const std::string& command = at(c.input, "command").asString();
+        if (command.substr(0, command.find('@')) == "batch")
+            return admitBatch(at(c.input, "args"), "/arguments/args");
+        return admitCommand(command, at(c.input, "args"), "/arguments/command");
+    }
+    auto it = toolCommands_.find(c.name);
+    if (it == toolCommands_.end()) return {};  // describe, query, skill_read, listen
+    if (it->second == "batch") return admitBatch(c.input, "/arguments");
+    return admitCommand(it->second, c.input, "/name");
+}
+
+Status Session::pinned() {
+    auto project = exec("project.get", json::Value::object());
+    const std::string hint = "switch back to \"" + branch_ +
+                             "\" (the panel's A/B) and send again, or reject the agent's branch";
+    if (!project)
+        return Error("agent.branch_changed",
+                     "cannot read the current branch: " + project.error().message, {}, hint);
+    const json::Value &current = at(*project, "branch"), &path = at(*project, "path");
+    if (!current.isString() || current.asString() != branch_)
+        return Error("agent.branch_changed",
+                     "the current branch is \"" +
+                         (current.isString() ? current.asString() : std::string()) +
+                         "\", not the agent's branch \"" + branch_ + "\"",
+                     {}, hint);
+    if (at(*project, "generation").asInt() != projectGeneration_ || !path.isString() ||
+        path.asString() != projectPath_)
+        return Error("agent.branch_changed",
+                     "the project file changed from \"" + projectPath_ + "\" to \"" +
+                         (path.isString() ? path.asString() : std::string()) + "\"",
+                     {}, "send again to continue in this project");
+    return {};
+}
+
+ToolResult Session::call(const ToolCall& c, std::optional<Error>& stopTurn) {
     ToolResult r{c.id, {}, false};
+    auto failed = [&](const Error& error) {
+        r.content = json::writeCompact(errorJson(error));
+        r.isError = true;
+        return r;
+    };
+    if (auto ok = pinned(); !ok) {
+        stopTurn = ok.error();
+        return failed(ok.error());
+    }
+    if (auto ok = admit(c); !ok) return failed(ok.error());
     if (c.name == "skill_read") {
         const std::string topic =
             at(c.input, "topic").isString() ? at(c.input, "topic").asString() : "";
@@ -191,7 +305,24 @@ ToolResult Session::call(const ToolCall& c) {
         params["name"] = c.name;
         params["arguments"] = c.input;
         req["params"] = std::move(params);
-        auto resp = mcp_->handle(req);
+        auto guarded = dispatcher_.guarded(
+            [&](const cmd::Invocation& invocation) -> Status {
+                if (auto allowed = admitCommand(invocation.command, invocation.args, "/command");
+                    !allowed)
+                    return allowed;
+                // pinned() queries this command itself.
+                if (invocation.command.substr(0, invocation.command.find('@')) == "project.get")
+                    return {};
+                auto same = pinned();
+                if (!same) stopTurn = same.error();
+                return same;
+            },
+            [&]() -> Result<json::Value> {
+                auto response = mcp_->handle(req);
+                return response ? std::move(*response) : json::Value();
+            });
+        std::optional<json::Value> resp;
+        if (guarded && !guarded->isNull()) resp = std::move(*guarded);
         if (!resp) {
             r.content = "no response";
             r.isError = true;
@@ -205,20 +336,27 @@ ToolResult Session::call(const ToolCall& c) {
             r.isError = at(result, "isError").isBool() && at(result, "isError").asBool();
         }
     }
+    if (auto ok = pinned(); !ok) {  // a script (or the human) moved it while the call ran
+        stopTurn = ok.error();
+        return failed(ok.error());
+    }
     if (r.content.size() > kMaxToolResult)
         r.content = r.content.substr(0, kMaxToolResult) + "\n… (truncated; ask for less detail)";
     return r;
 }
 
-void Session::work(std::stop_token stop, std::weak_ptr<int> alive) {
-    auto onModel = [this, alive](std::function<void()> f) {
-        post_([alive, f = std::move(f)] {
-            if (alive.lock()) f();
+void Session::work(std::stop_token stop, std::weak_ptr<int> alive, std::uint64_t generation) {
+    // Events of this turn: dropped once it is cancelled (or the session is gone).
+    auto onModel = [this, alive, generation](std::function<void()> f) {
+        post_([this, alive, generation, f = std::move(f)] {
+            if (alive.lock() && generation_ == generation) f();
         });
     };
+    // The worker's last post: only now is the session idle.
     auto finish = [&](std::optional<std::string> error) {
-        busy_ = false;
-        onModel([this, error] {
+        post_([this, alive, error] {
+            if (!alive.lock()) return;
+            busy_ = false;
             if (error && events.error) events.error(*error);
             if (events.idle) events.idle();
         });
@@ -246,20 +384,42 @@ void Session::work(std::stop_token stop, std::weak_ptr<int> alive) {
             if (events.turn) events.turn(t);
         });
         if (turn->message.toolCalls.empty()) return finish(std::nullopt);
-        // Run each call on the model thread and wait (abandoning on cancel).
+        // Run each call on the model thread and wait. Every call gets a result
+        // (the next request needs one per call), real or "not run".
+        struct Outcome {
+            ToolResult result;
+            std::optional<Error> stopTurn;
+        };
         Message results;
+        std::optional<std::string> stopWith;
         for (const ToolCall& c : turn->message.toolCalls) {
-            auto promise = std::make_shared<std::promise<ToolResult>>();
+            if (stopWith || stop.stop_requested()) {
+                results.toolResults.push_back(
+                    {c.id, stopWith ? "not run: the turn stopped" : "cancelled", true});
+                continue;
+            }
+            auto promise = std::make_shared<std::promise<Outcome>>();
             auto future = promise->get_future();
-            onModel([this, c, promise] {
+            post_([this, alive, generation, c, promise] {
+                if (!alive.lock() || generation_ != generation)  // cancelled: never runs
+                    return promise->set_value({{c.id, "cancelled", true}, std::nullopt});
+                Outcome o;
                 if (events.toolStarted) events.toolStarted(c);
-                ToolResult r = call(c);
-                if (events.toolFinished) events.toolFinished(c, r);
-                promise->set_value(std::move(r));
+                o.result = call(c, o.stopTurn);
+                if (events.toolFinished) events.toolFinished(c, o.result);
+                promise->set_value(std::move(o));
             });
-            while (future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready)
-                if (stop.stop_requested()) return finish("cancelled");
-            results.toolResults.push_back(future.get());
+            while (future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready &&
+                   !stop.stop_requested()) {
+            }
+            if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                // Cancelled while queued: the call is invalidated and will not run.
+                results.toolResults.push_back({c.id, "cancelled", true});
+                continue;
+            }
+            Outcome o = future.get();
+            if (o.stopTurn) stopWith = o.stopTurn->toString();
+            results.toolResults.push_back(std::move(o.result));
         }
         const bool listened =
             std::any_of(turn->message.toolCalls.begin(), turn->message.toolCalls.end(),
@@ -268,6 +428,8 @@ void Session::work(std::stop_token stop, std::weak_ptr<int> alive) {
             std::lock_guard lock(mutex_);
             history_.push_back(std::move(results));
         }
+        if (stopWith) return finish(*stopWith);
+        if (stop.stop_requested()) return finish("cancelled");
         if (listened) return finish(std::nullopt);  // the human answers in the next message
     }
 }

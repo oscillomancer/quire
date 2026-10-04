@@ -224,6 +224,8 @@ std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash);
 // The points an envelope plays (gap log #28): its own, with each automation
 // item on it replacing the span it covers (looped, scaled; a later item cuts
 // an earlier one it overlaps), a step at each edge. Absolute beats.
+// Refuses expansions beyond 100k repetitions/points per envelope.
+Status automationExpansionBudget(const Session& s);
 std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope);
 // An envelope's value at `pos` from sorted points with their segment shapes
 // (`fallback` without points).
