@@ -604,6 +604,9 @@ q = nil
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? string|table
 ---@field mute? boolean
+---@field mono? boolean Sum the source to mono before the pan
+---@field phase_invert? boolean
+---@field channels? table Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity
 
 ---@class Quire.route_add_result
 ---@field id string
@@ -623,6 +626,9 @@ q = nil
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? string|table
 ---@field mute? boolean
+---@field mono? boolean Sum the source to mono before the pan
+---@field phase_invert? boolean
+---@field channels? table Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity
 
 ---@class Quire.script_run_args
 ---@field code string The Lua source. It may return a value: what it returns is converted to JSON (tables with string keys are objects, sequences are arrays).
@@ -987,7 +993,7 @@ q = nil
 ---@field list fun(): Quire.route_list_result List sends with endpoints and mixer settings.
 ---@field matrix fun(): table What can be routed where: strips, plug-in keys, sends and blocked pairs.
 ---@field remove fun(args: Quire.route_remove_args): table Remove a send.
----@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, or mute.
+---@field set fun(args: Quire.route_set_args): table Change a route's endpoints, tap, level, pan, mute, or channel map.
 
 ---@class Quire.script
 ---@field run fun(args: Quire.script_run_args): Quire.script_run_result Run a Lua script on the command bus.

@@ -59,7 +59,8 @@ struct RouteArgs {
     std::optional<model::Tap> tap;
     std::optional<double> volumeDb;
     std::optional<model::RoutePan> pan;
-    std::optional<bool> mute;
+    std::optional<bool> mute, mono, phaseInvert;
+    std::optional<model::ChannelMap> channels;
 };
 struct RouteSetArgs {
     std::string route;
@@ -67,7 +68,8 @@ struct RouteSetArgs {
     std::optional<model::Tap> tap;
     std::optional<double> volumeDb;
     std::optional<model::RoutePan> pan;
-    std::optional<bool> mute;
+    std::optional<bool> mute, mono, phaseInvert;
+    std::optional<model::ChannelMap> channels;
 };
 struct RouteRef {
     std::string route;
@@ -81,7 +83,8 @@ struct RouteEntry {
     std::string id, from, to, fx, tap;
     double volumeDb = 0;
     model::RoutePan pan;
-    bool mute = false;
+    bool mute = false, mono = false, phaseInvert = false;
+    model::ChannelMap channels;
 };
 struct RouteList {
     std::vector<RouteEntry> routes;
@@ -218,6 +221,14 @@ auto tapSchema() {
                                             {model::Tap::PreFx, "pre_fx"}});
 }
 
+schema::Schema<model::ChannelMap> channelMapSchema() {
+    return schema::object<model::ChannelMap>("channel_map")
+        .field("from", &model::ChannelMap::from,
+               schema::arrayOf(schema::integerOf<int>().range(1, 64)))
+        .field("to", &model::ChannelMap::to, schema::arrayOf(schema::integerOf<int>().range(1, 64)))
+        .build();
+}
+
 template <class T>
 schema::Schema<T> routeArgsSchema(const char* name) {
     auto b = schema::object<T>(name);
@@ -232,6 +243,13 @@ schema::Schema<T> routeArgsSchema(const char* name) {
             schema::number().range(model::kSilenceDb, 12).unit(units::Unit::dB));
     b.field("pan", &T::pan, model::routePanSchema());
     b.field("mute", &T::mute, schema::boolean());
+    b.field("mono", &T::mono, schema::boolean().doc("Sum the source to mono before the pan"));
+    b.field("phase_invert", &T::phaseInvert, schema::boolean());
+    b.field("channels", &T::channels,
+            channelMapSchema().doc(
+                "Which source channel feeds which destination channel, pair by pair: "
+                "{from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left "
+                "channel to both, {from: [], to: []} restores the identity"));
     return b.build();
 }
 
@@ -335,6 +353,29 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
     if (a.volumeDb) r.volumeDb = *a.volumeDb;
     if (a.pan) r.pan = *a.pan;
     if (a.mute) r.mute = *a.mute;
+    if (a.mono) r.mono = *a.mono;
+    if (a.phaseInvert) r.phaseInvert = *a.phaseInvert;
+    if (a.channels) {
+        const model::ChannelMap& m = *a.channels;
+        if (m.from.size() != m.to.size())
+            return Error("route.channels", "channels.from and channels.to differ in length",
+                         "/channels", "pair them: {from: [1, 2], to: [2, 1]}");
+        // Strips are mono or stereo (session-model §1.4): channels 1 and 2.
+        const int sourceChannels = 2, targetChannels = 2;
+        for (std::size_t k = 0; k < m.from.size(); ++k) {
+            if (m.from[k] > sourceChannels)
+                return Error("route.channels",
+                             "the source has " + std::to_string(sourceChannels) + " channels",
+                             "/channels/from/" + std::to_string(k), "use 1 or 2");
+            if (m.to[k] > targetChannels)
+                return Error("route.channels",
+                             "the destination has " + std::to_string(targetChannels) + " channels",
+                             "/channels/to/" + std::to_string(k), "use 1 or 2");
+        }
+        const bool identity =
+            m.from.empty() || (m.from == std::vector<int>{1, 2} && m.to == std::vector<int>{1, 2});
+        r.channels = identity ? model::ChannelMap{} : m;
+    }
     return r;
 }
 
@@ -420,17 +461,23 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "route.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Change a route's endpoints, tap, level, pan, or mute.";
+        c.summary = "Change a route's endpoints, tap, level, pan, mute, or channel map.";
         c.tags = {"route", "mix"};
         c.args = routeArgsSchema<RouteSetArgs>("route_set_args");
         c.result = emptySchema();
         c.examples = {
-            {"Mute a route", j(R"({"route":"sd_1","mute":true})"), j("{}"), "song_with_route"}};
+            {"Mute a route", j(R"({"route":"sd_1","mute":true})"), j("{}"), "song_with_route"},
+            {"Swap left and right", j(R"({"route":"sd_1","channels":{"from":[1,2],"to":[2,1]}})"),
+             j("{}"), "song_with_route"}};
+        c.errors = {{"route.channels", "the map pairs channels the strips do not have",
+                     "pair 1 and 2: {from: [1, 2], to: [2, 1]}"}};
         c.run = [](const RouteSetArgs& a, Context& ctx) -> Result<Empty> {
             const auto s = app(ctx).view();
             auto id = require<model::Route>(s, a.route, "/route");
             if (!id) return std::move(id).error();
-            RouteArgs edits{a.from.value_or(""), a.to, a.fx, a.tap, a.volumeDb, a.pan, a.mute};
+            RouteArgs edits{a.from.value_or(""), a.to,      a.fx,   a.tap,
+                            a.volumeDb,          a.pan,     a.mute, a.mono,
+                            a.phaseInvert,       a.channels};
             auto r = buildRoute(edits, s, app(ctx), s.routes.find(*id), *id);
             if (!r) return std::move(r).error();
             app(ctx).txn().put<model::Route>(*id, std::move(*r));
@@ -487,6 +534,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                          .field("volume_db", &RouteEntry::volumeDb, schema::number())
                          .field("pan", &RouteEntry::pan, model::routePanSchema())
                          .field("mute", &RouteEntry::mute, schema::boolean())
+                         .field("mono", &RouteEntry::mono, schema::boolean())
+                         .field("phase_invert", &RouteEntry::phaseInvert, schema::boolean())
+                         .field("channels", &RouteEntry::channels, channelMapSchema())
                          .build();
         c.result = schema::object<RouteList>("route_list")
                        .field("routes", &RouteList::routes, schema::arrayOf(entry))
@@ -503,7 +553,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                                       r.tap == model::Tap::PostFader  ? "post_fader"
                                       : r.tap == model::Tap::PreFader ? "pre_fader"
                                                                       : "pre_fx",
-                                      r.volumeDb, r.pan, r.mute});
+                                      r.volumeDb, r.pan, r.mute, r.mono, r.phaseInvert,
+                                      r.channels});
             }
             return out;
         };

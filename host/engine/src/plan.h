@@ -191,6 +191,16 @@ struct Edge {
     double volumeDb = 0.0, pan = 0.0;
     double staticGain = 1, staticPan = .5;
     bool mono = false, invert = false;
+    // The route's channel map (session-model §1.8) as a matrix: destination
+    // channel × source channel. Off: identity.
+    bool mapped = false;
+    float map[2][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+    void applyMap(float& l, float& r) const SUPPLE_RT {
+        if (!mapped) return;
+        const float a = l, b = r;
+        l = map[0][0] * a + map[0][1] * b;
+        r = map[1][0] * a + map[1][1] * b;
+    }
     Automation autoVolume, autoPan, autoMute;     // route envelopes (dB, %, 0/1)
     Automation stripVolume, stripPan, stripMute;  // private copies: source-owned
     bool encode = false, followPan = true, muted = false;

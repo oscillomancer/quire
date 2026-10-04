@@ -4916,6 +4916,9 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value |  |  |  |  |
 | `mute` | boolean |  |  |  |  |
+| `mono` | boolean |  |  |  | Sum the source to mono before the pan |
+| `phase_invert` | boolean |  |  |  |  |
+| `channels` | object |  |  |  | Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity |
 
 ### Result
 
@@ -5050,9 +5053,51 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "mute": {
             "type": "boolean"
+          },
+          "mono": {
+            "type": "boolean"
+          },
+          "phase_invert": {
+            "type": "boolean"
+          },
+          "channels": {
+            "type": "object",
+            "title": "channel_map",
+            "properties": {
+              "from": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1.0,
+                  "maximum": 64.0
+                }
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1.0,
+                  "maximum": 64.0
+                }
+              }
+            },
+            "required": ["from", "to"],
+            "additionalProperties": false
           }
         },
-        "required": ["id", "from", "to", "fx", "tap", "volume_db", "pan", "mute"],
+        "required": [
+          "id",
+          "from",
+          "to",
+          "fx",
+          "tap",
+          "volume_db",
+          "pan",
+          "mute",
+          "mono",
+          "phase_invert",
+          "channels"
+        ],
         "additionalProperties": false
       }
     }
@@ -5168,7 +5213,7 @@ Result:
 
 ## `route.set@1`
 
-Change a route's endpoints, tap, level, pan, or mute.
+Change a route's endpoints, tap, level, pan, mute, or channel map.
 
 
 
@@ -5186,6 +5231,9 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value |  |  |  |  |
 | `mute` | boolean |  |  |  |  |
+| `mono` | boolean |  |  |  | Sum the source to mono before the pan |
+| `phase_invert` | boolean |  |  |  |  |
+| `channels` | object |  |  |  | Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity |
 
 ### Result
 
@@ -5199,6 +5247,10 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 ```
 
+### Errors
+
+- `route.channels`: the map pairs channels the strips do not have Hint: pair 1 and 2: {from: [1, 2], to: [2, 1]}
+
 ### Examples
 
 **Mute a route** (`song_with_route`)
@@ -5207,6 +5259,26 @@ Kind: `edit`. Exposure: `mcp-tool`.
 {
   "route": "sd_1",
   "mute": true
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Swap left and right** (`song_with_route`)
+
+```json
+{
+  "route": "sd_1",
+  "channels": {
+    "from": [1, 2],
+    "to": [2, 1]
+  }
 }
 
 ```

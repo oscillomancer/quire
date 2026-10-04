@@ -343,6 +343,21 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         ed.gainR = g * pr;
         ed.mono = r.mono;
         ed.invert = r.phaseInvert;
+        if (!r.channels.from.empty()) {  // stereo strips: channels 1 and 2
+            float m[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
+            for (std::size_t k = 0; k < r.channels.from.size() && k < r.channels.to.size(); ++k) {
+                const int from = r.channels.from[k], to = r.channels.to[k];
+                if (from < 1 || from > 2 || to < 1 || to > 2) {
+                    p.warnings.push_back(e.id.str() + ": channel " +
+                                         std::to_string(std::max(from, to)) +
+                                         " is beyond the strips' two; that pair is ignored");
+                    continue;
+                }
+                m[to - 1][from - 1] += 1.0f;
+            }
+            ed.mapped = !(m[0][0] == 1 && m[0][1] == 0 && m[1][0] == 0 && m[1][1] == 1);
+            std::copy(&m[0][0], &m[0][0] + 4, &ed.map[0][0]);
+        }
         pending.push_back({ed.from, index.at(*toTrack), std::move(ed), 1 + e.id.n});
     }
     std::sort(pending.begin(), pending.end(), [](const Pending& a, const Pending& b) {
@@ -496,7 +511,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             continue;
         }
         e.encode = e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan || e.mono ||
-                   e.invert || e.muted || e.autoVolume.active() || e.autoPan.active() ||
+                   e.invert || e.mapped || e.muted || e.autoVolume.active() || e.autoPan.active() ||
                    e.autoMute.active();
         if (!e.encode) continue;
         Node& source = p.nodes[e.from];
@@ -789,7 +804,7 @@ Status checkStrips(const Plan& p) {
                 return Error("engine.strip_edge", "send encoder is not owned by its source");
             if (!n.decodeInput || p.nodes[e.from].master ||
                 (!e.encode && (e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan ||
-                               e.mono || e.invert || e.muted || e.autoVolume.active() ||
+                               e.mono || e.invert || e.mapped || e.muted || e.autoVolume.active() ||
                                e.autoPan.active() || e.autoMute.active())))
                 return Error("engine.strip_edge",
                              "summing inputs require an unmodified Channel output");
@@ -829,6 +844,7 @@ void addEdge(Plan& p, Edge& e, double panLawDb, Stereo& into, std::int64_t pos,
             const double sign = e.invert ? -1 : 1;
             l *= static_cast<float>(sign * g * pl);
             r *= static_cast<float>(sign * g * pr);
+            e.applyMap(l, r);  // on the send's output, after its pan
         }
         into.l[i] += l;
         into.r[i] += r;
@@ -1204,6 +1220,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             }
             e.encoder.sample(l, r, e.encoded.l[i], e.encoded.r[i],
                              e.fader.gain.next() * e.fader.gate.next(), e.fader.pan.next());
+            // The channel map acts on the send's output (after its pan): the
+            // encode is per channel, so moving encoded channels is exact.
+            e.applyMap(e.encoded.l[i], e.encoded.r[i]);
         }
     }
     return true;

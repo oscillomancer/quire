@@ -3641,6 +3641,38 @@
         },
         "mute": {
           "type": "boolean"
+        },
+        "mono": {
+          "type": "boolean",
+          "description": "Sum the source to mono before the pan"
+        },
+        "phase_invert": {
+          "type": "boolean"
+        },
+        "channels": {
+          "type": "object",
+          "title": "channel_map",
+          "properties": {
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 64.0
+              }
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 64.0
+              }
+            }
+          },
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "description": "Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity"
         }
       },
       "required": ["from"],
@@ -3726,9 +3758,51 @@
               },
               "mute": {
                 "type": "boolean"
+              },
+              "mono": {
+                "type": "boolean"
+              },
+              "phase_invert": {
+                "type": "boolean"
+              },
+              "channels": {
+                "type": "object",
+                "title": "channel_map",
+                "properties": {
+                  "from": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1.0,
+                      "maximum": 64.0
+                    }
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1.0,
+                      "maximum": 64.0
+                    }
+                  }
+                },
+                "required": ["from", "to"],
+                "additionalProperties": false
               }
             },
-            "required": ["id", "from", "to", "fx", "tap", "volume_db", "pan", "mute"],
+            "required": [
+              "id",
+              "from",
+              "to",
+              "fx",
+              "tap",
+              "volume_db",
+              "pan",
+              "mute",
+              "mono",
+              "phase_invert",
+              "channels"
+            ],
             "additionalProperties": false
           }
         }
@@ -3789,8 +3863,8 @@
   },
   {
     "name": "route_set",
-    "title": "Change a route's endpoints, tap, level, pan, or mute.",
-    "description": "Change a route's endpoints, tap, level, pan, or mute.  See describe for errors and examples.",
+    "title": "Change a route's endpoints, tap, level, pan, mute, or channel map.",
+    "description": "Change a route's endpoints, tap, level, pan, mute, or channel map.  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "route_set_args",
@@ -3857,6 +3931,38 @@
         },
         "mute": {
           "type": "boolean"
+        },
+        "mono": {
+          "type": "boolean",
+          "description": "Sum the source to mono before the pan"
+        },
+        "phase_invert": {
+          "type": "boolean"
+        },
+        "channels": {
+          "type": "object",
+          "title": "channel_map",
+          "properties": {
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 64.0
+              }
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 64.0
+              }
+            }
+          },
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "description": "Which source channel feeds which destination channel, pair by pair: {from: [1, 2], to: [2, 1]} swaps, {from: [1, 1], to: [1, 2]} sends the left channel to both, {from: [], to: []} restores the identity"
         }
       },
       "required": ["route"],

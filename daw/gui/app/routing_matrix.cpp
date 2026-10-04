@@ -270,6 +270,16 @@ Status RoutingMatrix::reload() {
         if (const auto* v = r.find("volume_db"); v && v->isNumber()) x.volumeDb = v->asDouble();
         if (const auto* v = r.find("pan"); v && v->isNumber()) x.pan = v->asDouble();
         if (const auto* v = r.find("mute"); v && v->isBool()) x.mute = v->asBool();
+        if (const auto* v = r.find("mono"); v && v->isBool()) x.mono = v->asBool();
+        if (const auto* v = r.find("phase_invert"); v && v->isBool()) x.phaseInvert = v->asBool();
+        if (const auto* ch = r.find("channels"); ch && ch->isObject()) {
+            for (const char* side : {"from", "to"})
+                if (const auto* ids = ch->find(side); ids && ids->isArray())
+                    for (const auto& n : ids->asArray())
+                        if (n.isNumber())
+                            (side[0] == 'f' ? x.mapFrom : x.mapTo)
+                                .push_back(static_cast<int>(n.asDouble()));
+        }
         next.sends.push_back(std::move(x));
     }
     model_ = std::move(next);
@@ -348,6 +358,54 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     pan_ = &details_->emplace<ui::TextField>("routing.pan", "", "pan %");
     pan_->layout.width = ui::SizeRule::fixed(80);
     pan_->onSubmit = [this](const std::string& text) { setSend("pan", json::Value(text)); };
+    // Channels: how the send's output lands on the destination (route.set
+    // {channels, mono}); a menu of the stereo choices.
+    channels_ = &details_->emplace<ui::Button>("routing.channels", "L/R", [this] {
+        if (!selected_ || !channels_) return;
+        struct Choice {
+            const char* label;
+            std::vector<int> from, to;
+            bool mono;
+        };
+        static const Choice kChoices[] = {{"L/R \u2192 L/R", {}, {}, false},
+                                          {"Swap: L/R \u2192 R/L", {1, 2}, {2, 1}, false},
+                                          {"Left to both", {1, 1}, {1, 2}, false},
+                                          {"Right to both", {2, 2}, {1, 2}, false},
+                                          {"Left only", {1}, {1}, false},
+                                          {"Right only", {2}, {2}, false},
+                                          {"Mono (sum)", {}, {}, true}};
+        std::vector<ui::MenuItem> items;
+        for (const Choice& c : kChoices) {
+            ui::MenuItem m;
+            m.label = c.label;
+            m.run = [this, c] {
+                if (!selected_) return;
+                json::Value args = json::Value::object();
+                args["route"] = *selected_;
+                json::Value map = json::Value::object(), from = json::Value::array(),
+                            to = json::Value::array();
+                for (int n : c.from) from.push_back(static_cast<std::int64_t>(n));
+                for (int n : c.to) to.push_back(static_cast<std::int64_t>(n));
+                map["from"] = std::move(from);
+                map["to"] = std::move(to);
+                args["channels"] = std::move(map);
+                args["mono"] = c.mono;
+                if (exec("route.set", std::move(args))) (void)reload();
+            };
+            items.push_back(std::move(m));
+        }
+        const ui::Rect b = channels_->bounds();
+        root_.openPopup(
+            ui::makeMenu("routing.channels.menu", std::move(items), [this] { root_.closePopup(); }),
+            b, ui::Placement::Below);
+    });
+    channels_->layout.width = ui::SizeRule::fixed(96);
+    phase_ = &details_->emplace<ui::Button>("routing.phase", "\u00f8", [this] {
+        for (const auto& x : model_.sends)
+            if (selected_ && x.id == *selected_)
+                setSend("phase_invert", json::Value(!x.phaseInvert));
+    });
+    phase_->layout.width = ui::SizeRule::fixed(44);
     mute_ = &details_->emplace<ui::Button>("routing.mute", "Mute", [this] {
         for (const auto& x : model_.sends)
             if (selected_ && x.id == *selected_) setSend("mute", json::Value(!x.mute));
@@ -370,11 +428,24 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
                         details_ = nullptr;
                         volume_ = pan_ = nullptr;
                         mute_ = nullptr;
+                        channels_ = phase_ = nullptr;
                         taps_.clear();
                         selected_.reset();
                     });
     if (auto r = reload(); !r && status_) status_->setText(r.error().message);
     if (status_) status_->setText(status());
+}
+
+std::string RoutingMatrix::channelsText(const MatrixModel::Send& x) {
+    if (x.mono) return "Mono";
+    using V = std::vector<int>;
+    if (x.mapFrom.empty()) return "L/R";
+    if (x.mapFrom == V{1, 2} && x.mapTo == V{2, 1}) return "Swap R/L";
+    if (x.mapFrom == V{1, 1} && x.mapTo == V{1, 2}) return "L to both";
+    if (x.mapFrom == V{2, 2} && x.mapTo == V{1, 2}) return "R to both";
+    if (x.mapFrom == V{1} && x.mapTo == V{1}) return "L only";
+    if (x.mapFrom == V{2} && x.mapTo == V{2}) return "R only";
+    return "Custom map";
 }
 
 std::string RoutingMatrix::status() const {
@@ -410,6 +481,8 @@ void RoutingMatrix::select(std::optional<std::string> send) {
     if (!volume_->focused()) volume_->setText(fmt(x->volumeDb, 1) + " dB");
     if (!pan_->focused()) pan_->setText(fmt(x->pan, 0) + "%");
     mute_->setText(x->mute ? "Unmute" : "Mute");
+    channels_->setText(channelsText(*x));
+    phase_->setText(x->phaseInvert ? "\u00f8 on" : "\u00f8");
     if (grid_) grid_->invalidate();
 }
 

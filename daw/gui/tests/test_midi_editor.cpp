@@ -391,6 +391,21 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     REQUIRE(f.root->click("routing.mute"));
     CHECK(m.sendsAt(row(keys), col(drums)).front()->mute);
     f.snapshot("routing-send.png");
+    // Channels: the menu's second row swaps left and right (route.set channels).
+    REQUIRE(f.root->click("routing.channels"));
+    f.root->frame(false);
+    ui::Node* menu = f.root->find("routing.channels.menu");
+    REQUIRE(menu);
+    const ui::Point swapRow{menu->bounds().x + 30, menu->bounds().y + 26 + 13};
+    f.root->pointer({ui::PointerEvent::Type::Move, swapRow});
+    f.root->pointer({ui::PointerEvent::Type::Down, swapRow, 1});
+    f.root->pointer({ui::PointerEvent::Type::Up, swapRow, 1});
+    f.root->frame(false);
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->mapTo == std::vector<int>{2, 1});
+    CHECK(f.root->find("routing.channels")->valueText() == "Swap R/L");
+    REQUIRE(f.root->click("routing.phase"));
+    CHECK(m.sendsAt(row(keys), col(drums)).front()->phaseInvert);
+    f.snapshot("routing-channels.png");
     REQUIRE(f.root->click("routing.remove"));
     CHECK(m.sendsAt(row(keys), col(drums)).empty());
     // Changes from elsewhere arrive on sync.

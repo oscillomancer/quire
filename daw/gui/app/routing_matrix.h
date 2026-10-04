@@ -33,7 +33,8 @@ struct MatrixModel {
     struct Send {
         std::string id, from, to, tap;
         double volumeDb = 0, pan = 0;
-        bool mute = false;
+        bool mute = false, mono = false, phaseInvert = false;
+        std::vector<int> mapFrom, mapTo;  // the channel map (empty: identity)
     };
     std::vector<Source> sources;
     std::vector<Destination> destinations;
@@ -58,6 +59,7 @@ class RoutingMatrix {
     ui::Node* grid() const { return grid_; }
     Status clickCell(std::size_t row, std::size_t col);
     std::optional<std::string> selectedSend() const { return selected_; }
+    static std::string channelsText(const MatrixModel::Send& x);
     std::string status() const;
 
   private:
@@ -79,6 +81,8 @@ class RoutingMatrix {
     ui::TextField* volume_ = nullptr;
     ui::TextField* pan_ = nullptr;
     ui::Button* mute_ = nullptr;
+    ui::Button* channels_ = nullptr;  // the channel map (a menu)
+    ui::Button* phase_ = nullptr;
     std::vector<ui::Button*> taps_;
 };
 

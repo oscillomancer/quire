@@ -208,6 +208,44 @@ TEST_CASE("mixer: volume, folder, hard pan, mute, pre-fader route") {
     CHECK(peak(r2.audio.channels[0]) == doctest::Approx(0.25 * kStrip * kStrip).epsilon(1e-4));
 }
 
+TEST_CASE("a route's channel map swaps or duplicates channels into the destination") {
+    auto pool = makePool();
+    auto build = [](model::ChannelMap map) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+        const Id a = addTrack(t, "A");
+        addFx(t, a, kSine);
+        addNote(t, a, 0.0, 1.0);
+        t.modify<model::Track>(a, [](model::Track& x) {
+            x.pan = -100.0;  // all left
+            x.parentSend.enabled = false;
+        });
+        model::Route send;
+        send.from.track = a;
+        send.to.track = bus;
+        send.channels = std::move(map);
+        t.create(send);
+        return commit(t);
+    };
+    auto plain = render(build({}), pool, 0.5);
+    REQUIRE(plain.warnings.empty());
+    const double left = peak(plain.audio.channels[0]);
+    CHECK(left > 0.05);
+    CHECK(peak(plain.audio.channels[1]) < 1e-9);
+    // Swapped: the left channel arrives on the right.
+    auto swapped = render(build({{1, 2}, {2, 1}}), pool, 0.5);
+    CHECK(peak(swapped.audio.channels[0]) < 1e-9);
+    CHECK(peak(swapped.audio.channels[1]) == doctest::Approx(left).epsilon(1e-4));
+    // The left to both sides.
+    auto both = render(build({{1, 1}, {1, 2}}), pool, 0.5);
+    CHECK(peak(both.audio.channels[0]) == doctest::Approx(left).epsilon(1e-4));
+    CHECK(peak(both.audio.channels[1]) == doctest::Approx(left).epsilon(1e-4));
+    // A channel the strips lack is warned about and skipped.
+    auto beyond = render(build({{3}, {1}}), pool, 0.5);
+    REQUIRE(beyond.warnings.size() == 1);
+    CHECK(beyond.warnings[0].find("channel 3") != std::string::npos);
+}
+
 TEST_CASE("latency compensation keeps parallel paths aligned") {
     auto pool = makePool();
     auto build = [](bool withLatent) {
