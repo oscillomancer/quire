@@ -783,3 +783,30 @@ TEST_CASE("text ellipsis removes whole UTF-8 characters") {
     root.frame(false);
     CHECK(pixelDistance(expected, root.readBack()) == 0);
 }
+
+TEST_CASE("unchanged button text and scrollbar ranges leave the content cache intact") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("unchanged-controls");
+    content->layout.dir = Layout::Dir::Row;
+    auto& button = content->emplace<Button>("button", "read");
+    auto& bar = content->emplace<ScrollBar>("bar", ScrollBar::Axis::Vertical);
+    bar.layout.width = SizeRule::fixed(ScrollBar::kThickness);
+    bar.layout.height = SizeRule::fraction();
+    bar.setRange(500, 100);
+    bar.setValue(20);
+    root.setContent(std::move(content));
+    root.frame(false);
+    const auto repaints = root.stats().repaints;
+    button.setText("read");
+    bar.setRange(500, 100);
+    CHECK_FALSE(root.wantsFrame());
+    root.frame(false);
+    CHECK(root.stats().repaints == repaints);
+    button.setText("write");
+    CHECK(root.wantsFrame());
+    root.frame(false);
+    bar.setRange(10, 100);  // changed range also clamps its value
+    CHECK(bar.value() == 0);
+    CHECK(root.wantsFrame());
+}

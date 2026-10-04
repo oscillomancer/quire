@@ -49,6 +49,7 @@ Button::Button(std::string id, std::string text, std::function<void()> click)
 }
 
 void Button::setText(std::string text) {
+    if (text == text_) return;
     text_ = std::move(text);
     invalidate();
     relayout();

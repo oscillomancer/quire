@@ -5,6 +5,7 @@
 #include <iterator>
 
 #include "supple/views/envelope_lane.h"
+#include "supple/views/session_changes.h"
 
 namespace supple::views {
 namespace {
@@ -15,13 +16,49 @@ float clampHeight(float h) {
 
 }  // namespace
 
-bool TrackLayout::show(const model::Session& session) {
+bool TrackLayout::show(const model::Session& session, const std::vector<model::Change>* changes) {
     if (session.version == indexed_) return false;
+    bool geometry =
+        indexed_ == ~std::uint64_t{0} || session.project->masters != session_.project->masters;
+    for (auto id : changedObjects(session_.tracks, session.tracks, changes)) {
+        const auto* before = session_.tracks.find(id);
+        const auto* after = session.tracks.find(id);
+        geometry |= !before || !after || before->type != after->type ||
+                    before->parent != after->parent || before->children != after->children ||
+                    before->hiddenTcp != after->hiddenTcp ||
+                    before->folderCompact != after->folderCompact ||
+                    before->chain != after->chain || before->inputChain != after->inputChain;
+    }
+    for (auto id : changedObjects(session_.envelopes, session.envelopes, changes)) {
+        const auto* before = session_.envelopes.find(id);
+        const auto* after = session.envelopes.find(id);
+        auto lane = [](const model::Envelope* env) {
+            return env && env->visible &&
+                   (env->target.object.kind == model::Kind::Track ||
+                    env->target.object.kind == model::Kind::Fx);
+        };
+        geometry |= (lane(after) && scaleOf(*after).has_value()) != scaledEnvs_.contains(id);
+        geometry |=
+            lane(before) != lane(after) || (lane(before) && lane(after) &&
+                                            (before->target.object != after->target.object ||
+                                             before->target.param != after->target.param));
+    }
+    // Changing the plug-in can change whether its parameter lanes have scales.
+    for (auto id : changedObjects(session_.fx, session.fx, changes)) {
+        const auto* before = session_.fx.find(id);
+        const auto* after = session.fx.find(id);
+        geometry |= !before || !after || before->plugin.id != after->plugin.id ||
+                    before->plugin.format != after->plugin.format ||
+                    before->plugin.version != after->plugin.version;
+    }
     session_ = session;
     indexed_ = session.version;
+    if (!geometry) return false;
+    ++rebuilds_;
     rows_.clear();
     trackRows_.clear();
     envRows_.clear();
+    scaledEnvs_.clear();
     std::map<model::Id, model::Id> fxOwners;
     for (const auto& track : session_.tracks) {
         for (auto fx : track.value->chain) fxOwners[fx] = track.id;
@@ -30,6 +67,9 @@ bool TrackLayout::show(const model::Session& session) {
     std::map<model::Id, std::vector<std::pair<int, model::Id>>> lanes;
     for (const auto& envelope : session_.envelopes) {
         if (!envelope.value->visible || !scaleOf(*envelope.value)) continue;
+        if (envelope.value->target.object.kind == model::Kind::Track ||
+            envelope.value->target.object.kind == model::Kind::Fx)
+            scaledEnvs_.insert(envelope.id);
         auto owner = envelope.value->target.object;
         if (owner.kind == model::Kind::Fx) {
             const auto found = fxOwners.find(owner);

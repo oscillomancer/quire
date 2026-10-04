@@ -82,6 +82,7 @@ class Window {
     // bind it believes is already in place.
     void forceCurrent() const;
     void show();
+    void hide();
     void setSize(int width, int height);  // design units
     void setResizable(bool resizable);
     void setTitle(const std::string& title);

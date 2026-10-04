@@ -1,4 +1,5 @@
 #include "supple/views/arrange.h"
+#include "supple/views/session_changes.h"
 
 #include <SDL3/SDL.h>
 
@@ -956,14 +957,111 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
 
 ArrangeView::~ArrangeView() { *alive_ = nullptr; }
 
-void ArrangeView::show(const model::Session& session) {
-    if (!layout_.show(session)) return;
-    lanes_->rebuild();
-    tcp_->setSession(session);
-    header_->invalidate();
-    clampScroll();
-    syncScrollbars();
-    damageViews();
+void ArrangeView::show(const model::Session& session, const std::vector<model::Change>* changes) {
+    const auto before = layout_.session();
+    if (before.version == session.version && layout_.rebuilds() != 0) return;
+    if (layout_.show(session, changes)) {
+        lanes_->rebuild();
+        tcp_->setSession(session);
+        header_->invalidate();
+        clampScroll();
+        syncScrollbars();
+        damageViews();
+        return;
+    }
+    auto tracks = changedObjects(before.tracks, session.tracks, changes);
+    const auto changedItems = changedObjects(before.items, session.items, changes);
+    auto items = changedItems;
+    auto takes = changedObjects(before.takes, session.takes, changes);
+    const auto envelopes = changedObjects(before.envelopes, session.envelopes, changes);
+    const auto routes = changedObjects(before.routes, session.routes, changes);
+    const auto midi = changedObjects(before.midi, session.midi, changes);
+    const auto media = changedObjects(before.media, session.media, changes);
+    const bool timing = !before.tempo.sameStorage(session.tempo) ||
+                        !before.meters.sameStorage(session.meters) ||
+                        before.project->timebase != session.project->timebase;
+    std::set<model::Id> timebaseTracks, dirtyEnvelopes = envelopes;
+    for (auto id : tracks) {
+        const auto* old = before.tracks.find(id);
+        const auto* now = session.tracks.find(id);
+        if (old && now && old->timebase != now->timebase) timebaseTracks.insert(id);
+    }
+    // FX patch/parameter edits do not affect the TCP's chain badge.
+    for (auto id : changedObjects(before.fx, session.fx, changes)) {
+        const auto* old = before.fx.find(id);
+        const auto* now = session.fx.find(id);
+        if (!old || !now || old->bypass != now->bypass || old->offline != now->offline) {
+            if (auto track = model::trackOfFx(before, id)) tracks.insert(*track);
+            if (auto track = model::trackOfFx(session, id)) tracks.insert(*track);
+        }
+    }
+    tcp_->updateSession(session, tracks, envelopes, routes);
+    for (auto id : changedObjects(before.autoItems, session.autoItems, changes)) {
+        if (const auto* old = before.autoItems.find(id)) dirtyEnvelopes.insert(old->envelope);
+        if (const auto* now = session.autoItems.find(id)) dirtyEnvelopes.insert(now->envelope);
+    }
+    // Track values are the fallback of mixer envelopes with no points.
+    if (!tracks.empty())
+        for (const auto& entry : session.envelopes)
+            if (tracks.contains(entry.value->target.object)) dirtyEnvelopes.insert(entry.id);
+    for (auto id : dirtyEnvelopes) {
+        for (const auto* snapshot : {&before, &session})
+            if (const auto* env = snapshot->envelopes.find(id))
+                if (env->target.object.kind == model::Kind::Take) takes.insert(env->target.object);
+        if (auto row = layout_.indexOfEnv(id))
+            lanes_->invalidate(lanes_->rowRect(*row).intersect(lanes_->bounds()));
+    }
+    if (!media.empty() || !midi.empty())
+        for (const auto* snapshot : {&before, &session})
+            for (const auto& entry : snapshot->takes)
+                if (entry.value->source &&
+                    (media.contains(*entry.value->source) || midi.contains(*entry.value->source)))
+                    takes.insert(entry.id);
+    if (!takes.empty())
+        for (const auto* snapshot : {&before, &session})
+            for (const auto& entry : snapshot->items)
+                if (std::any_of(entry.value->takes.begin(), entry.value->takes.end(),
+                                [&](auto take) { return takes.contains(take); }))
+                    items.insert(entry.id);
+    if (timing) {
+        lanes_->rebuild();
+        ruler_->invalidate();
+    } else {
+        lanes_->updateIndex(before, items, timebaseTracks);
+        for (auto track : timebaseTracks)
+            if (auto row = layout_.indexOf(track))
+                lanes_->invalidate(lanes_->rowRect(*row).intersect(lanes_->bounds()));
+        // Clear both the old and the new footprint (moves, deletion, undo).
+        for (auto id : items)
+            for (const auto* snapshot : {&before, &session}) {
+                const auto* item = snapshot->items.find(id);
+                if (!item) continue;
+                const auto row = layout_.indexOf(item->track);
+                if (!row) continue;
+                const auto span = model::itemSpan(*snapshot, *item);
+                const auto r = lanes_->rowRect(*row);
+                lanes_->invalidate(ui::Rect{xAt(span.startSec), r.y,
+                                            std::max(1.0f, xAt(span.endSec) - xAt(span.startSec)),
+                                            r.h}
+                                       .inset(-2)
+                                       .intersect(lanes_->bounds()));
+            }
+    }
+    if (before.project->mediaDir != session.project->mediaDir) lanes_->invalidate();
+    const bool markers = !before.markers.sameStorage(session.markers) ||
+                         !before.regions.sameStorage(session.regions);
+    if (markers) ruler_->invalidate();
+    bool extent = timing || markers || !timebaseTracks.empty();
+    for (auto id : changedItems) {
+        const auto* old = before.items.find(id);
+        const auto* now = session.items.find(id);
+        extent |= !old || !now ||
+                  model::itemSpan(before, *old).endSec != model::itemSpan(session, *now).endSec;
+    }
+    if (extent) {
+        clampScroll();
+        syncScrollbars();
+    }
 }
 
 bool ArrangeView::poll() {

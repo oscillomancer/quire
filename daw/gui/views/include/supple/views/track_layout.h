@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include "supple/model/session.h"
@@ -40,11 +41,12 @@ class TrackLayout {
     static constexpr float kMinHeight = 8;
     static constexpr float kMaxHeight = 400;
 
-    // Rebuilds the rows when the session's version moved; true then. A track
+    // Updates the snapshot; returns true only when row geometry changed. A track
     // whose ancestor is a collapsed folder (Track::folderCompact == 2) is
     // hidden; a "small" folder (== 1) gets half the global height.
-    bool show(const model::Session& session);
+    bool show(const model::Session& session, const std::vector<model::Change>* changes = nullptr);
 
+    std::uint64_t rebuilds() const { return rebuilds_; }
     const model::Session& session() const { return session_; }
     const std::vector<TrackRow>& rows() const { return rows_; }
     std::size_t rowCount() const { return rows_.size(); }
@@ -76,10 +78,12 @@ class TrackLayout {
     float baseHeight(model::Id track) const;
     void rebuildGeometry();
 
+    std::uint64_t rebuilds_ = 0;
     model::Session session_;
     std::uint64_t indexed_ = ~std::uint64_t{0};
     std::vector<TrackRow> rows_;
     std::map<model::Id, std::size_t> trackRows_, envRows_;
+    std::set<model::Id> scaledEnvs_;
     std::map<model::Id, float> heights_;
     float globalHeight_ = kDefaultHeight;
     std::vector<float> rowHeights_;

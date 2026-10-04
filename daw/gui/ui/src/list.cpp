@@ -14,8 +14,11 @@ ScrollBar::ScrollBar(std::string id, Axis axis) : Node(std::move(id), Role::Slid
 }
 
 void ScrollBar::setRange(float content, float shown) {
-    content_ = std::max(0.0f, content);
-    visible_ = std::max(0.0f, shown);
+    content = std::max(0.0f, content);
+    shown = std::max(0.0f, shown);
+    if (content == content_ && shown == visible_) return;
+    content_ = content;
+    visible_ = shown;
     value_ = std::clamp(value_, 0.0f, maxValue());
     invalidate();
 }

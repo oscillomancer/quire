@@ -242,3 +242,40 @@ TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)")
     MESSAGE(opened << " VST3 editors");
     std::filesystem::remove_all(options.workdir);
 }
+
+TEST_CASE("editor show and hide requests preserve the offscreen parent window") {
+    auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+    REQUIRE(platform);
+    gui::WindowOptions options{"editor-requests", 64, 48, true};
+    options.gl = false;
+    auto opened = gui::Window::open(**platform, options);
+    REQUIRE(opened);
+    auto& window = **opened;
+    const auto identity = window.id();
+    host::Instance::EditorRequests requests;
+    requests.show = true;
+    gui::applyEditorRequests(window, requests);
+    CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
+    requests = {};
+    requests.hide = true;
+    gui::applyEditorRequests(window, requests);
+    CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) != 0);
+    requests.show = true;
+    requests.resize = true;
+    requests.width = 80;
+    requests.height = 60;
+    gui::applyEditorRequests(window, requests);
+    CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) != 0);
+    CHECK(window.width() == 80);
+    CHECK(window.height() == 60);
+    requests.hide = false;
+    gui::applyEditorRequests(window, requests);
+    CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
+    requests.closed = true;
+    requests.hide = true;
+    requests.width = 99;
+    gui::applyEditorRequests(window, requests);
+    CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
+    CHECK(window.width() == 80);
+    CHECK(window.id() == identity);
+}

@@ -747,6 +747,23 @@ void TcpPanel::setSession(const model::Session& session) {
     invalidate();
 }
 
+void TcpPanel::updateSession(const model::Session& session, const std::set<model::Id>& tracks,
+                             const std::set<model::Id>& envelopes,
+                             const std::set<model::Id>& routes) {
+    session_ = session;
+    for (auto* row : rows_) {
+        if (!row->visible || !row->bound()) continue;
+        const auto* track = session_.tracks.find(row->track());
+        if (tracks.contains(row->track()) ||
+            (track && track->record.input && routes.contains(*track->record.input))) {
+            row->refresh(session_);
+            row->invalidate();  // includes the colour stripe and type/selection badge
+        }
+    }
+    for (auto* row : envRows_)
+        if (row->visible && row->bound() && envelopes.contains(row->env())) row->refresh(session_);
+}
+
 void TcpPanel::refresh() {
     for (Row* row : rows_)
         if (row->bound()) row->refresh(session_);

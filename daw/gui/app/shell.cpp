@@ -220,11 +220,18 @@ void Shell::sync() {
             const auto id = model::Id::parse(text);
             return !id || !s.tracks.find(*id);
         });
+        const std::vector<model::Change>* changes = nullptr;
+        const auto* next = app_.versions().version(s.version);
+        const auto* previous = app_.versions().version(shownVersion_);
+        if (next && !next->parents.empty() && next->parents.front() == shownVersion_)
+            changes = &next->changes;
+        else if (previous && !previous->parents.empty() && previous->parents.front() == s.version)
+            changes = &previous->changes;
         shownVersion_ = s.version;
         const int strips = static_cast<int>(s.tracks.size());
         counts_->setText(std::to_string(strips) + (strips == 1 ? " strip  " : " strips  ") +
                          "version " + std::to_string(s.version));
-        arrange_->show(s);
+        arrange_->show(s, changes);
     }
     std::vector<model::Id> selected;
     for (const auto& text : ui_.selectedItems)

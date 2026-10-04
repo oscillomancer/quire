@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,6 +80,9 @@ class TcpPanel : public ui::Node {
 
     // Values come from this session snapshot; the rows are rebound.
     void setSession(const model::Session& session);
+    // Geometry stayed fixed: refresh only affected controls without rebinding.
+    void updateSession(const model::Session& session, const std::set<model::Id>& tracks,
+                       const std::set<model::Id>& envelopes, const std::set<model::Id>& routes);
     void refresh();  // values only (after a bus edit)
 
     ui::Rect rowRect(std::size_t row) const;  // same y as the lanes' rows

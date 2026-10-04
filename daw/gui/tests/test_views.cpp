@@ -23,6 +23,7 @@
 #include "supple/model/session.h"
 #include "supple/model/source_mapping.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
 #include "supple/views/arrange.h"
 #include "supple/views/envelope_lane.h"
 #include "supple/views/mouse_map.h"
@@ -1275,4 +1276,265 @@ TEST_CASE("meters ignore hidden ancestors and reset their hold on reopening") {
     CHECK_FALSE(meter.clipped());
     CHECK(meter.shownPeakDb(0) < -100);
     feed.detach(&meter);
+}
+
+TEST_CASE("unrelated FX edits in 200 tracks and 2000 items have bounded invalidation") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-invalidation-" + std::to_string(::getpid()));
+    peaks::PeakService peaks(dir, [](std::function<void()>) {});
+    auto initial = model::Session::create();
+    model::EditTxn build(initial, 1);
+    model::FxInstance fx;
+    fx.plugin.id = "invalidation-test";
+    const auto effect = build.create(fx);
+    std::vector<model::Id> tracks, items;
+    for (int i = 0; i < 200; ++i) {
+        model::Track track;
+        track.name = "Track " + std::to_string(i + 1);
+        track.parent = model::kMaster;
+        if (i == 0) track.chain.push_back(effect);
+        const auto id = build.create(track);
+        tracks.push_back(id);
+        for (int j = 0; j < 10; ++j) {
+            model::Item item;
+            item.track = id;
+            item.position = j * 4;
+            item.length = 4;
+            items.push_back(build.create(item));
+        }
+    }
+    build.modify<model::Track>(model::kMaster, [&](auto& master) { master.children = tracks; });
+    auto built = build.commit();
+    REQUIRE(built);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto owned = std::make_unique<views::ArrangeView>(peaks, views::ArrangeView::Resolve{});
+    auto* arrange = owned.get();
+    arrange->show(*built);
+    root.setContent(std::move(owned));
+    root.frame(false);
+    const auto layouts = arrange->trackLayout().rebuilds();
+    const auto indexes = arrange->lanes().indexStats();
+    const auto paints = root.stats();
+    model::EditTxn edit(*built, 2);
+    REQUIRE(edit.modify<model::FxInstance>(effect, [](auto& value) { value.params[1] = 0.5; }));
+    auto edited = edit.commit();
+    REQUIRE(edited);
+    const auto fxChanges = edit.changes();
+    arrange->show(*edited, &fxChanges);
+    root.frame(false);
+    MESSAGE("layout rebuilds=" << arrange->trackLayout().rebuilds() - layouts << ", index rebuilds="
+                               << arrange->lanes().indexStats().rebuilds - indexes.rebuilds
+                               << ", indexed items="
+                               << arrange->lanes().indexStats().items - indexes.items
+                               << ", repaints=" << root.stats().repaints - paints.repaints
+                               << ", repaint area="
+                               << root.stats().repaintedArea - paints.repaintedArea);
+    CHECK(arrange->trackLayout().rebuilds() - layouts == 0);
+    CHECK(arrange->lanes().indexStats().rebuilds - indexes.rebuilds == 0);
+    CHECK(arrange->lanes().indexStats().items - indexes.items == 0);
+    CHECK(root.stats().repaints - paints.repaints == 0);
+    CHECK(root.stats().repaintedArea == paints.repaintedArea);
+    CHECK(arrange->session().fx.find(effect)->params.at(1) == 0.5);
+    arrange->show(*built, &fxChanges);  // undo, same change list in reverse
+    root.frame(false);
+    CHECK(root.stats().repaints == paints.repaints);
+    arrange->show(*edited);  // no history hint: persistent object identity fallback
+    root.frame(false);
+    CHECK(root.stats().repaints == paints.repaints);
+
+    // A captured fader and a focused rename survive unrelated edits.
+    std::vector<json::Value> writes;
+    views::TcpCallbacks callbacks;
+    callbacks.commit = [&](std::string_view, json::Value args, std::string) {
+        writes.push_back(std::move(args));
+    };
+    arrange->setTcpCallbacks(std::move(callbacks));
+    auto* fader = arrange->tcpPanel().controlNode(tracks[0], "fader");
+    REQUIRE(fader);
+    const auto faderBounds = fader->bounds();
+    const ui::Point pressAt{faderBounds.x + faderBounds.w / 2, faderBounds.y + faderBounds.h / 2};
+    root.pointer({ui::PointerEvent::Type::Down, pressAt, 1});
+    root.frame(false);
+    arrange->show(*built, &fxChanges);
+    CHECK(arrange->tcpPanel().controlNode(tracks[0], "fader") == fader);
+    root.pointer({ui::PointerEvent::Type::Move, {pressAt.x + 10, pressAt.y}, 1});
+    root.pointer({ui::PointerEvent::Type::Up, {pressAt.x + 10, pressAt.y}, 1});
+    REQUIRE_FALSE(writes.empty());
+    CHECK(writes.back()["track"].asString() == tracks[0].str());
+    REQUIRE(arrange->tcpPanel().rename(tracks[0]));
+    auto* rename = root.focused();
+    root.text("kept rename");
+    arrange->show(*edited, &fxChanges);
+    CHECK(root.focused() == rename);
+    CHECK(rename->visible);
+    CHECK(static_cast<ui::TextField*>(rename)->text() == "kept rename");
+    root.key(SDLK_ESCAPE);
+    root.frame(false);
+
+    auto current = *edited;
+    std::uint64_t version = 3;
+    // Every incremental frame must match a complete repaint of the same model.
+    auto apply = [&](model::EditTxn& txn, bool geometry, bool reindex, bool visible) {
+        INFO("version " << txn.version());
+        const auto hints = txn.changes();
+        auto next = txn.commit();
+        REQUIRE_MESSAGE(next, (next ? "" : next.error().toString()));
+        const auto oldLayouts = arrange->trackLayout().rebuilds();
+        const auto oldIndexes = arrange->lanes().indexStats();
+        const auto oldPaints = root.stats();
+        arrange->show(*next, &hints);
+        root.frame(false);
+        CHECK(arrange->trackLayout().rebuilds() - oldLayouts == (geometry ? 1 : 0));
+        CHECK(arrange->lanes().indexStats().rebuilds - oldIndexes.rebuilds == (reindex ? 1 : 0));
+        if (!geometry && reindex && std::none_of(hints.begin(), hints.end(), [](const auto& hint) {
+                return hint.id.kind == model::Kind::TempoPoint ||
+                       hint.id.kind == model::Kind::Meter;
+            }))
+            CHECK(arrange->lanes().indexStats().items - oldIndexes.items <= 20);
+        CHECK((root.stats().repaints > oldPaints.repaints) == visible);
+        if (!geometry && !reindex && visible)
+            CHECK(root.stats().repaintedArea - oldPaints.repaintedArea < 100000);
+        const auto incremental = root.readBack();
+        root.damageAll();
+        root.frame(false);
+        const auto complete = root.readBack();
+        CHECK((incremental.rgba == complete.rgba));
+        current = *next;
+    };
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Item>(items[0], [](auto& item) { item.mute = true; });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Item>(items[0], [&](auto& item) {
+            item.track = tracks[1];
+            item.position = 1;
+        });
+        apply(txn, false, true, true);
+        CHECK(std::find(arrange->lanes().itemsInRow(0).begin(),
+                        arrange->lanes().itemsInRow(0).end(),
+                        items[0]) == arrange->lanes().itemsInRow(0).end());
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.remove<model::Item>(items[0]);
+        apply(txn, false, true, true);
+    }
+    // Jump back over the move and delete without an adjacent-version hint.
+    arrange->show(*edited);
+    root.frame(false);
+    const auto restored = root.readBack();
+    root.damageAll();
+    root.frame(false);
+    CHECK((restored.rgba == root.readBack().rgba));
+    current = *edited;
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Track>(tracks[0], [](auto& track) { track.mute = true; });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Item>(items.back(), [](auto& item) { item.mute = true; });
+        apply(txn, false, false, false);  // offscreen edit damages no pixels
+    }
+    model::Id envelope;
+    {
+        model::EditTxn txn(current, version++);
+        model::Envelope env;
+        env.target = {tracks[0], "volume"};
+        env.points = {{0, -12}, {4, 0}};
+        envelope = txn.create(env);
+        apply(txn, true, true, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Envelope>(envelope, [](auto& env) { env.points[0].value = -24; });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        model::AutomationItem ai;
+        ai.envelope = envelope;
+        ai.points = {{0, -6}, {4, 0}};
+        const auto id = txn.create(ai);
+        txn.modify<model::Envelope>(envelope, [&](auto& env) { env.items.push_back(id); });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Envelope>(envelope, [](auto& env) { env.visible = false; });
+        apply(txn, true, true, true);
+    }
+    model::Id source, take, takeEnvelope;
+    {
+        model::EditTxn txn(current, version++);
+        model::MidiSource midi;
+        midi.sequence.notes.push_back({0, 960, 0, 60, 100});
+        source = txn.create(midi);
+        model::Take tk;
+        tk.source = source;
+        take = txn.create(tk);
+        txn.modify<model::Item>(items[1], [&](auto& item) {
+            item.takes = {take};
+            item.activeTake = take;
+        });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::MidiSource>(source,
+                                      [](auto& midi) { midi.sequence.notes[0].pitch = 72; });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Take>(take, [](auto& tk) {
+            tk.name = "edited take";
+            tk.playrate = 2;
+        });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        model::Envelope env;
+        env.target = {take, "pan"};
+        env.points = {{0, -50}, {4, 50}};
+        takeEnvelope = txn.create(env);
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Envelope>(takeEnvelope, [](auto& env) { env.points[0].value = 25; });
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Track>(tracks[0],
+                                 [](auto& track) { track.timebase = model::TrackTimebase::Time; });
+        apply(txn, false, true, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        const auto tempo = current.tempo.begin()->id;
+        txn.modify<model::TempoPointObj>(tempo, [](auto& point) { point.bpm = 90; });
+        apply(txn, false, true, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        model::Marker marker;
+        marker.pos = 2;
+        marker.name = "changed ruler";
+        txn.create(marker);
+        apply(txn, false, false, true);
+    }
+    {
+        model::EditTxn txn(current, version++);
+        txn.modify<model::Track>(tracks[0], [](auto& track) { track.hiddenTcp = true; });
+        apply(txn, true, true, true);
+    }
 }
