@@ -31,7 +31,7 @@ Every addressable object (track, item, take, fx instance, envelope, send,
 marker, region, tempo/meter event, branch) has an ID of the form
 `<kind>_<n>`: `tr_12`, `it_40`, `tk_41`, `fx_7`, `en_3`, `sd_2`, `mk_5`,
 `rg_1`. `n` comes from a per-kind counter stored in the session, never
-reused. Short sequential IDs are cheap in LLM context and hard to mistype.
+reused, including after undo (each lineage retains allocation high-water counters). Short sequential IDs are cheap in LLM context and hard to mistype.
 Events inside containers (MIDI notes, envelope points) are not objects: they
 are addressed by the containing object plus a selector (time range, pitch,
 index in canonical order), or replaced wholesale via notation/point lists.
@@ -65,10 +65,10 @@ Otherwise the branch's transactions are **replayed** onto `main`'s head: each
 logged invocation is re-validated and re-applied. IDs created on the branch
 that collide with IDs created on `main` meanwhile are remapped (creation
 commands log the ID they produced; later arguments referencing it are
-rewritten — schema types identify ID fields). An invocation that fails, or
-that edits an object also modified on `main` since the fork (per-object
-revision stamps), is a **conflict**; the merge stops and reports conflicts
-with both values, and the human chooses. **Reject** deletes the ref.
+rewritten immediately after each creation, even within one batch — schema types identify ID fields). An invocation that fails, or
+that edits a non-structural field also modified on `main` since the fork, is a **conflict**; the merge stops and reports conflicts
+with both values, and the human chooses. Project metadata participates as the
+`project` singleton; equal new project-field values do not conflict. **Reject** deletes the ref.
 
 ### Engine separation
 
@@ -112,3 +112,12 @@ model code and a reconciler between model versions and live plugin instances.
 - **Coalescing.** Continuous gestures (a fader drag, an agent sweeping a
   value through many `fx.param.set` calls in one batch) coalesce into one
   version per gesture/batch, not one per event.
+
+### Unreachable history reclamation (2026-10-04)
+
+Versions outside every branch head/base/redo ancestry are reclaimed after
+edits and branch deletion. Render jobs and the clipboard hold explicit session
+leases (`VersionStore::pin`); these retain their version and ancestry until the
+lease is released and the next collection runs. An open branch retains its
+history. This first step does not squash reachable undo history or implement
+the configurable memory budget described above.

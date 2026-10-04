@@ -21,7 +21,10 @@ struct Config {
 
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Config> load(const std::filesystem::path& file);  // empty when absent
-    Status save(const std::filesystem::path& file) const;           // 0600
+    // Atomic and owner-only throughout: a 0600 temporary file in the same
+    // directory, fsynced, then renamed over `file`; a failure (code
+    // "agent.config") leaves the previous file as it was.
+    Status save(const std::filesystem::path& file) const;
 };
 
 }  // namespace supple::agent

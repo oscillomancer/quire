@@ -5,7 +5,10 @@
 #include "supple/base/files.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <cstdio>
+#include <set>
 
 namespace supple::model {
 
@@ -36,6 +39,126 @@ Schema<std::vector<Id>> ids() {
             [array](const std::vector<Id>& v) { return array.encode(v); }, array.jsonSchema()};
 }
 
+Schema<json::Value> jsonObject() {
+    json::Value spec = json::Value::object();
+    spec["type"] = "object";
+    return {"JSON object",
+            [](const json::Value& v, json::Value& out, schema::DecodeCtx& c, const std::string& p) {
+                if (!v.isObject()) {
+                    c.error("schema.type", "expected an object", p);
+                    return false;
+                }
+                out = v;
+                return true;
+            },
+            [](const json::Value& v) { return v; }, spec};
+}
+
+Schema<json::Value> renderSettings() {
+    auto decode = [](const json::Value& v, json::Value& out, schema::DecodeCtx& c,
+                     const std::string& p) {
+        if (!jsonObject().decodeInto(v, out, c, p)) return false;
+        auto fields = [&](json::Value& object,
+                          const std::map<std::string, Schema<json::Value>>& specs,
+                          const std::string& path) {
+            bool valid = true;
+            std::vector<std::string> unknown;
+            for (const auto& field : object.asObject()) {
+                const auto at = json::pointerJoin(path, field.key);
+                if (const auto it = specs.find(field.key); it != specs.end()) {
+                    json::Value decoded;
+                    valid &= it->second.decodeInto(field.value, decoded, c, at);
+                } else {
+                    if (c.warnings)
+                        c.warnings->push_back(
+                            {"schema.unknown_member", "ignored unknown member", at});
+                    unknown.push_back(field.key);
+                }
+            }
+            for (const auto& key : unknown) object.asObject().erase(key);
+            return valid;
+        };
+        auto typed = [](std::string type) {
+            auto ex = json::Value::object();
+            ex["type"] = type;
+            return Schema<json::Value>(
+                type,
+                [type](const json::Value& x, json::Value& y, schema::DecodeCtx& ctx,
+                       const std::string& at) {
+                    const bool ok = type == "string"    ? x.isString()
+                                    : type == "boolean" ? x.isBool()
+                                    : type == "integer"
+                                        ? x.isInt()
+                                        : x.isNumber() && std::isfinite(x.asDouble());
+                    if (!ok) {
+                        ctx.error("schema.type", "expected " + type, at);
+                        return false;
+                    }
+                    y = x;
+                    return true;
+                },
+                [](const json::Value& x) { return x; }, ex);
+        };
+        const auto text = typed("string"), number = typed("number"), integer = typed("integer");
+        bool ok = true;
+        const std::set<std::string> known{"format",   "bit_depth", "sample_rate",
+                                          "channels", "normalize", "tail_ms",
+                                          "pattern",  "secondary", "matrix"};
+        std::vector<std::string> unknown;
+        for (auto& field : out.asObject()) {
+            const auto at = json::pointerJoin(p, field.key);
+            if (!known.count(field.key)) {
+                if (c.warnings)
+                    c.warnings->push_back({"schema.unknown_member", "ignored unknown member", at});
+                unknown.push_back(field.key);
+                continue;
+            }
+            if (field.key == "format" || field.key == "normalize" || field.key == "secondary") {
+                if (field.value.isString()) continue;
+                if (field.key == "secondary" && field.value.isNull()) continue;
+                if (!field.value.isObject()) {
+                    c.error("schema.type", "expected a string or object", at);
+                    ok = false;
+                    continue;
+                }
+                if (field.key == "format")
+                    ok &= fields(
+                        field.value,
+                        {{"container", text}, {"bit_depth", integer}, {"dither", typed("boolean")}},
+                        at);
+                else if (field.key == "normalize")
+                    ok &= fields(
+                        field.value,
+                        {{"mode", text}, {"target", number}, {"limit_true_peak_db", number}}, at);
+                else
+                    ok &= fields(field.value, {{"format", text}, {"bit_depth", integer}}, at);
+            } else if (field.key == "matrix") {
+                if (!field.value.isObject()) {
+                    c.error("schema.type", "expected an object", at);
+                    ok = false;
+                    continue;
+                }
+                for (const auto& row : field.value.asObject()) {
+                    std::vector<std::string> decoded;
+                    ok &= schema::arrayOf(schema::string())
+                              .decodeInto(row.value, decoded, c, json::pointerJoin(at, row.key));
+                }
+            } else {
+                json::Value decoded;
+                ok &= (field.key == "pattern"     ? text
+                       : field.key == "bit_depth" ? integer
+                                                  : number)
+                          .decodeInto(field.value, decoded, c, at);
+            }
+        }
+        for (const auto& key : unknown) out.asObject().erase(key);
+        return ok;
+    };
+    auto ex = json::Value::object();
+    ex["type"] = "object";
+    return {"render settings", decode, [](const json::Value& v) { return v; }, ex};
+}
+
 std::string hex2(unsigned v) {
     char b[3];
     std::snprintf(b, sizeof b, "%02X", v & 0xff);
@@ -58,30 +181,43 @@ Schema<midi::Sequence> sequenceSchema() {
             c.error("schema.type", "expected a MIDI sequence object", p);
             return false;
         }
+        if (c.warnings)
+            for (const auto& field : v.asObject())
+                if (field.key != "ppq" && field.key != "length" && field.key != "notes" &&
+                    field.key != "controls" && field.key != "sysex")
+                    c.warnings->push_back({"schema.unknown_member", "ignored unknown member",
+                                           json::pointerJoin(p, field.key)});
         auto intAt = [&](const json::Value& row, std::size_t i, std::int64_t lo, std::int64_t hi,
                          const std::string& at, std::int64_t& x) {
-            if (i >= row.size() || !row.at(i).isNumber()) {
-                c.error("schema.type", "expected a number", at + "/" + std::to_string(i));
+            if (i >= row.size()) {
+                c.error("schema.type", "expected an integer", at + "/" + std::to_string(i));
                 return false;
             }
-            x = static_cast<std::int64_t>(row.at(i).asDouble());
+            const auto path = at + "/" + std::to_string(i);
+            if (!schema::integer().decodeInto(row.at(i), x, c, path)) return false;
             if (x < lo || x > hi) {
-                c.error("schema.out_of_range", "value out of range", at + "/" + std::to_string(i),
+                c.error("schema.out_of_range", "value out of range", path,
                         std::to_string(lo) + " .. " + std::to_string(hi));
                 return false;
             }
             return true;
         };
         bool ok = true;
-        if (const auto* ppq = v.find("ppq"); ppq && ppq->isNumber())
-            out.ppq = static_cast<int>(ppq->asInt());
-        if (const auto* len = v.find("length"); len && len->isNumber()) out.length = len->asInt();
+        if (const auto* ppq = v.find("ppq"))
+            ok &= schema::integerOf<int>().range(1, 32767).decodeInto(*ppq, out.ppq, c, p + "/ppq");
+        if (const auto* len = v.find("length"))
+            ok &= schema::integer().min(0).decodeInto(*len, out.length, c, p + "/length");
+        for (const char* key : {"notes", "controls", "sysex"})
+            if (const auto* rows = v.find(key); rows && !rows->isArray()) {
+                c.error("schema.type", "expected an array", p + "/" + key);
+                ok = false;
+            }
         if (const auto* notes = v.find("notes"); notes && notes->isArray()) {
             for (std::size_t i = 0; i < notes->size(); ++i) {
                 const auto& row = notes->at(i);
                 const std::string at = p + "/notes/" + std::to_string(i);
                 std::int64_t s = 0, l = 0, ch = 0, key = 0, vel = 0, off = 0;
-                if (!row.isArray() || row.size() < 5) {
+                if (!row.isArray() || row.size() < 5 || row.size() > 6) {
                     c.error("schema.type",
                             "a note is [start, length, channel, pitch, velocity, off_velocity?]",
                             at);
@@ -124,7 +260,9 @@ Schema<midi::Sequence> sequenceSchema() {
                 }
                 std::int64_t t = 0, ch = 0, n = 0, val = 0;
                 if (!intAt(row, 0, 0, INT64_MAX / 4, at, t) || !intAt(row, 2, 1, 16, at, ch) ||
-                    !intAt(row, 3, 0, 127, at, n) || !intAt(row, 4, -8192, 16383, at, val)) {
+                    !intAt(row, 3, 0, 127, at, n) ||
+                    !intAt(row, 4, ctl.kind == midi::ControlKind::PitchBend ? -8192 : 0,
+                           ctl.kind == midi::ControlKind::PitchBend ? 8191 : 127, at, val)) {
                     ok = false;
                     continue;
                 }
@@ -146,12 +284,28 @@ Schema<midi::Sequence> sequenceSchema() {
                     continue;
                 }
                 midi::Sysex x;
-                x.tick = row.at(0).asInt();
+                if (!intAt(row, 0, 0, INT64_MAX / 4, at, x.tick)) {
+                    ok = false;
+                    continue;
+                }
                 const std::string& hex = row.at(1).asString();
-                for (std::size_t k = 0; k + 1 < hex.size() + 1; k += 3) {
-                    if (k + 2 > hex.size()) break;
-                    x.bytes.push_back(
-                        static_cast<std::uint8_t>(std::stoul(hex.substr(k, 2), nullptr, 16)));
+                bool valid = !hex.empty() && hex.size() % 3 == 2;
+                for (std::size_t k = 0; valid && k < hex.size(); k += 3) {
+                    unsigned byte = 0;
+                    const auto [end, ec] =
+                        std::from_chars(hex.data() + k, hex.data() + k + 2, byte, 16);
+                    valid = ec == std::errc{} && end == hex.data() + k + 2 &&
+                            (k + 2 == hex.size() || hex[k + 2] == ' ');
+                    if (valid) x.bytes.push_back(static_cast<std::uint8_t>(byte));
+                }
+                if (!valid || x.bytes.size() < 2 || x.bytes.front() != 0xF0 ||
+                    x.bytes.back() != 0xF7 ||
+                    std::any_of(x.bytes.begin() + 1, x.bytes.end() - 1,
+                                [](std::uint8_t byte) { return byte > 0x7F; })) {
+                    c.error("schema.type", "expected a hexadecimal F0 .. F7 sysex message",
+                            at + "/1", "e.g. F0 7E 7F 09 01 F7");
+                    ok = false;
+                    continue;
                 }
                 out.sysex.push_back(std::move(x));
             }
@@ -319,7 +473,7 @@ const Schema<Project>& schemaOf<Project>() {
         dflt(b, d.masters);
         b.field("seed", &Project::seed, schema::integerOf<std::uint64_t>());
         dflt(b, d.seed);
-        b.field("render", &Project::render, schema::any());
+        b.field("render", &Project::render, renderSettings());
         dflt(b, d.render);
         return b.build();
     }();
@@ -621,7 +775,7 @@ const Schema<FxInstance>& schemaOf<FxInstance>() {
         dflt(b, d.pdc);
         b.field("auto_bypass_on_silence", &FxInstance::autoBypassOnSilence, boolean());
         dflt(b, d.autoBypassOnSilence);
-        b.field("patch", &FxInstance::patch, schema::any());
+        b.field("patch", &FxInstance::patch, jsonObject());
         b.field("state", &FxInstance::state, str());
         b.field("params", &FxInstance::params, paramValuesSchema());
         dflt(b, d.params);
@@ -725,8 +879,6 @@ const Schema<Envelope>& schemaOf<Envelope>() {
         dflt(b, d.timebase);
         b.field("points", &Envelope::points, schema::arrayOf(point));
         dflt(b, d.points);
-        b.field("items", &Envelope::items, ids());
-        dflt(b, d.items);
         return b.build();
     }();
     return s;
@@ -865,9 +1017,14 @@ json::Value projectToJson(const Session& s) {
     doc["sources"]["midi"] = mapToJson(s.midi);
     doc["routes"] = mapToJson(s.routes);
     doc["envelopes"] = mapToJson(s.envelopes);
+    for (const auto& e : s.envelopes) {
+        auto list = json::Value::array();
+        for (const auto& item : s.autoItems)
+            if (item.value->envelope == e.id) list.push_back(item.id.str());
+        doc["envelopes"][e.id.str()]["items"] = std::move(list);
+    }
     // Written only when there are some: projects without them stay byte-identical.
     if (!s.autoItems.empty()) doc["automation_items"] = mapToJson(s.autoItems);
-    doc["groups"] = json::Value::object();
     json::Value blobs = json::Value::object();
     for (const auto& [hash, blob] : s.blobs) {
         json::Value b = json::Value::object();
@@ -877,6 +1034,7 @@ json::Value projectToJson(const Session& s) {
         blobs[hash] = std::move(b);
     }
     doc["blobs"] = std::move(blobs);
+    for (const auto& section : s.extraSections.asObject()) doc[section.key] = section.value;
     return doc;
 }
 
@@ -887,6 +1045,20 @@ std::string serializeProject(const Session& s) {
 Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Warning>* warnings) {
     json::Value doc = input;
     if (!doc.isObject()) return Error("project.type", "a project is a JSON object");
+    std::map<std::string, json::Value> derivedItems;
+    if (auto* envs = doc.asObject().find("envelopes"); envs && envs->isObject())
+        for (auto& entry : envs->asObject())
+            if (entry.value.isObject())
+                if (auto* items = entry.value.find("items")) {
+                    const auto path = json::pointerJoin("/envelopes", entry.key) + "/items";
+                    if (!items->isArray()) return Error("schema.type", "expected an array", path);
+                    for (std::size_t i = 0; i < items->size(); ++i)
+                        if (!items->at(i).isString())
+                            return Error("schema.type", "expected an item id string",
+                                         path + "/" + std::to_string(i));
+                    derivedItems.emplace(entry.key, *items);
+                    entry.value.asObject().erase("items");
+                }
     const json::Value* schemaId = doc.find("schema");
     if (!schemaId || !schemaId->isString())
         return Error("project.schema", "missing \"schema\"", "/schema",
@@ -902,11 +1074,53 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         auto migrated = migrateProject1(std::move(doc), warnings);
         if (!migrated) return std::move(migrated).error();
         doc = std::move(*migrated);
-    } else if (version->minor > 0)
-        options.unknownMembers = schema::UnknownMembers::Ignore;
+    } else if (version->minor > 0 && warnings)
+        warnings->push_back(
+            {"project.newer_minor", "loading a newer project minor version", "/schema"});
+    options.unknownMembers = schema::UnknownMembers::Ignore;
     std::vector<Error> errors;
     Session s;
     s.version = 0;
+    auto warn = [&](std::string code, std::string message, std::string path) {
+        if (warnings) warnings->push_back({std::move(code), std::move(message), std::move(path)});
+    };
+    const std::set<std::string_view> known{
+        "schema", "project", "tempo",  "rulers",    "tracks",           "items", "takes",
+        "fx",     "sources", "routes", "envelopes", "automation_items", "blobs"};
+    for (const auto& section : doc.asObject()) {
+        const auto path = json::pointerJoin("", section.key);
+        if (section.key == "ui") {
+            warn("project.ui_sidecar", "ignored UI state; it lives in <name>.ui.json", path);
+        } else if (!known.count(section.key)) {
+            if (section.key == "extensions" && !section.value.isObject())
+                errors.emplace_back("schema.type", "expected an extensions object", path);
+            else {
+                s.extraSections[section.key] = section.value;
+                if (section.key == "groups")
+                    warn("project.groups_unsupported", "track groups are not yet implemented",
+                         path);
+            }
+        }
+    }
+    auto unknown = [&](const json::Value& value, const std::set<std::string_view>& names,
+                       const std::string& path) {
+        if (value.isObject())
+            for (const auto& field : value.asObject())
+                if (!names.count(field.key))
+                    warn("schema.unknown_member", "ignored unknown member",
+                         json::pointerJoin(path, field.key));
+    };
+    for (const auto& [name, fields] :
+         std::vector<std::pair<std::string_view, std::set<std::string_view>>>{
+             {"tempo", {"points", "meters"}},
+             {"rulers", {"markers", "regions"}},
+             {"sources", {"media", "midi"}}})
+        if (const auto* value = doc.find(name)) {
+            if (!value->isObject())
+                errors.emplace_back("schema.type", "expected an object", "/" + std::string(name));
+            else
+                unknown(*value, fields, "/" + std::string(name));
+        }
     if (const json::Value* p = doc.find("project")) {
         json::Value copy = *p;
         const json::Value* next = p->find("next_ids");
@@ -926,12 +1140,26 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         } else {
             s.project = std::make_shared<const Project>(std::move(*project));
         }
-        if (next && next->isObject())
-            for (const auto& m : next->asObject()) {
-                auto k = kindFromPrefix(m.key);
-                if (k && m.value.isNumber())
-                    s.next[*k] = static_cast<std::uint32_t>(m.value.asInt());
-            }
+        if (next) {
+            if (!next->isObject())
+                errors.emplace_back("schema.type", "expected next_ids object", "/project/next_ids");
+            else
+                for (const auto& m : next->asObject()) {
+                    const auto k = kindFromPrefix(m.key);
+                    if (!k) {
+                        warn("schema.unknown_member", "ignored unknown member",
+                             json::pointerJoin("/project/next_ids", m.key));
+                        continue;
+                    }
+                    auto counter = schema::integerOf<std::uint32_t>().decode(m.value);
+                    if (!counter) {
+                        auto error = std::move(counter).error();
+                        error.path = json::pointerJoin("/project/next_ids", m.key) + error.path;
+                        errors.push_back(std::move(error));
+                    } else
+                        s.next[*k] = *counter;
+                }
+        }
     }
     auto sub = [&](const char* a, const char* b) -> const json::Value* {
         const json::Value* x = doc.find(a);
@@ -978,6 +1206,17 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     mapFromJson<FxInstance>(sub("fx", nullptr), "/fx", Kind::Fx, fx, errors, options, warnings);
     if (const json::Value* blobs = doc.find("blobs"); blobs && blobs->isObject()) {
         for (const auto& m : blobs->asObject()) {
+            const auto path = json::pointerJoin("/blobs", m.key);
+            if (!m.value.isObject()) {
+                errors.emplace_back("schema.type", "expected a blob object", path);
+                continue;
+            }
+            unknown(m.value, {"size", "encoding", "data"}, path);
+            if (const auto* encoding = m.value.find("encoding");
+                !encoding || !encoding->isString() || *encoding != "base64") {
+                errors.emplace_back("project.blob", "encoding must be base64", path + "/encoding");
+                continue;
+            }
             const json::Value* data = m.value.find("data");
             auto bytes =
                 data && data->isString()
@@ -990,8 +1229,18 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
             }
             auto blob = std::make_shared<Blob>();
             blob->data = std::move(*bytes);
+            const auto* size = m.value.find("size");
+            auto count = size ? schema::integerOf<std::uint64_t>().decode(*size)
+                              : Result<std::uint64_t>(Error("schema.required", "missing size"));
+            if (!count || *count != blob->data.size()) {
+                errors.emplace_back("project.blob", "size must match decoded blob bytes",
+                                    path + "/size");
+                continue;
+            }
             s.blobs[m.key] = std::move(blob);
         }
+    } else if (doc.find("blobs")) {
+        errors.emplace_back("schema.type", "expected a blobs object", "/blobs");
     }
     if (!errors.empty()) {
         if (errors.size() == 1) return errors.front();
@@ -1012,6 +1261,16 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     s.routes = routes.build();
     s.envelopes = envelopes.build();
     s.autoItems = autoItems.build();
+    if (warnings)
+        for (const auto& [envelope, given] : derivedItems) {
+            auto expected = json::Value::array();
+            for (const auto& item : s.autoItems)
+                if (item.value->envelope.str() == envelope) expected.push_back(item.id.str());
+            if (given != expected)
+                warnings->push_back({"project.derived_items",
+                                     "ignored stale envelope items; derived from automation_items",
+                                     json::pointerJoin("/envelopes", envelope) + "/items"});
+        }
     // Derive the time map and validate everything through a no-op transaction.
     EditTxn txn(s, 0);
     return txn.commit();

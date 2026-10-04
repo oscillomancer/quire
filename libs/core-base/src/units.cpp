@@ -72,7 +72,11 @@ Result<double> parseQuantity(std::string_view text, Unit fieldUnit) {
                                  std::string(unitName(fieldUnit)));
             if (norm == "dbfs")
                 return Error("schema.unit", "dBFS requires an absolute level field", {}, "use dB");
-            return value * a.scale;
+            const double converted = value * a.scale;
+            if (!std::isfinite(converted))
+                return Error("schema.unit", "quantity overflows its base unit", {},
+                             "use a smaller finite quantity");
+            return converted;
         }
     return Error("schema.unit", "unknown unit", {},
                  "use a " + std::string(dimensionName(fieldUnit)) + " unit, e.g. 1 " +

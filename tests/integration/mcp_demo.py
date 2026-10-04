@@ -16,6 +16,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from processes import stop
+
 
 PHRASE = "1: C3:h E3:q G3:q"
 PAD = {
@@ -192,43 +194,37 @@ def run_mode(mode, sandbox, proxy_binary, orrery, root):
     workdir = root / mode
     workdir.mkdir()
     socket = workdir / "control.sock"
-    server = None
-    if mode == "stdio":
-        command = [str(sandbox), "--mcp", "--workdir", str(workdir),
-                   "--plugin-path", str(orrery.parent)]
-    else:
-        server = subprocess.Popen(
-            [str(sandbox), "serve", "--socket", str(socket), "--workdir", str(workdir),
-             "--plugin-path", str(orrery.parent)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
-        for _ in range(400):
-            if socket.exists():
-                break
-            assert server.poll() is None, server.stderr.read().decode()
-            time.sleep(0.025)
-        assert socket.exists(), "socket server did not start"
-        command = [str(proxy_binary), "--socket", str(socket)]
-    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, bufsize=0)
+    server = process = None
     transcript = []
     try:
+        if mode == "stdio":
+            command = [str(sandbox), "--mcp", "--workdir", str(workdir),
+                       "--plugin-path", str(orrery.parent)]
+        else:
+            server = subprocess.Popen(
+                [str(sandbox), "serve", "--socket", str(socket), "--workdir", str(workdir),
+                 "--plugin-path", str(orrery.parent)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            for _ in range(400):
+                if socket.exists():
+                    break
+                assert server.poll() is None, server.stderr.read().decode()
+                time.sleep(0.025)
+            assert socket.exists(), "socket server did not start"
+            command = [str(proxy_binary), "--socket", str(socket)]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, bufsize=0)
         session(Client(process, transcript), orrery)
         process.stdin.close()
         assert process.wait(timeout=10) == 0, process.stderr.read().decode()
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
-        if server is not None:
-            if server.poll() is None:
-                server.terminate()
-                try:
-                    server.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-                    server.wait(timeout=5)
-            assert not socket.exists(), "socket server left its socket"
+        # The proxy or stdio sandbox first (it holds a connection), then the
+        # socket server, which removes its socket on a graceful exit.
+        stop(process, timeout=5, graceful=False)
+        stop(server)
+    if server is not None:
+        assert not socket.exists(), "socket server left its socket"
     return transcript, workdir
 
 

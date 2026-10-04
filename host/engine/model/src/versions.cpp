@@ -40,6 +40,8 @@ EntryInfo info(const IdMap<T>& m, Id id) {
 }
 EntryInfo entryInfo(const Session& s, Id id) {
     switch (id.kind) {
+        case Kind::Project:
+            return {true, s.version};
         case Kind::Track:
             return info(s.tracks, id);
         case Kind::Item:
@@ -78,6 +80,8 @@ json::Value objectJson(const Session& s, Id id) {
         return v ? toJson(*v) : json::Value();
     };
     switch (id.kind) {
+        case Kind::Project:
+            return toJson(*s.project);
         case Kind::Track:
             return enc(s.tracks);
         case Kind::Item:
@@ -113,8 +117,8 @@ json::Value objectJson(const Session& s, Id id) {
 // added on each side appends to the parent's children on both): never a
 // conflict by themselves.
 bool structural(const std::string& field) {
-    return field == "children" || field == "chain" || field == "input_chain" || field == "takes" ||
-           field == "items";
+    return field == "masters" || field == "children" || field == "chain" ||
+           field == "input_chain" || field == "takes" || field == "items";
 }
 
 std::set<std::string> changedFields(const Session& before, const Session& after, Id id) {
@@ -238,7 +242,7 @@ VersionStore::VersionStore(Session initial) {
     v.session = std::make_shared<const Session>(std::move(initial));
     v.txn.label = "initial";
     versions_.emplace(id, std::move(v));
-    branches_.emplace("main", Branch{id, id, {}});
+    branches_.emplace("main", Branch{id, id, {}, versions_.at(id).session->next});
     next_ = id + 1;
 }
 
@@ -260,7 +264,15 @@ Result<VersionStore::Branch*> VersionStore::find(std::string_view name) {
 
 std::shared_ptr<const Session> VersionStore::head(std::string_view name) const {
     const Branch* b = lookup(name);
-    return b ? versions_.at(b->head).session : nullptr;
+    if (!b) return nullptr;
+    auto stored = versions_.at(b->head).session;
+    if (stored->next == b->allocated) return stored;
+    if (!b->view || b->view->version != stored->version || b->view->next != b->allocated) {
+        auto out = std::make_shared<Session>(*stored);
+        out->next = b->allocated;
+        b->view = std::move(out);
+    }
+    return b->view;
 }
 
 std::uint64_t VersionStore::headVersion(std::string_view name) const {
@@ -277,6 +289,31 @@ void VersionStore::forEachVersion(const std::function<void(const Version&)>& vis
     for (const auto& [id, v] : versions_) visit(v);
 }
 
+std::shared_ptr<const Session> VersionStore::pin(std::uint64_t id) const {
+    const auto* found = version(id);
+    return found ? found->session : nullptr;
+}
+
+void VersionStore::collectUnused() {
+    std::vector<std::uint64_t> pending;
+    for (const auto& [name, branch] : branches_) {
+        pending.push_back(branch.head);
+        pending.push_back(branch.base);
+        pending.insert(pending.end(), branch.redo.begin(), branch.redo.end());
+    }
+    for (const auto& [id, version] : versions_)
+        if (version.session.use_count() > 1) pending.push_back(id);
+    std::set<std::uint64_t> reachable;
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        if (!reachable.insert(id).second) continue;
+        if (const auto* found = version(id))
+            pending.insert(pending.end(), found->parents.begin(), found->parents.end());
+    }
+    std::erase_if(versions_, [&](const auto& entry) { return !reachable.count(entry.first); });
+}
+
 Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                            std::vector<Change> changes, std::vector<Id> created,
                                            std::uint64_t timeMs) {
@@ -285,6 +322,11 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                             std::to_string(session.version) + ", expected " +
                                             std::to_string(next_));
     Branch& b = branches_.at(current_);
+    b.view.reset();
+    for (std::size_t k = 0; k < kKindCount; ++k) {
+        b.allocated.next[k] = std::max(b.allocated.next[k], session.next.next[k]);
+        session.next.next[k] = b.allocated.next[k];
+    }
     const Version& head = versions_.at(b.head);
     Version v;
     v.id = next_++;
@@ -317,10 +359,8 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         std::vector<Invocation> inv = head.txn.invocations;
         inv.insert(inv.end(), v.txn.invocations.begin(), v.txn.invocations.end());
         v.txn.invocations = std::move(inv);
-        const std::uint64_t replaced = b.head;
         b.head = v.id;
         versions_.emplace(v.id, std::move(v));
-        versions_.erase(replaced);
     } else {
         v.parents = {b.head};
         v.changes = std::move(changes);
@@ -329,6 +369,7 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         b.redo.clear();
         versions_.emplace(v.id, std::move(v));
     }
+    collectUnused();
     return b.head;
 }
 
@@ -341,6 +382,7 @@ bool VersionStore::canRedo() const { return !branches_.at(current_).redo.empty()
 
 Status VersionStore::undo() {
     Branch& b = branches_.at(current_);
+    b.view.reset();
     if (b.head == b.base)
         return Error("history.nothing_to_undo", "nothing to undo on branch " + current_);
     b.redo.push_back(b.head);
@@ -350,6 +392,7 @@ Status VersionStore::undo() {
 
 Status VersionStore::redo() {
     Branch& b = branches_.at(current_);
+    b.view.reset();
     if (b.redo.empty())
         return Error("history.nothing_to_redo", "nothing to redo on branch " + current_);
     b.head = b.redo.back();
@@ -379,7 +422,7 @@ Status VersionStore::createBranch(const std::string& name, std::string_view from
     auto src = find(from);
     if (!src) return std::move(src).error();
     const std::uint64_t at = (*src)->head;
-    branches_.emplace(name, Branch{at, at, {}});
+    branches_.emplace(name, Branch{at, at, {}, (*src)->allocated});
     return okStatus();
 }
 
@@ -397,6 +440,7 @@ Status VersionStore::deleteBranch(std::string_view name) {
     auto b = find(name);
     if (!b) return std::move(b).error();
     branches_.erase(branches_.find(name));
+    collectUnused();
     return okStatus();
 }
 
@@ -451,9 +495,13 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
     }
     if (fork == dst.head) {
         dst.head = src->head;
+        dst.view.reset();
+        for (std::size_t k = 0; k < kKindCount; ++k)
+            dst.allocated.next[k] = std::max(dst.allocated.next[k], src->allocated.next[k]);
         dst.redo.clear();
         out.head = dst.head;
         out.fastForward = true;
+        collectUnused();
         return out;
     }
     // The source's transactions since the fork, oldest first (first-parent chain).
@@ -472,7 +520,7 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
 
     const Session& forkState = *versions_.at(fork).session;
     const Session& targetHead = *versions_.at(dst.head).session;
-    std::shared_ptr<const Session> state = versions_.at(dst.head).session;
+    std::shared_ptr<const Session> state = head(into);
     std::vector<Version> staged;
     std::uint64_t nextId = next_;
     std::uint64_t parent = dst.head;
@@ -498,7 +546,14 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
                 const auto theirs = changedFields(forkState, targetHead, c.id);
                 std::string both;
                 for (const auto& f : mine)
-                    if (!structural(f) && theirs.count(f)) both += (both.empty() ? "" : ", ") + f;
+                    if (!structural(f) && theirs.count(f)) {
+                        const auto mineValue = objectJson(*v.session, c.id);
+                        const auto theirsValue = objectJson(targetHead, c.id);
+                        const auto* x = mineValue.find(f);
+                        const auto* y = theirsValue.find(f);
+                        if (c.id != kProject || !x || !y || *x != *y)
+                            both += (both.empty() ? "" : ", ") + f;
+                    }
                 if (both.empty()) continue;
                 why = ": both branches changed " + both;
             }
@@ -510,36 +565,40 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
             return out;
         }
         std::vector<Invocation> inv;
+        Replayed result{*state, {}, {}};
         for (const auto& i : v.txn.invocations) {
             const json::Value* schema = schemas ? schemas(i.command) : nullptr;
-            inv.push_back({i.command, schema ? remapIds(i.args, *schema, out.remap) : i.args});
+            Invocation resolved{i.command, schema ? remapIds(i.args, *schema, out.remap) : i.args};
+            auto next = replay(result.session, {resolved}, nextId);
+            if (!next || result.created.size() + next->created.size() > v.created.size()) {
+                out.conflicts.push_back({Conflict::Kind::Invalid, step, v.id, std::nullopt,
+                                         next ? "replay created more objects than the original"
+                                              : next.error().toString()});
+                return out;
+            }
+            for (Id fresh : next->created) {
+                const Id original = v.created[result.created.size()];
+                if (original != fresh) out.remap[original] = fresh;
+                result.created.push_back(fresh);
+            }
+            result.changes = coalesce(result.changes, next->changes);
+            result.session = std::move(next->session);
+            inv.push_back(std::move(resolved));
         }
-        auto result = replay(*state, inv, nextId);
-        if (!result) {
-            out.conflicts.push_back(
-                {Conflict::Kind::Invalid, step, v.id, std::nullopt, result.error().toString()});
-            out.head = dst.head;
+        if (result.created.size() != v.created.size()) {
+            out.conflicts.push_back({Conflict::Kind::Invalid, step, v.id, std::nullopt,
+                                     "replay creation count differs from the original"});
             return out;
         }
-        if (result->created.size() != v.created.size()) {
-            out.conflicts.push_back(
-                {Conflict::Kind::Invalid, step, v.id, std::nullopt,
-                 "the replay created " + std::to_string(result->created.size()) +
-                     " objects, the original " + std::to_string(v.created.size())});
-            out.head = dst.head;
-            return out;
-        }
-        for (std::size_t i = 0; i < v.created.size(); ++i)
-            if (v.created[i] != result->created[i]) out.remap[v.created[i]] = result->created[i];
         Version nv;
         nv.id = nextId++;
         nv.parents = {parent};
         nv.txn = v.txn;
         nv.txn.invocations = std::move(inv);
-        nv.changes = std::move(result->changes);
-        nv.created = std::move(result->created);
+        nv.changes = std::move(result.changes);
+        nv.created = std::move(result.created);
         nv.timeMs = timeMs;
-        nv.session = std::make_shared<const Session>(std::move(result->session));
+        nv.session = std::make_shared<const Session>(std::move(result.session));
         state = nv.session;
         parent = nv.id;
         staged.push_back(std::move(nv));
@@ -553,8 +612,12 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
     }
     next_ = nextId;
     dst.head = parent;
+    for (std::size_t k = 0; k < kKindCount; ++k)
+        dst.allocated.next[k] = std::max(dst.allocated.next[k], state->next.next[k]);
     dst.redo.clear();
     out.head = dst.head;
+    dst.view.reset();
+    collectUnused();
     return out;
 }
 

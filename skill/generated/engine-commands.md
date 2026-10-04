@@ -201,7 +201,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `env` | string |  |  |  | Envelope id, e.g. "en_1". |
 | `position` | number |  | 0.0.. |  |  |
-| `bar` | integer |  | 1.0.. |  |  |
+| `bar` | integer |  | 1.0..2147483647.0 |  |  |
 | `length` | number |  |  | 4.0 |  |
 | `points` | array |  |  |  |  |
 | `source_length` | number |  |  |  |  |
@@ -2165,9 +2165,9 @@ Result:
 
 ## `fx.param.set@1`
 
-Set plugin parameters by key in physical units: {"cutoff": "800 Hz"}.
+Set semantic parameters in units, or plain plugin parameters by name/id.
 
-
+Plain CLAP/VST3 values use the declared range or plugin text; read-only parameters refuse edits.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2734,7 +2734,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
 | `position` | number |  | 0.0.. |  | Beats. |
-| `bar` | integer |  | 1.0.. |  | Start at this bar (1-based). |
+| `bar` | integer |  | 1.0..2147483647.0 |  | Start at this bar (1-based). |
 | `length` | number |  |  |  | Beats. |
 | `notation` | string |  |  |  |  |
 | `audio_file` | string |  |  |  |  |
@@ -2872,7 +2872,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `item` | string |  |  |  | Item id, e.g. "it_1". |
 | `position` | number |  | 0.0.. |  |  |
-| `bar` | integer |  | 1.0.. |  |  |
+| `bar` | integer |  | 1.0..2147483647.0 |  |  |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
 
 ### Result
@@ -3025,7 +3025,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `item` | string |  |  |  |  |
 | `position` | number |  | 0.0.. |  |  |
-| `bar` | integer |  | 1.0.. |  |  |
+| `bar` | integer |  | 1.0..2147483647.0 |  |  |
 | `length` | number |  | 0.0.. |  |  |
 | `mute` | boolean |  |  |  |  |
 | `loop` | boolean |  |  |  |  |
@@ -3506,6 +3506,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "id": {
             "type": "string"
           },
+          "timebase": {
+            "type": "string",
+            "enum": ["time", "beats", "beats_position"]
+          },
           "name": {
             "type": "string"
           },
@@ -3522,7 +3526,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "number"
           }
         },
-        "required": ["id", "name", "color"],
+        "required": ["id", "timebase", "name", "color"],
         "additionalProperties": false
       }
     }
@@ -4048,6 +4052,9 @@ Kind: `query`. Exposure: `mcp-tool`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4083,6 +4090,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4112,6 +4120,7 @@ Result:
   "meter": "4/4",
   "version": 0,
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4160,6 +4169,9 @@ Kind: `action`. Exposure: `mcp-exec`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4195,6 +4207,7 @@ Kind: `action`. Exposure: `mcp-exec`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4226,6 +4239,7 @@ Result:
   "meter": "<any>",
   "version": 0,
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4273,6 +4287,9 @@ Kind: `action`. Exposure: `mcp-tool`.
     "version": {
       "type": "integer"
     },
+    "generation": {
+      "type": "integer"
+    },
     "recoverable": {
       "type": "integer"
     },
@@ -4308,6 +4325,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "tempo",
     "meter",
     "version",
+    "generation",
     "recoverable",
     "autosave_available"
   ],
@@ -4344,6 +4362,7 @@ Result:
   "meter": "<any>",
   "version": "<any>",
   "recoverable": 0,
+  "generation": "<any>",
   "autosave_available": false
 }
 
@@ -4400,9 +4419,67 @@ Kind: `action`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
+            }
           }
         },
         "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recording_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path", "hint", "track", "file"],
         "additionalProperties": false
       }
     }
@@ -4468,6 +4545,35 @@ Kind: `query`. Exposure: `mcp-tool`.
   "type": "object",
   "title": "recoverable_list",
   "properties": {
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "recording_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path", "hint", "track", "file"],
+        "additionalProperties": false
+      }
+    },
     "recordings": {
       "type": "array",
       "items": {
@@ -4729,6 +4835,10 @@ Kind: `query`. Exposure: `mcp-tool`.
           "id": {
             "type": "string"
           },
+          "timebase": {
+            "type": "string",
+            "enum": ["time", "beats", "beats_position"]
+          },
           "name": {
             "type": "string"
           },
@@ -4745,7 +4855,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "type": "number"
           }
         },
-        "required": ["id", "name", "color"],
+        "required": ["id", "timebase", "name", "color"],
         "additionalProperties": false
       }
     }
@@ -6411,7 +6521,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `seconds` | number |  | 0.0.. |  |  |
 | `beat` | number |  | 0.0.. |  |  |
-| `bar` | integer |  | 1.0.. |  |  |
+| `bar` | integer |  | 1.0..2147483647.0 |  |  |
 
 ### Result
 
@@ -6572,7 +6682,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  |  |
 | `parent` | string |  |  |  | Parent track id, e.g. "tr_1". |
 | `index` | integer |  | 0.0.. |  |  |
-| `channels` | integer |  | 1.0..2.0 |  |  |
+| `channels` | integer |  | 1.0..8.0 |  |  |
 
 ### Result
 
@@ -7231,6 +7341,35 @@ Kind: `query`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
+            }
           }
         },
         "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -7296,10 +7435,10 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `enabled` | boolean |  |  |  |  |
 | `start_seconds` | number |  | 0.0.. |  |  |
 | `start_beat` | number |  | 0.0.. |  |  |
-| `start_bar` | integer |  | 1.0.. |  |  |
+| `start_bar` | integer |  | 1.0..2147483647.0 |  |  |
 | `end_seconds` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  | 0.0.. |  |  |
-| `end_bar` | integer |  | 1.0.. |  |  |
+| `end_bar` | integer |  | 1.0..2147483647.0 |  |  |
 
 ### Result
 
@@ -7539,6 +7678,35 @@ Kind: `action`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
+            }
           }
         },
         "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -7684,6 +7852,35 @@ Kind: `action`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
+            }
           }
         },
         "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -7743,10 +7940,10 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `enabled` | boolean |  |  |  |  |
 | `start_seconds` | number |  | 0.0.. |  |  |
 | `start_beat` | number |  | 0.0.. |  |  |
-| `start_bar` | integer |  | 1.0.. |  |  |
+| `start_bar` | integer |  | 1.0..2147483647.0 |  |  |
 | `end_seconds` | number |  | 0.0.. |  |  |
 | `end_beat` | number |  | 0.0.. |  |  |
-| `end_bar` | integer |  | 1.0.. |  |  |
+| `end_bar` | integer |  | 1.0..2147483647.0 |  |  |
 
 ### Result
 
@@ -7899,6 +8096,35 @@ Kind: `action`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
+            }
           }
         },
         "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -7957,7 +8183,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `seconds` | number |  | 0.0.. |  |  |
 | `beat` | number |  | 0.0.. |  |  |
-| `bar` | integer |  | 1.0.. |  |  |
+| `bar` | integer |  | 1.0..2147483647.0 |  |  |
 
 ### Result
 
@@ -8046,6 +8272,35 @@ Kind: `action`. Exposure: `mcp-tool`.
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
             }
           }
         },
@@ -8192,6 +8447,35 @@ Kind: `action`. Exposure: `mcp-tool`.
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "recording_warning",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "track": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message", "path", "hint", "track", "file"],
+              "additionalProperties": false
             }
           }
         },

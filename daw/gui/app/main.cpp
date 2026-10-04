@@ -493,6 +493,7 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
     {
         views::ItemGestures& g = shell.arrange()->gestures();
+        g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };
         const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
         if (auto mouse = views::MouseMap::load(mouseFile))
             g.mouse = std::move(*mouse);

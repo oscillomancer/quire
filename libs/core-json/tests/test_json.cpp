@@ -3,6 +3,10 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <vector>
 using namespace supple::json;
 TEST_CASE("parse and canonical output") {
     auto v = parse("{\"schema\":\"supple.test/1.0\",\"values\":[1,2.0,\"é\"]}");
@@ -213,4 +217,79 @@ TEST_CASE("invalid UTF-8 is located at its first byte") {
     CHECK(r.error().code == "json.parse.invalid_utf8");
     REQUIRE(r.error().loc.has_value());
     CHECK(r.error().loc->column == 20);
+}
+TEST_CASE("object member index stays exact through every mutation") {
+    // Keys are read-only through a mutable iterator, so no edit can leave the
+    // index pointing at a renamed member.
+    Object probe;
+    static_assert(!std::is_assignable_v<decltype((probe.begin()->key)), std::string>);
+    static_assert(std::is_assignable_v<decltype((probe.begin()->value)), Value>);
+
+    auto key = [](int i) { return "k" + std::to_string(i); };
+    Object o;
+    for (int i = 0; i < 40; ++i) o.set(key(i), i);
+    for (int i = 0; i < 40; ++i) {
+        REQUIRE(o.find(key(i)));
+        CHECK(o.find(key(i))->asInt() == i);
+    }
+    // Erasing shifts later members; lookups follow them and drop below the
+    // indexed size as well.
+    CHECK(o.erase(key(3)));
+    CHECK_FALSE(o.erase(key(3)));
+    CHECK_FALSE(o.contains(key(3)));
+    CHECK(o.find(key(39))->asInt() == 39);
+    for (int i = 0; i < 30; ++i) o.erase(key(i));
+    CHECK(o.size() == 10);
+    for (int i = 30; i < 40; ++i) CHECK(o.find(key(i))->asInt() == i);
+    for (int i = 0; i < 20; ++i) o[key(100 + i)] = i;
+    CHECK(o.find(key(119))->asInt() == 19);
+    CHECK(o.find(key(35))->asInt() == 35);
+    // Sorting, copying and moving carry a usable index.
+    o.sortKeys();
+    CHECK(o.begin()->key == key(100));
+    CHECK(o.find(key(30))->asInt() == 30);
+    Object copy = o;
+    Object assigned;
+    assigned = copy;
+    Object moved = std::move(copy);
+    for (const Object* each : {&o, &assigned, &moved}) {
+        CHECK(each->size() == 30);
+        CHECK(each->find(key(110))->asInt() == 10);
+        CHECK_FALSE(each->contains(key(3)));
+    }
+    // Values change through iteration without disturbing lookups.
+    for (auto& m : moved) m.value = m.key;
+    CHECK(moved.find(key(31))->asString() == key(31));
+}
+TEST_CASE("concurrent const lookups do not write a shared object") {
+    // Under the tsan preset this races if a const lookup builds a cache.
+    Value shared = Value::object();
+    for (int i = 0; i < 64; ++i) shared["member" + std::to_string(i)] = i;
+    const Value& view = shared;
+    std::vector<std::thread> readers;
+    std::vector<int> found(4, 0);
+    for (int t = 0; t < 4; ++t)
+        readers.emplace_back([&view, &found, t] {
+            for (int i = 0; i < 64; ++i)
+                if (const auto* v = view.find("member" + std::to_string(i)); v && v->asInt() == i)
+                    ++found[static_cast<std::size_t>(t)];
+        });
+    for (auto& r : readers) r.join();
+    for (int n : found) CHECK(n == 64);
+}
+TEST_CASE("fragment references resolve JSON pointers against the root") {
+    auto doc = parse(R"({"$defs":{"a b":{"x":1},"c/d":2},"list":[5]})");
+    REQUIRE(doc);
+    CHECK(resolveFragment(*doc, "#") == &*doc);
+    REQUIRE(resolveFragment(*doc, "#/$defs/a%20b/x"));
+    CHECK(resolveFragment(*doc, "#/$defs/a%20b/x")->asInt() == 1);
+    REQUIRE(resolveFragment(*doc, "#/$defs/c~1d"));
+    CHECK(resolveFragment(*doc, "#/$defs/c~1d")->asInt() == 2);
+    REQUIRE(resolveFragment(*doc, "#/list/0"));
+    CHECK(resolveFragment(*doc, "#/list/0")->asInt() == 5);
+    CHECK(resolveFragment(*doc, "/$defs") == nullptr);
+    CHECK(resolveFragment(*doc, "other.json#/$defs") == nullptr);
+    CHECK(resolveFragment(*doc, "#/$defs/a%2") == nullptr);
+    CHECK(resolveFragment(*doc, "#/$defs/a%zz") == nullptr);
+    CHECK(resolveFragment(*doc, "#/missing") == nullptr);
 }

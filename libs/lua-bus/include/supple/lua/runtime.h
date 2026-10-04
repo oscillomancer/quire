@@ -42,7 +42,8 @@ class Runtime {
                              const json::Value& args = json::Value());
     Script* find(std::string_view name);
     std::size_t size() const { return scripts_.size(); }
-    void clear();  // forget every script (a new project)
+    bool active() const;  // a script or event delivery is on the stack
+    void clear();         // forget every script (a new project)
 
     // Events of the bus, in emission order, delivered by deliver().
     void event(std::string_view topic, json::Value payload);

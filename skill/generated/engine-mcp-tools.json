@@ -165,7 +165,8 @@
         },
         "bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         },
         "length": {
           "type": "number",
@@ -1016,7 +1017,8 @@
               },
               "bar": {
                 "type": "integer",
-                "minimum": 1.0
+                "minimum": 1.0,
+                "maximum": 2147483647.0
               },
               "seconds": {
                 "type": "number",
@@ -1146,7 +1148,8 @@
               },
               "bar": {
                 "type": "integer",
-                "minimum": 1.0
+                "minimum": 1.0,
+                "maximum": 2147483647.0
               },
               "seconds": {
                 "type": "number",
@@ -1612,8 +1615,8 @@
   },
   {
     "name": "fx_param_set",
-    "title": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.",
-    "description": "Set plugin parameters by key in physical units: {\"cutoff\": \"800 Hz\"}.  See describe for errors and examples.",
+    "title": "Set semantic parameters in units, or plain plugin parameters by name/id.",
+    "description": "Set semantic parameters in units, or plain plugin parameters by name/id. Plain CLAP/VST3 values use the declared range or plugin text; read-only parameters refuse edits. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_param_set_args",
@@ -2030,6 +2033,7 @@
         "bar": {
           "type": "integer",
           "minimum": 1.0,
+          "maximum": 2147483647.0,
           "description": "Start at this bar (1-based)."
         },
         "length": {
@@ -2141,7 +2145,8 @@
         },
         "bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         },
         "track": {
           "type": "string",
@@ -2270,7 +2275,8 @@
         },
         "bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         },
         "length": {
           "type": "number",
@@ -2479,6 +2485,10 @@
               "id": {
                 "type": "string"
               },
+              "timebase": {
+                "type": "string",
+                "enum": ["time", "beats", "beats_position"]
+              },
               "name": {
                 "type": "string"
               },
@@ -2495,7 +2505,7 @@
                 "type": "number"
               }
             },
-            "required": ["id", "name", "color"],
+            "required": ["id", "timebase", "name", "color"],
             "additionalProperties": false
           }
         }
@@ -2961,6 +2971,9 @@
         "version": {
           "type": "integer"
         },
+        "generation": {
+          "type": "integer"
+        },
         "recoverable": {
           "type": "integer"
         },
@@ -2996,6 +3009,7 @@
         "tempo",
         "meter",
         "version",
+        "generation",
         "recoverable",
         "autosave_available"
       ],
@@ -3046,6 +3060,9 @@
         "version": {
           "type": "integer"
         },
+        "generation": {
+          "type": "integer"
+        },
         "recoverable": {
           "type": "integer"
         },
@@ -3081,6 +3098,7 @@
         "tempo",
         "meter",
         "version",
+        "generation",
         "recoverable",
         "autosave_available"
       ],
@@ -3147,9 +3165,67 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
+            "additionalProperties": false
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recording_warning",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "track": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message", "path", "hint", "track", "file"],
             "additionalProperties": false
           }
         }
@@ -3177,6 +3253,35 @@
       "type": "object",
       "title": "recoverable_list",
       "properties": {
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "recording_warning",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "track": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message", "path", "hint", "track", "file"],
+            "additionalProperties": false
+          }
+        },
         "recordings": {
           "type": "array",
           "items": {
@@ -3352,6 +3457,10 @@
               "id": {
                 "type": "string"
               },
+              "timebase": {
+                "type": "string",
+                "enum": ["time", "beats", "beats_position"]
+              },
               "name": {
                 "type": "string"
               },
@@ -3368,7 +3477,7 @@
                 "type": "number"
               }
             },
-            "required": ["id", "name", "color"],
+            "required": ["id", "timebase", "name", "color"],
             "additionalProperties": false
           }
         }
@@ -4816,7 +4925,8 @@
         },
         "bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         }
       },
       "additionalProperties": false
@@ -4938,7 +5048,7 @@
         "channels": {
           "type": "integer",
           "minimum": 1.0,
-          "maximum": 2.0
+          "maximum": 8.0
         }
       },
       "additionalProperties": false
@@ -5462,6 +5572,35 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -5508,7 +5647,8 @@
         },
         "start_bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         },
         "end_seconds": {
           "type": "number",
@@ -5520,7 +5660,8 @@
         },
         "end_bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         }
       },
       "additionalProperties": false
@@ -5707,6 +5848,35 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -5827,6 +5997,35 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -5873,7 +6072,8 @@
         },
         "start_bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         },
         "end_seconds": {
           "type": "number",
@@ -5885,7 +6085,8 @@
         },
         "end_bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         }
       },
       "additionalProperties": false
@@ -6008,6 +6209,35 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["track", "item", "take", "file", "seconds", "lost_frames", "takes"],
@@ -6051,7 +6281,8 @@
         },
         "bar": {
           "type": "integer",
-          "minimum": 1.0
+          "minimum": 1.0,
+          "maximum": 2147483647.0
         }
       },
       "additionalProperties": false
@@ -6140,6 +6371,35 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
                 }
               }
             },
@@ -6260,6 +6520,35 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "recording_warning",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "track": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["code", "message", "path", "hint", "track", "file"],
+                  "additionalProperties": false
                 }
               }
             },

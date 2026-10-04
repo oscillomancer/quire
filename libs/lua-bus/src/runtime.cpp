@@ -56,10 +56,21 @@ Script* Runtime::find(std::string_view name) {
     return found == scripts_.end() ? nullptr : found->second.get();
 }
 
+bool Runtime::active() const {
+    if (deliveryDepth_) return true;
+    for (const auto& [name, script] : scripts_)
+        if (script->running()) return true;
+    return false;
+}
+
 void Runtime::clear() {
     scripts_.clear();
     pending_.clear();
     droppedEvents_ = 0;
+}
+
+std::function<void()> Runtime::eventSavepoint() {
+    return [this, saved = pending_]() mutable { pending_ = std::move(saved); };
 }
 
 void Runtime::event(std::string_view topic, json::Value payload) {

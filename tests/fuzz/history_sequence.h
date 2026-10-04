@@ -18,7 +18,12 @@ namespace supple::test {
 inline Status historySequence(engine::EngineApp& app, cmd::Dispatcher& bus,
                               std::span<const std::uint8_t> bytes) {
     const cmd::Origin origin{cmd::Origin::Type::Test, "history-property", ""};
-    const std::string initial = model::serializeProject(app.head());
+    auto contentSnapshot = [](const model::Session& s) {
+        auto doc = model::projectToJson(s);
+        doc["project"].asObject().erase("next_ids");
+        return json::writeCanonical(doc);
+    };
+    const std::string initial = contentSnapshot(app.head());
     std::map<std::string, std::string> bases{{"main", initial}};
     unsigned branches = 0;
     const auto ids = [&](const auto& map, std::uint8_t choice) -> std::string {
@@ -129,7 +134,7 @@ inline Status historySequence(engine::EngineApp& app, cmd::Dispatcher& bus,
                 command = "branch.create";
                 if (branches < 3) {
                     const std::string name = "fuzz/" + std::to_string(branches++);
-                    bases[name] = model::serializeProject(app.head());
+                    bases[name] = contentSnapshot(app.head());
                     args["name"] = name;
                 } else {
                     args["name"] = "fuzz/0";  // duplicate: must fail atomically
@@ -184,7 +189,7 @@ inline Status historySequence(engine::EngineApp& app, cmd::Dispatcher& bus,
             if (!app.versions().undo()) return fail(bytes.size(), "undo failed");
             ++undone;
         }
-        if (model::serializeProject(app.head()) != bases.at(branch))
+        if (contentSnapshot(app.head()) != bases.at(branch))
             return fail(bytes.size(), "undo-all missed " + branch + " base");
         for (std::size_t n = 0; n < undone; ++n)
             if (!app.versions().redo()) return fail(bytes.size(), "redo failed");

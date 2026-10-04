@@ -31,7 +31,7 @@ Session
 ├── sources        md_* audio media, mi_* MIDI sources (pooled or unique)
 ├── routes         sd_*  edges: track→track, track→hw out, hw in→track
 ├── envelopes      en_*  automation (targets any param), automation items ai_*
-├── groups         gr_*  (Phase 5: linked parameters across tracks)
+├── groups         gr_*  (not yet implemented; preserved as an unknown section)
 └── blobs          content-addressed opaque data (plugin states, large arrays)
 ```
 
@@ -203,7 +203,9 @@ edited through `tempo.*`, not envelopes); `mode`
 (`trim|read|touch|latch|latch_preview|write`); `active`, `armed`,
 `visible`; `points`: array of `[pos, value, shape, tension]` in the
 envelope's time domain, sorted, with `shape` `linear|square|slow|fast_start|fast_end|bezier`;
-`items`: [ai id].
+`items`: [ai id], derived at serialization from the authoritative
+`automation_items` map in numeric ID order. It is not a model field. On load,
+stale or mismatched lists are ignored with a `project.derived_items` warning.
 
 Values are in the target's physical unit (dB, %, Hz for stock plugin
 params, CLAP value for third-party params); interpolation happens in the
@@ -216,12 +218,16 @@ repeat every `source_length` while `loop`, values play as `baseline +
 amplitude × (value − baseline)`, a later item cuts an earlier one it
 overlaps, and the envelope steps at each edge (gap log #28). Take envelopes
 (`{take: id, param}`) use item-relative beats and move with the item; they
-take no automation items.
+take no automation items. Expansion is bounded to 100,000 repetitions/points
+per envelope; over-budget edits and files refuse with `automation.budget`.
+Copied takes clone their FX, envelopes and automation items with new IDs;
+automation items retain their pool. Splits insert the curve value at the cut
+and retain the segment shape on both sides. MIDI overdub uses the take's play rate.
 
 ### 1.10 Rulers and render settings
 
-Markers `mk_*` `{pos, name, color, lane}`; regions `rg_*` `{start, end,
-name, color, lane}`; ruler lanes `{id, name}`.
+Markers `mk_*` `{pos, timebase, name, color, lane}`; regions `rg_*` `{start, end,
+timebase, name, color, lane}`; ruler lanes `{id, name}`.
 
 Render settings (defaults for `render.*`): `format` (wav/flac, bit depth,
 dither), `sample_rate`, `channels`, `normalize` (`none` | `{mode: lufs_i|
@@ -307,7 +313,9 @@ Masters are ordered by `project.masters`, independently of processing order;
 Canonical JSON (ADR-0009) with members in this order: `schema`, `project`,
 `tempo` (`points`, `meters`), `rulers` (`markers`, `regions`), `tracks`,
 `items`, `takes`, `fx`, `sources` (`media`, `midi`), `routes`, `envelopes`,
-`groups`, `blobs`, `ui`. *(Amended 2026-09-26: `fx` — plugin instances are
+`automation_items` (when present), `blobs`, then preserved unknown top-level
+sections and `extensions`. `groups` / `gr_*` are not yet implemented; a
+`groups` section is preserved with a warning. `ui` belongs to the sidecar. *(Amended 2026-09-26: `fx` — plugin instances are
 ID-keyed objects like the rest; chains reference them by id.)* Members equal
 to their defaults are omitted (the schema fills them in on load). Objects keyed by ID in ID order
 (numeric by kind). Compact array forms for bulk data:
@@ -324,8 +332,14 @@ small core-json addition; tracked as P4.1.)*
 
 ### 5.2 Compatibility policy
 
-Same as ADR-0009: same major → strict for known minors, ignore-with-warnings
-for newer minors; older majors migrate; newer majors refuse. The parser is
+Project exception to ADR-0009: known sections/fields reject wrong types or
+shapes with a field path for every minor. Unknown fields within known objects
+are dropped with warnings listing their paths. Unknown top-level sections and
+an explicit top-level `extensions` object are preserved verbatim on save.
+A newer minor loads with a version warning; older majors migrate and newer
+majors refuse. A project `ui` member is ignored with a warning pointing to
+`<name>.ui.json`. `groups` is preserved with a warning that track groups are
+not implemented. The parser is
 fuzzed (`project.fuzz`). Unknown plugin formats or missing plugins load as
 placeholder instances that keep their state untouched and pass audio
 through (the session survives; `project.load` reports them).
@@ -335,7 +349,8 @@ through (the session survives; `project.load` reports them).
 The extension derives from the product slug: `<name>.<slug>` (e.g.
 `demo.quire`), plus an optional sidecar directory
 `<name>.<slug>-data/` for blobs over 1 MiB (`<hash>.bin`) and autosaves.
-Saves are atomic (write temp, fsync, rename). Autosave every 60 s to
+UI state lives separately in `<name>.ui.json` (gui.md §1.2), never in the
+project document. Saves are atomic (write temp, fsync, rename). Autosave every 60 s to
 `<name>.<slug>-data/autosave-<n>.json` (keep 5). History is persisted only
 on request (ADR-0008 clarification).
 
@@ -488,3 +503,50 @@ random command sequences (fuzzed: random valid command streams, then undo
 all → initial state `identical`, redo all → final state); branch merge
 fast-forward, replay with ID remapping, both conflict kinds; memory-bound
 eviction; blob dedup.
+
+### Follow-up contracts (2026-10-04)
+
+- Undo/redo reloads the active engine plan and emits `session.changed` as
+  `{version, branch}`, like an edit. Per-lineage ID high-water counters survive
+  undo; adding after undo cannot reuse an ID. Independent branches may allocate
+  overlapping IDs; merge remaps each creation before replaying the next command,
+  including commands in the same batch.
+- Project fields are represented in changes/diffs by the singleton `project`.
+  Concurrent changes to the same project field conflict only when their new
+  values differ; disjoint fields replay normally.
+- Each invocation inside a batch has a savepoint. A caught failure restores
+  that invocation's model/history/event changes while successful siblings remain.
+- `project.new/open` stops and finishes recording, cancels and joins project jobs,
+  then increments `project.get.generation` and resets session caches/scripts.
+  Device and render-ahead settings persist. Deferred completions check generation;
+  stale completions emit an event and never mutate the replacement project.
+- First save stages and hashes scratch-media copies, publishes the media, then
+  atomically writes the project. A failure removes files created by that attempt;
+  scratch originals and the unsaved project identity remain intact.
+- Render completion/import is bound to the originating project generation and
+  current branch. A stale completion preserves files and reports
+  `render.stale_target` in the job result; no items are imported.
+  A job cancelled during project replacement keeps its cancelled status and
+  receives the stale result when its queued completion is serviced.
+- `track.add` and `track.set` accept 1..8 channels; busses/masters require at least 2.
+  `fx.param.set` keeps semantic parameter units and also supports plain CLAP/VST3
+  parameter names/IDs, declared ranges, writable flags and plugin text conversion.
+  Plain parameter edits save processor state after applying queued values on a
+  private probe. Latency probes restore patch/state/params before measuring.
+- Ruler lists include `timebase`; descriptions map seconds through the time map.
+  MIDI edits reject non-finite/oversized tick conversions and arithmetic before
+  rounding, including extreme deltas and impractically small quantization grids.
+
+### Numeric positions and expansion budgets (2026-10-04)
+
+Every edit and project load validates original numbers and derived ends, seconds,
+source offsets and sample products. Positions must fit signed-int bar addressing
+and signed-64 samples at the project/device/render rate, with space for block, render-ahead and
+PDC additions. Take playback/pitch transforms must have finite positive speeds
+and representable source/variant frame lengths. MIDI ticks and note-end sums
+are checked before use; materialized MIDI expansion is limited to 1,000,000
+events/passes per track to bound planning memory and keep note IDs in int32.
+Automation retains its 100,000 expanded-point budget and validates finite scaled
+curves. In-memory command renders use the engine’s existing 2^28-frame capacity
+at the project and requested output rates, with block headroom; this is a work
+budget, not a new duration policy.

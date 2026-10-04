@@ -6,7 +6,6 @@ writes its final frame as a PNG on exit."""
 import json
 import os
 import select
-import signal
 import struct
 import subprocess
 import sys
@@ -14,6 +13,8 @@ import tempfile
 import time
 import zlib
 from pathlib import Path
+
+from processes import stop
 
 
 def png_size_and_pixels(path):
@@ -85,12 +86,10 @@ def main():
             proxy.stdin.close()
             assert proxy.wait(timeout=10) == 0, proxy.stderr.read().decode()
         finally:
-            if proxy and proxy.poll() is None:
-                proxy.kill()
-                proxy.wait(timeout=5)
-            if gui.poll() is None:
-                gui.send_signal(signal.SIGTERM)
-        code = gui.wait(timeout=20)
+            # Both children are ended and reaped on every path: SIGTERM lets the
+            # GUI write its snapshot; a GUI that does not exit is killed.
+            stop(proxy, timeout=5, graceful=False)
+            code = stop(gui, timeout=20)
         assert code == 0, f"GUI exited {code}: {gui.stderr.read().decode()}"
     width, height, raw = png_size_and_pixels(snapshot)
     assert (width, height) == (1280, 800), (width, height)

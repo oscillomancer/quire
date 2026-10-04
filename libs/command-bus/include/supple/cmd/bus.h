@@ -218,7 +218,9 @@ class JobManager {
     Status completeWith(std::string_view id, json::Value result,
                         const std::function<void()>& publish);
     Status fail(std::string_view id, Error error);
-    Status cancel(std::string_view id);
+    // A late completion may attach a result to an already cancelled job (for
+    // example render.stale_target); this never changes its cancelled status.
+    Status cancel(std::string_view id, std::optional<json::Value> result = {});
     Result<json::Value> status(std::string_view id) const;
     Result<json::Value> wait(std::string_view id, double timeoutSeconds);
     json::Value list() const;
@@ -254,6 +256,8 @@ class Host {
     virtual Result<std::uint64_t> beginTransaction(const Origin&, std::string_view label) = 0;
     virtual Status commitTransaction(std::uint64_t) = 0;
     virtual Status rollbackTransaction(std::uint64_t) = 0;
+    // Snapshot the open transaction before an invocation. On failure the
+    // dispatcher calls the returned restore function, even if Lua catches it.
     virtual std::function<void()> invocationSavepoint() { return {}; }
     virtual void log(const LogRecord&) = 0;
     virtual void emit(std::string_view topic, json::Value payload) = 0;
@@ -275,11 +279,15 @@ class Host {
     // Called by ~Dispatcher while its JobManager is still alive: stop and join
     // any worker threads that report into it.
     virtual void stopJobs() {}
+    // The dispatcher owns the job store; hosts may cancel their project work.
+    virtual void dispatcherAttached(Dispatcher*) {}
 };
 
 class Dispatcher {
   public:
-    Dispatcher(const Registry& registry, Host& host) : registry_(registry), host_(host) {}
+    Dispatcher(const Registry& registry, Host& host) : registry_(registry), host_(host) {
+        host_.dispatcherAttached(this);
+    }
     ~Dispatcher();
     Dispatcher(const Dispatcher&) = delete;
     Dispatcher& operator=(const Dispatcher&) = delete;
@@ -293,6 +301,10 @@ class Dispatcher {
     // inside a script's own transaction).
     Result<json::Value> transact(std::string_view label, const Origin& origin,
                                  const std::function<Result<json::Value>()>& body);
+    // Model-thread scoped admission, also applies to nested Lua/batch calls.
+    using Admission = std::function<Status(const Invocation&)>;
+    Result<json::Value> guarded(Admission admission,
+                                const std::function<Result<json::Value>()>& body);
     const Registry& registry() const { return registry_; }
     JobManager& jobs() { return jobs_; }
     // Model-thread follow-up work (thread-safe to call): runs at the next
@@ -312,6 +324,7 @@ class Dispatcher {
     Host& host_;
     JobManager jobs_;
     std::uint64_t sequence_ = 0;
+    std::vector<Admission> admissions_;
     int transactionDepth_ = 0;  // > 0: commands join the open transact() transaction
     std::mutex postedMutex_;
     std::vector<std::pair<std::string, std::function<Status()>>> posted_;

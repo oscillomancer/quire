@@ -41,6 +41,15 @@ json::Value run(cmd::Dispatcher& bus, std::string name, std::string_view args) {
     REQUIRE_MESSAGE(result, (result ? std::string() : result.error().toString()));
     return *result;
 }
+void checkUndoContent(const model::Session& current, const std::string& before) {
+    auto previous = model::parseProject(before);
+    REQUIRE(previous);
+    for (std::size_t k = 0; k < model::kKindCount; ++k)
+        CHECK(current.next.next[k] >= previous->next.next[k]);
+    auto content = current;
+    content.next = previous->next;
+    CHECK(model::serializeProject(content) == before);
+}
 double peak(const fs::path& path) {
     auto audio = audio::readAudio(path);
     REQUIRE(audio);
@@ -89,6 +98,45 @@ TEST_CASE("auxiliary channels over the bus: channels, routes to 3/4, key pins (A
     CHECK(app->head().fx.find(*model::Id::parse("fx_2"))->pins.empty());
     // Strips stay within 1-8 channels.
     CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":9})"), kOrigin}));
+}
+
+TEST_CASE("tempo and meter edits see previous steps in the same batch") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    const auto before = model::serializeProject(app->head());
+    run(bus, "batch", R"({"steps":[
+        {"command":"tempo.set","args":{"points":[{"beat":0,"bpm":90}]}},
+        {"command":"tempo.set","args":{"points":[{"beat":0,"bpm":100}]}},
+        {"command":"timesig.set","args":{"bar":9,"meter":"3/4"}},
+        {"command":"timesig.set","args":{"bar":9,"meter":"5/4"}},
+        {"command":"timesig.set","args":{"bar":17,"meter":"7/4"}},
+        {"command":"timesig.remove","args":{"bar":17}}
+    ]})");
+    CHECK(app->head().tempo.size() == 1);
+    CHECK(app->head().timeMap->bpmAt(0) == 100);
+    CHECK(app->head().meters.size() == 2);
+    CHECK(app->head().timeMap->meterAt(9).numerator == 5);
+    run(bus, "history.undo", "{}");
+    checkUndoContent(app->head(), before);
+}
+
+TEST_CASE("FX descriptions reset shared scratch instances") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"FX"})");
+    run(bus, "fx.add",
+        R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-6}}})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain"})");
+    auto defaults = run(bus, "fx.describe", R"({"fx":"fx_2"})")["description"];
+    auto changed = run(bus, "fx.describe", R"({"fx":"fx_1"})")["description"];
+    CHECK(changed != defaults);
+    CHECK(run(bus, "fx.describe", R"({"fx":"fx_2"})")["description"] == defaults);
 }
 
 TEST_CASE("route sends through a gain bus, rejects cycles and replays in a branch merge") {
@@ -288,6 +336,13 @@ TEST_CASE("a VST3 is listed with its format and describes its plain parameters")
         run(bus, "fx.describe", R"({"fx":")" + fx + R"(","full":true,"filter":"cutoff"})");
     CHECK(none["params"].asArray().empty());
     CHECK(none["params_total"].asDouble() == 0);
+    const auto param = std::to_string(full["params"].asArray()[0]["id"].asInt());
+    auto doc = model::projectToJson(app->head());
+    doc["fx"][fx]["params"][param] = 0.25;
+    REQUIRE(writeFileAtomic(dir.path / "plain.json", json::writeCanonical(doc)));
+    run(bus, "project.open", R"({"path":"plain.json"})");
+    CHECK(run(bus, "fx.param.get",
+              R"({"fx":")" + fx + R"(","param":")" + param + R"("})")["value"] == 0.25);
 }
 
 namespace {
@@ -1139,4 +1194,377 @@ TEST_CASE("automation items: an item replaces the envelope in a render; a pool e
     CHECK(app->head().autoItems.empty());
     run(bus, "history.undo", "{}");
     CHECK(app->head().autoItems.size() == 2);
+}
+
+TEST_CASE("track removal cascades envelopes and automation items on input FX") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "fx.add", R"({"track":"tr_1","chain":"input","plugin":"com.suppleaudio.test.gain"})");
+    run(bus, "env.add", R"({"fx":"fx_1","param":"gain","points":[{"beat":0,"value":-3}]})");
+    run(bus, "autoitem.add", R"({"env":"en_1","position":0,"length":4})");
+    const auto before = model::serializeProject(app->head());
+    run(bus, "track.remove", R"({"track":"tr_1"})");
+    CHECK(app->head().fx.empty());
+    CHECK(app->head().envelopes.empty());
+    CHECK(app->head().autoItems.empty());
+    CHECK(model::checkInvariants(app->head()));
+    run(bus, "history.undo", "{}");
+    checkUndoContent(app->head(), before);
+    run(bus, "history.redo", "{}");
+    CHECK(app->head().autoItems.empty());
+}
+
+TEST_CASE("render planning refuses collisions between primary and secondary files") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"one"})");
+    run(bus, "track.add", R"({"name":"one.16"})");
+    for (const char* command : {"render.dry-run", "render.stems"}) {
+        CHECK(
+            fails(
+                bus, command,
+                R"({"operation":"stems","end_beat":1,"pattern":"{track}","format":"wav","bit_depth":32,"secondary":{"format":"wav","bit_depth":16}})") ==
+            "render.path");
+        CHECK_FALSE(fs::exists(app->rendersDir() / "one.wav"));
+    }
+    run(bus, "render.dry-run",
+        R"({"operation":"stems","end_beat":1,"pattern":"{counter}-{track}","secondary":{"format":"wav","bit_depth":16}})");
+}
+
+TEST_CASE("audio item splits advance source offsets by the take play rate") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","length":8})");
+    run(bus, "take.set", R"({"take":"tk_1","start_offset":0.25,"playrate":2})");
+    const auto before = model::serializeProject(app->head());
+    run(bus, "item.split", R"({"item":"it_1","at":2})");
+    const auto* right = app->head().takes.find(*model::Id::parse("tk_2"));
+    REQUIRE(right);
+    CHECK(right->startOffset == doctest::Approx(2.25));
+    run(bus, "history.undo", "{}");
+    checkUndoContent(app->head(), before);
+}
+
+TEST_CASE("MIDI queries report item length in beats for time-based items") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    run(bus, "item.set", R"({"item":"it_1","timebase":"time"})");
+    CHECK(run(bus, "midi.notes", R"({"item":"it_1"})")["length"].asDouble() == 4.0);
+    // Imported or project-file notes can be shorter than the editor's minimum.
+    run(bus, "midi.edit", R"({"item":"it_1","ops":[{"op":"remove","notes":[0]}]})");
+    auto doc = model::projectToJson(app->head());
+    doc["sources"]["midi"]["mi_1"]["sequence"]["notes"] = j("[[0,1,1,60,96]]");
+    REQUIRE(writeFileAtomic(dir.path / "short.json", json::writeCanonical(doc)));
+    run(bus, "project.open", R"({"path":"short.json"})");
+    run(bus, "midi.edit", R"({"item":"it_1","ops":[{"op":"resize","notes":[0],"start_delta":1}]})");
+    const auto& note = app->head().midi.find(*model::Id::parse("mi_1"))->sequence.notes[0];
+    CHECK(note.start == 0);
+    CHECK(note.length == 1);
+}
+
+TEST_CASE("merge remaps creations within a batch and versions project metadata") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "branch.create", R"({"name":"agent","switch":false})");
+    run(bus, "track.add", R"({"name":"Human"})");
+    run(bus, "project.set", R"({"author":"Human"})");
+    run(bus, "branch.switch", R"({"name":"agent"})");
+    run(bus, "batch", R"({"steps":[
+      {"command":"track.add","args":{"name":"Agent"}},
+      {"command":"track.set","args":{"track":"tr_1","volume_db":-9}},
+      {"command":"project.set","args":{"title":"Song"}}]})");
+    auto changes = run(bus, "branch.diff", R"({"a":"main","b":"agent"})");
+    CHECK(json::writeCompact(changes).find("project") != std::string::npos);
+    run(bus, "branch.merge", R"({"from":"agent","into":"main"})");
+    run(bus, "branch.switch", R"({"name":"main"})");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_1"))->volumeDb == 0);
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_2"))->volumeDb == -9);
+    CHECK(app->head().project->author == "Human");
+    CHECK(app->head().project->title == "Song");
+    run(bus, "branch.create", R"({"name":"other","switch":false})");
+    run(bus, "project.set", R"({"name":"Mine"})");
+    run(bus, "branch.switch", R"({"name":"other"})");
+    run(bus, "project.set", R"({"name":"Theirs"})");
+    auto conflict = bus.execute({"branch.merge", j(R"({"from":"other","into":"main"})"), kOrigin});
+    REQUIRE_FALSE(conflict);
+    CHECK(conflict.error().code == "branch.conflict");
+    REQUIRE(app->undo());
+    run(bus, "project.set", R"({"name":"Mine"})");
+    run(bus, "branch.merge", R"({"from":"other","into":"main"})");
+}
+
+TEST_CASE("track add accepts auxiliary channels and rejects mono busses") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"channels":8})");
+    CHECK(app->head().tracks.find(*model::Id::parse("tr_1"))->channels == 8);
+    auto bad = bus.execute({"track.add", j(R"({"type":"buss","channels":1})"), kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "track.channels");
+}
+
+TEST_CASE("MIDI extreme numbers and automation expansions refuse without edits") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const auto before = model::serializeProject(app->head());
+    for (
+        const auto* args :
+        {R"({"item":"it_1","ops":[{"op":"add","pitch":60,"start":1e300,"length":1}]})",
+         R"({"item":"it_1","ops":[{"op":"move","notes":[0],"beats":1e300}]})",
+         R"({"item":"it_1","ops":[{"op":"velocity","notes":[0],"velocity_delta":9223372036854775807}]})",
+         R"({"item":"it_1","ops":[{"op":"quantize","grid":1e-300}]})"}) {
+        REQUIRE_FALSE(bus.execute({"midi.edit", j(args), kOrigin}));
+        CHECK(model::serializeProject(app->head()) == before);
+    }
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    auto bad = bus.execute(
+        {"autoitem.add",
+         j(R"({"env":"en_1","position":0,"length":1e9,"source_length":0.000001,"loop":true})"),
+         kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "automation.budget");
+    CHECK(app->head().autoItems.empty());
+}
+
+TEST_CASE("take copies clone FX envelopes and pooled items and split shaped boundaries") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const auto source = app->head();
+    auto transaction = app->beginTransaction(kOrigin, "take automation");
+    REQUIRE(transaction);
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.gain";
+    const auto fxId = app->txn().create(fx);
+    const auto takeId = *source.items.begin()->value->activeTake;
+    app->txn().modify<model::Take>(takeId, [&](auto& take) { take.chain = {fxId}; });
+    model::Envelope env;
+    env.target = {takeId, "volume"};
+    env.points = {{0, -12, model::PointShape::FastStart, 0}, {4, 0}};
+    const auto envId = app->txn().create(env);
+    env.target = {fxId, "gain"};
+    const auto fxEnv = app->txn().create(env);
+    model::AutomationItem ai;
+    ai.envelope = fxEnv;
+    ai.length = 4;
+    ai.sourceLength = 4;
+    ai.pool = 7;
+    app->txn().create(ai);
+    REQUIRE(app->commitTransaction(*transaction));
+    const double boundary = model::pointsValueAt(app->head().envelopes.find(envId)->points, 2, 0);
+    run(bus, "item.duplicate", R"({"item":"it_1"})");
+    CHECK(app->head().fx.size() == 2);
+    CHECK(app->head().autoItems.size() == 2);
+    for (const auto& e : app->head().autoItems) CHECK(e.value->pool == 7);
+    run(bus, "item.split", R"({"item":"it_1","at":2})");
+    CHECK(app->head().fx.size() == 3);
+    CHECK(app->head().autoItems.size() == 3);
+    CHECK(app->head().envelopes.find(envId)->points.back().value == doctest::Approx(boundary));
+    CHECK(app->head().envelopes.find(envId)->points.back().shape == model::PointShape::FastStart);
+    int right = 0;
+    for (const auto& e : app->head().envelopes)
+        if (e.value->target.object.kind == model::Kind::Take &&
+            e.value->points.front().value == boundary) {
+            CHECK(e.value->points.front().pos == 0);
+            CHECK(e.value->points.front().shape == model::PointShape::FastStart);
+            ++right;
+        }
+    CHECK(right == 1);
+    REQUIRE(model::checkInvariants(app->head()));
+}
+
+TEST_CASE("ruler lists expose timebase and descriptions convert seconds to beats") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    auto transaction = app->beginTransaction(kOrigin, "time rulers");
+    REQUIRE(transaction);
+    app->txn().create(model::Marker{2, model::Timebase::Time, "Second bar", ""});
+    app->txn().create(model::Region{2, 4, model::Timebase::Time, "Region", ""});
+    REQUIRE(app->commitTransaction(*transaction));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    const auto markers = run(bus, "marker.list", "{}");
+    CHECK(*markers.find("markers")->at(0).find("timebase") == "time");
+    const auto description = describeSession(app->head());
+    CHECK(description.find("Second bar\" bar 2") != std::string::npos);
+    CHECK(description.find("Region\" bar 2") != std::string::npos);
+}
+
+TEST_CASE("unheaded notation follows the item's project meter through later changes") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Meter"})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"3/4"})");
+    run(bus, "timesig.set", R"({"bar":3,"meter":"5/8"})");
+    auto item = run(bus, "item.add",
+                    R"({"track":"tr_1","bar":2,"notation":"voice a; 1: C4:q r:* | D4:e r:*"})");
+    CHECK(item["position"].asDouble() == 3);
+    CHECK(item["length"].asDouble() == 5.5);
+    const auto text = run(bus, "midi.get", R"({"item":"it_1"})")["text"].asString();
+    json::Value write = json::Value::object();
+    write["item"] = "it_1";
+    write["notation"] = text;
+    auto rewritten = bus.execute({"midi.write", write, kOrigin});
+    REQUIRE_MESSAGE(rewritten, (rewritten ? "" : rewritten.error().toString()));
+    CHECK(model::itemLengthBeats(app->head(), *app->head().items.find(*model::Id::parse("it_1"))) ==
+          5.5);
+}
+
+TEST_CASE("commands reject numeric overflow and impossible derived work without edits") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Numbers"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    run(bus, "autoitem.add",
+        R"({"env":"en_1","position":0,"length":4,"points":[{"beat":0,"value":0}]})");
+    for (const auto& [command, args] : std::vector<std::pair<std::string, std::string>>{
+             {"time.convert", R"({"seconds":1e300})"},
+             {"time.convert", R"({"bar":2147483648})"},
+             {"transport.seek", R"({"beat":1e300})"},
+             {"transport.loop", R"({"start_seconds":0,"end_seconds":1e300})"},
+             {"transport.punch", R"({"start_bar":1,"end_bar":2147483648})"},
+             {"item.add", R"({"track":"tr_1","bar":2147483648})"},
+             {"item.add", R"({"track":"tr_1","position":1e300})"},
+             {"item.set", R"({"item":"it_1","length":1e300})"},
+             {"item.move", R"({"item":"it_1","position":1e300})"},
+             {"item.duplicate", R"({"item":"it_1","to":1e300})"},
+             {"item.set", R"({"item":"it_1","fade_in":1e300})"},
+             {"take.set", R"({"take":"tk_1","start_offset":1e300})"},
+             {"timesig.set", R"({"bar":2147483648,"meter":"4/4"})"},
+             {"tempo.set", R"({"points":[{"beat":0,"bpm":120},{"beat":1e300,"bpm":120}]})"},
+             {"marker.add", R"({"pos":1e300})"},
+             {"region.add", R"({"start":0,"end":1e300})"},
+             {"env.points.set", R"({"env":"en_1","points":[{"beat":1e300,"value":0}]})"},
+             {"env.points.set", R"({"env":"en_1","points":[{"beat":0,"value":1e300}]})"},
+             {"autoitem.set", R"({"item":"ai_1","length":1e300})"},
+             {"autoitem.duplicate", R"({"item":"ai_1","position":1e300})"},
+             {"render.mix", R"({"end_beat":1e300})"},
+             {"render.dry-run", R"({"end_beat":1e300})"},
+             {"render.mix", R"({"end_beat":20000,"sample_rate":384000})"},
+             {"project.set", R"({"render":{"sample_rate":1e300}})"},
+             {"project.set", R"({"render":{"tail_ms":1e300}})"}}) {
+        const auto before = model::serializeProject(app->head());
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_MESSAGE(!result, (command + " accepted " + args));
+        CHECK_MESSAGE(!result.error().path.empty(), (command + ": " + result.error().toString()));
+        CHECK(model::serializeProject(app->head()) == before);
+    }
+}
+
+TEST_CASE("a queued render keeps a discarded redo version until the queue releases it") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Pinned"})");
+    run(bus, "item.add", R"({"track":"tr_1","length":1})");
+    const auto queuedVersion = app->head().version;
+    std::weak_ptr<const model::Session> weak = app->versions().pin(queuedVersion);
+    run(bus, "render.queue.add",
+        R"({"command":"render.mix","args":{"end_beat":1,"name":"pinned"}})");
+    run(bus, "history.undo", "{}");
+    run(bus, "track.set", R"({"track":"tr_1","name":"Discard redo"})");
+    REQUIRE(app->versions().version(queuedVersion));
+    REQUIRE(run(bus, "render.queue.run", "{}").find("renders"));
+    app->versions().collectUnused();
+    CHECK_FALSE(app->versions().version(queuedVersion));
+    CHECK(weak.expired());
+    auto nested = bus.execute(
+        {"render.queue.add", j(R"({"command":"render.mix","args":{"end_beat":1e300}})"), kOrigin});
+    REQUIRE_FALSE(nested);
+    CHECK(nested.error().path == "/args/args/end_beat");
+}
+
+TEST_CASE("numeric sample bounds use the actual rate and recheck device-rate changes") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "project.new", R"({"sample_rate":8000})");
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":1}]})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"64/1"})");
+    // Fits signed samples at 8 kHz and int bars; exceeds samples at 384 kHz.
+    run(bus, "marker.add", R"({"pos":500000000000})");
+    auto converted = run(bus, "time.convert", R"({"beat":500000000000})");
+    CHECK(converted["seconds"].asDouble() == 30000000000000.0);
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    auto started =
+        app->startEngine(backend, {.sampleRate = 384000, .blockSize = 64}, {.anticipative = false});
+    REQUIRE_FALSE(started);
+    CHECK(started.error().path == "/rulers/markers/mk_1/pos");
+    CHECK_FALSE(app->engine());
+    run(bus, "project.new", R"({"sample_rate":8000})");
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":1}]})");
+    run(bus, "timesig.set", R"({"bar":1,"meter":"64/1"})");
+    REQUIRE(app->startEngine(backend, {.sampleRate = 384000, .blockSize = 64},
+                             {.anticipative = false}));
+    const auto before = model::serializeProject(app->head());
+    auto edit = bus.execute({"marker.add", j(R"({"pos":500000000000})"), kOrigin});
+    REQUIRE_FALSE(edit);
+    CHECK(edit.error().path == "/args/pos");
+    CHECK(model::serializeProject(app->head()) == before);
+    app->stopEngine();
+}
+
+TEST_CASE("automation duplication refuses pool-id overflow without changing either item") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Pools"})");
+    run(bus, "env.add", R"({"track":"tr_1","param":"volume"})");
+    run(bus, "autoitem.add", R"({"env":"en_1","position":0,"length":4})");
+    run(bus, "autoitem.add", R"({"env":"en_1","position":4,"length":4})");
+    auto txn = app->beginTransaction(kOrigin, "pool fixture");
+    REQUIRE(txn);
+    app->txn().modify<model::AutomationItem>(
+        *model::Id::parse("ai_1"), [](auto& ai) { ai.pool = std::numeric_limits<int>::max(); });
+    REQUIRE(app->commitTransaction(*txn));
+    const auto before = model::serializeProject(app->head());
+    auto r = bus.execute({"autoitem.duplicate", j(R"({"item":"ai_2"})"), kOrigin});
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code == "autoitem.pool");
+    CHECK(model::serializeProject(app->head()) == before);
 }

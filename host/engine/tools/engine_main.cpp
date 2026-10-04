@@ -143,8 +143,7 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
     }
     // Default length: from the start position to the last item's end, plus a second.
     const model::Session s = (*app)->view();
-    double endBeat = 0;
-    for (const auto& e : s.items) endBeat = std::max(endBeat, e.value->position + e.value->length);
+    const double endBeat = model::lastItemBeat(s);
     const double from = (*app)->engine()->transport().seconds;
     const double length = seconds.value_or(s.timeMap->secondsAt(endBeat) - from + 1.0);
     std::signal(SIGINT, [](int) { g_interrupted = true; });

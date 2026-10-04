@@ -1,3 +1,5 @@
+#include "command_validation.h"
+#include "supple/model/numeric.h"
 // Additional session edits and queries from session-model §7.
 #include <algorithm>
 #include <functional>
@@ -105,6 +107,7 @@ struct RulerRef {
     std::string id;
 };
 struct RulerEntry {
+    model::Timebase timebase = model::Timebase::Beats;
     std::string id, name, color;
     std::optional<double> pos, start, end;
 };
@@ -395,37 +398,6 @@ schema::Schema<model::FadeShape> fadeShapeSchema() {
                                                   {model::FadeShape::Exp, "exp"}});
 }
 
-// A copied take brings its envelopes (gap log #22): the take's own (item-
-// relative beats, moved by `shift` for a split's right side: what falls before
-// the new start becomes one point at it) and those on its take FX, by `ids`
-// (old id -> its copy).
-void cloneEnvelopes(const model::Session& s, model::EditTxn& txn, const std::map<Id, Id>& ids,
-                    double shift = 0) {
-    for (const auto& e : s.envelopes) {
-        const auto to = ids.find(e.value->target.object);
-        if (to == ids.end()) continue;
-        model::Envelope env = *e.value;
-        env.target.object = to->second;
-        if (to->first.kind == model::Kind::Take && shift != 0 && !env.points.empty()) {
-            const auto& pts = e.value->points;
-            double at = pts.front().value;  // the value at the new start
-            for (std::size_t k = 0; k + 1 < pts.size(); ++k)
-                if (pts[k].pos <= shift && shift < pts[k + 1].pos) {
-                    const double t = (shift - pts[k].pos) / (pts[k + 1].pos - pts[k].pos);
-                    at = pts[k].value + (pts[k + 1].value - pts[k].value) *
-                                            model::shapeCurve(pts[k].shape, pts[k].tension, t);
-                }
-            if (shift >= pts.back().pos) at = pts.back().value;
-            env.points.clear();
-            env.points.push_back({0.0, at, model::PointShape::Linear, 0.0});
-            for (const auto& pt : pts)
-                if (pt.pos > shift)
-                    env.points.push_back({pt.pos - shift, pt.value, pt.shape, pt.tension});
-        }
-        txn.create(std::move(env));
-    }
-}
-
 void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
     if (!take.source || take.source->kind != model::Kind::Midi) return;
     const model::MidiSource* source = s.midi.find(*take.source);
@@ -450,6 +422,7 @@ schema::Schema<T> rulerArgsSchema(const char* name) {
 auto rulerListSchema(bool region) {
     auto entry = schema::object<RulerEntry>("ruler_entry")
                      .field("id", &RulerEntry::id, schema::string())
+                     .field("timebase", &RulerEntry::timebase, model::timebaseSchema())
                      .field("name", &RulerEntry::name, schema::string())
                      .field("color", &RulerEntry::color, schema::string())
                      .field("pos", &RulerEntry::pos, schema::number())
@@ -491,7 +464,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!r) return std::move(r).error();
             return IdResult{app(ctx).txn().create(std::move(*r)).str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<RouteSetArgs, Empty> c;
@@ -524,7 +497,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.mute) app(ctx).recordAutomation(*id, "mute", *a.mute ? 1.0 : 0.0);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<RouteRef, Empty> c;
@@ -552,7 +525,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.remove<model::Route>(*id);
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, RouteList> c;
@@ -595,7 +568,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         struct LogArgs {
@@ -670,7 +643,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             out["last_seq"] = static_cast<std::int64_t>(records.empty() ? 0 : records.back().seq);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, json::Value> c;
@@ -791,7 +764,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             out["cycles"] = std::move(cycles);
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 
     {
@@ -873,7 +846,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.modify<model::Track>(*id, [&](model::Track& tr) { tr.parent = target; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 
     auto rulerCommands = [&]<bool Region>() {
@@ -910,7 +883,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (a.color) o.color = *a.color;
                 return IdResult{app(ctx).txn().create(std::move(o)).str()};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<RulerSetArgs, Empty> c;
@@ -942,7 +915,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 app(ctx).txn().put<Object>(*id, std::move(o));
                 return Empty{};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<RulerRef, Empty> c;
@@ -963,7 +936,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 app(ctx).txn().remove<Object>(*id);
                 return Empty{};
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
         {
             Command<cmd::NoArgs, RulerList> c;
@@ -981,6 +954,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 const auto s = app(ctx).view();
                 for (const auto& e : model::Traits<Object>::map(s)) {
                     RulerEntry row;
+                    row.timebase = e.value->timebase;
                     row.id = e.id.str();
                     row.name = e.value->name;
                     row.color = e.value->color;
@@ -994,7 +968,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 }
                 return out;
             };
-            registry.add(std::move(c));
+            addChecked(registry, std::move(c));
         }
     };
     rulerCommands.template operator()<false>();
@@ -1045,7 +1019,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<cmd::NoArgs, PluginList> c;
@@ -1083,7 +1057,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TimeArgs, TimeResult> c;
@@ -1095,7 +1069,8 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<TimeArgs>("time_convert_args")
                      .field("seconds", &TimeArgs::seconds, schema::number().min(0))
                      .field("beat", &TimeArgs::beat, schema::number().min(0))
-                     .field("bar", &TimeArgs::bar, schema::integer().min(1))
+                     .field("bar", &TimeArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .build();
         c.result = schema::object<TimeResult>("time_position")
                        .field("seconds", &TimeResult::seconds, schema::number())
@@ -1111,14 +1086,19 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.seconds.has_value() + a.beat.has_value() + a.bar.has_value() != 1)
                 return Error("time.input", "give exactly one of seconds, beat, or bar", "",
                              "remove the other time inputs");
-            const auto map = app(ctx).view().timeMap;
+            const auto s = app(ctx).view();
+            const auto map = s.timeMap;
             const double beat = a.seconds ? map->beatAt(*a.seconds)
                                 : a.bar   ? map->beatOfBar(static_cast<int>(*a.bar))
                                           : *a.beat;
+            SUPPLE_TRY(model::checkedBeat(s, beat,
+                                          a.seconds ? "/seconds"
+                                          : a.bar   ? "/bar"
+                                                    : "/beat"));
             const auto bb = map->barBeat(beat);
             return TimeResult{map->secondsAt(beat), beat, bb.bar, bb.beat, bb.fraction};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemSetArgs, Empty> c;
@@ -1136,7 +1116,8 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.args = schema::object<ItemSetArgs>("item_set_args")
                      .field("item", &ItemSetArgs::item, idSchema("it"))
                      .field("position", &ItemSetArgs::position, schema::number().min(0))
-                     .field("bar", &ItemSetArgs::bar, schema::integer().min(1))
+                     .field("bar", &ItemSetArgs::bar,
+                            schema::integer().range(1, std::numeric_limits<int>::max()))
                      .field("length", &ItemSetArgs::length, schema::number().min(0))
                      .field("mute", &ItemSetArgs::mute, schema::boolean())
                      .field("loop", &ItemSetArgs::loop, schema::boolean())
@@ -1204,7 +1185,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             t.put<model::Item>(*id, std::move(it));
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemDuplicateArgs, IdResult> c;
@@ -1234,23 +1215,15 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (!old) return std::move(old).error();
                 model::Take tk = **old;
                 unpoolCopiedSource(tk, s, txn);
-                tk.chain.clear();
-                std::map<Id, Id> ids;
-                for (Id fx : (*old)->chain) {
-                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
-                    if (!chained) return std::move(chained).error();
-                    tk.chain.push_back(txn.create(**chained));
-                    ids[fx] = tk.chain.back();
-                }
-                Id fresh = txn.create(std::move(tk));
-                ids[oldId] = fresh;
-                cloneEnvelopes(s, txn, ids);
+                auto cloned = copyTake(s, txn, oldId, std::move(tk));
+                if (!cloned) return std::move(cloned).error();
+                const Id fresh = *cloned;
                 copy.takes.push_back(fresh);
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
             }
             return IdResult{txn.create(std::move(copy)).str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemPasteArgs, ItemPasteResult> c;
@@ -1345,17 +1318,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                     } else {
                         unpoolCopiedSource(tk, s, txn);
                     }
-                    tk.chain.clear();
-                    std::map<Id, Id> ids;
-                    for (Id fx : (*old)->chain) {
-                        auto chained = dangling<model::FxInstance>(s, fx, at + "/item");
-                        if (!chained) return std::move(chained).error();
-                        tk.chain.push_back(txn.create(**chained));
-                        ids[fx] = tk.chain.back();
-                    }
-                    const Id fresh = txn.create(std::move(tk));
-                    ids[oldId] = fresh;
-                    cloneEnvelopes(s, txn, ids);
+                    auto cloned = copyTake(s, txn, oldId, std::move(tk));
+                    if (!cloned) return std::move(cloned).error();
+                    const Id fresh = *cloned;
                     copy.takes.push_back(fresh);
                     if (original.activeTake == oldId) copy.activeTake = fresh;
                 }
@@ -1363,7 +1328,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemSplitArgs, SplitResult> c;
@@ -1436,20 +1401,12 @@ void registerExtraCommands(cmd::Registry& registry) {
                 model::Take tk = **source;
                 const double delta = tk.source && tk.source->kind == model::Kind::Midi
                                          ? (a.at - startBeat) * tk.playrate
-                                         : splitSec - startSec;
+                                         : (splitSec - startSec) * tk.playrate;
                 tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
-                tk.chain.clear();
-                std::map<Id, Id> ids;
-                for (Id fx : (*source)->chain) {
-                    auto chained = dangling<model::FxInstance>(s, fx, "/takes");
-                    if (!chained) return std::move(chained).error();
-                    tk.chain.push_back(txn.create(**chained));
-                    ids[fx] = tk.chain.back();
-                }
-                Id fresh = txn.create(std::move(tk));
-                ids[oldTake] = fresh;
-                cloneEnvelopes(s, txn, ids, a.at - startBeat);  // from the right side's start
+                auto cloned = copyTake(s, txn, oldTake, std::move(tk), a.at - startBeat);
+                if (!cloned) return std::move(cloned).error();
+                const Id fresh = *cloned;
                 right.takes.push_back(fresh);
                 if (old.activeTake == oldTake) right.activeTake = fresh;
             }
@@ -1457,7 +1414,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             Id fresh = txn.create(std::move(right));
             return SplitResult{id->str(), fresh.str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeAddArgs, IdResult> c;
@@ -1504,7 +1461,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             });
             return IdResult{fresh.str()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeActivateArgs, Empty> c;
@@ -1551,7 +1508,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                                                [&](model::Item& it) { it.activeTake = *take; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<TakeSetArgs, Empty> c;
@@ -1626,7 +1583,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<ItemQuery, TakeList> c;
@@ -1673,7 +1630,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return out;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxMoveArgs, Empty> c;
@@ -1772,7 +1729,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             txn.modify<model::Track>(target, [&](model::Track& tr) { tr.chain = targetChain; });
             return Empty{};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxPatchGetArgs, FxPatchResult> c;
@@ -1809,7 +1766,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             return FxPatchResult{std::move(*effective)};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxPatchSetArgs, FxPatchResult> c;
@@ -1843,7 +1800,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 *id, [&](model::FxInstance& fx) { fx.patch = *patch; });
             return FxPatchResult{std::move(*patch)};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         Command<FxParamGetArgs, FxParamResult> c;
@@ -1867,8 +1824,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             const auto& fx = *s.fx.find(*id);
             auto effective = app(ctx).mergedPatch(fx, json::Value::object(), false);
-            if (!effective) return std::move(effective).error();  // a broken patch is the cause
-            const auto* params = effective->find("params");
+            if (!effective && effective.error().code != "fx.not_semantic")
+                return std::move(effective).error();  // a broken patch is the cause
+            const auto* params = effective ? effective->find("params") : nullptr;
             if (params && params->isObject())
                 if (const auto* value = params->find(a.param)) return FxParamResult{*value};
             for (const auto& [key, value] : fx.params)
@@ -1876,7 +1834,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Error("fx.param", "no saved parameter " + a.param, "/param",
                          "use fx.describe {full:true} for parameter names");
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 

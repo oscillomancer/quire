@@ -1,9 +1,11 @@
 #pragma once
 
 #include <supple/cmd/bus.h>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -11,6 +13,9 @@ namespace supple::rpc {
 inline constexpr std::size_t kMaxMessageBytes = 16 * 1024 * 1024;
 using Post = std::function<void(std::function<void()>)>;
 
+// Structured errors on the wire: code, message, path, hint, the optional text
+// location as `line`/`column`, and nested `details`. errorFromJson restores a
+// location only when both fields are integers in [0, INT_MAX].
 json::Value errorJson(const Error& error);
 Error errorFromJson(const json::Value& value);
 std::filesystem::path socketPath(std::string_view instance);
@@ -36,21 +41,44 @@ class Server {
 
 // Synchronous client for the MCP proxy and protocol tests. Calls must be made
 // off the model thread when connected to a server using that same thread.
+//
+// Recovery: a call that fails in transport (write or read error, timeout, a
+// signal interrupting the wait, an oversized or unreadable response frame, a
+// response with another id) closes the connection, so a late response can
+// never answer a later call. The client keeps the endpoint given to connect()
+// until close(): the next call reconnects first and repeats the last accepted
+// rpc.hello (connect()'s, or a later explicit one), then sends its own request.
+// A failed reconnect returns rpc.connect and the request is not sent. The
+// failed call itself is never resent: after rpc.timeout or rpc.interrupted the
+// request may still have run on the server. Structured command errors
+// returned by the server keep the connection.
 class Client {
   public:
     Client() = default;
     ~Client();
     Client(const Client&) = delete;
     Client& operator=(const Client&) = delete;
+    // Remembers the endpoint (even when this attempt fails), then connects and
+    // performs rpc.hello.
     Status connect(const std::filesystem::path& path, std::string client, std::string agent = {},
                    bool mcp = false);
+    // Disconnects and forgets the endpoint; later calls fail with rpc.connect.
     void close();
+    // How long a call waits for its response, clamped to [1 ms, 24 h];
+    // 30 s by default.
+    void setTimeout(std::chrono::milliseconds timeout);
     Result<json::Value> call(std::string_view method,
                              const json::Value& params = json::Value::object());
 
   private:
+    Status open();
+    void drop();
+    Result<json::Value> exchange(std::string_view method, const json::Value& params);
     int fd_ = -1;
     std::uint64_t nextId_ = 1;
     std::string input_;
+    std::filesystem::path path_;
+    std::optional<json::Value> hello_;  // set while an endpoint is remembered
+    std::chrono::milliseconds timeout_{30000};
 };
 }  // namespace supple::rpc

@@ -217,7 +217,7 @@ TEST_CASE("project file: canonical, defaults omitted, byte-identical round trip"
     for (const auto& m : doc.asObject()) order.push_back(m.key);
     CHECK(order == std::vector<std::string>{"schema", "project", "tempo", "rulers", "tracks",
                                             "items", "takes", "fx", "sources", "routes",
-                                            "envelopes", "groups", "blobs"});
+                                            "envelopes", "blobs"});
     // MIDI in compact rows, channels 1-based.
     const json::Value* notes =
         doc.find("sources")->find("midi")->find("mi_1")->find("sequence")->find("notes");
@@ -412,10 +412,14 @@ TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     std::vector<schema::Warning> warnings;
     auto parsed = projectFromJson(doc, &warnings);
     REQUIRE(parsed);
+    REQUIRE(warnings.size() == 2);
+    CHECK(warnings[0].path == "/schema");
+    CHECK(warnings[1].path == "/tracks/tr_0/future");
+    doc["schema"] = "supple.project/2.0";
+    warnings.clear();
+    REQUIRE(projectFromJson(doc, &warnings));
     REQUIRE(warnings.size() == 1);
     CHECK(warnings[0].path == "/tracks/tr_0/future");
-    doc["schema"] = "supple.project/2.0";
-    CHECK_FALSE(projectFromJson(doc));
 }
 
 TEST_CASE("automation items replace the envelope under them: loop, scale, overlap, file") {
@@ -484,4 +488,177 @@ TEST_CASE("automation items replace the envelope under them: loop, scale, overla
     stray.envelope = model::Id{model::Kind::Envelope, 99};
     t4.create(stray);
     CHECK_FALSE(t4.commit());
+}
+
+TEST_CASE("project MIDI decoding rejects malformed rows without truncation or exceptions") {
+    auto doc = projectToJson(richSession());
+    auto& seq = doc["sources"]["midi"]["mi_1"]["sequence"];
+    auto rejects = [&](const char* key, const char* input, const char* field) {
+        auto bad = doc;
+        bad["sources"]["midi"]["mi_1"]["sequence"][key] = json::parse(input).value();
+        Result<Session> result = Error("test", "not decoded");
+        REQUIRE_NOTHROW(result = projectFromJson(bad));
+        REQUIRE_FALSE(result);
+        CHECK(result.error().path == std::string("/sources/midi/mi_1/sequence/") + field);
+    };
+    rejects("ppq", "0", "ppq");
+    rejects("ppq", "960.5", "ppq");
+    rejects("length", "-1", "length");
+    rejects("notes", "false", "notes");
+    rejects("notes", "[[0.5,480,1,60,96]]", "notes/0/0");
+    rejects("notes", "[[1e100,480,1,60,96]]", "notes/0/0");
+    rejects("notes", "[[0,480,1,60,96,0,123]]", "notes/0");
+    rejects("controls", "[[0,\"cc\",1,7,-1]]", "controls/0/4");
+    rejects("controls", "[[0,\"program\",1,0,128]]", "controls/0/4");
+    rejects("controls", "[[0,\"bend\",1,0,8192]]", "controls/0/4");
+    rejects("sysex", "[[0,\"GG\"]]", "sysex/0/1");
+    rejects("sysex", "[[0,\"F0 7E F7 junk\"]]", "sysex/0/1");
+    rejects("sysex", "[[0,\"F0 FF F7\"]]", "sysex/0/1");
+    rejects("sysex", "[[-1,\"F0 F7\"]]", "sysex/0/0");
+    seq["notes"] = json::parse("[[9007199254740993,480,1,60,96]]").value();
+    auto exact = projectFromJson(doc);
+    REQUIRE(exact);
+    CHECK(exact->midi.find(Id{Kind::Midi, 1})->sequence.notes[0].start == 9007199254740993LL);
+}
+
+TEST_CASE("project ID counters refuse narrowing and fractional values") {
+    for (const char* value : {"-1", "4294967297", "1.5", "1e100", "\"1\""}) {
+        auto doc = projectToJson(Session::create());
+        doc["project"]["next_ids"]["tr"] = json::parse(value).value();
+        auto parsed = projectFromJson(doc);
+        REQUIRE_FALSE(parsed);
+        CHECK(parsed.error().path == "/project/next_ids/tr");
+    }
+    auto doc = projectToJson(Session::create());
+    doc["project"]["next_ids"] = false;
+    auto parsed = projectFromJson(doc);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().path == "/project/next_ids");
+}
+
+TEST_CASE("automation item lists are derived from the authoritative map") {
+    auto s = richSession();
+    EditTxn txn(s, s.version + 1);
+    AutomationItem ai;
+    ai.envelope = s.envelopes.begin()->id;
+    ai.length = 4;
+    ai.sourceLength = 4;
+    const auto id = txn.create(ai);
+    auto committed = txn.commit();
+    REQUIRE(committed);
+    auto doc = projectToJson(*committed);
+    auto& items = doc["envelopes"][ai.envelope.str()]["items"];
+    REQUIRE(items.isArray());
+    CHECK(items.at(0) == id.str());
+    items.push_back("ai_999");
+    std::vector<schema::Warning> warnings;
+    auto loaded = projectFromJson(doc, &warnings);
+    REQUIRE(loaded);
+    REQUIRE(warnings.size() == 1);
+    CHECK(warnings[0].code == "project.derived_items");
+    CHECK(serializeProject(*loaded) == serializeProject(*committed));
+}
+
+TEST_CASE(
+    "project sections: strict containers, preserved extensions, ignored UI and unsupported "
+    "groups") {
+    const auto base = projectToJson(Session::create());
+    for (const char* name : {"tempo", "rulers", "sources", "blobs", "extensions"}) {
+        auto bad = base;
+        bad[name] = json::Value::array();
+        auto result = projectFromJson(bad);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().path == std::string("/") + name);
+    }
+    auto doc = base;
+    doc["future"] = json::parse(R"({"uninterpreted":[1,true,{"x":"keep"}]})").value();
+    doc["extensions"] = json::parse(R"({"vendor.example":{"data":[null,2.0]}})").value();
+    const auto bytes = json::writeCanonical(doc) + "\n";
+    auto parsed = parseProject(bytes);
+    REQUIRE(parsed);
+    CHECK(serializeProject(*parsed) == bytes);
+    doc["ui"] = json::Value::array();
+    doc["groups"] = json::parse(R"({"gr_1":{"future":true}})").value();
+    std::vector<schema::Warning> warnings;
+    auto withWarnings = projectFromJson(doc, &warnings);
+    REQUIRE(withWarnings);
+    REQUIRE(warnings.size() == 2);
+    CHECK(warnings[0].path == "/ui");
+    CHECK(warnings[0].message.find(".ui.json") != std::string::npos);
+    CHECK(warnings[1].path == "/groups");
+    auto saved = projectToJson(*withWarnings);
+    CHECK_FALSE(saved.find("ui"));
+    CHECK(saved["groups"] == doc["groups"]);
+    CHECK(saved["extensions"] == doc["extensions"]);
+}
+
+TEST_CASE("model and project loading reject unsafe numeric ends and interpolation") {
+    for (bool automation : {false, true}) {
+        auto base = Session::create();
+        EditTxn t(base, 1);
+        Envelope env;
+        env.target = {kMaster, "volume"};
+        if (!automation) env.points = {{0, -1e308}, {1, 1e308}};
+        const auto id = t.create(env);
+        if (automation) {
+            AutomationItem ai;
+            ai.envelope = id;
+            ai.points = {{0, -1e308}, {1, 1e308}};
+            t.create(ai);
+        }
+        auto doc = projectToJson(t.preview());
+        auto loaded = projectFromJson(doc);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path.find("/points/") != std::string::npos);
+        CHECK_FALSE(t.commit());
+    }
+    auto base = Session::create();
+    EditTxn t(base, 1);
+    t.create(Marker{1e300, Timebase::Beats, "Huge", ""});
+    auto loaded = projectFromJson(projectToJson(t.preview()));
+    REQUIRE_FALSE(loaded);
+    CHECK(loaded.error().path.find("/pos") != std::string::npos);
+    CHECK_FALSE(t.commit());
+    EditTxn midiTxn(base, 2);
+    MidiSource source;
+    source.sequence.length = INT64_MAX;
+    midiTxn.create(source);
+    CHECK_FALSE(midiTxn.commit());
+}
+
+TEST_CASE("known nested project fields reject wrong shapes and drop unknowns with paths") {
+    auto base = projectToJson(Session::create());
+    for (const auto& [section, field] :
+         std::vector<std::pair<std::string, std::string>>{{"tempo", "points"},
+                                                          {"tempo", "meters"},
+                                                          {"rulers", "markers"},
+                                                          {"sources", "media"}}) {
+        auto doc = base;
+        doc[section][field] = json::Value::array();
+        auto loaded = projectFromJson(doc);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == "/" + section + "/" + field);
+    }
+    for (const char* field : {"render"}) {
+        auto doc = base;
+        doc["project"][field] = false;
+        auto loaded = projectFromJson(doc);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == std::string("/project/") + field);
+    }
+    auto doc = base;
+    doc["project"]["render"] =
+        json::parse(R"({"normalize":{"mode":"peak","future":true},"future":42})").value();
+    std::vector<schema::Warning> warnings;
+    auto loaded = projectFromJson(doc, &warnings);
+    REQUIRE(loaded);
+    REQUIRE(warnings.size() == 2);
+    CHECK(warnings[0].path == "/project/render/normalize/future");
+    CHECK(warnings[1].path == "/project/render/future");
+    CHECK_FALSE(loaded->project->render.find("future"));
+    CHECK_FALSE(loaded->project->render.find("normalize")->find("future"));
+    doc["project"]["render"] = json::parse(R"({"normalize":{"mode":true}})").value();
+    auto bad = projectFromJson(doc);
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().path == "/project/render/normalize/mode");
 }

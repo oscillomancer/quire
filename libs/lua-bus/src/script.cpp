@@ -6,6 +6,7 @@
 #include <lualib.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <string_view>
@@ -88,17 +89,26 @@ ScriptImpl* implOf(lua_State* L) { return *static_cast<ScriptImpl**>(lua_getextr
 
 // --- budget -------------------------------------------------------------------
 
+// Once spent, the budget stays spent until the outermost call returns: the
+// hook then fires on every instruction of every thread that runs, so a pcall
+// can catch one raise but the next Lua instruction outside it raises again.
 void budgetHook(lua_State* L, lua_Debug*) {
     ScriptImpl* impl = implOf(L);
-    impl->instructions += impl->options.hookCount;
-    if (std::chrono::steady_clock::now() >= impl->deadline) {
+    if (!impl->budgetSpent) {
+        impl->instructions += impl->options.hookCount;
+        const bool overCount = impl->options.instructionLimit != 0 &&
+                               impl->instructions >= impl->options.instructionLimit;
+        if (!overCount && std::chrono::steady_clock::now() < impl->deadline) return;
         impl->budgetSpent = true;
-        luaL_error(L, "the script spent its instruction budget");
+        lua_sethook(L, budgetHook, LUA_MASKCOUNT, 1);
+        if (L != impl->L) lua_sethook(impl->L, budgetHook, LUA_MASKCOUNT, 1);
     }
+    luaL_error(L, "the script spent its instruction budget");
 }
 
 void startBudget(lua_State* L, ScriptImpl& impl, double budgetMs) {
     impl.instructions = 0;
+    impl.budgetSpent = false;
     const auto budget = std::chrono::duration<double, std::milli>(budgetMs);
     impl.deadline = std::chrono::steady_clock::now() +
                     std::chrono::duration_cast<std::chrono::steady_clock::duration>(budget);
@@ -118,6 +128,7 @@ int messageHandler(lua_State* L) {
 // Calls the function at (top - nargs) through the message handler. On failure
 // the error value is on top; the handler itself is always popped.
 int callProtected(lua_State* L, ScriptImpl& impl, int nargs, int nresults) {
+    if (!lua_checkstack(L, 1)) return LUA_ERRMEM;
     const int function = lua_gettop(L) - nargs;  // the function sits below its arguments
     lua_rawgeti(L, LUA_REGISTRYINDEX, impl.messageHandlerRef);
     lua_insert(L, function);
@@ -143,11 +154,12 @@ const cmd::CommandInfo* findInfo(ScriptImpl& impl, std::string_view name) {
     if (!impl.registry) return nullptr;
     const auto at = name.find('@');
     if (at == std::string_view::npos) return impl.registry->find(name);
+    const auto suffix = name.substr(at + 1);
     int version = 0;
-    for (char ch : name.substr(at + 1)) {
-        if (ch < '0' || ch > '9') return nullptr;
-        version = version * 10 + (ch - '0');
-    }
+    const auto [end, ec] = std::from_chars(suffix.data(), suffix.data() + suffix.size(), version);
+    if (suffix.empty() || suffix.front() == '0' || ec != std::errc{} ||
+        end != suffix.data() + suffix.size() || version <= 0)
+        return nullptr;
     return impl.registry->find(name.substr(0, at), version);
 }
 
@@ -376,9 +388,31 @@ void installBindings(lua_State* L, ScriptImpl& impl) {
 // The sandbox (ADR-0006): the base library and string, table, math, utf8 and
 // coroutine, and nothing else. io, os, debug and package are not even linked
 // in, so a script cannot reach the filesystem, the clock or the process.
+int safeSetMetatable(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    if (!lua_isnil(L, 2)) {
+        luaL_checktype(L, 2, LUA_TTABLE);
+        lua_pushliteral(L, "__gc");
+        lua_rawget(L, 2);
+        const bool finalizer = !lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (finalizer)
+            return raiseError(L, Error("script.finalizer", "scripts cannot install finalizers",
+                                       "/metatable/__gc", "remove __gc; clean up explicitly"));
+    }
+    lua_settop(L, 2);
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, 2, 1);
+    return 1;
+}
+
 void openSandbox(lua_State* L, ScriptImpl& impl) {
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);
     lua_pop(L, 1);
+    lua_getglobal(L, "setmetatable");
+    lua_pushcclosure(L, safeSetMetatable, 1);
+    lua_setglobal(L, "setmetatable");
     luaL_requiref(L, LUA_STRLIBNAME, luaopen_string, 1);
     lua_pop(L, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
@@ -453,9 +487,19 @@ Status ScriptImpl::ensureState() {
                          std::to_string(options.memoryLimitBytes) + " byte memory limit",
                      {}, "raise memory_limit_bytes for this script");
     *static_cast<ScriptImpl**>(lua_getextraspace(L)) = this;
-    openSandbox(L, *this);
-    lua_pushcfunction(L, messageHandler);
-    messageHandlerRef = luaL_ref(L, LUA_REGISTRYINDEX);
+    auto initialize = [&](lua_State* state) {
+        openSandbox(state, *this);
+        lua_pushcfunction(state, messageHandler);
+        messageHandlerRef = luaL_ref(state, LUA_REGISTRYINDEX);
+        return 0;
+    };
+    if (protectedCall(L, 0, 0, initialize) != LUA_OK) {
+        lua_close(L);
+        L = nullptr;
+        messageHandlerRef = LUA_NOREF;
+        return Error("script.memory", "the sandbox exceeds its memory limit", {},
+                     "raise memory_limit_bytes for this script");
+    }
     return okStatus();
 }
 
@@ -475,7 +519,16 @@ Script::Script(const cmd::Registry* registry, cmd::Dispatcher* dispatcher, Scrip
 void Script::setCommands(const cmd::Registry* registry, cmd::Dispatcher* dispatcher) {
     impl_->registry = registry;
     impl_->dispatcher = dispatcher;
-    if (impl_->L && registry) installBindings(impl_->L, *impl_);
+    if (impl_->L && registry) {
+        const int base = lua_gettop(impl_->L);
+        auto install = [&](lua_State* L) {
+            installBindings(L, *impl_);
+            return 0;
+        };
+        if (protectedCall(impl_->L, 0, 0, install) != LUA_OK)
+            impl_->appendLog("script.memory: unable to install command bindings");
+        lua_settop(impl_->L, base);
+    }
 }
 
 Script::~Script() {
@@ -487,6 +540,7 @@ Script::~Script() {
 }
 
 const ScriptOptions& Script::options() const { return impl_->options; }
+bool Script::running() const { return impl_->running; }
 cmd::Origin Script::origin() const { return impl_->origin(); }
 std::vector<std::string> Script::log() const { return impl_->lines(); }
 std::size_t Script::subscriptionCount() const { return impl_->subscriptions.size(); }
@@ -511,8 +565,19 @@ Result<ScriptResult> Script::run(std::string_view source, double budgetMs,
     impl.memoryExceeded = false;
     const std::uint64_t logFrom = impl.logTotal;
     const int base = lua_gettop(L);
-    pushJson(L, args);
-    lua_setglobal(L, "args");
+    auto arguments = [&](lua_State* state) {
+        pushJson(state, args);
+        lua_pushglobaltable(state);
+        lua_pushliteral(state, "args");
+        lua_pushvalue(state, -3);
+        lua_rawset(state, -3);
+        return 0;
+    };
+    if (protectedCall(L, 0, 0, arguments) != LUA_OK) {
+        lua_settop(L, base);
+        return Error("script.memory", "the script arguments exceed the memory or stack limit", {},
+                     "reduce the arguments or raise memory_limit_bytes");
+    }
     startBudget(L, impl, budgetMs >= 0 ? budgetMs : impl.options.defaultBudgetMs);
     const std::string chunk = "=" + impl.chunkName;  // '=': verbatim, not [string "…"]
     int status = luaL_loadbufferx(L, source.data(), source.size(), chunk.c_str(), "t");
@@ -565,6 +630,13 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
     ScriptImpl& impl = *impl_;
     if (!impl.L || impl.subscriptions.empty()) return;
     lua_State* L = impl.L;
+    const bool wasRunning = impl.running;
+    impl.running = true;
+    struct Finished {
+        bool& flag;
+        bool previous;
+        ~Finished() { flag = previous; }
+    } finished{impl.running, wasRunning};
     std::vector<ScriptImpl::Subscription> matches;
     for (const auto& subscription : impl.subscriptions)
         if (topicMatches(subscription.topic, topic) && filterMatches(subscription.filter, payload))
@@ -574,16 +646,21 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
                                        [&](const auto& s) { return s.id == subscription.id; });
         if (live == impl.subscriptions.end()) continue;  // q.off inside an earlier handler
         const int base = lua_gettop(L);
-        startBudget(L, impl, impl.options.defaultBudgetMs);
-        lua_rawgeti(L, LUA_REGISTRYINDEX, subscription.ref);
-        pushJson(L, payload);
-        lua_pushlstring(L, topic.data(), topic.size());
-        if (callProtected(L, impl, 2, 0) != LUA_OK) {
+        if (!wasRunning) startBudget(L, impl, impl.options.defaultBudgetMs);
+        auto prepare = [&](lua_State* state) {
+            lua_rawgeti(state, LUA_REGISTRYINDEX, subscription.ref);
+            pushJson(state, payload);
+            lua_pushlstring(state, topic.data(), topic.size());
+            return 3;
+        };
+        int status = protectedCall(L, 0, 3, prepare);
+        if (status == LUA_OK) status = callProtected(L, impl, 2, 0);
+        if (status != LUA_OK) {
             Error error = errorFromLua(L, -1);
             impl.appendLog("handler for " + subscription.topic + " failed: " + error.code + ": " +
                            error.message);
         }
-        stopBudget(L);
+        if (!wasRunning) stopBudget(L);
         lua_settop(L, base);
     }
 }

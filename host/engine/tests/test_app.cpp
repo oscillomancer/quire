@@ -529,8 +529,7 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
         {"command": "track.add", "args": {"name": "Vocal"}, "as": "v"},
         {"command": "track.set", "args": {"track": "${v.track}", "armed": true, "record_input": [1, 2]}}]})");
     // A device whose inputs carry a 0.5 sine at 441 Hz.
-    DummyBackend backend({.mode = DummyBackend::Mode::Thread,
-                          .paced = true,
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual,
                           .input = [](float* const* in, std::uint32_t channels, std::uint32_t n,
                                       std::int64_t frame) {
                               for (std::uint32_t c = 0; c < channels; ++c)
@@ -540,17 +539,20 @@ TEST_CASE("an LLM records a take over the bus, hears it back and undoes it") {
                                                      2.0 * 3.14159265358979 * 441.0 *
                                                      static_cast<double>(frame + i) / 48000.0));
                           }});
-    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                             {.anticipative = false})
+                .ok());
     auto started = call("transport.record", "{}");
     CHECK(started["recording"].asBool());
-    CHECK(started["playing"].asBool());
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    backend.run(1);  // apply the queued transport command at the callback
+    CHECK(call("transport.get", "{}")["playing"].asBool());
+    backend.run(74);
     auto stopped = call("transport.stop", "{}");
     CHECK_FALSE(stopped["recording"].asBool());
     REQUIRE(stopped["recorded"].size() == 1);
     const json::Value& take = stopped["recorded"].at(0);
     CHECK(take.find("track")->asString() == "tr_1");
-    CHECK(take.find("seconds")->asDouble() > 0.2);
+    CHECK(take.find("seconds")->asDouble() == doctest::Approx(0.4));
     CHECK(take.find("lost_frames")->asInt() == 0);
     CHECK(fs::exists(take.find("file")->asString()));
     CHECK(app->head().items.size() == 1);
@@ -592,19 +594,20 @@ TEST_CASE("recordings a crash left out are listed and recovered in place, whole"
         {"command": "track.set", "args": {"track": "${v.track}", "armed": true, "record_input": [1]}}]})");
     call("project.save", R"({"path": "song.json"})");
     DummyBackend backend(
-        {.mode = DummyBackend::Mode::Thread,
-         .paced = true,
+        {.mode = DummyBackend::Mode::Manual,
          .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
              for (std::uint32_t c = 0; c < channels; ++c)
                  for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.5f;
          }});
-    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                             {.anticipative = false})
+                .ok());
     call("transport.seek", R"({"seconds": 0.5})");
     call("transport.record", "{}");
     // While it records, its file is not offered.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    backend.run(19);
     CHECK(call("project.recoverable", "{}")["recordings"].size() == 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    backend.run(38);
     auto stopped = call("transport.stop", "{}");
     app->stopEngine();
     REQUIRE(stopped["recorded"].size() == 1);
@@ -730,7 +733,7 @@ TEST_CASE("an unsaved project records into its scratch folder; the first save mo
         cmd::Dispatcher d(registry, *app);
         app->setupFixture(d, "recording_interrupted");
         REQUIRE(fs::exists(scratch / "media" / "rec" / "Vocal-1.wav"));
-        app->newProject(model::Project{});
+        REQUIRE(app->newProject(model::Project{}));
         CHECK_FALSE(fs::exists(scratch));
         app->setupFixture(d, "recording_interrupted");
         REQUIRE(fs::exists(scratch / "media" / "rec" / "Vocal-1.wav"));
@@ -757,15 +760,16 @@ TEST_CASE("two armed tracks with one name record to two files (review round 8)")
         {"command": "track.set", "args": {"track": "${a.track}", "armed": true, "record_input": [1]}},
         {"command": "track.set", "args": {"track": "${b.track}", "armed": true, "record_input": [2]}}]})");
     DummyBackend backend(
-        {.mode = DummyBackend::Mode::Thread,
-         .paced = true,
+        {.mode = DummyBackend::Mode::Manual,
          .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
              for (std::uint32_t c = 0; c < channels; ++c)
                  for (std::uint32_t i = 0; i < n; ++i) in[c][i] = c ? -0.5f : 0.25f;
          }});
-    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                             {.anticipative = false})
+                .ok());
     call("transport.record", "{}");
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    backend.run(38);
     auto stopped = call("transport.stop", "{}");
     app->stopEngine();
     REQUIRE(stopped["recorded"].size() == 2);
@@ -841,23 +845,24 @@ TEST_CASE("an LLM loop-records over the bus: one item, a take per pass, punch tr
     CHECK(bad.error().code == "transport.range");
 
     DummyBackend backend(
-        {.mode = DummyBackend::Mode::Thread,
-         .paced = true,
+        {.mode = DummyBackend::Mode::Manual,
          .input = [](float* const* in, std::uint32_t channels, std::uint32_t n, std::int64_t) {
              for (std::uint32_t c = 0; c < channels; ++c)
                  for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.25f;
          }});
-    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                             {.anticipative = false})
+                .ok());
     call("transport.seek", R"({"seconds": 0.5})");
     auto got = call("transport.get", "{}");
     CHECK(got["loop"].find("enabled")->asBool());
     call("transport.record", "{}");
-    std::this_thread::sleep_for(std::chrono::milliseconds(1300));  // two whole passes and a bit
+    backend.run(244);  // two whole passes and a bit
     auto stopped = call("transport.stop", "{}");
     REQUIRE(stopped["recorded"].size() == 1);
     const json::Value& rec = stopped["recorded"].at(0);
     const std::size_t passes = rec.find("takes")->size();
-    CHECK(passes >= 2);  // (about 2.6 on an unloaded machine)
+    CHECK(passes == 3);  // two whole passes and one partial
     CHECK(rec.find("seconds")->asDouble() == doctest::Approx(0.5));
     const model::Session s = app->head();
     REQUIRE(s.items.size() == 1);
@@ -879,7 +884,7 @@ TEST_CASE("an LLM loop-records over the bus: one item, a take per pass, punch tr
     call("transport.punch", R"({"start_seconds": 0.6, "end_seconds": 0.8})");
     call("transport.seek", R"({"seconds": 0.5})");
     call("transport.record", "{}");
-    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    backend.run(150);
     auto punched = call("transport.stop", "{}");
     app->stopEngine();
     REQUIRE(punched["recorded"].size() == 1);
@@ -915,8 +920,7 @@ TEST_CASE("an LLM records a MIDI performance over the bus and reads it back as n
     CHECK(route->midi->fromChannel == 1);
     // A keyboard: every 24000 device frames (0.5 s) a note on, off 12000 later.
     DummyBackend backend(
-        {.mode = DummyBackend::Mode::Thread,
-         .paced = true,
+        {.mode = DummyBackend::Mode::Manual,
          .midiPorts = {"USB Keyboard"},
          .midi = [](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
              for (std::int64_t f = frame; f < frame + n; ++f) {
@@ -933,10 +937,11 @@ TEST_CASE("an LLM records a MIDI performance over the bus and reads it back as n
          }});
     REQUIRE(
         app->startEngine(backend,
-                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true})
+                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true},
+                         {.anticipative = false})
             .ok());
     call("transport.record", "{}");
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
+    backend.run(263);
     auto stopped = call("transport.stop", "{}");
     app->stopEngine();
     REQUIRE(stopped["recorded"].size() == 1);
@@ -1073,6 +1078,9 @@ TEST_CASE("midi_overdub merges a performance into the item under it, as a new ta
         {"command": "fx.add", "args": {"track": "${k.track}", "plugin": "com.suppleaudio.test.sine"}},
         {"command": "item.add", "args": {"track": "${k.track}", "bar": 1, "notation": "voice v; 1: C3:w | C3:w | C3:w | C3:w"}},
         {"command": "track.set", "args": {"track": "${k.track}", "armed": true, "record_midi": "*", "record_mode": "midi_overdub"}}]})");
+    call("take.set", R"({"take":"tk_1","playrate":2})");
+    call("fx.add", R"({"take":"tk_1","plugin":"Test Gain"})");
+    call("env.add", R"({"fx":"fx_2","param":"gain","points":[{"beat":0,"value":-6}]})");
     const model::Session before = app->head();
     REQUIRE(before.items.size() == 1);
     const model::Id item = before.items.begin()->id;
@@ -1080,8 +1088,7 @@ TEST_CASE("midi_overdub merges a performance into the item under it, as a new ta
     const std::size_t oldNotes =
         before.midi.find(*before.takes.find(oldTake)->source)->sequence.notes.size();
     DummyBackend backend(
-        {.mode = DummyBackend::Mode::Thread,
-         .paced = true,
+        {.mode = DummyBackend::Mode::Manual,
          .midiPorts = {"Keyboard"},
          .midi = [](std::vector<MidiInputEvent>& out, std::uint32_t n, std::int64_t frame) {
              for (std::int64_t f = frame; f < frame + n; ++f) {
@@ -1098,10 +1105,11 @@ TEST_CASE("midi_overdub merges a performance into the item under it, as a new ta
          }});
     REQUIRE(
         app->startEngine(backend,
-                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true})
+                         {.sampleRate = 48000, .blockSize = 256, .inputs = 2, .midiInputs = true},
+                         {.anticipative = false})
             .ok());
     call("transport.record", "{}");
-    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    backend.run(225);  // exactly 1.2 s at 48 kHz/256, no clock criterion
     auto stopped = call("transport.stop", "{}");
     app->stopEngine();
     REQUIRE(stopped["recorded"].size() == 1);
@@ -1116,6 +1124,12 @@ TEST_CASE("midi_overdub merges a performance into the item under it, as a new ta
     for (const midi::Note& n : merged.notes) (n.pitch == 72 ? c5 : c3) += 1;
     CHECK(c3 == oldNotes);
     CHECK(c5 >= 2);
+    for (const auto& note : merged.notes)
+        if (note.pitch == 72 && note.start == 0) CHECK(note.length == 960);
+    const auto* fresh = s.takes.find(*it.activeTake);
+    REQUIRE(fresh->chain.size() == 1);
+    CHECK(fresh->chain[0] != before.takes.find(oldTake)->chain[0]);
+    CHECK(s.envelopes.size() == before.envelopes.size() + 1);
     call("history.undo", "{}");
     CHECK(app->head().items.find(item)->takes.size() == 1);
 }
@@ -1998,4 +2012,262 @@ TEST_CASE("track templates: a strip's settings and chains saved, then added as a
     // Errors: neither or both sources, an unknown name.
     CHECK_FALSE(d.execute({"track.template.load", j("{}"), kTest}));
     CHECK_FALSE(d.execute({"track.template.load", j(R"({"name": "Nope"})"), kTest}));
+}
+
+TEST_CASE("undo and redo reload the running plan and emit object version events") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto call = [&](std::string name, std::string_view args) {
+        auto r = bus.execute({std::move(name), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("track.add", "{}");
+    call("fx.add", R"({"track":"tr_1","plugin":"Test Gain"})");
+    DummyBackend backend({});
+    REQUIRE(app->startEngine(backend, {}, {.anticipative = false}));
+    CHECK(app->engine()->outputLatency() == 0);
+    call("fx.param.set", R"({"fx":"fx_1","values":{"latency":"short"}})");
+    const auto latency = app->engine()->outputLatency();
+    REQUIRE(latency > 0);
+    app->takeEvents();
+    call("history.undo", "{}");
+    CHECK(app->engine()->outputLatency() == 0);
+    call("history.redo", "{}");
+    CHECK(app->engine()->outputLatency() == latency);
+    int changes = 0;
+    for (const auto& [topic, payload] : app->takeEvents()) {
+        if (topic != "session.changed") continue;
+        REQUIRE(payload.isObject());
+        CHECK(*payload.find("branch") == "main");
+        CHECK(payload.find("version")->isInt());
+        ++changes;
+    }
+    CHECK(changes == 2);
+    app->stopEngine();
+}
+
+TEST_CASE("project replacement joins jobs and drops stale render completions") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j(R"({"name":"Vocal"})"), kTest}));
+    REQUIRE(bus.execute(
+        {"track.set", j(R"({"track":"tr_1","armed":true,"record_input":[1]})"), kTest}));
+    REQUIRE(app->save(root.path / "old.json"));
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->startEngine(backend, {.blockSize = 128, .inputs = 1}, {.anticipative = false}));
+    REQUIRE(bus.execute({"transport.record", j("{}"), kTest}));
+    backend.run(8);
+    auto target = renderTarget(*app);
+    const auto id = bus.jobs().create();
+    std::atomic<bool> joined{false};
+    app->startJob([&](std::stop_token stop) {
+        while (!stop.stop_requested()) std::this_thread::yield();
+        joined.store(true);
+    });
+    bool published = false;
+    json::Value result = json::Value::object();
+    result["path"] = "retained.wav";
+    completeRenderJob(*app, bus, bus.jobs(), id, target, result, [&] { published = true; });
+    REQUIRE(app->newProject({.name = "Fresh"}));
+    auto recording = audio::readAudio(root.path / "media" / "rec" / "Vocal-1.wav");
+    REQUIRE(recording);
+    CHECK(recording->frames() == 1024);
+    CHECK(app->head().items.empty());
+    REQUIRE(app->engine());
+    CHECK_FALSE(app->engine()->recording());
+    CHECK(joined.load());
+    CHECK(app->projectGeneration() == target.generation + 1);
+    CHECK(app->engine()->config().blockSize == 128);
+    bus.flushJobEvents();
+    CHECK_FALSE(published);
+    auto replaced = bus.jobs().status(id);
+    REQUIRE(replaced);
+    CHECK(*replaced->find("status") == "cancelled");
+    REQUIRE(replaced->find("result"));
+    CHECK(*replaced->find("result")->find("status") == "render.stale_target");
+    bool stale = false;
+    for (const auto& [topic, payload] : app->takeEvents())
+        if (topic == "render.stale_target") stale = true;
+    CHECK(stale);
+    const auto branchTarget = renderTarget(*app);
+    REQUIRE(app->versions().createBranch("other", "main"));
+    const auto branchJob = bus.jobs().create();
+    completeRenderJob(*app, bus, bus.jobs(), branchJob, branchTarget, result,
+                      [&] { published = true; });
+    REQUIRE(app->switchBranch("other"));
+    bus.flushJobEvents();
+    CHECK_FALSE(published);
+    auto status = bus.jobs().status(branchJob);
+    REQUIRE(status);
+    CHECK(*status->find("result")->find("status") == "render.stale_target");
+    CHECK(*status->find("result")->find("path") == "retained.wav");
+    app->stopEngine();
+}
+
+TEST_CASE("first save rolls back staged media when project publication fails") {
+    Root root;
+    AppOptions options;
+    options.workdir = root.path / "work";
+    options.scratchDir = root.path / "scratch";
+    auto created = EngineApp::create(options, {.console9 = false});
+    REQUIRE(created);
+    auto app = std::move(*created);
+    REQUIRE(writeFileAtomic(app->mediaDir() / "a.wav", "audio bytes"));
+    const auto project = root.path / "saved" / "project.json";
+    fs::create_directories(project);  // rename over a directory must fail
+    REQUIRE_FALSE(app->save(project));
+    CHECK(app->projectPath().empty());
+    CHECK(fs::exists(app->mediaDir() / "a.wav"));
+    CHECK_FALSE(fs::exists(project.parent_path() / "media" / "a.wav"));
+    fs::remove(project);
+    REQUIRE(app->save(project));
+    CHECK(app->projectPath() == project);
+    CHECK(fs::exists(project.parent_path() / "media" / "a.wav"));
+    CHECK_FALSE(fs::exists(options.scratchDir / "media" / "a.wav"));
+}
+
+TEST_CASE("latency probes restore semantic patch and standard params") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j("{}"), kTest}));
+    REQUIRE(bus.execute({"fx.add", j(R"({"track":"tr_1","plugin":"Test Gain"})"), kTest}));
+    REQUIRE(
+        bus.execute({"fx.param.set", j(R"({"fx":"fx_1","values":{"latency":"short"}})"), kTest}));
+    auto latency = app->fxLatencySamples(*model::Id::parse("fx_1"), *app->head().fx.begin()->value);
+    REQUIRE(latency);
+    CHECK(*latency > 0);
+}
+
+TEST_CASE("plain plugin parameter setters validate names ids text and saved state") {
+    Root root;
+    AppOptions options;
+    options.workdir = root.path;
+    options.pluginPath = {kFixture, FIXTURE_VST3_PATH};
+    auto made = EngineApp::create(options, {.console9 = false});
+    REQUIRE(made);
+    auto app = std::move(*made);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"track.add", j("{}"), kTest}));
+    REQUIRE(bus.execute({"fx.add", j(R"({"track":"tr_1","plugin":"Test VST3 Gain"})"), kTest}));
+    REQUIRE(bus.execute({"fx.param.set", j(R"({"fx":"fx_1","values":{"Gain":0.25}})"), kTest}));
+    const auto* fx = app->head().fx.find(*model::Id::parse("fx_1"));
+    REQUIRE(fx->state);
+    CHECK(fx->params.at(1) == doctest::Approx(0.25));
+    auto info = app->findPlugin(fx->plugin.id);
+    REQUIRE(info);
+    auto instance = host::Instance::create(*info, {});
+    REQUIRE(instance);
+    REQUIRE((*instance)->loadState(app->head().blobs.at(*fx->state)->data));
+    CHECK((*instance)->paramValue(1).value() == doctest::Approx(0.25));
+    auto text = (*instance)->paramText(1, 0.5);
+    REQUIRE(text);
+    json::Value args = j(R"({"fx":"fx_1","values":{}})");
+    args["values"]["1"] = *text;
+    REQUIRE(bus.execute({"fx.param.set", args, kTest}));
+    CHECK(app->head().fx.find(*model::Id::parse("fx_1"))->params.at(1) == doctest::Approx(0.5));
+    const auto before = model::serializeProject(app->head());
+    for (const auto* values : {R"({"Gain":2})", R"({"Missing":0})", R"({"Gain":false})"}) {
+        args["values"] = j(values);
+        REQUIRE_FALSE(bus.execute({"fx.param.set", args, kTest}));
+        CHECK(model::serializeProject(app->head()) == before);
+    }
+    REQUIRE(bus.execute({"fx.add", j(R"({"track":"tr_1","plugin":"Test Edge"})"), kTest}));
+    auto readonly = bus.execute({"fx.param.set", j(R"({"fx":"fx_2","values":{"7":1}})"), kTest});
+    REQUIRE_FALSE(readonly);
+    CHECK(readonly.error().code == "fx.param_readonly");
+}
+
+TEST_CASE("recovery reports corrupt sidecars and recovers the valid selection") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");
+    const auto corrupt = app->recordDir() / "Broken-1.wav";
+    fs::copy_file(app->recordDir() / "Vocal-1.wav", corrupt);
+    auto sidecar = corrupt;
+    sidecar.replace_extension(".rec.json");
+    REQUIRE(writeFileAtomic(sidecar, "{broken"));
+    auto listed = d.execute({"project.recoverable", j("{}"), kTest});
+    REQUIRE(listed);
+    REQUIRE((*listed)["recordings"].size() == 1);
+    REQUIRE((*listed)["warnings"].size() == 1);
+    CHECK((*listed)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK((*listed)["warnings"].at(0).find("file")->asString() == "rec/Broken-1.wav");
+    auto recovered = d.execute(
+        {"project.recover", j(R"({"files":["rec/Broken-1.wav","rec/Vocal-1.wav"]})"), kTest});
+    REQUIRE(recovered);
+    REQUIRE((*recovered)["recovered"].size() == 1);
+    REQUIRE((*recovered)["warnings"].size() == 1);
+    CHECK((*recovered)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK_FALSE((*recovered)["warnings"].at(0).find("hint")->asString().empty());
+    CHECK(app->head().items.size() == 1);
+}
+
+TEST_CASE("recording loop capacity warning reaches transport.stop and retained passes commit") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    REQUIRE(d.execute({"track.add", j(R"({"name":"Input"})"), kTest}));
+    REQUIRE(
+        d.execute({"track.set", j(R"({"track":"tr_1","armed":true,"record_input":[1]})"), kTest}));
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 1},
+                             {.anticipative = false}));
+    REQUIRE(d.execute({"transport.loop",
+                       j(R"({"start_seconds":0,"end_seconds":0.0013333333333333333})"), kTest}));
+    REQUIRE(d.execute({"transport.record", j("{}"), kTest}));
+    backend.run(4100);
+    auto stopped = d.execute({"transport.stop", j("{}"), kTest});
+    REQUIRE_MESSAGE(stopped, (stopped ? "" : stopped.error().toString()));
+    REQUIRE((*stopped)["recorded"].size() == 1);
+    auto info = (*stopped)["recorded"].at(0);
+    REQUIRE(info["warnings"].size() == 1);
+    auto warning = info["warnings"].at(0);
+    CHECK(warning["code"].asString() == "recording.loop_runs_full");
+    CHECK(warning["path"].asString() == "/recording");
+    CHECK_FALSE(warning["hint"].asString().empty());
+    CHECK(warning["track"].asString() == "tr_1");
+    CHECK_FALSE(warning["file"].asString().empty());
+    CHECK(info["takes"].size() > 1);
+    CHECK(app->head().items.size() == 1);
+    app->stopEngine();
+}
+
+TEST_CASE("recovery skips an overflowing recording start beside a valid file") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher d(registry, *app);
+    app->setupFixture(d, "recording_interrupted");
+    const auto invalid = app->recordDir() / "Overflow-1.wav";
+    fs::copy_file(app->recordDir() / "Vocal-1.wav", invalid);
+    auto sidecar = invalid;
+    sidecar.replace_extension(".rec.json");
+    REQUIRE(writeFileAtomic(
+        sidecar,
+        R"({"schema":"supple.recording/1.0","track":"tr_1","sample_rate":48000,"start_sample":9223372036854775807})"));
+    auto r = d.execute({"project.recover", j("{}"), kTest});
+    REQUIRE(r);
+    REQUIRE((*r)["warnings"].size() == 1);
+    CHECK((*r)["warnings"].at(0).find("code")->asString() == "record.sidecar");
+    CHECK((*r)["warnings"].at(0).find("path")->asString() == "/start_sample");
+    REQUIRE((*r)["recovered"].size() == 1);
+    CHECK(app->head().items.size() == 1);
 }

@@ -25,7 +25,8 @@ json::Value JobManager::snapshot(const Job& job) {
     value["status"] = job.status;
     value["progress"] = job.progress;
     value["progress"]["fraction"] = job.fraction->load(std::memory_order_relaxed);
-    if (job.status == "done") value["result"] = job.result;
+    if (job.status == "done" || (job.status == "cancelled" && !job.result.isNull()))
+        value["result"] = job.result;
     if (job.status == "failed") value["error"] = errorJson(job.error);
     return value;
 }
@@ -120,7 +121,7 @@ Status JobManager::fail(std::string_view id, Error error) {
     prune();
     return {};
 }
-Status JobManager::cancel(std::string_view id) {
+Status JobManager::cancel(std::string_view id, std::optional<json::Value> result) {
     std::lock_guard lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
@@ -128,10 +129,13 @@ Status JobManager::cancel(std::string_view id) {
         it->second.cancelRequested = true;
         it->second.cancelFlag->store(true, std::memory_order_release);
         it->second.status = "cancelled";
-        events_.emplace_back("job.done", snapshot(it->second));
-        cv_.notify_all();
-        prune();
+    } else if (it->second.status != "cancelled" || !result) {
+        return {};
     }
+    if (result) it->second.result = std::move(*result);
+    events_.emplace_back("job.done", snapshot(it->second));
+    cv_.notify_all();
+    prune();
     return {};
 }
 Result<json::Value> JobManager::status(std::string_view id) const {

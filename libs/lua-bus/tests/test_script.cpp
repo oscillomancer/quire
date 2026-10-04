@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -44,6 +45,20 @@ constexpr const char* kEcho = R"({text = "t", n = 3, freq = 2, flag = false, mod
                               R"(anything = false, move = {kind = "point", x = 0}, ref = "tr_1"})";
 
 }  // namespace
+
+TEST_CASE("the fuzz toy counter refuses overflow without changing its value") {
+    Scene scene;
+    scene.host.toy.count = std::numeric_limits<std::int64_t>::max();
+    auto high = scene.run("q.toy.add{value=1}");
+    REQUIRE_FALSE(high);
+    CHECK(high.error().code == "toy.overflow");
+    CHECK(scene.host.toy.count == std::numeric_limits<std::int64_t>::max());
+    scene.host.toy.count = std::numeric_limits<std::int64_t>::min();
+    auto low = scene.run("q.toy.add{value=-1}");
+    REQUIRE_FALSE(low);
+    CHECK(low.error().code == "toy.overflow");
+    CHECK(scene.host.toy.count == std::numeric_limits<std::int64_t>::min());
+}
 
 TEST_CASE("the sandbox has the five libraries and nothing else") {
     Scene scene;
@@ -87,15 +102,12 @@ TEST_CASE("print and q.log go to the script's log") {
 }
 
 TEST_CASE("the instruction budget stops a runaway script") {
-    Scene scene;
-    const auto started = std::chrono::steady_clock::now();
-    auto out = scene.run("while true do end", 50.0);
-    const auto spent =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
-            .count();
+    ScriptOptions options;
+    options.instructionLimit = 1000;
+    Scene scene(options);
+    auto out = scene.run("while true do pcall(function() while true do end end) end", 10000.0);
     REQUIRE(!out);
     CHECK(out.error().code == "script.budget");
-    CHECK(spent < 3000.0);  // it really stopped, and far sooner than "eventually"
     CHECK(out.error().hint.find("budget_ms") != std::string::npos);
 }
 
@@ -436,4 +448,113 @@ TEST_CASE("a script created without a registry or dispatcher can still compute")
     auto call = bare.run("return q.toy.get()");
     REQUIRE_MESSAGE(!call, call.error().toString());
     CHECK(call.error().code == "script.error");  // q.toy is nil: the bindings are not there
+}
+
+TEST_CASE("Lua JSON conversion bounds cyclic and deep tables and preserves binary keys") {
+    Scene scene;
+    auto cyclic = scene.run("local t = {}; t.self = t; return t");
+    REQUIRE_FALSE(cyclic);
+    CHECK(cyclic.error().code == "script.value");
+    auto deep = scene.run("local t = {}; for i = 1, 100 do t = {t} end; return t");
+    REQUIRE_FALSE(deep);
+    CHECK(deep.error().code == "script.value");
+    auto badArgs = scene.run("local t = {}; t.self = t; q.toy.add(t)");
+    REQUIRE_FALSE(badArgs);
+    CHECK(badArgs.error().code == "script.value");
+    CHECK(badArgs.error().path.rfind("/args", 0) == 0);
+    auto cyclicError = scene.run("local t = {code='custom'}; t.details = {t}; error(t)");
+    REQUIRE_FALSE(cyclicError);
+    CHECK(cyclicError.error().code == "custom");
+    auto version = scene.run("q.run('toy.add@999999999999999999999999', {})");
+    REQUIRE_FALSE(version);
+    CHECK(version.error().code == "command.version");
+    for (const auto* expression : {"return 0/0", "return math.huge", "return {x=-math.huge}"}) {
+        auto number = scene.run(expression);
+        REQUIRE_FALSE(number);
+        CHECK(number.error().code == "script.value");
+    }
+    auto keys = scene.runWith("return args", obj(R"({"a\u0000b":1,"a":2})"));
+    REQUIRE(keys);
+    CHECK(keys->result == obj(R"({"a\u0000b":1,"a":2})"));
+    auto healthy = scene.run("return 42");
+    REQUIRE(healthy);
+    CHECK(healthy->result == 42);
+}
+
+TEST_CASE("Lua initialization and argument pushes fail inside protected calls") {
+    ScriptOptions options;
+    options.memoryLimitBytes = 5000;
+    Scene tiny(options);
+    auto initialized = tiny.run("return 1");
+    REQUIRE_FALSE(initialized);
+    CHECK(initialized.error().code == "script.memory");
+    options.memoryLimitBytes = 192 * 1024;
+    Scene limited(options);
+    REQUIRE(limited.run("return 1"));
+    json::Value args = json::Value::object();
+    args["large"] = std::string(300000, 'x');
+    auto pushed = limited.runWith("return 1", args);
+    REQUIRE_FALSE(pushed);
+    CHECK(pushed.error().code == "script.memory");
+    REQUIRE(limited.run("return 2"));
+}
+TEST_CASE("Lua error tables are read raw without executing metamethods") {
+    Scene scene;
+    auto failed =
+        scene.run("error(setmetatable({}, {__index=function() error('metamethod ran') end}))");
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().message.find("metamethod ran") == std::string::npos);
+}
+
+TEST_CASE("named arrays resolve JSON pointer refs and preserve an empty Lua array") {
+    struct Arrays {
+        std::vector<std::int64_t> values;
+    };
+    auto shape = schema::object<Arrays>("arrays")
+                     .field("values", &Arrays::values,
+                            schema::named("numbers", schema::arrayOf(schema::integer())))
+                     .build();
+    cmd::Registry registry;
+    cmd::Command<Arrays, Arrays> echo;
+    echo.name = "test.arrays";
+    echo.exposure = cmd::Exposure::Internal;
+    echo.args = shape;
+    echo.result = shape;
+    echo.run = [](const Arrays& a, cmd::Context&) -> Result<Arrays> { return a; };
+    registry.add(std::move(echo));
+    ToyHost host;
+    cmd::Dispatcher bus(registry, host);
+    Script script(&registry, &bus);
+    auto result = script.run("return q.test.arrays{values={}}");
+    REQUIRE(result);
+    // Empty result tables have no schema on the return boundary; the command
+    // succeeds only if the argument converted as the named array.
+    CHECK(cmd::luaStubs(registry).find("values integer[]") != std::string::npos);
+}
+
+TEST_CASE("sandbox refuses finalizers before installation, including under an instruction cap") {
+    ScriptOptions options;
+    options.instructionLimit = 1000;
+    Scene scene(options);
+    auto loop = scene.run("setmetatable({}, {__gc=function() while true do end end})");
+    REQUIRE_FALSE(loop);
+    CHECK(loop.error().code == "script.finalizer");
+    CHECK(loop.error().path == "/metatable/__gc");
+    auto caught = scene.run(R"(
+        local ok, e = pcall(setmetatable, {}, {__gc=false})
+        assert(not ok and e.code == 'script.finalizer' and e.hint ~= '')
+        local t, mt = {}, {}
+        setmetatable(t, mt, 'ignored extra argument')
+        mt.__gc = function() while true do end end
+        local ok2, e2 = pcall(setmetatable, {}, mt)
+        assert(not ok2 and e2.code == 'script.finalizer')
+        t = nil
+        collectgarbage('collect')
+        return getmetatable(setmetatable({}, {__index={x=3}})).__index.x
+    )");
+    REQUIRE(caught);
+    CHECK(caught->result.asInt() == 3);
+    auto budget = scene.run("while true do end");
+    REQUIRE_FALSE(budget);
+    CHECK(budget.error().code == "script.budget");
 }

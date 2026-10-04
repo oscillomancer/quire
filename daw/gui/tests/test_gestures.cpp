@@ -76,6 +76,7 @@ struct Fixture {
         root->setContent(std::move(arrange));
         view->installOverlay(*root);
         auto& g = view->gestures();
+        g.pinVersion = [this](std::uint64_t version) { return app->versions().pin(version); };
         g.run = [this](const std::string& label, const std::vector<views::EditStep>& steps) {
             return dispatcher->transact(label, kUi, [&]() -> Result<json::Value> {
                 std::vector<json::Value> results;
@@ -1035,4 +1036,29 @@ TEST_CASE("clipboard channel offsets skip envelope rows and report missing targe
     REQUIRE(gestures.selection().size() == 1);
     CHECK(f.item(gestures.selection().front()).track == last);
     CHECK(diagnostic.find("dropped 1") != std::string::npos);
+}
+
+TEST_CASE("clipboard keeps a discarded redo version available until replaced") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto original = f.itemOnRow(0);
+    auto& g = f.view->gestures();
+    g.setSelection({original});
+    REQUIRE(g.duplicateSelection());
+    f.sync();
+    const auto copiedVersion = f.app->head().version;
+    std::weak_ptr<const model::Session> weak = f.app->versions().pin(copiedVersion);
+    g.copySelection();
+    REQUIRE(f.dispatcher->execute({"history.undo", json::Value::object(), kUi}));
+    REQUIRE(f.dispatcher->execute(
+        {"track.set", json::parse(R"({"track":"tr_1","name":"new edit"})").value(), kUi}));
+    f.sync();
+    REQUIRE(f.app->versions().version(copiedVersion));
+    REQUIRE(g.paste(200));
+    f.sync();
+    CHECK(f.item(g.selection()[0]).position == 200);
+    g.copySelection();
+    f.app->versions().collectUnused();
+    CHECK_FALSE(f.app->versions().version(copiedVersion));
+    CHECK(weak.expired());
 }

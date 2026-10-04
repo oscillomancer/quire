@@ -55,7 +55,7 @@ key that includes the object's content revision.
 ### 1.2 UI state is not session state
 
 Zoom, scroll, selection, window layout, open editors, docking and
-screensets live in a separate per-project UI file (`<project>.ui.json`,
+screensets live in a separate per-project UI file (`<name>.ui.json`,
 canonical JSON, never in the project's diff) plus per-user settings
 (keymaps, toolbars, theme) under the user config directory
 (`$XDG_CONFIG_HOME/<slug>/`). Selection is exposed read-only to agents

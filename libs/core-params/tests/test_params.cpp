@@ -452,4 +452,18 @@ TEST_CASE("a description reads back into a spec that converts identically (hosts
     CHECK_FALSE(fromDescription("x", json::Value(3.0)));
     CHECK_FALSE(fromDescription("x", json::parse(R"({"name": "X"})").value()));  // no id
     CHECK_FALSE(fromDescription("x", json::parse(R"({"id": 1, "unit": "furlong"})").value()));
+    for (const auto* text :
+         {R"({"id":-1})", R"({"id":0.5})", R"({"id":4294967296})", R"({"id":1e100})"}) {
+        auto bad = fromDescription("x", json::parse(text).value());
+        REQUIRE_FALSE(bad);
+        CHECK(bad.error().path == "/x/id");
+    }
+}
+
+TEST_CASE("parameter curve exponents must be finite") {
+    auto p = kTable[0];
+    p.curve = {CurveKind::Pow, std::numeric_limits<double>::infinity()};
+    auto result = validateTable(std::span(&p, 1));
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "params.table.curve_k");
 }

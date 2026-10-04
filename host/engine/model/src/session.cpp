@@ -1,4 +1,5 @@
 #include "supple/model/session.h"
+#include "supple/model/numeric.h"
 
 #include <algorithm>
 #include <charconv>
@@ -18,7 +19,9 @@ constexpr std::string_view kPrefixes[kKindCount] = {"tr", "it", "tk", "md", "mi"
                                                     "ai", "mk", "rg", "tp", "ts", "gr", "ln", "rj"};
 }
 
-std::string_view prefix(Kind kind) { return kPrefixes[static_cast<std::size_t>(kind)]; }
+std::string_view prefix(Kind kind) {
+    return kind == Kind::Project ? "project" : kPrefixes[static_cast<std::size_t>(kind)];
+}
 
 std::optional<Kind> kindFromPrefix(std::string_view p) {
     for (std::size_t i = 0; i < kKindCount; ++i)
@@ -26,9 +29,12 @@ std::optional<Kind> kindFromPrefix(std::string_view p) {
     return std::nullopt;
 }
 
-std::string Id::str() const { return std::string(prefix(kind)) + "_" + std::to_string(n); }
+std::string Id::str() const {
+    return *this == kProject ? "project" : std::string(prefix(kind)) + "_" + std::to_string(n);
+}
 
 std::optional<Id> Id::parse(std::string_view text) {
+    if (text == "project") return kProject;
     const auto us = text.find('_');
     if (us == std::string_view::npos || us + 1 >= text.size()) return std::nullopt;
     auto k = kindFromPrefix(text.substr(0, us));
@@ -95,6 +101,7 @@ std::vector<Change> EditTxn::changes() const {
     std::vector<Change> out;
     out.reserve(changes_.size());
     for (const auto& [id, op] : changes_) out.push_back({op, id});
+    if (projectChanged_) out.push_back({Change::Op::Update, kProject});
     return out;
 }
 
@@ -441,7 +448,235 @@ struct Checker {
 
 }  // namespace
 
+Status automationExpansionBudget(const Session& s) {
+    constexpr std::size_t limit = 100000;
+    std::map<Id, std::size_t> totals;
+    for (const auto& e : s.envelopes) {
+        if (e.value->points.size() > limit)
+            return Error("automation.budget", "envelope exceeds 100000 expanded points",
+                         "/envelopes/" + e.id.str() + "/points", "reduce the envelope points");
+        totals[e.id] = e.value->points.size();
+    }
+    for (const auto& e : s.autoItems) {
+        const auto& ai = *e.value;
+        const double reps = ai.loop ? std::ceil(ai.length / ai.sourceLength) : 1;
+        if (!std::isfinite(reps) || reps < 1 || reps > limit || ai.points.size() > limit)
+            return Error("automation.budget",
+                         "automation expansion exceeds 100000 repetitions/points",
+                         "/automation_items/" + e.id.str(),
+                         "increase source_length or reduce length/points");
+        const auto cost = static_cast<std::size_t>(reps) * (ai.points.size() + 2) + 2;
+        auto& total = totals[ai.envelope];
+        if (cost > limit || total > limit - cost)
+            return Error("automation.budget", "envelope exceeds 100000 expanded points",
+                         "/automation_items/" + e.id.str(),
+                         "reduce length/points or increase source_length");
+        total += cost;
+    }
+    return {};
+}
+
+Status validateNumeric(const Session& s) {
+    auto position = [&](double value, Timebase tb, const std::string& path) {
+        return tb == Timebase::Time ? checkedSeconds(s, value, path) : checkedBeat(s, value, path);
+    };
+    for (const auto& e : s.tempo)
+        SUPPLE_TRY(checkedBeat(s, e.value->beat, "/tempo/points/" + e.id.str() + "/beat"));
+    for (const auto& e : s.meters)
+        SUPPLE_TRY(checkedBeat(s, s.timeMap->beatOfBar(e.value->bar),
+                               "/tempo/meter/" + e.id.str() + "/bar"));
+    const auto& render = s.project->render;
+    if (render.isObject() && render.size())
+        if (auto valid = schemaOf<Project>().validate(toJson(*s.project)); !valid) {
+            Error error = valid.error();
+            auto prefix = [](auto&& self, Error& e) -> void {
+                e.path = "/project" + e.path;
+                for (auto& child : e.details) self(self, child);
+            };
+            prefix(prefix, error);
+            return error;
+        }
+    if (!render.isObject())
+        return Error("schema.type", "render must be an object", "/project/render");
+    for (const char* key : {"sample_rate", "tail_ms", "channels"})
+        if (const auto* v = render.find(key)) {
+            const std::string p = std::string("/project/render/") + key;
+            if (!v->isNumber()) return Error("schema.type", "expected a number", p);
+            const double n = v->asDouble();
+            if (!std::isfinite(n) ||
+                (std::string_view(key) == "sample_rate" &&
+                 (n < 8000 || n > 384000 || n != std::floor(n))) ||
+                (std::string_view(key) == "channels" && n != 1 && n != 2) ||
+                (std::string_view(key) == "tail_ms" && (n < 0 || n > 600000)))
+                return numericError(p);
+        }
+    for (const auto& e : s.media) {
+        const auto& md = *e.value;
+        const std::string p = "/sources/media/" + e.id.str();
+        if (!std::isfinite(md.sampleRate) || md.sampleRate <= 0 || md.frames < 0)
+            return numericError(p);
+        SUPPLE_TRY(checkedSamples(
+            static_cast<long double>(md.frames) / static_cast<long double>(md.sampleRate),
+            s.project->sampleRate, p + "/frames"));
+    }
+    for (const auto& e : s.midi) {
+        const auto& seq = e.value->sequence;
+        const std::string p = "/sources/midi/" + e.id.str() + "/sequence";
+        constexpr auto limit = std::numeric_limits<std::int64_t>::max() / 4;
+        if (seq.ppq < 1 || seq.ppq > 32767 || seq.length < 0 || seq.length > limit)
+            return numericError(p + "/length");
+        for (std::size_t i = 0; i < seq.notes.size(); ++i) {
+            const auto& n = seq.notes[i];
+            if (n.start < 0 || n.length < 0 || n.start > limit || n.length > limit - n.start)
+                return numericError(p + "/notes/" + std::to_string(i));
+        }
+        for (const auto& c : seq.controls)
+            if (c.tick < 0 || c.tick > limit) return numericError(p + "/controls");
+        for (const auto& x : seq.sysex)
+            if (x.tick < 0 || x.tick > limit) return numericError(p + "/sysex");
+    }
+    std::map<Id, long double> eventCounts;
+    for (const auto& e : s.items) {
+        const auto& it = *e.value;
+        const std::string p = "/items/" + e.id.str();
+        if (!std::isfinite(it.position) || it.position < 0) return numericError(p + "/position");
+        if (!std::isfinite(it.length) || it.length < 0 || !std::isfinite(it.position + it.length))
+            return numericError(p + "/length");
+        const auto span = itemSpan(s, it);
+        SUPPLE_TRY(checkedBeat(s, span.startBeat, p + "/position"));
+        SUPPLE_TRY(checkedBeat(s, s.timeMap->beatAt(span.endSec), p + "/length"));
+        SUPPLE_TRY(checkedSeconds(s, span.startSec, p + "/position"));
+        SUPPLE_TRY(checkedSeconds(s, span.endSec, p + "/length"));
+        for (auto [name, fade] :
+             {std::pair{"fade_in", it.fadeIn}, std::pair{"fade_out", it.fadeOut}}) {
+            if (!std::isfinite(fade.length) || fade.length < 0 || !std::isfinite(fade.curve))
+                return numericError(p + "/" + name);
+            SUPPLE_TRY(checkedSeconds(s, span.startSec + fade.length, p + "/" + name));
+        }
+        for (Id tk : it.takes) {
+            const auto* take = s.takes.find(tk);
+            if (!take) continue;  // reference checker supplies the missing-object error
+            const std::string tp = "/takes/" + tk.str();
+            if (!std::isfinite(take->startOffset)) return numericError(tp + "/start_offset");
+            if (!std::isfinite(take->playrate) || !(take->playrate > 0))
+                return numericError(tp + "/playrate");
+            const double pitchRate = std::exp2(take->pitch / 12);
+            if (!std::isfinite(take->pitch) || !std::isfinite(pitchRate) || !(pitchRate > 0))
+                return numericError(tp + "/pitch");
+            if (!take->source) continue;
+            if (take->source->kind == Kind::Media) {
+                const auto* md = s.media.find(*take->source);
+                if (!md) continue;
+                const double speed = take->playrate * (take->preservePitch ? 1 : pitchRate);
+                if (!std::isfinite(speed) || !(speed > 0)) return numericError(tp + "/playrate");
+                SUPPLE_TRY(checkedSamples(take->startOffset / speed, s.project->sampleRate,
+                                          tp + "/start_offset"));
+                SUPPLE_TRY(checkedSamples(take->startOffset + (span.endSec - span.startSec) * speed,
+                                          md->sampleRate, tp + "/playrate"));
+                const long double variantFrames = static_cast<long double>(md->frames) *
+                                                  static_cast<long double>(s.project->sampleRate) /
+                                                  static_cast<long double>(md->sampleRate) /
+                                                  static_cast<long double>(speed);
+                if (!std::isfinite(variantFrames) || variantFrames > (std::int64_t{1} << 28))
+                    return Error("media.budget", "take variant exceeds the in-memory frame budget",
+                                 tp + "/playrate", "increase playrate or use a shorter source");
+            } else if (const auto* src = s.midi.find(*take->source)) {
+                const auto& seq = src->sequence;
+                const double loop = static_cast<double>(seq.length) / seq.ppq;
+                const double offset =
+                    it.loop && loop > 0 ? std::fmod(take->startOffset, loop) : take->startOffset;
+                const double content =
+                    (s.timeMap->beatAt(span.endSec) - span.startBeat) * take->playrate + offset;
+                if (!std::isfinite(content) || !std::isfinite(take->startOffset * seq.ppq) ||
+                    std::abs(take->startOffset * seq.ppq) > static_cast<double>(INT64_MAX / 4))
+                    return numericError(tp + "/start_offset");
+                const double reps = it.loop && loop > 0 ? 1 + std::floor(content / loop) : 1;
+                if (!std::isfinite(reps) || reps < 0 || reps >= std::numeric_limits<int>::max())
+                    return numericError(p + "/length");
+                // Planning materializes events: bound work, including the prior loop pass.
+                auto& count = eventCounts[it.track];
+                count += (static_cast<long double>(reps) + 1) *
+                         (2.L * seq.notes.size() + seq.controls.size() + seq.sysex.size());
+                if (count > 1000000 || reps > 1000000)
+                    return Error("midi.budget", "MIDI expansion exceeds 1000000 events/passes",
+                                 p + "/length",
+                                 "shorten the item or increase the source loop length");
+            }
+        }
+    }
+    auto points = [&](const auto& pts, Timebase tb, const std::string& p) -> Status {
+        for (std::size_t i = 0; i < pts.size(); ++i) {
+            const auto at = p + "/" + std::to_string(i);
+            SUPPLE_TRY(position(pts[i].pos, tb, at + "/beat"));
+            if (!std::isfinite(pts[i].value) || !std::isfinite(pts[i].tension) ||
+                (i && !std::isfinite(pts[i].value - pts[i - 1].value)))
+                return numericError(at + "/value");
+        }
+        return {};
+    };
+    auto curveOutput = [](const Envelope* env, double value, const std::string& path) -> Status {
+        if (!env || env->target.object.kind == Kind::Fx) return {};
+        if (env->target.param == "volume") {
+            const double gain = value <= kSilenceDb ? 0 : std::pow(10, value / 20);
+            if (!std::isfinite(gain) ||
+                gain > static_cast<double>(std::numeric_limits<float>::max()))
+                return numericError(path);
+        } else if (env->target.param == "pitch") {
+            const double speed = std::exp2(value / 12);
+            if (!std::isfinite(speed) || !(speed > 0)) return numericError(path);
+        }
+        return {};
+    };
+    std::map<Id, std::pair<double, double>> curveBounds;
+    for (const auto& e : s.envelopes) {
+        SUPPLE_TRY(
+            points(e.value->points, e.value->timebase, "/envelopes/" + e.id.str() + "/points"));
+        auto& bounds = curveBounds[e.id];
+        for (const auto& pt : e.value->points) {
+            SUPPLE_TRY(
+                curveOutput(e.value.get(), pt.value, "/envelopes/" + e.id.str() + "/points"));
+            bounds.first = std::min(bounds.first, pt.value);
+            bounds.second = std::max(bounds.second, pt.value);
+        }
+        if (!std::isfinite(bounds.second - bounds.first))
+            return numericError("/envelopes/" + e.id.str() + "/points");
+    }
+    for (const auto& e : s.autoItems) {
+        const auto& ai = *e.value;
+        const std::string p = "/automation_items/" + e.id.str();
+        SUPPLE_TRY(checkedBeat(s, ai.position, p + "/position"));
+        if (!(ai.length > 0) || !(ai.sourceLength > 0)) return numericError(p + "/length");
+        SUPPLE_TRY(checkedBeat(s, ai.position + ai.length, p + "/length"));
+        SUPPLE_TRY(checkedBeat(s, ai.sourceLength, p + "/source_length"));
+        SUPPLE_TRY(points(ai.points, Timebase::Beats, p + "/points"));
+        if (!std::isfinite(ai.baseline) || !std::isfinite(ai.amplitude))
+            return numericError(p + "/amplitude");
+        auto& bounds = curveBounds[ai.envelope];
+        auto include = [&](double value) -> Status {
+            if (!std::isfinite(value)) return numericError(p + "/points");
+            SUPPLE_TRY(curveOutput(s.envelopes.find(ai.envelope), value, p + "/points"));
+            bounds.first = std::min(bounds.first, value);
+            bounds.second = std::max(bounds.second, value);
+            if (!std::isfinite(bounds.second - bounds.first)) return numericError(p + "/points");
+            return {};
+        };
+        if (ai.points.empty()) SUPPLE_TRY(include(ai.baseline));
+        for (const auto& pt : ai.points)
+            SUPPLE_TRY(include(ai.baseline + ai.amplitude * (pt.value - ai.baseline)));
+    }
+    for (const auto& e : s.markers)
+        SUPPLE_TRY(
+            position(e.value->pos, e.value->timebase, "/rulers/markers/" + e.id.str() + "/pos"));
+    for (const auto& e : s.regions) {
+        const auto& r = *e.value;
+        SUPPLE_TRY(position(r.start, r.timebase, "/rulers/regions/" + e.id.str() + "/start"));
+        SUPPLE_TRY(position(r.end, r.timebase, "/rulers/regions/" + e.id.str() + "/end"));
+    }
+    return automationExpansionBudget(s);
+}
+
 Status checkInvariants(const Session& s) {
+    SUPPLE_TRY(validateNumeric(s));
     Checker c{s, {}};
     if (!(s.project->sampleRate >= 8000 && s.project->sampleRate <= 384000))
         c.fail("/project/sample_rate", "sample rate out of range");
@@ -504,6 +739,15 @@ void diffMap(const IdMap<T>& a, const IdMap<T>& b, std::vector<ObjectDiff>& out)
 
 std::vector<ObjectDiff> diff(const Session& a, const Session& b) {
     std::vector<ObjectDiff> out;
+    const auto from = toJson(*a.project), to = toJson(*b.project);
+    std::vector<std::string> fields;
+    for (const auto& member : from.asObject()) {
+        const auto* after = to.find(member.key);
+        if (!after || member.value != *after) fields.push_back(member.key);
+    }
+    for (const auto& member : to.asObject())
+        if (!from.find(member.key)) fields.push_back(member.key);
+    if (!fields.empty()) out.push_back({Change::Op::Update, kProject, std::move(fields)});
     // Kind order as in session-model §1 (tempo, rulers, tracks, items, …).
     diffMap(a.tempo, b.tempo, out);
     diffMap(a.meters, b.meters, out);
@@ -644,6 +888,7 @@ double pointsValueAt(const std::vector<EnvPoint>& pts, double pos, double fallba
 }
 
 std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
+    if (!automationExpansionBudget(s)) return {};
     const Envelope* env = s.envelopes.find(envelope);
     if (!env) return {};
     std::vector<const AutomationItem*> items;

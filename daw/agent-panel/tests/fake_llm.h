@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -29,6 +30,7 @@ class FakeServer {
         int status = 200;
         std::vector<std::string> chunks;  // written with small pauses (streaming)
         int delayMs = 0;
+        std::function<void()> beforeSend = {};
     };
     FakeServer() {
         fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -99,6 +101,7 @@ class FakeServer {
                                (r.status == 200 ? " OK" : " Error") +
                                "\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
             ::send(c, head.data(), head.size(), MSG_NOSIGNAL);
+            if (r.beforeSend) r.beforeSend();
             if (r.status != 200) {
                 const std::string err = R"({"error": {"message": "invalid key"}})";
                 ::send(c, err.data(), err.size(), MSG_NOSIGNAL);

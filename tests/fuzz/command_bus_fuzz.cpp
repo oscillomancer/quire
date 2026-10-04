@@ -46,8 +46,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     command.result = supple::schema::object<Result>("result")
                          .field("total", &Result::total, supple::schema::integerOf<int>())
                          .build();
+    // Checked: valid arguments (INT_MAX, then 1) must not overflow the fixture
+    // and read as a bug in the bus.
     command.run = [](const Args& args, supple::cmd::Context& ctx) -> supple::Result<Result> {
-        return Result{ctx.service<int>() += args.amount};
+        int& total = ctx.service<int>();
+        int sum = 0;
+        if (__builtin_add_overflow(total, args.amount, &sum))
+            return supple::Error("toy.overflow", "the total would overflow", "/amount",
+                                 "add a smaller amount");
+        total = sum;
+        return Result{total};
     };
     registry.add(std::move(command));
     Host host;
