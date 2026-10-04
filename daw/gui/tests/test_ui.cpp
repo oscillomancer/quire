@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 #include <stb_image.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 
@@ -80,6 +81,84 @@ double pixelDistance(const gui::Image& a, const gui::Image& b) {
 }
 
 }  // namespace
+
+TEST_CASE("a list shorter than one row pages by one row") {
+    REQUIRE_GL();
+    const Theme theme = Theme::dark();
+    Canvas canvas(fixture().window->vg(), fixture().fonts, theme);
+    List list("short-list");
+    list.setCount(10);
+    list.arrange(canvas, {0, 0, 100, 10});
+    list.select(0);
+    CHECK(list.onKey({SDLK_PAGEDOWN}));
+    CHECK(list.selected() == 1);
+    CHECK(list.onKey({SDLK_PAGEUP}));
+    CHECK(list.selected() == 0);
+}
+
+TEST_CASE("root dispatch defers deletion and resolves targets after callbacks") {
+    REQUIRE_GL();
+    struct Reactive : Node {
+        explicit Reactive(std::string id, bool& dead) : Node(std::move(id)), dead_(dead) {
+            focusable = interactive = true;
+            layout.width = SizeRule::fixed(100);
+        }
+        ~Reactive() override { dead_ = true; }
+        void onFocus(bool value) override {
+            if (auto callback = focusChanged) callback(value);
+        }
+        void onHover(bool value) override {
+            if (auto callback = hoverChanged) callback(value);
+        }
+        std::function<void(bool)> focusChanged, hoverChanged;
+        bool& dead_;
+    };
+    bool oldDead = false, nextDead = false;
+    int clicks = 0;
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("content");
+    content->layout.dir = Layout::Dir::Row;
+    auto& old = content->emplace<Reactive>("old", oldDead);
+    auto& next = content->emplace<Reactive>("next", nextDead);
+    root.setContent(std::move(content));
+    root.frame(false);
+    SUBCASE("blur replaces content during a click") {
+        root.focus(&old);
+        old.focusChanged = [&](bool focused) {
+            if (focused) return;
+            auto replacement = std::make_unique<Node>("replacement");
+            replacement->layout.dir = Layout::Dir::Row;
+            replacement->emplace<Node>("spacer").layout.width = SizeRule::fixed(100);
+            auto& button = replacement->emplace<Button>("new", "New", [&] { ++clicks; });
+            button.layout.width = SizeRule::fixed(100);
+            button.layout.height = SizeRule::fraction();
+            root.setContent(std::move(replacement));
+            CHECK_FALSE(oldDead);
+            CHECK_FALSE(nextDead);
+        };
+        CHECK(root.click("next"));
+        CHECK(oldDead);
+        CHECK(nextDead);
+        CHECK(clicks == 1);
+        CHECK(root.focused() == root.find("new"));
+    }
+    SUBCASE("hover exit removes the next target") {
+        bool entered = false;
+        next.hoverChanged = [&](bool hovered) {
+            if (hovered) entered = true;
+        };
+        old.hoverChanged = [&](bool hovered) {
+            if (hovered) return;
+            (void)root.content()->remove(&next);
+            CHECK_FALSE(nextDead);
+        };
+        root.pointer({PointerEvent::Type::Move, {50, 50}});
+        root.pointer({PointerEvent::Type::Move, {150, 50}});
+        CHECK(nextDead);
+        CHECK_FALSE(entered);
+        CHECK(root.hovered() == nullptr);
+    }
+}
 
 TEST_CASE("stack layout: fixed, content and fractions with padding, gaps and alignment") {
     REQUIRE_GL();
@@ -573,4 +652,134 @@ TEST_CASE("a plugin editor switching GL contexts behind SDL's back cannot break 
     CHECK(image.width >= 360);
     f.window->setSize(320, 200);
     root.frame(false);
+}
+
+TEST_CASE("widget callbacks survive removing their own node") {
+    auto token = std::make_shared<int>(42);
+    std::weak_ptr<int> weak = token;
+    bool kept = false;
+    SUBCASE("button key") {
+        auto button = std::make_unique<Button>("self", "B");
+        button->onClick = [&, held = token] {
+            button.reset();
+            kept = !weak.expired();
+        };
+        token.reset();
+        CHECK(button->onKey({SDLK_RETURN}));
+    }
+    SUBCASE("toggle") {
+        auto toggle = std::make_unique<Toggle>("self", "T", "accent");
+        toggle->onToggle = [&, held = token](bool) {
+            toggle.reset();
+            kept = !weak.expired();
+        };
+        token.reset();
+        CHECK(toggle->onKey({SDLK_RETURN}));
+    }
+    SUBCASE("slider") {
+        auto slider = std::make_unique<Slider>("self");
+        slider->onChange = [&, held = token](double, Gesture) {
+            slider.reset();
+            kept = !weak.expired();
+        };
+        token.reset();
+        CHECK(slider->onKey({SDLK_END}));
+    }
+    SUBCASE("list activation") {
+        auto list = std::make_unique<List>("self");
+        list->setCount(1);
+        list->select(0);
+        list->onActivate = [&, held = token](std::size_t) {
+            list.reset();
+            kept = !weak.expired();
+        };
+        token.reset();
+        CHECK(list->onKey({SDLK_RETURN}));
+    }
+    SUBCASE("scroll bar") {
+        auto bar = std::make_unique<ScrollBar>("self", ScrollBar::Axis::Vertical);
+        bar->setRange(100, 20);
+        bar->onScroll = [&, held = token](float) {
+            bar.reset();
+            kept = !weak.expired();
+        };
+        token.reset();
+        CHECK(bar->onPointer({PointerEvent::Type::Down, {1, 1}, 1}));
+    }
+    SUBCASE("text field submit keeps its text") {
+        const std::string expected(200, 'x');
+        auto field = std::make_unique<TextField>("self", expected);
+        field->onSubmit = [&, held = token](const std::string& text) {
+            field.reset();
+            kept = !weak.expired();
+            CHECK(text == expected);
+        };
+        token.reset();
+        CHECK(field->onKey({SDLK_RETURN}));
+    }
+    SUBCASE("text field forwarded key") {
+        auto field = std::make_unique<TextField>("self");
+        field->onOtherKey = [&, held = token](const KeyEvent&) {
+            field.reset();
+            kept = !weak.expired();
+            return true;
+        };
+        token.reset();
+        CHECK(field->onKey({SDLK_DOWN}));
+    }
+    SUBCASE("text area submit keeps its text") {
+        const std::string expected(200, 'x');
+        auto area = std::make_unique<TextArea>("self", expected);
+        area->onSubmit = [&, held = token](const std::string& text) {
+            area.reset();
+            kept = !weak.expired();
+            CHECK(text == expected);
+        };
+        token.reset();
+        CHECK(area->onKey({SDLK_RETURN, kCtrl}));
+    }
+    CHECK(kept);
+    CHECK(weak.expired());
+}
+
+TEST_CASE("collapsed fader and slider tracks keep finite drag values") {
+    REQUIRE_GL();
+    const Theme theme = Theme::dark();
+    Canvas canvas(fixture().window->vg(), fixture().fonts, theme);
+    Fader fader("small");
+    Slider slider("small");
+    for (Node* node : {static_cast<Node*>(&fader), static_cast<Node*>(&slider)}) {
+        node->arrange(canvas, {0, 0, 0, 0});
+        CHECK(node->onPointer({PointerEvent::Type::Down, {0, 0}, 1}));
+        CHECK(node->onPointer({PointerEvent::Type::Move, {0, 0}, 1}));
+        CHECK(node->onPointer({PointerEvent::Type::Up, {0, 0}, 1}));
+    }
+    CHECK(std::isfinite(fader.value()));
+    CHECK(std::isfinite(slider.value()));
+}
+
+TEST_CASE("text ellipsis removes whole UTF-8 characters") {
+    REQUIRE_GL();
+    struct Text : Node {
+        std::string text;
+        float width = 0;
+        Text() : Node("text") {}
+        void paint(Canvas& c) override {
+            c.text({0, 0, width, 30}, text, Font::Ui, 14, c.theme().color("ink"));
+        }
+    };
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto node = std::make_unique<Text>();
+    Text* text = node.get();
+    const Theme theme = Theme::dark();
+    Canvas canvas(fixture().window->vg(), fixture().fonts, theme);
+    text->width = canvas.textWidth("é…", Font::Ui, 14) + 0.25f;
+    text->text = "é…";
+    root.setContent(std::move(node));
+    root.frame(false);
+    const auto expected = root.readBack();
+    text->text = "éééééé";
+    text->invalidate();
+    root.frame(false);
+    CHECK(pixelDistance(expected, root.readBack()) == 0);
 }

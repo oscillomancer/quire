@@ -79,13 +79,12 @@ class PeakService {
     PeakService& operator=(const PeakService&) = delete;
 
     // `hash` is the media's "sha256:<hex>" (model::MediaSource::hash); when
-    // empty, the media path keys the pyramid (and path, size and mtime the
-    // disk cache).
+    // empty, path, size and mtime key both memory and disk caches.
     std::shared_ptr<const Pyramid> get(const std::string& hash, const std::filesystem::path& media);
     // Called on the owner's thread when a pyramid becomes ready (or fails),
-    // with the key: the hash, or "path:<media>".
+    // with the key: the hash, or "path:<media>:<size>:<mtime>".
     std::function<void(const std::string& key)> onReady;
-    // A failure is remembered (no retry loop); null when none.
+    // A failure is remembered for that media revision; file changes permit retry.
     std::optional<Error> failure(const std::string& hash, const std::filesystem::path& media) const;
 
     struct Stats {

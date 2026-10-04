@@ -39,6 +39,7 @@ struct CcPoint {
 };
 
 struct RollState {
+    std::uint64_t gestureVersion = 0;
     std::string item;         // "it_3"; empty: closed
     double itemPosition = 0;  // project beats
     double itemLength = 4;    // beats
@@ -90,7 +91,9 @@ class MidiEditor {
     ui::Node* roll() const { return roll_; }
     ui::TextArea* notation() const { return text_; }
     MidiEventList* eventList() const { return eventList_.get(); }
-    Status edit(json::Value ops);  // midi.edit on the open item, keeping the selection
+    std::uint64_t beginGesture();
+    Status edit(json::Value ops, std::optional<std::uint64_t> expectedVersion =
+                                     {});  // midi.edit on the open item, keeping the selection
     void selectAll();
     void quantize();
     void transpose(int semitones);
@@ -122,6 +125,7 @@ class MidiEditor {
     ui::Label* title_ = nullptr;
     ui::TextArea* text_ = nullptr;
     ui::TextBlock* diagnostics_ = nullptr;
+    ui::Root::OverlayHandle playheadHandle_;
     ui::Node* playhead_ = nullptr;  // in the root's overlay
     std::uint64_t version_ = 0;
     std::string appliedText_;  // the text last compiled into the item

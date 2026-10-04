@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <span>
 
 #include <zlib.h>
@@ -42,8 +43,12 @@ void chunk(std::vector<std::uint8_t>& out, const char type[4],
 }  // namespace
 
 std::vector<std::uint8_t> encodePng(const Image& image) {
+    if (image.width <= 0 || image.height <= 0) return {};
     const auto w = static_cast<std::size_t>(image.width),
                h = static_cast<std::size_t>(image.height);
+    if (w > (std::numeric_limits<std::size_t>::max() - 1) / 4 ||
+        h > std::numeric_limits<std::size_t>::max() / (w * 4 + 1) || image.rgba.size() != w * h * 4)
+        return {};
     // Raw scanlines, each prefixed with filter type 0.
     std::vector<std::uint8_t> raw;
     raw.reserve(h * (w * 4 + 1));
@@ -72,6 +77,9 @@ std::vector<std::uint8_t> encodePng(const Image& image) {
 
 Status writePng(const std::filesystem::path& path, const Image& image) {
     const auto bytes = encodePng(image);
+    if (bytes.empty())
+        return Error("gui.png", "cannot encode the image", {},
+                     "provide positive dimensions and exactly width * height * 4 RGBA bytes");
     return writeFileAtomic(path, std::span<const std::uint8_t>(bytes));
 }
 

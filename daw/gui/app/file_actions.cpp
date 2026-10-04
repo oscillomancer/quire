@@ -15,7 +15,6 @@ const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 
 // A dialog's answer, delivered on the UI thread through `post`.
 struct DialogRequest {
-    FileActions::Post post;
     std::function<void(std::vector<std::filesystem::path>)> done;
 };
 
@@ -25,13 +24,38 @@ void SDLCALL onDialog(void* userdata, const char* const* files, int) {
     if (files)
         for (const char* const* f = files; *f; ++f) paths.emplace_back(*f);
     if (paths.empty()) return;  // cancelled (or an error SDL reported)
-    req->post([done = std::move(req->done), paths = std::move(paths)] { done(paths); });
+    req->done(std::move(paths));
 }
 
 const SDL_DialogFileFilter kProjectFilter[] = {{"Projects", "json"}, {"All files", "*"}};
 const SDL_DialogFileFilter kAudioFilter[] = {{"Audio", "wav;flac;mp3"}, {"All files", "*"}};
 
 }  // namespace
+
+DialogLifetime::~DialogLifetime() {
+    std::lock_guard lock(state_->mutex);
+    state_->active = false;
+}
+
+std::function<void(DialogLifetime::Paths)> DialogLifetime::guard(
+    Post post, std::function<void(Paths)> done) const {
+    return [weak = std::weak_ptr<State>(state_), post = std::move(post),
+            done = std::move(done)](Paths paths) {
+        auto state = weak.lock();
+        if (!state) return;
+        std::lock_guard lock(state->mutex);
+        if (!state->active) return;
+        post([weak, done, paths = std::move(paths)] {
+            auto current = weak.lock();
+            if (!current) return;
+            {
+                std::lock_guard check(current->mutex);
+                if (!current->active) return;
+            }
+            done(paths);
+        });
+    };
+}
 
 FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
                          engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post)
@@ -50,7 +74,8 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     });
     actions_.addUi("ui.file.open", "File: open project…", [this] {
         confirmDiscard("Open another project?", [this] {
-            auto* req = new DialogRequest{post_, [this](auto paths) { openPath(paths.front()); }};
+            auto* req = new DialogRequest{
+                dialogs_.guard(post_, [this](auto paths) { openPath(paths.front()); })};
             SDL_ShowOpenFileDialog(onDialog, req, window_, kProjectFilter, 2, nullptr, false);
         });
     });
@@ -59,13 +84,14 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
         if (exec("project.save", json::Value::object())) markSaved();
     });
     actions_.addUi("ui.file.save_as", "File: save as…", [this] {
-        auto* req = new DialogRequest{post_, [this](auto paths) { saveAs(paths.front()); }};
+        auto* req =
+            new DialogRequest{dialogs_.guard(post_, [this](auto paths) { saveAs(paths.front()); })};
         const std::string here = app_.projectPath().empty() ? "" : app_.projectPath().string();
         SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
                                here.empty() ? nullptr : here.c_str());
     });
     actions_.addUi("ui.file.import", "File: import audio…", [this] {
-        auto* req = new DialogRequest{post_, [this](auto paths) { import(paths); }};
+        auto* req = new DialogRequest{dialogs_.guard(post_, [this](auto paths) { import(paths); })};
         SDL_ShowOpenFileDialog(onDialog, req, window_, kAudioFilter, 2, nullptr, true);
     });
 }
@@ -156,10 +182,10 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
         root_.closePopup();
         if (app_.projectPath().empty()) {
             // Save as first; continue after the dialog answers.
-            auto* req = new DialogRequest{post_, [this, keep](auto paths) {
-                                              saveAs(paths.front());
-                                              if (!dirty()) (*keep)();
-                                          }};
+            auto* req = new DialogRequest{dialogs_.guard(post_, [this, keep](auto paths) {
+                saveAs(paths.front());
+                if (!dirty()) (*keep)();
+            })};
             SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2, nullptr);
             return;
         }

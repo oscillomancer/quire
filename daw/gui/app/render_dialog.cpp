@@ -1,7 +1,9 @@
 #include "render_dialog.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -26,13 +28,15 @@ std::optional<double> number(std::string_view text) {
     const std::string s(text);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
-    if (end == s.c_str() || *end != '\0') return {};
+    if (end == s.c_str() || *end != '\0' || !std::isfinite(v)) return {};
     return v;
 }
 
 std::optional<std::int64_t> integer(std::string_view text) {
-    auto v = number(text);
-    return v ? std::optional<std::int64_t>(static_cast<std::int64_t>(*v)) : std::nullopt;
+    std::int64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size()) return std::nullopt;
+    return value;
 }
 
 std::string baseName(const std::string& path) {
@@ -353,6 +357,44 @@ void RenderDialog::outputArgs(json::Value& a) const {
     a["secondary"] = std::move(second);
 }
 
+Status RenderDialog::validateFields() const {
+    auto invalid = [](const char* field, const char* expected) -> Status {
+        return Error("gui.render.field", std::string("render.") + field + ": " + expected,
+                     std::string("/") + field,
+                     "correct this field or leave it empty for the project default");
+    };
+    for (const auto& [field, text] : {std::pair{"start", &start_},
+                                      {"end", &end_},
+                                      {"tail", &tail_},
+                                      {"target", &target_},
+                                      {"limit", &limit_}}) {
+        if (text->empty()) continue;
+        const auto value = number(*text);
+        if (!value) return invalid(field, "enter a finite number");
+        if ((text == &start_ || text == &end_ || text == &tail_) && *value < 0)
+            return invalid(field, "enter a non-negative number");
+    }
+    for (const auto& [field, text] : {std::pair{"sample_rate", &sampleRate_},
+                                      {"channels", &channels_},
+                                      {"bit_depth", &bitDepth_}}) {
+        if (text->empty()) continue;
+        const auto value = integer(*text);
+        if (!value) return invalid(field, "enter an integer");
+        if (text == &sampleRate_ && (*value < 8000 || *value > 384000))
+            return invalid(field, "use 8000..384000 Hz");
+        if (text == &channels_ && *value != 1 && *value != 2)
+            return invalid(field, "use one or two channels");
+        if (text == &bitDepth_ && *value != 16 && *value != 24 && *value != 32)
+            return invalid(field, "use 16, 24 or 32 bits");
+    }
+    if (const auto space = secondary_.find(' '); space != std::string::npos) {
+        const auto depth = integer(secondary_.substr(space + 1));
+        if (!depth || (*depth != 16 && *depth != 24 && *depth != 32))
+            return invalid("secondary", "use a format followed by 16, 24 or 32 bits");
+    }
+    return {};
+}
+
 json::Value RenderDialog::args(bool forJob) const {
     json::Value a = json::Value::object();
     if (!pattern_.empty()) a["pattern"] = pattern_;
@@ -393,6 +435,12 @@ void RenderDialog::setStatus(std::string text) {
 
 void RenderDialog::refreshPreview() {
     dirty_ = false;
+    if (auto valid = validateFields(); !valid) {
+        previewText_ = valid.error().message;
+        setStatus(previewText_);
+        if (previewBlock_) previewBlock_->setText(previewText_);
+        return;
+    }
     auto result = dispatcher_.execute({"render.dry-run", previewArgs(), kUiOrigin});
     if (!result) {
         previewText_ = "pattern: " + result.error().message;
@@ -423,6 +471,10 @@ void RenderDialog::refreshPreview() {
 }
 
 void RenderDialog::run() {
+    if (auto valid = validateFields(); !valid) {
+        setStatus(valid.error().message);
+        return;
+    }
     const char* command = source_ == Source::Master  ? "render.mix"
                           : source_ == Source::Stems ? "render.stems"
                                                      : "render.regions";
@@ -445,6 +497,10 @@ void RenderDialog::run() {
 }
 
 void RenderDialog::addToQueue() {
+    if (auto valid = validateFields(); !valid) {
+        setStatus(valid.error().message);
+        return;
+    }
     const char* command = source_ == Source::Master  ? "render.mix"
                           : source_ == Source::Stems ? "render.stems"
                                                      : "render.regions";
@@ -596,7 +652,8 @@ void RenderDialog::pollJob() {
         else if (result->find("path"))
             addFile(*result);
     }
-    setStatus(std::to_string(resultFiles_.size()) +
+    const bool cancelled = s == "cancelled" || s == "canceled";
+    setStatus((cancelled ? "cancelled; " : "") + std::to_string(resultFiles_.size()) +
               (resultFiles_.size() == 1 ? " file rendered" : " files rendered"));
     refreshQueueButton();
     if (resultsBlock_) resultsBlock_->setText(text.empty() ? "no files" : text);

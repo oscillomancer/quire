@@ -2,6 +2,7 @@
 // notation panel typed into, the session read back through commands.
 #include <doctest/doctest.h>
 #include <unistd.h>
+#include "product_fixture.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -18,6 +19,7 @@
 #include "supple/gui/window.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
+#include "supple/ui/widgets.h"
 
 using namespace supple;
 
@@ -63,8 +65,8 @@ struct Fixture {
         engine::registerEngineCommands(registry);
         dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
-        actions = std::make_unique<gui::AppActions>(registry, *dispatcher, *app, ui,
-                                                    actions::Keymap::defaultFile("quire-test"));
+        actions = std::make_unique<gui::AppActions>(
+            registry, *dispatcher, *app, ui, actions::Keymap::defaultFile(gui::test::slug()));
         editor = std::make_unique<gui::MidiEditor>(*root, *actions, *dispatcher, *app, ui);
         auto frame = std::make_unique<ui::Node>("window");
         frame->layout.dir = ui::Layout::Dir::Column;
@@ -133,6 +135,83 @@ struct Fixture {
 };
 
 }  // namespace
+
+TEST_CASE("MIDI editor: an empty roll can marquee without a note anchor") {
+    Fixture f;
+    if (!f.ok) return;
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"remove","notes":[0,1,2,3]}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    const auto version = f.app->head().version;
+    f.drag(f.at(0.5, 60), f.at(2, 64));
+    CHECK(f.editor->state().notes.empty());
+    CHECK(f.editor->state().selected.empty());
+    CHECK(f.app->head().version == version);
+}
+
+TEST_CASE("MIDI editor: selected notes painted on top win overlapping hit tests") {
+    Fixture f;
+    if (!f.ok) return;
+    f.exec("midi.edit",
+           R"({"item":")" + f.item +
+               R"(","ops":[{"op":"add","pitch":60,"start":0,"length":1,"velocity":40}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& state = f.editor->state();
+    REQUIRE(state.notes.size() == 5);
+    state.selected = {0};
+    f.frame();
+    f.pointer(ui::PointerEvent::Type::Down, f.at(0.4, 60));
+    CHECK(state.selected == std::set<std::size_t>{0});
+    f.pointer(ui::PointerEvent::Type::Up, f.at(0.4, 60));
+    CHECK(state.selected == std::set<std::size_t>{0});
+}
+
+TEST_CASE("MIDI editor: external note removal cancels a captured drag") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    const ui::Point start = f.at(3.5, 72);
+    f.pointer(ui::PointerEvent::Type::Down, start);
+    REQUIRE(f.editor->state().drag == gui::RollState::Drag::Move);
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[{"op":"remove","notes":[3]}]})");
+    f.frame();
+    CHECK(f.editor->state().drag == gui::RollState::Drag::None);
+    const auto version = f.app->head().version;
+    f.pointer(ui::PointerEvent::Type::Move, {start.x + 20, start.y - 12});
+    f.pointer(ui::PointerEvent::Type::Up, {start.x + 20, start.y - 12});
+    CHECK(f.app->head().version == version);
+    CHECK(f.notes().size() == 3);
+}
+
+TEST_CASE("MIDI editor: closing cancels velocity and CC previews before reopening") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    SUBCASE("velocity") {
+        const ui::Rect lane = f.root->find("midi.velocity")->bounds();
+        f.pointer(ui::PointerEvent::Type::Down, {f.at(0, 60).x, lane.y + 10});
+        REQUIRE(f.editor->state().drag == gui::RollState::Drag::Velocity);
+    }
+    SUBCASE("CC") {
+        const ui::Rect lane = f.root->find("midi.cc")->bounds();
+        f.pointer(ui::PointerEvent::Type::Down, {f.at(1, 60).x, lane.y + 10});
+        REQUIRE_FALSE(f.editor->state().ccDraft.empty());
+    }
+    f.editor->close();
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    CHECK(f.editor->state().drag == gui::RollState::Drag::None);
+    CHECK_FALSE(f.editor->state().velocityNote);
+    CHECK(f.editor->state().ccDraft.empty());
+    const auto version = f.app->head().version;
+    f.pointer(ui::PointerEvent::Type::Move, f.at(2, 60));
+    f.pointer(ui::PointerEvent::Type::Up, f.at(2, 60));
+    CHECK(f.app->head().version == version);
+}
 
 TEST_CASE("MIDI editor: open, draw, select, move, resize, transpose, delete, velocity") {
     Fixture f;
@@ -452,6 +531,22 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     const auto& strips = mixer.strips();
     REQUIRE(strips.size() == 3);
     CHECK(strips[0].type == "channel");  // channels, busses, masters
+    const auto route =
+        f.exec("route.add", R"({"from":")" + strips[0].track + R"(","to":")" + buss + R"("})")["id"]
+            .asString();
+    mixer.sync();
+    auto* send = dynamic_cast<ui::Label*>(f.root->find("mixer.send." + route));
+    REQUIRE(send);
+    const auto originalSend = send->text();
+    auto* originalFader = strips[0].fader;
+    f.exec("route.set", R"({"route":")" + route + R"(","volume_db":-12})");
+    mixer.sync();
+    CHECK(send->text().find("-12.0") != std::string::npos);
+    CHECK(strips[0].fader == originalFader);
+    f.exec("history.undo", "{}");
+    mixer.sync();
+    CHECK(send->text() == originalSend);
+    f.root->frame(false);
     // The masters stay pinned to the right edge; the others start at the left.
     const ui::Rect row = f.root->find("mixer.strips")->bounds();
     CHECK(static_cast<double>(strips[0].node->bounds().x) ==
@@ -866,4 +961,82 @@ TEST_CASE("MIDI event list: stale inline edits and closing cannot target hidden 
     f.frame();
     CHECK(f.editor->eventList()->list()->count() == 4);
     CHECK(f.editor->state().selected.empty());
+}
+
+TEST_CASE("MIDI external edits clear identity and reject a gesture before the next sync") {
+    Fixture f;
+    REQUIRE(f.ok);
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    f.editor->state().selected = {0};
+    const auto version = f.editor->beginGesture();
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"add","pitch":58,"start":0,"length":1}]})");
+    const auto external = f.app->head().version;
+    json::Value ops = json::parse(R"([{"op":"remove","notes":[0]}])").value();
+    auto result = f.editor->edit(std::move(ops), version);
+    CHECK_FALSE(result);
+    CHECK(f.app->head().version == external);
+    CHECK(f.editor->state().selected.empty());
+    CHECK(f.notes().size() == 5);
+    f.editor->state().selected = {1};
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"velocity","notes":[1],"velocity":50}]})");
+    f.frame();
+    CHECK(f.editor->state().selected.empty());
+}
+
+TEST_CASE("MIDI notation follows project meters at the item's placement") {
+    Fixture f;
+    REQUIRE(f.ok);
+    f.exec("timesig.set", R"({"bar":2,"meter":"3/4"})");
+    f.exec("timesig.set", R"({"bar":3,"meter":"5/8"})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    CHECK(f.editor->notation()->text().find("meter 4/4") == std::string::npos);
+    // Header disagreement is caught by live compile before midi.write.
+    auto* text = f.editor->notation();
+    f.root->focus(text);
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("meter 4/4; voice v; 1: C4:w");
+    const auto version = f.app->head().version;
+    text->onSubmit(text->text());
+    CHECK(f.app->head().version == version);
+    CHECK_FALSE(text->marks().empty());
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("meter 3/4; meter 5/8 at 2; voice v; 1: C4:h. | 2: D4:q E4:q F4:e");
+    text->onSubmit(text->text());
+    CHECK(text->marks().empty());
+    CHECK(f.notes().size() == 4);
+}
+
+TEST_CASE("routing matrix clamps scrolling when channel rows are deleted") {
+    Fixture f;
+    REQUIRE(f.ok);
+    std::vector<std::string> tracks;
+    for (int i = 0; i < 30; ++i)
+        tracks.push_back(
+            f.exec("track.add", R"({"type":"buss","name":"Bus"})")["track"].asString());
+    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    matrix.open();
+    f.root->frame(false);
+    const auto bounds = matrix.grid()->bounds();
+    ui::PointerEvent wheel;
+    wheel.type = ui::PointerEvent::Type::Wheel;
+    wheel.pos = {bounds.x + 201, bounds.y + 123};
+    wheel.wheelY = -100;
+    wheel.wheelX = -100;
+    matrix.grid()->onPointer(wheel);
+    for (const auto& track : tracks) f.exec("track.remove", R"({"track":")" + track + R"("})");
+    matrix.sync();
+    f.root->frame(false);
+    // Row zero and column zero return to their ordinary screen positions.
+    ui::PointerEvent hover;
+    hover.type = ui::PointerEvent::Type::Move;
+    hover.pos = {bounds.x + 201, bounds.y + 123};
+    matrix.grid()->onPointer(hover);
+    auto* status = f.root->find("routing.status");
+    REQUIRE(status);
+    CHECK(status->valueText().find(matrix.model().blocked(0, 0)) != std::string::npos);
+    CHECK(status->valueText().find("not allowed") != std::string::npos);
 }

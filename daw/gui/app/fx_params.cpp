@@ -32,6 +32,7 @@ ParamPanel::ParamPanel(cmd::Dispatcher& dispatcher, ui::Root& root)
 
 Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
     fx_ = fx;
+    gesture_.clear();
     auto query = [&](std::string command, json::Value args) {
         return dispatcher_.execute({std::move(command), std::move(args), kUiOrigin});
     };
@@ -186,10 +187,14 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                     gesture_.clear();
                     return;
                 }
-                if (g == ui::Gesture::Begin) gesture_ = "fx.param:" + idText(fx_) + ":" + key;
+                if (g == ui::Gesture::Begin) {
+                    gesture_ = "fx.param:" + idText(fx_) + ":" + key + ":" +
+                               std::to_string(++gestureSerial_);
+                    return;
+                }
                 const double value = params::clampPhysical(
                     spec_keep->spec, params::fromNormalized(spec_keep->spec, normalized));
-                setPhysical(value, true);
+                setPhysical(value, g == ui::Gesture::Move);
             };
             slider->setValue(params::toNormalized(spec, physical));
             slider->setDefault(params::toNormalized(spec, spec.def));

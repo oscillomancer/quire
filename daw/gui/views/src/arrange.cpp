@@ -812,16 +812,19 @@ class Corner : public ui::Node {
 
 class Playhead : public ui::Node {
   public:
-    explicit Playhead(ArrangeView& view) : Node("playhead"), view_(view) {}
+    explicit Playhead(std::shared_ptr<ArrangeView*> alive)
+        : Node("playhead"), alive_(std::move(alive)) {}
     // The overlay's children are arranged with their own bounds, so take the
     // parent's (the full window).
     void arrange(const ui::Canvas&, const ui::Rect&) override {
         if (parent()) setBounds(parent()->bounds());
     }
     void paint(ui::Canvas& c) override {
-        const ui::Rect a = view_.lanesRect();
+        if (!*alive_) return;
+        const ArrangeView& view = **alive_;
+        const ui::Rect a = view.lanesRect();
         if (a.empty()) return;
-        const float x = view_.playheadX();
+        const float x = view.playheadX();
         if (x < a.x - 1 || x > a.right() + 1) return;
         const ui::Color col = c.theme().color("accent");
         c.line({x, a.y}, {x, a.bottom()}, col, 1.0f);
@@ -829,7 +832,7 @@ class Playhead : public ui::Node {
     }
 
   private:
-    ArrangeView& view_;
+    std::shared_ptr<ArrangeView*> alive_;
 };
 
 // --- the view ----------------------------------------------------------------------
@@ -839,6 +842,7 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
       peaks_(peaks),
       resolve_(std::move(resolve)),
       transportSource_(std::move(transport)) {
+    alive_ = std::make_shared<ArrangeView*>(this);
     gestures_ = std::make_unique<ItemGestures>(*this);
     interactive = true;
     focusable = true;
@@ -945,12 +949,12 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     layout_.onChanged = [this] {
         clampScroll();
         syncScrollbars();
-        if (tcp_) tcp_->invalidate();
+        if (tcp_) tcp_->scrolled();
         damageViews();
     };
 }
 
-ArrangeView::~ArrangeView() = default;
+ArrangeView::~ArrangeView() { *alive_ = nullptr; }
 
 void ArrangeView::show(const model::Session& session) {
     if (!layout_.show(session)) return;
@@ -1091,7 +1095,9 @@ void ArrangeView::applyFollow() {
 }
 
 bool ArrangeView::installOverlay(ui::Root& root) {
-    root.overlay().add(std::make_unique<Playhead>(*this));
+    if (overlayInstalled_) return true;
+    overlayInstalled_ = true;
+    overlay_ = root.addOverlay(std::make_unique<Playhead>(alive_));
     gestures_->installOverlay(root);
     return true;
 }
@@ -1117,7 +1123,7 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
     // Where the pointer is decides: over the track panel the wheel scrolls the
     // tracks (and the lanes with them); over the lanes and the ruler it zooms
-    // around the playhead (Shift: scroll in time, Ctrl: scroll the tracks,
+    // under the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
     // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
@@ -1133,12 +1139,12 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
             std::max(0.0, v.startSeconds - static_cast<double>(dx) * 60.0 / v.pixelsPerSecond);
-    } else {  // horizontal zoom around the playhead: it keeps its place on screen
-        const double keep = playhead_ - v.startSeconds;
+    } else {  // horizontal zoom under the pointer
+        const double keep = static_cast<double>(e.pos.x - lanesRect().x) / v.pixelsPerSecond;
+        const double anchor = v.startSeconds + keep;
         v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
         v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
-        v.startSeconds =
-            std::max(0.0, playhead_ - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
+        v.startSeconds = std::max(0.0, anchor - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
     }
     setViewport(v);
     return true;

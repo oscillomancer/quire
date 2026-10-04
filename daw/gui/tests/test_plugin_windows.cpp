@@ -2,11 +2,16 @@
 // SUPPLE_GUI_DISPLAY_TEST=1 (a window appears for about a second).
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
+#include "product_fixture.h"
 
+#include <clap/clap.h>
 #include <unistd.h>
+#include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <thread>
 
 #include "plugin_windows.h"
@@ -14,6 +19,64 @@
 #include "supple/host/clap_host.h"
 
 using namespace supple;
+
+TEST_CASE("editor FD watching reports startup failure and stops without a display") {
+    auto failed = gui::FdWatcher::create([] {},
+                                         [](int*) {
+                                             errno = EMFILE;
+                                             return -1;
+                                         });
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().code == "gui.editor.fds");
+    int descriptors[2];
+    REQUIRE(::pipe(descriptors) == 0);
+    std::mutex mutex;
+    std::condition_variable ready;
+    bool notified = false;
+    auto watcher = gui::FdWatcher::create([&] {
+        std::lock_guard lock(mutex);
+        notified = true;
+        ready.notify_one();
+    });
+    REQUIRE(watcher);
+    (*watcher)->watch({{descriptors[0], CLAP_POSIX_FD_READ}});
+    REQUIRE(::write(descriptors[1], "x", 1) == 1);
+    {
+        std::unique_lock lock(mutex);
+        ready.wait(lock, [&] { return notified; });
+    }
+    const auto events = (*watcher)->takeReady();
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().first == descriptors[0]);
+    CHECK((events.front().second & CLAP_POSIX_FD_READ) != 0);
+    CHECK_FALSE((*watcher)->error());
+    watcher->reset();  // must wake an otherwise idle poll before joining
+    ::close(descriptors[0]);
+    ::close(descriptors[1]);
+    notified = false;
+    int polls = 0;
+    auto broken = gui::FdWatcher::create(
+        [&] {
+            std::lock_guard lock(mutex);
+            notified = true;
+            ready.notify_one();
+        },
+        {},
+        [&](std::span<pollfd>) {
+            ++polls;
+            errno = EBADF;
+            return -1;
+        });
+    REQUIRE(broken);
+    {
+        std::unique_lock lock(mutex);
+        ready.wait(lock, [&] { return notified; });
+    }
+    REQUIRE((*broken)->error());
+    CHECK((*broken)->error()->code == "gui.editor.fds");
+    broken->reset();
+    CHECK(polls == 1);  // a permanent failure terminates instead of spinning
+}
 
 TEST_CASE("the stock plugins offer embeddable X11 editors (no display needed)") {
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
@@ -25,8 +88,8 @@ TEST_CASE("the stock plugins offer embeddable X11 editors (no display needed)") 
     }
     int withEditor = 0;
     for (const host::PluginInfo& info : *plugins) {
-        auto instance =
-            host::Instance::create(info, host::HostIdentity{"Quire test", "Supple Audio", "", "0"});
+        auto instance = host::Instance::create(
+            info, host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"});
         REQUIRE(instance);
         withEditor += (*instance)->hasEditor();
         CHECK_FALSE((*instance)->editorOpen());
@@ -53,8 +116,8 @@ TEST_CASE("an editor opens in its window, services its timers and closes") {
     REQUIRE(plugins);
     gui::PluginWindows windows(**platform, **app, [] {});
     for (const host::PluginInfo& info : *plugins) {
-        auto instance =
-            host::Instance::create(info, host::HostIdentity{"Quire test", "Supple Audio", "", "0"});
+        auto instance = host::Instance::create(
+            info, host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"});
         REQUIRE(instance);
         if (!(*instance)->hasEditor()) continue;
         // SUPPLE_EDITOR_ONLY=<name> and SUPPLE_EDITOR_HOLD_MS for a manual look.
@@ -101,7 +164,7 @@ TEST_CASE("isolated plugins' editors embed from their bridge process (opt-in, ne
         if (const char* only = std::getenv("SUPPLE_EDITOR_ONLY"); only && info.name != only)
             continue;
         auto instance = host::Instance::create(
-            info, host::HostIdentity{"Quire test", "Supple Audio", "", "0"}, true);
+            info, host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"}, true);
         REQUIRE(instance);
         if (!(*instance)->hasEditor()) continue;
         REQUIRE((*instance)->activate(48000, 32, 512));
@@ -151,8 +214,8 @@ TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)")
         if (info.format != "vst3") continue;
         if (const char* only = std::getenv("SUPPLE_EDITOR_ONLY"); only && info.name != only)
             continue;
-        auto instance =
-            host::Instance::create(info, host::HostIdentity{"Quire test", "Supple Audio", "", "0"});
+        auto instance = host::Instance::create(
+            info, host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"});
         if (!instance) {
             MESSAGE(info.name << ": " << instance.error().message);
             continue;

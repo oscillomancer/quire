@@ -186,6 +186,53 @@ struct Fixture {
 
 }  // namespace
 
+TEST_CASE("arrange gestures: copy validates the unselected anchor's destination") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id anchor = f.itemOnRow(0), selected = f.itemOnRow(1);
+    const auto env =
+        f.dispatcher->execute({"env.add",
+                               json::parse(R"({"track":")" + f.item(anchor).track.str() +
+                                           R"(","param":"volume","points":[]})")
+                                   .value(),
+                               kUi});
+    REQUIRE(env);
+    f.sync();
+    g.setSelection({selected});
+    const ui::Rect r = f.rectOf(anchor);
+    const ui::Point press{r.x + 14, r.y + r.h / 2};
+    const ui::Rect lane = f.view->rowRect(1);
+    f.pointer(ui::PointerEvent::Type::Down, press, 1, 1, ui::kCtrl);
+    f.pointer(ui::PointerEvent::Type::Move, {press.x + 16, lane.y + lane.h / 2}, 1, 1, ui::kCtrl);
+    CHECK(g.state().deltaRows == 0);  // the anchor would land on an envelope lane
+    f.pointer(ui::PointerEvent::Type::Up, {press.x + 16, lane.y + lane.h / 2}, 1, 1, ui::kCtrl);
+}
+
+TEST_CASE(
+    "arrange gestures: track deletion between preview and release cannot index a missing row") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id anchor = f.itemOnRow(1), selected = f.itemOnRow(0);
+    g.setSelection({selected});
+    const ui::Rect r = f.rectOf(anchor);
+    const ui::Point press{r.x + 14, r.y + r.h / 2};
+    const ui::Point target{press.x + 16, f.view->rowRect(4).y + r.h / 2};
+    f.pointer(ui::PointerEvent::Type::Down, press, 1, 1, ui::kCtrl);
+    f.pointer(ui::PointerEvent::Type::Move, target, 1, 1, ui::kCtrl);
+    REQUIRE(g.state().deltaRows == 3);
+    for (std::size_t row : {5u, 4u}) {
+        const auto track = f.view->trackLayout().rows()[row].track;
+        REQUIRE(f.dispatcher->execute(
+            {"track.remove", json::parse(R"({"track":")" + track.str() + R"("})").value(), kUi}));
+    }
+    f.sync();
+    const auto count = f.app->head().items.size();
+    f.pointer(ui::PointerEvent::Type::Up, target, 1, 1, ui::kCtrl);
+    CHECK(f.app->head().items.size() == count);
+}
+
 TEST_CASE("arrange gestures: select, move (snapped, free, across tracks), trim, slip, fades") {
     Fixture f;
     if (!f.ok) {
@@ -478,6 +525,28 @@ TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pool
     rightClick({xOfBeat(15) + 1, body});
     f.menuRow("autoitem.menu", 6);
     CHECK(items().size() == 1);
+    // Deleting the block during a point gesture must not write its draft into
+    // the underlying envelope instead.
+    const auto remaining = items().front().first;
+    const auto& remainingItem = *f.app->head().autoItems.find(remaining);
+    const ui::Point point{xOfBeat(remainingItem.position + remainingItem.length / 2),
+                          area.y + area.h * 0.85f};
+    f.pointer(ui::PointerEvent::Type::Down, point);
+    f.pointer(ui::PointerEvent::Type::Move, {point.x, point.y - 3});
+    REQUIRE(f.view->gestures().state().autoItem == remaining);
+    REQUIRE(f.dispatcher->execute(
+        {"autoitem.remove", json::parse(R"({"item":")" + remaining.str() + R"("})").value(), kUi}));
+    f.sync();
+    const auto underlying = f.app->head().envelopes.find(env)->points;
+    const auto version = f.app->head().version;
+    f.pointer(ui::PointerEvent::Type::Up, {point.x, point.y - 3});
+    const auto& after = f.app->head().envelopes.find(env)->points;
+    REQUIRE(after.size() == underlying.size());
+    for (std::size_t i = 0; i < after.size(); ++i) {
+        CHECK(after[i].pos == underlying[i].pos);
+        CHECK(after[i].value == underlying[i].value);
+    }
+    CHECK(f.app->head().version == version);
 }
 
 TEST_CASE("arrange gestures: the mouse map rebinds modifiers per context (gap log #37)") {
@@ -512,6 +581,13 @@ TEST_CASE("arrange gestures: the mouse map rebinds modifiers per context (gap lo
     const auto bad = g.mouse.set("item.drag", ui::kAlt, "fly");
     REQUIRE_FALSE(bad);
     CHECK(bad.error().hint.find("slip") != std::string::npos);
+    REQUIRE(g.mouse.set("item.drag", 0, "copy"));
+    REQUIRE(g.mouse.set("item.drag", ui::kAlt, ""));
+    CHECK(g.mouse.behaviour("item.drag", ui::kAlt) == "copy");
+    CHECK(g.mouse.behaviour("item.drag", ui::kCtrl | ui::kAlt | ui::kShift) == "copy");
+    auto restored = views::MouseMap::fromJson(g.mouse.toJson());
+    REQUIRE(restored);
+    CHECK(restored->behaviour("item.drag", ui::kAlt) == "copy");
 }
 
 TEST_CASE("arrange gestures: Alt on an item's right edge stretches it (length and play rate)") {
@@ -901,4 +977,62 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     f.menuRow("item.menu", 8);
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
+}
+
+TEST_CASE("left trim moves every take offset at its own play rate in one undo step") {
+    Fixture f;
+    REQUIRE(f.ok);
+    std::optional<model::Id> id;
+    for (const auto& entry : f.app->head().items)
+        if (entry.value->takes.size() == 2) id = entry.id;
+    REQUIRE(id);
+    const auto takes = f.item(*id).takes;
+    REQUIRE(f.dispatcher->execute(
+        {"take.set", json::parse(R"({"take":")" + takes[1].str() + R"(","playrate":2})").value(),
+         kUi}));
+    f.sync();
+    const auto before = f.app->head();
+    const auto span = model::itemSpan(before, f.item(*id));
+    const auto steps = f.steps();
+    const auto rect = f.rectOf(*id);
+    f.drag({rect.x + 2, rect.y + rect.h / 2}, {rect.x + 10, rect.y + rect.h / 2});
+    REQUIRE(f.steps() == steps + 1);
+    const double delta = model::itemSpan(f.app->head(), f.item(*id)).startSec - span.startSec;
+    REQUIRE(delta > 0);
+    for (auto take : takes)
+        CHECK(f.app->head().takes.find(take)->startOffset ==
+              doctest::Approx(before.takes.find(take)->startOffset +
+                              delta * before.takes.find(take)->playrate));
+    REQUIRE(f.dispatcher->execute({"history.undo", json::Value::object(), kUi}));
+    for (auto take : takes)
+        CHECK(f.app->head().takes.find(take)->startOffset == before.takes.find(take)->startOffset);
+}
+
+TEST_CASE("clipboard channel offsets skip envelope rows and report missing targets") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto& gestures = f.view->gestures();
+    const auto a = f.itemOnRow(0), b = f.itemOnRow(1);
+    const auto target = f.view->trackLayout().rows()[2].track;
+    const auto next = f.view->trackLayout().rows()[3].track;
+    const auto last = f.view->trackLayout().rows()[5].track;
+    gestures.setSelection({a, b});
+    gestures.copySelection();
+    REQUIRE(f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"track":")" + target.str() + R"(","param":"volume","points":[]})").value(),
+         kUi}));
+    f.sync();
+    REQUIRE(gestures.paste(200, target));
+    f.sync();
+    REQUIRE(gestures.selection().size() == 2);
+    CHECK(f.item(gestures.selection()[0]).track == target);
+    CHECK(f.item(gestures.selection()[1]).track == next);
+    std::string diagnostic;
+    gestures.onError = [&](const Error& error) { diagnostic = error.message; };
+    REQUIRE(gestures.paste(300, last));
+    f.sync();
+    REQUIRE(gestures.selection().size() == 1);
+    CHECK(f.item(gestures.selection().front()).track == last);
+    CHECK(diagnostic.find("dropped 1") != std::string::npos);
 }

@@ -256,12 +256,13 @@ void AgentPanel::send(const std::string& prompt) {
     }
     ensureSession();
     if (!session_ || session_->busy()) return;
+    const std::string submitted = prompt;
     auto card = std::make_unique<Card>("agent.you." + std::to_string(serial_++), "selection", 0.7f);
-    card->emplace<ui::TextBlock>(card->id() + ".text", prompt);
+    card->emplace<ui::TextBlock>(card->id() + ".text", submitted);
     append(std::move(card));
     input_->setText("");
     speaking_ = nullptr;
-    if (session_->send(prompt)) setBusy(true);
+    if (session_->send(submitted)) setBusy(true);
 }
 
 std::string AgentPanel::describeChange(const json::Value& change) const {

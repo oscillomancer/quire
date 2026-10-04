@@ -40,7 +40,8 @@ class MenuList : public List {
             const MenuItem& item = items_[i];
             if (item.separator || !item.enabled) return;
             auto run = item.run;  // the menu is destroyed by close
-            if (close_) close_();
+            auto close = close_;
+            if (close) close();
             if (run) run();
         };
     }
@@ -55,7 +56,11 @@ class MenuList : public List {
     bool onPointer(const PointerEvent& e) override {
         // A single click activates a menu row (lists need a double click).
         if (e.type == PointerEvent::Type::Up && e.button == 1 && selected()) {
-            if (bounds().contains(e.pos)) onActivate(*selected());
+            if (bounds().contains(e.pos)) {
+                const auto row = *selected();
+                auto activate = onActivate;
+                activate(row);
+            }
             return true;
         }
         if (e.type == PointerEvent::Type::Move && bounds().contains(e.pos)) {
@@ -129,6 +134,7 @@ class PopupFrame : public Node {
 
 Node& Root::openPopup(std::unique_ptr<Node> content, const Rect& anchor, Placement placement,
                       std::function<void()> onClose) {
+    Dispatch dispatch(*this);
     auto frame = std::make_unique<PopupFrame>(std::move(content), anchor, placement,
                                               std::move(onClose), focused_);
     PopupFrame& f = static_cast<PopupFrame&>(overlay_->add(std::move(frame)));
@@ -147,6 +153,7 @@ Node& Root::openPopup(std::unique_ptr<Node> content, const Rect& anchor, Placeme
 }
 
 void Root::closePopup() {
+    Dispatch dispatch(*this);
     if (popups_.empty()) return;
     auto* f = static_cast<PopupFrame*>(popups_.back());
     popups_.pop_back();

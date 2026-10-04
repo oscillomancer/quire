@@ -101,6 +101,105 @@ double envValueAt(const model::Envelope& env, double beat, double fallback) {
     return a.value + (b.value - a.value) * model::shapeCurve(a.shape, a.tension, t);
 }
 
+EnvelopeCurve::EnvelopeCurve(const model::Session& session, model::Id envelope, EnvScale scale,
+                             double from, double to)
+    : scale_(std::move(scale)) {
+    // Index source definitions and boundary points, never expanded loop passes.
+    (void)from;
+    (void)to;
+    normalized_ = scale_.kind == EnvScale::Kind::Plugin && scale_.normalizedInterpolation;
+    const auto* env = session.envelopes.find(envelope);
+    if (!env) return;
+    std::vector<const model::AutomationItem*> items;
+    for (const auto& entry : session.autoItems)
+        if (entry.value->envelope == envelope) items.push_back(entry.value.get());
+    std::stable_sort(items.begin(), items.end(),
+                     [](auto* a, auto* b) { return a->position < b->position; });
+    double previousEnd = -1e300;
+    auto add = [&](double at, double value) { points_.push_back({at, value}); };
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const auto& item = *items[i];
+        const double start = std::max(item.position, previousEnd);
+        const double end = i + 1 < items.size()
+                               ? std::min(item.position + item.length, items[i + 1]->position)
+                               : item.position + item.length;
+        if (!(end > start) || !(item.sourceLength > 0)) continue;
+        for (const auto& point : env->points)
+            if (point.pos > previousEnd && point.pos < start) points_.push_back(point);
+        if (!env->points.empty()) add(start, model::pointsValueAt(env->points, start, 0));
+        Segment segment{start, end, item.sourceLength, item.baseline, item.loop, item.points};
+        for (auto& point : segment.points)
+            point.value = item.baseline + item.amplitude * (point.value - item.baseline);
+        auto local = [&](double at) {
+            return model::pointsValueAt(segment.points, std::min(at, item.sourceLength),
+                                        item.baseline);
+        };
+        add(start, local(0));
+        double last = end - start;
+        if (item.loop) {
+            const double pass = std::max(0.0, std::ceil(last / item.sourceLength - 1e-9) - 1);
+            if (std::isfinite(pass))
+                last -= pass * item.sourceLength;
+            else
+                last = item.sourceLength;
+        }
+        add(end, local(last));
+        if (!env->points.empty()) add(end, model::pointsValueAt(env->points, end, 0));
+        segments_.push_back(std::move(segment));
+        previousEnd = end;
+    }
+    for (const auto& point : env->points)
+        if (point.pos > previousEnd) points_.push_back(point);
+    if (normalized_)
+        for (auto& point : points_) point.value = scale_.toNorm(point.value);
+}
+
+double EnvelopeCurve::valueAt(double beat, double fallback) const {
+    auto domain = [&](double value) { return normalized_ ? scale_.toNorm(value) : value; };
+    double value = model::pointsValueAt(points_, beat, domain(fallback));
+    const auto next =
+        std::upper_bound(segments_.begin(), segments_.end(), beat,
+                         [](double at, const Segment& segment) { return at < segment.start; });
+    if (next != segments_.begin()) {
+        const auto& item = *std::prev(next);
+        if (beat >= item.start && beat < item.end) {
+            const double local = beat - item.start;
+            const double at = item.loop ? std::fmod(local, item.sourceLength) : local;
+            const double endLocal = item.loop ? std::min(item.sourceLength, item.end - beat + at)
+                                              : item.end - item.start;
+            auto sourceValue = [&](double x) {
+                return model::pointsValueAt(item.points, std::min(x, item.sourceLength),
+                                            item.baseline);
+            };
+            model::EnvPoint a{0, domain(sourceValue(0))},
+                b{endLocal, domain(sourceValue(endLocal))};
+            const auto upper = std::upper_bound(
+                item.points.begin(), item.points.end(), at,
+                [](double x, const model::EnvPoint& point) { return x < point.pos; });
+            auto lower = upper;
+            while (lower != item.points.begin() && std::prev(lower)->pos >= item.sourceLength)
+                --lower;
+            if (lower != item.points.begin()) {
+                const auto& point = *std::prev(lower);
+                if (point.pos < item.sourceLength) {
+                    a = point;
+                    a.value = domain(a.value);
+                }
+            }
+            if (upper != item.points.end() && upper->pos < item.sourceLength &&
+                upper->pos < b.pos) {
+                b = *upper;
+                b.value = domain(b.value);
+            }
+            value = b.pos > a.pos ? a.value + (b.value - a.value) *
+                                                  model::shapeCurve(a.shape, a.tension,
+                                                                    (at - a.pos) / (b.pos - a.pos))
+                                  : b.value;
+        }
+    }
+    return normalized_ ? scale_.fromNorm(value) : value;
+}
+
 int envOrder(const model::Envelope& env) {
     const std::string& p = env.target.param;
     return p == "volume" ? 0 : p == "pan" ? 1 : p == "mute" ? 2 : 3;

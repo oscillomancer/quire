@@ -76,19 +76,13 @@ Rect Fader::track() const {
                : Rect{b.x + 6, b.y + b.h / 2 - 2, std::max(0.0f, b.w - 12), 4};
 }
 
-double Fader::positionAt(Point p) const {
-    const Rect t = track();
-    return orientation_ == Orientation::Vertical
-               ? std::clamp(1.0 - static_cast<double>((p.y - t.y) / t.h), 0.0, 1.0)
-               : std::clamp(static_cast<double>((p.x - t.x) / t.w), 0.0, 1.0);
-}
-
 void Fader::change(double db, Gesture g) {
     db = std::clamp(db, kFaderSilenceDb, kTopDb);
     if (db != db_ || g == Gesture::Begin || g == Gesture::End) {
         db_ = db;
         invalidate();
-        if (onChange) onChange(db_, g);
+        auto callback = onChange;
+        if (callback) callback(db_, g);
     }
 }
 
@@ -142,8 +136,9 @@ bool Fader::onPointer(const PointerEvent& e) {
             if (!dragging_) return false;
             // Relative drags: grabbing the cap never jumps; Shift is fine.
             const Rect tr = track();
-            const float delta = orientation_ == Orientation::Vertical ? (press_.y - e.pos.y) / tr.h
-                                                                      : (e.pos.x - press_.x) / tr.w;
+            const float delta = orientation_ == Orientation::Vertical
+                                    ? (press_.y - e.pos.y) / std::max(1.0f, tr.h)
+                                    : (e.pos.x - press_.x) / std::max(1.0f, tr.w);
             const double scale = (e.mods & kShift) ? 0.1 : 1.0;
             const double pos =
                 std::clamp(faderPosition(pressDb_) + static_cast<double>(delta) * scale, 0.0, 1.0);
@@ -217,7 +212,8 @@ void PanControl::change(double pan, Gesture g) {
     if (pan != pan_ || g == Gesture::Begin || g == Gesture::End) {
         pan_ = pan;
         invalidate();
-        if (onChange) onChange(pan_, g);
+        auto callback = onChange;
+        if (callback) callback(pan_, g);
     }
 }
 
@@ -322,7 +318,8 @@ void Slider::change(double value, Gesture g) {
     if (v != value_ || g == Gesture::Begin || g == Gesture::End) {
         value_ = v;
         invalidate();
-        if (onChange) onChange(value_, g);
+        auto callback = onChange;
+        if (callback) callback(value_, g);
     }
 }
 
@@ -357,7 +354,7 @@ bool Slider::onPointer(const PointerEvent& e) {
         case T::Move: {
             if (!dragging_) return false;
             const double scale = (e.mods & kShift) ? 0.1 : 1.0;
-            const double width = static_cast<double>(track().w);
+            const double width = static_cast<double>(std::max(1.0f, track().w));
             const double delta = static_cast<double>(e.pos.x - press_.x) / width;
             change(pressValue_ + delta * scale, Gesture::Move);
             return true;
@@ -579,11 +576,12 @@ bool Toggle::onPointer(const PointerEvent& e) {
         case PointerEvent::Type::Up: {
             const bool fire = pressed_ && bounds().contains(e.pos);
             pressed_ = false;
+            invalidate();
             if (fire) {
                 on_ = !on_;
-                if (onToggle) onToggle(on_);
+                auto callback = onToggle;
+                if (callback) callback(on_);
             }
-            invalidate();
             return true;
         }
         default:
@@ -595,7 +593,8 @@ bool Toggle::onKey(const KeyEvent& e) {
     if (e.key == SDLK_RETURN || e.key == SDLK_SPACE) {
         on_ = !on_;
         invalidate();
-        if (onToggle) onToggle(on_);
+        auto callback = onToggle;
+        if (callback) callback(on_);
         return true;
     }
     return false;

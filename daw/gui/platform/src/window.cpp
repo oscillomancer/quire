@@ -61,11 +61,14 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     std::unique_ptr<Window> w(new Window);
-    SDL_WindowFlags flags =
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (options.resizable) flags |= SDL_WINDOW_RESIZABLE;
+    if (options.utility) flags |= SDL_WINDOW_UTILITY;
     if (options.hidden) flags |= SDL_WINDOW_HIDDEN;
     w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
     if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+    if (options.parent && options.parent->window_)
+        (void)SDL_SetWindowParent(w->window_, options.parent->window_);
     w->context_ = SDL_GL_CreateContext(w->window_);
     if (!w->context_) return sdlError("gui.window", "SDL_GL_CreateContext");
     SDL_GL_MakeCurrent(w->window_, static_cast<SDL_GLContext>(w->context_));

@@ -1,4 +1,5 @@
 #include "plan.h"
+#include "supple/model/fade_shape.h"
 
 #include <atomic>
 #include <cassert>
@@ -16,25 +17,8 @@ std::int64_t latTap(const Node& n, model::Tap tap) {
     return tap == model::Tap::PreFx ? n.latIn : n.latIn + n.latChain;
 }
 
-double fadeCurve(model::FadeShape shape, double t) {
-    t = std::clamp(t, 0.0, 1.0);
-    switch (shape) {
-        case model::FadeShape::Linear:
-            return t;
-        case model::FadeShape::Slow:
-            return t * t;
-        case model::FadeShape::Fast:
-            return 1.0 - (1.0 - t) * (1.0 - t);
-        case model::FadeShape::SlowFast:
-            return t * t * (3.0 - 2.0 * t);
-        case model::FadeShape::FastSlow:
-            return 0.5 - std::sin(std::asin(1.0 - 2.0 * t) / 3.0);
-        case model::FadeShape::Cos:
-            return std::sin(t * std::numbers::pi / 2.0);  // equal power
-        case model::FadeShape::Exp:
-            return t * t * t;
-    }
-    return t;
+double fadeCurve(model::FadeShape shape, double curve, double t) {
+    return model::fadeGain(shape, curve, t);
 }
 
 // Note and control events of the MIDI items on `track`, in samples from the
@@ -857,6 +841,8 @@ Status prepare(Plan& p, const Session& s) {
             tc.fadeOut = time::samplesAt(it.fadeOut.length, p.rate);
             tc.fadeInShape = it.fadeIn.shape;
             tc.fadeOutShape = it.fadeOut.shape;
+            tc.fadeInCurve = it.fadeIn.curve;
+            tc.fadeOutCurve = it.fadeOut.curve;
         }
     // Audio items, like events shifted by the track's input latency.
     for (Node& n : p.nodes) {
@@ -919,6 +905,8 @@ Status prepare(Plan& p, const Session& s) {
             c.fadeOut = time::samplesAt(it.fadeOut.length, p.rate);
             c.fadeInShape = it.fadeIn.shape;
             c.fadeOutShape = it.fadeOut.shape;
+            c.fadeInCurve = it.fadeIn.curve;
+            c.fadeOutCurve = it.fadeOut.curve;
             for (std::size_t k = 0; k < n.takeChains.size(); ++k) {
                 if (n.takeChains[k].item != e.id) continue;
                 // Through its take chain: the raw source; gain, pan and fades after it.
@@ -1173,10 +1161,10 @@ void playClip(const Clip& c, Stereo& into, std::int64_t pos, std::uint32_t n,
         }
         double fade = 1.0;
         if (c.fadeIn > 0 && k < c.fadeIn)
-            fade *=
-                fadeCurve(c.fadeInShape, static_cast<double>(k) / static_cast<double>(c.fadeIn));
+            fade *= fadeCurve(c.fadeInShape, c.fadeInCurve,
+                              static_cast<double>(k) / static_cast<double>(c.fadeIn));
         if (c.fadeOut > 0 && k >= c.length - c.fadeOut)
-            fade *= fadeCurve(c.fadeOutShape,
+            fade *= fadeCurve(c.fadeOutShape, c.fadeOutCurve,
                               static_cast<double>(c.length - k) / static_cast<double>(c.fadeOut));
         const auto i = static_cast<std::size_t>(t - pos);
         into.l[i] += static_cast<float>(static_cast<double>(l) * c.gainL * fade);
@@ -1401,9 +1389,10 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         const std::int64_t k = t - tc.start;
         double g = 1.0;
         if (tc.fadeIn > 0 && k < tc.fadeIn)
-            g *= fadeCurve(tc.fadeInShape, static_cast<double>(k) / static_cast<double>(tc.fadeIn));
+            g *= fadeCurve(tc.fadeInShape, tc.fadeInCurve,
+                           static_cast<double>(k) / static_cast<double>(tc.fadeIn));
         if (tc.fadeOut > 0 && k >= length - tc.fadeOut)
-            g *= fadeCurve(tc.fadeOutShape,
+            g *= fadeCurve(tc.fadeOutShape, tc.fadeOutCurve,
                            static_cast<double>(length - k) / static_cast<double>(tc.fadeOut));
         if (tc.volume.active()) g *= dbToGain(tc.volume.at(t));
         if (tc.mute.active() && tc.mute.at(t) >= .5) g = 0.0;

@@ -83,7 +83,8 @@ bool Button::onPointer(const PointerEvent& e) {
             const bool fire = pressed_ && bounds().contains(e.pos);
             pressed_ = false;
             invalidate();
-            if (fire && onClick) onClick();
+            auto callback = onClick;
+            if (fire && callback) callback();
             return true;
         }
         default:
@@ -93,7 +94,8 @@ bool Button::onPointer(const PointerEvent& e) {
 
 bool Button::onKey(const KeyEvent& e) {
     if (e.key == SDLK_RETURN || e.key == SDLK_SPACE) {
-        if (onClick) onClick();
+        auto callback = onClick;
+        if (callback) callback();
         return true;
     }
     return false;

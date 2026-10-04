@@ -299,12 +299,118 @@ TEST_CASE("TCP sends: pooling during a captured drag keeps the original source")
 
 TEST_CASE("TCP sends: overlay survives replacement of its owning view") {
     SendsFixture f;
+    const auto overlays = f.root->overlay().children().size();
+    f.view().installOverlay(*f.root);
+    CHECK(f.root->overlay().children().size() == overlays);
     f.pointer(Pointer::Down, SendsFixture::centre(f.out(f.a).bounds()));
     f.pointer(Pointer::Move, f.target(f.b, true));
     f.root->frame(false);
     f.root->setContent(std::make_unique<ui::Node>("replacement"));
+    CHECK(f.root->overlay().children().empty());
     f.root->frame(false);
     CHECK(f.routes().size() == 0);
+}
+
+TEST_CASE("TCP pooled gestures cancel when scrolling rebinds their row") {
+    SendsFixture f;
+    for (int i = 0; i < 12; ++i) f.add("channel", "Extra " + std::to_string(i));
+    f.sync();
+    ui::Point press{};
+    SUBCASE("fader") {
+        press = SendsFixture::centre(f.view().tcpPanel().controlNode(f.a, "fader")->bounds());
+    }
+    SUBCASE("pan") {
+        press = SendsFixture::centre(f.view().tcpPanel().controlNode(f.a, "pan")->bounds());
+    }
+    SUBCASE("resize") {
+        const auto bounds = f.view().tcpPanel().rowNode(f.a)->bounds();
+        press = {bounds.x + 10, bounds.bottom() - 2};
+    }
+    SUBCASE("rename") {
+        REQUIRE(f.view().tcpPanel().rename(f.a));
+        f.root->text("Renamed");
+    }
+    const auto before = f.history();
+    if (press.x != 0) f.pointer(Pointer::Down, press);
+    auto viewport = f.view().viewport();
+    viewport.scrollY = 10000;
+    f.view().setViewport(viewport);
+    f.root->frame(false);
+    CHECK(f.view().tcpPanel().rowNode(f.a) == nullptr);
+    if (press.x != 0) {
+        f.pointer(Pointer::Move, {press.x + 30, press.y + 20});
+        f.pointer(Pointer::Up, {press.x + 30, press.y + 20});
+    } else
+        f.root->key(SDLK_RETURN);
+    CHECK(f.history() == before);
+    CHECK(f.app->head().tracks.find(f.a)->name == "A");
+}
+
+TEST_CASE("shell selection sync replaces equal-sized selections and drops deleted items") {
+    SendsFixture f;
+    auto add = [&] {
+        json::Value args = json::Value::object();
+        args["track"] = f.a.str();
+        args["notation"] = "voice a; 1: C4:w";
+        const auto result = f.exec("item.add", std::move(args));
+        auto id = model::Id::parse(result.find("item")->asString());
+        REQUIRE(id);
+        return *id;
+    };
+    const auto a = add(), b = add();
+    f.state.selectedItems = {a.str()};
+    f.sync();
+    CHECK(f.view().gestures().selection() == std::vector<model::Id>{a});
+    f.state.selectedItems = {b.str()};
+    f.sync();
+    CHECK(f.view().gestures().selection() == std::vector<model::Id>{b});
+    json::Value args = json::Value::object();
+    args["item"] = b.str();
+    f.exec("item.remove", std::move(args));
+    f.sync();
+    CHECK(f.view().gestures().selection().empty());
+    CHECK(f.state.selectedItems.empty());
+    f.exec("history.undo", json::Value::object());
+    f.sync();
+    REQUIRE(f.app->head().items.find(b));
+    CHECK(f.state.selectedItems.empty());
+    f.state.selectedTracks = {f.b.str()};
+    args = json::Value::object();
+    args["track"] = f.b.str();
+    f.exec("track.remove", std::move(args));
+    f.sync();
+    CHECK(f.state.selectedTracks.empty());
+    f.exec("history.undo", json::Value::object());
+    f.sync();
+    CHECK(f.state.selectedTracks.empty());
+}
+
+TEST_CASE("TCP rows refresh strip type and depth while keeping the same identity") {
+    SendsFixture f;
+    json::Value args = json::Value::object();
+    args["track"] = f.b.str();
+    args["index"] = 0;
+    f.exec("track.move", std::move(args));
+    f.sync();
+    auto* name = f.view().tcpPanel().controlNode(f.a, "name");
+    REQUIRE(name);
+    const float before = name->bounds().x;
+    args = json::Value::object();
+    args["track"] = f.a.str();
+    args["parent"] = f.b.str();
+    f.exec("track.move", std::move(args));
+    f.sync();
+    CHECK(f.view().tcpPanel().controlNode(f.a, "name") == name);
+    CHECK(name->bounds().x == doctest::Approx(static_cast<double>(before + 14)));
+    auto* arm = f.view().tcpPanel().controlNode(f.a, "arm");
+    REQUIRE(arm);
+    CHECK(arm->visible);
+    args = json::Value::object();
+    args["track"] = f.a.str();
+    args["type"] = "buss";
+    f.exec("track.set", std::move(args));
+    f.sync();
+    CHECK_FALSE(arm->visible);
 }
 
 TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one undo step each)") {
@@ -439,17 +545,17 @@ TEST_CASE("TCP: the wheel over the tracks scrolls them and the lanes together, n
         }
     CHECK(volumes() == before);  // no fader or pan moved
 
-    // Over the lanes the wheel zooms around the playhead, which keeps its place.
+    // Over the lanes the wheel keeps the time under the pointer in place.
     f.view().setPlayhead(4.0);
     f.sync();
     const ui::Rect lanes = f.view().lanesRect();
     const float scroll = f.view().viewport().scrollY;
     const double pps = f.view().viewport().pixelsPerSecond;
-    const float x = f.view().lanes().xAt(4.0);
-    wheel({lanes.x + lanes.w / 2, lanes.y + lanes.h / 2}, 1.0f);
+    const float x = lanes.x + lanes.w / 2;
+    const double time = f.view().lanes().timeAt(x);
+    wheel({x, lanes.y + lanes.h / 2}, 1.0f);
     CHECK(f.view().viewport().pixelsPerSecond > pps);
-    CHECK(static_cast<double>(f.view().lanes().xAt(4.0)) ==
-          doctest::Approx(static_cast<double>(x)).epsilon(0.001));
+    CHECK(f.view().lanes().timeAt(x) == doctest::Approx(time).epsilon(0.001));
     CHECK(f.view().viewport().scrollY == scroll);
     // Ctrl scrolls the tracks from the lanes too, still aligned.
     wheel({lanes.x + lanes.w / 2, lanes.y + lanes.h / 2}, -1.0f, ui::kCtrl);
