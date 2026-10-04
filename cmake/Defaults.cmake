@@ -76,21 +76,34 @@ function(supple_add_library name)
   add_library(supple::${name} ALIAS ${name})
 endfunction()
 
-# supple_add_tests(<lib> SOURCES ... [DEPS ...] [LABELS ...])
-# Builds <lib>.tests (doctest) and registers it with CTest.
+# supple_add_tests(<lib> SOURCES ... [DEPS ...] [LABELS ...] [SPLIT])
+# Builds <lib>.tests (doctest) and registers it with CTest. SPLIT registers
+# one CTest entry per source file instead (<lib>.tests.<file stem>, doctest's
+# source-file filter), so a large suite runs in parallel and each part stays
+# within the test timeout under the sanitizers.
 function(supple_add_tests lib)
   if(NOT SUPPLE_BUILD_TESTS)
     return()
   endif()
-  cmake_parse_arguments(ARG "" "" "SOURCES;DEPS;LABELS" ${ARGN})
+  cmake_parse_arguments(ARG "SPLIT" "" "SOURCES;DEPS;LABELS" ${ARGN})
   set(t ${lib}.tests)
   add_executable(${t} ${ARG_SOURCES})
   target_link_libraries(${t} PRIVATE ${lib} ${ARG_DEPS} supple::doctest-main)
   supple_target_defaults(${t})
-  add_test(NAME ${t} COMMAND ${t})
-  set_tests_properties(${t} PROPERTIES LABELS "${lib};${ARG_LABELS}")
+  set(names)
+  if(ARG_SPLIT)
+    foreach(src ${ARG_SOURCES})
+      get_filename_component(stem ${src} NAME_WE)
+      add_test(NAME ${t}.${stem} COMMAND ${t} "-sf=*/${stem}.cpp")
+      list(APPEND names ${t}.${stem})
+    endforeach()
+  else()
+    add_test(NAME ${t} COMMAND ${t})
+    set(names ${t})
+  endif()
+  set_tests_properties(${names} PROPERTIES LABELS "${lib};${ARG_LABELS}")
   if(ARG_LABELS MATCHES "rt")
-    set_tests_properties(${t} PROPERTIES ENVIRONMENT
+    set_tests_properties(${names} PROPERTIES ENVIRONMENT
       "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")
   endif()
 endfunction()

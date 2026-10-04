@@ -25,7 +25,7 @@ def main():
         )
         proxy = None
         try:
-            for _ in range(200):
+            for _ in range(1200):  # up to 30 s: sanitizer builds start slowly
                 if socket.exists():
                     break
                 if server.poll() is not None:

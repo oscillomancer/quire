@@ -22,7 +22,11 @@ if(SUPPLE_BUILD_TESTS)
 
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
-                   tests/test_jack.cpp tests/test_workers.cpp tests/test_meters.cpp LABELS rt)
+                   tests/test_jack.cpp tests/test_workers.cpp tests/test_meters.cpp LABELS rt SPLIT)
+  # The app and command suites take minutes under the sanitizers; the preset
+  # default (600 s) is a per-test fallback, so give the engine parts room.
+  set_tests_properties(engine.tests.test_app engine.tests.test_commands PROPERTIES TIMEOUT 1800
+                       RESOURCE_LOCK engine-heavy)  # several GB each under the sanitizers
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   add_dependencies(engine.tests clap-host-fixtures clap-host-vst3-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)
@@ -48,6 +52,9 @@ if(SUPPLE_BUILD_TESTS)
   target_sources(engine.tests PRIVATE tests/test_bench.cpp bench/session.cpp)
   target_include_directories(engine.tests PRIVATE bench)
   target_compile_definitions(engine.tests PRIVATE BENCH_RECIPE="${CMAKE_CURRENT_SOURCE_DIR}/bench/session.json")
+  add_test(NAME engine.tests.test_bench COMMAND engine.tests "-sf=*/test_bench.cpp")
+  set_tests_properties(engine.tests.test_bench PROPERTIES LABELS "engine;rt" ENVIRONMENT
+    "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME engine.bench-tooling COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${PROJECT_SOURCE_DIR}/tools/bench -p "test_*.py")
