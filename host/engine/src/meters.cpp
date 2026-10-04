@@ -34,7 +34,7 @@ std::uint16_t MeterBank::slotFor(model::Id track) {
     if (freeSlots_.empty()) return kNoSlot;  // more strips than slots: unmetered
     const std::uint16_t slot = freeSlots_.back();
     freeSlots_.pop_back();
-    slots_[slot] = {track, true};
+    slots_[slot] = {track, true, slots_[slot].generation + 1};
     byTrack_[track] = slot;
     return slot;
 }
@@ -56,7 +56,7 @@ void MeterBank::endPlan() {
 void MeterBank::drain(Ring& ring) {
     MeterEntry entry;
     while (ring.pop(entry)) {
-        if (entry.slot >= kSlots) continue;
+        if (entry.slot >= kSlots || entry.generation != slots_[entry.slot].generation) continue;
         std::vector<MeterEntry>& list = pending_[entry.slot];
         if (list.size() >= kMaxPendingPerSlot)
             list.erase(list.begin());  // never heard: newest wins

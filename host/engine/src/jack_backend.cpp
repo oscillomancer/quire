@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -279,6 +280,9 @@ Status JackBackend::available(const std::string& library) {
 
 Status JackBackend::start(const BackendConfig& config, Callback callback) {
     if (impl_) return Error("backend.running", "the backend is already running");
+    if (!std::isfinite(config.sampleRate) || config.sampleRate < 1 || config.sampleRate > 768000)
+        return Error("backend.config", "invalid requested sample rate", "/sample_rate",
+                     "use a finite rate from 1 to 768000 Hz");
     if (config.blockSize == 0 || config.outputs == 0 || config.outputs > Impl::kMaxPorts ||
         config.inputs > Impl::kMaxPorts)
         return Error("backend.config", "the JACK backend needs a block size, 1 to " +

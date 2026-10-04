@@ -49,6 +49,13 @@ plan (built incrementally from the previous one where possible, §1.6).
   filter), plus its PDC delay line.
 - **HwInput / HwOutput** nodes bound to backend ports.
 
+Looping MIDI takes wrap `start_offset` modulo the source's beat length, as audio
+loops do. Compilation covers the initial partial cycle, every full repetition,
+and the final partial cycle; notes crossing the item's start are retriggered
+there and their note-offs remain correctly placed. SMF export is limited to
+16 MiB of encoded bytes, including long-delta padding; larger output returns
+`midi.smf_too_large` before padding is emitted.
+
 ### 1.2 Buffers
 
 All buffers are allocated at compile time: per node, `channels × maxBlock`
@@ -106,11 +113,21 @@ are integer samples; beat positions derived per block from the segment
 table). Looping wraps at exact samples; a block that crosses the loop point is
 split.
 
+Time conversions clamp at their representable limits: `samplesAt` saturates
+rounded products to signed 64-bit samples (NaN maps to zero); `barBeat` clamps
+to signed-int bars including the last fraction of the final bar (NaN selects
+beat zero). Callers must still validate finite positions and leave room for
+block and latency arithmetic. JACK validates requested rates in 1..768000 Hz
+before constructing its latency request.
+
 ### 1.6 Incremental rebuild and plan swap
 
 The compiler diffs the new version against the one the current plan was built
 from (session-model §4). Unchanged nodes keep their plugin instances and
-state (their DSP objects are moved into the new plan); new plugins are
+state (their DSP objects are moved into the new plan). Held timeline notes
+carry only when the receiving instrument instance is retained. Route and parent
+edge delay histories carry when source, destination, tap, kind and delay length
+match; changed lengths start empty. New plugins are
 instantiated and activated on the main thread before the swap; parameter
 changes on existing instances become param events rather than rebuilds.
 The swap: `std::atomic<const RenderPlan*>` exchanged by the model thread;
@@ -194,7 +211,10 @@ reported output latency; entries of an older epoch (a seek or a pause bumped
 it) are dropped, and while the transport is stopped everything already
 processed counts as heard (monitored input). `EngineApp::meters()` drains the
 rings and returns one reading per strip of the newest plan — zeros for a strip
-with no heard audio; decay and peak hold belong to the GUI. A full ring drops
+with no heard audio; decay and peak hold belong to the GUI. Each entry carries
+its slot generation from the publishing plan; entries from a retired allocation
+cannot contaminate a newer track even when loads outrun plan adoption.
+A full ring drops
 the entry and counts it (`engine.status.meter_drops`, per producer). Offline
 renders do not meter at all (no bank: zero cost), and the publishers never
 touch the signal, so renders stay bit-identical.
@@ -253,7 +273,15 @@ preset's engine tests (with the dummy backend).
   flush; a sidecar per file records its track and start, and
   `project.recover` repairs the header to cover everything on disk and places
   takes a crash left out (ADR-0014); punch in/out and loop recording (one take per pass); MIDI recording
-  into MIDI takes; overflow is an error event, never a silent drop.
+  into MIDI takes. Audio ring overflow becomes equal-length silence at its file
+  position and is still reported; loop run positions remain in file-time units.
+  Disk and periodic header errors stop only the failing target and retain that
+  target's first error. The loop run table holds the initial run plus 4096 wraps;
+  when full, capture stops adding input and returns retained passes with a
+  structured `recording.loop_runs_full` warning for the commit. Sidecars require
+  `supple.recording/1.0`, a track id, a positive finite sample rate, and complete,
+  ordered loop runs beginning at file frame zero; invalid sidecars return a
+  structured error and must be skipped during recovery.
 - **Backends** (ADR-0004): JACK (dlopen), dummy, offline in P4; buffer-size,
   sample-rate and device changes stop the engine cleanly, rebuild the plan,
   and restart; xruns are counted (backend callbacks + our own deadline
@@ -273,12 +301,12 @@ instance).
   Data plane: a `memfd` shared-memory region per instance with input/output
   audio buffers, event arenas and a cycle header; wake via eventfd/futex
   through `rt::wake()`.
-- **Pipelined** (default): at cycle n the engine publishes input n and
-  consumes output n−1; the instance's reported latency is increased by one
-  engine block (compensated by PDC). **Synchronous** (opt-in, for
-  low-latency monitoring): the engine publishes input n and spins until
-  output n or a deadline (≤ 30 % of the block period), else silence + a
-  bridge-miss count.
+- The current bridge is synchronous and runs only offline or on rendered-ahead
+  nodes. A stage on a device-callback node (including a take FX stage) passes
+  through with its compensated delay; the callback calls neither processing nor
+  lifecycle methods of the bridge. The plan warning names the FX and asks for
+  `isolation: in_process` to monitor through it. Pipelined live bridging is future
+  work (ADR-0013); synchronous monitoring is not supported.
 - Crash handling: a control thread watches the process (pidfd); on crash the
   instance becomes a **failed node** (silence; `fx.failed` event with the
   signal and last known state kept in the model), the rest of the session
@@ -451,8 +479,10 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   rebuilds its ParamSpec, so the host converts exactly as the plugin does)
   or, for any plugin, by CLAP id or name (plain CLAP values). Semantic points
   are physical and interpolated in the normalized (curve) domain (ADR-0010).
-  Per block the stage gets param events at the block start, every 32 samples
-  and at each point (in time order; unchanged values are not resent),
+  The stage gets param events at absolute timeline sample positions that are
+  multiples of 32 in the lane's latency-shifted coordinates, and at each exact
+  point (in time order; unchanged values are not resent). A block-start value
+  is sent only to initialize a lane after prepare, locate, seek or loop wrap,
   merged into its sorted event list by an allocation-free insertion sort,
   within capacity reserved at prepare. Lanes shift by the latency ahead of
   the stage; seeks reset them and resend. Real-time output equals the

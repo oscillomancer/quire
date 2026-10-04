@@ -1,6 +1,7 @@
 #include <supple/midi/midi.h>
 
 #include <doctest/doctest.h>
+#include <limits>
 
 using namespace supple::midi;
 
@@ -82,4 +83,32 @@ TEST_CASE("SMF writer validates the clip and metadata") {
     CHECK_FALSE(writeSmf(s, {{0, Meter{3, 3}}}, {}).ok());
     CHECK_FALSE(writeSmf(s, {}, {{0, -10.0}}).ok());
     CHECK(writeSmf(s, {{0, Meter{3, 4}}}, {{0, 120.0}}).ok());
+}
+
+TEST_CASE("SMF writing rejects unbounded delta padding with a structured error") {
+    Sequence source;
+    source.length = std::numeric_limits<std::int64_t>::max();
+    auto encoded = writeSmf(source, {}, {});
+    REQUIRE_FALSE(encoded);
+    CHECK(encoded.error().code == "midi.smf_too_large");
+    CHECK(encoded.error().path == "/length");
+    CHECK_FALSE(encoded.error().hint.empty());
+    // A long but bounded delta still round-trips (with padding meta events).
+    source.length = 0x0fffffffLL * 3 + 10;
+    encoded = writeSmf(source, {}, {});
+    REQUIRE(encoded);
+    CHECK(encoded->size() <= kMaxSmfBytes);
+    const auto decoded = readSmf(*encoded);
+    REQUIRE(decoded);
+    CHECK(decoded->length == source.length);
+}
+
+TEST_CASE("SMF writing enforces the encoded byte budget for payloads") {
+    Sequence source;
+    source.sysex = {{0, std::vector<std::uint8_t>(kMaxSmfBytes, 0)}};
+    source.sysex[0].bytes.front() = 0xf0;
+    source.sysex[0].bytes.back() = 0xf7;
+    auto encoded = writeSmf(source, {}, {});
+    REQUIRE_FALSE(encoded);
+    CHECK(encoded.error().code == "midi.smf_too_large");
 }

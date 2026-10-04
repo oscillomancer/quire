@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -329,4 +330,15 @@ TEST_CASE("MIDI from each device reaches the callback in its block (ADR-0016)") 
     CHECK(seen[0] == std::array<int, 4>{300, 1, 0x90, 60});
     CHECK(seen[1] == std::array<int, 4>{900, 0, 0xb0, 7});
     fake.reset();
+}
+
+TEST_CASE("JACK rejects an invalid rate before constructing a latency request") {
+    for (double rate : {0.0, -1.0, 768001.0, 1e300, std::numeric_limits<double>::infinity(),
+                        std::numeric_limits<double>::quiet_NaN()}) {
+        JackBackend backend({.library = FAKE_JACK_PATH});
+        const auto status = backend.start({.sampleRate = rate},
+                                          [](const float* const*, float* const*, std::uint32_t) {});
+        CHECK_FALSE(status);
+        if (!status) CHECK(status.error().code == "backend.config");
+    }
 }

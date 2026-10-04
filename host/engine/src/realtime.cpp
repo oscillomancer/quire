@@ -31,6 +31,7 @@ void pushMeters(MeterBank& bank, const detail::Plan& plan, const std::vector<std
         entry.stream = stream;
         entry.frames = frames;
         entry.slot = node.meterSlot;
+        entry.generation = node.meterGeneration;
         for (int c = 0; c < 2; ++c) {
             entry.peak[c] = node.meterPeak[c];
             entry.sumSq[c] = node.meterSumSq[c];
@@ -309,6 +310,25 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             plan = std::move(*again);
         }
     }
+    // Synchronous bridge calls (including lifecycle) belong to the renderer.
+    // A live bridge is a compensated pass-through until live pipelining exists.
+    std::vector<host::Instance*> blocked;
+    for (detail::Node& node : plan->nodes) {
+        if (options_.anticipative && !node.live) continue;
+        detail::forEachStage(node, [&](detail::Stage& stage) {
+            if (!stage.instance || !stage.instance->isolated()) return;
+            stage.callbackBypass = true;
+            blocked.push_back(stage.instance);
+            plan->warnings.push_back(stage.fx.str() +
+                                     ": bridged FX is passed through on a live node; set isolation "
+                                     "to in_process to monitor through it");
+        });
+    }
+    std::sort(blocked.begin(), blocked.end());
+    for (auto* instances : {&plan->instances, &plan->liveInstances, &plan->rendererInstances})
+        std::erase_if(*instances, [&](host::Instance* instance) {
+            return std::binary_search(blocked.begin(), blocked.end(), instance);
+        });
     if (std::any_of(plan->nodes.begin(), plan->nodes.end(),
                     [](const detail::Node& n) { return n.midiIn.has_value(); })) {
         const std::vector<std::string> ports = backend_->midiPorts();  // ADR-0016
@@ -334,7 +354,10 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     // executors iterate are built from the slots.
     if (meters_) {
         meters_->beginPlan();
-        for (detail::Node& node : plan->nodes) node.meterSlot = meters_->slotFor(node.id);
+        for (detail::Node& node : plan->nodes) {
+            node.meterSlot = meters_->slotFor(node.id);
+            node.meterGeneration = meters_->generationFor(node.meterSlot);
+        }
         meters_->endPlan();
         detail::Plan& p = *plan;
         p.meterNodes.clear();
