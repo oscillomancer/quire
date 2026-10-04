@@ -633,7 +633,9 @@ const clap_host_t* gEditorHost = nullptr;
 struct Edge {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
-    std::uint8_t config[4] = {0, 0, 0, 0};
+    // Loaded on the main thread while the audio thread may flush or process
+    // (both allowed by CLAP), so each byte is atomic.
+    std::atomic<std::uint8_t> config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
     int timerCalls = 0, activations = 0;
     std::atomic<int> processCalls{0};
@@ -745,14 +747,14 @@ void CLAP_ABI edgeFlush(const clap_plugin_t* pl, const clap_input_events_t* in,
 const clap_plugin_params_t kEdgeParams = {edgeParamCount,  edgeParamInfo,   edgeParamValue,
                                           edgeValueToText, edgeTextToValue, edgeFlush};
 uint32_t CLAP_ABI edgeTail(const clap_plugin_t* pl) {
-    const auto* c = E(pl)->config;
-    return static_cast<uint32_t>(c[1]) | (static_cast<uint32_t>(c[2]) << 8) |
-           (static_cast<uint32_t>(c[3]) << 16);
+    const auto& c = E(pl)->config;
+    return static_cast<uint32_t>(c[1].load()) | (static_cast<uint32_t>(c[2].load()) << 8) |
+           (static_cast<uint32_t>(c[3].load()) << 16);
 }
 const clap_plugin_tail_t kEdgeTail = {edgeTail};
 bool CLAP_ABI edgeStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
     std::array<std::uint8_t, 4> state;
-    std::memcpy(state.data(), E(pl)->config, 4);
+    for (std::size_t i = 0; i < 4; ++i) state[i] = E(pl)->config[i].load();
     if (state[0] >= 30) state[1] = static_cast<std::uint8_t>(E(pl)->editorValue.load());
     return state[0] != 7 && os->write(os, state.data(), 4) == 4;
 }
@@ -760,7 +762,7 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     if (E(pl)->config[0] == 8) return false;
     std::uint8_t buf[4];
     if (is->read(is, buf, 4) != 4) return false;
-    std::memcpy(E(pl)->config, buf, 4);
+    for (std::size_t i = 0; i < 4; ++i) E(pl)->config[i].store(buf[i]);
     if (buf[0] >= 30) E(pl)->editorValue = buf[1];
     if (buf[0] == 2) {
         const auto* timer = static_cast<const clap_host_timer_support_t*>(
@@ -955,7 +957,7 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_pro
         auto end = *reinterpret_cast<const clap_event_note_t*>(event);
         end.header.type = CLAP_EVENT_NOTE_END;
         if (E(pl)->config[0] == 14) {
-            const auto mask = E(pl)->config[2];
+            const std::uint8_t mask = E(pl)->config[2];
             if (mask & 1) end.note_id = -1;
             if (mask & 2) end.port_index = -1;
             if (mask & 4) end.channel = -1;
