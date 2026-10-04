@@ -151,6 +151,7 @@ class EngineApp : public cmd::Host {
     void clearScratch();
 
     // --- plugins ----------------------------------------------------------------
+    const host::ScanReport& pluginScanReport() const { return scanReport_; }
     Result<std::span<const host::PluginInfo>> plugins(bool rescan = false);
     // By id (exact, then case-insensitive) or display name; hint lists the closest ids.
     Result<host::PluginInfo> findPlugin(std::string_view idOrName);
@@ -307,7 +308,7 @@ class EngineApp : public cmd::Host {
                                            std::string_view label) override;
     Status commitTransaction(std::uint64_t id) override;
     Status rollbackTransaction(std::uint64_t id) override;
-    std::function<void()> invocationSavepoint() override;
+    Result<std::function<Status()>> invocationSavepoint() override;
     void log(const cmd::LogRecord& record) override;
     void emit(std::string_view topic, json::Value payload) override;
     void commandFinished() override;
@@ -361,6 +362,7 @@ class EngineApp : public cmd::Host {
     model::TxnRecord record_;
     std::uint64_t txnId_ = 0;
     std::optional<std::vector<host::PluginInfo>> catalogue_;
+    host::ScanReport scanReport_;
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
     std::map<std::string, std::filesystem::path> renders_;

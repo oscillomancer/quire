@@ -102,8 +102,10 @@ model code and a reconciler between model versions and live plugin instances.
 ## Clarifications (2026-09-26, from design review)
 
 - **Memory bounds.** Undo history is bounded per branch by a configurable
-  byte budget (default 512 MiB of *unique* payload) and version count
-  (default 1000); the oldest versions beyond the bound are released. Large
+  byte budget (default 1 GiB of estimated *unique* retained data). The
+  project setting `history_budget_bytes` controls it; old undo steps beyond
+  the bound are squashed into one earlier-history step. A separate version
+  count cap is not implemented. Large
   payloads (plugin state blobs, MIDI chunks, envelope chunks) are immutable
   and deduplicated by content hash, so re-capturing identical state costs
   nothing. Unreachable versions are freed immediately (reference counting).
@@ -117,7 +119,27 @@ model code and a reconciler between model versions and live plugin instances.
 
 Versions outside every branch head/base/redo ancestry are reclaimed after
 edits and branch deletion. Render jobs and the clipboard hold explicit session
-leases (`VersionStore::pin`); these retain their version and ancestry until the
-lease is released and the next collection runs. An open branch retains its
-history. This first step does not squash reachable undo history or implement
-the configurable memory budget described above.
+leases (`VersionStore::pin`); unreachable collection traces their version
+and ancestry until the lease is released. Budget enforcement may still combine
+unleased older steps, while preserving leased versions and open branch boundaries. The subsequent budget phase squashes reachable linear undo steps as described
+below.
+
+
+### History budget and squashing (2026-10-04)
+
+After commits, merges and branch deletion, estimate the retained unique object,
+MIDI, blob, envelope and automation payloads by shared pointer identity; shared
+collection storage is counted once. Include snapshot and replay-log metadata.
+If the current project's `history_budget_bytes` (default 1 GiB) is exceeded,
+combine the oldest eligible linear steps into their child's `earlier history`
+step, dropping intermediate snapshots and retaining the combined replay log,
+changes, created IDs and the union of edited field names (including edits
+reverted to the fork value, for merge conflict detection). Undo/redo can cross that step as one operation.
+`history.list` exposes `truncated`, each entry's `squashed_steps`, and estimated
+`retained_bytes`/`budget_bytes`.
+
+Leased versions, branch heads/bases, redo targets, forks and merge nodes remain
+addressable and exact; their required snapshots and retained replay logs may
+exceed the budget. No payload is discarded from a live session. The bound is an
+estimate of model/history data, not a process RSS or media-cache limit. Releasing
+a lease allows later budget enforcement to squash formerly protected steps.

@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <supple/product.h>
 #include <unistd.h>
 
 #include <cmath>
@@ -196,7 +197,7 @@ TEST_CASE("sandbox invocation hook restores state and discards failed invocation
     REQUIRE(restore);
     REQUIRE(host.session().patchMerge(*id, *json::parse(R"({"params":{"gain":-6}})")));
     host.emit("test.changed", j(R"({"value":"failed"})"));
-    restore();
+    REQUIRE((*restore)());
     auto params = host.session().paramGet(*id);
     REQUIRE(params);
     CHECK((*params)["gain"]["value"].asDouble() == doctest::Approx(0));
@@ -217,4 +218,117 @@ TEST_CASE("sandbox invocation hook restores state and discards failed invocation
     CHECK(seen->result.at(1) == "after");
     REQUIRE(host.session().inTransaction());
     REQUIRE(host.rollbackTransaction(*transaction));
+}
+
+TEST_CASE("sandbox bus refuses failed invocation snapshots and aborts caught restore failures") {
+    Root root;
+    auto host = makeHost(root.path);
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Command<cmd::NoArgs, cmd::NoArgs> failure;
+    failure.name = "test.poison";
+    failure.kind = cmd::Kind::Edit;
+    failure.exposure = cmd::Exposure::Internal;
+    failure.args = schema::object<cmd::NoArgs>("no_args").build();
+    failure.result = failure.args;
+    failure.run = [](const cmd::NoArgs&, cmd::Context& ctx) -> Result<cmd::NoArgs> {
+        auto instance = ctx.service<Session>().instance("in_1");
+        if (!instance) return instance.error();
+        const std::array<std::uint8_t, 4> cannotRestore{8, 0, 0, 0};
+        SUPPLE_TRY((*instance)->loadState(cannotRestore));
+        return Error("test.partial", "failed after changing state", "/instance", "retry");
+    };
+    registry.add(std::move(failure));
+    cmd::Dispatcher bus(registry, *host);
+    host->attachCommands(bus);
+    auto id = host->session().load("com.suppleaudio.test.edge");
+    REQUIRE(id);
+    auto instance = host->session().instance(*id);
+    REQUIRE(instance);
+    const std::array<std::uint8_t, 4> cannotSave{7, 0, 0, 0};
+    const std::array<std::uint8_t, 4> good{};
+    auto result = bus.transact("capture", kTest, [&]() -> Result<json::Value> {
+        REQUIRE((*instance)->loadState(cannotSave));
+        auto refused =
+            bus.execute({"plugin.load", j(R"({"plugin":"com.suppleaudio.test.gain"})"), kTest});
+        REQUIRE_FALSE(refused);
+        CHECK(refused.error().code == "sandbox.snapshot_failed");
+        CHECK(refused.error().path == "/instances/in_1");
+        CHECK(host->session().chain().size() == 1);
+        REQUIRE((*instance)->loadState(good));
+        return json::Value();
+    });
+    REQUIRE(result);
+    CHECK_FALSE(host->session().inTransaction());
+    result = bus.execute({"script.run", j(R"lua({"code":
+        "q.batch('restore', function() local ok,err=pcall(q.test.poison,{}); assert(not ok and err.code=='test.partial'); assert(err.details[1].code=='sandbox.rollback_failed') end)"})lua"),
+                          kTest});
+    REQUIRE_FALSE(result);
+    CHECK_FALSE(host->session().inTransaction());
+    // The outer rollback fails too because this fixture now refuses all restores.
+    CHECK(result.error().code == "sandbox.rollback_failed");
+    std::function<bool(const Error&, std::string_view)> contains = [&](const Error& e,
+                                                                       std::string_view code) {
+        if (e.code == code) return true;
+        for (const auto& detail : e.details)
+            if (contains(detail, code)) return true;
+        return false;
+    };
+    CHECK(contains(result.error(), "transaction.restore_failed"));
+    CHECK(contains(result.error(), "sandbox.restore_failed"));
+    const auto events = host->takeEvents();
+    CHECK(std::count_if(events.begin(), events.end(),
+                        [](const auto& e) { return e.first == "sandbox.savepoint_failed"; }) == 2);
+}
+
+TEST_CASE("sandbox plugin list exposes cached failures even for an empty catalogue") {
+    Root root;
+    struct Environment {
+        std::optional<std::string> previous;
+        ~Environment() {
+            if (previous)
+                ::setenv("XDG_CACHE_HOME", previous->c_str(), 1);
+            else
+                ::unsetenv("XDG_CACHE_HOME");
+        }
+    } env;
+    if (const char* previous = std::getenv("XDG_CACHE_HOME")) env.previous = previous;
+    const auto cache = root.path / "cache";
+    REQUIRE(::setenv("XDG_CACHE_HOME", cache.c_str(), 1) == 0);
+    fs::create_directories(root.path);
+    struct Bridge {
+        fs::path previous =
+            fs::path(FIXTURE_CLAP_PATH).parent_path() / (std::string(product::kSlug) + "-bridge");
+        ~Bridge() { host::setBridgeExecutable(previous); }
+    } bridge;
+    const auto bad = root.path / "bad.clap";
+    REQUIRE(writeFileAtomic(bad, "invalid plugin"));
+    SessionOptions options;
+    options.workdir = root.path;
+    options.pluginPath = {bad};
+    auto opened = Session::open(options);
+    REQUIRE(opened);
+    SandboxHost host(std::move(*opened));
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher bus(registry, host);
+    auto first = bus.execute({"plugin.list", j("{}"), kTest});
+    REQUIRE(first);
+    CHECK((*first)["plugins"].size() == 0);
+    auto failure = (*first)["scan"]["failures"].asArray()[0];
+    CHECK(failure["module"] == fs::canonical(bad).string());
+    CHECK(failure["reason"]["code"] == "host.load");
+    CHECK_FALSE(failure["cached"].asBool());
+    host::setBridgeExecutable(root.path / "missing-bridge");
+    auto second = bus.execute({"plugin.list", j(R"({"rescan":true})"), kTest});
+    REQUIRE(second);
+    CHECK((*second)["scan"]["warnings"].asArray()[0]["code"] == "host.scan.unsupervised");
+    CHECK((*second)["scan"]["failures"].asArray()[0]["cached"].asBool());
+    CHECK((*second)["scan"]["cached_modules"].asInt() == 1);
+    const std::vector<fs::path> empty;
+    REQUIRE(host::scan(empty));
+    auto retained = bus.execute({"plugin.list", j("{}"), kTest});
+    REQUIRE(retained);
+    CHECK((*retained)["scan"] == (*second)["scan"]);
+    CHECK((*retained)["scan"]["warnings"].isArray());
 }

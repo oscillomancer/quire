@@ -473,6 +473,9 @@ const Schema<Project>& schemaOf<Project>() {
         dflt(b, d.masters);
         b.field("seed", &Project::seed, schema::integerOf<std::uint64_t>());
         dflt(b, d.seed);
+        b.field("history_budget_bytes", &Project::historyBudgetBytes,
+                schema::integerOf<std::uint64_t>().min(1));
+        dflt(b, d.historyBudgetBytes);
         b.field("render", &Project::render, renderSettings());
         dflt(b, d.render);
         return b.build();

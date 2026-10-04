@@ -636,3 +636,12 @@ process-request bit and an ordered list of `{param id, clear flags}` after
 `paramsRescanFlags`, update both reader and writer together, and expose the
 received wake bit to the proxy's RT-safe wake API. This is a protocol change and
 is reported for the orchestrator rather than applied in this review.
+
+### Plug-in catalogue scan reports (2026-10-04)
+
+`plugin.list` and `plugin.scan` return `scan` beside `plugins`, including an
+empty catalogue. Its `failures` entries contain `{module, reason: {code, message,
+path, hint, details?}, cached}`, `warnings` contains structured reasons, and
+`cached_modules` counts reused module results. EngineApp retains this report
+with its catalogue so unrelated scans cannot overwrite it. Filtering affects
+only available plug-ins; explicit scanning replaces the catalogue/report pair.

@@ -36,6 +36,7 @@ struct Project {
     bool console9 = true;
     std::vector<Id> masters{kMaster};
     std::uint64_t seed = 0;
+    std::uint64_t historyBudgetBytes = 1ULL << 30;
     json::Value render = json::Value::object();  // render.* defaults and matrix
 };
 

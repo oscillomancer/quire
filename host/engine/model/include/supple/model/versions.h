@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,9 @@ struct Version {
     std::vector<Change> changes;  // relative to parents[0]
     std::vector<Id> created;      // IDs this version added, in creation order
     std::uint64_t timeMs = 0;
+    std::uint64_t squashedSteps = 0;  // represented by one earlier-history step
+    // Fields touched by the combined steps, including edits later reverted.
+    std::map<Id, std::set<std::string>> squashedFields;
 };
 
 struct Conflict {
@@ -104,6 +108,9 @@ class VersionStore {
     // Model-thread lease for a render/clipboard snapshot. Holding it keeps the
     // version addressable even after its branch/redo tail is discarded.
     std::shared_ptr<const Session> pin(std::uint64_t id) const;
+    std::uint64_t retainedBytes() const;  // estimate of unique retained objects/payloads
+    bool historyTruncated() const;
+    void enforceBudget();  // model thread; leases and branch/merge boundaries survive
     void collectUnused();  // reclaim unreachable versions without active leases
     // Every version on every branch, oldest first.
     void forEachVersion(const std::function<void(const Version&)>& visit) const;

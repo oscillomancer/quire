@@ -314,6 +314,188 @@ void VersionStore::collectUnused() {
     std::erase_if(versions_, [&](const auto& entry) { return !reachable.count(entry.first); });
 }
 
+namespace {
+std::uint64_t jsonBytes(const json::Value& v) {
+    std::uint64_t bytes = sizeof(v);
+    if (v.isString()) bytes += v.asString().size();
+    if (v.isArray())
+        for (const auto& x : v.asArray()) bytes += jsonBytes(x);
+    if (v.isObject())
+        for (const auto& x : v.asObject()) bytes += x.key.size() + jsonBytes(x.value);
+    return bytes;
+}
+template <class T>
+std::uint64_t objectBytes(const T& v) {
+    std::uint64_t bytes = sizeof(v);
+    if constexpr (requires { v.name; }) bytes += v.name.size();
+    if constexpr (requires { v.points; }) bytes += v.points.size() * sizeof(EnvPoint);
+    if constexpr (requires { v.children; }) bytes += v.children.size() * sizeof(Id);
+    if constexpr (requires { v.chain; }) bytes += v.chain.size() * sizeof(Id);
+    if constexpr (requires { v.inputChain; }) bytes += v.inputChain.size() * sizeof(Id);
+    if constexpr (requires { v.takes; }) bytes += v.takes.size() * sizeof(Id);
+    if constexpr (requires { v.patch; })
+        if (v.patch) bytes += jsonBytes(*v.patch);
+    return bytes;
+}
+std::uint64_t objectBytes(const MidiSource& v) {
+    const auto& s = v.sequence;
+    std::uint64_t bytes = sizeof(v) + s.notes.size() * sizeof(midi::Note) +
+                          s.controls.size() * sizeof(midi::Control) +
+                          s.sysex.size() * sizeof(midi::Sysex);
+    for (const auto& event : s.sysex) bytes += event.bytes.size();
+    return bytes;
+}
+std::uint64_t objectBytes(const Project& v) {
+    return sizeof(v) + v.name.size() + v.title.size() + v.author.size() + v.notes.size() +
+           v.mediaDir.size() + v.masters.size() * sizeof(Id) + jsonBytes(v.render);
+}
+// Pointer identity counts persistent containers and immutable payloads once.
+// No MIDI events/blob bytes are traversed or serialized to estimate them.
+struct RetainedSize {
+    std::map<const void*, std::pair<std::size_t, std::uint64_t>> payloads;
+    std::map<std::uint64_t, std::vector<const void*>> byVersion;
+    std::map<const void*, std::vector<std::pair<const void*, std::uint64_t>>> containers;
+    std::uint64_t bytes = 0;
+    void add(std::uint64_t id, const void* key, std::uint64_t size) {
+        auto& [count, stored] = payloads[key];
+        if (count++ == 0) {
+            stored = size;
+            bytes += size;
+        }
+        byVersion[id].push_back(key);
+    }
+    template <class T>
+    void map(std::uint64_t id, const IdMap<T>& objects) {
+        if (objects.empty()) return;
+        const void* storage = &*objects.begin();
+        add(id, storage, objects.size() * sizeof(typename IdMap<T>::Entry));
+        auto [cached, fresh] = containers.try_emplace(storage);
+        if (fresh)
+            for (const auto& e : objects)
+                cached->second.emplace_back(e.value.get(), objectBytes(*e.value));
+        for (const auto& [key, bytesHeld] : cached->second) add(id, key, bytesHeld);
+    }
+    void add(const Version& v) {
+        const auto& s = *v.session;
+        std::uint64_t metadata = sizeof(v) + sizeof(s) + v.changes.size() * sizeof(Change) +
+                                 v.created.size() * sizeof(Id) + jsonBytes(s.extraSections) +
+                                 v.txn.label.size() + v.txn.origin.size() +
+                                 v.txn.coalesceKey.size();
+        for (const auto& invocation : v.txn.invocations)
+            metadata += sizeof(invocation) + invocation.command.size() + jsonBytes(invocation.args);
+        for (const auto& [id, fields] : v.squashedFields) {
+            metadata += sizeof(id) + sizeof(fields);
+            for (const auto& field : fields) metadata += sizeof(field) + field.size();
+        }
+        add(v.id, &v, metadata);
+        add(v.id, s.project.get(), objectBytes(*s.project));
+        map(v.id, s.tempo);
+        map(v.id, s.meters);
+        map(v.id, s.tracks);
+        map(v.id, s.items);
+        map(v.id, s.takes);
+        map(v.id, s.media);
+        map(v.id, s.midi);
+        map(v.id, s.fx);
+        map(v.id, s.routes);
+        map(v.id, s.envelopes);
+        map(v.id, s.autoItems);
+        map(v.id, s.markers);
+        map(v.id, s.regions);
+        for (const auto& [hash, blob] : s.blobs)
+            add(v.id, blob.get(), sizeof(Blob) + blob->data.size());
+    }
+    void drop(std::uint64_t id) {
+        for (const void* key : byVersion.at(id)) {
+            auto& [count, size] = payloads.at(key);
+            if (--count == 0) bytes -= size;
+        }
+        byVersion.erase(id);
+    }
+};
+}  // namespace
+
+std::uint64_t VersionStore::retainedBytes() const {
+    RetainedSize size;
+    for (const auto& [id, v] : versions_) size.add(v);
+    return size.bytes;
+}
+
+bool VersionStore::historyTruncated() const {
+    const auto& b = branches_.at(current_);
+    for (auto id : b.redo)
+        if (versions_.at(id).squashedSteps) return true;
+    for (auto id = b.head;;) {
+        const auto& v = versions_.at(id);
+        if (v.squashedSteps) return true;
+        if (id == b.base || v.parents.empty()) return false;
+        id = v.parents.front();
+    }
+}
+
+void VersionStore::enforceBudget() {
+    collectUnused();
+    RetainedSize size;
+    for (const auto& [id, v] : versions_) size.add(v);
+    const auto budget =
+        versions_.at(branches_.at(current_).head).session->project->historyBudgetBytes;
+    if (size.bytes <= budget) return;
+    std::set<std::uint64_t> protectedIds;
+    std::map<std::uint64_t, std::vector<std::uint64_t>> children;
+    for (const auto& [name, b] : branches_) {
+        protectedIds.insert(b.head);
+        protectedIds.insert(b.base);
+        protectedIds.insert(b.redo.begin(), b.redo.end());
+    }
+    for (const auto& [id, v] : versions_) {
+        if (v.session.use_count() > 1 || v.parents.size() != 1) protectedIds.insert(id);
+        for (auto parent : v.parents) children[parent].push_back(id);
+    }
+    // Oldest first, independently across branch lineages. Forks, merge nodes,
+    // redo steps and leases remain exact. The child retains the end snapshot
+    // and the combined replay log of the earlier-history step.
+    for (auto it = versions_.begin(); it != versions_.end() && size.bytes > budget;) {
+        const auto id = it->first;
+        auto& v = it->second;
+        auto next = std::next(it);
+        if (!protectedIds.contains(id) && children[id].size() == 1) {
+            auto& child = versions_.at(children[id].front());
+            if (child.parents.size() == 1 && child.session.use_count() == 1) {
+                size.drop(child.id);
+                size.drop(id);
+                auto remember = [&](const Version& step) {
+                    for (const auto& [object, fields] : step.squashedFields)
+                        child.squashedFields[object].insert(fields.begin(), fields.end());
+                    const auto& before = *versions_.at(step.parents.front()).session;
+                    for (const auto& change : step.changes) {
+                        if (change.op != Change::Op::Update) continue;
+                        auto fields = changedFields(before, *step.session, change.id);
+                        child.squashedFields[change.id].insert(fields.begin(), fields.end());
+                    }
+                };
+                remember(child);
+                remember(v);
+                child.parents = v.parents;
+                auto inv = std::move(v.txn.invocations);
+                inv.insert(inv.end(), child.txn.invocations.begin(), child.txn.invocations.end());
+                child.txn.invocations = std::move(inv);
+                child.changes = coalesce(v.changes, child.changes);
+                auto created = std::move(v.created);
+                created.insert(created.end(), child.created.begin(), child.created.end());
+                child.created = std::move(created);
+                child.squashedSteps += v.squashedSteps + 1;
+                child.txn.label = "earlier history";
+                child.txn.coalesceKey.clear();
+                auto& siblings = children[v.parents.front()];
+                std::replace(siblings.begin(), siblings.end(), id, child.id);
+                size.add(child);
+                versions_.erase(it);
+            }
+        }
+        it = next;
+    }
+}
+
 Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
                                            std::vector<Change> changes, std::vector<Id> created,
                                            std::uint64_t timeMs) {
@@ -369,7 +551,7 @@ Result<std::uint64_t> VersionStore::commit(Session session, TxnRecord txn,
         b.redo.clear();
         versions_.emplace(v.id, std::move(v));
     }
-    collectUnused();
+    enforceBudget();
     return b.head;
 }
 
@@ -440,7 +622,7 @@ Status VersionStore::deleteBranch(std::string_view name) {
     auto b = find(name);
     if (!b) return std::move(b).error();
     branches_.erase(branches_.find(name));
-    collectUnused();
+    enforceBudget();
     return okStatus();
 }
 
@@ -501,7 +683,7 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
         dst.redo.clear();
         out.head = dst.head;
         out.fastForward = true;
-        collectUnused();
+        enforceBudget();
         return out;
     }
     // The source's transactions since the fork, oldest first (first-parent chain).
@@ -542,7 +724,9 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
             } else if (c.op == Change::Op::Remove) {
                 why = " was changed on " + std::string(into) + " since the fork";
             } else {
-                const auto mine = changedFields(before, *v.session, c.id);
+                auto mine = changedFields(before, *v.session, c.id);
+                if (auto touched = v.squashedFields.find(c.id); touched != v.squashedFields.end())
+                    mine.insert(touched->second.begin(), touched->second.end());
                 const auto theirs = changedFields(forkState, targetHead, c.id);
                 std::string both;
                 for (const auto& f : mine)
@@ -594,6 +778,11 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
         nv.id = nextId++;
         nv.parents = {parent};
         nv.txn = v.txn;
+        nv.squashedSteps = v.squashedSteps;
+        for (const auto& [object, fields] : v.squashedFields) {
+            const auto remappedId = out.remap.find(object);
+            nv.squashedFields[remappedId == out.remap.end() ? object : remappedId->second] = fields;
+        }
         nv.txn.invocations = std::move(inv);
         nv.changes = std::move(result.changes);
         nv.created = std::move(result.created);
@@ -617,7 +806,8 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
     dst.redo.clear();
     out.head = dst.head;
     dst.view.reset();
-    collectUnused();
+    state.reset();
+    enforceBudget();
     return out;
 }
 

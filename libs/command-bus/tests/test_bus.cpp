@@ -30,7 +30,7 @@ struct JobStarted {
 };
 struct FakeHost : Host, RefResolver {
     Toy toy;
-    bool failRollback = false;
+    bool failRollback = false, failCapture = false, failRestore = false;
     int before = 0;
     int begins = 0, commits = 0, rollbacks = 0;
     std::vector<LogRecord> records;
@@ -55,6 +55,15 @@ struct FakeHost : Host, RefResolver {
         ++rollbacks;
         if (failRollback) return Error("test.rollback", "restore failed", "/instances/in_1");
         return okStatus();
+    }
+    Result<std::function<Status()>> invocationSavepoint() override {
+        if (failCapture) return Error("test.capture", "snapshot refused", "/toy", "repair toy");
+        return std::function<Status()>([this, saved = toy.count] {
+            if (failRestore)
+                return Status(Error("test.restore", "restore refused", "/toy", "repair toy"));
+            toy.count = saved;
+            return okStatus();
+        });
     }
     void log(const LogRecord& record) override { records.push_back(record); }
     void emit(std::string_view topic, json::Value) override { events.emplace_back(topic); }
@@ -417,4 +426,39 @@ TEST_CASE("transaction rollback failure preserves the initiating error") {
     CHECK(result.error().code == "test.rollback");
     REQUIRE(result.error().details.size() == 1);
     CHECK(result.error().details[0].code == "test.command");
+}
+
+TEST_CASE("savepoint capture refuses handlers and restore failure poisons caught transactions") {
+    auto registry = makeRegistry();
+    FakeHost host;
+    Dispatcher bus(registry, host);
+    host.failCapture = true;
+    auto result = bus.transact("capture", testOrigin, [&]() -> Result<json::Value> {
+        auto rejected = bus.execute({"toy.add", obj(R"({"value":3})"), testOrigin});
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == "test.capture");
+        CHECK(host.toy.count == 0);
+        return json::Value();  // A capture failure may be caught safely.
+    });
+    REQUIRE(result);
+    host.failCapture = false;
+    host.failRestore = true;
+    result = bus.transact("restore", testOrigin, [&]() -> Result<json::Value> {
+        auto rejected = bus.execute({"toy.fail", obj("{}"), testOrigin});
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == "toy.failed");
+        REQUIRE(rejected.error().details.size() == 1);
+        CHECK(rejected.error().details.front().code == "test.restore");
+        auto blocked = bus.execute({"toy.add", obj(R"({"value":3})"), testOrigin});
+        REQUIRE_FALSE(blocked);
+        return json::Value();  // Swallowing the call error cannot allow commit.
+    });
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "transaction.restore_failed");
+    CHECK(host.toy.count == 0);
+    CHECK(host.commits == 1);
+    CHECK(host.rollbacks == 1);
+    host.failRestore = false;
+    REQUIRE(bus.execute({"toy.add", obj(R"({"value":1})"), testOrigin}));
+    CHECK(host.toy.count == 1);  // poison is scoped to the failed transaction
 }

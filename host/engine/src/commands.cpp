@@ -137,6 +137,7 @@ struct ProjectSetArgs {
     std::optional<bool> console9;
     std::optional<json::Value> render;
     std::optional<model::Timebase> timebase;
+    std::optional<std::uint64_t> historyBudgetBytes;
 };
 struct PathArgs {
     std::optional<std::string> path;
@@ -660,10 +661,12 @@ struct HistoryResult {
 struct HistoryEntry {
     std::int64_t version = 0;
     std::string label, origin;
+    std::uint64_t squashedSteps = 0;
 };
 struct HistoryList {
     std::vector<HistoryEntry> versions;
-    bool canUndo = false, canRedo = false;
+    bool canUndo = false, canRedo = false, truncated = false;
+    std::uint64_t retainedBytes = 0, budgetBytes = 0;
 };
 
 // The model's name for a container ("wav"/"flac"/"mp3"): the detected one, not
@@ -787,6 +790,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("author", &ProjectSetArgs::author, schema::string())
                      .field("notes", &ProjectSetArgs::notes, schema::string())
                      .field("console9", &ProjectSetArgs::console9, schema::boolean())
+                     .field("history_budget_bytes", &ProjectSetArgs::historyBudgetBytes,
+                            schema::integerOf<std::uint64_t>().min(1).doc(
+                                "Estimated retained history byte budget; default 1 GiB. Leases and "
+                                "branch boundaries may exceed it."))
                      .field("render", &ProjectSetArgs::render, schema::any())
                      .field("timebase", &ProjectSetArgs::timebase, model::timebaseSchema())
                      .build();
@@ -800,6 +807,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.author) p.author = *a.author;
             if (a.notes) p.notes = *a.notes;
             if (a.console9) p.console9 = *a.console9;
+            if (a.historyBudgetBytes) p.historyBudgetBytes = *a.historyBudgetBytes;
             if (a.render) {
                 if (!a.render->isObject())
                     return Error("render.settings", "render settings must be an object", "/render");
@@ -2554,23 +2562,34 @@ void registerEngineCommands(cmd::Registry& registry) {
                          .field("version", &HistoryEntry::version, schema::integer())
                          .field("label", &HistoryEntry::label, schema::string())
                          .field("origin", &HistoryEntry::origin, schema::string())
+                         .field("squashed_steps", &HistoryEntry::squashedSteps,
+                                schema::integerOf<std::uint64_t>())
                          .build();
         c.result = schema::object<HistoryList>("history_list")
                        .field("versions", &HistoryList::versions, schema::arrayOf(entry))
                        .field("can_undo", &HistoryList::canUndo, schema::boolean())
                        .field("can_redo", &HistoryList::canRedo, schema::boolean())
+                       .field("truncated", &HistoryList::truncated, schema::boolean())
+                       .field("retained_bytes", &HistoryList::retainedBytes,
+                              schema::integerOf<std::uint64_t>())
+                       .field("budget_bytes", &HistoryList::budgetBytes,
+                              schema::integerOf<std::uint64_t>())
                        .build();
-        c.examples = {{"List", obj("{}"),
-                       obj(R"({"versions": "<any>", "can_undo": true, "can_redo": false})"),
-                       "song"}};
+        c.examples = {
+            {"List", obj("{}"),
+             obj(R"({"versions": "<any>", "can_undo": true, "can_redo": false, "truncated": false, "retained_bytes": "<any>", "budget_bytes": 1073741824})"),
+             "song"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<HistoryList> {
             EngineApp& app = A(ctx);
             HistoryList out;
             for (const model::Version* v : app.versions().history(20))
-                out.versions.push_back(
-                    {static_cast<std::int64_t>(v->id), v->txn.label, v->txn.origin});
+                out.versions.push_back({static_cast<std::int64_t>(v->id), v->txn.label,
+                                        v->txn.origin, v->squashedSteps});
             out.canUndo = app.versions().canUndo();
             out.canRedo = app.versions().canRedo();
+            out.truncated = app.versions().historyTruncated();
+            out.retainedBytes = app.versions().retainedBytes();
+            out.budgetBytes = app.head().project->historyBudgetBytes;
             return out;
         };
         addChecked(registry, std::move(c));

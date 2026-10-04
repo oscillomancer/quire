@@ -202,5 +202,6 @@ structured reasons, whether each failure was cached, warnings, and the number
 of cache hits. Catalogue owners must retain the report alongside their plugin
 list and expose failures/warnings to callers; a later unrelated scan on the
 same thread replaces `lastScanReport()`. Sandbox `Session::pluginScanReport()`
-retains its catalogue report. Engine and command catalogue serialization are
-integration work owned by the lead/commands reviewer.
+retains its catalogue report. EngineApp also retains its catalogue report. Engine `plugin.list`/`plugin.scan`
+and sandbox `plugin.list` expose it as the `scan` result object, including for
+an empty available catalogue.

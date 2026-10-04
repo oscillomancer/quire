@@ -56,7 +56,8 @@ not objects (ADR-0008).
 other rates is resampled, never converted on import); `ppq` default for new
 MIDI (960); `timebase` default for new items (`time` | `beats` |
 `beats_position`); `media_dir` (relative); `render` default settings (§1.10);
-`next_ids`; `seed` (session randomness, e.g. dither); `console9` (bool,
+`next_ids`; `history_budget_bytes` (positive estimated bytes, default 1 GiB; §6.2);
+`seed` (session randomness, e.g. dither); `console9` (bool,
 default true: Console 9 summing on every strip; false keeps its gains and pan
 law but runs the stages linear, ADR-0019 §6); `masters` (ordered master
 ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
@@ -373,7 +374,15 @@ branches. Each branch has a head and an undo cursor.
 
 Per branch, linear. `history.undo` moves the head to its parent (the
 undone version stays as the branch's redo target until a new edit);
-`history.redo` moves forward. Bounded by ADR-0008's memory budget.
+`history.redo` moves forward. `project.set {history_budget_bytes}` changes the
+persisted estimated history byte budget (default 1 GiB, positive integer).
+Above it, oldest eligible linear steps on each branch combine into one
+`earlier history` step; intermediate snapshots are released and undo/redo crosses
+the combined step as one operation. Shared MIDI/blob/object/collection payloads
+are counted once. Leases, branch bases/heads, redo targets and fork/merge
+boundaries survive; required data/replay logs may exceed the budget.
+`history.list` reports `truncated`, `retained_bytes`, `budget_bytes`, and
+`squashed_steps` per entry. This does not persist undo history into project files.
 Coalescing: consecutive edits with the same `coalesce_key` (e.g. one fader
 gesture, `fx.param.set` on the same param within one gesture) replace the
 head instead of stacking.

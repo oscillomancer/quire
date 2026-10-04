@@ -43,8 +43,70 @@ struct PluginEntry {
     std::string path, version;
     std::optional<bool> shadowed;  // another location earlier on the path has this id
 };
+struct ScanReason {
+    std::string code, message, path, hint;
+    std::optional<std::vector<json::Value>> details;
+};
+ScanReason scanReason(const Error& e) {
+    ScanReason r{e.code, e.message, e.path, e.hint, {}};
+    if (!e.details.empty()) {
+        auto encode = [](auto&& self, const Error& error) -> json::Value {
+            json::Value v = json::Value::object();
+            v["code"] = error.code;
+            v["message"] = error.message;
+            v["path"] = error.path;
+            v["hint"] = error.hint;
+            if (!error.details.empty()) {
+                v["details"] = json::Value::array();
+                for (const auto& d : error.details) v["details"].push_back(self(self, d));
+            }
+            return v;
+        };
+        r.details = std::vector<json::Value>{};
+        for (const auto& d : e.details) r.details->push_back(encode(encode, d));
+    }
+    return r;
+}
+struct ScanFailure {
+    std::string module;
+    ScanReason reason;
+    bool cached = false;
+};
+struct ScanReport {
+    std::vector<ScanFailure> failures;
+    std::vector<ScanReason> warnings;
+    std::uint64_t cachedModules = 0;
+};
+ScanReport scanReport(const host::ScanReport& source) {
+    ScanReport r;
+    for (const auto& f : source.failures)
+        r.failures.push_back({f.module.string(), scanReason(f.reason), f.cached});
+    for (const auto& w : source.warnings) r.warnings.push_back(scanReason(w));
+    r.cachedModules = source.cachedModules;
+    return r;
+}
+auto scanReportSchema() {
+    auto reason = schema::object<ScanReason>("scan_reason")
+                      .field("code", &ScanReason::code, schema::string())
+                      .field("message", &ScanReason::message, schema::string())
+                      .field("path", &ScanReason::path, schema::string())
+                      .field("hint", &ScanReason::hint, schema::string())
+                      .field("details", &ScanReason::details, schema::arrayOf(schema::any()))
+                      .build();
+    auto failure = schema::object<ScanFailure>("scan_failure")
+                       .field("module", &ScanFailure::module, schema::string())
+                       .field("reason", &ScanFailure::reason, reason)
+                       .field("cached", &ScanFailure::cached, schema::boolean())
+                       .build();
+    return schema::object<ScanReport>("scan_report")
+        .field("failures", &ScanReport::failures, schema::arrayOf(failure))
+        .field("warnings", &ScanReport::warnings, schema::arrayOf(reason))
+        .field("cached_modules", &ScanReport::cachedModules, schema::integerOf<std::uint64_t>())
+        .build();
+}
 struct PluginListResult {
     std::vector<PluginEntry> plugins;
+    ScanReport scan;
 };
 
 struct LoadArgs {
@@ -370,8 +432,10 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                 .build();
         c.result = schema::object<PluginListResult>("plugin_list")
                        .field("plugins", &PluginListResult::plugins, schema::arrayOf(entry))
+                       .field("scan", &PluginListResult::scan, scanReportSchema())
                        .build();
-        c.examples = {{"List everything", obj("{}"), obj(R"({"plugins": "<any>"})"), "empty"}};
+        c.examples = {{"List everything", obj("{}"),
+                       obj(R"({"plugins": "<any>", "scan": "<any>"})"), "empty"}};
         c.run = [](const PluginListArgs& a, Context& ctx) -> Result<PluginListResult> {
             auto list = S(ctx).plugins(a.rescan);
             if (!list) return std::move(list).error();
@@ -383,6 +447,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
             };
             const std::string f = lower(a.filter.value_or(""));
             PluginListResult r;
+            r.scan = scanReport(S(ctx).pluginScanReport());
             for (std::size_t i = 0; i < list->size(); ++i) {
                 const auto& p = (*list)[i];
                 if (!f.empty() && lower(p.id).find(f) == std::string::npos &&
@@ -1016,8 +1081,8 @@ Status SandboxHost::rollbackTransaction(std::uint64_t id) {
     return result;
 }
 
-std::function<void()> SandboxHost::invocationSavepoint() {
-    if (!session_->inTransaction()) return {};
+Result<std::function<Status()>> SandboxHost::invocationSavepoint() {
+    if (!session_->inTransaction()) return std::function<Status()>{};
     auto report = [this](const Error& error) {
         auto encode = [](auto&& self, const Error& e) -> json::Value {
             json::Value value = json::Value::object();
@@ -1036,17 +1101,18 @@ std::function<void()> SandboxHost::invocationSavepoint() {
     auto saved = session_->invocationSavepoint();
     if (!saved) {
         report(saved.error());
-        return {};
+        return saved.error();
     }
     const auto eventCount = events_.size();
     auto restoreEvents = scripts_ ? scripts_->eventSavepoint() : std::function<void()>{};
-    return [this, restore = std::move(*saved), eventCount, restoreEvents = std::move(restoreEvents),
-            report] {
+    return std::function<Status()>([this, restore = std::move(*saved), eventCount,
+                                    restoreEvents = std::move(restoreEvents), report] {
         auto result = restore();
         if (events_.size() > eventCount) events_.resize(eventCount);
         if (restoreEvents) restoreEvents();
         if (!result) report(result.error());
-    };
+        return result;
+    });
 }
 
 json::Value toJson(const cmd::LogRecord& r) {

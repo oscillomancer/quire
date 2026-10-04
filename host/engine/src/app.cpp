@@ -90,7 +90,7 @@ Result<std::span<const host::PluginInfo>> EngineApp::plugins(bool rescan) {
     if (!catalogue_ || rescan) {
         const auto path =
             options_.pluginPath.empty() ? host::defaultSearchPath() : options_.pluginPath;
-        auto list = host::scan(path);
+        auto list = host::scan(path, host::ScanOptions{}, &scanReport_);
         if (!list) return std::move(list).error();
         host::orderCatalogue(*list);  // the first location on the path wins an id
         catalogue_ = std::move(*list);
@@ -1925,17 +1925,19 @@ Status EngineApp::rollbackTransaction(std::uint64_t id) {
     return okStatus();
 }
 
-std::function<void()> EngineApp::invocationSavepoint() {
-    if (!txn_) return {};
+Result<std::function<Status()>> EngineApp::invocationSavepoint() {
+    if (!txn_) return std::function<Status()>{};
     auto scriptEvents = scripts_ ? scripts_->eventSavepoint() : std::function<void()>{};
-    return [this, saved = *txn_, record = record_, writing = autoWrite_, events = events_,
-            scriptEvents = std::move(scriptEvents)]() mutable {
+    return std::function<Status()>([this, saved = *txn_, record = record_, writing = autoWrite_,
+                                    events = events_,
+                                    scriptEvents = std::move(scriptEvents)]() mutable {
         *txn_ = std::move(saved);
         record_ = std::move(record);
         autoWrite_ = std::move(writing);
         events_ = std::move(events);
         if (scriptEvents) scriptEvents();
-    };
+        return okStatus();
+    });
 }
 
 void EngineApp::log(const cmd::LogRecord& record) {

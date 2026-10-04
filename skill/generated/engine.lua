@@ -302,6 +302,9 @@ q = nil
 ---@field versions table[]
 ---@field can_undo boolean
 ---@field can_redo boolean
+---@field truncated boolean
+---@field retained_bytes integer
+---@field budget_bytes integer
 
 ---@class Quire.history_redo_result
 ---@field version integer
@@ -437,9 +440,11 @@ q = nil
 
 ---@class Quire.plugin_list_result
 ---@field plugins table[]
+---@field scan table
 
 ---@class Quire.plugin_scan_result
 ---@field plugins table[]
+---@field scan table
 
 ---@class Quire.project_get_result
 ---@field name string
@@ -511,6 +516,7 @@ q = nil
 ---@field author? string
 ---@field notes? string
 ---@field console9? boolean
+---@field history_budget_bytes? integer Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it.
 ---@field render? any
 ---@field timebase? "time"|"beats"|"beats_position"
 

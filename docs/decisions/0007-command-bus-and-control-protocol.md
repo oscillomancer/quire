@@ -113,3 +113,15 @@ agent branch/project isolation. RPC preserves source locations, enforces framing
 bounds before parsing, and reconnects after invalidated calls. Model-loop timer
 cancellation guarantees are documented on `rpc::Timer`; cross-thread owner
 lifetime requires synchronization.
+
+### Invocation snapshot failure contract (2026-10-04)
+
+`Host::invocationSavepoint()` returns `Result<std::function<Status()>>`.
+Capture failure refuses that invocation before its handler runs. A failed
+restore is appended to the invocation error's details and poisons the outer
+transaction: it rolls back rather than committing even if Lua `pcall` caught
+the call error. Further calls in that failed transaction are refused. The
+outer error is `transaction.restore_failed`; a failed outer rollback retains
+that initiating error in its details. Poison is cleared when that outer
+transaction ends. A host without mutable invocation state may return a
+successful empty callback.

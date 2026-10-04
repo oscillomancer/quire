@@ -22,9 +22,15 @@ struct Host final : supple::cmd::Host {
         return std::uint64_t{1};
     }
     supple::Status commitTransaction(std::uint64_t) override { return {}; }
-    Status rollbackTransaction(std::uint64_t) override {
+    supple::Status rollbackTransaction(std::uint64_t) override {
         total = prior;
-        return okStatus();
+        return supple::okStatus();
+    }
+    supple::Result<std::function<supple::Status()>> invocationSavepoint() override {
+        return std::function<supple::Status()>([this, saved = total] {
+            total = saved;
+            return supple::okStatus();
+        });
     }
     void log(const supple::cmd::LogRecord&) override {}
     void emit(std::string_view, supple::json::Value) override {}

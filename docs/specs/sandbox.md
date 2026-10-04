@@ -168,8 +168,10 @@ the initiating command/commit error as a final detail when rollback fails.
 Renders created inside a failed batch are deleted. Invocation savepoints are
 independent of that outer snapshot; a failed step restores its plug-in states,
 chain, settings, render set and pending Lua/host events while the transaction
-remains open. D4's void restore hook reports snapshot/restore failures as `sandbox.savepoint_failed`
-events with the same structured error fields.
+remains open. The Result-returning invocation hook refuses the command when
+capture fails. Restore failure is attached to the command error and aborts the
+outer transaction even if Lua catches the call error. Snapshot/restore failures
+also emit `sandbox.savepoint_failed` with the same structured error fields.
 
 Preset documents accept `supple.preset/1.0` (optional numeric `version: 1`).
 An absent schema is legacy; unknown/newer schemas or explicit versions fail
@@ -288,3 +290,13 @@ paths, locations and hints.
   rebased from `/params/…` to `/values/…`). Presets live in
   `<presetDir>/<plugin id>/<name>.json`. IDs are never reused, even after a
   rollback.
+
+
+### Catalogue diagnostics (2026-10-04)
+
+`plugin.list` always returns `scan` beside `plugins`, including when no plug-ins
+are available or a filter matches none. `scan.failures` contains `{module,
+reason: {code, message, path, hint, details?}, cached}`; `scan.warnings` carries
+structured errors and `scan.cached_modules` counts reused module results.
+The report belongs to this catalogue and survives unrelated host scans;
+`rescan: true` replaces both the catalogue and its report.

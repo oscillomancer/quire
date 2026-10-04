@@ -114,6 +114,16 @@ struct ToyHost : cmd::Host {
         ++rollbacks;
         return okStatus();
     }
+    Result<std::function<Status()>> invocationSavepoint() override {
+        auto restoreEvents = runtime ? runtime->eventSavepoint() : std::function<void()>{};
+        return std::function<Status()>(
+            [this, snapshot = toy, pending = events, restoreEvents = std::move(restoreEvents)] {
+                toy = snapshot;
+                events = pending;
+                if (restoreEvents) restoreEvents();
+                return okStatus();
+            });
+    }
     void log(const cmd::LogRecord& record) override { records.push_back(record); }
     void emit(std::string_view topic, json::Value payload) override {
         events.emplace_back(std::string(topic), std::move(payload));
