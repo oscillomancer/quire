@@ -2135,7 +2135,8 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
                     key.to.fx = f;
                     if (postSolo) {
                         key.tap = model::Tap::PostFader;
-                        t.modify<model::Track>(keyed, [](auto& tr) { tr.solo = model::Solo::On; });
+                        t.modify<model::Track>(
+                            keyed, [](auto& keyedTrack) { keyedTrack.solo = model::Solo::On; });
                     }
                     t.create(key);
                     model::Track bus;

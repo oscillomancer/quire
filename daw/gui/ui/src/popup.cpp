@@ -40,8 +40,8 @@ class MenuList : public List {
             const MenuItem& item = items_[i];
             if (item.separator || !item.enabled) return;
             auto run = item.run;  // the menu is destroyed by close
-            auto close = close_;
-            if (close) close();
+            auto closeMenu = close_;
+            if (closeMenu) closeMenu();
             if (run) run();
         };
     }

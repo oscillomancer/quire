@@ -691,8 +691,9 @@ void edgeEditorOutput(const clap_plugin_t* pl, const clap_output_events_t* out, 
     gesture.param_id = 7;
     if (phase == 1) out->try_push(out, &gesture.header);
     clap_event_param_value_t value{};
-    value.header = {sizeof(value), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
-                    CLAP_EVENT_IS_LIVE | (edge.config[0] == 31 ? CLAP_EVENT_DONT_RECORD : 0U)};
+    value.header = {
+        sizeof(value), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+        CLAP_EVENT_IS_LIVE | (edge.config[0] == 31 ? std::uint32_t{CLAP_EVENT_DONT_RECORD} : 0U)};
     value.param_id = 7;
     value.value = idle || phase == 2 ? 10 : 5;
     value.note_id = value.port_index = value.channel = value.key = -1;
