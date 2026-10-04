@@ -23,10 +23,6 @@ if(SUPPLE_BUILD_TESTS)
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
                    tests/test_jack.cpp tests/test_workers.cpp tests/test_meters.cpp LABELS rt SPLIT)
-  # The app and command suites take minutes under the sanitizers; the preset
-  # default (600 s) is a per-test fallback, so give the engine parts room.
-  set_tests_properties(engine.tests.test_app engine.tests.test_commands PROPERTIES TIMEOUT 1800
-                       RESOURCE_LOCK engine-heavy)  # several GB each under the sanitizers
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   add_dependencies(engine.tests clap-host-fixtures clap-host-vst3-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)

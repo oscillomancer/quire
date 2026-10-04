@@ -8,6 +8,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <span>
@@ -583,26 +584,27 @@ Schema<E> enumeration(std::initializer_list<std::pair<E, std::string_view>> choi
 template <class T>
 Schema<std::optional<T>> optional(Schema<T> inner) {
     auto ex = inner.jsonSchema();
-    return {
-        "optional",
-        [inner](const json::Value& v, std::optional<T>& out, DecodeCtx& c, const std::string& p) {
-            if (v.isNull()) {
-                out.reset();
-                return true;
-            }
-            T tmp{};
-            bool ok = inner.decodeInto(v, tmp, c, p);
-            if (ok) out = std::move(tmp);
-            return ok;
-        },
-        [inner](const std::optional<T>& v) { return v ? inner.encode(*v) : json::Value(); }, ex};
+    auto in = std::make_shared<const Schema<T>>(std::move(inner));  // copies share it
+    return {"optional",
+            [in](const json::Value& v, std::optional<T>& out, DecodeCtx& c, const std::string& p) {
+                if (v.isNull()) {
+                    out.reset();
+                    return true;
+                }
+                T tmp{};
+                bool ok = in->decodeInto(v, tmp, c, p);
+                if (ok) out = std::move(tmp);
+                return ok;
+            },
+            [in](const std::optional<T>& v) { return v ? in->encode(*v) : json::Value(); }, ex};
 }
 template <class T>
 Schema<std::vector<T>> arrayOf(Schema<T> item) {
     auto ex = typeExport("array");
     ex["items"] = item.jsonSchema();
+    auto it = std::make_shared<const Schema<T>>(std::move(item));
     return {"array",
-            [item](const json::Value& v, std::vector<T>& out, DecodeCtx& c, const std::string& p) {
+            [it](const json::Value& v, std::vector<T>& out, DecodeCtx& c, const std::string& p) {
                 if (!v.isArray()) {
                     wrongType(c, p, "array");
                     return false;
@@ -610,16 +612,16 @@ Schema<std::vector<T>> arrayOf(Schema<T> item) {
                 bool ok = true;
                 for (std::size_t i = 0; i < v.size(); ++i) {
                     T x{};
-                    if (item.decodeInto(v.at(i), x, c, json::pointerJoin(p, i)))
+                    if (it->decodeInto(v.at(i), x, c, json::pointerJoin(p, i)))
                         out.push_back(std::move(x));
                     else
                         ok = false;
                 }
                 return ok;
             },
-            [item](const std::vector<T>& v) {
+            [it](const std::vector<T>& v) {
                 json::Value out = json::Value::array();
-                for (const auto& x : v) out.push_back(item.encode(x));
+                for (const auto& x : v) out.push_back(it->encode(x));
                 return out;
             },
             ex};
@@ -628,9 +630,10 @@ template <class T>
 Schema<std::map<std::string, T>> mapOf(Schema<T> value) {
     auto ex = typeExport("object");
     ex["additionalProperties"] = value.jsonSchema();
+    auto val = std::make_shared<const Schema<T>>(std::move(value));
     return {"map",
-            [value](const json::Value& v, std::map<std::string, T>& out, DecodeCtx& c,
-                    const std::string& p) {
+            [val](const json::Value& v, std::map<std::string, T>& out, DecodeCtx& c,
+                  const std::string& p) {
                 if (!v.isObject()) {
                     wrongType(c, p, "object");
                     return false;
@@ -638,16 +641,16 @@ Schema<std::map<std::string, T>> mapOf(Schema<T> value) {
                 bool ok = true;
                 for (const auto& m : v.asObject()) {
                     T x{};
-                    if (value.decodeInto(m.value, x, c, json::pointerJoin(p, m.key)))
+                    if (val->decodeInto(m.value, x, c, json::pointerJoin(p, m.key)))
                         out[m.key] = std::move(x);
                     else
                         ok = false;
                 }
                 return ok;
             },
-            [value](const std::map<std::string, T>& v) {
+            [val](const std::map<std::string, T>& v) {
                 json::Value out = json::Value::object();
-                for (const auto& [k, x] : v) out[k] = value.encode(x);
+                for (const auto& [k, x] : v) out[k] = val->encode(x);
                 return out;
             },
             ex};
@@ -686,27 +689,29 @@ class ObjectBuilder {
         if (auto* d = f.schema.find("description")) f.doc = d->asString();
         auto fieldName = f.name;
         auto fieldDoc = f.doc;
-        f.decode = [member, schema, fieldName, fieldDoc](const json::Value* v, T& obj, DecodeCtx& c,
+        // The three closures share one copy of the member schema.
+        auto shared = std::make_shared<const Schema<M>>(std::move(schema));
+        f.decode = [member, shared, fieldName, fieldDoc](const json::Value* v, T& obj, DecodeCtx& c,
                                                          const std::string& p) {
             if (!v) {
                 if constexpr (!IsOptional<M>::value)
                     c.error("schema.required", "missing required member \"" + fieldName + "\"", p,
-                            "add " + fieldName + " (" + schema.title() + ")" +
+                            "add " + fieldName + " (" + shared->title() + ")" +
                                 (fieldDoc.empty() ? "" : ": " + fieldDoc));
                 return;
             }
-            schema.decodeInto(*v, obj.*member, c, p);
+            shared->decodeInto(*v, obj.*member, c, p);
         };
-        f.encode = [member, schema](const T& obj) -> std::optional<json::Value> {
+        f.encode = [member, shared](const T& obj) -> std::optional<json::Value> {
             if constexpr (IsOptional<M>::value) {
                 if (!(obj.*member)) return std::nullopt;
             }
-            return schema.encode(obj.*member);
+            return shared->encode(obj.*member);
         };
         f.applyDefault = [](T&) {};
         f.setDefault = [member](T& obj, const std::any& v) { obj.*member = std::any_cast<M>(v); };
-        f.encodeDefault = [schema](const std::any& v) {
-            return schema.encode(std::any_cast<M>(v));
+        f.encodeDefault = [shared](const std::any& v) {
+            return shared->encode(std::any_cast<M>(v));
         };
         fields_.push_back(std::move(f));
         return *this;
@@ -716,12 +721,13 @@ class ObjectBuilder {
         return field(std::move(name), member, optional(std::move(schema)));
     }
     ObjectBuilder& field(std::string name, float T::* member, Schema<double> schema) {
+        auto shared = std::make_shared<const Schema<double>>(schema);
         Schema<float> floatSchema(
             schema.title(),
-            [schema](const json::Value& value, float& out, DecodeCtx& ctx,
+            [shared](const json::Value& value, float& out, DecodeCtx& ctx,
                      const std::string& path) {
                 double decoded = 0;
-                if (!schema.decodeInto(value, decoded, ctx, path)) return false;
+                if (!shared->decodeInto(value, decoded, ctx, path)) return false;
                 if (decoded < -static_cast<double>(std::numeric_limits<float>::max()) ||
                     decoded > static_cast<double>(std::numeric_limits<float>::max())) {
                     ctx.error("schema.out_of_range", "number outside float range", path,
@@ -731,7 +737,7 @@ class ObjectBuilder {
                 out = static_cast<float>(decoded);
                 return true;
             },
-            [schema](float value) { return schema.encode(static_cast<double>(value)); },
+            [shared](float value) { return shared->encode(static_cast<double>(value)); },
             schema.jsonSchema());
         return field(std::move(name), member, std::move(floatSchema));
     }
@@ -771,7 +777,8 @@ class ObjectBuilder {
         if (required.size()) ex["required"] = std::move(required);
         ex["additionalProperties"] =
             policy_.value_or(UnknownMembers::Error) == UnknownMembers::Error ? false : true;
-        auto fields = fields_;
+        auto fields =
+            std::make_shared<const std::vector<Field>>(fields_);  // shared by both closures
         auto policy = policy_;
         auto title = title_;
         auto decoder = [fields, policy](const json::Value& v, T& out, DecodeCtx& c,
@@ -781,7 +788,7 @@ class ObjectBuilder {
                 return false;
             }
             auto before = c.errors.size();
-            for (const auto& f : fields) {
+            for (const auto& f : *fields) {
                 auto* member = v.find(f.name);
                 auto path = json::pointerJoin(p, f.name);
                 if (!member && f.hasDefault)
@@ -798,7 +805,7 @@ class ObjectBuilder {
             }
             for (const auto& m : v.asObject()) {
                 bool known = false;
-                for (const auto& f : fields)
+                for (const auto& f : *fields)
                     if (m.key == f.name) {
                         known = true;
                         break;
@@ -812,7 +819,7 @@ class ObjectBuilder {
                     continue;
                 }
                 std::vector<std::string_view> names;
-                for (const auto& f : fields) {
+                for (const auto& f : *fields) {
                     names.push_back(f.name);
                 }
                 std::string hint = listNames(names);
@@ -827,7 +834,7 @@ class ObjectBuilder {
         };
         auto encoder = [fields](const T& obj) {
             json::Value v = json::Value::object();
-            for (const auto& f : fields) {
+            for (const auto& f : *fields) {
                 auto x = f.encode(obj);
                 if (x && !(f.omitDefault && f.hasDefault && *x == f.defaultJson))
                     v[f.name] = std::move(*x);
@@ -867,15 +874,16 @@ class VariantBuilder {
         Alternative alt;
         alt.tag = std::move(tag);
         alt.schema = schema.jsonSchema();
-        alt.decode = [schema](const json::Value& v, V& out, DecodeCtx& c, const std::string& p) {
+        auto shared = std::make_shared<const Schema<A>>(std::move(schema));
+        alt.decode = [shared](const json::Value& v, V& out, DecodeCtx& c, const std::string& p) {
             A x{};
-            bool ok = schema.decodeInto(v, x, c, p);
+            bool ok = shared->decodeInto(v, x, c, p);
             if (ok) out = std::move(x);
             return ok;
         };
-        alt.encode = [schema](const V& v) -> std::optional<json::Value> {
+        alt.encode = [shared](const V& v) -> std::optional<json::Value> {
             if (!std::holds_alternative<A>(v)) return std::nullopt;
-            return schema.encode(std::get<A>(v));
+            return shared->encode(std::get<A>(v));
         };
         alts_.push_back(std::move(alt));
         return *this;
@@ -892,7 +900,7 @@ class VariantBuilder {
             one.push_back(std::move(s));
         }
         ex["oneOf"] = std::move(one);
-        auto alts = alts_;
+        auto alts = std::make_shared<const std::vector<Alternative>>(alts_);
         auto tag = tag_;
         auto decoder = [alts, tag](const json::Value& v, V& out, DecodeCtx& c,
                                    const std::string& p) {
@@ -902,7 +910,7 @@ class VariantBuilder {
             }
             const auto* t = v.find(tag);
             std::vector<std::string_view> names;
-            for (const auto& a : alts) {
+            for (const auto& a : *alts) {
                 names.push_back(a.tag);
             }
             const auto all = listNames(names);
@@ -911,7 +919,7 @@ class VariantBuilder {
                         "add \"" + tag + "\" with one of: " + all);
                 return false;
             }
-            for (const auto& a : alts)
+            for (const auto& a : *alts)
                 if (a.tag == t->asString()) {
                     json::Value without = v;
                     without.asObject().erase(tag);
@@ -925,7 +933,7 @@ class VariantBuilder {
         };
         auto encoder = [alts, tag](const V& v) {
             json::Value out = json::Value::object();
-            for (const auto& a : alts) {
+            for (const auto& a : *alts) {
                 auto x = a.encode(v);
                 if (x) {
                     out[tag] = a.tag;
@@ -952,11 +960,13 @@ Schema<T> named(std::string_view name, Schema<T> s) {
     auto ex = json::Value::object();
     ex["$ref"] = "#/$defs/" + std::string(name);
     ex["$defs"][std::string(name)] = s.jsonSchema();
+    const auto title = s.title();
+    auto shared = std::make_shared<const Schema<T>>(std::move(s));
     return Schema<T>(
-        s.title(),
-        [s](const json::Value& v, T& out, DecodeCtx& c, const std::string& p) {
-            return s.decodeInto(v, out, c, p);
+        title,
+        [shared](const json::Value& v, T& out, DecodeCtx& c, const std::string& p) {
+            return shared->decodeInto(v, out, c, p);
         },
-        [s](const T& v) { return s.encode(v); }, ex);
+        [shared](const T& v) { return shared->encode(v); }, ex);
 }
 }  // namespace supple::schema
