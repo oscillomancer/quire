@@ -86,7 +86,7 @@ Result<Target> midiTarget(const model::Session& s, const std::string& text) {
     t.frame.ppq = midi->sequence.ppq;
     t.frame.offset = take->startOffset;
     t.frame.rate = take->playrate > 0 ? take->playrate : 1.0;
-    t.frame.itemPosition = it->position;
+    t.frame.itemPosition = model::itemSpan(s, *it).startBeat;
     return t;
 }
 

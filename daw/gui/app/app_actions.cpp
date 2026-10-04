@@ -104,6 +104,11 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                         obj({{"item", "$each.item"}, {"at", "$playhead.beats"}})));
     registry_.add(bound("item.remove:selected", "Item: remove selected", "item.remove",
                         obj({{"item", "$each.item"}})));
+    for (auto [name, label] : {std::pair{"beats", "Project: items follow the beat"},
+                               {"time", "Project: items follow time"},
+                               {"beats_position", "Project: items follow the beat (start only)"}})
+        registry_.add(bound(std::string("project.timebase:") + name, label, "project.set",
+                            obj({{"timebase", name}})));
 
     auto loaded = actions::Keymap::load(keymapFile_);
     if (loaded) {

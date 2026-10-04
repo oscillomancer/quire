@@ -56,8 +56,7 @@ std::string RenderDialog::defaultFor(std::string_view key) const {
     };
     char buf[64];
     if (key == "end_beat") {
-        double last = 0;
-        for (const auto& e : s.items) last = std::max(last, e.value->position + e.value->length);
+        const double last = model::lastItemBeat(s);
         std::snprintf(buf, sizeof buf, "last item end (%.2f)", last);
         return buf;
     }

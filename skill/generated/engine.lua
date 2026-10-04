@@ -328,6 +328,7 @@ q = nil
 ---@field fade_out? number
 ---@field name? string
 ---@field color? string
+---@field timebase? "track"|"time"|"beats"|"beats_position"
 
 ---@class Quire.item_split_args
 ---@field item string
@@ -468,6 +469,7 @@ q = nil
 ---@field notes? string
 ---@field console9? boolean
 ---@field render? any
+---@field timebase? "time"|"beats"|"beats_position"
 
 ---@class Quire.region_add_args
 ---@field start? number
@@ -738,6 +740,7 @@ q = nil
 ---@field record_mode? "input"|"midi_overdub"|"midi_replace"
 ---@field monitor? "off"|"on"|"auto"
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
+---@field timebase? "project"|"time"|"beats"|"beats_position" What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now
 
 ---@class Quire.track_template_list_result
 ---@field templates table[]
@@ -970,7 +973,7 @@ q = nil
 ---@field recover fun(args?: Quire.project_recover_args): Quire.project_recover_result Put recordings a crash left out back into the project (one undo step).
 ---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.
 ---@field save fun(args?: Quire.project_save_args): Quire.project_save_result Save the project (canonical JSON) to its file or a new path.
----@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, Console 9).
+---@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, Console 9, timebase).
 
 ---@class Quire.region
 ---@field add fun(args?: Quire.region_add_args): Quire.region_add_result Add a named region in beats.

@@ -171,6 +171,17 @@ struct Fixture {
         pointer(ui::PointerEvent::Type::Up, p, 1, 1, mods);
         sync();
     }
+    // Picks row `index` of an open menu (rows are 26 px; separators count as rows).
+    void menuRow(const std::string& id, int index) {
+        root->frame(false);
+        ui::Node* menu = root->find(id);
+        REQUIRE(menu);
+        const ui::Point p{menu->bounds().x + 30, menu->bounds().y + 26.0f * index + 13};
+        pointer(ui::PointerEvent::Type::Move, p);
+        pointer(ui::PointerEvent::Type::Down, p);
+        pointer(ui::PointerEvent::Type::Up, p);
+        sync();
+    }
 };
 
 }  // namespace
@@ -661,7 +672,7 @@ TEST_CASE(
     ui::Node* menu = f.root->find("item.menu");
     REQUIRE(menu);
     const auto before = f.steps();
-    REQUIRE(f.root->click("item.menu"));  // its only row: Delete
+    f.menuRow("item.menu", 0);  // Delete
     f.sync();
     CHECK_FALSE(f.app->head().items.find(midi));
     CHECK(f.app->head().items.find(audio));
@@ -673,7 +684,7 @@ TEST_CASE(
     const ui::Rect ra = f.rectOf(a);
     rightClick({ra.x + ra.w / 2, ra.y + ra.h / 2});
     REQUIRE(f.root->find("item.menu"));
-    REQUIRE(f.root->click("item.menu"));
+    f.menuRow("item.menu", 0);
     f.sync();
     CHECK_FALSE(f.app->head().items.find(a));
     CHECK_FALSE(f.app->head().items.find(b));
@@ -683,4 +694,37 @@ TEST_CASE(
     f.drag({lanes.x + 4, f.view->rowRect(0).y + 4},
            {lanes.x + 200, f.view->rowRect(1).bottom() - 4}, 0, 3);
     CHECK_FALSE(f.root->find("item.menu"));
+}
+
+TEST_CASE("arrange gestures: the item menu sets what items follow; a time item moves by beats") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    const model::Id audio = f.itemOnRow(0);
+    const ui::Rect r = f.rectOf(audio);
+    const ui::Point on{r.x + r.w / 2, r.y + r.h / 2};
+    f.pointer(ui::PointerEvent::Type::Down, on, 3);
+    f.pointer(ui::PointerEvent::Type::Up, on, 3);
+    f.sync();
+    REQUIRE(f.root->find("item.menu"));
+    const double startSec = model::itemSpan(f.app->head(), f.item(audio)).startSec;
+    f.menuRow("item.menu", 3);  // Delete, rule, beat, time
+    CHECK(f.item(audio).timebase == model::ItemTimebase::Time);
+    CHECK(f.item(audio).position == doctest::Approx(startSec));  // seconds now, same place
+    CHECK(g.selection() == std::vector<model::Id>{audio});
+    // A drag still moves it by whole beats (snapped), now written in seconds.
+    const ui::Rect moved = f.rectOf(audio);
+    const float beat = f.beatPx();
+    f.drag({moved.x + moved.w / 2, moved.y + moved.h / 2},
+           {moved.x + moved.w / 2 + 2 * beat, moved.y + moved.h / 2});
+    const model::Session& s = f.app->head();
+    CHECK(model::itemSpan(s, f.item(audio)).startSec ==
+          doctest::Approx(s.timeMap->secondsAt(s.timeMap->beatAt(startSec) + 2)).epsilon(1e-6));
+    // The tempo halves: it stays at its seconds.
+    const double before = model::itemSpan(s, f.item(audio)).startSec;
+    REQUIRE(f.dispatcher->execute({"tempo.set",
+                                   json::parse(R"({"points":[{"beat":0,"bpm":60}]})").value(),
+                                   {cmd::Origin::Type::Ui, "gui", {}}}));
+    f.sync();
+    CHECK(model::itemSpan(f.app->head(), f.item(audio)).startSec == doctest::Approx(before));
 }

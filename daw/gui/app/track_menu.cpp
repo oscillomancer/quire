@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,12 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
     m.label = "Color…";
     m.run = [this, track, anchor] { (void)openColors(track, anchor); };
     items.push_back(std::move(m));
+    if (app.head().tracks.find(track)->type == model::StripType::Channel) {
+        m = {};
+        m.label = "Timebase…";
+        m.run = [this, track, anchor] { openTimebase(track, anchor); };
+        items.push_back(std::move(m));
+    }
     items.push_back({"", "", {}, true, true});  // separator
     m = {};
     m.label = "Delete";
@@ -78,6 +85,32 @@ Status TrackMenu::openColors(const model::Id& track, const ui::Rect& anchor) con
         ui::makeMenu("track.color." + track.str(), std::move(items), [this] { root.closePopup(); }),
         anchor, anchor.w > 0 ? ui::Placement::Below : ui::Placement::Center);
     return {};
+}
+
+void TrackMenu::openTimebase(const model::Id& track, const ui::Rect& anchor) const {
+    const model::Track* tr = app.head().tracks.find(track);
+    if (!tr) return;
+    std::vector<ui::MenuItem> items;
+    for (auto [label, value, name] :
+         {std::tuple{"Follow the project", model::TrackTimebase::Project, "project"},
+          {"Follow the beat", model::TrackTimebase::Beats, "beats"},
+          {"Follow time", model::TrackTimebase::Time, "time"},
+          {"Follow the beat (start only)", model::TrackTimebase::BeatsPosition,
+           "beats_position"}}) {
+        ui::MenuItem m;
+        m.label = label;
+        m.checked = tr->timebase == value;
+        m.run = [this, track, timebase = std::string(name)] {
+            json::Value args = json::Value::object();
+            args["track"] = track.str();
+            args["timebase"] = timebase;
+            commit("track.set", std::move(args));
+        };
+        items.push_back(std::move(m));
+    }
+    root.openPopup(ui::makeMenu("track.timebase." + track.str(), std::move(items),
+                                [this] { root.closePopup(); }),
+                   anchor, anchor.w > 0 ? ui::Placement::Below : ui::Placement::Center);
 }
 
 void TrackMenu::openRename(const model::Id& track, const ui::Rect& anchor) const {

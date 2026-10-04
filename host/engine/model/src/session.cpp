@@ -504,27 +504,95 @@ std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash) {
 
 namespace supple::model {
 
-ItemSpan itemSpan(const Session& s, const Item& it) {
-    const time::TimeMap& tm = *s.timeMap;
-    const Track* tr = s.tracks.find(it.track);
-    Timebase tb = s.project->timebase;
-    if (it.timebase == ItemTimebase::Time)
-        tb = Timebase::Time;
-    else if (it.timebase == ItemTimebase::Beats)
-        tb = Timebase::Beats;
-    else if (it.timebase == ItemTimebase::BeatsPosition)
-        tb = Timebase::BeatsPosition;
-    else if (tr && tr->timebase == TrackTimebase::Time)
-        tb = Timebase::Time;
-    else if (tr && tr->timebase == TrackTimebase::Beats)
-        tb = Timebase::Beats;
-    else if (tr && tr->timebase == TrackTimebase::BeatsPosition)
-        tb = Timebase::BeatsPosition;
+Timebase itemTimebase(const Session& s, const Item& it) {
+    if (it.timebase == ItemTimebase::Time) return Timebase::Time;
+    if (it.timebase == ItemTimebase::Beats) return Timebase::Beats;
+    if (it.timebase == ItemTimebase::BeatsPosition) return Timebase::BeatsPosition;
+    if (const Track* tr = s.tracks.find(it.track)) {
+        if (tr->timebase == TrackTimebase::Time) return Timebase::Time;
+        if (tr->timebase == TrackTimebase::Beats) return Timebase::Beats;
+        if (tr->timebase == TrackTimebase::BeatsPosition) return Timebase::BeatsPosition;
+    }
+    return s.project->timebase;
+}
+
+namespace {
+ItemSpan spanAs(const time::TimeMap& tm, const Item& it, Timebase tb) {
     if (tb == Timebase::Time) return {tm.beatAt(it.position), it.position, it.position + it.length};
     const double startSec = tm.secondsAt(it.position);
     if (tb == Timebase::Beats)
         return {it.position, startSec, tm.secondsAt(it.position + it.length)};
     return {it.position, startSec, startSec + it.length};  // beats position, seconds length
+}
+void writeSpan(const time::TimeMap& tm, Item& it, Timebase tb, double startBeat, double endBeat) {
+    if (tb == Timebase::Time) {
+        it.position = tm.secondsAt(startBeat);
+        it.length = tm.secondsAt(endBeat) - it.position;
+    } else if (tb == Timebase::Beats) {
+        it.position = startBeat;
+        it.length = endBeat - startBeat;
+    } else {
+        it.position = startBeat;
+        it.length = tm.secondsAt(endBeat) - tm.secondsAt(startBeat);
+    }
+}
+}  // namespace
+
+double itemLengthBeats(const Session& s, const Item& it) {
+    const ItemSpan span = itemSpan(s, it);
+    return s.timeMap->beatAt(span.endSec) - span.startBeat;
+}
+
+double itemEndBeat(const Session& s, const Item& it) {
+    return s.timeMap->beatAt(itemSpan(s, it).endSec);
+}
+
+double lastItemBeat(const Session& s) {
+    double end = 0;
+    for (const auto& e : s.items) end = std::max(end, itemEndBeat(s, *e.value));
+    return end;
+}
+
+void placeItem(const Session& s, Item& it, double startBeat, std::optional<double> lengthBeats) {
+    const time::TimeMap& tm = *s.timeMap;
+    const Timebase tb = itemTimebase(s, it);
+    startBeat = std::max(0.0, startBeat);
+    if (lengthBeats) {
+        writeSpan(tm, it, tb, startBeat, startBeat + *lengthBeats);
+        return;
+    }
+    // Keep the length in the item's own domain.
+    if (tb == Timebase::Time)
+        it.position = tm.secondsAt(startBeat);
+    else
+        it.position = startBeat;
+}
+
+void moveItem(const Session& s, Item& it, Id track, double startBeat) {
+    const time::TimeMap& tm = *s.timeMap;
+    const Timebase before = itemTimebase(s, it);
+    const ItemSpan span = itemSpan(s, it);
+    it.track = track;
+    startBeat = std::max(0.0, startBeat);
+    const double endBeat = before == Timebase::Beats
+                               ? startBeat + (tm.beatAt(span.endSec) - span.startBeat)
+                               : tm.beatAt(tm.secondsAt(startBeat) + (span.endSec - span.startSec));
+    writeSpan(tm, it, itemTimebase(s, it), startBeat, endBeat);
+}
+
+void placeItemSeconds(const Session& s, Item& it, double startSec, double endSec) {
+    const time::TimeMap& tm = *s.timeMap;
+    writeSpan(tm, it, itemTimebase(s, it), tm.beatAt(startSec), tm.beatAt(endSec));
+}
+
+void retimeItem(const Session& s, Item& it, Timebase from, Timebase to) {
+    const time::TimeMap& tm = *s.timeMap;
+    const ItemSpan span = spanAs(tm, it, from);
+    writeSpan(tm, it, to, span.startBeat, tm.beatAt(span.endSec));
+}
+
+ItemSpan itemSpan(const Session& s, const Item& it) {
+    return spanAs(*s.timeMap, it, itemTimebase(s, it));
 }
 
 }  // namespace supple::model

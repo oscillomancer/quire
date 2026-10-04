@@ -202,11 +202,7 @@ Result<model::Id> regionId(const model::Session& s, const std::string& text) {
     return *id;
 }
 
-double lastBeat(const model::Session& s) {
-    double end = 0;
-    for (const auto& e : s.items) end = std::max(end, e.value->position + e.value->length);
-    return end;
-}
+double lastBeat(const model::Session& s) { return model::lastItemBeat(s); }
 Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, const Args& a) {
     auto source = sessionFor(app, a.branch);
     if (!source) return std::move(source).error();
@@ -319,8 +315,9 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
             }
         }
         for (const auto& item : s.items)
-            if ((!track || item.value->track == *track) && item.value->position <= first &&
-                item.value->position + item.value->length > first) {
+            if ((!track || item.value->track == *track) &&
+                model::itemSpan(s, *item.value).startBeat <= first &&
+                model::itemEndBeat(s, *item.value) > first) {
                 data.item = item.id.str();
                 if (item.value->activeTake) {
                     const auto* take = s.takes.find(*item.value->activeTake);

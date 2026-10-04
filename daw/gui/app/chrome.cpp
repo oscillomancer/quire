@@ -78,6 +78,8 @@ ChromeLayout ChromeLayout::defaults() {
         {"Transport",
          {"transport.toggle", "transport.record", "transport.loop.toggle", "-",
           "transport.seek:start", "transport.seek:end"}},
+        {"Project",
+         {"project.timebase:beats", "project.timebase:time", "project.timebase:beats_position"}},
     };
     l.toolbar = {"transport.toggle", "transport.record", "transport.loop.toggle",
                  "history.undo",     "history.redo",     "track.add:channel",

@@ -90,9 +90,25 @@ class LaneLabels : public ui::Node {
                     name += rate;
                 }
                 const float alpha = item->mute ? 0.45f : 0.85f;
+                // An item that does not follow the beat says what it follows: a
+                // tempo change leaves "time" items at their seconds, and "pos"
+                // items keep their length in seconds (their start follows).
+                const model::Timebase tb = model::itemTimebase(s, *item);
+                const char* follows = tb == model::Timebase::Time            ? "time"
+                                      : tb == model::Timebase::BeatsPosition ? "pos"
+                                                                             : nullptr;
+                const float badgeRight = r.right() - (item->takes.size() > 1 ? 22.0f : 4.0f);
+                float timebaseW = 0;
+                if (follows && r.w > 70) {
+                    timebaseW = c.textWidth(follows, ui::Font::Mono, t.type("caption")) + 8;
+                    const ui::Rect badge{badgeRight - timebaseW, r.y + 3, timebaseW, 12};
+                    c.strokeRect(badge, t.color("ink-quiet").withAlpha(alpha), 1.0f);
+                    c.text(badge, follows, ui::Font::Mono, t.type("caption"),
+                           t.color("ink-quiet").withAlpha(alpha), ui::kCenter | ui::kMiddle);
+                }
                 // Keep the label clear of the padlock an item may carry.
                 const float textX = item->locked ? r.x + 18.0f : r.x + 4.0f;
-                const float textW = std::max(0.0f, r.right() - textX - 26.0f);
+                const float textW = std::max(0.0f, r.right() - textX - 26.0f - timebaseW);
                 c.text({textX, r.y + 1, textW, 14}, name, ui::Font::Ui, t.type("caption"),
                        t.color("ink").withAlpha(alpha));
                 // A badge when the item carries more than one take.

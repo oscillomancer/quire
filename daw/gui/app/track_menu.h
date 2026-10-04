@@ -1,5 +1,5 @@
 // A track's right-click menu, shared by the TCP and the mixer: Rename, Color…
-// (the swatch menu) and Delete. Each pick is one command (one undo step).
+// (the swatch menu), Timebase… (channels) and Delete. Each pick is one command (one undo step).
 #pragma once
 
 #include <functional>
@@ -25,6 +25,8 @@ struct TrackMenu {
     // centres the menu (the ui.track.color action).
     Status openColors(const model::Id& track, const ui::Rect& anchor) const;
     void openRename(const model::Id& track, const ui::Rect& anchor) const;
+    // What a channel's items follow when the tempo changes (track.set timebase).
+    void openTimebase(const model::Id& track, const ui::Rect& anchor) const;
 
   private:
     void commit(std::string_view command, json::Value args) const;

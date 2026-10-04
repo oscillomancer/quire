@@ -2645,7 +2645,7 @@ Result:
 
 Set an item's position, length, playback, fades, name, color, or lock.
 
-Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {"locked": false}.
+Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {"locked": false}. timebase: what the item follows when the tempo changes — beats (moves and stretches with it), time (stays at its seconds), beats_position (its start follows the beat, its length stays in seconds) or track (inherit); the item keeps its place now.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2667,6 +2667,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `fade_out` | number |  | 0.0.. |  |  |
 | `name` | string |  |  |  |  |
 | `color` | string |  |  |  |  |
+| `timebase` | string |  |  |  |  |
 
 ### Result
 
@@ -2688,6 +2689,23 @@ Kind: `edit`. Exposure: `mcp-tool`.
 {
   "item": "it_1",
   "gain_db": "-3 dB"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Keep an item at its time when the tempo changes** (`song_with_item`)
+
+```json
+{
+  "item": "it_1",
+  "timebase": "time"
 }
 
 ```
@@ -4208,9 +4226,9 @@ Result:
 
 ## `project.set@1`
 
-Change project metadata (name, title, author, notes, Console 9).
+Change project metadata (name, title, author, notes, Console 9, timebase).
 
-
+timebase: what items follow when the tempo changes, for items and tracks that inherit it — beats (default), time or beats_position; they keep their place now.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -4224,6 +4242,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `notes` | string |  |  |  |  |
 | `console9` | boolean |  |  |  |  |
 | `render` | value |  |  |  |  |
+| `timebase` | string |  |  |  |  |
 
 ### Result
 
@@ -6256,6 +6275,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `record_mode` | string |  |  |  |  |
 | `monitor` | string |  |  |  |  |
 | `parent_send` | boolean |  |  |  | The implicit send to the parent buss/master (off: only explicit sends leave the strip) |
+| `timebase` | string |  |  |  | What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now |
 
 ### Result
 

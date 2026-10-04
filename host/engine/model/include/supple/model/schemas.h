@@ -13,7 +13,10 @@ namespace supple::model {
 
 schema::Schema<StripType> stripTypeSchema();
 schema::Schema<RoutePan> routePanSchema();
-schema::Schema<Id> idSchema();  // "tr_3"
+schema::Schema<Timebase> timebaseSchema();            // time | beats | beats_position
+schema::Schema<TrackTimebase> trackTimebaseSchema();  // project | time | beats | beats_position
+schema::Schema<ItemTimebase> itemTimebaseSchema();    // track | time | beats | beats_position
+schema::Schema<Id> idSchema();                        // "tr_3"
 template <class T>
 const schema::Schema<T>& schemaOf();  // specialized for every object type
 

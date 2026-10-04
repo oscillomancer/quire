@@ -40,11 +40,7 @@ schema::Schema<model::Tap> tapSchema() {
                                             {model::Tap::PreFx, "pre_fx"}});
 }
 
-double lastBeat(const model::Session& s) {
-    double end = 0;
-    for (const auto& e : s.items) end = std::max(end, e.value->position + e.value->length);
-    return end;
-}
+double lastBeat(const model::Session& s) { return model::lastItemBeat(s); }
 
 Result<Loaded> trackAudio(EngineApp& a, std::string_view track, std::optional<double> start,
                           std::optional<double> end, model::Tap tap) {

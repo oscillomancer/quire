@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <tuple>
 
 #include "supple/ui/canvas.h"
 #include "supple/ui/popup.h"
@@ -13,6 +14,14 @@
 
 namespace supple::views {
 namespace {
+
+// An item's start and length in beats, whatever its timebase follows.
+double startBeat(const model::Session& s, const model::Item& it) {
+    return model::itemSpan(s, it).startBeat;
+}
+double lengthBeats(const model::Session& s, const model::Item& it) {
+    return model::itemLengthBeats(s, it);
+}
 
 constexpr float kEdge = 6;               // px at an item's ends that trim it
 constexpr float kHandle = 9;             // the fade handles' square at the top corners
@@ -50,7 +59,7 @@ void addCrossfades(const model::Session& s, const std::vector<Placed>& placed,
         for (const auto& e : s.items) {
             const model::Item& o = *e.value;
             if (o.track != p.track || moving(e.id)) continue;
-            const double os = o.position, oe = o.position + o.length;
+            const double os = startBeat(s, o), oe = startBeat(s, o) + lengthBeats(s, o);
             if (os < p.start && p.start < oe && oe < p.end) {  // o, then p
                 const double len = seconds(p.start, oe);
                 fades[e.id.str()].second = len;
@@ -97,8 +106,8 @@ class Ghost : public ui::Node {
             if (target < 0 || static_cast<std::size_t>(target) >= v.trackLayout().rowCount())
                 return std::nullopt;
             const ui::Rect r = v.rowRect(static_cast<std::size_t>(target));
-            const double start = it.position + beatDelta + startDelta;
-            const double end = it.position + beatDelta + it.length + lenDelta;
+            const double start = startBeat(s, it) + beatDelta + startDelta;
+            const double end = startBeat(s, it) + beatDelta + lengthBeats(s, it) + lenDelta;
             const float x0 = v.xAt(s.timeMap->secondsAt(start)),
                         x1 = v.xAt(s.timeMap->secondsAt(end));
             return ui::Rect{x0, r.y + 1, std::max(2.0f, x1 - x0), r.h - 2};
@@ -146,8 +155,8 @@ class Ghost : public ui::Node {
                 if (anchor)
                     if (auto r = rectFor(*anchor, 0, 0, 0, 0)) {
                         const float dx =
-                            v.xAt(s.timeMap->secondsAt(anchor->position + st.deltaBeats)) -
-                            v.xAt(s.timeMap->secondsAt(anchor->position));
+                            v.xAt(s.timeMap->secondsAt(startBeat(s, *anchor) + st.deltaBeats)) -
+                            v.xAt(s.timeMap->secondsAt(startBeat(s, *anchor)));
                         c.strokeRect(*r, t.color("focus"), 1.5f);
                         c.line({r->x + r->w / 2, r->y + r->h / 2},
                                {r->x + r->w / 2 + dx, r->y + r->h / 2}, t.color("focus"), 2);
@@ -281,7 +290,7 @@ ItemGestures::Clip ItemGestures::clip() const {
         const model::Item* it = itemOf(s, id);
         const auto row = it ? view_.trackLayout().indexOf(it->track) : std::nullopt;
         if (!row) continue;
-        c.items.push_back({id, it->position, it->position + it->length, *row});
+        c.items.push_back({id, startBeat(s, *it), startBeat(s, *it) + lengthBeats(s, *it), *row});
     }
     return c;
 }
@@ -370,9 +379,10 @@ double ItemGestures::stretchRate(const model::Item& item, const model::Take& tak
                                  double deltaBeats) const {
     const model::Session& s = view_.session();
     const double rate = take.playrate > 0 ? take.playrate : 1.0;
-    const double start = s.timeMap->secondsAt(item.position);
-    const double before = s.timeMap->secondsAt(item.position + item.length) - start;
-    const double after = s.timeMap->secondsAt(item.position + item.length + deltaBeats) - start;
+    const double start = s.timeMap->secondsAt(startBeat(s, item));
+    const double before = s.timeMap->secondsAt(startBeat(s, item) + lengthBeats(s, item)) - start;
+    const double after =
+        s.timeMap->secondsAt(startBeat(s, item) + lengthBeats(s, item) + deltaBeats) - start;
     return std::clamp(after > 0 ? rate * before / after : rate, 0.01, 100.0);
 }
 
@@ -418,8 +428,8 @@ std::optional<ItemGestures::Hit> ItemGestures::hit(ui::Point p) const {
         h.item = e.id;
         h.row = *row;
         h.rect = const_cast<ArrangeView&>(view_).lanes().itemRect(*row, it);
-        if (!h.rect.contains(p) || it.position < bestStart) continue;
-        bestStart = it.position;
+        if (!h.rect.contains(p) || startBeat(s, it) < bestStart) continue;
+        bestStart = startBeat(s, it);
         const ui::Rect& r = h.rect;
         const bool roomy = r.w > 4 * kHandle;
         if (it.takes.size() > 1 && p.x >= r.right() - 24 && p.x < r.right() - kHandle &&
@@ -513,9 +523,9 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         switch (state_.drag) {
             case Drag::Move: {
                 if (!anchor) break;
-                double d = snap(anchor->position + raw, free_) - anchor->position;
+                double d = snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor);
                 for (model::Id id : selection_)  // nothing before the start
-                    if (const model::Item* it = itemOf(s, id)) d = std::max(d, -it->position);
+                    if (const model::Item* it = itemOf(s, id)) d = std::max(d, -startBeat(s, *it));
                 state_.deltaBeats = d;
                 // Rows: every selected item must land on a channel.
                 const int dr = static_cast<int>(rowAt(e.pos.y).value_or(pressRow_)) -
@@ -537,14 +547,14 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             case Drag::TrimLeft:
                 if (anchor)
                     state_.deltaBeats =
-                        std::min(snap(anchor->position + raw, free_) - anchor->position,
-                                 anchor->length - kMinLength);
+                        std::min(snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor),
+                                 lengthBeats(s, *anchor) - kMinLength);
                 break;
             case Drag::TrimRight:
                 if (anchor) {
-                    const double end = anchor->position + anchor->length;
-                    state_.deltaBeats =
-                        std::max(snap(end + raw, free_) - end, kMinLength - anchor->length);
+                    const double end = startBeat(s, *anchor) + lengthBeats(s, *anchor);
+                    state_.deltaBeats = std::max(snap(end + raw, free_) - end,
+                                                 kMinLength - lengthBeats(s, *anchor));
                 }
                 break;
             case Drag::Slip:
@@ -553,8 +563,9 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             case Drag::FadeIn:
             case Drag::FadeOut:
                 if (anchor) {
-                    const double startSec = s.timeMap->secondsAt(anchor->position);
-                    const double endSec = s.timeMap->secondsAt(anchor->position + anchor->length);
+                    const double startSec = s.timeMap->secondsAt(startBeat(s, *anchor));
+                    const double endSec =
+                        s.timeMap->secondsAt(startBeat(s, *anchor) + lengthBeats(s, *anchor));
                     const double at = view_.timeAt(e.pos.x);
                     state_.fadeSeconds =
                         std::clamp(state_.drag == Drag::FadeIn ? at - startSec : endSec - at, 0.0,
@@ -581,7 +592,8 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             }
             case Drag::Comp:
                 if (anchor) {
-                    const double start = anchor->position, end = anchor->position + anchor->length;
+                    const double start = startBeat(s, *anchor),
+                                 end = startBeat(s, *anchor) + lengthBeats(s, *anchor);
                     const double a0 = std::clamp(snap(beatAtX(press_.x), free_), start, end);
                     const double a1 = std::clamp(snap(beatAtX(e.pos.x), free_), start, end);
                     state_.compFrom = std::min(a0, a1);
@@ -631,6 +643,35 @@ void ItemGestures::openItemMenu(ui::Point at) {
         if (auto r = deleteSelection(); !r && onError) onError(r.error());
     };
     items.push_back(std::move(del));
+    // Timebase: what the selection follows when the tempo changes (item.set
+    // timebase, one step; the items keep their place now).
+    ui::MenuItem rule;
+    rule.separator = true;
+    items.push_back(rule);
+    const model::Session& s = view_.session();
+    const model::Item* first = itemOf(s, selection_.front());
+    const model::ItemTimebase now = first ? first->timebase : model::ItemTimebase::Track;
+    for (auto [label, value, name] :
+         {std::tuple{"Follow the beat", model::ItemTimebase::Beats, "beats"},
+          {"Follow time", model::ItemTimebase::Time, "time"},
+          {"Follow the beat (start only)", model::ItemTimebase::BeatsPosition, "beats_position"},
+          {"Follow the track", model::ItemTimebase::Track, "track"}}) {
+        ui::MenuItem m;
+        m.label = label;
+        m.checked = now == value;
+        m.run = [this, timebase = std::string(name)] {
+            if (!run) return;
+            std::vector<EditStep> steps;
+            for (model::Id item : selection_) {
+                json::Value args = json::Value::object();
+                args["item"] = item.str();
+                args["timebase"] = timebase;
+                steps.push_back({"item.set", std::move(args)});
+            }
+            if (auto r = run("Item timebase", steps); !r && onError) onError(r.error());
+        };
+        items.push_back(std::move(m));
+    }
     root_->openPopup(ui::makeMenu("item.menu", std::move(items), [this] { root_->closePopup(); }),
                      {at.x, at.y, 1, 1});
 }
@@ -654,7 +695,8 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         // order, so the take is chosen by index).
         json::Value activate = json::Value::object();
         activate["index"] = static_cast<std::int64_t>(state_.takeLane);
-        const double start = anchor->position, end = anchor->position + anchor->length;
+        const double start = startBeat(s, *anchor),
+                     end = startBeat(s, *anchor) + lengthBeats(s, *anchor);
         const bool whole = !moved_ || state_.compTo - state_.compFrom < kMinLength ||
                            (state_.compFrom <= start + 1e-9 && state_.compTo >= end - 1e-9);
         if (whole) {
@@ -768,12 +810,12 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 if (copy_) {
                     json::Value dup = json::Value::object();
                     dup["item"] = id.str();
-                    dup["to"] = it->position + state_.deltaBeats;
+                    dup["to"] = startBeat(s, *it) + state_.deltaBeats;
                     steps.push_back({"item.duplicate", std::move(dup)});
                     placed.push_back({"$step" + std::to_string(steps.size() - 1) + ".id",
                                       std::nullopt, track.value_or(it->track),
-                                      it->position + state_.deltaBeats,
-                                      it->position + state_.deltaBeats + it->length});
+                                      startBeat(s, *it) + state_.deltaBeats,
+                                      startBeat(s, *it) + state_.deltaBeats + lengthBeats(s, *it)});
                     if (!track) continue;
                     json::Value mv = json::Value::object();
                     mv["item"] = "$step" + std::to_string(steps.size() - 1) + ".id";
@@ -783,12 +825,12 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 }
                 json::Value args = json::Value::object();
                 args["item"] = id.str();
-                args["position"] = it->position + state_.deltaBeats;
+                args["position"] = startBeat(s, *it) + state_.deltaBeats;
                 if (track) args["track"] = track->str();
                 steps.push_back({"item.move", std::move(args)});
                 placed.push_back({id.str(), id, track.value_or(it->track),
-                                  it->position + state_.deltaBeats,
-                                  it->position + state_.deltaBeats + it->length});
+                                  startBeat(s, *it) + state_.deltaBeats,
+                                  startBeat(s, *it) + state_.deltaBeats + lengthBeats(s, *it)});
             }
             const std::size_t edits = steps.size();
             if (autoCrossfade) addCrossfades(s, placed, steps);
@@ -809,17 +851,17 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 const double rate = take->playrate > 0 ? take->playrate : 1.0;
                 auto offsetFor = [&](double dd) {
                     if (isMidi(take)) return take->startOffset + dd * rate;
-                    return take->startOffset + (s.timeMap->secondsAt(anchor->position + dd) -
-                                                s.timeMap->secondsAt(anchor->position)) *
+                    return take->startOffset + (s.timeMap->secondsAt(startBeat(s, *anchor) + dd) -
+                                                s.timeMap->secondsAt(startBeat(s, *anchor))) *
                                                    rate;
                 };
                 if (offsetFor(d) < 0) {  // not before the source's start
                     if (isMidi(take))
                         d = -take->startOffset / rate;
                     else
-                        d = s.timeMap->beatAt(s.timeMap->secondsAt(anchor->position) -
+                        d = s.timeMap->beatAt(s.timeMap->secondsAt(startBeat(s, *anchor)) -
                                               take->startOffset / rate) -
-                            anchor->position;
+                            startBeat(s, *anchor);
                 }
                 json::Value targs = json::Value::object();
                 targs["take"] = anchor->activeTake->str();
@@ -829,14 +871,15 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             if (d == 0) return;
             json::Value args = json::Value::object();
             args["item"] = state_.anchor.str();
-            args["position"] = anchor->position + d;
-            args["length"] = anchor->length - d;
+            args["position"] = startBeat(s, *anchor) + d;
+            args["length"] = lengthBeats(s, *anchor) - d;
             steps.insert(steps.begin(), {"item.set", std::move(args)});
             if (autoCrossfade)
-                addCrossfades(s,
-                              {{state_.anchor.str(), state_.anchor, anchor->track,
-                                anchor->position + d, anchor->position + anchor->length}},
-                              steps);
+                addCrossfades(
+                    s,
+                    {{state_.anchor.str(), state_.anchor, anchor->track, startBeat(s, *anchor) + d,
+                      startBeat(s, *anchor) + lengthBeats(s, *anchor)}},
+                    steps);
             runSteps("Trim item start", steps);
             return;
         }
@@ -844,7 +887,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             if (!anchor || anchor->locked || state_.deltaBeats == 0) return;
             json::Value args = json::Value::object();
             args["item"] = state_.anchor.str();
-            args["length"] = anchor->length + state_.deltaBeats;
+            args["length"] = lengthBeats(s, *anchor) + state_.deltaBeats;
             const model::Take* take = activeTake(s, *anchor);
             if (state_.stretch && take) {
                 json::Value rate = json::Value::object();
@@ -855,18 +898,19 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 if (autoCrossfade)
                     addCrossfades(
                         s,
-                        {{state_.anchor.str(), state_.anchor, anchor->track, anchor->position,
-                          anchor->position + anchor->length + state_.deltaBeats}},
+                        {{state_.anchor.str(), state_.anchor, anchor->track, startBeat(s, *anchor),
+                          startBeat(s, *anchor) + lengthBeats(s, *anchor) + state_.deltaBeats}},
                         steps);
                 runSteps("Stretch item", steps);
                 return;
             }
             std::vector<EditStep> steps = {{"item.set", std::move(args)}};
             if (autoCrossfade)
-                addCrossfades(s,
-                              {{state_.anchor.str(), state_.anchor, anchor->track, anchor->position,
-                                anchor->position + anchor->length + state_.deltaBeats}},
-                              steps);
+                addCrossfades(
+                    s,
+                    {{state_.anchor.str(), state_.anchor, anchor->track, startBeat(s, *anchor),
+                      startBeat(s, *anchor) + lengthBeats(s, *anchor) + state_.deltaBeats}},
+                    steps);
             runSteps("Trim item end", steps);
             return;
         }
@@ -874,11 +918,11 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             const model::Take* take = anchor ? activeTake(s, *anchor) : nullptr;
             if (!take || anchor->locked || state_.deltaBeats == 0) return;
             const double rate = take->playrate > 0 ? take->playrate : 1.0;
-            const double shift = isMidi(take)
-                                     ? state_.deltaBeats * rate
-                                     : (s.timeMap->secondsAt(anchor->position + state_.deltaBeats) -
-                                        s.timeMap->secondsAt(anchor->position)) *
-                                           rate;
+            const double shift =
+                isMidi(take) ? state_.deltaBeats * rate
+                             : (s.timeMap->secondsAt(startBeat(s, *anchor) + state_.deltaBeats) -
+                                s.timeMap->secondsAt(startBeat(s, *anchor))) *
+                                   rate;
             json::Value args = json::Value::object();
             args["take"] = anchor->activeTake->str();
             args["start_offset"] = std::max(0.0, take->startOffset - shift);

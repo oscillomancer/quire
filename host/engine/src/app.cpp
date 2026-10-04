@@ -1006,19 +1006,19 @@ bool overdubMidi(model::EditTxn& t, const model::Session& s, const RecordedTake&
         if (it.track != r.track || !it.activeTake) continue;
         const model::Take* old = s.takes.find(*it.activeTake);
         if (!old || !old->source || old->source->kind != model::Kind::Midi) continue;
-        if (atBeat < it.position || atBeat >= it.position + it.length) continue;
+        const model::ItemSpan span = model::itemSpan(s, it);
+        const double itemEndBeat = s.timeMap->beatAt(span.endSec);
+        if (atBeat < span.startBeat || atBeat >= itemEndBeat) continue;
         midi::Sequence seq = s.midi.find(*old->source)->sequence;
         const double ppq = seq.ppq;
         auto tick = [&](std::int64_t sample) {
             return static_cast<std::int64_t>(
-                std::llround((s.timeMap->beatAt(static_cast<double>(sample) / rate) - it.position +
-                              old->startOffset) *
+                std::llround((s.timeMap->beatAt(static_cast<double>(sample) / rate) -
+                              span.startBeat + old->startOffset) *
                              ppq));
         };
-        const auto from =
-            static_cast<std::int64_t>(std::llround(s.timeMap->secondsAt(it.position) * rate));
-        const auto to = static_cast<std::int64_t>(
-            std::llround(s.timeMap->secondsAt(it.position + it.length) * rate));
+        const auto from = static_cast<std::int64_t>(std::llround(span.startSec * rate));
+        const auto to = static_cast<std::int64_t>(std::llround(span.endSec * rate));
         for (const Run& run : runs)  // every pass layers onto the same take
             appendRecorded(seq, r, run.index, from, to, run.t0 + (run.to - run.from), tick);
         seq.canonicalize();
@@ -1060,11 +1060,11 @@ void commitMidiTake(model::EditTxn& t, const model::Session& s, const RecordedTa
         item.track = r.track;
         const double start = static_cast<double>(ip.start) / rate;
         const double end = static_cast<double>(ip.end) / rate;
-        item.position = s.timeMap->beatAt(start);
-        item.length = s.timeMap->beatAt(end) - item.position;
+        model::placeItemSeconds(s, item, start, end);  // in the track's timebase
+        const double startBeat = s.timeMap->beatAt(start);
         auto tick = [&](std::int64_t sample) {
             return static_cast<std::int64_t>(std::llround(
-                (s.timeMap->beatAt(static_cast<double>(sample) / rate) - item.position) * ppq));
+                (s.timeMap->beatAt(static_cast<double>(sample) / rate) - startBeat) * ppq));
         };
         RecordedInfo info;
         std::optional<Id> active;
@@ -1197,8 +1197,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
             item.track = r.track;
             const double start = static_cast<double>(ip.start) / rate;
             const double end = static_cast<double>(ip.end) / rate;
-            item.position = s.timeMap->beatAt(start);
-            item.length = s.timeMap->beatAt(end) - item.position;
+            model::placeItemSeconds(s, item, start, end);  // in the track's timebase
             RecordedInfo info;
             std::optional<Id> active;
             for (std::size_t k = 0; k < ip.takes.size(); ++k) {

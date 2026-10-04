@@ -128,6 +128,7 @@ struct ProjectSetArgs {
     std::optional<std::string> name, title, author, notes;
     std::optional<bool> console9;
     std::optional<json::Value> render;
+    std::optional<model::Timebase> timebase;
 };
 struct PathArgs {
     std::optional<std::string> path;
@@ -440,6 +441,7 @@ struct TrackSetArgs {
     std::optional<model::RecordMode> recordMode;
     std::optional<model::Monitor> monitor;
     std::optional<bool> parentSend;
+    std::optional<model::TrackTimebase> timebase;
 };
 struct TrackEntry {
     std::string id, name, parent;
@@ -727,7 +729,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "project.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Change project metadata (name, title, author, notes, Console 9).";
+        c.summary = "Change project metadata (name, title, author, notes, Console 9, timebase).";
+        c.description =
+            "timebase: what items follow when the tempo changes, for items and tracks that "
+            "inherit it — beats (default), time or beats_position; they keep their place now.";
         c.tags = {"project"};
         c.args = schema::object<ProjectSetArgs>("project_set_args")
                      .field("name", &ProjectSetArgs::name, schema::string())
@@ -736,6 +741,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("notes", &ProjectSetArgs::notes, schema::string())
                      .field("console9", &ProjectSetArgs::console9, schema::boolean())
                      .field("render", &ProjectSetArgs::render, schema::any())
+                     .field("timebase", &ProjectSetArgs::timebase, model::timebaseSchema())
                      .build();
         c.result = emptySchema();
         c.examples = {{"Name it", obj(R"({"name": "Demo"})"), obj("{}"), "empty"}};
@@ -779,6 +785,20 @@ void registerEngineCommands(cmd::Registry& registry) {
                     }
                 }
                 p.render = *a.render;
+            }
+            if (a.timebase && *a.timebase != p.timebase) {
+                // Items that inherit the project's timebase keep their place.
+                const model::Session s = A(ctx).view();
+                for (const auto& e : s.items) {
+                    const model::Track* tr = s.tracks.find(e.value->track);
+                    if (e.value->timebase != model::ItemTimebase::Track ||
+                        (tr && tr->timebase != model::TrackTimebase::Project))
+                        continue;
+                    t.modify<model::Item>(e.id, [&](model::Item& it) {
+                        model::retimeItem(s, it, p.timebase, *a.timebase);
+                    });
+                }
+                p.timebase = *a.timebase;
             }
             t.setProject(std::move(p));
             return Empty{};
@@ -1270,6 +1290,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("parent_send", &TrackSetArgs::parentSend,
                        schema::boolean().doc("The implicit send to the parent buss/master "
                                              "(off: only explicit sends leave the strip)"))
+                .field("timebase", &TrackSetArgs::timebase,
+                       model::trackTimebaseSchema().doc(
+                           "What this channel's items follow when the tempo changes (those "
+                           "that inherit it): project, beats, time or beats_position; they keep "
+                           "their place now"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1378,12 +1403,29 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.pan) t.pan = *a.pan;
                 if (a.mute) t.mute = *a.mute;
                 if (a.parentSend) t.parentSend.enabled = *a.parentSend;
+                if (a.timebase) t.timebase = *a.timebase;
                 if (a.solo)
                     t.solo = *a.solo == "on"         ? model::Solo::On
                              : *a.solo == "in_place" ? model::Solo::InPlace
                              : *a.solo == "defeat"   ? model::Solo::Defeat
                                                      : model::Solo::Off;
             });
+            if (a.timebase && *a.timebase != s.tracks.find(*id)->timebase) {
+                // Its items that inherit the track's timebase keep their place.
+                const model::Timebase to =
+                    *a.timebase == model::TrackTimebase::Time    ? model::Timebase::Time
+                    : *a.timebase == model::TrackTimebase::Beats ? model::Timebase::Beats
+                    : *a.timebase == model::TrackTimebase::BeatsPosition
+                        ? model::Timebase::BeatsPosition
+                        : s.project->timebase;
+                for (const auto& e : s.items) {
+                    if (e.value->track != *id || e.value->timebase != model::ItemTimebase::Track)
+                        continue;
+                    app.txn().modify<model::Item>(e.id, [&](model::Item& it) {
+                        model::retimeItem(s, it, model::itemTimebase(s, it), to);
+                    });
+                }
+            }
             // Touch/latch/write envelopes record the change while the transport plays.
             if (a.volumeDb) app.recordAutomation(*id, "volume", *a.volumeDb);
             if (a.pan) app.recordAutomation(*id, "pan", *a.pan);
@@ -1574,8 +1616,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             const Id tk = t.create(std::move(take));
             model::Item item;
             item.track = *track;
-            item.position = pos;
-            item.length = length;
+            model::placeItem(s, item, pos, length);  // in the track's timebase
             item.takes = {tk};
             item.activeTake = tk;
             const Id it = t.create(std::move(item));
@@ -1659,11 +1700,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                 track = *tr;
             }
             app.txn().modify<model::Item>(*id, [&](model::Item& it) {
-                if (a.position || a.bar)
-                    it.position = beatsOf(
-                        s, a.position,
-                        a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt);
-                if (track) it.track = *track;
+                const double start =
+                    a.position || a.bar
+                        ? beatsOf(
+                              s, a.position,
+                              a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt)
+                        : model::itemSpan(s, it).startBeat;
+                model::moveItem(s, it, track.value_or(it.track), start);
             });
             return Empty{};
         };
@@ -1696,7 +1739,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!take || !take->source || take->source->kind != model::Kind::Midi)
                 return Error("midi.not_midi", a.item + " has no MIDI take", "/item",
                              "use item.add with notation");
-            auto compiled = compileNotation(s, a.notation, it.position);
+            auto compiled = compileNotation(s, a.notation, model::itemSpan(s, it).startBeat);
             if (!compiled) return std::move(compiled).error();
             const model::MidiSource* old = s.midi.find(*take->source);
             compiled->first.pooled = old && old->pooled;
@@ -2180,9 +2223,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 s = *head;
             }
             double endBeat = a.endBeat.value_or(0.0);
-            if (!a.endBeat)
-                for (const auto& e : s.items)
-                    endBeat = std::max(endBeat, e.value->position + e.value->length);
+            if (!a.endBeat) endBeat = std::max(endBeat, model::lastItemBeat(s));
             if (endBeat <= a.startBeat.value_or(0.0))
                 return Error("render.empty", "nothing to render", {}, "add items or give end_beat");
             OfflineSettings o;
@@ -3159,8 +3200,7 @@ void registerEngineCommands(cmd::Registry& registry) {
 std::string describeSession(const model::Session& s) {
     std::string out;
     const auto meter = s.timeMap->meterAt(1);
-    double endBeat = 0;
-    for (const auto& e : s.items) endBeat = std::max(endBeat, e.value->position + e.value->length);
+    const double endBeat = model::lastItemBeat(s);
     char head[256];
     std::snprintf(head, sizeof head, "Project \"%s\" · %g kHz · %g BPM %d/%d · %.1f s\n",
                   s.project->name.c_str(), s.project->sampleRate / 1000.0, s.timeMap->bpmAt(0),
@@ -3203,7 +3243,12 @@ std::string describeSession(const model::Session& s) {
                 if (e.value->track != id) continue;
                 const model::Item& it = *e.value;
                 std::string il(static_cast<std::size_t>(2 * depth + 2), ' ');
-                il += e.id.str() + " " + barOf(it.position) + "–" + barOf(it.position + it.length);
+                const double start = model::itemSpan(s, it).startBeat;
+                il += e.id.str() + " " + barOf(start) + "–" +
+                      barOf(start + model::itemLengthBeats(s, it));
+                if (model::itemTimebase(s, it) != model::Timebase::Beats)
+                    il += model::itemTimebase(s, it) == model::Timebase::Time ? " [time]"
+                                                                              : " [beats position]";
                 const model::Take* take = it.activeTake ? s.takes.find(*it.activeTake) : nullptr;
                 if (take && take->source) {
                     if (take->source->kind == model::Kind::Midi) {

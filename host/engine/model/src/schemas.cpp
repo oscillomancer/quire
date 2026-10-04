@@ -253,6 +253,20 @@ auto timebaseS() {
 
 }  // namespace
 
+Schema<Timebase> timebaseSchema() { return timebaseS(); }
+Schema<TrackTimebase> trackTimebaseSchema() {
+    return en<TrackTimebase>({{TrackTimebase::Project, "project"},
+                              {TrackTimebase::Time, "time"},
+                              {TrackTimebase::Beats, "beats"},
+                              {TrackTimebase::BeatsPosition, "beats_position"}});
+}
+Schema<ItemTimebase> itemTimebaseSchema() {
+    return en<ItemTimebase>({{ItemTimebase::Track, "track"},
+                             {ItemTimebase::Time, "time"},
+                             {ItemTimebase::Beats, "beats"},
+                             {ItemTimebase::BeatsPosition, "beats_position"}});
+}
+
 Schema<Id> idSchema() {
     json::Value ex = json::Value::object();
     ex["type"] = "string";
@@ -387,11 +401,7 @@ const Schema<Track>& schemaOf<Track>() {
         dflt(b, d.parentSend);
         b.field("record", &Track::record, record);
         dflt(b, d.record);
-        b.field("timebase", &Track::timebase,
-                en<TrackTimebase>({{TrackTimebase::Project, "project"},
-                                   {TrackTimebase::Time, "time"},
-                                   {TrackTimebase::Beats, "beats"},
-                                   {TrackTimebase::BeatsPosition, "beats_position"}}));
+        b.field("timebase", &Track::timebase, trackTimebaseSchema());
         dflt(b, d.timebase);
         b.field("chain", &Track::chain, ids());
         dflt(b, d.chain);
@@ -440,11 +450,7 @@ const Schema<Item>& schemaOf<Item>() {
         b.field("lane", &Item::lane, idSchema());
         b.field("position", &Item::position, num());
         b.field("length", &Item::length, num().min(0));
-        b.field("timebase", &Item::timebase,
-                en<ItemTimebase>({{ItemTimebase::Track, "track"},
-                                  {ItemTimebase::Time, "time"},
-                                  {ItemTimebase::Beats, "beats"},
-                                  {ItemTimebase::BeatsPosition, "beats_position"}}));
+        b.field("timebase", &Item::timebase, itemTimebaseSchema());
         dflt(b, d.timebase);
         b.field("loop", &Item::loop, boolean());
         dflt(b, d.loop);

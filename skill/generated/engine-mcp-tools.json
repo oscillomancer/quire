@@ -1951,7 +1951,7 @@
   {
     "name": "item_set",
     "title": "Set an item's position, length, playback, fades, name, color, or lock.",
-    "description": "Set an item's position, length, playback, fades, name, color, or lock. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {\"locked\": false}. See describe for errors and examples.",
+    "description": "Set an item's position, length, playback, fades, name, color, or lock. Positions and lengths are in beats; fades are in seconds. Name is the active take's name. A locked item refuses every edit except {\"locked\": false}. timebase: what the item follows when the tempo changes — beats (moves and stretches with it), time (stays at its seconds), beats_position (its start follows the beat, its length stays in seconds) or track (inherit); the item keeps its place now. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "item_set_args",
@@ -2019,6 +2019,10 @@
         },
         "color": {
           "type": "string"
+        },
+        "timebase": {
+          "type": "string",
+          "enum": ["track", "time", "beats", "beats_position"]
         }
       },
       "required": ["item"],
@@ -2938,8 +2942,8 @@
   },
   {
     "name": "project_set",
-    "title": "Change project metadata (name, title, author, notes, Console 9).",
-    "description": "Change project metadata (name, title, author, notes, Console 9).  See describe for errors and examples.",
+    "title": "Change project metadata (name, title, author, notes, Console 9, timebase).",
+    "description": "Change project metadata (name, title, author, notes, Console 9, timebase). timebase: what items follow when the tempo changes, for items and tracks that inherit it — beats (default), time or beats_position; they keep their place now. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "project_set_args",
@@ -2959,7 +2963,11 @@
         "console9": {
           "type": "boolean"
         },
-        "render": {}
+        "render": {},
+        "timebase": {
+          "type": "string",
+          "enum": ["time", "beats", "beats_position"]
+        }
       },
       "additionalProperties": false
     },
@@ -4769,6 +4777,11 @@
         "parent_send": {
           "type": "boolean",
           "description": "The implicit send to the parent buss/master (off: only explicit sends leave the strip)"
+        },
+        "timebase": {
+          "type": "string",
+          "enum": ["project", "time", "beats", "beats_position"],
+          "description": "What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now"
         }
       },
       "required": ["track"],

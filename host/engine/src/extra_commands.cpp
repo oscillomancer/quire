@@ -139,6 +139,7 @@ struct ItemSetArgs {
     std::optional<std::int64_t> bar;
     std::optional<bool> mute, loop, locked;
     std::optional<std::string> name, color;
+    std::optional<model::ItemTimebase> timebase;
 };
 struct ItemDuplicateArgs {
     std::string item;
@@ -1091,7 +1092,10 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.summary = "Set an item's position, length, playback, fades, name, color, or lock.";
         c.description =
             "Positions and lengths are in beats; fades are in seconds. Name is the active take's "
-            "name. A locked item refuses every edit except {\"locked\": false}.";
+            "name. A locked item refuses every edit except {\"locked\": false}. timebase: what "
+            "the item follows when the tempo changes — beats (moves and stretches with it), "
+            "time (stays at its seconds), beats_position (its start follows the beat, its "
+            "length stays in seconds) or track (inherit); the item keeps its place now.";
         c.tags = {"item"};
         c.args = schema::object<ItemSetArgs>("item_set_args")
                      .field("item", &ItemSetArgs::item, idSchema("it"))
@@ -1110,10 +1114,13 @@ void registerExtraCommands(cmd::Registry& registry) {
                      .field("fade_out", &ItemSetArgs::fadeOut, schema::number().min(0))
                      .field("name", &ItemSetArgs::name, schema::string())
                      .field("color", &ItemSetArgs::color, schema::string())
+                     .field("timebase", &ItemSetArgs::timebase, model::itemTimebaseSchema())
                      .build();
         c.result = emptySchema();
-        c.examples = {{"Lower an item", j(R"({"item":"it_1","gain_db":"-3 dB"})"), j("{}"),
-                       "song_with_item"}};
+        c.examples = {
+            {"Lower an item", j(R"({"item":"it_1","gain_db":"-3 dB"})"), j("{}"), "song_with_item"},
+            {"Keep an item at its time when the tempo changes",
+             j(R"({"item":"it_1","timebase":"time"})"), j("{}"), "song_with_item"}};
         c.run = [](const ItemSetArgs& a, Context& ctx) -> Result<Empty> {
             const auto s = app(ctx).view();
             auto id = require<model::Item>(s, a.item, "/item");
@@ -1130,9 +1137,20 @@ void registerExtraCommands(cmd::Registry& registry) {
                 return Error("item.length", "length must be greater than 0", "/length",
                              "give a positive length, or remove the item");
             model::Item it = original;
-            if (a.position) it.position = *a.position;
-            if (a.bar) it.position = s.timeMap->beatOfBar(static_cast<int>(*a.bar));
-            if (a.length) it.length = *a.length;
+            if (a.timebase) {  // first: the rest is placed in the new domain
+                const model::Timebase from = model::itemTimebase(s, it);
+                it.timebase = *a.timebase;
+                model::retimeItem(s, it, from, model::itemTimebase(s, it));
+            }
+            if (a.position || a.bar || a.length) {
+                const double start = a.position ? *a.position
+                                     : a.bar    ? s.timeMap->beatOfBar(static_cast<int>(*a.bar))
+                                                : model::itemSpan(s, it).startBeat;
+                if (a.length)
+                    model::placeItem(s, it, start, *a.length);
+                else
+                    model::moveItem(s, it, it.track, start);
+            }
             if (a.mute) it.mute = *a.mute;
             if (a.loop) it.loop = *a.loop;
             if (a.locked) it.locked = *a.locked;
@@ -1171,7 +1189,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
             model::Item copy = *s.items.find(*id);
-            copy.position = a.to.value_or(copy.position + copy.length);
+            const double end = model::itemSpan(s, copy).startBeat + model::itemLengthBeats(s, copy);
+            model::moveItem(s, copy, copy.track, a.to.value_or(end));
             copy.takes.clear();
             auto& txn = app(ctx).txn();
             for (Id oldId : s.items.find(*id)->takes) {
@@ -1250,8 +1269,17 @@ void registerExtraCommands(cmd::Registry& registry) {
                                  "paste onto a channel");
                 const model::Item& original = *s.items.find(*item);
                 model::Item copy = original;
-                copy.position = p.position;
+                // Its length as its timebase kept it in the copied version (beats
+                // for beats, seconds otherwise), placed on today's tempo map.
+                const model::ItemSpan span = model::itemSpan(s, original);
+                const bool beats = model::itemTimebase(s, original) == model::Timebase::Beats;
                 copy.track = *track;
+                const double lengthBeats =
+                    beats ? s.timeMap->beatAt(span.endSec) - span.startBeat
+                          : now.timeMap->beatAt(now.timeMap->secondsAt(p.position) + span.endSec -
+                                                span.startSec) -
+                                p.position;
+                model::placeItem(now, copy, p.position, lengthBeats);
                 copy.takes.clear();
                 copy.activeTake.reset();
                 for (Id oldId : original.takes) {

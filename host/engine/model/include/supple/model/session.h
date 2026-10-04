@@ -222,6 +222,29 @@ struct ItemSpan {
     double startBeat = 0, startSec = 0, endSec = 0;
 };
 ItemSpan itemSpan(const Session& s, const Item& item);
+// The timebase an item follows: its own, else its track's, else the project's.
+Timebase itemTimebase(const Session& s, const Item& item);
+// Its length in beats at the current tempo map (end beat - start beat).
+double itemLengthBeats(const Session& s, const Item& item);
+double itemEndBeat(const Session& s, const Item& item);
+// The last item end, in beats (0 without items).
+double lastItemBeat(const Session& s);
+// Writes an item's position (and length) in its own domain so that it starts
+// at `startBeat` — and lasts `lengthBeats`, when given; otherwise it keeps
+// its length in that domain (beats for `beats`, seconds for `time` and
+// `beats_position`). `item.track` and `item.timebase` must be set first.
+void placeItem(const Session& s, Item& item, double startBeat,
+               std::optional<double> lengthBeats = std::nullopt);
+// Moves an item to `track` (may be its own) to start at `startBeat`, keeping
+// its length as its timebase defines it before the move (beats for `beats`,
+// seconds otherwise), even when the new track's timebase differs.
+void moveItem(const Session& s, Item& item, Id track, double startBeat);
+// Places it from seconds (a recording): start and end on the timeline.
+void placeItemSeconds(const Session& s, Item& item, double startSec, double endSec);
+// Changes what an item follows, keeping it where it is now (start and end).
+// `track`/`project`: the timebase the item would inherit after the change
+// (callers changing a track's or the project's timebase pass the new one).
+void retimeItem(const Session& s, Item& item, Timebase from, Timebase to);
 
 // Object-level differences, deterministic order (kind, then ID). `fields`
 // lists the changed top-level fields of updated objects (JSON member names).

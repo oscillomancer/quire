@@ -859,3 +859,71 @@ TEST_CASE("item.add reuses a pre-hash source for the same file and backfills its
     CHECK(third.find("source")->asString() == "md_2");
     CHECK(app->head().media.size() == 2);
 }
+
+TEST_CASE("timebase: items keep their place when it changes, and follow it when the tempo does") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"A"})");  // tr_1
+    run(bus, "track.add", R"({"name":"B"})");  // tr_2
+    // At 120 BPM: beat 4 = 2 s, two beats long = 1 s.
+    run(bus, "item.add", R"({"track":"tr_1","position":4,"length":2,"notation":"1: C4:h r:h"})");
+    run(bus, "item.add", R"({"track":"tr_1","position":8,"length":2,"notation":"1: C4:h r:h"})");
+    const model::Id a = *model::Id::parse("it_1"), b = *model::Id::parse("it_2");
+    auto span = [&](model::Id id) {
+        return model::itemSpan(app->head(), *app->head().items.find(id));
+    };
+    // it_1 follows time from now on: the model holds seconds, nothing moves.
+    run(bus, "item.set", R"({"item":"it_1","timebase":"time"})");
+    CHECK(app->head().items.find(a)->position == doctest::Approx(2.0));
+    CHECK(app->head().items.find(a)->length == doctest::Approx(1.0));
+    CHECK(span(a).startBeat == doctest::Approx(4.0));
+    // Positions given in beats land in its domain.
+    run(bus, "item.set", R"({"item":"it_1","position":6})");
+    CHECK(app->head().items.find(a)->position == doctest::Approx(3.0));
+    CHECK(app->head().items.find(a)->length == doctest::Approx(1.0));  // seconds kept
+    run(bus, "item.set", R"({"item":"it_1","length":4})");
+    CHECK(app->head().items.find(a)->length == doctest::Approx(2.0));
+    // Half the tempo: the time item stays at 3 s, the beats item doubles its time.
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":60}]})");
+    CHECK(span(a).startSec == doctest::Approx(3.0));
+    CHECK(span(a).endSec == doctest::Approx(5.0));
+    CHECK(span(b).startSec == doctest::Approx(8.0));
+    CHECK(span(b).endSec == doctest::Approx(10.0));
+    // Moved to B by beat, it keeps its seconds length.
+    run(bus, "item.move", R"({"item":"it_1","track":"tr_2","position":1})");
+    CHECK(span(a).startSec == doctest::Approx(1.0));
+    CHECK(span(a).endSec == doctest::Approx(3.0));
+    // A track's timebase converts its inheriting items, keeping them in place.
+    run(bus, "track.set", R"({"track":"tr_1","timebase":"time"})");
+    CHECK(app->head().items.find(b)->position == doctest::Approx(8.0));  // seconds now
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":120}]})");
+    CHECK(span(b).startSec == doctest::Approx(8.0));
+    CHECK(span(b).endSec == doctest::Approx(10.0));
+    // beats_position: the start follows the beat, the length stays in seconds.
+    run(bus, "item.set", R"({"item":"it_2","timebase":"beats_position"})");
+    CHECK(app->head().items.find(b)->position == doctest::Approx(16.0));  // beat at 8 s
+    run(bus, "tempo.set", R"({"points":[{"beat":0,"bpm":60}]})");
+    CHECK(span(b).startSec == doctest::Approx(16.0));
+    CHECK(span(b).endSec - span(b).startSec == doctest::Approx(2.0));
+    // The project's timebase converts what inherits it (items on tracks that
+    // follow the project); a duplicate lands right after the original.
+    run(bus, "item.add", R"({"track":"tr_2","position":2,"length":1,"notation":"1: C4:q r:*"})");
+    const model::Id c = *model::Id::parse("it_3");
+    run(bus, "project.set", R"({"timebase":"time"})");
+    CHECK(app->head().project->timebase == model::Timebase::Time);
+    CHECK(app->head().items.find(c)->position == doctest::Approx(2.0));  // beat 2 at 60 BPM
+    const auto dup = run(bus, "item.duplicate", R"({"item":"it_3"})");
+    const model::Id d = *model::Id::parse(dup.find("id")->asString());
+    CHECK(span(d).startSec == doctest::Approx(span(c).endSec));
+    // The describe text says which items do not follow beats.
+    const auto text = run(bus, "session.describe", "{}");
+    CHECK(json::writeCompact(text).find("[time]") != std::string::npos);
+    // One undo step undoes the project change and its conversions together.
+    run(bus, "history.undo", "{}");
+    run(bus, "history.undo", "{}");
+    CHECK(app->head().project->timebase == model::Timebase::Beats);
+    CHECK(app->head().items.find(c)->position == doctest::Approx(2.0));
+}
