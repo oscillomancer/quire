@@ -224,6 +224,12 @@ class Fixture final : public SingleComponentEffect {
                 double value = 0;
                 if (queue->getPoint(nextPoint, offset, value) != kResultOk || offset > i) break;
                 value_ = value;
+                if (data.outputParameterChanges) {
+                    int32 queueIndex = 0, pointIndex = 0;
+                    auto* output = data.outputParameterChanges->addParameterData(
+                        queue->getParameterId(), queueIndex);
+                    if (output) output->addPoint(offset, value, pointIndex);
+                }
                 ++nextPoint;
             }
             while (kind_ == Sine && data.inputEvents &&

@@ -496,6 +496,18 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     return didWork;
 }
 
+Instance::IdleOutputs RemoteInstance::takeIdleOutputs() {
+    Instance::IdleOutputs out;
+    auto reply = call(Op::TakeIdleOutputs, Writer{});
+    if (!reply) return out;
+    Reader r(reply->data(), reply->size());
+    out.dropped = r.u64();
+    const auto count = r.u32();
+    out.events.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) out.events.push_back(readOutputEvent(r));
+    return out;
+}
+
 // --- data plane (audio thread) ----------------------------------------------------------
 
 bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {

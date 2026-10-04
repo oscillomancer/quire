@@ -35,9 +35,11 @@ renderer and worker threads, not in the device callback.
    transport, input and output audio (channels × max frames), an input event
    arena and an output event arena (fixed capacity; overflow dropped and
    counted as today). Lifecycle calls that CLAP puts on the audio thread
-   (`start_processing`, `stop_processing`, `reset`, params flush) travel as
+   (`start_processing`, `stop_processing`, `reset`, active params flush) travel as
    commands in the same header, so they run on the bridge's audio thread in
-   order with `process`.
+   order with `process`. Inactive params flush runs on the main thread.
+   Both idle flush paths retain their outputs in a bounded queue, drained on
+   main through `TakeIdleOutputs` on the control plane.
 5. **Synchronous processing with a deadline.** The caller (the renderer or a
    worker) writes inputs, bumps the request sequence, wakes the bridge's
    audio thread (futex on a 32-bit word in the shared region), and waits for
@@ -114,7 +116,20 @@ syscalls per block for the data, not just the wake-up).
   control request stalls control calls for the other instances; a timeout
   fails the whole shared process. Use `dedicated` for plugins whose slow
   control callbacks need isolation from other effects.
-- Protocol v6 retains the v5 operation numbers and shared-memory layout.
+- Protocol v6 retains the v5 operation numbers and appends `TakeIdleOutputs`.
+  Its shared-memory output-event ABI is extended before v6's first release:
+  the pointer-free 40-byte `OutputEvent` retains the full CLAP flags and
+  note/parameter target `(port, channel, key, note_id)`, including -1 wildcards.
+  `Layout` uses the new size for its output arena and following audio offsets;
+  both endpoints must be built together. There is no released v6 ABI to preserve.
+  Idle flush output queues hold 1024 events, dropping newest on overflow;
+  `TakeIdleOutputs` drains FIFO events and the dropped count since the previous
+  drain. Its reply encodes `u64 dropped`, `u32 count`, then each event's
+  `u8 kind`, `u32 time`, `u32 paramId`, `f64 value`, `i32 noteId`, `u32 flags`,
+  `i16 port`, `i16 channel`, `i16 key` without native padding. Count is bounded
+  at 1024; invalid kinds, truncation or trailing data are protocol violations.
+  Flush event times are 0. Process output storage and idle queues are separate;
+  a main-thread drain never consumes the process arena.
   Error payloads carry `code`, `message`, `path`, `hint`, then a count and
   recursively encoded `details` (decoder depth limited to 32). Malformed
   replies fail the operation with `bridge.malformed` and fail the shared

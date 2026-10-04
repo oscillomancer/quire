@@ -214,6 +214,24 @@ paths, locations and hints.
 - Output events go to a caller-preallocated `OutputEvents` sink (fixed
   storage + count + dropped), never a growing container, so `process()` is
   allocation-free; it is `SUPPLE_RT` and exercised under rtsan.
+  `OutputEvent::flags` preserves CLAP event flags, including `DontRecord`
+  (do not record automation) and `IsLive`. Note-end events retain their input
+  note address `(port, channel, key, noteId)`; -1 is an unspecified/wildcard
+  component, so a note id of -1 can be matched using the other components.
+  Parameter values also retain their target address. VST3 output parameter
+  values are normalized, with zero flags and address components of -1.
+  Native VST3 note-off outputs are not synthesized as CLAP note-end events.
+- `takeIdleOutputs()` drains CLAP `params.flush` output gestures/values on the
+  main thread, local or bridged, including active-but-stopped audio-thread
+  flushes. The instance retains a FIFO of 1024 events independently of the
+  process sink; overflow drops newest and the returned `dropped` count is
+  cleared on drain. Returned events have time 0 and the same flags/address
+  form as process outputs. A drain is bounded by the queue's captured size;
+  concurrent flush outputs not in that capture wait for the next drain.
+  No allocation or lock occurs in the flush output callback. The returned
+  vector allocates only on main. This is a CLAP flush channel; the VST3
+  backing does not expose CLAP idle outputs. A failed bridge returns an empty
+  drain and remains observable through `failed()`.
 - `setParam()` flushes immediately through `params.flush` while the plugin is
   inactive (main thread); while active it queues into an SPSC ring delivered
   at time 0 of the next `process()`, or by `flushParams()` on the audio thread

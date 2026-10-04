@@ -156,6 +156,12 @@ struct Instance::HostState {
     std::vector<ClapEvent> events;
     std::uint32_t eventCount = 0;
     OutputEvents* outSink = nullptr;
+    // Only one flush producer runs at a time. Inactive flushes produce on
+    // main; activation/deactivation hand production to/from the audio thread.
+    // The main thread is always the consumer; it never resets the ring.
+    SpscRing<OutputEvent, IdleOutputs::kCapacity> idleOutputs;
+    std::atomic<std::uint64_t> idleDropped{0};
+    bool idleFlush = false;
     clap_input_events_t inEvents{};
     clap_output_events_t outEvents{};
     clap_event_transport_t transport{};
@@ -317,15 +323,20 @@ struct HostCallbacks {
                                     const clap_event_header_t* e) {
         auto* s = static_cast<Instance::HostState*>(list->ctx);
         OutputEvents* sink = s->outSink;
-        if (!sink || e->space_id != CLAP_CORE_EVENT_SPACE_ID) return true;  // accepted and ignored
+        if ((!sink && !s->idleFlush) || e->space_id != CLAP_CORE_EVENT_SPACE_ID) return true;
         OutputEvent out{};
-        out.time = e->time;
+        out.time = s->idleFlush ? 0 : e->time;
+        out.flags = e->flags;
         switch (e->type) {
             case CLAP_EVENT_PARAM_VALUE: {
                 const auto* p = reinterpret_cast<const clap_event_param_value_t*>(e);
                 out.kind = OutputEvent::Kind::ParamValue;
                 out.paramId = p->param_id;
                 out.value = p->value;
+                out.noteId = p->note_id;
+                out.port = p->port_index;
+                out.channel = p->channel;
+                out.key = p->key;
                 break;
             }
             case CLAP_EVENT_PARAM_GESTURE_BEGIN:
@@ -341,10 +352,18 @@ struct HostCallbacks {
                 const auto* n = reinterpret_cast<const clap_event_note_t*>(e);
                 out.kind = OutputEvent::Kind::NoteEnd;
                 out.noteId = n->note_id;
+                out.port = n->port_index;
+                out.channel = n->channel;
+                out.key = n->key;
                 break;
             }
             default:
                 return true;
+        }
+        if (s->idleFlush) {
+            if (s->idleOutputs.push(out)) return true;
+            s->idleDropped.fetch_add(1, std::memory_order_relaxed);
+            return false;
         }
         if (sink->count < sink->storage.size()) {
             sink->storage[sink->count++] = out;
@@ -910,6 +929,14 @@ Result<double> Instance::plainParam(std::uint32_t id, double normalized) const {
 }
 
 namespace {
+void flushIdleOutputs(Instance::HostState& h, const clap_plugin_t* plugin,
+                      const clap_plugin_params_t* params) {
+    h.outSink = nullptr;
+    h.idleFlush = true;
+    params->flush(plugin, &h.inEvents, &h.outEvents);
+    h.idleFlush = false;
+}
+
 void flushInactiveEdits(Instance::HostState& h, const clap_plugin_t* plugin,
                         const clap_plugin_params_t* params) {
     const auto edits = h.paramQueue.pending();
@@ -924,8 +951,7 @@ void flushInactiveEdits(Instance::HostState& h, const clap_plugin_t* plugin,
         e.value = edit.value;
         e.note_id = e.port_index = e.channel = e.key = -1;
     }
-    h.outSink = nullptr;
-    params->flush(plugin, &h.inEvents, &h.outEvents);
+    flushIdleOutputs(h, plugin, params);
     h.eventCount = 0;
     h.paramQueue.barrier();
 }
@@ -950,8 +976,7 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
         e.param.port_index = -1;
         e.param.channel = -1;
         e.param.key = -1;
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
         h.eventCount = 0;
         return okStatus();
     }
@@ -1004,8 +1029,7 @@ void Instance::flushParams() SUPPLE_RT {
     drainParamQueue(h, 0);
     const bool requested = h.flushRequested.exchange(false);
     if ((h.eventCount || requested) && extParams_) {
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
     }
     h.eventCount = 0;
 }
@@ -1373,8 +1397,7 @@ bool Instance::serviceMainThread() {
     // flushParams() on the audio thread (needsAudioFlush()).
     if (!active_ && extParams_ && h.flushRequested.exchange(false)) {
         h.eventCount = 0;
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
         did = true;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -1557,6 +1580,19 @@ Instance::Notifications Instance::takeNotifications() {
     n.paramsRescan = h.rescanned.exchange(false);
     n.paramsRescanFlags = h.rescanFlags.exchange(0);
     return n;
+}
+
+Instance::IdleOutputs Instance::takeIdleOutputs() {
+    if (remote_) return remote_->takeIdleOutputs();
+    IdleOutputs out;
+    if (!hostState_) return out;
+    auto& h = *hostState_;
+    const auto count = h.idleOutputs.size();
+    out.events.reserve(count);
+    OutputEvent event;
+    for (std::size_t i = 0; i < count && h.idleOutputs.pop(event); ++i) out.events.push_back(event);
+    out.dropped = h.idleDropped.exchange(0);
+    return out;
 }
 
 std::vector<std::string> Instance::takeLog() {

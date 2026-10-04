@@ -135,6 +135,32 @@ bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
     return true;
 }
 
+void writeOutputEvent(Writer& w, const OutputEvent& e) {
+    w.u8(static_cast<std::uint8_t>(e.kind));
+    w.u32(e.time);
+    w.u32(e.paramId);
+    w.f64(e.value);
+    w.i32(e.noteId);
+    w.u32(e.flags);
+    w.i16(e.port);
+    w.i16(e.channel);
+    w.i16(e.key);
+}
+
+OutputEvent readOutputEvent(Reader& r) {
+    OutputEvent e;
+    e.kind = static_cast<OutputEvent::Kind>(r.u8());
+    e.time = r.u32();
+    e.paramId = r.u32();
+    e.value = r.f64();
+    e.noteId = r.i32();
+    e.flags = r.u32();
+    e.port = r.i16();
+    e.channel = r.i16();
+    e.key = r.i16();
+    return e;
+}
+
 bool validRequest(Op op, Reader r) {
     switch (op) {
         case Op::Create:
@@ -182,6 +208,7 @@ bool validRequest(Op op, Reader r) {
         case Op::Destroy:
         case Op::EditorClose:
         case Op::EditorRequests:
+        case Op::TakeIdleOutputs:
             break;
         default:
             return false;
@@ -237,6 +264,16 @@ bool validReply(Op op, Reader r) {
         case Op::EditorRequests:
             r.skip(12);
             break;
+        case Op::TakeIdleOutputs: {
+            (void)r.u64();
+            const auto count = r.u32();
+            if (count > Instance::IdleOutputs::kCapacity) return false;
+            for (std::uint32_t i = 0; i < count && r.ok(); ++i) {
+                const auto e = readOutputEvent(r);
+                if (e.kind > OutputEvent::Kind::NoteEnd) return false;
+            }
+            break;
+        }
         case Op::Activate:
         case Op::Deactivate:
         case Op::SetParam:

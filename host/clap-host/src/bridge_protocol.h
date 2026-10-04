@@ -20,6 +20,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "supple/base/result.h"
@@ -28,7 +29,8 @@
 namespace supple::host::bridge {
 
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
-// 6: structured error details and restart failures in notifications.
+// 6 (unreleased): error details, restart failures, complete output event
+// metadata in shared memory and a control-plane idle-output drain.
 inline constexpr std::uint32_t kVersion = 6;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
@@ -63,10 +65,11 @@ enum class Op : std::uint32_t {
     PlainParam,       // id, normalized → plain
     // The plug-in's editor, embedded by the bridge into the host's X11 window
     // (window ids are the X server's, not a process's).
-    EditorOpen,      // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
-    EditorResize,    // u32 width, u32 height → the accepted size (as EditorOpen)
-    EditorClose,     // → ok
-    EditorRequests,  // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
+    EditorOpen,       // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
+    EditorResize,     // u32 width, u32 height → the accepted size (as EditorOpen)
+    EditorClose,      // → ok
+    EditorRequests,   // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
+    TakeIdleOutputs,  // → u64 dropped, u32 count, [OutputEvent]
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };
@@ -77,6 +80,8 @@ class Writer {
     std::vector<std::uint8_t> bytes;
     void u8(std::uint8_t v) { bytes.push_back(v); }
     void u32(std::uint32_t v) { raw(&v, 4); }
+    void i16(std::int16_t v) { raw(&v, 2); }
+    void i32(std::int32_t v) { raw(&v, 4); }
     void u64(std::uint64_t v) { raw(&v, 8); }
     void i64(std::int64_t v) { raw(&v, 8); }
     void f64(double v) { raw(&v, 8); }
@@ -128,6 +133,16 @@ class Reader {
     }
     std::uint32_t u32() {
         std::uint32_t v = 0;
+        raw(&v, 4);
+        return v;
+    }
+    std::int16_t i16() {
+        std::int16_t v = 0;
+        raw(&v, 2);
+        return v;
+    }
+    std::int32_t i32() {
+        std::int32_t v = 0;
         raw(&v, 4);
         return v;
     }
@@ -197,6 +212,9 @@ class Reader {
     bool ok_ = true;
 };
 
+void writeOutputEvent(Writer& writer, const OutputEvent& event);
+OutputEvent readOutputEvent(Reader& reader);
+
 using Deadline = std::chrono::steady_clock::time_point;
 inline Deadline deadlineAfter(int timeoutMs) {
     return timeoutMs < 0 ? Deadline::max()
@@ -216,6 +234,12 @@ bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
                     std::vector<std::uint8_t>& payload, int* fd, Deadline deadline);
 
 // --- data plane ---------------------------------------------------------------------
+
+// Both endpoints use this native, pointer-free ABI; Layout accounts for its
+// v6 size. Control-plane idle events encode each field without ABI padding.
+static_assert(std::is_trivially_copyable_v<OutputEvent>);
+static_assert(std::is_standard_layout_v<OutputEvent>);
+static_assert(sizeof(OutputEvent) == 40);
 
 // Commands the host runs on the bridge's audio thread, in order.
 enum class Cmd : std::uint32_t { Process = 1, StartProcessing, StopProcessing, Reset, Flush, Quit };

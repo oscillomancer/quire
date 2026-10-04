@@ -79,6 +79,7 @@ class RemoteInstance {
     // serviceMainThread + notifications + log in one round trip.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
     bool needsAudioFlush() const { return needsAudioFlush_; }
+    Instance::IdleOutputs takeIdleOutputs();
     // The plug-in's editor, embedded by the bridge into `x11Parent` (gap log #39).
     Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);
     Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);

@@ -634,8 +634,26 @@ bool CLAP_ABI edgeValueToText(const clap_plugin_t*, clap_id, double v, char* out
 }
 bool CLAP_ABI edgeTextToValue(const clap_plugin_t*, clap_id, const char*, double*) { return false; }
 void CLAP_ABI edgeFlush(const clap_plugin_t* pl, const clap_input_events_t*,
-                        const clap_output_events_t*) {
-    ++E(pl)->flushes;
+                        const clap_output_events_t* out) {
+    const auto value = ++E(pl)->flushes;
+    if (E(pl)->config[0] != 9 && E(pl)->config[0] != 10) return;
+    const int repeats = E(pl)->config[0] == 10 ? 600 : 1;
+    for (int i = 0; i < repeats; ++i) {
+        clap_event_param_gesture_t gesture{};
+        gesture.header = {sizeof(gesture), 0, CLAP_CORE_EVENT_SPACE_ID,
+                          CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_IS_LIVE};
+        gesture.param_id = 7;
+        out->try_push(out, &gesture.header);
+        clap_event_param_value_t param{};
+        param.header = {sizeof(param), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+                        CLAP_EVENT_IS_LIVE | CLAP_EVENT_DONT_RECORD};
+        param.param_id = 7;
+        param.value = value;
+        param.note_id = param.port_index = param.channel = param.key = -1;
+        out->try_push(out, &param.header);
+        gesture.header.type = CLAP_EVENT_PARAM_GESTURE_END;
+        out->try_push(out, &gesture.header);
+    }
 }
 const clap_plugin_params_t kEdgeParams = {edgeParamCount,  edgeParamInfo,   edgeParamValue,
                                           edgeValueToText, edgeTextToValue, edgeFlush};
@@ -715,6 +733,11 @@ void CLAP_ABI edgeGuiTitle(const clap_plugin_t*, const char*) {}
 bool CLAP_ABI edgeGuiShow(const clap_plugin_t* pl) {
     if (E(pl)->config[0] == 4) return false;
     E(pl)->guiShown = true;
+    if (E(pl)->config[0] == 9 || E(pl)->config[0] == 10) {
+        const auto* params = static_cast<const clap_host_params_t*>(
+            E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
+        params->request_flush(E(pl)->host);
+    }
     gEditorHost = E(pl)->host;
     const auto* gui =
         static_cast<const clap_host_gui_t*>(E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_GUI));
@@ -748,6 +771,7 @@ void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
 }
 const clap_plugin_timer_support_t kEdgeTimer = {edgeTimer};
 const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kEdgeTimer;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
@@ -761,6 +785,21 @@ bool CLAP_ABI edgeActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) 
 }
 bool CLAP_ABI edgeStart(const clap_plugin_t* pl) { return E(pl)->config[0] == 0; }
 clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t*, const clap_process_t* p) {
+    clap_event_param_value_t param{};
+    param.header = {sizeof(param), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+                    CLAP_EVENT_DONT_RECORD | CLAP_EVENT_IS_LIVE};
+    param.param_id = 7;
+    param.value = 42;
+    param.note_id = param.port_index = param.channel = param.key = -1;
+    p->out_events->try_push(p->out_events, &param.header);
+    for (uint32_t i = 0; i < p->in_events->size(p->in_events); ++i) {
+        const auto* event = p->in_events->get(p->in_events, i);
+        if (event->space_id != CLAP_CORE_EVENT_SPACE_ID || event->type != CLAP_EVENT_NOTE_OFF)
+            continue;
+        auto end = *reinterpret_cast<const clap_event_note_t*>(event);
+        end.header.type = CLAP_EVENT_NOTE_END;
+        p->out_events->try_push(p->out_events, &end.header);
+    }
     for (uint32_t c = 0; c < 2; ++c)
         for (uint32_t i = 0; i < p->frames_count; ++i)
             p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i];

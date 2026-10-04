@@ -337,6 +337,14 @@ struct Bridge {
             case Op::SaveState:
                 return replyOr(instance->saveState(),
                                [](Writer& w, const std::vector<std::uint8_t>& b) { w.blob(b); });
+            case Op::TakeIdleOutputs: {
+                const auto out = instance->takeIdleOutputs();
+                Writer w;
+                w.u64(out.dropped);
+                w.u32(static_cast<std::uint32_t>(out.events.size()));
+                for (const auto& event : out.events) writeOutputEvent(w, event);
+                return reply(w);
+            }
             case Op::LoadState: {
                 const auto bytes = r.blob();
                 return replyStatus(instance->loadState(bytes));

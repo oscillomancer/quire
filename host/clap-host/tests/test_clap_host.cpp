@@ -423,6 +423,9 @@ TEST_CASE("sine: notes at sample offsets, note end events, MIDI dialect") {
     CHECK(out.storage[0].kind == OutputEvent::Kind::NoteEnd);
     CHECK(out.storage[0].time == 300);
     CHECK(out.storage[0].noteId == 7);
+    CHECK(out.storage[0].port == 0);
+    CHECK(out.storage[0].channel == 0);
+    CHECK(out.storage[0].key == 69);
     // Raw MIDI events also reach the plugin.
     Event midiOn{.kind = Event::Kind::Midi, .time = 0};
     midiOn.midi[0] = 0x90;
@@ -456,6 +459,232 @@ TEST_CASE("the process path is real-time safe" * doctest::description("rt")) {
     for (int i = 0; i < 50; ++i) ok = ok && rtBlock(**inst, buf.block(256, events, false), out);
     CHECK(ok);
     (*inst)->stopProcessing();
+}
+
+TEST_CASE("process outputs retain flags and anonymous note addresses locally and bridged") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+        REQUIRE(made);
+        auto& p = **made;
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.startProcessing());
+        Buffers buffers(64);
+        const Event notes[] = {{.kind = Event::Kind::NoteOn,
+                                .time = 3,
+                                .port = 0,
+                                .channel = 3,
+                                .key = 64,
+                                .noteId = -1},
+                               {.kind = Event::Kind::NoteOff,
+                                .time = 11,
+                                .port = 0,
+                                .channel = 3,
+                                .key = 64,
+                                .noteId = -1}};
+        std::array<OutputEvent, 2> storage;
+        OutputEvents out{storage};
+        REQUIRE(rtBlock(p, buffers.block(64, notes), out));
+        REQUIRE(out.count == 2);
+        CHECK(out.dropped == 0);
+        const auto& value = storage[0];
+        CHECK(value.kind == OutputEvent::Kind::ParamValue);
+        CHECK(value.flags == (OutputEvent::DontRecord | OutputEvent::IsLive));
+        CHECK(value.paramId == 7);
+        CHECK(value.value == 42);
+        CHECK(value.noteId == -1);
+        CHECK(value.port == -1);
+        CHECK(value.channel == -1);
+        CHECK(value.key == -1);
+        const auto& end = storage[1];
+        CHECK(end.kind == OutputEvent::Kind::NoteEnd);
+        CHECK(end.time == 11);
+        CHECK(end.noteId == -1);
+        CHECK(end.port == 0);
+        CHECK(end.channel == 3);
+        CHECK(end.key == 64);
+        CHECK(end.flags == 0);
+        out.clear();
+        out.storage = std::span<OutputEvent>(storage.data(), 1);
+        REQUIRE(rtBlock(p, buffers.block(64, notes), out));
+        CHECK(out.count == 1);
+        CHECK(out.dropped == 1);
+        CHECK(p.takeIdleOutputs().events.empty());
+        p.stopProcessing();
+        p.deactivate();
+    }
+}
+
+TEST_CASE("VST3 parameter outputs retain normalized values and default metadata") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto gain = std::find_if(found->begin(), found->end(),
+                             [](const PluginInfo& p) { return p.name == "Test VST3 Gain"; });
+    REQUIRE(gain != found->end());
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(*gain, {}, isolated);
+        REQUIRE(made);
+        auto& p = **made;
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.startProcessing());
+        const Event param{.kind = Event::Kind::Param, .time = 7, .paramId = 1, .value = 0.625};
+        Buffers buffers(64);
+        std::array<OutputEvent, 1> storage;
+        OutputEvents out{storage};
+        REQUIRE(rtBlock(p, buffers.block(64, std::span<const Event>(&param, 1)), out));
+        REQUIRE(out.count == 1);
+        CHECK(out.dropped == 0);
+        const auto& value = storage[0];
+        CHECK(value.kind == OutputEvent::Kind::ParamValue);
+        CHECK(value.time == 7);
+        CHECK(value.paramId == 1);
+        CHECK(value.value == 0.625);
+        CHECK(value.flags == 0);
+        CHECK(value.noteId == -1);
+        CHECK(value.port == -1);
+        CHECK(value.channel == -1);
+        CHECK(value.key == -1);
+        CHECK(p.paramsNormalized());
+        p.stopProcessing();
+        p.deactivate();
+    }
+}
+
+namespace {
+void checkIdleGesture(const Instance::IdleOutputs& out, double value) {
+    REQUIRE(out.events.size() == 3);
+    CHECK(out.dropped == 0);
+    CHECK(out.events[0].kind == OutputEvent::Kind::GestureBegin);
+    CHECK(out.events[1].kind == OutputEvent::Kind::ParamValue);
+    CHECK(out.events[2].kind == OutputEvent::Kind::GestureEnd);
+    CHECK(out.events[1].value == value);
+    for (const auto& e : out.events) {
+        CHECK(e.paramId == 7);
+        CHECK(e.time == 0);
+        CHECK((e.flags & OutputEvent::IsLive) != 0);
+        CHECK(e.noteId == -1);
+        CHECK(e.port == -1);
+        CHECK(e.channel == -1);
+        CHECK(e.key == -1);
+    }
+    CHECK((out.events[1].flags & OutputEvent::DontRecord) != 0);
+}
+}  // namespace
+
+TEST_CASE("stopped editor flush outputs survive locally and bridged, on both flush threads") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+        REQUIRE(made);
+        auto& p = **made;
+        const std::uint8_t state[4] = {9, 0, 0, 0};
+        REQUIRE(p.loadState(state));
+        p.serviceMainThread();
+        checkIdleGesture(p.takeIdleOutputs(), 1);
+        REQUIRE(p.openEditor(0x5a17, 1.0));  // fixture editor uses no display/window
+        p.serviceMainThread();
+        checkIdleGesture(p.takeIdleOutputs(), 2);
+        CHECK(p.takeIdleOutputs().events.empty());
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.loadState(state));
+        p.serviceMainThread();
+        REQUIRE(p.needsAudioFlush());
+        std::thread audio([&] { p.flushParams(); });
+        audio.join();
+        checkIdleGesture(p.takeIdleOutputs(), 3);
+        p.deactivate();
+        REQUIRE(p.setParam(7, 0));
+        checkIdleGesture(p.takeIdleOutputs(), 4);
+        p.closeEditor();
+        const auto empty = p.takeIdleOutputs();
+        CHECK(empty.events.empty());
+        CHECK(empty.dropped == 0);
+    }
+}
+
+TEST_CASE("idle output overflow is counted and draining reopens capacity") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        for (bool active : {false, true}) {
+            CAPTURE(isolated);
+            CAPTURE(active);
+            auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+            REQUIRE(made);
+            auto& p = **made;
+            if (active) REQUIRE(p.activate(48000, 1, 64));
+            auto flush = [&](std::uint8_t mode) {
+                const std::uint8_t state[4] = {mode, 0, 0, 0};
+                REQUIRE(p.loadState(state));
+                p.serviceMainThread();
+                if (active) {
+                    std::thread audio([&] { p.flushParams(); });
+                    audio.join();
+                }
+            };
+            flush(10);
+            flush(10);
+            const auto out = p.takeIdleOutputs();
+            REQUIRE(out.events.size() == Instance::IdleOutputs::kCapacity);
+            CHECK(out.dropped == 3600 - Instance::IdleOutputs::kCapacity);
+            for (std::size_t i = 0; i < out.events.size(); ++i) {
+                const OutputEvent::Kind kinds[] = {OutputEvent::Kind::GestureBegin,
+                                                   OutputEvent::Kind::ParamValue,
+                                                   OutputEvent::Kind::GestureEnd};
+                CHECK(out.events[i].kind == kinds[i % 3]);
+            }
+            const auto empty = p.takeIdleOutputs();
+            CHECK(empty.events.empty());
+            CHECK(empty.dropped == 0);
+            flush(9);
+            checkIdleGesture(p.takeIdleOutputs(), 3);
+            if (active) p.deactivate();
+        }
+    }
+}
+
+TEST_CASE("bridge idle output codec rejects malformed replies and preserves metadata") {
+    using namespace bridge;
+    const OutputEvent event{.kind = OutputEvent::Kind::NoteEnd,
+                            .time = 12,
+                            .noteId = -1,
+                            .flags = OutputEvent::DontRecord,
+                            .port = 2,
+                            .channel = 4,
+                            .key = 65};
+    Writer w;
+    w.u64(17);
+    w.u32(1);
+    writeOutputEvent(w, event);
+    REQUIRE(validReply(Op::TakeIdleOutputs, Reader(w.bytes.data(), w.bytes.size())));
+    Reader r(w.bytes.data(), w.bytes.size());
+    CHECK(r.u64() == 17);
+    CHECK(r.u32() == 1);
+    const auto decoded = readOutputEvent(r);
+    CHECK(r.done());
+    CHECK(decoded.flags == event.flags);
+    CHECK(decoded.noteId == -1);
+    CHECK(decoded.port == 2);
+    CHECK(decoded.channel == 4);
+    CHECK(decoded.key == 65);
+    w.bytes.pop_back();
+    CHECK_FALSE(validReply(Op::TakeIdleOutputs, Reader(w.bytes.data(), w.bytes.size())));
+    Writer excessive;
+    excessive.u64(0);
+    excessive.u32(Instance::IdleOutputs::kCapacity + 1);
+    CHECK_FALSE(
+        validReply(Op::TakeIdleOutputs, Reader(excessive.bytes.data(), excessive.bytes.size())));
+    Writer invalid;
+    invalid.u64(0);
+    invalid.u32(1);
+    auto badKind = event;
+    badKind.kind = static_cast<OutputEvent::Kind>(255);
+    writeOutputEvent(invalid, badKind);
+    CHECK_FALSE(
+        validReply(Op::TakeIdleOutputs, Reader(invalid.bytes.data(), invalid.bytes.size())));
 }
 
 TEST_CASE("lifecycle: a restart requested while processing waits until processing stops") {
@@ -1161,7 +1390,7 @@ TEST_CASE("bridge requests fail when a scripted child stops reading") {
 
 TEST_CASE("malformed scripted bridge replies fail the whole process") {
     for (const auto op : {bridge::Op::ParamValue, bridge::Op::Params, bridge::Op::SaveState,
-                          bridge::Op::Service, bridge::Op::Create}) {
+                          bridge::Op::Service, bridge::Op::Create, bridge::Op::TakeIdleOutputs}) {
         for (bool errorReply : {false, true}) {
             CAPTURE(op);
             CAPTURE(errorReply);

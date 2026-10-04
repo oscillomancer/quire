@@ -21,6 +21,10 @@ point vectors grow during `addPoint`. `EventList` uses storage allocated at
 construction. Controller conversions run on the main thread; process queues
 and output edits carry normalized values. The engine converts automation before
 processing; main-thread consumers must convert output edits before using plain values.
+Output parameter events have flags 0 and note/port/channel/key addresses -1,
+because VST3 parameter-change queues do not supply CLAP event flags or note
+addresses. Native VST3 note-off events are not CLAP note-end notifications.
+`takeIdleOutputs()` is the CLAP params.flush channel; it returns no VST3 events.
 A plugin that allocates or locks inside its own `process` cannot be made RT safe
 by the host.
 
