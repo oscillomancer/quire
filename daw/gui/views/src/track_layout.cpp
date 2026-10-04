@@ -20,27 +20,38 @@ bool TrackLayout::show(const model::Session& session) {
     session_ = session;
     indexed_ = session.version;
     rows_.clear();
+    trackRows_.clear();
+    envRows_.clear();
+    std::map<model::Id, model::Id> fxOwners;
+    for (const auto& track : session_.tracks) {
+        for (auto fx : track.value->chain) fxOwners[fx] = track.id;
+        for (auto fx : track.value->inputChain) fxOwners[fx] = track.id;
+    }
+    std::map<model::Id, std::vector<std::pair<int, model::Id>>> lanes;
+    for (const auto& envelope : session_.envelopes) {
+        if (!envelope.value->visible || !scaleOf(*envelope.value)) continue;
+        auto owner = envelope.value->target.object;
+        if (owner.kind == model::Kind::Fx) {
+            const auto found = fxOwners.find(owner);
+            if (found == fxOwners.end()) continue;
+            owner = found->second;
+        }
+        if (owner.kind == model::Kind::Track)
+            lanes[owner].emplace_back(envOrder(*envelope.value), envelope.id);
+    }
+    for (auto& [track, entries] : lanes) std::sort(entries.begin(), entries.end());
     std::function<void(model::Id, int)> visit = [&](model::Id id, int depth) {
         const model::Track* t = session_.tracks.find(id);
         if (!t) return;
         const bool row = t->type != model::StripType::Master && !t->hiddenTcp;
         if (row) {
+            trackRows_[id] = rows_.size();
             rows_.push_back({id, t->type, depth, std::nullopt});
-            // Its visible automation lanes (volume, pan, mute) right below it.
-            std::vector<std::pair<int, model::Id>> lanes;
-            // Its own controls' envelopes, then its effects' (main and input chains).
-            auto owned = [&](model::Id object) {
-                if (object == id) return true;
-                if (object.kind != model::Kind::Fx) return false;
-                return std::find(t->chain.begin(), t->chain.end(), object) != t->chain.end() ||
-                       std::find(t->inputChain.begin(), t->inputChain.end(), object) !=
-                           t->inputChain.end();
-            };
-            for (const auto& e : session_.envelopes)
-                if (owned(e.value->target.object) && e.value->visible && scaleOf(*e.value))
-                    lanes.emplace_back(envOrder(*e.value), e.id);
-            std::sort(lanes.begin(), lanes.end());
-            for (const auto& lane : lanes) rows_.push_back({id, t->type, depth, lane.second});
+            if (const auto found = lanes.find(id); found != lanes.end())
+                for (const auto& lane : found->second) {
+                    envRows_[lane.second] = rows_.size();
+                    rows_.push_back({id, t->type, depth, lane.second});
+                }
         }
         if (t->folderCompact == 2) return;  // a collapsed folder hides its children
         for (model::Id c : t->children) visit(c, row ? depth + 1 : depth);
@@ -54,15 +65,13 @@ bool TrackLayout::show(const model::Session& session) {
 }
 
 std::optional<std::size_t> TrackLayout::indexOf(model::Id track) const {
-    for (std::size_t i = 0; i < rows_.size(); ++i)
-        if (rows_[i].track == track && !rows_[i].env) return i;
-    return std::nullopt;
+    const auto found = trackRows_.find(track);
+    return found == trackRows_.end() ? std::nullopt : std::optional(found->second);
 }
 
 std::optional<std::size_t> TrackLayout::indexOfEnv(model::Id env) const {
-    for (std::size_t i = 0; i < rows_.size(); ++i)
-        if (rows_[i].env == env) return i;
-    return std::nullopt;
+    const auto found = envRows_.find(env);
+    return found == envRows_.end() ? std::nullopt : std::optional(found->second);
 }
 
 std::optional<EnvScale> TrackLayout::scaleOf(const model::Envelope& env) const {

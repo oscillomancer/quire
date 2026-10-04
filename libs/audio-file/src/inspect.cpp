@@ -57,7 +57,7 @@ struct Riff {
 Riff parseRiff(std::span<const std::uint8_t> head) {
     Riff out;
     if (head.size() < 12) return out;
-    out.rf64 = std::memcmp(head.data(), "RF64", 4) == 0;
+    out.rf64 = std::memcmp(head.data(), "RF64", 4) == 0 || std::memcmp(head.data(), "BW64", 4) == 0;
     if (std::memcmp(head.data() + 8, "WAVE", 4) != 0) {
         out.need = std::numeric_limits<std::uint64_t>::max();  // not a WAVE file
         return out;
@@ -66,16 +66,17 @@ Riff parseRiff(std::span<const std::uint8_t> head) {
     while (at + 8 <= head.size()) {
         const std::uint8_t* p = head.data() + at;
         const std::uint32_t size = le32(p + 4);
-        if (std::memcmp(p, "ds64", 4) == 0 && at + 8 + 28 <= head.size()) {
-            out.dataBytes = be32(p + 8 + 8) | (std::uint64_t(be32(p + 8 + 12)) << 32);
-            out.rf64Frames = be32(p + 8 + 16) | (std::uint64_t(be32(p + 8 + 20)) << 32);
-        } else if (std::memcmp(p, "fmt ", 4) == 0 && at + 8 + 16 <= head.size()) {
+        if (std::memcmp(p, "ds64", 4) == 0 && size >= 28 && at + 8 + 28 <= head.size()) {
+            out.dataBytes = le32(p + 8 + 8) | (std::uint64_t(le32(p + 8 + 12)) << 32);
+            out.rf64Frames = le32(p + 8 + 16) | (std::uint64_t(le32(p + 8 + 20)) << 32);
+        } else if (std::memcmp(p, "fmt ", 4) == 0 && size >= 16 && at + 8 + 16 <= head.size()) {
             out.formatTag = le16(p + 8);
             out.channels = le16(p + 10);
             out.sampleRate = le32(p + 12);
             out.blockAlign = le16(p + 20);
             out.bitsPerSample = le16(p + 22);
-            if (out.formatTag == 0xfffe && at + 8 + 26 <= head.size())  // WAVE_FORMAT_EXTENSIBLE
+            if (out.formatTag == 0xfffe && size >= 40 &&
+                at + 8 + 40 <= head.size())  // WAVE_FORMAT_EXTENSIBLE
                 out.formatTag = le16(p + 8 + 24);
             out.haveFmt = true;
         } else if (std::memcmp(p, "data", 4) == 0) {
@@ -84,7 +85,7 @@ Riff parseRiff(std::span<const std::uint8_t> head) {
             out.haveData = true;
             return out;
         }
-        at += 8 + size + (size & 1u);  // chunks are word aligned
+        at += 8ull + size + (size & 1u);  // chunks are word aligned
     }
     out.need = at;  // the walk ran out of buffer: the caller reads more
     return out;

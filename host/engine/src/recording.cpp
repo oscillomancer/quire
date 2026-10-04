@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include "supple/base/files.h"
 #include "supple/base/sha256.h"
@@ -39,30 +40,49 @@ Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info)
 }
 
 Result<RecordingInfo> readSidecar(const std::filesystem::path& wav) {
-    auto text = readTextFile(sidecarPath(wav), 1 << 16);
+    auto text = readTextFile(sidecarPath(wav), 1 << 20);
     if (!text) return std::move(text).error();
     auto v = json::parse(*text);
     if (!v) return std::move(v).error();
-    const json::Value* track = v->find("track");
-    const json::Value* start = v->find("start_sample");
-    const json::Value* rate = v->find("sample_rate");
-    std::optional<model::Id> id =
-        track && track->isString() ? model::Id::parse(track->asString()) : std::nullopt;
-    if (!id || !start || !start->isInt() || !rate || !rate->isNumber())
-        return Error("record.sidecar", sidecarPath(wav).string() + " is not a recording sidecar");
+    auto invalid = [&](std::string path, std::string message) {
+        return Error("record.sidecar", sidecarPath(wav).string() + ": " + message, std::move(path),
+                     "restore a valid supple.recording/1.0 sidecar or skip this file");
+    };
+    const auto* schema = v->find("schema");
+    if (!v->isObject() || !schema || !schema->isString() ||
+        schema->asString() != "supple.recording/1.0")
+        return invalid("/schema", "unsupported recording schema/version");
+    const auto* track = v->find("track");
+    const auto* start = v->find("start_sample");
+    const auto* rate = v->find("sample_rate");
+    const auto id = track && track->isString() ? model::Id::parse(track->asString()) : std::nullopt;
+    if (!id || id->kind != model::Kind::Track) return invalid("/track", "expected a tr_ track id");
+    if (!start || !start->isInt()) return invalid("/start_sample", "expected an integer sample");
+    if (!rate || !rate->isNumber() || !std::isfinite(rate->asDouble()) || rate->asDouble() <= 0)
+        return invalid("/sample_rate", "expected a positive finite rate");
     RecordingInfo info{*id, start->asInt(), rate->asDouble(), {}, 0, 0};
-    const json::Value* segs = v->find("segments");
-    const json::Value* loop = v->find("loop");
-    if (segs && segs->isArray() && loop && loop->isArray() && loop->size() == 2 &&
-        loop->at(0).isInt() && loop->at(1).isInt()) {
-        for (std::size_t i = 0; i < segs->size(); ++i) {
-            const json::Value& row = segs->at(i);
-            if (!row.isArray() || row.size() != 2 || !row.at(0).isInt() || !row.at(1).isInt())
-                return Error("record.sidecar", sidecarPath(wav).string() + ": bad segments");
-            info.segments.push_back({row.at(0).asInt(), row.at(1).asInt()});
-        }
+    const auto* segs = v->find("segments");
+    const auto* loop = v->find("loop");
+    if (segs || loop) {
+        if (!segs || !segs->isArray() || segs->size() == 0 || !loop || !loop->isArray() ||
+            loop->size() != 2 || !loop->at(0).isInt() || !loop->at(1).isInt())
+            return invalid("/segments", "loop and nonempty segments must be supplied together");
         info.loopStart = loop->at(0).asInt();
         info.loopEnd = loop->at(1).asInt();
+        if (info.loopStart < 0 || info.loopEnd <= info.loopStart)
+            return invalid("/loop", "expected a nonnegative, increasing loop range");
+        for (std::size_t i = 0; i < segs->size(); ++i) {
+            const auto& row = segs->at(i);
+            if (!row.isArray() || row.size() != 2 || !row.at(0).isInt() || !row.at(1).isInt() ||
+                row.at(0).asInt() < 0 || (i && row.at(0).asInt() <= info.segments.back().fileFrame))
+                return invalid("/segments/" + std::to_string(i),
+                               "expected increasing nonnegative file frames");
+            info.segments.push_back({row.at(0).asInt(), row.at(1).asInt()});
+        }
+        if (info.segments.front().fileFrame != 0 ||
+            info.segments.front().timeline != info.startSample)
+            return invalid("/segments/0",
+                           "the first run must begin at file frame 0 and start_sample");
     }
     return info;
 }
@@ -71,17 +91,20 @@ void FrameRing::init(std::uint32_t channels, std::size_t frames) {
     channels_ = channels;
     capacity_ = frames;
     buf_.assign(frames * channels, 0.0f);
+    positions_.assign(frames, 0);
     write_ = 0;
     read_ = 0;
 }
 
 std::size_t FrameRing::write(const float* const* in, std::uint32_t inChannels,
-                             std::span<const int> select, std::uint32_t frames) SUPPLE_RT {
+                             std::span<const int> select, std::uint32_t frames,
+                             std::int64_t firstFrame) SUPPLE_RT {
     const std::size_t w = write_.load(std::memory_order_relaxed);
     const std::size_t room = capacity_ - (w - read_.load(std::memory_order_acquire));
     const std::size_t n = std::min<std::size_t>(frames, room);
     for (std::size_t i = 0; i < n; ++i) {
         float* dst = buf_.data() + ((w + i) % capacity_) * channels_;
+        positions_[(w + i) % capacity_] = firstFrame + static_cast<std::int64_t>(i);
         for (std::uint32_t c = 0; c < channels_; ++c) {
             const int src = c < select.size() ? select[c] : -1;
             dst[c] = in && src >= 0 && static_cast<std::uint32_t>(src) < inChannels && in[src]
@@ -93,12 +116,18 @@ std::size_t FrameRing::write(const float* const* in, std::uint32_t inChannels,
     return n;
 }
 
-std::size_t FrameRing::read(float* out, std::size_t maxFrames) {
+std::size_t FrameRing::read(float* out, std::size_t maxFrames, std::int64_t* firstFrame) {
     const std::size_t r = read_.load(std::memory_order_relaxed);
-    const std::size_t n = std::min(maxFrames, write_.load(std::memory_order_acquire) - r);
-    for (std::size_t i = 0; i < n; ++i)
-        std::copy_n(buf_.data() + ((r + i) % capacity_) * channels_, channels_,
-                    out + i * channels_);
+    const std::size_t available = std::min(maxFrames, write_.load(std::memory_order_acquire) - r);
+    if (available && firstFrame) *firstFrame = positions_[r % capacity_];
+    std::size_t n = 0;
+    for (; n < available; ++n) {
+        if (firstFrame &&
+            positions_[(r + n) % capacity_] != *firstFrame + static_cast<std::int64_t>(n))
+            break;
+        std::copy_n(buf_.data() + ((r + n) % capacity_) * channels_, channels_,
+                    out + n * channels_);
+    }
     read_.store(r + n, std::memory_order_release);
     return n;
 }
@@ -138,7 +167,7 @@ Status Recorder::open() {
 
 void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
                        std::int64_t pos) SUPPLE_RT {
-    if (frames == 0) return;
+    if (frames == 0 || runsFull_) return;
     if (!started_.load(std::memory_order_relaxed)) {
         // What the performer heard at `pos` reaches us a round trip later.
         start_.store(pos - latency_, std::memory_order_relaxed);
@@ -148,20 +177,25 @@ void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::ui
         if (n < kMaxSegments) {
             segments_[n] = {captured_, pos};
             segmentCount_.store(n + 1, std::memory_order_release);
+        } else {
+            runsFull_ = true;
+            return;
         }
     }
     expected_ = pos + frames;
-    captured_ += frames;
     for (auto& t : tracks_) {
-        const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames);
+        const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames, captured_);
         if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
     }
+    captured_ += frames;
 }
 
 void Recorder::captureMidi(std::span<const MidiInputEvent> events, std::uint32_t offset,
                            std::uint32_t frames, std::int64_t pos) SUPPLE_RT {
     (void)pos;  // placed by finish() from the captured position and the runs
-    if (midiTracks_.empty() || events.empty() || !started_.load(std::memory_order_relaxed)) return;
+    if (runsFull_ || midiTracks_.empty() || events.empty() ||
+        !started_.load(std::memory_order_relaxed))
+        return;
     // capture() has counted this part: it began at captured_ - frames.
     const std::int64_t base = captured_ - frames;
     for (const MidiInputEvent& ev : events) {
@@ -195,24 +229,38 @@ void Recorder::drainMidi() {
 }
 
 void Recorder::lose(std::uint32_t frames) SUPPLE_RT {
+    if (runsFull_) return;
     if (frames == 0 || !started_.load(std::memory_order_relaxed)) return;
     for (auto& t : tracks_) t->overflow.fetch_add(frames, std::memory_order_relaxed);
+}
+
+void Recorder::padTo(Track& t, std::int64_t frame) {
+    const std::array<float, 4096> silence{};
+    while (t.writeError && t.writer.frames() < static_cast<std::uint64_t>(frame)) {
+        const auto n =
+            std::min<std::uint64_t>(silence.size() / t.ring.channels(),
+                                    static_cast<std::uint64_t>(frame) - t.writer.frames());
+        auto st = t.writer.append(silence.data(), static_cast<std::size_t>(n));
+        rememberError(t, std::move(st));
+    }
 }
 
 void Recorder::drain(Track& t, std::vector<float>& scratch) {
     const std::size_t chunk = scratch.size() / t.ring.channels();
     for (;;) {
-        const std::size_t n = t.ring.read(scratch.data(), chunk);
+        std::int64_t first = 0;
+        const std::size_t n = t.ring.read(scratch.data(), chunk, &first);
         if (n == 0) break;
-        if (writeError_) {
+        padTo(t, first);
+        if (t.writeError) {
             auto st = t.writer.append(scratch.data(), n);
-            if (!st) writeError_ = std::move(st);
+            rememberError(t, std::move(st));
         }
-        if (!writeError_) t.overflow.fetch_add(n, std::memory_order_relaxed);  // lost too
+        if (!t.writeError) t.overflow.fetch_add(n, std::memory_order_relaxed);  // lost too
     }
-    if (writeError_) {
+    if (t.writeError) {
         auto st = t.writer.flush();  // a crash of the process keeps what the OS has
-        if (!st) writeError_ = std::move(st);
+        rememberError(t, std::move(st));
     }
 }
 
@@ -223,25 +271,44 @@ void Recorder::writeSidecars() {
     for (auto& t : tracks_) {
         // Without one the take is fine but a crash would leave it unplaced.
         auto st = writeSidecar(t->target.file, {t->target.track, start, rate_, {}, 0, 0});
-        if (!st && sidecarError_) sidecarError_ = std::move(st);
+        rememberError(*t, std::move(st), true);
     }
+}
+
+void Recorder::rememberError(Track& track, Status status, bool sidecar) {
+    if (status) return;
+    if (track.firstError) track.firstError = status.error();
+    Status& target = sidecar ? track.sidecarError : track.writeError;
+    if (target) target = std::move(status);
+}
+
+void Recorder::updateHeaders() {
+    for (auto& t : tracks_)
+        if (t->writeError) rememberError(*t, t->writer.updateHeader());
 }
 
 void Recorder::writerLoop() {
     std::vector<float> scratch(8192 * 16);
     auto lastHeader = std::chrono::steady_clock::now();
     while (!stop_.load(std::memory_order_acquire)) {
+        if (writerStalled_.load(std::memory_order_acquire)) {
+            writerStallAck_.store(true, std::memory_order_release);
+            while (writerStalled_.load(std::memory_order_acquire) && !stop_.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            writerStallAck_.store(false, std::memory_order_release);
+        }
         writeSidecars();
         for (auto& t : tracks_) drain(*t, scratch);
         drainMidi();  // the MIDI rings too (bounded: a long performance must not overflow)
         if (std::chrono::steady_clock::now() - lastHeader > std::chrono::seconds(5)) {
-            for (auto& t : tracks_) (void)t->writer.updateHeader();  // a crash keeps this much
+            updateHeaders();  // a crash keeps this much
             lastHeader = std::chrono::steady_clock::now();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     writeSidecars();
-    for (auto& t : tracks_) drain(*t, scratch);  // what arrived before the stop
+    for (auto& t : tracks_) drain(*t, scratch);    // what arrived before the stop
+    for (auto& t : tracks_) padTo(*t, captured_);  // a final dropped tail has no next timestamp
 }
 
 std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
@@ -283,6 +350,11 @@ std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
             std::copy_n(ev.bytes, 3, e.bytes);
             r.midi.push_back(e);
         }
+        if (runsFull_)
+            r.warnings.emplace_back(
+                "recording.loop_runs_full",
+                "recording stopped adding input because its loop run table is full", "/recording",
+                "commit the retained passes and start a new recording");
         out.push_back(std::move(r));
     }
     for (auto& t : tracks_) {
@@ -296,24 +368,29 @@ std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
             if (sg.fileFrame < r.frames) r.segments.push_back(sg);
         r.loop = {loop.start, loop.end};
         r.overflowFrames = t->overflow.load();
-        if (auto st = t->writer.close(); !st && writeError_) writeError_ = std::move(st);
+        rememberError(*t, t->writer.close());
         // The file's bytes are final now that it is closed, so hash them here:
         // the commit then never reads the recording back. (An incremental hash
         // of the write stream cannot be the file's digest — close() rewrites the
         // header's sizes — so this one read is what "the file's bytes" costs.)
-        if (writeError_.ok()) {
-            if (auto hash = sha256File(t->target.file)) r.hash = *hash;
+        if (t->writeError.ok()) {
+            auto hash = sha256File(t->target.file);
+            if (hash)
+                r.hash = *hash;
+            else
+                rememberError(*t, std::move(hash).error());
         }
         if (r.segments.size() > 1 && started_.load(std::memory_order_relaxed)) {
             // Where each pass belongs, for recovery of an unsaved take.
             RecordingInfo info{t->target.track, start, rate_, r.segments, loop.start, loop.end};
-            if (auto st = writeSidecar(t->target.file, info); !st && sidecarError_)
-                sidecarError_ = std::move(st);
+            rememberError(*t, writeSidecar(t->target.file, info), true);
         }
-        if (!writeError_)
-            r.error = writeError_.error().toString();
-        else if (!sidecarError_)
-            r.error = sidecarError_.error().toString();
+        if (!t->firstError) r.error = t->firstError.error().toString();
+        if (runsFull_)
+            r.warnings.emplace_back(
+                "recording.loop_runs_full",
+                "recording stopped adding input because its loop run table is full", "/recording",
+                "commit the retained passes and start a new recording");
         out.push_back(std::move(r));
     }
     return out;

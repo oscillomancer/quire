@@ -167,21 +167,24 @@ class Roll : public ui::Node {
 
     std::optional<std::size_t> noteAt(ui::Point p, int* edge) const {
         const Geometry g{s_, bounds()};
-        for (std::size_t k = s_.notes.size(); k-- > 0;) {
-            const ui::Rect r = g.rectOf(s_.notes[k]);
-            if (!r.contains(p)) continue;
-            if (edge)
-                *edge = p.x >= r.right() - kEdge && r.w > 2 * kEdge ? 1
-                        : p.x <= r.x + kEdge && r.w > 2 * kEdge     ? -1
-                                                                    : 0;
-            return k;
-        }
+        for (bool selected : {true, false})
+            for (std::size_t k = s_.notes.size(); k-- > 0;) {
+                if (s_.selected.contains(k) != selected) continue;
+                const ui::Rect r = g.rectOf(s_.notes[k]);
+                if (!r.contains(p)) continue;
+                if (edge)
+                    *edge = p.x >= r.right() - kEdge && r.w > 2 * kEdge ? 1
+                            : p.x <= r.x + kEdge && r.w > 2 * kEdge     ? -1
+                                                                        : 0;
+                return k;
+            }
         return std::nullopt;
     }
 
     bool onPointer(const ui::PointerEvent& e) override {
         const Geometry g{s_, bounds()};
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         if (e.type == T::Wheel) {
             if (e.mods & ui::kCtrl) {  // zoom around the pointer
                 const double at = g.beatOf(e.pos.x);
@@ -220,7 +223,7 @@ class Roll : public ui::Node {
                     op["velocity"] = s_.lastVelocity;
                     json::Value ops = json::Value::array();
                     ops.push_back(std::move(op));
-                    (void)editor_.edit(std::move(ops));
+                    (void)editor_.edit(std::move(ops), s_.gestureVersion);
                 }
                 s_.drag = RollState::Drag::None;
                 return true;
@@ -257,17 +260,16 @@ class Roll : public ui::Node {
                 if (free) return raw;
                 return s_.snapBeat(anchorBeat + raw) - anchorBeat;
             };
-            const RollNote& a = s_.notes[anchor_];
             switch (s_.drag) {
                 case RollState::Drag::Move:
-                    s_.dBeats = snapped(a.start);
+                    s_.dBeats = snapped(s_.notes[anchor_].start);
                     s_.dPitch = static_cast<int>(std::lround((press_.y - e.pos.y) / s_.rowHeight));
                     break;
                 case RollState::Drag::ResizeEnd:
-                    s_.dLength = snapped(a.start + a.length);
+                    s_.dLength = snapped(s_.notes[anchor_].start + s_.notes[anchor_].length);
                     break;
                 case RollState::Drag::ResizeStart:
-                    s_.dStart = snapped(a.start);
+                    s_.dStart = snapped(s_.notes[anchor_].start);
                     break;
                 case RollState::Drag::Marquee: {
                     s_.marquee = {std::min(press_.x, e.pos.x), std::min(press_.y, e.pos.y),
@@ -315,7 +317,7 @@ class Roll : public ui::Node {
             }
             s_.dBeats = s_.dLength = s_.dStart = 0;
             s_.dPitch = 0;
-            if (ops.size() > 0) (void)editor_.edit(std::move(ops));
+            if (ops.size() > 0) (void)editor_.edit(std::move(ops), s_.gestureVersion);
             repaintAll();
             return true;
         }
@@ -457,6 +459,7 @@ class VelocityLane : public ui::Node {
     }
     bool onPointer(const ui::PointerEvent& e) override {
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         const ui::Rect a = area();
         const Geometry g{s_, roll_ ? roll_->bounds() : a};
         auto valueAt = [&](float y) {
@@ -507,7 +510,7 @@ class VelocityLane : public ui::Node {
             s_.velocityNote.reset();
             json::Value ops = json::Value::array();
             ops.push_back(std::move(op));
-            (void)editor_.edit(std::move(ops));
+            (void)editor_.edit(std::move(ops), s_.gestureVersion);
             repaintAll();
             return true;
         }
@@ -573,6 +576,7 @@ class CcLane : public ui::Node {
     }
     bool onPointer(const ui::PointerEvent& e) override {
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         const ui::Rect a = area();
         const Geometry g{s_, roll_ ? roll_->bounds() : a};
         auto valueAt = [&](float y) {
@@ -635,7 +639,7 @@ class CcLane : public ui::Node {
             }
             s_.ccDraft.clear();
             s_.ccErasing = false;
-            (void)editor_.edit(std::move(ops));
+            (void)editor_.edit(std::move(ops), s_.gestureVersion);
             invalidate();
             return true;
         }
@@ -690,9 +694,7 @@ MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dis
     actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes", [this] { quantize(); });
 }
 
-MidiEditor::~MidiEditor() {
-    if (playhead_) (void)root_.overlay().remove(playhead_);  // it refers to this editor
-}
+MidiEditor::~MidiEditor() = default;
 
 std::unique_ptr<ui::Node> MidiEditor::build() {
     auto panel = std::make_unique<ui::Node>("midi.editor");
@@ -813,7 +815,7 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
 
     auto overlay = std::make_unique<RollPlayhead>(state_, roll_);
     playhead_ = overlay.get();
-    root_.overlay().add(std::move(overlay));
+    playheadHandle_ = root_.addOverlay(std::move(overlay));
     return panel;
 }
 
@@ -859,6 +861,10 @@ void MidiEditor::close() {
     state_.item.clear();
     state_.notes.clear();
     state_.selected.clear();
+    state_.drag = RollState::Drag::None;
+    state_.velocityNote.reset();
+    state_.ccDraft.clear();
+    state_.ccErasing = false;
     if (eventList_) eventList_->sync();
     if (panel_ && panel_->visible) {
         if (root_.focused() && (root_.focused() == roll_ || root_.focused() == text_))
@@ -874,6 +880,14 @@ Status MidiEditor::reload() {
     args["item"] = state_.item;
     auto r = dispatcher_.execute({"midi.notes", std::move(args), kOrigin});
     if (!r) return std::move(r).error();
+    // A reload replaces note indices and CC data; an old preview cannot be
+    // committed against the new sequence (including undo and item switches).
+    state_.drag = RollState::Drag::None;
+    state_.dBeats = state_.dLength = state_.dStart = 0;
+    state_.dPitch = state_.dVelocity = 0;
+    state_.velocityNote.reset();
+    state_.ccDraft.clear();
+    state_.ccErasing = false;
     state_.itemPosition = (*r)["position"].asDouble();
     state_.itemLength = (*r)["length"].asDouble();
     state_.notes.clear();
@@ -931,16 +945,36 @@ void MidiEditor::refreshTitle() {
     title_->setText(titleBase_ + " · grid " + grid + (state_.snap ? "" : " · snap off"));
 }
 
+namespace {
+std::function<midi::Meter(int)> meterAtItem(const model::Session& session, double beat) {
+    const auto map = session.timeMap;
+    const int first = map->barBeat(std::max(0.0, beat)).bar;
+    return [map, first](int bar) {
+        const auto meter = map->meterAt(std::max(1, first + bar - 1));
+        return midi::Meter{meter.numerator, meter.denominator};
+    };
+}
+}  // namespace
+
 void MidiEditor::reloadText() {
     if (!text_) return;
-    json::Value args = json::Value::object();
-    args["item"] = state_.item;
-    auto r = dispatcher_.execute({"midi.get", std::move(args), kOrigin});
-    if (!r) {
-        showDiagnostics({}, "notation unavailable: " + r.error().message);
+    const auto id = model::Id::parse(state_.item);
+    const auto* item = id ? app_.head().items.find(*id) : nullptr;
+    const auto* take =
+        item && item->activeTake ? app_.head().takes.find(*item->activeTake) : nullptr;
+    const auto* source = take && take->source ? app_.head().midi.find(*take->source) : nullptr;
+    if (!item || !source) {
+        showDiagnostics({}, "notation unavailable: no MIDI source");
         return;
     }
-    appliedText_ = (*r)["text"].asString();
+    notation::DecompileOptions options;
+    options.meterAt = meterAtItem(app_.head(), model::itemSpan(app_.head(), *item).startBeat);
+    auto text = notation::decompile(source->sequence, options);
+    if (!text) {
+        showDiagnostics({}, "notation unavailable: " + text.error().message);
+        return;
+    }
+    appliedText_ = std::move(*text);
     text_->setText(appliedText_);
     textDirty_ = false;
     showDiagnostics({}, "");
@@ -958,6 +992,7 @@ void MidiEditor::compileText(bool write) {
     const std::string text = text_->text();
     notation::CompileContext cc;
     cc.ppq = app_.head().project->ppq;
+    cc.meterAt = meterAtItem(app_.head(), state_.itemPosition);
     auto compiled = notation::compile(text, cc);
     if (!compiled) {
         const Error& e = compiled.error();
@@ -1000,7 +1035,17 @@ void MidiEditor::compileText(bool write) {
     (void)reload();
 }
 
-Status MidiEditor::edit(json::Value ops) {
+std::uint64_t MidiEditor::beginGesture() {
+    sync();
+    return app_.head().version;
+}
+
+Status MidiEditor::edit(json::Value ops, std::optional<std::uint64_t> expectedVersion) {
+    if (expectedVersion && *expectedVersion != app_.head().version) {
+        sync();
+        return Error("gui.midi.stale", "the MIDI item changed during the gesture", "/item",
+                     "start the gesture again against the current item");
+    }
     json::Value args = json::Value::object();
     args["item"] = state_.item;
     args["ops"] = std::move(ops);
@@ -1100,26 +1145,11 @@ void MidiEditor::sync() {
             close();
             return;
         }
-        // Indices shift when notes move: keep the selected notes that are
-        // unchanged, by value.
-        std::vector<RollNote> kept;
-        for (std::size_t i : state_.selected)
-            if (i < state_.notes.size()) kept.push_back(state_.notes[i]);
+        state_.selected.clear();
         if (!reload()) {
             close();
             return;
         }
-        state_.selected.clear();
-        for (const RollNote& k : kept)
-            for (std::size_t i = 0; i < state_.notes.size(); ++i) {
-                const RollNote& n = state_.notes[i];
-                if (!state_.selected.contains(i) && n.pitch == k.pitch && n.channel == k.channel &&
-                    n.velocity == k.velocity && std::abs(n.start - k.start) < 1e-6 &&
-                    std::abs(n.length - k.length) < 1e-6) {
-                    state_.selected.insert(i);
-                    break;
-                }
-            }
         if (!text_ || !text_->focused() || !textDirty_) reloadText();
     }
     if (compilePending_ && std::chrono::steady_clock::now() - lastEdit_ > kCompileDelay) {

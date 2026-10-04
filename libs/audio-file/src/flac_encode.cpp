@@ -298,7 +298,7 @@ Result<std::vector<std::uint8_t>> encodeFlac(const AudioData& data, const FlacOp
     for (const auto& channel : data.channels)
         if (channel.size() != frames)
             return Error("audio.encode", "channels have different lengths");
-    const std::size_t blockSize = std::clamp<std::size_t>(options.blockSize, 16, 65535);
+    const auto blockSize = static_cast<std::size_t>(std::clamp(options.blockSize, 16, 65535));
 
     // Quantize exactly as encodeWav does (one dither stream, frame by frame).
     const double scale = bps == 16 ? 32768.0 : 8388608.0;

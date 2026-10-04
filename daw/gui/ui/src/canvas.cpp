@@ -127,9 +127,9 @@ void Canvas::text(const Rect& box, std::string_view s, Font font, float size, Co
         // Shorten to fit, ending in an ellipsis (U+2026).
         const std::string ellipsis = "\xE2\x80\xA6";
         while (!shown.empty() && textWidth(shown + ellipsis, font, size) > box.w) {
-            shown.pop_back();
-            while (!shown.empty() && (static_cast<unsigned char>(shown.back()) & 0xC0) == 0x80)
-                shown.pop_back();  // keep UTF-8 sequences whole
+            std::size_t end = shown.size() - 1;
+            while (end > 0 && (static_cast<unsigned char>(shown[end]) & 0xC0) == 0x80) --end;
+            shown.resize(end);  // remove the whole UTF-8 character
         }
         shown += ellipsis;
     }

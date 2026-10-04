@@ -25,6 +25,7 @@ struct FakeJack {
     void (*xrun)() = fn<void (*)()>("fakejack_xrun");
     void (*stall)(int) = fn<void (*)(int)>("fakejack_stall");
     void (*failOpen)(int) = fn<void (*)(int)>("fakejack_fail_open");
+    void (*failCapture)(int) = fn<void (*)(int)>("fakejack_fail_capture");
     void (*setInput)(float) = fn<void (*)(float)>("fakejack_set_input");
     void (*shutdown)() = fn<void (*)()>("fakejack_shutdown");
     int (*open)() = fn<int (*)()>("fakejack_open");
@@ -40,6 +41,7 @@ struct FakeJack {
     void reset(std::uint32_t period = 1024) {
         stall(0);
         failOpen(0);
+        failCapture(0);
         setInput(0.0f);
         setRate(48000);
         setPeriod(period);

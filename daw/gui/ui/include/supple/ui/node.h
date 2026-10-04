@@ -85,10 +85,11 @@ class Node {
         return static_cast<T&>(add(std::make_unique<T>(std::forward<Args>(args)...)));
     }
     Node& add(std::unique_ptr<Node> child);
-    std::unique_ptr<Node> remove(Node* child);
+    // Removed nodes stay alive until the current input dispatch completes.
+    std::shared_ptr<Node> remove(Node* child);
     void clear();
     Node* parent() const { return parent_; }
-    const std::vector<std::unique_ptr<Node>>& children() const { return children_; }
+    const std::vector<std::shared_ptr<Node>>& children() const { return children_; }
     // Depth-first search by id (this node included).
     Node* find(std::string_view id);
     Root* root() const;
@@ -145,6 +146,7 @@ class Node {
     virtual void onHover(bool hovered) { (void)hovered; }
     bool hovered() const;
     bool focused() const;
+    bool visibleInTree() const;
 
     // For tests, the command log and (later) accessibility.
     virtual std::string valueText() const { return {}; }
@@ -160,7 +162,7 @@ class Node {
     Rect bounds_;
     Node* parent_ = nullptr;
     Root* root_ = nullptr;  // set on the tree's top node only
-    std::vector<std::unique_ptr<Node>> children_;
+    std::vector<std::shared_ptr<Node>> children_;
 };
 
 }  // namespace supple::ui

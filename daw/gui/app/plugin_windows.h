@@ -5,11 +5,13 @@
 // engine replaces or drops it, the window closes.
 #pragma once
 
+#include <poll.h>
 #include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -26,18 +28,26 @@ namespace supple::gui {
 // dispatched it (so a level-triggered fd cannot spin).
 class FdWatcher {
   public:
-    explicit FdWatcher(std::function<void()> wake);
+    using Pipe = std::function<int(int*)>;
+    using Poll = std::function<int(std::span<pollfd>)>;
+    static Result<std::unique_ptr<FdWatcher>> create(std::function<void()> wake, Pipe pipe = {},
+                                                     Poll poll = {});
     ~FdWatcher();
+    std::optional<Error> error();
     void watch(std::vector<std::pair<int, std::uint32_t>> fds);  // UI thread: the set to poll
     std::vector<std::pair<int, std::uint32_t>> takeReady();      // UI thread: (fd, CLAP flags)
 
   private:
+    explicit FdWatcher(std::function<void()> wake) : wake_(std::move(wake)) {}
     void run(std::stop_token stop);
+    void notify();
+    Poll poll_;
     std::function<void()> wake_;
     std::mutex mutex_;
     std::vector<std::pair<int, std::uint32_t>> fds_, ready_;
     int pipe_[2] = {-1, -1};  // wakes poll() when the set changes or on shutdown
     std::jthread thread_;
+    std::optional<Error> error_;
 };
 
 class PluginWindows {
@@ -59,6 +69,7 @@ class PluginWindows {
     void setOwner(const Window* owner) { owner_ = owner; }
     std::size_t count() const { return editors_.size(); }
     bool isOpen(model::Id fx) const;
+    std::function<void(const Error&)> onError;
 
     // Events addressed to editor windows; true when consumed.
     bool handle(const SDL_Event& e);
@@ -82,7 +93,9 @@ class PluginWindows {
     const Window* owner_ = nullptr;
     engine::EngineApp& app_;
     std::vector<Editor> editors_;
-    FdWatcher watcher_;
+    std::unique_ptr<FdWatcher> watcher_;
+    std::optional<Error> watcherError_;
+    bool watcherErrorReported_ = false;
 };
 
 }  // namespace supple::gui

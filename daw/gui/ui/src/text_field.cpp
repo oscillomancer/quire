@@ -164,7 +164,10 @@ std::size_t TextField::hit(float x) const {
 
 void TextField::changed() {
     invalidate();
-    if (onChange) onChange(text_);
+    if (auto callback = onChange) {
+        const std::string text = text_;
+        callback(text);
+    }
 }
 
 void TextField::insert(std::string_view s) {
@@ -245,11 +248,14 @@ bool TextField::onKey(const KeyEvent& e) {
             return true;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
-            if (onSubmit) onSubmit(text_);
+            if (auto callback = onSubmit) {
+                const std::string text = text_;
+                callback(text);
+            }
             return true;
         case SDLK_ESCAPE:
-            if (onCancel) {
-                onCancel();
+            if (auto callback = onCancel) {
+                callback();
                 return true;
             }
             return false;
@@ -283,7 +289,8 @@ bool TextField::onKey(const KeyEvent& e) {
                 break;
         }
     }
-    return onOtherKey ? onOtherKey(e) : false;
+    auto callback = onOtherKey;
+    return callback ? callback(e) : false;
 }
 
 bool TextField::onText(std::string_view text) {

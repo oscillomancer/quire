@@ -75,6 +75,9 @@ struct SmfReadOptions {
 };
 Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info = nullptr,
                          const SmfReadOptions& options = {});
+// Encoded files are limited to 16 MiB (including headers and padding meta
+// events for long deltas). Larger output returns midi.smf_too_large.
+inline constexpr std::size_t kMaxSmfBytes = 16 * 1024 * 1024;
 Result<std::vector<std::uint8_t>> writeSmf(
     const Sequence& sequence, const std::vector<std::pair<std::int64_t, Meter>>& meters,
     const std::vector<std::pair<std::int64_t, double>>& tempos);

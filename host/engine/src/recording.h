@@ -26,12 +26,14 @@ class FrameRing {
     // Copies `frames` of the selected input channels (missing ones: silence);
     // returns how many fitted.
     std::size_t write(const float* const* in, std::uint32_t inChannels, std::span<const int> select,
-                      std::uint32_t frames) SUPPLE_RT;
-    std::size_t read(float* out, std::size_t maxFrames);  // interleaved
+                      std::uint32_t frames, std::int64_t firstFrame = 0) SUPPLE_RT;
+    // With firstFrame, read only one contiguous file-time run.
+    std::size_t read(float* out, std::size_t maxFrames, std::int64_t* firstFrame = nullptr);
     std::uint32_t channels() const { return channels_; }
 
   private:
     std::vector<float> buf_;
+    std::vector<std::int64_t> positions_;
     std::size_t capacity_ = 0;  // frames
     std::uint32_t channels_ = 0;
     alignas(64) std::atomic<std::size_t> write_{0};
@@ -75,11 +77,15 @@ class Recorder {
     std::vector<RecordedTake> finish(LoopRange loop = {});
 
   private:
+    friend struct RecorderTestAccess;
     struct Track {
         RecordTarget target;
         FrameRing ring;
         audio::WavStreamWriter writer;
         std::atomic<std::uint64_t> overflow{0};
+        Status writeError = okStatus();  // writer thread, then finish after join
+        Status sidecarError = okStatus();
+        Status firstError = okStatus();
     };
     // MIDI: events stamped with the captured-frame position they arrived at
     // (placed on the timeline by finish(), knowing the runs).
@@ -98,7 +104,10 @@ class Recorder {
     };
     void writerLoop();
     void drain(Track& t, std::vector<float>& scratch);
+    void padTo(Track& t, std::int64_t frame);
     void writeSidecars();
+    void updateHeaders();
+    static void rememberError(Track& track, Status status, bool sidecar = false);
 
     std::vector<std::unique_ptr<Track>> tracks_;
     std::vector<std::unique_ptr<MidiTrack>> midiTracks_;
@@ -110,14 +119,14 @@ class Recorder {
     // frames captured so far, and the runs after the first (preallocated;
     // read by finish() after capture has stopped).
     std::int64_t expected_ = 0, captured_ = 0;
+    bool runsFull_ = false;
     static constexpr std::size_t kMaxSegments = 4096;
     std::array<RecordedSegment, kMaxSegments> segments_{};
     std::atomic<std::size_t> segmentCount_{0};
     std::atomic<bool> stop_{false};
+    std::atomic<bool> writerStalled_{false}, writerStallAck_{false};  // test access
     std::thread writer_;
-    bool sidecars_ = false;           // writer thread
-    Status writeError_ = okStatus();  // writer thread; read after join
-    Status sidecarError_ = okStatus();
+    bool sidecars_ = false;  // writer thread
 };
 
 }  // namespace supple::engine::detail

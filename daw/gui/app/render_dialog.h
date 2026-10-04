@@ -65,6 +65,7 @@ class RenderDialog {
     // The project's render defaults, as the placeholder for an empty field.
     std::string defaultFor(std::string_view key) const;
     json::Value args(bool forJob) const;
+    Status validateFields() const;
     // Format, bit depth and the second file, shared by args() and the queue.
     void outputArgs(json::Value& a) const;
     void refreshQueueButton();

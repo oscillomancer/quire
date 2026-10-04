@@ -1,9 +1,11 @@
 #include <doctest/doctest.h>
 #include <supple/base/rng.h>
 #include <supple/time/timeline.h>
+#include <limits>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 using namespace supple;
 using namespace supple::time;
@@ -166,4 +168,38 @@ TEST_CASE("samples round half to even") {
     CHECK(samplesAt(1.25, 2.0) == 2);  // 2.5
     CHECK(samplesAt(-0.75, 2.0) == -2);
     CHECK(samplesAt(1.0, 48000.0) == 48000);
+}
+
+TEST_CASE("pickup positions do not overflow integer subtraction") {
+    const auto map = TimeMap::constant(120);
+    constexpr int first = std::numeric_limits<int>::min();
+    CHECK(map.beatOfBar(first) == (static_cast<double>(first) - 1) * 4);
+    CHECK(map.beatOf({1, first}) == static_cast<double>(first) - 1);
+}
+
+TEST_CASE("sample and bar conversion saturates at representable boundaries") {
+    using Limit = std::numeric_limits<std::int64_t>;
+    const double inf = std::numeric_limits<double>::infinity();
+    CHECK(samplesAt(inf, 48000) == Limit::max());
+    CHECK(samplesAt(-inf, 48000) == Limit::min());
+    CHECK(samplesAt(1e300, 1e300) == Limit::max());
+    CHECK(samplesAt(std::numeric_limits<double>::quiet_NaN(), 48000) == 0);
+    CHECK(samplesAt(static_cast<double>(Limit::max()), 1) == Limit::max());
+    CHECK(samplesAt(static_cast<double>(Limit::min()), 1) == Limit::min());
+    const auto map = TimeMap::constant(120, 7, 8);
+    for (double b : {inf, 1e300}) {
+        const auto p = map.barBeat(b);
+        CHECK(p.bar == std::numeric_limits<int>::max());
+        CHECK(p.beat == 7);
+        CHECK(p.fraction >= 0);
+        CHECK(p.fraction < 1);
+    }
+    for (double b : {-inf, -1e300, map.beatOfBar(std::numeric_limits<int>::min())}) {
+        const auto p = map.barBeat(b);
+        CHECK(p.bar == std::numeric_limits<int>::min());
+        CHECK(p.beat == 1);
+    }
+    CHECK(map.barBeat(std::numeric_limits<double>::quiet_NaN()).bar == 1);
+    CHECK(map.barBeat(map.beatOfBar(std::numeric_limits<int>::max())).bar ==
+          std::numeric_limits<int>::max());
 }

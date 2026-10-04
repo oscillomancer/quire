@@ -408,7 +408,10 @@ meter map (sandbox), they define the bar lengths. In the DAW, meter changes
 belong to the project (`timesig.*` commands); the host's `meterAt` maps
 local bars to project bars through the item's placement (bar 1 of the
 notation sits on the project bar the command names), and every `meter` line
-must agree with it (`notation.meter_mismatch`).
+must agree with it (`notation.meter_mismatch`). GUI live compile and decompile
+use the same project context: local bar 1 maps to the project bar containing
+the item's start, and later local bars follow later project meter changes.
+The command-side compiler and `midi.get` must supply that identical context.
 
 ```
 meter 4/4
@@ -477,6 +480,8 @@ the last event), `duplicate_voice`, `duplicate_pitch`.
 `decompile` must satisfy the **round-trip law**: for any `Sequence s`
 (canonicalized), `compile(decompile(s)).sequence == s`, with the same ppq
 and meter map. It also must be deterministic (same input → same bytes).
+Bar starts use a cached prefix timeline; event grouping and voice assignment
+use indexes while preserving the canonical ordering and existing output.
 Canonical output, in order:
 
 1. `notation 1`, `ppq N` (always), `meter N/D` (standalone only: the first

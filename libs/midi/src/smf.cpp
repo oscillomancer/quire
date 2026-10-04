@@ -280,6 +280,10 @@ Result<std::vector<std::uint8_t>> writeSmf(
     auto invalid = [](std::string what, std::string hint) -> Error {
         return {"midi.smf_invalid", std::move(what), {}, std::move(hint)};
     };
+    auto tooLarge = []() -> Error {
+        return {"midi.smf_too_large", "encoded MIDI file exceeds the 16 MiB budget", "/length",
+                "shorten the sequence or split it into smaller files"};
+    };
     if (source.ppq < 1 || source.ppq > 32767 || source.length < 0)
         return invalid("Invalid PPQ or item length.", "Use PPQ 1..32767 and a nonnegative length.");
     std::int64_t lastEvent = 0;
@@ -300,6 +304,7 @@ Result<std::vector<std::uint8_t>> writeSmf(
         lastEvent = std::max(lastEvent, c.tick);
     }
     for (const auto& sx : source.sysex) {
+        if (sx.bytes.size() > kMaxSmfBytes - 26) return tooLarge();
         if (sx.tick < 0 || sx.bytes.size() < 2 || sx.bytes.front() != 0xf0 ||
             sx.bytes.back() != 0xf7)
             return invalid("Invalid sysex.",
@@ -383,7 +388,30 @@ Result<std::vector<std::uint8_t>> writeSmf(
     std::stable_sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
         return std::tie(a.tick, a.order) < std::tie(b.tick, b.order);
     });
+    // Account for long-delta padding without emitting it: an int64 length
+    // can otherwise require billions of empty meta events.
+    const auto deltaBytes = [](std::int64_t delta) -> std::uint64_t {
+        constexpr std::int64_t maxDelta = 0x0fffffff;
+        const auto chunks = delta > 0 ? (delta - 1) / maxDelta : 0;
+        auto residual = static_cast<std::uint32_t>(delta - chunks * maxDelta);
+        std::uint64_t size = static_cast<std::uint64_t>(chunks) * 7 + 1;
+        while (residual >= 128) {
+            ++size;
+            residual >>= 7;
+        }
+        return size;
+    };
+    std::uint64_t encodedSize = 22;
+    std::int64_t budgetPrevious = 0;
+    for (const auto& e : events) {
+        encodedSize += deltaBytes(e.tick - budgetPrevious) + e.data.size();
+        if (encodedSize > kMaxSmfBytes) return tooLarge();
+        budgetPrevious = e.tick;
+    }
+    encodedSize += deltaBytes(std::max(budgetPrevious, sequence.length) - budgetPrevious) + 3;
+    if (encodedSize > kMaxSmfBytes) return tooLarge();
     Bytes track;
+    track.reserve(static_cast<std::size_t>(encodedSize - 22));
     std::int64_t previous = 0;
     for (const auto& e : events) {
         emitDelta(track, e.tick - previous);

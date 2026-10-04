@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace supple::time {
@@ -163,16 +164,25 @@ double TimeMap::barLength(int bar) const { return meterSegs_[meterSegAtBar(bar)]
 
 double TimeMap::beatOfBar(int bar) const {
     const MeterSeg& s = meterSegs_[meterSegAtBar(bar)];
-    return s.beat + (bar - s.bar) * s.barQuarters;  // bars before 1 extend the first meter
+    return s.beat + (static_cast<double>(bar) - s.bar) *
+                        s.barQuarters;  // bars before 1 extend the first meter
 }
 
 BarBeat TimeMap::barBeat(double beat) const {
+    constexpr int lo = std::numeric_limits<int>::min(), hi = std::numeric_limits<int>::max();
+    if (std::isnan(beat)) beat = 0;
+    if (beat <= beatOfBar(lo)) return {lo, 1, 0, 0};
+    const auto last = meterAt(hi);
+    const double lastLength = barLength(hi);
+    if (beat >= beatOfBar(hi) + lastLength - kSnap)
+        return {hi, last.numerator, std::nextafter(1.0, 0.0), std::nextafter(lastLength, 0.0)};
     const MeterSeg& s = meterSegs_[beat < 0.0 ? 0 : meterSegAtBeat(beat)];
     const double L = s.barQuarters;
     const double k = std::floor((beat - s.beat) / L);
-    int bar = s.bar + static_cast<int>(k);
+    int bar =
+        static_cast<int>(std::clamp(s.bar + k, static_cast<double>(lo), static_cast<double>(hi)));
     double inBar = beat - (s.beat + k * L);
-    if (inBar > L - kSnap) {  // a hair before the next bar line is on it
+    if (inBar > L - kSnap && bar < hi) {  // a hair before the next bar line is on it
         ++bar;
         inBar = 0.0;
         if (beat >= 0.0 && meterSegAtBar(bar) != meterSegAtBar(bar - 1)) {
@@ -194,11 +204,18 @@ BarBeat TimeMap::barBeat(double beat) const {
 
 double TimeMap::beatOf(const BarBeat& p) const {
     const MeterSeg& s = meterSegs_[meterSegAtBar(p.bar)];
-    return beatOfBar(p.bar) + ((p.beat - 1) + p.fraction) * 4.0 / s.denominator;
+    return beatOfBar(p.bar) +
+           ((static_cast<double>(p.beat) - 1) + p.fraction) * 4.0 / s.denominator;
 }
 
 std::int64_t samplesAt(double seconds, double rate) {
-    return static_cast<std::int64_t>(std::nearbyint(seconds * rate));  // default mode: half to even
+    const double samples = std::nearbyint(seconds * rate);  // default mode: half to even
+    if (std::isnan(samples)) return 0;
+    if (samples >= static_cast<double>(std::numeric_limits<std::int64_t>::max()))
+        return std::numeric_limits<std::int64_t>::max();
+    if (samples <= static_cast<double>(std::numeric_limits<std::int64_t>::min()))
+        return std::numeric_limits<std::int64_t>::min();
+    return static_cast<std::int64_t>(samples);
 }
 
 }  // namespace supple::time

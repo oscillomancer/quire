@@ -15,6 +15,7 @@ extern "C" {  // compiled as C in nanovg_gl3.c; the header has no guards of its 
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace supple::ui {
 
@@ -38,9 +39,11 @@ int buttonFrom(Uint8 b) {
 }
 
 // Pointer events bubble from the target to its ancestors until handled.
-bool deliver(Node* target, const PointerEvent& e) {
-    for (Node* n = target; n; n = n->parent())
+bool deliver(Root& root, Node* target, const PointerEvent& e) {
+    for (Node* n = target; n && n->root() == &root;) {
         if (n->enabled && n->onPointer(e)) return true;
+        n = n->root() == &root ? n->parent() : nullptr;
+    }
     return false;
 }
 
@@ -55,20 +58,65 @@ Root::Root(gui::Window& window, const gui::Fonts& fonts, Theme theme)
     : window_(window),
       fonts_(fonts),
       theme_(std::move(theme)),
-      overlay_(std::make_unique<Node>("overlay")) {
+      overlay_(std::make_unique<Node>("overlay")),
+      alive_(std::make_shared<Root*>(this)) {
     overlay_->attach(this);
 }
 
 Root::~Root() {
+    *alive_ = nullptr;
     if (cache_ && cache_->fb) nvgluDeleteFramebuffer(cache_->fb);
 }
 
 void Root::setContent(std::unique_ptr<Node> content) {
     focused_ = hovered_ = captured_ = nullptr;
+    if (content_) {
+        content_->attach(nullptr);
+        retire(std::move(content_));
+    }
     content_ = std::move(content);
     if (content_) content_->attach(this);
     relayout();
     damageAll();
+}
+
+void Root::retire(std::shared_ptr<Node> node) {
+    if (dispatchDepth_ && node) retired_.push_back(std::move(node));
+}
+
+bool Root::attached(const Node* node) const { return node && node->root() == this; }
+
+void Root::capture(Node* node) { captured_ = attached(node) ? node : nullptr; }
+
+Root::OverlayHandle::OverlayHandle(OverlayHandle&& other) noexcept
+    : root_(std::move(other.root_)), node_(std::exchange(other.node_, nullptr)) {}
+
+Root::OverlayHandle& Root::OverlayHandle::operator=(OverlayHandle&& other) noexcept {
+    if (this != &other) {
+        reset();
+        root_ = std::move(other.root_);
+        node_ = std::exchange(other.node_, nullptr);
+    }
+    return *this;
+}
+
+void Root::OverlayHandle::reset() {
+    if (auto owner = root_.lock(); owner && *owner && node_)
+        (void)(*owner)->overlay().remove(node_);
+    node_ = nullptr;
+    root_.reset();
+}
+
+Root::OverlayHandle Root::addOverlay(std::unique_ptr<Node> node) {
+    Node* added = &overlay_->add(std::move(node));
+    return OverlayHandle(alive_, added);
+}
+
+Node* Root::pointerTarget(Point point) {
+    if (layoutPending_) layoutNow(Canvas(window_.vg(), fonts_, theme_));
+    if (attached(captured_)) return captured_;
+    if (Node* target = overlay_->hitTest(point)) return target;
+    return content_ ? content_->hitTest(point) : nullptr;
 }
 
 Node* Root::find(std::string_view id) const {
@@ -230,21 +278,24 @@ void Root::frame(bool present) {
 }
 
 void Root::focus(Node* node) {
+    Dispatch dispatch(*this);
+    if (!attached(node)) node = nullptr;
     if (node == focused_) return;
     Node* old = focused_;
     focused_ = node;
     if (old) {
-        old->onFocus(false);
         old->invalidate();
+        old->onFocus(false);
     }
-    if (node) {
-        node->onFocus(true);
+    if (focused_ == node && attached(node)) {
         node->invalidate();
+        node->onFocus(true);
     }
-    const bool wantsText = node && node->role() == Role::TextField;
+    if (!attached(focused_)) focused_ = nullptr;
+    const bool wantsText = focused_ && focused_->role() == Role::TextField;
     if (wantsText)
         SDL_StartTextInput(window_.sdl());
-    else if (old && old->role() == Role::TextField)
+    else
         SDL_StopTextInput(window_.sdl());
 }
 
@@ -255,6 +306,7 @@ void Root::forget(Node* node) {
 }
 
 void Root::pointer(PointerEvent e) {
+    Dispatch dispatch(*this);
     // A press outside every popup closes them and goes no further.
     if (e.type == PointerEvent::Type::Down && !popups_.empty() && !captured_) {
         const bool inside = std::any_of(popups_.begin(), popups_.end(),
@@ -264,29 +316,33 @@ void Root::pointer(PointerEvent e) {
             return;
         }
     }
-    Node* target = captured_;
-    if (!target) {
-        target = overlay_->hitTest(e.pos);
-        if (!target && content_) target = content_->hitTest(e.pos);
-    }
+    Node* target = pointerTarget(e.pos);
     if (e.type == PointerEvent::Type::Move && !captured_ && target != hovered_) {
         if (hovered_) {
-            hovered_->onHover(false);
-            hovered_->invalidate();
+            Node* old = std::exchange(hovered_, nullptr);
+            old->invalidate();
+            old->onHover(false);
         }
-        hovered_ = target;
+        hovered_ = target = pointerTarget(e.pos);
         if (hovered_) {
-            hovered_->onHover(true);
             hovered_->invalidate();
+            hovered_->onHover(true);
         }
+        target = pointerTarget(e.pos);
+        if (hovered_ != target) hovered_ = nullptr;
     }
     if (e.type == PointerEvent::Type::Down) {
-        Node* f = target;
-        while (f && !f->focusable) f = f->parent();
-        focus(f);
+        for (unsigned retry = 0; retry < 16; ++retry) {
+            Node* f = target;
+            while (f && !f->focusable) f = f->parent();
+            if (f == focused_) break;
+            focus(f);
+            target = pointerTarget(e.pos);
+            if (retry == 15) return;  // callbacks continually replace their targets
+        }
         captured_ = target;  // implicit capture for drags
     }
-    if (target) deliver(target, e);
+    if (target) deliver(*this, target, e);
     if (e.type == PointerEvent::Type::Up) captured_ = nullptr;
 }
 
@@ -301,14 +357,15 @@ bool Root::click(std::string_view id, int button) {
 }
 
 void Root::key(int keycode, unsigned mods) {
+    Dispatch dispatch(*this);
     const KeyEvent e{keycode, mods, false};
-    for (Node* n = focused_; n; n = n->parent())
+    for (Node* n = focused_; attached(n); n = attached(n) ? n->parent() : nullptr)
         if (n->enabled && n->onKey(e)) return;
     if (keycode == SDLK_ESCAPE && !popups_.empty()) {
         closePopup();
         return;
     }
-    if (popups_.empty() && onUnhandledKey && onUnhandledKey(e)) return;
+    if (auto callback = onUnhandledKey; popups_.empty() && callback && callback(e)) return;
     if (keycode == SDLK_TAB) {  // focus traversal
         std::vector<Node*> order;
         collectFocusable(*overlay_, order);
@@ -323,10 +380,12 @@ void Root::key(int keycode, unsigned mods) {
 }
 
 void Root::text(std::string_view utf8) {
+    Dispatch dispatch(*this);
     if (focused_ && focused_->enabled) focused_->onText(utf8);
 }
 
 void Root::composition(std::string_view utf8, int cursor) {
+    Dispatch dispatch(*this);
     if (focused_ && focused_->enabled) focused_->onComposition(utf8, cursor);
 }
 
@@ -372,13 +431,15 @@ void Root::handle(const SDL_Event& e) {
             pointer(p);
             break;
         }
-        case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE: {
+            Dispatch dispatch(*this);
             if (hovered_) {
-                hovered_->onHover(false);
-                hovered_->invalidate();
-                hovered_ = nullptr;
+                Node* old = std::exchange(hovered_, nullptr);
+                old->invalidate();
+                old->onHover(false);
             }
             break;
+        }
         case SDL_EVENT_KEY_DOWN:
             key(static_cast<int>(e.key.key), modsFrom(e.key.mod));
             break;

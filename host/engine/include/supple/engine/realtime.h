@@ -83,7 +83,8 @@ struct RecordedTake {
         std::int64_t start = 0, end = 0;
     } loop;
     std::uint64_t overflowFrames = 0;  // input lost because the disk fell behind
-    std::string error;                 // a failed disk write (what came after it is lost), if any
+    std::string error;                 // first file/sidecar error of this target, if any
+    std::vector<Error> warnings;       // e.g. recording.loop_runs_full; retained passes are usable
     double sampleRate = 0;             // of the file and of startSample (the engine's rate)
     // MIDI (ADR-0016): no file; `frames` is the length recorded, `segments`
     // the runs, the events in time order.

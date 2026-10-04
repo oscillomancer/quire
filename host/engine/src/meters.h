@@ -37,6 +37,7 @@ namespace supple::engine {
 // block.
 struct MeterEntry {
     std::uint64_t epoch = 0;
+    std::uint64_t generation = 0;  // the slot's allocation identity, copied from the plan
     std::int64_t stream = 0;
     std::uint32_t frames = 0;
     std::uint16_t slot = 0xffff;
@@ -76,6 +77,9 @@ class MeterBank {
     // slots of tracks the plan no longer has are released and reused.
     void beginPlan();
     std::uint16_t slotFor(model::Id track);
+    std::uint64_t generationFor(std::uint16_t slot) const {
+        return slot < kSlots ? slots_[slot].generation : 0;
+    }
     void endPlan();
 
     // --- main thread: reading -----------------------------------------------------
@@ -104,6 +108,7 @@ class MeterBank {
     struct Slot {
         model::Id track;
         bool used = false;  // in the plan being compiled (beginPlan/endPlan)
+        std::uint64_t generation = 0;
     };
     std::array<Slot, kSlots> slots_{};
     std::map<model::Id, std::uint16_t> byTrack_;  // assigned tracks -> slot
@@ -111,6 +116,7 @@ class MeterBank {
     // Released slots wait two plans before they are handed out again: the plan
     // that dropped a track is still playing while the next one is compiled, and
     // the one before it may still push an entry for the slot during a crossfade.
+    // Generations also protect reuse when several loads arrive before adoption.
     std::vector<std::uint16_t> retiredPrev_, retired_;
     std::vector<std::vector<MeterEntry>> pending_;  // per slot
 };

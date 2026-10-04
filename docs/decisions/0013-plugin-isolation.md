@@ -123,4 +123,8 @@ syscalls per block for the data, not just the wake-up).
   `Create` replies whether the plug-in has an embeddable editor. Both apps find
   `<slug>-bridge` beside themselves or in the build tree
   (`locateBridgeExecutable`).
-- Not yet: the pipelined mode, B6 overhead benchmark.
+- Current live limit: the synchronous bridge is never processed or given
+  lifecycle calls from the device callback. Bridged stages on live nodes pass
+  through with their compensated delay, and the plan warns with the FX id and
+  `isolation: in_process` for monitoring. Offline and rendered-ahead processing
+  remain synchronous. Not yet: pipelined live bridging, B6 overhead benchmark.

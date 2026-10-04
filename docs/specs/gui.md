@@ -85,7 +85,10 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   field). Text input through SDL3 text-input events (IME composition shown
   inline).
 - **Damage.** Each window keeps a dirty-rect list; nodes invalidate
-  themselves; a frame redraws only damaged regions (scissored). Animated
+  themselves; a frame redraws only damaged regions (scissored). Removed nodes
+  survive the current input dispatch; focus, hover and capture are resolved
+  again after callbacks. Views own overlay registrations and release them
+  when destroyed. Animated
   nodes (meters, playhead) are separate *layers* with their own small dirty
   rects so a running transport does not repaint the arrange view.
 - **Rendering.** Per window one GL 3.3 core context.
@@ -177,7 +180,10 @@ Ruler (bars/beats and time; tempo and meter lanes; markers and regions),
 virtualized track rows (only visible rows exist), items with waveforms or
 MIDI, take lanes, fades and crossfades, automation lanes (volume/pan/mute
 on strips; plugin parameters), time selection, snapping grid, playhead with
-follow modes.
+follow modes. On every version change, deleted track and item IDs are
+pruned from transient selection; undo restores objects, not old selection.
+MIDI editor selection clears on external version changes, and a gesture
+cannot commit against a version newer than the one where it started.
 
 Gestures (P0, `reaper-ux.md` 8–13): drop files onto tracks/timeline, move,
 trim edges, split (S), duplicate, slip (Alt-drag), stretch (with the rate
@@ -185,9 +191,18 @@ and pitch-preservation mode visible), fade/crossfade handles, take switch.
 Each gesture previews locally (a ghost) and commits **one** command or batch
 on release, so a drag is one undo step and never floods versions;
 continuous controls (faders) send coalesced `*.set` edits during the drag
-and one final value (the bus's gesture coalescing). Zoom anchors at the
-pointer; horizontal zoom is continuous; vertical track height per track and
-global.
+and one final value (the bus's gesture coalescing). A pooled TCP row pins
+the original track for fader, pan, resize and rename gestures; rebinding
+cancels the gesture. Wheel and pointer gesture zoom anchor at the pointer;
+keyboard zoom anchors at the playhead. Horizontal zoom is continuous;
+vertical track height per track and global.
+Left trim shifts every take's source offset by the trimmed duration times
+its play rate, in the same transaction. Clipboard track offsets are in
+channel order; pasting skips envelope rows and reports items dropped for
+lack of a target channel. MIDI thumbnails map offset, rate and loop passes
+as playback does. Fade shapes and curve bends share playback's evaluator.
+Automation drawing samples only visible time and bounds loop glyph work;
+plugin automation interpolates in the playback parameter domain (ADR-0010).
 Commands: `item.*`, `take.*`, `fade.*` (as named in session-model §7),
 `envelope.*`, `marker.*`, `region.*`, `tempo.*`, `transport.*`.
 
@@ -197,7 +212,8 @@ Strips in track order grouped by type: channels, busses, masters (several
 masters are allowed, ADR-0019), each with the type's visual language; FX
 slots, sends (level/pan/tap, with "follow" pan shown), input/arm/monitor on
 channels, fader + pan + meters, Console 9 on/off as a project toggle with its
-level-matched behaviour explained in its tooltip.
+level-matched behaviour explained in its tooltip. Meters update only when
+their entire ancestor chain is visible, and clear peak hold on reopening.
 
 ### 4.5 FX chain and plugins
 
@@ -210,7 +226,10 @@ geometry). For plugins without a GUI — and always as a second tab — a
 **semantic parameter panel** generated from the plugin's semantic schema
 (units, ranges, enums, groups): the same description an agent reads, so the
 human and the agent see the same names and units. Stock plugin editors are
-the template's Pugl editors.
+the template's Pugl editors. Latency badges refresh after effect model edits,
+host replacement and live latency changes. File-descriptor service startup
+and poll failures are reported; editors requiring unavailable FD service
+cannot remain open.
 Commands: `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix
@@ -221,6 +240,8 @@ outputs); a cell creates/edits a route (tap, channels, level, pan/follow,
 mute, invert, mono); cells that `route.strip_type` would reject are drawn
 disabled with the rule as their tooltip; record-input assignments appear in
 the same grid. A graph view (nodes and edges, PDC per node) is P1.
+Matrix updates clamp scroll to the current endpoint range; paint uses
+endpoint-pair indexes for send and cycle rules.
 Commands: `route.*`, `track.set {record_input}`.
 
 ### 4.7 MIDI editor
@@ -233,6 +254,9 @@ either side update the other through `item.*` commands. This is the
 LLM-native differentiator: the same text an agent writes is visible and
 editable by the human. Event list view is P1.
 
+Native file-dialog completions check owner lifetime before posting and again
+on the UI thread; outstanding dialogs may safely outlive shutdown.
+
 ### 4.8 Render dialog
 
 A front end to `render.*` (P4.15): sources (master, stems, selected
@@ -240,7 +264,9 @@ items/regions, region matrix), bounds, tail, output pattern (the typed
 variables of the render schema) with a **live dry-run preview** of the
 resolved files, formats (primary + secondary), normalization/limiting,
 add-to-project, queue. Every option maps to a schema field; nothing is
-GUI-only.
+GUI-only. A nonempty invalid numeric field blocks preview, queue insertion
+and rendering with a field diagnostic. Cancelled jobs remain labelled
+cancelled and retain any partial result files returned by the engine.
 
 ### 4.9 Recording
 

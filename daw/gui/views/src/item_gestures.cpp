@@ -297,13 +297,12 @@ class Ghost : public ui::Node {
 ItemGestures::ItemGestures(ArrangeView& view)
     : view_(view), alive_(std::make_shared<ItemGestures*>(this)) {}
 
-// The ghost stays on the overlay (the root may already have destroyed it, so
-// it is not touched here); it paints nothing once this is gone.
+// The registration releases the ghost; its token also covers deferred deletion.
 ItemGestures::~ItemGestures() { *alive_ = nullptr; }
 
 void ItemGestures::installOverlay(ui::Root& root) {
     root_ = &root;
-    root.overlay().add(std::make_unique<Ghost>(alive_));
+    if (!overlay_) overlay_ = root.addOverlay(std::make_unique<Ghost>(alive_));
 }
 
 void ItemGestures::setSelection(std::vector<model::Id> items) {
@@ -349,11 +348,23 @@ ItemGestures::Clip ItemGestures::clip() const {
     Clip c;
     const model::Session& s = view_.session();
     c.version = s.version;
-    for (model::Id id : selection_) {
-        const model::Item* it = itemOf(s, id);
-        const auto row = it ? view_.trackLayout().indexOf(it->track) : std::nullopt;
-        if (!row) continue;
-        c.items.push_back({id, startBeat(s, *it), startBeat(s, *it) + lengthBeats(s, *it), *row});
+    std::vector<model::Id> channels;
+    for (const auto& row : view_.trackLayout().rows())
+        if (!row.env && row.type == model::StripType::Channel) channels.push_back(row.track);
+    std::ptrdiff_t first = static_cast<std::ptrdiff_t>(channels.size());
+    for (auto id : selection_) {
+        const auto* item = itemOf(s, id);
+        if (!item) continue;
+        const auto found = std::find(channels.begin(), channels.end(), item->track);
+        if (found == channels.end()) continue;
+        const auto index = found - channels.begin();
+        first = std::min(first, index);
+        c.items.push_back({id, startBeat(s, *item), startBeat(s, *item) + lengthBeats(s, *item),
+                           item->track, index});
+    }
+    if (!c.items.empty()) {
+        c.anchorTrack = channels[static_cast<std::size_t>(first)];
+        for (auto& item : c.items) item.channelOffset -= first;
     }
     return c;
 }
@@ -381,9 +392,7 @@ Status ItemGestures::cutSelection() {
 }
 
 Status ItemGestures::paste(double atBeat, std::optional<model::Id> track) {
-    std::optional<std::size_t> row;
-    if (track) row = view_.trackLayout().indexOf(*track);
-    return pasteClip(clipboard_, atBeat, row,
+    return pasteClip(clipboard_, atBeat, track,
                      clipboard_.items.size() == 1 ? "Paste item" : "Paste items");
 }
 
@@ -396,37 +405,37 @@ Status ItemGestures::duplicateSelection() {
                      c.items.size() == 1 ? "Duplicate item" : "Duplicate items");
 }
 
-Status ItemGestures::pasteClip(const Clip& c, double atBeat, std::optional<std::size_t> row,
+Status ItemGestures::pasteClip(const Clip& c, double atBeat, std::optional<model::Id> track,
                                const std::string& label) {
     if (c.items.empty() || !run) return {};
-    const auto& rows = view_.trackLayout().rows();
+    std::vector<model::Id> channels;
+    for (const auto& row : view_.trackLayout().rows())
+        if (!row.env && row.type == model::StripType::Channel) channels.push_back(row.track);
+    const auto anchor = std::find(channels.begin(), channels.end(),
+                                  track.value_or(c.anchorTrack.value_or(model::Id{})));
     double start = 1e300;
-    std::size_t top = rows.size();
-    for (const auto& e : c.items) {
-        start = std::min(start, e.position);
-        top = std::min(top, e.row);
-    }
-    const std::ptrdiff_t shift =
-        row ? static_cast<std::ptrdiff_t>(*row) - static_cast<std::ptrdiff_t>(top) : 0;
+    for (const auto& entry : c.items) start = std::min(start, entry.position);
     json::Value placements = json::Value::array();
+    std::size_t dropped = 0;
     for (const auto& e : c.items) {
-        // The row the item lands on; a row that is not a channel (or past the
-        // end) keeps the item on its own row.
-        std::size_t target = e.row;
-        const std::ptrdiff_t moved = static_cast<std::ptrdiff_t>(e.row) + shift;
-        if (moved >= 0 && static_cast<std::size_t>(moved) < rows.size() &&
-            !rows[static_cast<std::size_t>(moved)].env &&
-            rows[static_cast<std::size_t>(moved)].type == model::StripType::Channel)
-            target = static_cast<std::size_t>(moved);
-        if (target >= rows.size()) continue;
+        const auto target = (anchor - channels.begin()) + e.channelOffset;
+        if (anchor == channels.end() || target < 0 ||
+            static_cast<std::size_t>(target) >= channels.size()) {
+            ++dropped;
+            continue;
+        }
         json::Value p = json::Value::object();
         p["item"] = e.item.str();
-        p["track"] = rows[target].track.str();
+        p["track"] = channels[static_cast<std::size_t>(target)].str();
         p["position"] = std::max(0.0, atBeat + (e.position - start));
         placements.push_back(std::move(p));
     }
     json::Value args = json::Value::object();
     args["version"] = static_cast<std::int64_t>(c.version);
+    if (placements.asArray().empty())
+        return Error("gui.clipboard.targets",
+                     "paste dropped " + std::to_string(dropped) + " items: no target channel", {},
+                     "select a target channel with enough following channels");
     args["items"] = std::move(placements);
     auto r = run(label, {{"item.paste", std::move(args)}});
     if (!r) return std::move(r).error();
@@ -435,6 +444,9 @@ Status ItemGestures::pasteClip(const Clip& c, double atBeat, std::optional<std::
         for (const json::Value& id : made->asArray())
             if (auto parsed = model::Id::parse(id.asString())) selection_.push_back(*parsed);
     changed();
+    if (dropped && onError)
+        onError(Error("gui.clipboard.targets", "paste dropped " + std::to_string(dropped) +
+                                                   " items without a target channel"));
     return {};
 }
 
@@ -635,15 +647,17 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         switch (state_.drag) {
             case Drag::Move: {
                 if (!anchor) break;
+                std::vector<model::Id> items = selection_;
+                if (!isSelected(state_.anchor)) items.push_back(state_.anchor);
                 double d = snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor);
-                for (model::Id id : selection_)  // nothing before the start
+                for (model::Id id : items)  // nothing before the start
                     if (const model::Item* it = itemOf(s, id)) d = std::max(d, -startBeat(s, *it));
                 state_.deltaBeats = d;
                 // Rows: every selected item must land on a channel.
                 const int dr = static_cast<int>(rowAt(e.pos.y).value_or(pressRow_)) -
                                static_cast<int>(pressRow_);
                 bool ok = true;
-                for (model::Id id : selection_) {
+                for (model::Id id : items) {
                     const model::Item* it = itemOf(s, id);
                     const auto row = it ? view_.trackLayout().indexOf(it->track) : std::nullopt;
                     const auto target = row ? static_cast<std::ptrdiff_t>(*row) + dr : -1;
@@ -984,9 +998,13 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 if (state_.deltaRows != 0) {
                     const auto row = view_.trackLayout().indexOf(it->track);
                     if (!row) continue;
-                    track = view_.trackLayout()
-                                .rows()[*row + static_cast<std::size_t>(state_.deltaRows)]
-                                .track;
+                    const auto target = static_cast<std::ptrdiff_t>(*row) + state_.deltaRows;
+                    const auto& rows = view_.trackLayout().rows();
+                    if (target < 0 || static_cast<std::size_t>(target) >= rows.size() ||
+                        rows[static_cast<std::size_t>(target)].env ||
+                        rows[static_cast<std::size_t>(target)].type != model::StripType::Channel)
+                        return;
+                    track = rows[static_cast<std::size_t>(target)].track;
                 }
                 if (copy_) {
                     json::Value dup = json::Value::object();
@@ -1023,32 +1041,34 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         }
         case Drag::TrimLeft: {
             if (!anchor || anchor->locked || state_.deltaBeats == 0) return;
-            const model::Take* take = activeTake(s, *anchor);
             double d = state_.deltaBeats;
-            std::vector<EditStep> steps;
-            if (take) {
-                // The source offset moves with the edge so the material stays put:
-                // seconds for audio (at the take's rate), beats for MIDI.
-                const double rate = take->playrate > 0 ? take->playrate : 1.0;
-                auto offsetFor = [&](double dd) {
-                    if (isMidi(take)) return take->startOffset + dd * rate;
-                    return take->startOffset + (s.timeMap->secondsAt(startBeat(s, *anchor) + dd) -
-                                                s.timeMap->secondsAt(startBeat(s, *anchor))) *
-                                                   rate;
-                };
-                if (offsetFor(d) < 0) {  // not before the source's start
-                    if (isMidi(take))
-                        d = -take->startOffset / rate;
-                    else
-                        d = s.timeMap->beatAt(s.timeMap->secondsAt(startBeat(s, *anchor)) -
-                                              take->startOffset / rate) -
-                            startBeat(s, *anchor);
+            auto offsetFor = [&](const model::Take& take, double delta) {
+                const double rate = take.playrate > 0 ? take.playrate : 1.0;
+                return take.startOffset +
+                       (isMidi(&take) ? delta
+                                      : s.timeMap->secondsAt(startBeat(s, *anchor) + delta) -
+                                            s.timeMap->secondsAt(startBeat(s, *anchor))) *
+                           rate;
+            };
+            for (auto id : anchor->takes)
+                if (const auto* take = s.takes.find(id); take && offsetFor(*take, d) < 0) {
+                    const double rate = take->playrate > 0 ? take->playrate : 1.0;
+                    const double limit =
+                        isMidi(take)
+                            ? -take->startOffset / rate
+                            : s.timeMap->beatAt(s.timeMap->secondsAt(startBeat(s, *anchor)) -
+                                                take->startOffset / rate) -
+                                  startBeat(s, *anchor);
+                    d = std::max(d, limit);
                 }
-                json::Value targs = json::Value::object();
-                targs["take"] = anchor->activeTake->str();
-                targs["start_offset"] = std::max(0.0, offsetFor(d));
-                steps.push_back({"take.set", std::move(targs)});
-            }
+            std::vector<EditStep> steps;
+            for (auto id : anchor->takes)
+                if (const auto* take = s.takes.find(id)) {
+                    json::Value targs = json::Value::object();
+                    targs["take"] = id.str();
+                    targs["start_offset"] = std::max(0.0, offsetFor(*take, d));
+                    steps.push_back({"take.set", std::move(targs)});
+                }
             if (d == 0) return;
             json::Value args = json::Value::object();
             args["item"] = state_.anchor.str();
@@ -1362,9 +1382,11 @@ void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
 
 void ItemGestures::commitEnv(const std::string& label) {
     if (!run || !state_.env) return;
+    if (!view_.session().envelopes.contains(*state_.env)) return;
     json::Value args = json::Value::object(), points = json::Value::array();
     const model::AutomationItem* ai =
         state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
+    if (state_.autoItem && !ai) return;
     if (ai)
         args["item"] = state_.autoItem->str();
     else

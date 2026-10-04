@@ -3,8 +3,11 @@
 #include <unistd.h>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <cstring>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <numbers>
 #include <thread>
@@ -90,6 +93,10 @@ TEST_CASE("pyramids serialize exactly and reject foreign or truncated files") {
     REQUIRE(back);
     CHECK(back->frames() == p.frames());
     CHECK(back->serialize() == bytes);
+    auto old = bytes;
+    old[4] = 1;
+    old[5] = old[6] = old[7] = 0;
+    CHECK_FALSE(peaks::Pyramid::deserialize(old));
     auto truncated = bytes;
     truncated.resize(truncated.size() - 7);
     CHECK_FALSE(peaks::Pyramid::deserialize(truncated));
@@ -163,7 +170,10 @@ TEST_CASE("the peak service builds once off-thread, caches on disk and loads the
             writeFileAtomic(other, std::span<const std::uint8_t>(*audio::encodeWav(tone(24000)))));
         peaks::PeakService service(dir / "cache", post);
         int ready = 0;
-        service.onReady = [&](const std::string&) { ++ready; };
+        service.onReady = [&](const std::string& key) {
+            CHECK(key.starts_with("path:"));
+            ++ready;
+        };
         service.get("", wav);
         service.get("", other);
         REQUIRE(drainUntil([&] { return ready == 2; }));
@@ -187,4 +197,74 @@ TEST_CASE("the peak service builds once off-thread, caches on disk and loads the
         drainUntil([] { return false; });
     }
     std::filesystem::remove_all(dir.parent_path());
+}
+
+TEST_CASE("partial peak buckets weight RMS by the number of samples") {
+    audio::AudioData data;
+    data.sampleRate = 48000;
+    data.channels = {std::vector<float>(65, 0.0f)};
+    data.channels.front().back() = 1.0f;
+    const auto pyramid = peaks::Pyramid::build(data);
+    for (const auto& level : pyramid.levels())
+        CHECK(pyramid.range(level, 0, 0, 65).rms ==
+              doctest::Approx(1.0 / std::sqrt(65.0)).epsilon(0.00001));
+}
+
+TEST_CASE("peak cache rejects inconsistent metadata") {
+    const auto bytes = peaks::Pyramid::build(tone(65)).serialize();
+    auto check = [&](std::size_t offset, const auto& value) {
+        auto bad = bytes;
+        std::memcpy(bad.data() + offset, &value, sizeof value);
+        CHECK_FALSE(peaks::Pyramid::deserialize(bad));
+    };
+    check(12, 0.0);  // sample rate
+    check(12, std::numeric_limits<double>::quiet_NaN());
+    check(20, std::int64_t{-1});  // frame count
+    check(36, std::uint64_t{1});  // first level needs two buckets
+    audio::AudioData empty;
+    empty.sampleRate = 48000;
+    empty.channels.resize(1);
+    const auto serialized = peaks::Pyramid::build(empty).serialize();
+    auto back = peaks::Pyramid::deserialize(serialized);
+    REQUIRE(back);
+    CHECK(back->frames() == 0);
+    CHECK(back->serialize() == serialized);
+}
+
+TEST_CASE("unhashed peaks rebuild replaced files and retry after a missing file appears") {
+    const auto dir = scratch("revisions");
+    const auto wav = dir / "tone.wav";
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::function<void()>> posted;
+    peaks::PeakService service(dir / "cache", [&](auto fn) {
+        std::lock_guard lock(mutex);
+        posted.push_back(std::move(fn));
+        ready.notify_one();
+    });
+    auto drain = [&] {
+        std::vector<std::function<void()>> tasks;
+        {
+            std::unique_lock lock(mutex);
+            ready.wait(lock, [&] { return !posted.empty(); });
+            tasks.swap(posted);
+        }
+        for (auto& task : tasks) task();
+    };
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    CHECK(service.failure("", wav).has_value());
+    REQUIRE(audio::writeWav(wav, tone(24000)));
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    REQUIRE(service.get("", wav));
+    CHECK(service.get("", wav)->frames() == 24000);
+    REQUIRE(audio::writeWav(wav, tone(48000)));
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    REQUIRE(service.get("", wav));
+    CHECK(service.get("", wav)->frames() == 48000);
+    CHECK(service.stats().failed == 1);
+    CHECK(service.stats().built == 2);
+    std::filesystem::remove_all(dir);
 }
