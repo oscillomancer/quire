@@ -152,6 +152,48 @@ Acceptance (build prompt Phase 4):
 | P5.17 | performance gates and the workflow-gap log | gap log **done** — all 40 workflows done as of p5-gaps (2026-10-04; `docs/research/gui-workflow-gaps.md`); bench numbers in `docs/benchmarks/gui.md` |
 | — | p5-gaps (2026-10-03/04) | **done** (orchestrator): count-in, punch range, route channel maps, timebase, screensets, FLAC + second file + render queue, take FX and envelopes, automation items, mouse map and chrome editing, bridged editors, auxiliary channels and plug-in pins (ADR-0020) |
 
+## Codebase review and cleanup (2026-10-04)
+
+A full review of the existing DAW by four Codex workers (`gpt-6.1-sol`, one
+worktree and area each: engine, command layer, GUI, plug-in hosting), every
+batch reviewed and integrated by the orchestrator; per-area reports with
+each fix's trigger, test and verification live in the review worktrees.
+Roughly 250 fixes, most with a regression that fails without them. Notable:
+
+- **Engine:** plug-in automation is independent of the block partition; a
+  recording overflow keeps time; bridged FX are never run from the device
+  callback (passed through with a warning on live nodes); post-fader keys
+  ignore solo (ADR-0018); held notes, edge delays and aux delays carry
+  across plan swaps; NoteEnd voice addressing; request_process wakes
+  plug-ins; params rescan/clear re-resolve lanes (envelopes never deleted);
+  recordings commit at stop and are hashed in the background (ADR-0014).
+- **Command layer:** undo/redo reload the running engine; each invocation in
+  a batch is atomic, and savepoint failures refuse or roll back (ADR-0007);
+  take copies clone FX/envelopes/automation; merges remap ids and see
+  project metadata; history reclaims unreachable versions and has a 1 GiB
+  budget that squashes the oldest steps (ADR-0008); project files keep
+  unknown top-level sections and `extensions`, UI state lives only in the
+  `<name>.ui.json` sidecar, `groups` is preserved but not implemented
+  (ADR-0009); raw and derived numeric checks on every edit/transport/render
+  argument; Lua finalizers refused (ADR-0006).
+- **GUI:** callback and dispatch lifetimes; stale gestures after external
+  edits; fades drawn with the engine's shapes (`model/fade_shape.h`); MIDI
+  thumbnails use playback's source mapping; change-scoped arrange
+  invalidation (an unrelated FX edit in a 200-track session repaints
+  nothing); wheel zoom under the pointer.
+- **Hosting:** state loads are barriers for queued edits; bridge requests
+  have one deadline and protocol v6 carries error details, full output
+  events, wake and clear; supervised scanning in a scan-only bridge child
+  with a success/failure cache (ADR-0013); plug-in editor edits reach the
+  model (one undo step per gesture, no echo; read-only outputs are display
+  only).
+
+Known limits after the review: overlapping gestures on a plain (opaque
+state) plug-in share their state blob; the history budget's size estimate
+walks shared payloads per version and squashed steps keep large invocation
+arguments; track groups are not implemented; a live (pipelined) bridge mode
+does not exist yet, so bridged FX are passed through while monitoring.
+
 ## Team (Hermes workers via Herdr; Codex retired)
 
 Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Four Codex
@@ -177,7 +219,7 @@ and work agents can run at the same time.
 - **scoring** — scoring, optimizer tuning, describe fix, eval provenance (landed). No reruns (Nate, 2026-10-01).
 - **gui** — arrange view, TCP + transport, input picker (landed).
 - **gui2** — FX/plugin GUIs, render dialog, slider, FX badges (landed).
-- Codex (`gpt-6.1-sol` only, launched with `--no-daemon`; at most two): **events** — MIDI event list, FX chain presets; **ruler** — ruler editing, drag-to-send (landed; weekly usage spent 2026-10-01).
+- Codex (`gpt-6.1-sol` only, launched with `--no-daemon`): **events** — MIDI event list, FX chain presets; **ruler** — ruler editing, drag-to-send (landed). The 2026-10-04 review team — **engine**, **commands**, **gui**, **host** — landed; weekly usage nearly spent again (resets 2026-10-11).
 
 OpenRouter credits ran out on 2026-10-01 (~13:20): every Hermes worker is
 paused; the orchestrator finished their in-flight work (harness commit,
