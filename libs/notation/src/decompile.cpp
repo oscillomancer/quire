@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -23,13 +24,13 @@ struct Timeline {
     }
     std::int64_t start(int bar) const {
         std::int64_t tick = 0;
-        for (int b = 1; b < bar && b < 100000; ++b) tick += internal::barTicks(meter(b), ppq);
+        for (int b = 1; b < bar && b <= 100000; ++b) tick += internal::barTicks(meter(b), ppq);
         return tick;
     }
     int bar(std::int64_t tick) const {
         int b = 1;
         std::int64_t at = 0;
-        while (b < 100000) {
+        while (b <= 100000) {
             const auto span = internal::barTicks(meter(b), ppq);
             if (span <= 0 || tick < at + span) break;
             at += span;
@@ -204,6 +205,13 @@ std::optional<std::pair<std::string, int>> drumGrid(const std::vector<midi::Note
 }  // namespace
 
 Result<std::string> decompile(const midi::Sequence& source, const DecompileOptions& options) {
+    for (const auto& note : source.notes)
+        if (note.start < 0 || note.length < 0 ||
+            note.length > std::numeric_limits<std::int64_t>::max() - note.start)
+            return Error{"notation.invalid_sequence",
+                         "Note time is invalid or overflows.",
+                         {},
+                         "Use non-negative note times whose sum fits in tick time."};
     if (source.ppq < 1 || source.ppq > 32767 || source.length < 0 ||
         source.length < lastEvent(source))
         return Error{"notation.invalid_sequence",
@@ -213,12 +221,44 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
     midi::Sequence s = source;
     s.canonicalize();
     Timeline time{s.ppq, options};
-    if (internal::barTicks(time.meter(1), s.ppq) < 1 ||
-        (std::int64_t(s.ppq) * 4 * time.meter(1).numerator) % time.meter(1).denominator != 0)
-        return Error{"notation.tick_fraction",
-                     "Meter has a fractional-tick bar.",
+    std::int64_t checkedUntil = 0;
+    for (int bar = 1; bar <= 100000; ++bar) {
+        const auto meter = time.meter(bar);
+        if (meter.numerator < 1 || meter.numerator > 64 || meter.denominator < 1 ||
+            meter.denominator > 64 || (meter.denominator & (meter.denominator - 1)) != 0 ||
+            internal::barTicks(meter, s.ppq) < 1 ||
+            (std::int64_t(s.ppq) * 4 * meter.numerator) % meter.denominator != 0)
+            return Error{"notation.tick_fraction",
+                         "Meter has an invalid or fractional-tick bar.",
+                         {},
+                         "Use a valid meter and compatible PPQ throughout the item."};
+        checkedUntil += internal::barTicks(meter, s.ppq);
+        if (checkedUntil > s.length) break;
+    }
+    if (checkedUntil < s.length)
+        return Error{"notation.invalid_sequence",
+                     "Sequence exceeds the notation bar limit.",
                      {},
-                     "Choose a PPQ compatible with the meter."};
+                     "Use an item of at most 100000 bars."};
+
+    for (const auto& note : s.notes)
+        if (time.bar(note.start) > 100000)
+            return Error{"notation.invalid_sequence",
+                         "Note starts beyond the notation bar limit.",
+                         {},
+                         "Use note positions in bars 1..100000."};
+    for (const auto& control : s.controls)
+        if (time.bar(control.tick) > 100000)
+            return Error{"notation.invalid_sequence",
+                         "Control is beyond the notation bar limit.",
+                         {},
+                         "Use control positions in bars 1..100000."};
+    for (const auto& sx : s.sysex)
+        if (time.bar(sx.tick) > 100000)
+            return Error{"notation.invalid_sequence",
+                         "Sysex is beyond the notation bar limit.",
+                         {},
+                         "Use sysex positions in bars 1..100000."};
 
     std::map<int, std::vector<Group>> channels;
     for (const auto& note : s.notes) {
@@ -359,7 +399,14 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
     std::map<Key, std::vector<midi::Control>> lanes;
     std::map<int, std::vector<midi::Control>> programs;
     for (const auto& c : s.controls) {
-        if (c.tick < 0 || c.channel > 15 || c.number > 127)
+        const bool bend = c.kind == midi::ControlKind::PitchBend;
+        if (c.tick < 0 || c.channel > 15 || c.number > 127 ||
+            static_cast<unsigned>(c.kind) > static_cast<unsigned>(midi::ControlKind::PitchBend) ||
+            c.value < (bend ? -8192 : 0) || c.value > (bend ? 8191 : 127) ||
+            ((c.kind == midi::ControlKind::ChannelPressure ||
+              c.kind == midi::ControlKind::PitchBend ||
+              c.kind == midi::ControlKind::ProgramChange) &&
+             c.number != 0))
             return Error{"notation.invalid_sequence",
                          "Sequence has an invalid control.",
                          {},
@@ -419,7 +466,15 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
             body += time.position(point.tick) + " " + std::to_string(point.value) + "\n";
     }
     std::map<int, std::vector<midi::Sysex>> sysex;
-    for (const auto& sx : s.sysex) sysex[0].push_back(sx);
+    for (const auto& sx : s.sysex) {
+        if (sx.tick < 0 || sx.bytes.size() < 2 || sx.bytes.front() != 0xf0 ||
+            sx.bytes.back() != 0xf7)
+            return Error{"notation.invalid_sequence",
+                         "Sequence has invalid sysex framing or time.",
+                         {},
+                         "Use non-negative time and include F0 and F7."};
+        sysex[0].push_back(sx);
+    }
     for (int channel = 0; channel < 16; ++channel) {
         if (!programs.contains(channel) && !sysex.contains(channel)) continue;
         body += "\nevents ch " + std::to_string(channel + 1) + "\n";

@@ -322,7 +322,7 @@ TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd 
     a.root->frame(false);
     CHECK(a.root->focused() == a.root->find("agent.input"));
     a.type("Add a drum buss");
-    a.key("Return");
+    REQUIRE(a.root->click("agent.send"));
     REQUIRE(panel.session());
     for (int i = 0; i < 2000 && panel.session()->busy(); ++i) {
         std::vector<std::function<void()>> now;
@@ -339,6 +339,13 @@ TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd 
         posted.clear();
     }
     REQUIRE_FALSE(panel.session()->busy());
+    const auto requests = server.requests();
+    REQUIRE_FALSE(requests.empty());
+    REQUIRE(requests.front().find("messages"));
+    const auto* content = requests.front().find("messages")->asArray().back().find("content");
+    REQUIRE(content);
+    REQUIRE_FALSE(content->asArray().empty());
+    CHECK(content->asArray().front().find("text")->asString().ends_with("\n\nAdd a drum buss"));
     a.root->frame(false);
     auto* diff = dynamic_cast<ui::TextBlock*>(a.root->find("agent.review.diff"));
     REQUIRE(diff);

@@ -218,6 +218,11 @@ void Shell::sync() {
                          "version " + std::to_string(s.version));
         arrange_->show(s);
     }
+    std::vector<model::Id> selected;
+    for (const auto& text : ui_.selectedItems)
+        if (auto id = model::Id::parse(text); id && s.items.find(*id)) selected.push_back(*id);
+    if (arrange_->gestures().selection() != selected)
+        arrange_->gestures().setSelection(std::move(selected));
     // The bar changes with the model or while the engine runs; refreshing it on
     // every idle pass would repaint (and cost) for nothing.
     if (transport_ && (moved || app_.engine())) transport_->sync();

@@ -635,15 +635,17 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         switch (state_.drag) {
             case Drag::Move: {
                 if (!anchor) break;
+                std::vector<model::Id> items = selection_;
+                if (!isSelected(state_.anchor)) items.push_back(state_.anchor);
                 double d = snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor);
-                for (model::Id id : selection_)  // nothing before the start
+                for (model::Id id : items)  // nothing before the start
                     if (const model::Item* it = itemOf(s, id)) d = std::max(d, -startBeat(s, *it));
                 state_.deltaBeats = d;
                 // Rows: every selected item must land on a channel.
                 const int dr = static_cast<int>(rowAt(e.pos.y).value_or(pressRow_)) -
                                static_cast<int>(pressRow_);
                 bool ok = true;
-                for (model::Id id : selection_) {
+                for (model::Id id : items) {
                     const model::Item* it = itemOf(s, id);
                     const auto row = it ? view_.trackLayout().indexOf(it->track) : std::nullopt;
                     const auto target = row ? static_cast<std::ptrdiff_t>(*row) + dr : -1;
@@ -984,9 +986,13 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 if (state_.deltaRows != 0) {
                     const auto row = view_.trackLayout().indexOf(it->track);
                     if (!row) continue;
-                    track = view_.trackLayout()
-                                .rows()[*row + static_cast<std::size_t>(state_.deltaRows)]
-                                .track;
+                    const auto target = static_cast<std::ptrdiff_t>(*row) + state_.deltaRows;
+                    const auto& rows = view_.trackLayout().rows();
+                    if (target < 0 || static_cast<std::size_t>(target) >= rows.size() ||
+                        rows[static_cast<std::size_t>(target)].env ||
+                        rows[static_cast<std::size_t>(target)].type != model::StripType::Channel)
+                        return;
+                    track = rows[static_cast<std::size_t>(target)].track;
                 }
                 if (copy_) {
                     json::Value dup = json::Value::object();
@@ -1362,9 +1368,11 @@ void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
 
 void ItemGestures::commitEnv(const std::string& label) {
     if (!run || !state_.env) return;
+    if (!view_.session().envelopes.contains(*state_.env)) return;
     json::Value args = json::Value::object(), points = json::Value::array();
     const model::AutomationItem* ai =
         state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
+    if (state_.autoItem && !ai) return;
     if (ai)
         args["item"] = state_.autoItem->str();
     else

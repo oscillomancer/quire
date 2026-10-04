@@ -812,16 +812,19 @@ class Corner : public ui::Node {
 
 class Playhead : public ui::Node {
   public:
-    explicit Playhead(ArrangeView& view) : Node("playhead"), view_(view) {}
+    explicit Playhead(std::shared_ptr<ArrangeView*> alive)
+        : Node("playhead"), alive_(std::move(alive)) {}
     // The overlay's children are arranged with their own bounds, so take the
     // parent's (the full window).
     void arrange(const ui::Canvas&, const ui::Rect&) override {
         if (parent()) setBounds(parent()->bounds());
     }
     void paint(ui::Canvas& c) override {
-        const ui::Rect a = view_.lanesRect();
+        if (!*alive_) return;
+        const ArrangeView& view = **alive_;
+        const ui::Rect a = view.lanesRect();
         if (a.empty()) return;
-        const float x = view_.playheadX();
+        const float x = view.playheadX();
         if (x < a.x - 1 || x > a.right() + 1) return;
         const ui::Color col = c.theme().color("accent");
         c.line({x, a.y}, {x, a.bottom()}, col, 1.0f);
@@ -829,7 +832,7 @@ class Playhead : public ui::Node {
     }
 
   private:
-    ArrangeView& view_;
+    std::shared_ptr<ArrangeView*> alive_;
 };
 
 // --- the view ----------------------------------------------------------------------
@@ -839,6 +842,7 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
       peaks_(peaks),
       resolve_(std::move(resolve)),
       transportSource_(std::move(transport)) {
+    alive_ = std::make_shared<ArrangeView*>(this);
     gestures_ = std::make_unique<ItemGestures>(*this);
     interactive = true;
     focusable = true;
@@ -945,12 +949,12 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     layout_.onChanged = [this] {
         clampScroll();
         syncScrollbars();
-        if (tcp_) tcp_->invalidate();
+        if (tcp_) tcp_->scrolled();
         damageViews();
     };
 }
 
-ArrangeView::~ArrangeView() = default;
+ArrangeView::~ArrangeView() { *alive_ = nullptr; }
 
 void ArrangeView::show(const model::Session& session) {
     if (!layout_.show(session)) return;
@@ -1091,7 +1095,9 @@ void ArrangeView::applyFollow() {
 }
 
 bool ArrangeView::installOverlay(ui::Root& root) {
-    root.overlay().add(std::make_unique<Playhead>(*this));
+    if (overlayInstalled_) return true;
+    overlayInstalled_ = true;
+    root.overlay().add(std::make_unique<Playhead>(alive_));
     gestures_->installOverlay(root);
     return true;
 }

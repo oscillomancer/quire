@@ -37,6 +37,7 @@ class ParamPanel {
     ui::Root& root_;
     model::Id fx_;
     std::string gesture_;
+    std::uint64_t gestureSerial_ = 0;
 };
 
 }  // namespace supple::gui

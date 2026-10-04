@@ -1,7 +1,9 @@
 #include "render_dialog.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -26,13 +28,15 @@ std::optional<double> number(std::string_view text) {
     const std::string s(text);
     char* end = nullptr;
     const double v = std::strtod(s.c_str(), &end);
-    if (end == s.c_str() || *end != '\0') return {};
+    if (end == s.c_str() || *end != '\0' || !std::isfinite(v)) return {};
     return v;
 }
 
 std::optional<std::int64_t> integer(std::string_view text) {
-    auto v = number(text);
-    return v ? std::optional<std::int64_t>(static_cast<std::int64_t>(*v)) : std::nullopt;
+    std::int64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size()) return std::nullopt;
+    return value;
 }
 
 std::string baseName(const std::string& path) {

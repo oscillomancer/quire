@@ -39,7 +39,6 @@ class Fader : public Node {
 
   private:
     Rect track() const;
-    double positionAt(Point p) const;
     void change(double db, Gesture g);
     Orientation orientation_;
     double db_ = 0, pressDb_ = 0;

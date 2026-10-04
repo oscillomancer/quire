@@ -108,7 +108,8 @@ class FxWindow {
     model::Id track_, selected_;
     std::optional<model::Id> take_;  // set: the window shows that take's chain
     Tab tab_ = Tab::Chain;
-    std::string gesture_;                         // the active slider drag
+    std::string gesture_;  // the active slider drag
+    std::uint64_t gestureSerial_ = 0;
     std::string pendingChain_ = "main";           // where Add plugin… inserts
     std::map<std::string, std::string> latency_;  // measured once per effect
     std::set<std::string> failed_;                // engine.status failed_fx

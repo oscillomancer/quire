@@ -191,6 +191,10 @@ bool PluginWindows::handle(const SDL_Event& e) {
     for (std::size_t i = 0; i < editors_.size(); ++i) {
         Editor& ed = editors_[i];
         if (ed.window->id() != id) continue;
+        if (ed.fx && app_.instanceOf(*ed.fx) != ed.instance) {
+            drop(i);
+            return true;
+        }
         if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             drop(i);
         } else if (e.type == SDL_EVENT_WINDOW_RESIZED && ed.resizable &&

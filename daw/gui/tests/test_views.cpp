@@ -1109,6 +1109,8 @@ TEST_CASE("the strip's input button names the ports and hands the anchor to the 
     CHECK(tcp.pickedAnchor.w > 0);
     CHECK(tcp.pickedAnchor.x > 0);
     CHECK(tcp.pickedAnchor.y > 0);
+    CHECK(tcp.pickedAnchor.x == button->bounds().x);
+    CHECK(tcp.pickedAnchor.y == button->bounds().y);
 }
 
 TEST_CASE("the mouse map: built-in defaults, per-combination overrides, the file round-trips") {

@@ -129,13 +129,17 @@ Pyramid Pyramid::build(const audio::AudioData& audio) {
                 const std::size_t from = b * factor, to = std::min(below.count, from + factor);
                 Bucket out = below.buckets[from * channels + c];
                 double sq = 0;
+                std::size_t samples = 0;
                 for (std::size_t i = from; i < to; ++i) {
                     const Bucket& in = below.buckets[i * channels + c];
                     out.min = std::min(out.min, in.min);
                     out.max = std::max(out.max, in.max);
-                    sq += prevSquares[i * channels + c];
+                    const auto weight = std::min<std::size_t>(below.samplesPerBucket,
+                                                              frames - i * below.samplesPerBucket);
+                    sq += prevSquares[i * channels + c] * static_cast<double>(weight);
+                    samples += weight;
                 }
-                squares[b * channels + c] = sq / static_cast<double>(to - from);
+                squares[b * channels + c] = sq / static_cast<double>(samples);
                 level.buckets[b * channels + c] = out;
             }
         finish(level, squares);
@@ -166,14 +170,17 @@ Span Pyramid::range(const Level& level, int channel, double from, double to) con
     const auto c = static_cast<std::size_t>(channel);
     Bucket b = level.buckets[static_cast<std::size_t>(first) * channels + c];
     double sq = 0;
+    double samples = 0;
     for (auto i = first; i < end; ++i) {
         const Bucket& in = level.buckets[static_cast<std::size_t>(i) * channels + c];
         b.min = std::min(b.min, in.min);
         b.max = std::max(b.max, in.max);
-        sq += static_cast<double>(unq15(in.rms)) * static_cast<double>(unq15(in.rms));
+        const double weight =
+            std::min(spb, static_cast<double>(frames_) - static_cast<double>(i) * spb);
+        sq += static_cast<double>(unq15(in.rms)) * static_cast<double>(unq15(in.rms)) * weight;
+        samples += weight;
     }
-    return {unq15(b.min), unq15(b.max),
-            static_cast<float>(std::sqrt(sq / static_cast<double>(end - first)))};
+    return {unq15(b.min), unq15(b.max), static_cast<float>(std::sqrt(sq / samples))};
 }
 
 std::vector<std::uint8_t> Pyramid::serialize() const {
@@ -187,7 +194,7 @@ std::vector<std::uint8_t> Pyramid::serialize() const {
         put(out, l.samplesPerBucket);
         put(out, static_cast<std::uint64_t>(l.count));
         const auto* p = reinterpret_cast<const std::uint8_t*>(l.buckets.data());
-        out.insert(out.end(), p, p + l.buckets.size() * sizeof(Bucket));
+        if (!l.buckets.empty()) out.insert(out.end(), p, p + l.buckets.size() * sizeof(Bucket));
     }
     return out;
 }
@@ -202,6 +209,7 @@ Result<Pyramid> Pyramid::deserialize(std::span<const std::uint8_t> in) {
         channels > 64 || !get(in, p.sampleRate_) || !get(in, p.frames_) || !get(in, levels) ||
         levels != kSamplesPerBucket.size())
         return bad();
+    if (!std::isfinite(p.sampleRate_) || p.sampleRate_ <= 0 || p.frames_ < 0) return bad();
     p.channels_ = static_cast<int>(channels);
     for (std::uint32_t i = 0; i < levels; ++i) {
         Level l;
@@ -209,6 +217,8 @@ Result<Pyramid> Pyramid::deserialize(std::span<const std::uint8_t> in) {
         if (!get(in, l.samplesPerBucket) || l.samplesPerBucket != kSamplesPerBucket[i] ||
             !get(in, count))
             return bad();
+        const auto frames = static_cast<std::uint64_t>(p.frames_);
+        if (count != frames / l.samplesPerBucket + (frames % l.samplesPerBucket != 0)) return bad();
         const std::uint64_t bytes = count * channels * sizeof(Bucket);
         if (count > (std::uint64_t{1} << 34) || in.size() < bytes) return bad();
         l.count = static_cast<std::size_t>(count);
@@ -309,8 +319,8 @@ void PeakService::run(std::stop_token stop) {
             }
         }
         if (post_)
-            post_([this, alive = std::weak_ptr<int>(alive_), hash = hash] {
-                if (alive.lock() && onReady) onReady(hash);
+            post_([this, alive = std::weak_ptr<int>(alive_), key = key] {
+                if (alive.lock() && onReady) onReady(key);
             });
     }
 }

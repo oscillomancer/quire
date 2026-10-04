@@ -167,15 +167,17 @@ class Roll : public ui::Node {
 
     std::optional<std::size_t> noteAt(ui::Point p, int* edge) const {
         const Geometry g{s_, bounds()};
-        for (std::size_t k = s_.notes.size(); k-- > 0;) {
-            const ui::Rect r = g.rectOf(s_.notes[k]);
-            if (!r.contains(p)) continue;
-            if (edge)
-                *edge = p.x >= r.right() - kEdge && r.w > 2 * kEdge ? 1
-                        : p.x <= r.x + kEdge && r.w > 2 * kEdge     ? -1
-                                                                    : 0;
-            return k;
-        }
+        for (bool selected : {true, false})
+            for (std::size_t k = s_.notes.size(); k-- > 0;) {
+                if (s_.selected.contains(k) != selected) continue;
+                const ui::Rect r = g.rectOf(s_.notes[k]);
+                if (!r.contains(p)) continue;
+                if (edge)
+                    *edge = p.x >= r.right() - kEdge && r.w > 2 * kEdge ? 1
+                            : p.x <= r.x + kEdge && r.w > 2 * kEdge     ? -1
+                                                                        : 0;
+                return k;
+            }
         return std::nullopt;
     }
 
@@ -257,17 +259,16 @@ class Roll : public ui::Node {
                 if (free) return raw;
                 return s_.snapBeat(anchorBeat + raw) - anchorBeat;
             };
-            const RollNote& a = s_.notes[anchor_];
             switch (s_.drag) {
                 case RollState::Drag::Move:
-                    s_.dBeats = snapped(a.start);
+                    s_.dBeats = snapped(s_.notes[anchor_].start);
                     s_.dPitch = static_cast<int>(std::lround((press_.y - e.pos.y) / s_.rowHeight));
                     break;
                 case RollState::Drag::ResizeEnd:
-                    s_.dLength = snapped(a.start + a.length);
+                    s_.dLength = snapped(s_.notes[anchor_].start + s_.notes[anchor_].length);
                     break;
                 case RollState::Drag::ResizeStart:
-                    s_.dStart = snapped(a.start);
+                    s_.dStart = snapped(s_.notes[anchor_].start);
                     break;
                 case RollState::Drag::Marquee: {
                     s_.marquee = {std::min(press_.x, e.pos.x), std::min(press_.y, e.pos.y),
@@ -859,6 +860,10 @@ void MidiEditor::close() {
     state_.item.clear();
     state_.notes.clear();
     state_.selected.clear();
+    state_.drag = RollState::Drag::None;
+    state_.velocityNote.reset();
+    state_.ccDraft.clear();
+    state_.ccErasing = false;
     if (eventList_) eventList_->sync();
     if (panel_ && panel_->visible) {
         if (root_.focused() && (root_.focused() == roll_ || root_.focused() == text_))
@@ -874,6 +879,14 @@ Status MidiEditor::reload() {
     args["item"] = state_.item;
     auto r = dispatcher_.execute({"midi.notes", std::move(args), kOrigin});
     if (!r) return std::move(r).error();
+    // A reload replaces note indices and CC data; an old preview cannot be
+    // committed against the new sequence (including undo and item switches).
+    state_.drag = RollState::Drag::None;
+    state_.dBeats = state_.dLength = state_.dStart = 0;
+    state_.dPitch = state_.dVelocity = 0;
+    state_.velocityNote.reset();
+    state_.ccDraft.clear();
+    state_.ccErasing = false;
     state_.itemPosition = (*r)["position"].asDouble();
     state_.itemLength = (*r)["length"].asDouble();
     state_.notes.clear();

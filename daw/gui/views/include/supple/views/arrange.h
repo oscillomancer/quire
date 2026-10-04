@@ -161,6 +161,8 @@ class ArrangeView : public ui::Node {
     ui::ScrollBar* hbar_ = nullptr;
     ui::ScrollBar* vbar_ = nullptr;
     double lastPollMs_ = -1e9;
+    std::shared_ptr<ArrangeView*> alive_;
+    bool overlayInstalled_ = false;
 };
 
 }  // namespace supple::views

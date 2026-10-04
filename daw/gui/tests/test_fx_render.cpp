@@ -223,6 +223,79 @@ struct Fixture {
 
 }  // namespace
 
+TEST_CASE("FX drags survive model refresh and separate drags have separate undo steps") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) return;
+    const auto track = f.addTrack("Drag");
+    auto added = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    REQUIRE(added);
+    REQUIRE(f.fx->open(track));
+    REQUIRE(f.fx->chain().size() == 1);
+    const auto effect = f.fx->chain().front();
+    auto drag = [&](const std::string& id, bool right) {
+        f.frame();
+        auto* slider = f.root->find(id);
+        REQUIRE(slider);
+        const auto b = slider->bounds();
+        const float y = b.y + b.h / 2;
+        const float from = right ? b.x + 12 : b.right() - 12;
+        const float to = right ? b.right() - 12 : b.x + 12;
+        const auto history = f.historyCount();
+        f.root->pointer({ui::PointerEvent::Type::Down, {from, y}, 1});
+        for (int i = 1; i <= 5; ++i) {
+            const float x = from + (to - from) * i / 5;
+            f.root->pointer({ui::PointerEvent::Type::Move, {x, y}, 1});
+            f.fx->tick();
+            f.root->frame(false);
+            CHECK(f.root->find(id) == slider);
+        }
+        f.root->pointer({ui::PointerEvent::Type::Up, {to, y}, 1});
+        f.fx->tick();
+        f.frame();
+        CHECK(f.historyCount() == history + 1);
+    };
+    drag("fx.wet." + effect.str(), false);
+    CHECK(f.app->head().fx.find(effect)->wet < 10);
+    drag("fx.wet." + effect.str(), true);
+    CHECK(f.app->head().fx.find(effect)->wet > 90);
+    f.fx->select(effect);
+    f.fx->showParamsTab();
+    drag("fx.param.gain", true);
+    drag("fx.param.gain", false);
+    REQUIRE(f.run("track.remove", f.args({{"track", track.str()}})));
+    f.fx->tick();
+    CHECK_FALSE(f.root->find("fx.param.gain"));
+}
+
+TEST_CASE("plugin browser refresh after close does not retain destroyed labels") {
+    Fixture f;
+    if (!f.ok) return;
+    f.fx->browser().open([](const std::string&) {});
+    f.frame();
+    f.fx->browser().close();
+    f.fx->browser().refresh();
+    f.fx->browser().tick();
+    CHECK_FALSE(f.fx->browser().isOpen());
+}
+
+TEST_CASE("render numeric fields reject non-finite values and overflowing integers") {
+    Fixture f;
+    if (!f.ok) return;
+    f.render->open();
+    f.render->setField("render.end", "4");
+    f.render->setField("render.start", "nan");
+    f.render->setField("render.tail", "inf");
+    f.render->setField("render.sample_rate", "1e100");
+    f.render->setField("render.channels", "nan");
+    f.render->addToQueue();
+    REQUIRE(f.app->renderQueue().size() == 1);
+    const auto& args = f.app->renderQueue().front().args;
+    CHECK_FALSE(args.find("start_beat"));
+    CHECK_FALSE(args.find("tail_s"));
+    CHECK_FALSE(args.find("sample_rate"));
+    CHECK_FALSE(args.find("channels"));
+}
+
 TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, favourites") {
     Fixture f;
     if (!f.ok) {
@@ -260,6 +333,10 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     REQUIRE(f.fx->chain().size() == 2);
     const model::Id fx2 = f.fx->chain()[1];
     CHECK(f.app->head().fx.find(fx2)->plugin.id == facet);
+    const auto secondSelected = f.root->readBack();
+    f.fx->select(fx1);
+    f.frame();
+    CHECK(f.root->readBack().rgba != secondSelected.rgba);
     f.click("fx.up." + fx2.str());
     REQUIRE(f.fx->chain().size() == 2);
     CHECK(f.fx->chain()[0] == fx2);
@@ -358,6 +435,16 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.root->find("ifx.row." + inputFx.str()) != nullptr);
     f.click("ifx.remove." + inputFx.str());
     CHECK(f.fx->inputChain().empty());
+    f.fx->close();
+    gui::UiState selection;
+    selection.selectedTracks = {track.str()};
+    REQUIRE(f.fx->openToAdd(selection, json::Value::object()));
+    f.frame();
+    f.type("Plumb");
+    f.key("Return");
+    CHECK(f.fx->inputChain().empty());
+    REQUIRE(f.fx->chain().size() == 3);
+    f.click("fx.remove." + f.fx->chain().back().str());
 
     // Remove (from the chain tab: the rows live there).
     f.click("fx.tab.chain");

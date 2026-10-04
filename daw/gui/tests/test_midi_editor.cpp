@@ -18,6 +18,7 @@
 #include "supple/gui/window.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
+#include "supple/ui/widgets.h"
 
 using namespace supple;
 
@@ -133,6 +134,83 @@ struct Fixture {
 };
 
 }  // namespace
+
+TEST_CASE("MIDI editor: an empty roll can marquee without a note anchor") {
+    Fixture f;
+    if (!f.ok) return;
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"remove","notes":[0,1,2,3]}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    const auto version = f.app->head().version;
+    f.drag(f.at(0.5, 60), f.at(2, 64));
+    CHECK(f.editor->state().notes.empty());
+    CHECK(f.editor->state().selected.empty());
+    CHECK(f.app->head().version == version);
+}
+
+TEST_CASE("MIDI editor: selected notes painted on top win overlapping hit tests") {
+    Fixture f;
+    if (!f.ok) return;
+    f.exec("midi.edit",
+           R"({"item":")" + f.item +
+               R"(","ops":[{"op":"add","pitch":60,"start":0,"length":1,"velocity":40}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& state = f.editor->state();
+    REQUIRE(state.notes.size() == 5);
+    state.selected = {0};
+    f.frame();
+    f.pointer(ui::PointerEvent::Type::Down, f.at(0.4, 60));
+    CHECK(state.selected == std::set<std::size_t>{0});
+    f.pointer(ui::PointerEvent::Type::Up, f.at(0.4, 60));
+    CHECK(state.selected == std::set<std::size_t>{0});
+}
+
+TEST_CASE("MIDI editor: external note removal cancels a captured drag") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    const ui::Point start = f.at(3.5, 72);
+    f.pointer(ui::PointerEvent::Type::Down, start);
+    REQUIRE(f.editor->state().drag == gui::RollState::Drag::Move);
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[{"op":"remove","notes":[3]}]})");
+    f.frame();
+    CHECK(f.editor->state().drag == gui::RollState::Drag::None);
+    const auto version = f.app->head().version;
+    f.pointer(ui::PointerEvent::Type::Move, {start.x + 20, start.y - 12});
+    f.pointer(ui::PointerEvent::Type::Up, {start.x + 20, start.y - 12});
+    CHECK(f.app->head().version == version);
+    CHECK(f.notes().size() == 3);
+}
+
+TEST_CASE("MIDI editor: closing cancels velocity and CC previews before reopening") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    SUBCASE("velocity") {
+        const ui::Rect lane = f.root->find("midi.velocity")->bounds();
+        f.pointer(ui::PointerEvent::Type::Down, {f.at(0, 60).x, lane.y + 10});
+        REQUIRE(f.editor->state().drag == gui::RollState::Drag::Velocity);
+    }
+    SUBCASE("CC") {
+        const ui::Rect lane = f.root->find("midi.cc")->bounds();
+        f.pointer(ui::PointerEvent::Type::Down, {f.at(1, 60).x, lane.y + 10});
+        REQUIRE_FALSE(f.editor->state().ccDraft.empty());
+    }
+    f.editor->close();
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    CHECK(f.editor->state().drag == gui::RollState::Drag::None);
+    CHECK_FALSE(f.editor->state().velocityNote);
+    CHECK(f.editor->state().ccDraft.empty());
+    const auto version = f.app->head().version;
+    f.pointer(ui::PointerEvent::Type::Move, f.at(2, 60));
+    f.pointer(ui::PointerEvent::Type::Up, f.at(2, 60));
+    CHECK(f.app->head().version == version);
+}
 
 TEST_CASE("MIDI editor: open, draw, select, move, resize, transpose, delete, velocity") {
     Fixture f;
@@ -452,6 +530,22 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     const auto& strips = mixer.strips();
     REQUIRE(strips.size() == 3);
     CHECK(strips[0].type == "channel");  // channels, busses, masters
+    const auto route =
+        f.exec("route.add", R"({"from":")" + strips[0].track + R"(","to":")" + buss + R"("})")["id"]
+            .asString();
+    mixer.sync();
+    auto* send = dynamic_cast<ui::Label*>(f.root->find("mixer.send." + route));
+    REQUIRE(send);
+    const auto originalSend = send->text();
+    auto* originalFader = strips[0].fader;
+    f.exec("route.set", R"({"route":")" + route + R"(","volume_db":-12})");
+    mixer.sync();
+    CHECK(send->text().find("-12.0") != std::string::npos);
+    CHECK(strips[0].fader == originalFader);
+    f.exec("history.undo", "{}");
+    mixer.sync();
+    CHECK(send->text() == originalSend);
+    f.root->frame(false);
     // The masters stay pinned to the right edge; the others start at the left.
     const ui::Rect row = f.root->find("mixer.strips")->bounds();
     CHECK(static_cast<double>(strips[0].node->bounds().x) ==

@@ -261,7 +261,10 @@ void TextArea::undo(bool redo) {
     typingBurst_ = false;
     ensureCaretVisible();
     invalidate();
-    if (onChange) onChange(text_);
+    if (auto callback = onChange) {
+        const std::string text = text_;
+        callback(text);
+    }
 }
 
 void TextArea::replace(std::size_t from, std::size_t to, std::string_view with, bool typing) {
@@ -272,7 +275,10 @@ void TextArea::replace(std::size_t from, std::size_t to, std::string_view with, 
     wantColumn_ = -1;
     ensureCaretVisible();
     invalidate();
-    if (onChange) onChange(text_);
+    if (auto callback = onChange) {
+        const std::string text = text_;
+        callback(text);
+    }
 }
 
 void TextArea::moveTo(std::size_t pos, bool extend, bool keepColumn) {
@@ -398,7 +404,10 @@ bool TextArea::onKey(const KeyEvent& e) {
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
             if (ctrl) {
-                if (onSubmit) onSubmit(text_);
+                if (auto callback = onSubmit) {
+                    const std::string text = text_;
+                    callback(text);
+                }
                 return true;
             }
             // Keep the line's indentation.
@@ -413,8 +422,8 @@ bool TextArea::onKey(const KeyEvent& e) {
             replace(s0, s1, "  ", true);
             return true;
         case SDLK_ESCAPE:
-            if (onCancel) {
-                onCancel();
+            if (auto callback = onCancel) {
+                callback();
                 return true;
             }
             return false;
@@ -479,7 +488,7 @@ void TextArea::onFocus(bool focused) {
         typingBurst_ = false;
     }
     invalidate();
-    if (onFocusChange) onFocusChange(focused);
+    if (auto callback = onFocusChange) callback(focused);
 }
 
 }  // namespace supple::ui

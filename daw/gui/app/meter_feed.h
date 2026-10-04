@@ -26,7 +26,13 @@ class MeterFeed {
     // A meter shows `track`; forget it before the node goes away.
     void attach(const std::string& track, ui::Meter* meter) { meters_[track].push_back(meter); }
     void detach(ui::Meter* meter) {
-        for (auto& [track, list] : meters_) std::erase(list, meter);
+        for (auto it = meters_.begin(); it != meters_.end();) {
+            std::erase(it->second, meter);
+            if (it->second.empty())
+                it = meters_.erase(it);
+            else
+                ++it;
+        }
     }
     void detachAll() { meters_.clear(); }
     // Every frame.

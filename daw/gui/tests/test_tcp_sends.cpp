@@ -299,12 +299,68 @@ TEST_CASE("TCP sends: pooling during a captured drag keeps the original source")
 
 TEST_CASE("TCP sends: overlay survives replacement of its owning view") {
     SendsFixture f;
+    const auto overlays = f.root->overlay().children().size();
+    f.view().installOverlay(*f.root);
+    CHECK(f.root->overlay().children().size() == overlays);
     f.pointer(Pointer::Down, SendsFixture::centre(f.out(f.a).bounds()));
     f.pointer(Pointer::Move, f.target(f.b, true));
     f.root->frame(false);
     f.root->setContent(std::make_unique<ui::Node>("replacement"));
     f.root->frame(false);
     CHECK(f.routes().size() == 0);
+}
+
+TEST_CASE("shell selection sync replaces equal-sized selections and drops deleted items") {
+    SendsFixture f;
+    auto add = [&] {
+        json::Value args = json::Value::object();
+        args["track"] = f.a.str();
+        args["notation"] = "voice a; 1: C4:w";
+        const auto result = f.exec("item.add", std::move(args));
+        auto id = model::Id::parse(result.find("item")->asString());
+        REQUIRE(id);
+        return *id;
+    };
+    const auto a = add(), b = add();
+    f.state.selectedItems = {a.str()};
+    f.sync();
+    CHECK(f.view().gestures().selection() == std::vector<model::Id>{a});
+    f.state.selectedItems = {b.str()};
+    f.sync();
+    CHECK(f.view().gestures().selection() == std::vector<model::Id>{b});
+    json::Value args = json::Value::object();
+    args["item"] = b.str();
+    f.exec("item.remove", std::move(args));
+    f.sync();
+    CHECK(f.view().gestures().selection().empty());
+}
+
+TEST_CASE("TCP rows refresh strip type and depth while keeping the same identity") {
+    SendsFixture f;
+    json::Value args = json::Value::object();
+    args["track"] = f.b.str();
+    args["index"] = 0;
+    f.exec("track.move", std::move(args));
+    f.sync();
+    auto* name = f.view().tcpPanel().controlNode(f.a, "name");
+    REQUIRE(name);
+    const float before = name->bounds().x;
+    args = json::Value::object();
+    args["track"] = f.a.str();
+    args["parent"] = f.b.str();
+    f.exec("track.move", std::move(args));
+    f.sync();
+    CHECK(f.view().tcpPanel().controlNode(f.a, "name") == name);
+    CHECK(name->bounds().x == doctest::Approx(static_cast<double>(before + 14)));
+    auto* arm = f.view().tcpPanel().controlNode(f.a, "arm");
+    REQUIRE(arm);
+    CHECK(arm->visible);
+    args = json::Value::object();
+    args["track"] = f.a.str();
+    args["type"] = "buss";
+    f.exec("track.set", std::move(args));
+    f.sync();
+    CHECK_FALSE(arm->visible);
 }
 
 TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one undo step each)") {

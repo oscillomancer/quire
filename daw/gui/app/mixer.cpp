@@ -21,6 +21,15 @@ std::string dbText(double db) {
     return buf;
 }
 
+std::string sendText(const model::Session& session, const model::Route& route) {
+    std::string to = "?";
+    if (route.to.track)
+        if (const auto* dest = session.tracks.find(*route.to.track))
+            to = dest->name.empty() ? route.to.track->str() : dest->name;
+    if (route.to.fx) to = route.to.fx->str() + " key";
+    return "→ " + to + " " + dbText(route.volumeDb);
+}
+
 // A run of strips side by side from `scroll` on (the scrolled ones clip).
 class StripGroup : public ui::Node {
   public:
@@ -232,10 +241,18 @@ std::string Mixer::structure() const {
                t->color + ":";
         for (model::Id fx : t->chain) {
             const model::FxInstance* f = s.fx.find(fx);
-            out += fx.str() + (f && (f->bypass || f->offline) ? "-" : "") + ",";
+            out += fx.str() + ",";
+            if (f)
+                out += std::to_string(f->bypass) + std::to_string(f->offline) + ":" +
+                       std::to_string(f->label.size()) + ":" + f->label + ":" +
+                       std::to_string(f->plugin.name.size()) + ":" + f->plugin.name;
         }
         for (const auto& e : s.routes)
-            if (e.value->from.track == id) out += e.id.str() + ",";
+            if (e.value->from.track == id) {
+                out += e.id.str() + "," + std::to_string(e.value->mute);
+                if (e.value->to.track) out += e.value->to.track->str();
+                if (e.value->to.fx) out += e.value->to.fx->str();
+            }
         out += ";";
         for (model::Id child : t->children) walk(child);
     };
@@ -338,14 +355,8 @@ void Mixer::rebuild() {
         for (const auto& e : s.routes) {
             if (e.value->from.track != id || shown == 2) continue;
             ++shown;
-            std::string to = "?";
-            if (e.value->to.track)
-                if (const model::Track* d = s.tracks.find(*e.value->to.track))
-                    to = d->name.empty() ? e.value->to.track->str() : d->name;
-            if (e.value->to.fx) to = e.value->to.fx->str() + " key";
             sends
-                .emplace<ui::Label>("mixer.send." + e.id.str(),
-                                    "→ " + to + " " + dbText(e.value->volumeDb), ui::Font::Ui,
+                .emplace<ui::Label>("mixer.send." + e.id.str(), sendText(s, *e.value), ui::Font::Ui,
                                     "caption", e.value->mute ? "ink-faint" : "ink-quiet")
                 .layout.height = ui::SizeRule::fixed(14);
         }
@@ -433,6 +444,12 @@ void Mixer::update() {
         if (!st.fader->dragging()) {
             st.fader->setValue(t->volumeDb);
             st.value->setText(dbText(t->volumeDb));
+        }
+        for (const auto& route : s.routes) {
+            if (route.value->from.track != *id) continue;
+            auto* label = dynamic_cast<ui::Label*>(st.node->find("mixer.send." + route.id.str()));
+            if (!label) continue;
+            label->setText(sendText(s, *route.value));
         }
         st.pan->setValue(t->pan);
         st.mute->setOn(t->mute);

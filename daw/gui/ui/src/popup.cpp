@@ -40,7 +40,8 @@ class MenuList : public List {
             const MenuItem& item = items_[i];
             if (item.separator || !item.enabled) return;
             auto run = item.run;  // the menu is destroyed by close
-            if (close_) close_();
+            auto close = close_;
+            if (close) close();
             if (run) run();
         };
     }
@@ -55,7 +56,11 @@ class MenuList : public List {
     bool onPointer(const PointerEvent& e) override {
         // A single click activates a menu row (lists need a double click).
         if (e.type == PointerEvent::Type::Up && e.button == 1 && selected()) {
-            if (bounds().contains(e.pos)) onActivate(*selected());
+            if (bounds().contains(e.pos)) {
+                const auto row = *selected();
+                auto activate = onActivate;
+                activate(row);
+            }
             return true;
         }
         if (e.type == PointerEvent::Type::Move && bounds().contains(e.pos)) {

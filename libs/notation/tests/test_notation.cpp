@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <sstream>
 
@@ -32,6 +33,51 @@ std::string dump(const supple::midi::Sequence& sequence) {
     return out.str();
 }
 }  // namespace
+
+TEST_CASE("notation rejects overflowing positions and invalid compile contexts") {
+    CompileContext context;
+    context.ppq = 0;
+    CHECK_FALSE(compile("voice a; 1: C4:q", context));
+    CHECK_FALSE(compile("meter -4294967292/4; voice a; 1: C4:q"));
+    CHECK_FALSE(compile("length 1+9223372036854775807t; voice a; 1: C4:q"));
+    CHECK_FALSE(compile("lane cc 1 ch 1; 1.1+9223372036854775807t 80"));
+}
+
+TEST_CASE("notation decompiler validates event ranges and every used meter") {
+    supple::midi::Sequence sequence;
+    sequence.length = 7680;
+    SUBCASE("note end overflow") {
+        sequence.notes = {{std::numeric_limits<std::int64_t>::max(), 1, 0, 60, 100, 0}};
+        CHECK_FALSE(decompile(sequence));
+    }
+    SUBCASE("control kind") {
+        sequence.controls = {{0, static_cast<supple::midi::ControlKind>(255), 0, 0, 1}};
+        CHECK_FALSE(decompile(sequence));
+    }
+    SUBCASE("control value") {
+        sequence.controls = {{0, supple::midi::ControlKind::CC, 0, 1, 128}};
+        CHECK_FALSE(decompile(sequence));
+    }
+    SUBCASE("sysex framing") {
+        sequence.sysex = {{0, {0xf0, 0x01}}};
+        CHECK_FALSE(decompile(sequence));
+    }
+    SUBCASE("invalid later meter") {
+        DecompileOptions options;
+        options.meterAt = [](int bar) { return supple::midi::Meter{4, bar == 1 ? 4 : 0}; };
+        CHECK_FALSE(decompile(sequence, options));
+    }
+}
+
+TEST_CASE("notation round trips the final supported bar boundary") {
+    supple::midi::Sequence sequence;
+    sequence.length = 100000LL * 3840;
+    auto written = decompile(sequence);
+    REQUIRE(written);
+    auto compiled = compile(*written);
+    REQUIRE(compiled);
+    CHECK(compiled->sequence == sequence);
+}
 
 TEST_CASE("valid notation corpus matches event listings") {
     const auto root = std::filesystem::path(NOTATION_CORPUS_DIR) / "valid";

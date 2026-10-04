@@ -55,7 +55,8 @@ bool ScrollBar::onPointer(const PointerEvent& e) {
     const Rect b = bounds();
     auto emit = [&](float v) {
         setValue(v);
-        if (onScroll) onScroll(value_);
+        auto callback = onScroll;
+        if (callback) callback(value_);
     };
     switch (e.type) {
         case PointerEvent::Type::Down: {
@@ -74,6 +75,7 @@ bool ScrollBar::onPointer(const PointerEvent& e) {
                 const float origin = vertical ? b.y : b.x;
                 const float travel = std::max(1.0f, track - length);
                 emit((along - *grab_ - origin) / travel * maxValue());
+                return true;
             }
             return grab_.has_value();
         case PointerEvent::Type::Up:
@@ -108,7 +110,8 @@ void List::select(std::optional<std::size_t> row, bool notify) {
     selected_ = row;
     if (row) scrollTo(*row);
     invalidate();
-    if (notify && row && onSelect) onSelect(*row);
+    auto callback = onSelect;
+    if (notify && row && callback) callback(*row);
 }
 
 void List::scrollTo(std::size_t row) {
@@ -172,8 +175,9 @@ bool List::onPointer(const PointerEvent& e) {
             if (e.button != 1) return false;
             const auto row = rowAt(e.pos);
             if (!row) return true;
+            auto activate = onActivate;
             select(*row, true);
-            if (e.clicks >= 2 && onActivate) onActivate(*row);
+            if (e.clicks >= 2 && activate) activate(*row);
             return true;
         }
         case PointerEvent::Type::Wheel:
@@ -186,8 +190,8 @@ bool List::onPointer(const PointerEvent& e) {
 
 bool List::onKey(const KeyEvent& e) {
     if (count_ == 0) return false;
-    const std::size_t page =
-        std::max<std::size_t>(1, static_cast<std::size_t>(bounds().h / rowHeight) - 1);
+    const std::size_t page = static_cast<std::size_t>(
+        std::max(1.0f, rowHeight > 0 ? std::floor(bounds().h / rowHeight) - 1 : 1.0f));
     const std::size_t cur = selected_.value_or(0);
     switch (e.key) {
         case SDLK_DOWN:
@@ -209,9 +213,12 @@ bool List::onKey(const KeyEvent& e) {
             select(count_ - 1, true);
             return true;
         case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-            if (selected_ && onActivate) onActivate(*selected_);
-            return selected_.has_value();
+        case SDLK_KP_ENTER: {
+            const auto row = selected_;
+            auto activate = onActivate;
+            if (row && activate) activate(*row);
+            return row.has_value();
+        }
         default:
             return false;
     }

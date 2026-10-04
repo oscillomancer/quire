@@ -25,6 +25,14 @@ double nowMs() {
     return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
 }
 
+bool draggingSlider(const ui::Node& node) {
+    if (const auto* slider = dynamic_cast<const ui::Slider*>(&node); slider && slider->dragging())
+        return true;
+    for (const auto& child : node.children())
+        if (draggingSlider(*child)) return true;
+    return false;
+}
+
 // A chain row: paints its selection, selects the effect on a left press and
 // reorders with Alt+Up / Alt+Down (fx.move).
 class Row : public ui::Node {
@@ -46,7 +54,7 @@ class Row : public ui::Node {
     }
     bool onPointer(const ui::PointerEvent& e) override {
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
-            if (onSelect_) onSelect_();
+            if (auto callback = onSelect_) callback();
             return true;
         }
         return e.type == ui::PointerEvent::Type::Up;
@@ -54,11 +62,13 @@ class Row : public ui::Node {
     bool onKey(const ui::KeyEvent& e) override {
         if (!onMove_ || !(e.mods & ui::kAlt)) return false;
         if (e.key == SDLK_UP) {
-            onMove_(-1);
+            auto callback = onMove_;
+            callback(-1);
             return true;
         }
         if (e.key == SDLK_DOWN) {
-            onMove_(1);
+            auto callback = onMove_;
+            callback(1);
             return true;
         }
         return false;
@@ -242,6 +252,7 @@ Status FxWindow::open(model::Id track) {
     if (!app_.head().tracks.find(track))
         return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
     track_ = track;
+    pendingChain_ = "main";
     take_.reset();
     selected_ = {};
     tab_ = Tab::Chain;
@@ -406,8 +417,14 @@ void FxWindow::select(model::Id fx) {
     choosePresetChain(std::find(input.begin(), input.end(), fx) != input.end());
     if (tab_ == Tab::Params)
         refresh();
-    else
+    else {
+        if (body_)
+            for (const auto& child : body_->children())
+                if (auto* row = dynamic_cast<Row*>(child.get()))
+                    row->selected =
+                        row->id() == "fx.row." + fx.str() || row->id() == "ifx.row." + fx.str();
         root_.damageAll();
+    }
 }
 
 void FxWindow::showChainTab() {
@@ -422,9 +439,14 @@ void FxWindow::showParamsTab() {
 
 void FxWindow::refresh() {
     if (!page_) return;
+    if (body_ && draggingSlider(*body_)) return;  // keep capture and previews until release
+    gesture_.clear();
     const std::string focusId = root_.focused() ? root_.focused()->id() : std::string();
     const model::Track* track = app_.head().tracks.find(track_);
     if (!track) {
+        body_->clear();
+        selected_ = {};
+        shownVersion_ = app_.head().version;
         setStatus("the track is gone");
         return;
     }
@@ -573,7 +595,10 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
                 gesture_.clear();
                 return;
             }
-            if (g == ui::Gesture::Begin) gesture_ = "fx.wet:" + fx.str();
+            if (g == ui::Gesture::Begin) {
+                gesture_ = "fx.wet:" + fx.str() + ":" + std::to_string(++gestureSerial_);
+                return;
+            }
             const double percent = 100.0 * normalized;
             char text[24];
             std::snprintf(text, sizeof text, "wet %3.0f%%", percent);

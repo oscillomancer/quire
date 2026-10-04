@@ -145,6 +145,10 @@ class Compiler {
     }
 
     Result<Compiled> run() {
+        if (result_.sequence.ppq < 1 || result_.sequence.ppq > 32767) {
+            add("syntax", "Invalid host PPQ.", Token{"ppq", 1, 1}, "Use PPQ 1..32767.");
+            return errorResult();
+        }
         parseStructure();
         if (!errors_.empty()) return errorResult();
         const int meterLimit = std::max(maxBar_, length_ ? length_->first + 1 : 1);
@@ -170,12 +174,27 @@ class Compiler {
             if (ticks >= internal::barTicks(meter(bars + 1), result_.sequence.ppq))
                 add("syntax", "Length tick remainder must be less than one bar.", lengthToken_,
                     "Increase the whole-bar count and reduce the tick remainder.");
-            result_.sequence.length = barStart(bars + 1) + ticks;
+            if (!errors_.empty()) return errorResult();
+            const auto start = barStart(bars + 1);
+            if (!errors_.empty()) return errorResult();
+            if (ticks > std::numeric_limits<std::int64_t>::max() - start) {
+                add("bad_duration", "Item length overflows tick time.", lengthToken_,
+                    "Use a shorter pickup or length.");
+                return errorResult();
+            }
+            result_.sequence.length = start + ticks;
         } else {
             result_.sequence.length = barStart(maxBar_ + 1);
-            while (result_.sequence.length < eventEnd && maxBar_ < 100000)
-                result_.sequence.length +=
-                    internal::barTicks(meter(++maxBar_), result_.sequence.ppq);
+            if (!errors_.empty()) return errorResult();
+            while (result_.sequence.length < eventEnd && maxBar_ < 100000) {
+                const auto span = internal::barTicks(meter(++maxBar_), result_.sequence.ppq);
+                if (span > std::numeric_limits<std::int64_t>::max() - result_.sequence.length) {
+                    add("bad_duration", "Item length overflows tick time.", lengthToken_,
+                        "Use a shorter pickup or duration.");
+                    return errorResult();
+                }
+                result_.sequence.length += span;
+            }
         }
         if (result_.sequence.length < eventEnd)
             add("length_short", "Item length ends before the last event.", lengthToken_,
@@ -227,11 +246,18 @@ class Compiler {
         if (it == meterChanges_.begin()) return firstMeter_;
         return std::prev(it)->second;
     }
-    std::int64_t barStart(int bar) const {
+    std::int64_t barStart(int bar) {
         if (bar <= 0) return 0;
         std::int64_t tick = result_.pickupTicks;
-        for (int b = 1; b < bar && b < 100000; ++b)
-            tick += internal::barTicks(meter(b), result_.sequence.ppq);
+        for (int b = 1; b < bar && b <= 100000; ++b) {
+            const auto span = internal::barTicks(meter(b), result_.sequence.ppq);
+            if (span > std::numeric_limits<std::int64_t>::max() - tick) {
+                add("bad_duration", "Bar position overflows tick time.", Token{"pickup", 1, 1},
+                    "Use a shorter pickup.");
+                return 0;
+            }
+            tick += span;
+        }
         return tick;
     }
     std::int64_t lastEventEnd() const {
@@ -374,7 +400,7 @@ class Compiler {
                 auto d = slash != std::string::npos
                              ? internal::integer(std::string_view(t[1].text).substr(slash + 1))
                              : std::nullopt;
-                if (!n || !d || *n > 64 || *d > 64 ||
+                if (!n || !d || *n < 1 || *d < 1 || *n > 64 || *d > 64 ||
                     !validMeter({static_cast<int>(*n), static_cast<int>(*d)})) {
                     add("syntax", "Invalid meter.", t[0],
                         "Use meter N/D with a power-of-two denominator.");
@@ -706,15 +732,20 @@ class Compiler {
                 "Use a beat with a whole-tick onset, or use beat 1 with a tick offset.");
             return std::nullopt;
         }
-        const auto within = beatNumerator / m.denominator + *offset;
-        if (within >= internal::barTicks(m, result_.sequence.ppq)) {
+        const auto beatOffset = beatNumerator / m.denominator;
+        if (*offset >= internal::barTicks(m, result_.sequence.ppq) - beatOffset) {
             add("position", "Tick offset exceeds this bar.", token,
                 "Use an offset that stays within the bar.");
             return std::nullopt;
         }
+        const auto within = beatOffset + *offset;
         maxBar_ = std::max(maxBar_, static_cast<int>(*bar));
-        return std::pair<int, std::int64_t>{static_cast<int>(*bar),
-                                            barStart(static_cast<int>(*bar)) + within};
+        const auto start = barStart(static_cast<int>(*bar));
+        if (within > std::numeric_limits<std::int64_t>::max() - start) {
+            add("position", "Position overflows tick time.", token, "Use a shorter pickup.");
+            return std::nullopt;
+        }
+        return std::pair<int, std::int64_t>{static_cast<int>(*bar), start + within};
     }
 
     std::optional<std::vector<int>> chord(std::string_view text, int octave, const Token& at) {
@@ -989,12 +1020,25 @@ class Compiler {
                             "Use ., -, x, X, o, or 1..9.");
                         continue;
                     }
-                    if (vel != 0)
-                        result_.sequence.notes.push_back(
-                            {barStart(bar) + static_cast<std::int64_t>(i) * voice.step,
-                             voice.hitLength, static_cast<std::uint8_t>(voice.channel),
-                             static_cast<std::uint8_t>(pitchValue), static_cast<std::uint8_t>(vel),
-                             0});
+                    if (vel != 0) {
+                        const auto base = barStart(bar);
+                        const auto offset = static_cast<std::int64_t>(i) * voice.step;
+                        if (offset > std::numeric_limits<std::int64_t>::max() - base) {
+                            add("bad_duration", "Grid note start overflows tick time.", row[0],
+                                "Use a shorter pickup.");
+                            continue;
+                        }
+                        const auto start = base + offset;
+                        if (voice.hitLength > std::numeric_limits<std::int64_t>::max() - start) {
+                            add("bad_duration", "Grid note duration overflows tick time.", row[0],
+                                "Use a shorter hit length.");
+                            continue;
+                        }
+                        result_.sequence.notes.push_back({start, voice.hitLength,
+                                                          static_cast<std::uint8_t>(voice.channel),
+                                                          static_cast<std::uint8_t>(pitchValue),
+                                                          static_cast<std::uint8_t>(vel), 0});
+                    }
                 }
             }
         }

@@ -21,17 +21,6 @@
 namespace supple::views {
 namespace {
 
-// The node's rect in window coordinates: a popup anchors against these, and
-// every node's bounds are relative to its parent (root.h's popups).
-ui::Rect absoluteRect(const ui::Node& node) {
-    ui::Rect r = node.bounds();
-    for (const ui::Node* p = node.parent(); p; p = p->parent()) {
-        r.x += p->bounds().x;
-        r.y += p->bounds().y;
-    }
-    return r;
-}
-
 std::string_view typeToken(model::StripType t) {
     switch (t) {
         case model::StripType::Channel:
@@ -273,11 +262,11 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
     });
     input_ = &emplace<ui::Button>(id + ".input", "in \u2014", [this] {
         if (!track_ || !panel_.cb_.pickInput) return;
-        panel_.cb_.pickInput(*track_, absoluteRect(*input_));
+        panel_.cb_.pickInput(*track_, input_->bounds());
     });
     env_ = &emplace<ui::Button>(id + ".env", "env", [this] {
         if (!track_ || !panel_.cb_.envelopes) return;
-        panel_.cb_.envelopes(*track_, absoluteRect(*env_));
+        panel_.cb_.envelopes(*track_, env_->bounds());
     });
     out_ = &emplace<OutButton>(panel_, id + ".out", [this] { return track_; });
 }
@@ -299,6 +288,9 @@ void TcpPanel::Row::bind(const model::Id& track, int depth, const model::Track& 
 void TcpPanel::Row::refresh(const model::Session& session) {
     const model::Track* tr = track_.has_value() ? session.tracks.find(*track_) : nullptr;
     if (!tr) return;
+    channel_ = tr->type == model::StripType::Channel;
+    if (const auto row = panel_.layout_.indexOf(*track_))
+        depth_ = panel_.layout_.rows()[*row].depth;
     const std::string name =
         tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name;
     name_->setText(name);
@@ -697,6 +689,7 @@ class TcpPanel::EnvRow : public ui::Node {
 
 void TcpPanel::setSession(const model::Session& session) {
     session_ = session;
+    rearrange_ = true;
     bindRows();
     for (Row* row : rows_)
         if (row->visible && row->bound()) row->refresh(session_);

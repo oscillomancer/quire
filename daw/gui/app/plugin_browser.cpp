@@ -184,7 +184,7 @@ PluginBrowser::RowText PluginBrowser::rowText(std::size_t row) const {
 // not use, which is why it is called out.
 void PluginBrowser::updateDetail() {
     std::string text;
-    if (const auto row = list_->selected(); row && *row < rows_.size()) {
+    if (const auto row = list_ ? list_->selected() : std::nullopt; row && *row < rows_.size()) {
         const Entry& entry = *rows_[*row].entry;
         text = entry.path;
         if (entry.shadowed) text += "  — shadowed: the first copy on the plugin path wins";
@@ -205,6 +205,8 @@ void PluginBrowser::open(std::function<void(const std::string&)> onAdd) {
         search_ = nullptr;
         list_ = nullptr;
         status_ = nullptr;
+        detailLabel_ = nullptr;
+        scanPending_ = false;
     });
 }
 

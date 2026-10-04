@@ -36,9 +36,14 @@ TEST_CASE("an offscreen window draws with GL and NanoVG and reads back its pixel
         MESSAGE("skipped: no offscreen GL here: " << platform.error().message);
         return;
     }
-    auto window = gui::Window::open(**platform, {"test", 64, 48, true});
+    gui::WindowOptions options{"test", 64, 48, true};
+    options.resizable = false;
+    options.utility = true;
+    auto window = gui::Window::open(**platform, options);
     REQUIRE_MESSAGE(window, (window ? "" : window.error().message));
     gui::Window& w = **window;
+    CHECK((SDL_GetWindowFlags(w.sdl()) & SDL_WINDOW_RESIZABLE) == 0);
+    CHECK((SDL_GetWindowFlags(w.sdl()) & SDL_WINDOW_UTILITY) != 0);
     CHECK(w.x11Window() == 0);  // offscreen: nothing to parent plugin editors to
     auto fonts = gui::loadFonts(w.vg(), SUPPLE_GUI_FONTS_DIR);
     REQUIRE_MESSAGE(fonts, (fonts ? "" : fonts.error().message));
@@ -73,4 +78,12 @@ TEST_CASE("the platform wake event can be pushed from another thread") {
             break;
         }
     CHECK(woke);
+}
+
+TEST_CASE("PNG encoding refuses invalid dimensions and truncated RGBA data") {
+    CHECK(gui::encodePng({0, 1, {}}).empty());
+    CHECK(gui::encodePng({-1, 1, {}}).empty());
+    CHECK(gui::encodePng({1, 1, {0, 0, 0}}).empty());
+    CHECK(gui::encodePng({1, 1, {0, 0, 0, 0, 0}}).empty());
+    CHECK_FALSE(gui::writePng("/tmp/supple-invalid-image.png", {1, 1, {}}));
 }

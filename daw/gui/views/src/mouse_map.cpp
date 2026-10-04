@@ -103,8 +103,10 @@ MouseMap::MouseMap() {
 std::string_view MouseMap::behaviour(std::string_view context, unsigned mods) const {
     const Context* c = MouseMap::context(context);
     if (!c) return {};
-    if (const auto it = map_.find(context); it != map_.end())
+    if (const auto it = map_.find(context); it != map_.end()) {
         if (const auto b = it->second.find(mods & kMods); b != it->second.end()) return b->second;
+        if (const auto plain = it->second.find(0); plain != it->second.end()) return plain->second;
+    }
     return c->behaviours.front();
 }
 

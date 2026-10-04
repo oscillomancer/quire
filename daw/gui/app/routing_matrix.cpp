@@ -424,13 +424,18 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     channels_->layout.width = ui::SizeRule::fixed(96);
     phase_ = &details_->emplace<ui::Button>("routing.phase", "\u00f8", [this] {
         for (const auto& x : model_.sends)
-            if (selected_ && x.id == *selected_)
+            if (selected_ && x.id == *selected_) {
                 setSend("phase_invert", json::Value(!x.phaseInvert));
+                return;  // reload replaced model_.sends
+            }
     });
     phase_->layout.width = ui::SizeRule::fixed(44);
     mute_ = &details_->emplace<ui::Button>("routing.mute", "Mute", [this] {
         for (const auto& x : model_.sends)
-            if (selected_ && x.id == *selected_) setSend("mute", json::Value(!x.mute));
+            if (selected_ && x.id == *selected_) {
+                setSend("mute", json::Value(!x.mute));
+                return;  // reload replaced model_.sends
+            }
     });
     details_->emplace<ui::Button>("routing.remove", "Remove", [this] {
         if (!selected_) return;

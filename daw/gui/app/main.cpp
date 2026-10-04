@@ -859,14 +859,6 @@ int main(int argc, char** argv) {
                 if (o.frames == 0) ++drawn;
             }
         }
-        // Selection changed by actions (or the history) reaches the gesture layer.
-        if (auto& g = shell.arrange()->gestures();
-            g.selection().size() != uiState.selectedItems.size()) {
-            std::vector<model::Id> ids;
-            for (const auto& s : uiState.selectedItems)
-                if (auto id = model::Id::parse(s)) ids.push_back(*id);
-            g.setSelection(std::move(ids));
-        }
         SDL_Event e;
         int wait = next;
         if (o.frames == 0 && shell.arrange()->playing() && (wait < 0 || wait > 16)) wait = 16;
