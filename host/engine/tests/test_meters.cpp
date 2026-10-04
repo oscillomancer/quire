@@ -26,6 +26,7 @@ MeterEntry block(std::uint16_t slot, std::uint64_t epoch, std::int64_t stream, s
                  float peak) {
     MeterEntry e;
     e.slot = slot;
+    e.generation = 1;
     e.epoch = epoch;
     e.stream = stream;
     e.frames = frames;
@@ -208,4 +209,32 @@ TEST_CASE("a strip the newest plan no longer has is not reported") {
     bank.endPlan();
     CHECK(bank.read(1, kHeardEverything).empty());
     CHECK(bank.pendingEntries() == 0);
+}
+
+TEST_CASE("rapid plans reject queued entries from a reused meter generation") {
+    MeterBank bank;
+    bank.beginPlan();
+    const auto oldSlot = bank.slotFor(track(1));
+    bank.endPlan();
+    auto old = block(oldSlot, 1, 0, 128, 1);
+    old.generation = bank.generationFor(oldSlot);
+    REQUIRE(bank.pushRenderer(old));
+    for (int i = 0; i < 2; ++i) {
+        bank.beginPlan();
+        bank.endPlan();
+    }
+    bank.beginPlan();
+    const auto slot = bank.slotFor(track(2));
+    bank.endPlan();
+    REQUIRE(slot == oldSlot);
+    REQUIRE(bank.generationFor(slot) != old.generation);
+    REQUIRE(bank.pushCallback(old));  // an executor can still have the old plan
+    auto reading = bank.read(1, kHeardEverything);
+    REQUIRE(find(reading, track(2)));
+    CHECK(find(reading, track(2))->peak[0] == 0);
+    auto current = block(slot, 1, 0, 128, .25f);
+    current.generation = bank.generationFor(slot);
+    REQUIRE(bank.pushRenderer(current));
+    reading = bank.read(1, kHeardEverything);
+    CHECK(find(reading, track(2))->peak[0] == .25f);
 }

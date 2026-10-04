@@ -3,13 +3,13 @@
 // The session is compiled into a plan: tracks in topological order (sources
 // before the tracks they feed, the master last), each track summing its
 // inputs (routes and children's parent sends, in a fixed order), playing its
-// MIDI items into its FX chain, then width, volume, pan (project pan law) and
-// mute. Routes tap pre-FX, pre-fader or post-fader. Plugin delay
+// MIDI items into its FX chain, then its typed Console 9 strip stages and
+// fader/pan/mute (ADR-0019). Routes tap pre-FX, pre-fader or post-fader. Plugin delay
 // compensation aligns every track's inputs by delaying edges, shifts a
 // track's own item events by its input latency, and discards the master's
 // total latency, so the output lines up with the timeline to the sample.
 //
-// Deterministic: fixed summation order, one audio thread, fixed block size.
+// Deterministic: fixed summation order, independent of worker scheduling.
 #pragma once
 
 #include <atomic>

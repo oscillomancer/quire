@@ -235,6 +235,7 @@ struct Edge {
     FaderControl fader;
     Stereo encoded;
     Delay delay;
+    bool preserveDelayOnLocate = false;
     Stereo tmp;
     // Channel pairs that touch a strip's auxiliary channels (ADR-0020, 0-based
     // channels: 0/1 the main pair): linear, at the route's level, mute and
@@ -245,6 +246,7 @@ struct Edge {
     struct AuxLink {
         int from = 0, to = 0;
         MonoDelay delay;
+        bool preserveDelayOnLocate = false;
     };
     std::vector<AuxLink> auxLinks;
     bool auxOnly = false;
@@ -277,6 +279,7 @@ struct Stage {
     Id fx;
     std::vector<ParamLane> lanes;
     bool bypass = false, instrument = false;
+    bool callbackBypass = false;  // synchronous bridges never run on the device thread
     double wet = 1.0;
     // The wet level applied at the end of the last block (-1: none yet) and
     // a ramp toward the target (0 when bypassed): a bypass or wet change
@@ -364,7 +367,7 @@ struct Node {
     std::vector<std::size_t> out;  // source-owned send encoders
     std::vector<Stage> chain;
     std::int64_t latIn = 0, latChain = 0;
-    Stereo sum, preFx, preFader, post;
+    Stereo sum, preFx, preFader, post, postKey;
     std::vector<TimedEvent> events;
     std::size_t nextEvent = 0;
     // Notes delivered and not yet ended, per MIDI channel and key; a loop
@@ -379,9 +382,12 @@ struct Node {
     model::StripType type = model::StripType::Channel;
     bool mute = false, master = false, decodeInput = false;
     bool soloSilenced = false;
+    bool postKeyed = false;
     ConsoleStage<console9::Buss> decoder;
     ConsoleStage<console9::Channel> encoder;
     FaderControl fader;
+    ConsoleStage<console9::Channel> keyEncoder;
+    FaderControl keyFader;  // mute/fader/pan without audible-send solo suppression
     // Input monitoring (ADR-0014): the device inputs this track hears (0-based;
     // one = mono to both sides), and whether it is live (monitors, or is fed
     // by a node that does).
@@ -401,6 +407,7 @@ struct Node {
     // is measured into (0xFFFF: unmetered), and the last block's measurements,
     // written by processNode on whichever executor processed it.
     std::uint16_t meterSlot = 0xffff;
+    std::uint64_t meterGeneration = 0;
     float meterPeak[2] = {0.0f, 0.0f};
     float meterSumSq[2] = {0.0f, 0.0f};
 };
@@ -513,7 +520,8 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT;
 // the renderer, and its instance was reset on the way).
 void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
 // A plan swap (the 10 ms crossfade on structural swaps, engine.md §2): the
-// Console 9 state, fader ramps and stage wet levels carry into the new
+// Console 9 state, fader ramps, stage wet levels and matching dry/channel
+// delay histories carry into the new
 // one's matching nodes (by track) and stages (by instance), so a changed
 // value ramps from where the old plan left it. `liveClass` as for wrapTo.
 void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT;

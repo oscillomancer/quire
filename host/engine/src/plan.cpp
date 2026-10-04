@@ -59,29 +59,35 @@ std::vector<TimedEvent> trackEvents(const Session& s, Id track, double startSeco
         const double startBeat = span.startBeat, endSec = span.endSec;
         const double rateScale = take->playrate > 0 ? take->playrate : 1.0;
         const double loopBeats = seq.ppq > 0 ? static_cast<double>(seq.length) / seq.ppq : 0.0;
+        const bool looping = it.loop && loopBeats > 0;
+        const double sourceOffset =
+            looping ? std::fmod(take->startOffset, loopBeats) : take->startOffset;
         auto toSample = [&](double contentBeat, double loopOffset) -> std::optional<std::int64_t> {
-            const double itemBeat = (contentBeat - take->startOffset) / rateScale + loopOffset;
+            const double itemBeat = (contentBeat + loopOffset - sourceOffset) / rateScale;
             if (itemBeat < 0) return std::nullopt;
             const double sec = tm.secondsAt(startBeat + itemBeat);
             return time::samplesAt(std::min(sec, endSec), rate) - origin;
         };
         const std::int64_t endSample = time::samplesAt(endSec, rate) - origin;
-        const int reps = it.loop && loopBeats > 0
-                             ? 1 + static_cast<int>(std::floor((tm.beatAt(endSec) - startBeat) *
-                                                               rateScale / loopBeats))
-                             : 1;
-        for (int k = 0; k < reps; ++k) {
-            const double offset = k * loopBeats / rateScale;
+        const int reps =
+            looping
+                ? 1 + static_cast<int>(std::floor(
+                          ((tm.beatAt(endSec) - startBeat) * rateScale + sourceOffset) / loopBeats))
+                : 1;
+        // Include the previous cycle so a note-off that spans the source
+        // boundary can end the voice retriggered at the item's start.
+        for (int k = looping ? -1 : 0; k < reps; ++k) {
+            const double offset = k * loopBeats;
             for (const midi::Note& n : seq.notes) {
-                if (k > 0 && n.start >= seq.length) continue;
+                if (looping && n.start >= seq.length) continue;
                 const double b0 = static_cast<double>(n.start) / seq.ppq;
                 auto on = toSample(b0, offset);
                 // A take can start in the middle of a note (for example after
                 // item.split). Retrigger the held note at the item's boundary.
                 if (!on) {
-                    if (static_cast<double>(n.start + n.length) / seq.ppq <= take->startOffset)
+                    if (static_cast<double>(n.start + n.length) / seq.ppq + offset <= sourceOffset)
                         continue;
-                    on = time::samplesAt(tm.secondsAt(startBeat + offset), rate) - origin;
+                    on = time::samplesAt(tm.secondsAt(startBeat), rate) - origin;
                 }
                 if (*on >= endSample) continue;
                 auto off = toSample(static_cast<double>(n.start + n.length) / seq.ppq, offset);
@@ -166,7 +172,7 @@ Result<std::vector<Id>> topoOrder(const Session& s) {
     for (const auto& e : s.routes) {
         const model::Route& r = *e.value;
         const std::optional<Id> to = r.to.fx ? model::trackOfFx(s, *r.to.fx) : r.to.track;
-        if (r.from.track && to && !r.mute) link(*r.from.track, *to);
+        if (r.from.track && to) link(*r.from.track, *to);
     }
     std::set<Id> ready;
     for (const auto& [id, d] : indeg)
@@ -275,6 +281,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                                                          : console9::faderGain(t.volumeDb);
         n.staticPan = console9::nativePan(t.pan);
         n.encoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 1), p.linearConsole);
+        n.keyEncoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 1), p.linearConsole);
         n.decoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 2), p.linearConsole);
         n.mute = t.mute;
         auto makeStage = [&](Id fxId) {
@@ -664,6 +671,9 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         const auto salt = std::rotl(source.id.n, 32) ^ ((e.route->n << 3) | 3);
         e.encoder.init(console9::seedsFor(s.project->seed, salt), p.linearConsole);
     }
+    for (const Edge& edge : p.edges)
+        if (edge.stage >= 0 && edge.tap == model::Tap::PostFader)
+            p.nodes[edge.from].postKeyed = true;
     SUPPLE_TRY(checkStrips(p));
     return p;
 }
@@ -757,6 +767,7 @@ Status prepare(Plan& p, const Session& s) {
         n.preFx.init(block);
         n.preFader.init(block);
         n.post.init(block);
+        if (n.postKeyed) n.postKey.init(block);
     }
     // Latency compensation, in topological order. A key lines up with its
     // stage's input: the node's input latency plus the stages before it.
@@ -975,7 +986,12 @@ Status prepare(Plan& p, const Session& s) {
                 }
                 lanes += block / kAutomationStep + 2 + pts;
             }
-            st.blockEvents.reserve(windowMax + 1 + lanes);
+            const bool noteTarget =
+                n.noteTarget >= 0 && &st == &n.chain[static_cast<std::size_t>(n.noteTarget)];
+            const std::size_t notes =
+                noteTarget ? 16 * 128 : 0;  // releases at a wrap or route edit
+            const std::size_t live = noteTarget && n.midiIn ? kMaxMidiInputEvents : 0;
+            st.blockEvents.reserve(windowMax + 1 + lanes + notes + live);
         }
     }
     // The node graph for the worker pool: a node waits for its edges' sources.
@@ -1032,7 +1048,7 @@ host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange*
     t.tempo = p.timeMap->bpmAt(beat);
     t.beat = beat;
     t.barStartBeat = p.timeMap->beatOfBar(bb.bar);
-    t.bar = bb.bar - 1;
+    t.bar = bb.bar == std::numeric_limits<int>::min() ? bb.bar : bb.bar - 1;
     t.numerator = static_cast<std::uint16_t>(meter.numerator);
     t.denominator = static_cast<std::uint16_t>(meter.denominator);
     t.seconds = seconds;
@@ -1083,6 +1099,7 @@ Status checkStrips(const Plan& p) {
 const Stereo& edgeSignal(const Plan& p, const Edge& e) SUPPLE_RT {
     if (e.encode) return e.encoded;
     const Node& src = p.nodes[e.from];
+    if (e.stage >= 0 && e.tap == model::Tap::PostFader) return src.postKey;
     return e.tap == model::Tap::PreFx      ? src.preFx
            : e.tap == model::Tap::PreFader ? src.preFader
                                            : src.post;
@@ -1167,10 +1184,10 @@ void playClip(const Clip& c, Stereo& into, std::int64_t pos, std::uint32_t n,
     }
 }
 
-// Plugin parameter automation: values at the block start, every
-// kAutomationStep samples and at each point, in time order (the lane's
+// Plugin parameter automation: an initial value, the absolute timeline
+// kAutomationStep grid and each point, in time order (the lane's
 // cursor only moves forward), merged into the block's sorted events.
-void automateStage(Stage& st, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
+void automateStage(Stage& st, std::int64_t pos, std::uint32_t n, std::int64_t origin) SUPPLE_RT {
     if (st.lanes.empty()) return;
     const std::size_t before = st.blockEvents.size();
     for (ParamLane& ln : st.lanes) {
@@ -1181,12 +1198,16 @@ void automateStage(Stage& st, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
                                                           return pt.sample < x;
                                                       }) -
                                      pts.begin());
-        std::uint32_t grid = 0;
+        const auto phase = ((pos % kAutomationStep + origin % kAutomationStep) % kAutomationStep +
+                            kAutomationStep) %
+                           kAutomationStep;
+        auto grid = static_cast<std::uint32_t>((kAutomationStep - phase) % kAutomationStep);
+        bool initial = std::isnan(ln.lastSent);
         for (;;) {
             const std::uint32_t atPoint = pi < pts.size() && pts[pi].sample < pos + n
                                               ? static_cast<std::uint32_t>(pts[pi].sample - pos)
                                               : n;
-            const std::uint32_t at = std::min(grid, atPoint);
+            const std::uint32_t at = std::min({initial ? 0u : n, grid, atPoint});
             if (at >= n) break;
             const double v = ln.clapAt(pos + at);
             if (v != ln.lastSent && st.blockEvents.size() < st.blockEvents.capacity()) {
@@ -1200,6 +1221,7 @@ void automateStage(Stage& st, std::int64_t pos, std::uint32_t n) SUPPLE_RT {
             }
             if (at == grid) grid += kAutomationStep;
             if (at == atPoint) ++pi;
+            initial = false;
         }
     }
     if (st.blockEvents.size() > before)  // stable insertion sort by time: no allocation
@@ -1215,7 +1237,8 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
               std::int64_t pos, const void* self) SUPPLE_RT {
     // A stage whose plugin is not processing (start_processing failed)
     // passes audio through, delay-compensated, like a bypass.
-    if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self)) {
+    if (st.callbackBypass || !st.instance || !st.instance->processing() ||
+        (self && st.instance->owner() != self)) {
         st.dry.process(sum.l.data(), sum.r.data(), n);  // compensated bypass
         st.appliedWet = -1.0f;
         st.wetRampLeft = 0;  // no ramp to carry: `appliedWet` holds nothing
@@ -1296,8 +1319,8 @@ bool runPinned(Plan& p, Node& node, Stage& st, std::uint32_t n, const host::Tran
             st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
         return runStage(p, st, node.sum, n, transport, pos, self);
     }
-    if (!st.instance || !st.instance->processing() || (self && st.instance->owner() != self) ||
-        st.bypass) {
+    if (st.callbackBypass || !st.instance || !st.instance->processing() ||
+        (self && st.instance->owner() != self) || st.bypass) {
         for (int c = 0; c < channels; ++c)
             st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
         st.appliedWet = st.bypass ? 0.0f : -1.0f;
@@ -1331,7 +1354,8 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         tc.active = true;
         for (Stage& st : tc.chain) {
             st.dry.clear();
-            if (st.instance && st.instance->processing() && (!self || st.instance->owner() == self))
+            if (!st.callbackBypass && st.instance && st.instance->processing() &&
+                (!self || st.instance->owner() == self))
                 st.instance->reset();
         }
     }
@@ -1367,7 +1391,7 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
             }
         }
     }
-    for (Stage& st : tc.chain) automateStage(st, pos, n);
+    for (Stage& st : tc.chain) automateStage(st, pos, n, time::samplesAt(p.startSeconds, p.rate));
     for (Stage& st : tc.chain)
         if (!runStage(p, st, tc.buf, n, transport, pos, self)) return false;
     const std::int64_t length = tc.end - tc.start;
@@ -1532,7 +1556,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                     std::swap(target[j - 1], target[j]);
     }
     // 2b. Plugin parameter automation (automateStage).
-    for (Stage& st : node.chain) automateStage(st, pos, n);
+    for (Stage& st : node.chain) automateStage(st, pos, n, time::samplesAt(p.startSeconds, p.rate));
     // 3. The FX chain, in place on `sum`.
     for (Stage& st : node.chain) {
         // Its key first, every block (the key edges' delay lines and
@@ -1585,12 +1609,24 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                        node.autoVolume.active() || node.autoPan.active(), p.smoothFrames);
         const double gain = node.fader.gain.next() * node.fader.gate.next();
         const double nativePan = node.fader.pan.next();
+        double keyGain = 0, keyPan = nativePan;
+        if (node.postKeyed) {
+            node.keyFader.set(g, node.autoPan.active() ? console9::nativePan(pan) : node.staticPan,
+                              node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute,
+                              node.autoVolume.active() || node.autoPan.active(), p.smoothFrames);
+            keyGain = node.keyFader.gain.next() * node.keyFader.gate.next();
+            keyPan = node.keyFader.pan.next();
+        }
         if (node.master) {
             const double balance = nativePan * 2 - 1;
             const double l = balance <= 0 ? 1 : std::cos(balance * std::numbers::pi / 2);
             const double r = balance >= 0 ? 1 : std::cos(balance * std::numbers::pi / 2);
             node.post.l[i] = node.sum.l[i] * static_cast<float>(gain * l);
             node.post.r[i] = node.sum.r[i] * static_cast<float>(gain * r);
+            if (node.postKeyed) {
+                node.postKey.l[i] = node.sum.l[i] * static_cast<float>(keyGain * l);
+                node.postKey.r[i] = node.sum.r[i] * static_cast<float>(keyGain * r);
+            }
             if (metered) {
                 meterPeakL = std::max(meterPeakL, std::fabs(double(node.post.l[i])));
                 meterPeakR = std::max(meterPeakR, std::fabs(double(node.post.r[i])));
@@ -1600,6 +1636,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         } else {
             node.encoder.sample(node.sum.l[i], node.sum.r[i], node.post.l[i], node.post.r[i], gain,
                                 nativePan);
+            if (node.postKeyed)
+                node.keyEncoder.sample(node.sum.l[i], node.sum.r[i], node.postKey.l[i],
+                                       node.postKey.r[i], keyGain, keyPan);
             if (metered) {
                 if (nativePan != meterPan) {
                     console9::panGains(console9::panAngle(nativePan), meterLeft, meterRight);
@@ -1710,6 +1749,14 @@ bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint
 }
 
 namespace {
+void locateEdge(Edge& edge, bool restart) SUPPLE_RT {
+    if (restart || !edge.preserveDelayOnLocate) edge.delay.clear();
+    edge.preserveDelayOnLocate = false;
+    for (auto& link : edge.auxLinks) {
+        if (restart || !link.preserveDelayOnLocate) link.delay.clear();
+        link.preserveDelayOnLocate = false;
+    }
+}
 // Take chains (gap log #22) after a seek (`wrap` false: fresh at the next
 // entry) or a loop wrap (held notes end; delay lines and tails kept).
 void locateTakes(Node& n, std::int64_t pos, bool wrap, bool keepPlaying = false) SUPPLE_RT {
@@ -1747,6 +1794,8 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
         if (restartConsole) {
             n.encoder.reset();
+            n.keyEncoder.reset();
+            n.keyFader.reset();
             n.decoder.reset();
             n.fader.reset();
         }
@@ -1760,7 +1809,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
         }
-        if (!n.releaseHeld) n.held.fill(0);
+        if (restartConsole && !n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
             if (!st.preserveDryOnLocate) {
@@ -1775,8 +1824,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
         }
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
-            e.delay.clear();
-            for (Edge::AuxLink& link : e.auxLinks) link.delay.clear();
+            locateEdge(e, restartConsole);
             if (!e.encode)
                 for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan})
                     a->cursor = 0;
@@ -1800,6 +1848,8 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
         if (restartConsole) {
             n.encoder.reset();
+            n.keyEncoder.reset();
+            n.keyFader.reset();
             n.decoder.reset();
             n.fader.reset();
         }
@@ -1813,7 +1863,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
         }
-        if (!n.releaseHeld) n.held.fill(0);
+        if (restartConsole && !n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain) {
             if (!st.preserveDryOnLocate) {
@@ -1828,8 +1878,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
         }
     }
     for (Edge& e : p.edges) {
-        e.delay.clear();
-        for (Edge::AuxLink& link : e.auxLinks) link.delay.clear();
+        locateEdge(e, restartConsole);
         for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripPan}) a->cursor = 0;
     }
 }
@@ -1843,6 +1892,7 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
         n.encoder.reset();
+        n.keyEncoder.reset();
         n.decoder.reset();
         for (std::size_t ei : n.out) {
             Edge& e = p.edges[ei];
@@ -1898,9 +1948,43 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
             if (old.id != n.id) continue;
             // Only what this executor processed (the other one writes the rest).
             if (liveClass >= 0 && old.live != (liveClass == 1)) break;
+            // Match inside the destination's incoming edges: scanning every
+            // node to rediscover each edge's destination would be cubic.
+            for (std::size_t ei : n.in) {
+                Edge& edge = to.edges[ei];
+                for (std::size_t oi : old.in) {
+                    Edge& previous = from.edges[oi];
+                    if (edge.route != previous.route || edge.tap != previous.tap ||
+                        (edge.stage >= 0) != (previous.stage >= 0) ||
+                        to.nodes[edge.from].id != from.nodes[previous.from].id)
+                        continue;
+                    if (edge.stage >= 0 &&
+                        n.chain[static_cast<std::size_t>(edge.stage)].fx !=
+                            old.chain[static_cast<std::size_t>(previous.stage)].fx)
+                        continue;
+                    if (edge.delay.length == previous.delay.length) {
+                        for (int c = 0; c < 2; ++c)
+                            std::swap(edge.delay.buf[c], previous.delay.buf[c]);
+                        edge.delay.pos = previous.delay.pos;
+                        edge.preserveDelayOnLocate = true;
+                    }
+                    for (auto& link : edge.auxLinks)
+                        for (auto& oldLink : previous.auxLinks)
+                            if (link.from == oldLink.from && link.to == oldLink.to &&
+                                link.delay.length == oldLink.delay.length) {
+                                std::swap(link.delay.buf, oldLink.delay.buf);
+                                link.delay.pos = oldLink.delay.pos;
+                                link.preserveDelayOnLocate = true;
+                                break;
+                            }
+                    break;
+                }
+            }
             if (n.type == old.type) {
                 n.fader = old.fader;
                 n.encoder.carry(old.encoder, to.smoothFrames);
+                n.keyEncoder.carry(old.keyEncoder, to.smoothFrames);
+                n.keyFader = old.keyFader;
                 n.decoder.carry(old.decoder, to.smoothFrames);
                 for (std::size_t ei : n.out)
                     for (std::size_t oi : old.out) {
@@ -1912,6 +1996,14 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                             break;
                         }
                     }
+            }
+            if (n.noteTarget >= 0 && old.noteTarget >= 0 &&
+                n.chain[static_cast<std::size_t>(n.noteTarget)].instance &&
+                n.chain[static_cast<std::size_t>(n.noteTarget)].instance ==
+                    old.chain[static_cast<std::size_t>(old.noteTarget)].instance) {
+                for (std::size_t k = 0; k < n.held.size(); ++k)
+                    n.held[k] = static_cast<std::uint8_t>(std::min(255, n.held[k] + old.held[k]));
+                n.releaseHeld = n.releaseHeld || old.releaseHeld;
             }
             auto carryStages = [](std::vector<Stage>& chain, std::vector<Stage>& oldChain) {
                 for (Stage& st : chain)
@@ -1926,6 +2018,17 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                                 std::swap(st.dry.buf[1], os.dry.buf[1]);
                                 st.dry.pos = os.dry.pos;
                                 st.preserveDryOnLocate = true;
+                            }
+                            if (st.chanDelay.size() == os.chanDelay.size() &&
+                                std::equal(std::begin(st.outPin), std::end(st.outPin),
+                                           std::begin(os.outPin))) {
+                                for (std::size_t c = 0; c < st.chanDelay.size(); ++c) {
+                                    MonoDelay& delay = st.chanDelay[c];
+                                    MonoDelay& oldDelay = os.chanDelay[c];
+                                    if (delay.length != oldDelay.length) continue;
+                                    std::swap(delay.buf, oldDelay.buf);
+                                    delay.pos = oldDelay.pos;
+                                }
                             }
                             break;
                         }

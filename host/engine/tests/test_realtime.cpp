@@ -1,3 +1,4 @@
+#include <clap/plugin.h>
 #include <doctest/doctest.h>
 
 #include <array>
@@ -6,9 +7,11 @@
 #include <future>
 #include <thread>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <supple/audio/audio_file.h>
+#include <supple/base/files.h>
 #include <supple/base/sha256.h>
 #include <supple/engine/jack.h>
 #include <supple/engine/realtime.h>
@@ -17,6 +20,7 @@
 #include "fake_jack.h"
 #include "meters.h"
 #include "plan.h"
+#include "recording.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -42,10 +46,116 @@ struct EngineTestAccess {
     static LoopRange rtLoop(const Engine& e) { return e.loopC_; }
     static std::uint64_t rendererEpoch(const Engine& e) { return e.epochDone_.load(); }
     static LoopRange rendererLoop(const Engine& e) { return e.loopR_; }  // after rendererEpoch
+    static const detail::Plan& latestPlan(const Engine& e) { return *e.latestPlan_.load(); }
 };
 }  // namespace supple::engine
 using model::Id;
 using model::kMaster;
+
+namespace supple::engine::detail {
+struct RecorderTestAccess {
+    static void stall(Recorder& recorder) { recorder.writerStalled_.store(true); }
+    static bool stalled(const Recorder& recorder) { return recorder.writerStallAck_.load(); }
+    static void resume(Recorder& recorder) { recorder.writerStalled_.store(false); }
+    static bool failHeader(Recorder& recorder, std::size_t index) {
+        const auto& file = recorder.tracks_[index]->target.file;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+            if (std::filesystem::read_symlink(entry.path(), ec) != file || ec) continue;
+            const int descriptor = std::stoi(entry.path().filename().string());
+            const int readOnly = ::open(file.c_str(), O_RDONLY);
+            if (readOnly < 0) return false;
+            const bool ok = ::dup2(readOnly, descriptor) >= 0;
+            ::close(readOnly);
+            return ok;
+        }
+        return false;
+    }
+    static void updateHeaders(Recorder& recorder) { recorder.updateHeaders(); }
+    static void failTarget(Recorder& recorder, std::size_t index) {
+        recorder.tracks_[index]->writer.abandon();
+    }
+};
+}  // namespace supple::engine::detail
+
+namespace {
+template <class Predicate>
+bool waitForRecorder(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!predicate() && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+    return predicate();
+}
+}  // namespace
+
+TEST_CASE("a stalled recording writer preserves overflow gaps and loop file positions") {
+    using Access = detail::RecorderTestAccess;
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-rec-stall-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    detail::Recorder recorder({{Id{model::Kind::Track, 1}, {0}, dir / "take.wav", {}}}, 16, 0);
+    Access::stall(recorder);
+    REQUIRE(recorder.open());
+    REQUIRE(waitForRecorder([&] { return Access::stalled(recorder); }));
+    std::array<float, 200> data;
+    data.fill(1);
+    const float* input[] = {data.data()};
+    recorder.capture(input, 1, 200, 0);  // 160 fit, 40 are dropped
+    Access::resume(recorder);
+    REQUIRE(waitForRecorder([&] { return !Access::stalled(recorder); }));
+    Access::stall(recorder);
+    REQUIRE(waitForRecorder([&] { return Access::stalled(recorder); }));
+    data.fill(.5f);
+    recorder.capture(input, 1, 24, 0);    // loop wraps at file frame 200
+    recorder.capture(input, 1, 200, 24);  // a dropped tail, no following timestamp
+    const auto takes = recorder.finish({0, 200, true});
+    REQUIRE(takes.size() == 1);
+    CHECK(takes[0].error.empty());
+    CHECK(takes[0].overflowFrames == 104);
+    CHECK(takes[0].frames == 424);
+    REQUIRE(takes[0].segments.size() == 2);
+    CHECK(takes[0].segments[1].fileFrame == 200);
+    const auto decoded = audio::readAudio(takes[0].file);
+    REQUIRE(decoded);
+    REQUIRE(decoded->frames() == 424);
+    for (std::size_t frame = 0; frame < decoded->frames(); ++frame) {
+        const float expected = frame < 160 ? 1.f : frame < 200 ? 0.f : frame < 360 ? .5f : 0.f;
+        CHECK(decoded->channels[0][frame] == expected);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a failed recording target leaves other targets writing") {
+    using Access = detail::RecorderTestAccess;
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-rec-error-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    detail::Recorder recorder({{Id{model::Kind::Track, 1}, {0}, dir / "bad.wav", {}},
+                               {Id{model::Kind::Track, 2}, {0}, dir / "good.wav", {}}},
+                              16, 0);
+    Access::stall(recorder);
+    REQUIRE(recorder.open());
+    REQUIRE(waitForRecorder([&] { return Access::stalled(recorder); }));
+    Access::failTarget(recorder, 0);
+    const std::array<float, 32> data = [] {
+        std::array<float, 32> result;
+        result.fill(.5f);
+        return result;
+    }();
+    const float* input[] = {data.data()};
+    recorder.capture(input, 1, 32, 0);
+    const auto takes = recorder.finish();
+    REQUIRE(takes.size() == 2);
+    CHECK_FALSE(takes[0].error.empty());
+    CHECK(takes[0].overflowFrames == 32);
+    CHECK(takes[1].error.empty());
+    CHECK(takes[1].frames == 32);
+    CHECK(takes[1].overflowFrames == 0);
+    CHECK_FALSE(takes[1].hash.empty());
+    const auto decoded = audio::readAudio(takes[1].file);
+    REQUIRE(decoded);
+    CHECK(decoded->channels[0] == std::vector<float>(32, .5f));
+    std::filesystem::remove_all(dir);
+}
 
 namespace {
 
@@ -1533,6 +1643,110 @@ TEST_CASE("MIDI monitoring: a keyboard plays the instrument live, sample-accurat
         }
 }
 
+TEST_CASE("a live processing error silences the failed device block" * doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        const auto session = monitoring(synthSession());
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 384});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}));
+        REQUIRE(engine.load(session));
+        if (options.anticipative) REQUIRE(engine.awaitPlan());
+        engine.play();
+        if (options.anticipative) engine.awaitTransport();
+        backend.run(2);
+        // Inject a process error in the in-tree fixture on the manual audio thread.
+        std::vector<std::pair<clap_plugin_t*, decltype(clap_plugin_t::process)>> processes;
+        for (const auto& fx : session.fx)
+            if (auto* instance = pool.find(fx.id)) {
+                auto* plugin = const_cast<clap_plugin_t*>(instance->raw());
+                REQUIRE(plugin);
+                processes.emplace_back(plugin, plugin->process);
+                plugin->process = [](const clap_plugin_t*, const clap_process_t*) {
+                    return clap_process_status{CLAP_PROCESS_ERROR};
+                };
+            }
+        backend.run(1);
+        for (const auto& [plugin, process] : processes) plugin->process = process;
+        engine.stop();
+        CHECK(engine.processErrors() == 1);
+        const auto& captured = backend.capture().channels[0];
+        CHECK(std::any_of(captured.begin() + 128, captured.begin() + 256,
+                          [](float sample) { return std::abs(sample) > 0.01f; }));
+        CHECK(std::all_of(captured.begin() + 256, captured.end(),
+                          [](float sample) { return sample == 0; }));
+    }
+}
+
+TEST_CASE("MIDI monitoring preserves every event in a device block" * doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        auto pool = makePool();
+        MediaCache media;
+        // Both messages fit in one block: losing the off leaves a stuck voice.
+        DummyBackend backend(keyboard({{10, 0x90, 60, 100}, {100, 0x80, 60, 0}}, 512));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.blockSize = 256, .midiInputs = true}).ok());
+        REQUIRE(engine.load(keyboardSession()).ok());
+        REQUIRE(engine.awaitPlan());
+        backend.run(2);
+        engine.stop();
+        const auto& signal = backend.capture().channels[0];
+        CHECK(signal[50] != 0.0f);
+        for (std::size_t i = 100; i < signal.size(); ++i) REQUIRE(signal[i] == 0.0f);
+    }
+}
+
+TEST_CASE("live buffers cover a device block larger than the render block" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(constantInput(512));
+    Engine engine(pool, media, {.renderBlock = 64, .workers = 0});
+    REQUIRE(engine.start(backend, {.blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.load(monitoring(synthSession())).ok());
+    // Check before driving it: the unfixed plan would overrun its buffers.
+    REQUIRE(EngineTestAccess::latestPlan(engine).block >= 256);
+    REQUIRE(engine.awaitPlan());
+    backend.run(2);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    for (float sample : backend.capture().channels[0])
+        CHECK(sample == doctest::Approx(0.5 * 0.472135955).epsilon(1e-5));
+}
+
+TEST_CASE("seeking restarts the console seeds in both executors" * doctest::description("rt")) {
+    model::Session s = synthSession();
+    model::EditTxn edit(s, 2);
+    auto project = edit.project();
+    project.console9 = true;
+    project.seed = 12345;
+    edit.setProject(project);
+    s = edit.commit().value();
+    auto offlinePool = makePool();
+    auto reference = renderOffline(s, offlinePool, {.endSeconds = 0.1, .threads = 1});
+    REQUIRE(reference);
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.captureFrames = 8192});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative) REQUIRE(engine.awaitRendered(2048));
+        backend.run(16);
+        engine.seek(0);
+        if (options.anticipative) REQUIRE(engine.awaitRendered(6144));
+        backend.run(48);
+        engine.stop();
+        CHECK(maxDiff(backend.capture().channels[0], 2048, reference->audio.channels[0], 4800) ==
+              0);
+        CHECK(maxDiff(backend.capture().channels[1], 2048, reference->audio.channels[1], 4800) ==
+              0);
+    }
+}
+
 TEST_CASE("MIDI recording: events land on the timeline where they were heard, per loop pass" *
           doctest::description("rt")) {
     for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
@@ -1894,90 +2108,96 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
     // synthSession's track (a sine and a 64-sample latent gain) keys a key mix
     // on a second track. Monitoring that track makes it live: the key then
     // crosses from the renderer to the callback through a frontier ring.
-    for (const bool monitored : {false, true})
-        for (const EngineOptions& options :
-             {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}}) {
-            INFO("monitored " << monitored << ", anticipative " << options.anticipative
-                              << ", workers " << options.workers);
-            model::Session s = synthSession(-3.0, "com.suppleaudio.test.gain");
-            {
-                model::EditTxn t(s, 2);
-                auto project = t.project();
-                project.console9 = true;
-                project.seed = 8901;
-                t.setProject(project);
-                Id source;
-                for (const auto& e : s.tracks)
-                    if (e.id != kMaster) source = e.id;
-                model::Track tr;
-                tr.name = "Keyed";
-                tr.parent = kMaster;
-                const Id keyed = t.create(tr);
-                t.modify<model::Track>(kMaster,
-                                       [&](model::Track& m) { m.children.push_back(keyed); });
-                model::FxInstance fx;
-                fx.plugin.id = "com.suppleaudio.test.keymix";
-                const Id f = t.create(fx);
-                t.modify<model::Track>(keyed, [&](model::Track& x) { x.chain.push_back(f); });
-                model::Route key;
-                key.from.track = source;
-                key.to.fx = f;
-                t.create(key);
-                model::Track bus;
-                bus.type = model::StripType::Buss;
-                bus.parent = kMaster;
-                const Id busId = t.create(bus);
-                t.modify<model::Track>(kMaster, [&](auto& m) {
-                    std::erase(m.children, keyed);
-                    m.children.push_back(busId);
-                });
-                t.modify<model::Track>(keyed, [&](auto& child) { child.parent = busId; });
-                t.modify<model::Track>(busId,
-                                       [&](auto& group) { group.children.push_back(keyed); });
-                model::Route send;
-                send.from.track = source;
-                send.to.track = busId;
-                send.tap = model::Tap::PreFader;
-                send.volumeDb = -6;
-                t.create(send);
-                s = t.commit().value();
-            }
-            if (monitored) s = monitoring(s);  // the last track: the keyed one
-            auto pool = makePool();
-            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
-            auto rtPool = makePool();
-            MediaCache media;
-            DummyBackend backend(
-                {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
-            Engine engine(rtPool, media, options);
-            REQUIRE(
-                engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
-            REQUIRE(engine.load(s).ok());
-            if (options.anticipative) REQUIRE(engine.awaitPlan());
-            engine.play();
-            if (options.anticipative && !monitored)
-                runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
-            else if (options.anticipative) {
-                engine.awaitTransport();
-                for (int i = 0; i < (48000 * 2 + 4096) / 128; i += 16) {
-                    REQUIRE(engine.awaitRendered(4096));
-                    backend.run(16);
+    for (const bool postSolo : {false, true})
+        for (const bool monitored : {false, true})
+            for (const EngineOptions& options :
+                 {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}}) {
+                INFO("monitored " << monitored << ", anticipative " << options.anticipative
+                                  << ", workers " << options.workers);
+                model::Session s = synthSession(-3.0, "com.suppleaudio.test.gain");
+                {
+                    model::EditTxn t(s, 2);
+                    auto project = t.project();
+                    project.console9 = true;
+                    project.seed = 8901;
+                    t.setProject(project);
+                    Id source;
+                    for (const auto& e : s.tracks)
+                        if (e.id != kMaster) source = e.id;
+                    model::Track tr;
+                    tr.name = "Keyed";
+                    tr.parent = kMaster;
+                    const Id keyed = t.create(tr);
+                    t.modify<model::Track>(kMaster,
+                                           [&](model::Track& m) { m.children.push_back(keyed); });
+                    model::FxInstance fx;
+                    fx.plugin.id = "com.suppleaudio.test.keymix";
+                    const Id f = t.create(fx);
+                    t.modify<model::Track>(keyed, [&](model::Track& x) { x.chain.push_back(f); });
+                    model::Route key;
+                    key.from.track = source;
+                    key.to.fx = f;
+                    if (postSolo) {
+                        key.tap = model::Tap::PostFader;
+                        t.modify<model::Track>(keyed, [](auto& tr) { tr.solo = model::Solo::On; });
+                    }
+                    t.create(key);
+                    model::Track bus;
+                    bus.type = model::StripType::Buss;
+                    bus.parent = kMaster;
+                    const Id busId = t.create(bus);
+                    t.modify<model::Track>(kMaster, [&](auto& m) {
+                        std::erase(m.children, keyed);
+                        m.children.push_back(busId);
+                    });
+                    t.modify<model::Track>(keyed, [&](auto& child) { child.parent = busId; });
+                    t.modify<model::Track>(busId,
+                                           [&](auto& group) { group.children.push_back(keyed); });
+                    model::Route send;
+                    send.from.track = source;
+                    send.to.track = busId;
+                    send.tap = model::Tap::PreFader;
+                    send.volumeDb = -6;
+                    t.create(send);
+                    s = t.commit().value();
                 }
-            } else {
-                backend.run((48000 * 2 + 4096) / 128);
+                if (monitored) s = monitoring(s);  // the last track: the keyed one
+                auto pool = makePool();
+                auto offline =
+                    renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+                auto rtPool = makePool();
+                MediaCache media;
+                DummyBackend backend(
+                    {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+                Engine engine(rtPool, media, options);
+                REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2})
+                            .ok());
+                REQUIRE(engine.load(s).ok());
+                if (options.anticipative) REQUIRE(engine.awaitPlan());
+                engine.play();
+                if (options.anticipative && !monitored)
+                    runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+                else if (options.anticipative) {
+                    engine.awaitTransport();
+                    for (int i = 0; i < (48000 * 2 + 4096) / 128; i += 16) {
+                        REQUIRE(engine.awaitRendered(4096));
+                        backend.run(16);
+                    }
+                } else {
+                    backend.run((48000 * 2 + 4096) / 128);
+                }
+                engine.stop();
+                CHECK(engine.processErrors() == 0);
+                const std::uint32_t L = engine.outputLatency();
+                const auto& cap = backend.capture();
+                CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
+                CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
+                double energy = 0;
+                for (std::size_t i = 0; i < 96000; ++i)
+                    energy += static_cast<double>(offline.audio.channels[0][i]) *
+                              static_cast<double>(offline.audio.channels[0][i]);
+                CHECK(energy > 1.0);
             }
-            engine.stop();
-            CHECK(engine.processErrors() == 0);
-            const std::uint32_t L = engine.outputLatency();
-            const auto& cap = backend.capture();
-            CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
-            CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
-            double energy = 0;
-            for (std::size_t i = 0; i < 96000; ++i)
-                energy += static_cast<double>(offline.audio.channels[0][i]) *
-                          static_cast<double>(offline.audio.channels[0][i]);
-            CHECK(energy > 1.0);
-        }
 }
 
 TEST_CASE("auxiliary channels play in real time as offline, rendered ahead or live (ADR-0020)" *
@@ -2435,4 +2655,187 @@ TEST_CASE("the metronome clicks every beat in the live output, accented on the b
         CHECK(std::fabs(l[onsets[1] + 6000]) == 0.0f);    // silence between clicks
         CHECK(l[onsets[2] + 100] == r[onsets[2] + 100]);  // centred
     }
+}
+
+TEST_CASE("live bridged effects pass through without callback lifecycle or processing") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    for (auto isolation : {model::Isolation::SharedBridge, model::Isolation::Dedicated})
+        for (const auto& options : {kInCallback, EngineOptions{.workers = 0}}) {
+            auto pool = makePool();
+            MediaCache media;
+            DummyBackend backend(constantInput(1024));
+            Engine engine(pool, media, options);
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}));
+            auto base = monitoring(synthSession(0, "com.suppleaudio.test.gain"));
+            model::EditTxn t(base, 2);
+            Id fxId;
+            for (const auto& fx : base.fx)
+                if (fx.value->plugin.id == "com.suppleaudio.test.gain") {
+                    fxId = fx.id;
+                    t.modify<model::FxInstance>(fx.id, [&](auto& f) {
+                        f.isolation = isolation;
+                        f.patch = json::parse(R"({"schema":"supple.test-gain-patch/1.0",
+                        "params":{"gain":-12,"latency":"short"}})")
+                                      .value();
+                    });
+                }
+            auto session = t.commit().value();
+            REQUIRE(engine.load(session));
+            if (options.anticipative) REQUIRE(engine.awaitPlan());
+            backend.run(4);
+            REQUIRE(pool.find(fxId));
+            CHECK_FALSE(pool.find(fxId)->processing());
+            auto warnings = engine.warnings();
+            CHECK(std::any_of(warnings.begin(), warnings.end(), [&](const auto& w) {
+                return w.find(fxId.str()) != std::string::npos &&
+                       w.find("in_process") != std::string::npos;
+            }));
+            CHECK(double(backend.capture().channels[0][300]) ==
+                  doctest::Approx(.5 * .472135955).epsilon(1e-4));
+            CHECK(double(backend.capture().channels[1][300]) ==
+                  doctest::Approx(-.25 * .472135955).epsilon(1e-4));
+            CHECK(std::all_of(backend.capture().channels[0].begin(),
+                              backend.capture().channels[0].begin() + 64,
+                              [](float value) { return value == 0; }));
+            engine.stop();
+            model::EditTxn unmonitor(session, 3);
+            for (const auto& track : session.tracks)
+                unmonitor.modify<model::Track>(
+                    track.id, [](auto& tr) { tr.record.monitor = model::Monitor::Off; });
+            const auto aheadSession = unmonitor.commit().value();
+            auto referencePool = makePool();
+            const auto reference =
+                renderOffline(aheadSession, referencePool, {.startSeconds = 0, .endSeconds = .1})
+                    .value();
+            CHECK(reference.warnings.empty());
+            if (options.anticipative) {
+                DummyBackend aheadBackend(
+                    {.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
+                Engine aheadEngine(pool, media, options);
+                REQUIRE(aheadEngine.start(aheadBackend,
+                                          {.sampleRate = 48000, .blockSize = 128, .inputs = 2}));
+                REQUIRE(aheadEngine.load(aheadSession));
+                REQUIRE(aheadEngine.awaitPlan());
+                aheadEngine.play();
+                runAhead(aheadEngine, aheadBackend, 48, 128);
+                aheadEngine.stop();
+                CHECK(maxDiff(aheadBackend.capture().channels[0], aheadEngine.outputLatency(),
+                              reference.audio.channels[0], 4800) == 0);
+            }
+        }
+}
+
+TEST_CASE("recording header errors retain the first error and spare other targets") {
+    using Access = detail::RecorderTestAccess;
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-rec-header-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    detail::Recorder recorder({{Id{model::Kind::Track, 1}, {0}, dir / "bad.wav", {}},
+                               {Id{model::Kind::Track, 2}, {0}, dir / "good.wav", {}}},
+                              16, 0);
+    Access::stall(recorder);
+    REQUIRE(recorder.open());
+    REQUIRE(waitForRecorder([&] { return Access::stalled(recorder); }));
+    REQUIRE(Access::failHeader(recorder, 0));
+    Access::updateHeaders(recorder);  // the same routine the writer runs periodically
+    Access::failTarget(recorder, 0);  // later append errors must not replace the header error
+    const std::array<float, 32> data{};
+    const float* input[] = {data.data()};
+    recorder.capture(input, 1, 32, 0);
+    const auto takes = recorder.finish();
+    REQUIRE(takes.size() == 2);
+    CHECK(takes[0].error.find("file.write") != std::string::npos);
+    CHECK(takes[1].error.empty());
+    CHECK(takes[1].frames == 32);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a full recording loop table keeps its runs and stops adding input") {
+    using Access = detail::RecorderTestAccess;
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-rec-runs-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    detail::Recorder recorder({{Id{model::Kind::Track, 1}, {0}, dir / "take.wav", {}}}, 1, 0);
+    Access::stall(recorder);
+    REQUIRE(recorder.open());
+    REQUIRE(waitForRecorder([&] { return Access::stalled(recorder); }));
+    const float sample = .5f;
+    const float* input[] = {&sample};
+    for (int pass = 0; pass < 4100; ++pass) recorder.capture(input, 1, 1, 0);
+    const auto takes = recorder.finish({0, 1, true});
+    REQUIRE(takes.size() == 1);
+    CHECK(takes[0].error.empty());
+    CHECK(takes[0].frames == 4097);
+    REQUIRE(takes[0].segments.size() == 4097);
+    CHECK(takes[0].segments.back().fileFrame == 4096);
+    REQUIRE(takes[0].warnings.size() == 1);
+    CHECK(takes[0].warnings[0].code == "recording.loop_runs_full");
+    const auto side = detail::readSidecar(takes[0].file);
+    REQUIRE(side);
+    CHECK(side->segments.size() == 4097);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("recording recovery requires a complete valid sidecar") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-rec-sidecar-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto wav = dir / "take.wav";
+    auto original = json::parse(R"({"schema":"supple.recording/1.0","track":"tr_000001",
+        "start_sample":-4,"sample_rate":48000,"segments":[[0,-4],[10,0]],"loop":[0,10]})")
+                        .value();
+    // Use the model's actual canonical id spelling.
+    original["track"] = Id{model::Kind::Track, 1}.str();
+    REQUIRE(writeFileAtomic(detail::sidecarPath(wav), json::writeCanonical(original)));
+    REQUIRE(detail::readSidecar(wav));
+    for (int mutation = 0; mutation < 12; ++mutation) {
+        auto v = original;
+        switch (mutation) {
+            case 0:
+                v["schema"] = "other/1.0";
+                break;
+            case 1:
+                v["schema"] = "supple.recording/2.0";
+                break;
+            case 2:
+                v["track"] = Id{model::Kind::Fx, 1}.str();
+                break;
+            case 3:
+                v["sample_rate"] = 0;
+                break;
+            case 4:
+                v["sample_rate"] = -1;
+                break;
+            case 5:
+                v["sample_rate"] = "48000";
+                break;
+            case 6:
+                v["segments"] = json::Value::array();
+                break;
+            case 7:
+                v["loop"] = json::Value();
+                break;
+            case 8:
+                v["segments"] = json::parse("[[0,-4],[-1,0]]").value();
+                break;
+            case 9:
+                v["segments"] = json::parse("[[0,-4],[0,0]]").value();
+                break;
+            case 10:
+                v["loop"] = json::parse("[0,0]").value();
+                break;
+            case 11:
+                v["segments"] = json::parse("[[0,0],[10,0]]").value();
+                break;
+        }
+        REQUIRE(writeFileAtomic(detail::sidecarPath(wav), json::writeCanonical(v)));
+        const auto info = detail::readSidecar(wav);
+        CHECK_FALSE(info);
+        if (!info) {
+            CHECK(info.error().code == "record.sidecar");
+            CHECK_FALSE(info.error().path.empty());
+            CHECK_FALSE(info.error().hint.empty());
+        }
+    }
+    std::filesystem::remove_all(dir);
 }

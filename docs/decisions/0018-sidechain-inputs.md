@@ -83,15 +83,12 @@ plain compressors.
 
 ## Implementation notes (2026-09-29)
 
-- **Solo moved onto the edges.** Solo used to silence a node's taps; a
-  key from a soloed-out track then went silent, contradicting decision 4.
-  A solo-silenced node now keeps its output and fades what it *sends*
-  (every edge except keys) over the 10 ms smoothing ramp; the gain is
-  carried across plan swaps like the mix ramps. Mixes are unchanged.
-  Isolated stems read the track's own output and so no longer follow the
-  project's solo state (they did before, by accident of the tap).
-- **Frontier keys.** The renderer applies the solo gain when it fills a
-  frontier ring; the callback does not apply it again.
+- **Unsoloed post-fader keys.** Audible post-fader output retains its solo
+  gate. Sources used by post-fader keys also compute an unsoloed tap through a
+  separate, identically seeded Console 9 encoder and fader (including mute).
+  Only key edges read it; no signal crosses Console 9 twice. The source owns
+  that tap, including publication to frontier rings, so a live destination
+  sees the same key samples as an offline destination.
 - **Key restarts.** `Engine::load` compares each VST3 instance's key
   activation with the new plan's; a change stops the instance on the audio
   thread and a fresh one is activated with the new flag. CLAP instances

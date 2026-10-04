@@ -67,6 +67,7 @@ std::atomic<bool> g_stalled{false}, g_stallAck{false}, g_failOpen{false};
 std::atomic<std::uint64_t> g_cycles{0};
 std::atomic<Frames> g_bufferSizeRequest{0};
 std::atomic<int> g_connections{0};
+std::atomic<bool> g_failCapture{false};
 std::atomic<float> g_inputValue{0.0f};
 std::string g_latencyEnv;
 std::mutex g_midiMutex;  // (not g_mutex: fakejack_stall holds that while the loop idles)
@@ -256,7 +257,15 @@ const char** jack_get_ports(Client*, const char*, const char* type, unsigned lon
         out[2] = nullptr;
         return out;
     }
-    if ((flags & 0x5) != 0x5) return nullptr;  // physical inputs (playback) only
+    if ((flags & 0x6) == 0x6) {
+        static const char* kCapture[] = {"system:capture_1", "system:capture_2"};
+        auto** out = static_cast<const char**>(std::malloc(3 * sizeof(const char*)));
+        out[0] = kCapture[0];
+        out[1] = kCapture[1];
+        out[2] = nullptr;
+        return out;
+    }
+    if ((flags & 0x5) != 0x5) return nullptr;
     static const char* kPlayback[] = {"system:playback_1", "system:playback_2"};
     auto** out = static_cast<const char**>(std::malloc(3 * sizeof(const char*)));
     out[0] = kPlayback[0];
@@ -266,6 +275,11 @@ const char** jack_get_ports(Client*, const char*, const char* type, unsigned lon
 }
 
 int jack_connect(Client*, const char* from, const char* to) {
+    if (Port* p = findPort(to); p && !p->midi && !p->output) {
+        if (g_failCapture.load() && std::strcmp(from, "system:capture_1") == 0) return 1;
+        g_connections.fetch_add(1);
+        return 0;
+    }
     if (Port* p = findPort(to); p && p->midi) {  // a MIDI device into our input
         g_connections.fetch_add(1);
         return 0;
@@ -280,6 +294,7 @@ void jack_free(void* p) { std::free(p); }
 // --- test controls ---------------------------------------------------------------------
 
 void fakejack_set_period(Frames n) { g_period = std::min(n, kMaxPeriod); }
+void fakejack_fail_capture(int fail) { g_failCapture = fail != 0; }
 void fakejack_set_rate(Frames rate) {
     g_rate = rate;
     std::lock_guard lock(g_mutex);

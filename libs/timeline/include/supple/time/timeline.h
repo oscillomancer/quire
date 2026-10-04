@@ -70,6 +70,8 @@ class TimeMap {
     MeterChange meterAt(int bar) const;  // the change in effect (its `bar` is where it began)
     double beatOfBar(int bar) const;     // start of `bar` in beats (bar 1 -> 0)
     double barLength(int bar) const;     // in quarter notes
+    // Clamps to bars [INT_MIN, INT_MAX], including the final bar's last
+    // fraction. Infinities clamp; NaN selects beat 0.
     BarBeat barBeat(double beat) const;  // positions within 1e-9 of a bar line snap onto it
     double beatOf(const BarBeat& position) const;  // uses bar, beat, fraction (not quarters)
 
@@ -101,7 +103,8 @@ class TimeMap {
 };
 
 // Seconds -> samples at `rate`, rounding half to even (the spec's rule for
-// compiling render plans).
+// compiling render plans). Saturates to [INT64_MIN, INT64_MAX], including
+// infinite products; a NaN product returns 0.
 std::int64_t samplesAt(double seconds, double rate);
 
 }  // namespace supple::time

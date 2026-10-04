@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -120,6 +121,76 @@ TEST_CASE("pan law gains") {
     CHECK(std::fabs(r) < 1e-12);
     std::tie(l, r) = panGains(0.0, 0.0);
     CHECK(l == doctest::Approx(1.0).epsilon(1e-6));
+}
+
+TEST_CASE("muted routes still order their source before their destination") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    const Id source = addTrack(t, "Source");  // later ID than the destination
+    t.modify<model::Track>(source, [](auto& track) { track.parentSend.enabled = false; });
+    addFx(t, source, kSine);
+    addNote(t, source, 0.0, 1.0);
+    model::Route route;
+    route.from.track = source;
+    route.to.track = bus;
+    route.mute = true;
+    const Id send = t.create(route);
+    model::Envelope envelope;
+    envelope.target = {send, "mute"};
+    envelope.points = {{0.0, 1.0, model::PointShape::Square, 0.0},
+                       {0.1, 0.0, model::PointShape::Square, 0.0}};
+    t.create(envelope);
+    auto pool = makePool();
+    const auto result = render(commit(t), pool, 0.1);
+    CHECK(peak(result.audio.channels[0], 0, 2400) == 0);
+    CHECK(peak(result.audio.channels[0], 3000) > 0.01);
+}
+
+TEST_CASE("unchanged auxiliary latency survives a plan adoption") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    t.modify<model::Track>(bus, [](auto& track) { track.channels = 4; });
+    const Id source = addTrack(t, "Source");
+    t.modify<model::Track>(source, [](auto& track) { track.parentSend.enabled = false; });
+    addFx(t, source, kSine);
+    addNote(t, source, 0, 1);
+    const auto latent =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+            .value();
+    addFx(t, bus, kGain, latent);  // delays the unwritten 3/4 along with 1/2
+    const Id keyed = addFx(t, bus, "com.suppleaudio.test.keymix");
+    t.modify<model::FxInstance>(keyed, [](auto& fx) { fx.pins.key = {3, 4}; });
+    model::Route route;
+    route.from.track = source;
+    route.to.track = bus;
+    route.tap = model::Tap::PreFader;
+    route.channels = {{1, 2}, {3, 4}};
+    t.create(route);
+    const auto session = commit(t);
+    auto pool = makePool();
+    auto referencePool = makePool();
+    auto old = detail::compile(session, pool, 0, 128).value();
+    auto reference = detail::compile(session, referencePool, 0, 128).value();
+    REQUIRE(detail::prepare(old, session));
+    REQUIRE(detail::prepare(reference, session));
+    for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+    for (auto* instance : reference.instances) REQUIRE(instance->startProcessing());
+    for (int pos = 0; pos < 512; pos += 128) {
+        REQUIRE(detail::processBlock(old, pos, 128));
+        REQUIRE(detail::processBlock(reference, pos, 128));
+    }
+    auto replacement = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(replacement, session));
+    detail::carryMix(old, replacement, -1);
+    detail::locate(replacement, 512, false);
+    REQUIRE(detail::processBlock(replacement, 512, 128));
+    REQUIRE(detail::processBlock(reference, 512, 128));
+    const auto& actual = replacement.nodes[replacement.mainMaster].post;
+    const auto& expected = reference.nodes[reference.mainMaster].post;
+    CHECK(std::equal(actual.l.begin(), actual.l.end(), expected.l.begin()));
+    CHECK(std::equal(actual.r.begin(), actual.r.end(), expected.r.begin()));
+    for (auto* instance : old.instances) instance->stopProcessing();
+    for (auto* instance : reference.instances) instance->stopProcessing();
 }
 
 TEST_CASE("shared bridge accepts a new effect after its last instance is removed") {
@@ -756,6 +827,25 @@ TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curv
         REQUIRE(r.warnings.size() == 1);
         CHECK(r.warnings[0].find("gian") != std::string::npos);
     }
+    {
+        const auto session = build(
+            "gain", {{0.0, 0.0, PointShape::Linear, 0.0}, {2.0, -24.0, PointShape::Linear, 0.0}});
+        model::EditTxn shifted(session, 2);
+        for (const auto& item : session.items)
+            shifted.modify<model::Item>(item.id, [](auto& it) { it.position = .02; });
+        const auto audible = commit(shifted);
+        for (double start : {0.0, 0.001}) {
+            auto aligned = renderOffline(
+                audible, pool, {.startSeconds = start, .endSeconds = 0.1, .blockSize = 512});
+            auto odd = renderOffline(audible, pool,
+                                     {.startSeconds = start, .endSeconds = 0.1, .blockSize = 37});
+            REQUIRE(aligned);
+            REQUIRE(odd);
+            CHECK(peak(odd->audio.channels[0]) > .01);
+            CHECK(std::equal(odd->audio.channels[0].begin(), odd->audio.channels[0].end(),
+                             aligned->audio.channels[0].begin()));
+        }
+    }
 }
 
 TEST_CASE("plugins see the transport loop (CLAP loop flags)") {
@@ -1094,4 +1184,187 @@ TEST_CASE(
     CHECK(peak(ducked.audio.channels[0], 25000, 47000) ==
           doctest::Approx(0.5 * peak(plain.audio.channels[0], 25000, 47000)).epsilon(1e-3));
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("parent and route delay history survives label-only adoption") {
+    for (bool routeSend : {false, true}) {
+        auto pool = makePool();
+        auto refPool = makePool();
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id latent = addTrack(t, "Latent");
+        addFx(t, latent, kSine);
+        addNote(t, latent, 0, 1);
+        addFx(t, latent, kGain,
+              json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+                  .value());
+        const Id source = addTrack(t, "Plain");
+        addFx(t, source, kSine);
+        addNote(t, source, 0, 1, 72);
+        if (routeSend) {
+            t.modify<model::Track>(source, [](auto& tr) { tr.parentSend.enabled = false; });
+            model::Route route;
+            route.from.track = source;
+            route.to.track = kMaster;
+            t.create(route);
+        }
+        const auto session = commit(t);
+        auto old = detail::compile(session, pool, 0, 128).value();
+        auto reference = detail::compile(session, refPool, 0, 128).value();
+        REQUIRE(detail::prepare(old, session));
+        REQUIRE(detail::prepare(reference, session));
+        for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+        for (auto* instance : reference.instances) REQUIRE(instance->startProcessing());
+        for (int pos = 0; pos < 512; pos += 128) {
+            REQUIRE(detail::processBlock(old, pos, 128));
+            REQUIRE(detail::processBlock(reference, pos, 128));
+        }
+        model::EditTxn rename(session, 2);
+        rename.modify<model::Track>(source, [](auto& tr) { tr.name = "Renamed"; });
+        const auto renamed = commit(rename);
+        auto next = detail::compile(renamed, pool, 0, 128).value();
+        REQUIRE(detail::prepare(next, renamed));
+        detail::carryMix(old, next, -1);
+        detail::locate(next, 512, false);
+        REQUIRE(detail::processBlock(next, 512, 128));
+        REQUIRE(detail::processBlock(reference, 512, 128));
+        CHECK(std::equal(next.nodes[next.mainMaster].post.l.begin(),
+                         next.nodes[next.mainMaster].post.l.end(),
+                         reference.nodes[reference.mainMaster].post.l.begin()));
+        // An altered delay length must start empty.
+        auto changed = detail::compile(renamed, pool, 0, 128).value();
+        REQUIRE(detail::prepare(changed, renamed));
+        for (auto& edge : changed.edges)
+            if (edge.delay.length) edge.delay.init(65);
+        detail::carryMix(next, changed, -1);
+        detail::locate(changed, 640, false);
+        for (const auto& edge : changed.edges)
+            if (edge.delay.length)
+                CHECK(std::all_of(edge.delay.buf[0].begin(), edge.delay.buf[0].end(),
+                                  [](float x) { return x == 0; }));
+        for (auto* instance : old.instances) instance->stopProcessing();
+        for (auto* instance : reference.instances) instance->stopProcessing();
+    }
+}
+
+TEST_CASE("retained timeline notes are released at a loop after adoption") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id tr = addTrack(t, "Synth");
+    const Id synth = addFx(t, tr, kSine);
+    addNote(t, tr, 0, 2);
+    const auto session = commit(t);
+    auto old = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(old, session));
+    for (auto* instance : old.instances) REQUIRE(instance->startProcessing());
+    REQUIRE(detail::processBlock(old, 0, 128));
+    auto next = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(next, session));
+    detail::carryMix(old, next, -1);
+    detail::locate(next, 128, false);
+    auto node =
+        std::find_if(next.nodes.begin(), next.nodes.end(), [&](auto& n) { return n.id == tr; });
+    REQUIRE(node != next.nodes.end());
+    CHECK(node->held[69] == 1);
+    detail::wrapTo(next, 0, -1);
+    REQUIRE(detail::processBlock(next, 0, 128));
+    CHECK(node->held[69] == 1);  // off for the retained voice, then the new loop's on
+    CHECK(node->chain[static_cast<std::size_t>(node->noteTarget)].blockEvents.size() >= 2);
+    if (node->chain[static_cast<std::size_t>(node->noteTarget)].blockEvents.size() >= 2) {
+        CHECK(node->chain[static_cast<std::size_t>(node->noteTarget)].blockEvents[0].kind ==
+              host::Event::Kind::NoteOff);
+        CHECK(node->chain[static_cast<std::size_t>(node->noteTarget)].blockEvents[1].kind ==
+              host::Event::Kind::NoteOn);
+    }
+    auto changed = detail::compile(session, pool, 0, 128).value();
+    REQUIRE(detail::prepare(changed, session));
+    for (auto& n : changed.nodes)
+        if (n.id == tr) n.chain[static_cast<std::size_t>(n.noteTarget)].instance = nullptr;
+    detail::carryMix(next, changed, -1);
+    for (const auto& n : changed.nodes)
+        if (n.id == tr) CHECK(n.held[69] == 0);
+    pool.find(synth)->stopProcessing();
+}
+
+TEST_CASE("post-fader keys ignore source solo silencing and retain Console 9 encoding") {
+    for (bool console : {false, true}) {
+        model::EditTxn t(model::Session::create({.console9 = console}), 1);
+        const Id source = addTrack(t, "Source");
+        const Id destination = addTrack(t, "Destination");
+        t.modify<model::Track>(source, [](auto& tr) { tr.parentSend.enabled = false; });
+        addFx(t, source, kSine);
+        addNote(t, source, 0, 1);
+        const Id fx = addFx(t, destination, "com.suppleaudio.test.keymix");
+        model::Route key;
+        key.from.track = source;
+        key.to.fx = fx;
+        key.tap = model::Tap::PostFader;
+        t.create(key);
+        const auto plain = commit(t);
+        model::EditTxn solo(plain, 2);
+        solo.modify<model::Track>(destination, [](auto& tr) { tr.solo = model::Solo::On; });
+        auto pool = makePool();
+        auto refPool = makePool();
+        const auto expected = render(plain, refPool, .1);
+        const auto actual = render(commit(solo), pool, .1);
+        CHECK(peak(actual.audio.channels[0]) > .01);
+        CHECK(std::equal(actual.audio.channels[0].begin(), actual.audio.channels[0].end(),
+                         expected.audio.channels[0].begin()));
+    }
+}
+
+TEST_CASE("MIDI loop source offsets wrap cyclically and cover the final partial cycle") {
+    auto pool = makePool();
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id tr = addTrack(t, "Synth");
+    addFx(t, tr, kSine);
+    addNote(t, tr, 0, 4);
+    Id takeId;
+    const auto base = commit(t);
+    for (const auto& take : base.takes) takeId = take.id;
+    Id midiId = *base.takes.find(takeId)->source;
+    model::EditTxn loop(base, 2);
+    loop.modify<model::MidiSource>(midiId, [](auto& src) {
+        src.sequence.notes = {{960, 1920, 0, 69, 127, 0}, {3360, 960, 0, 72, 127, 0}};
+        src.sequence.controls = {{3600, midi::ControlKind::CC, 0, 1, 60}};
+    });
+    for (const auto& item : base.items)
+        loop.modify<model::Item>(item.id, [](auto& it) {
+            it.loop = true;
+            it.length = 8;
+        });
+    const auto session = commit(loop);
+    auto eventsAt = [&](double offset) {
+        model::EditTxn edit(session, 3);
+        edit.modify<model::Take>(takeId, [&](auto& take) { take.startOffset = offset; });
+        const auto edited = commit(edit);
+        auto plan = detail::compile(edited, pool, 0, 128).value();
+        REQUIRE(detail::prepare(plan, edited));
+        for (const auto& node : plan.nodes)
+            if (node.id == tr) return node.events;
+        return std::vector<detail::TimedEvent>{};
+    };
+    const auto canonical = eventsAt(0);
+    CHECK(std::any_of(canonical.begin(), canonical.end(), [](const auto& e) {
+        return e.sample == 108000 && e.event.key == 72 &&
+               e.event.kind == host::Event::Kind::NoteOff;  // beat 4.5, across the source boundary
+    }));
+    for (double offset : {4., 12., 400.}) {
+        const auto actual = eventsAt(offset);
+        REQUIRE(actual.size() == canonical.size());
+        for (std::size_t i = 0; i < actual.size(); ++i) {
+            CHECK(actual[i].sample == canonical[i].sample);
+            CHECK(actual[i].event.kind == canonical[i].event.kind);
+            CHECK(actual[i].event.key == canonical[i].event.key);
+        }
+    }
+    const auto fractional = eventsAt(2.5);
+    auto has = [&](std::int64_t sample, host::Event::Kind kind, int key) {
+        return std::any_of(fractional.begin(), fractional.end(), [&](const auto& e) {
+            return e.sample == sample && e.event.kind == kind && e.event.key == key;
+        });
+    };
+    CHECK(has(0, host::Event::Kind::NoteOn, 69));
+    CHECK(has(12000, host::Event::Kind::NoteOff, 69));
+    CHECK(has(156000, host::Event::Kind::NoteOn, 69));
+    CHECK(has(192000, host::Event::Kind::NoteOff, 69));  // clipped at item end
 }

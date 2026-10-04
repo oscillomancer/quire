@@ -31,6 +31,7 @@ void pushMeters(MeterBank& bank, const detail::Plan& plan, const std::vector<std
         entry.stream = stream;
         entry.frames = frames;
         entry.slot = node.meterSlot;
+        entry.generation = node.meterGeneration;
         for (int c = 0; c < 2; ++c) {
             entry.peak[c] = node.meterPeak[c];
             entry.sumSq[c] = node.meterSumSq[c];
@@ -250,10 +251,11 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
     auto build = [&]() -> Result<std::unique_ptr<detail::Plan>> {
-        auto compiled =
-            detail::compile(session, plugins_, 0.0,
-                            options_.anticipative ? options_.renderBlock : config_.blockSize,
-                            config_.sampleRate);  // the device's rate, whatever the project's
+        auto compiled = detail::compile(
+            session, plugins_, 0.0,
+            options_.anticipative ? std::max(options_.renderBlock, config_.blockSize)
+                                  : config_.blockSize,
+            config_.sampleRate);  // the device's rate, whatever the project's
         if (!compiled) return std::move(compiled).error();
         auto built = std::make_unique<detail::Plan>(std::move(*compiled));
         built->projectDir = projectDir;
@@ -308,6 +310,25 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             plan = std::move(*again);
         }
     }
+    // Synchronous bridge calls (including lifecycle) belong to the renderer.
+    // A live bridge is a compensated pass-through until live pipelining exists.
+    std::vector<host::Instance*> blocked;
+    for (detail::Node& node : plan->nodes) {
+        if (options_.anticipative && !node.live) continue;
+        detail::forEachStage(node, [&](detail::Stage& stage) {
+            if (!stage.instance || !stage.instance->isolated()) return;
+            stage.callbackBypass = true;
+            blocked.push_back(stage.instance);
+            plan->warnings.push_back(stage.fx.str() +
+                                     ": bridged FX is passed through on a live node; set isolation "
+                                     "to in_process to monitor through it");
+        });
+    }
+    std::sort(blocked.begin(), blocked.end());
+    for (auto* instances : {&plan->instances, &plan->liveInstances, &plan->rendererInstances})
+        std::erase_if(*instances, [&](host::Instance* instance) {
+            return std::binary_search(blocked.begin(), blocked.end(), instance);
+        });
     if (std::any_of(plan->nodes.begin(), plan->nodes.end(),
                     [](const detail::Node& n) { return n.midiIn.has_value(); })) {
         const std::vector<std::string> ports = backend_->midiPorts();  // ADR-0016
@@ -333,7 +354,10 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     // executors iterate are built from the slots.
     if (meters_) {
         meters_->beginPlan();
-        for (detail::Node& node : plan->nodes) node.meterSlot = meters_->slotFor(node.id);
+        for (detail::Node& node : plan->nodes) {
+            node.meterSlot = meters_->slotFor(node.id);
+            node.meterGeneration = meters_->generationFor(node.meterSlot);
+        }
         meters_->endPlan();
         detail::Plan& p = *plan;
         p.meterNodes.clear();
@@ -682,7 +706,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         seekSeen_ = xport.seekSeq;
         pos_ = xport.seekSample;
         if (plan) {
-            detail::locate(*plan, pos_, false);
+            detail::locate(*plan, pos_);
             resetOwned(processing_);
         }
     }
@@ -1230,11 +1254,16 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     // Metering (P5.3c): the callback measures the live nodes it just played, at
     // the position it played them from. While the transport is stopped nothing
     // is rendered ahead, so a monitored input is heard as it is produced.
-    if (meters_ && (playing || !wantNow()))
+    if (ok && meters_ && (playing || !wantNow()))
         pushMeters(*meters_, p, p.liveMeterNodes, rtEpoch_, liveStream_, k, false);
     const detail::Node& master = p.nodes[p.mainMaster];
-    std::copy_n(master.post.l.begin(), k, out[0]);
-    std::copy_n(master.post.r.begin(), k, out[1]);
+    if (ok) {
+        std::copy_n(master.post.l.begin(), k, out[0]);
+        std::copy_n(master.post.r.begin(), k, out[1]);
+    } else {
+        std::fill_n(out[0], k, 0.0f);
+        std::fill_n(out[1], k, 0.0f);
+    }
     if (playing) addClicks(p, out, 0, livePos_, k);
     if (playing) {
         if (detail::Recorder* r = recorder_.load()) {
