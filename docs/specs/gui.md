@@ -142,7 +142,12 @@ item-time to source-time before sampling the pyramid.
 Notes as instanced rectangles (position, length, pitch, velocity colour,
 selection) from the item's sequence (the same compiled representation the
 engine plays), in the arrange view (mini view) and the piano roll; CC lanes
-as line strips/bars.
+as line strips/bars. Loop thumbnails include source-crossing notes held from
+the preceding cycle, clip them at the item's boundaries, and omit source
+note starts at or beyond the loop length, matching playback. Offsets and
+play rates apply to these tails too; loop-pass and note-glyph drawing remain
+bounded to 8192 each. Without a positive source length, the thumbnail uses
+one nonlooping pass, as playback does.
 
 ### 3.3 Meters and telemetry
 
