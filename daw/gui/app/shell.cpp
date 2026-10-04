@@ -193,7 +193,7 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     arrange_->setTcpCallbacks(std::move(tcp));
     // Plugin parameter lanes take their scale from the effect's description.
     arrange_->trackLayout().pluginScales =
-        [scales = std::make_shared<PluginScales>(dispatcher_)](const model::Envelope& env) {
+        [scales = std::make_shared<PluginScales>(dispatcher_, &app_)](const model::Envelope& env) {
             return (*scales)(env);
         };
     counts_ = &shell->emplace<ui::Label>("status", status_, ui::Font::Mono, "small", "ink-quiet");
@@ -212,6 +212,14 @@ void Shell::sync() {
     const model::Session& s = app_.head();
     const bool moved = s.version != shownVersion_;
     if (moved) {
+        std::erase_if(ui_.selectedItems, [&](const std::string& text) {
+            const auto id = model::Id::parse(text);
+            return !id || !s.items.find(*id);
+        });
+        std::erase_if(ui_.selectedTracks, [&](const std::string& text) {
+            const auto id = model::Id::parse(text);
+            return !id || !s.tracks.find(*id);
+        });
         shownVersion_ = s.version;
         const int strips = static_cast<int>(s.tracks.size());
         counts_->setText(std::to_string(strips) + (strips == 1 ? " strip  " : " strips  ") +

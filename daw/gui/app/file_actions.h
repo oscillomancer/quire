@@ -6,6 +6,8 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 
 #include "app_actions.h"
@@ -14,6 +16,25 @@
 struct SDL_Window;
 
 namespace supple::gui {
+
+// Native callbacks may race shutdown; posted completions run on the UI thread.
+class DialogLifetime {
+  public:
+    using Paths = std::vector<std::filesystem::path>;
+    using Post = std::function<void(std::function<void()>)>;
+    DialogLifetime() = default;
+    DialogLifetime(const DialogLifetime&) = delete;
+    DialogLifetime& operator=(const DialogLifetime&) = delete;
+    ~DialogLifetime();
+    std::function<void(Paths)> guard(Post post, std::function<void(Paths)> done) const;
+
+  private:
+    struct State {
+        std::mutex mutex;
+        bool active = true;
+    };
+    std::shared_ptr<State> state_ = std::make_shared<State>();
+};
 
 class FileActions {
   public:
@@ -41,6 +62,7 @@ class FileActions {
     UiState& ui_;
     SDL_Window* window_;
     Post post_;
+    DialogLifetime dialogs_;
     std::uint64_t savedVersion_ = 0;
     std::string savedBranch_;
 };

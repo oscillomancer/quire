@@ -248,18 +248,22 @@ class Compiler {
     }
     std::int64_t barStart(int bar) {
         if (bar <= 0) return 0;
-        std::int64_t tick = result_.pickupTicks;
-        for (int b = 1; b < bar && b <= 100000; ++b) {
-            const auto span = internal::barTicks(meter(b), result_.sequence.ppq);
-            if (span > std::numeric_limits<std::int64_t>::max() - tick) {
+        if (barStarts_.empty()) barStarts_.push_back(result_.pickupTicks);
+        const auto count = static_cast<std::size_t>(std::min(bar, 100001));
+        while (barStarts_.size() < count) {
+            const auto span = internal::barTicks(meter(static_cast<int>(barStarts_.size())),
+                                                 result_.sequence.ppq);
+            if (span > std::numeric_limits<std::int64_t>::max() - barStarts_.back()) {
                 add("bad_duration", "Bar position overflows tick time.", Token{"pickup", 1, 1},
                     "Use a shorter pickup.");
                 return 0;
             }
-            tick += span;
+            barStarts_.push_back(barStarts_.back() + span);
         }
-        return tick;
+        return barStarts_[count - 1];
     }
+    std::vector<std::int64_t> barStarts_;
+
     std::int64_t lastEventEnd() const {
         std::int64_t end = 0;
         for (const auto& note : result_.sequence.notes)

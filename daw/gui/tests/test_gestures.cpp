@@ -978,3 +978,61 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
 }
+
+TEST_CASE("left trim moves every take offset at its own play rate in one undo step") {
+    Fixture f;
+    REQUIRE(f.ok);
+    std::optional<model::Id> id;
+    for (const auto& entry : f.app->head().items)
+        if (entry.value->takes.size() == 2) id = entry.id;
+    REQUIRE(id);
+    const auto takes = f.item(*id).takes;
+    REQUIRE(f.dispatcher->execute(
+        {"take.set", json::parse(R"({"take":")" + takes[1].str() + R"(","playrate":2})").value(),
+         kUi}));
+    f.sync();
+    const auto before = f.app->head();
+    const auto span = model::itemSpan(before, f.item(*id));
+    const auto steps = f.steps();
+    const auto rect = f.rectOf(*id);
+    f.drag({rect.x + 2, rect.y + rect.h / 2}, {rect.x + 10, rect.y + rect.h / 2});
+    REQUIRE(f.steps() == steps + 1);
+    const double delta = model::itemSpan(f.app->head(), f.item(*id)).startSec - span.startSec;
+    REQUIRE(delta > 0);
+    for (auto take : takes)
+        CHECK(f.app->head().takes.find(take)->startOffset ==
+              doctest::Approx(before.takes.find(take)->startOffset +
+                              delta * before.takes.find(take)->playrate));
+    REQUIRE(f.dispatcher->execute({"history.undo", json::Value::object(), kUi}));
+    for (auto take : takes)
+        CHECK(f.app->head().takes.find(take)->startOffset == before.takes.find(take)->startOffset);
+}
+
+TEST_CASE("clipboard channel offsets skip envelope rows and report missing targets") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto& gestures = f.view->gestures();
+    const auto a = f.itemOnRow(0), b = f.itemOnRow(1);
+    const auto target = f.view->trackLayout().rows()[2].track;
+    const auto next = f.view->trackLayout().rows()[3].track;
+    const auto last = f.view->trackLayout().rows()[5].track;
+    gestures.setSelection({a, b});
+    gestures.copySelection();
+    REQUIRE(f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"track":")" + target.str() + R"(","param":"volume","points":[]})").value(),
+         kUi}));
+    f.sync();
+    REQUIRE(gestures.paste(200, target));
+    f.sync();
+    REQUIRE(gestures.selection().size() == 2);
+    CHECK(f.item(gestures.selection()[0]).track == target);
+    CHECK(f.item(gestures.selection()[1]).track == next);
+    std::string diagnostic;
+    gestures.onError = [&](const Error& error) { diagnostic = error.message; };
+    REQUIRE(gestures.paste(300, last));
+    f.sync();
+    REQUIRE(gestures.selection().size() == 1);
+    CHECK(f.item(gestures.selection().front()).track == last);
+    CHECK(diagnostic.find("dropped 1") != std::string::npos);
+}

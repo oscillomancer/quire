@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -17,26 +18,25 @@ namespace supple::notation {
 namespace {
 
 struct Timeline {
+    Timeline(int ticks, const DecompileOptions& opts) : ppq(ticks), options(opts) {}
     int ppq;
     const DecompileOptions& options;
+    mutable std::vector<midi::Meter> meters;
+    std::vector<std::int64_t> starts{0};
     midi::Meter meter(int bar) const {
-        return options.meterAt ? options.meterAt(bar) : midi::Meter{};
+        while (meters.size() < static_cast<std::size_t>(bar)) {
+            const int next = static_cast<int>(meters.size()) + 1;
+            meters.push_back(options.meterAt ? options.meterAt(next) : midi::Meter{});
+        }
+        return meters[static_cast<std::size_t>(bar - 1)];
     }
     std::int64_t start(int bar) const {
-        std::int64_t tick = 0;
-        for (int b = 1; b < bar && b <= 100000; ++b) tick += internal::barTicks(meter(b), ppq);
-        return tick;
+        return starts[static_cast<std::size_t>(std::clamp(bar, 1, static_cast<int>(starts.size())) -
+                                               1)];
     }
     int bar(std::int64_t tick) const {
-        int b = 1;
-        std::int64_t at = 0;
-        while (b <= 100000) {
-            const auto span = internal::barTicks(meter(b), ppq);
-            if (span <= 0 || tick < at + span) break;
-            at += span;
-            ++b;
-        }
-        return b;
+        return std::max(1, static_cast<int>(std::upper_bound(starts.begin(), starts.end(), tick) -
+                                            starts.begin()));
     }
     std::string position(std::int64_t tick) const {
         const int b = bar(tick);
@@ -233,6 +233,7 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
                          {},
                          "Use a valid meter and compatible PPQ throughout the item."};
         checkedUntil += internal::barTicks(meter, s.ppq);
+        time.starts.push_back(checkedUntil);
         if (checkedUntil > s.length) break;
     }
     if (checkedUntil < s.length)
@@ -261,6 +262,7 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
                          "Use sysex positions in bars 1..100000."};
 
     std::map<int, std::vector<Group>> channels;
+    std::map<std::tuple<int, std::int64_t, std::int64_t, int, int>, std::size_t> groupIndex;
     for (const auto& note : s.notes) {
         if (note.start < 0 || note.length < 0 || note.channel > 15 || note.pitch > 127 ||
             note.velocity < 1 || note.velocity > 127 || note.offVelocity > 127)
@@ -269,15 +271,14 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
                          {},
                          "Check note time, pitch, channel, and velocities."};
         auto& groups = channels[note.channel];
-        auto it = std::find_if(groups.begin(), groups.end(), [&](const Group& g) {
-            return g.start == note.start && g.length == note.length &&
-                   g.velocity == note.velocity && g.off == note.offVelocity;
-        });
-        if (it == groups.end()) {
+        const auto key = std::tuple{int(note.channel), note.start, note.length, int(note.velocity),
+                                    int(note.offVelocity)};
+        auto [found, added] = groupIndex.emplace(key, groups.size());
+        if (added)
             groups.push_back(
                 {note.start, note.length, note.velocity, note.offVelocity, {note.pitch}});
-        } else
-            it->pitches.push_back(note.pitch);
+        else
+            groups[found->second].pitches.push_back(note.pitch);
     }
     std::string body;
     int lastWrittenBar = 0;
@@ -299,16 +300,26 @@ Result<std::string> decompile(const midi::Sequence& source, const DecompileOptio
                    std::tie(b.start, b.pitches[0], b.length, b.velocity, b.off);
         });
         std::vector<Voice> voices;
+        using End = std::pair<std::int64_t, std::size_t>;
+        std::priority_queue<End, std::vector<End>, std::greater<End>> busy;
+        std::set<std::size_t> freeVoices;
         for (auto& group : groups) {
             std::sort(group.pitches.begin(), group.pitches.end());
-            auto it = std::find_if(voices.begin(), voices.end(),
-                                   [&](const Voice& voice) { return voice.cursor <= group.start; });
-            if (it == voices.end()) {
-                voices.push_back({});
-                it = std::prev(voices.end());
+            while (!busy.empty() && busy.top().first <= group.start) {
+                freeVoices.insert(busy.top().second);
+                busy.pop();
             }
-            it->groups.push_back(group);
-            it->cursor = group.start + group.length;
+            std::size_t index = voices.size();
+            if (freeVoices.empty())
+                voices.push_back({});
+            else {
+                index = *freeVoices.begin();
+                freeVoices.erase(freeVoices.begin());
+            }
+            auto& voice = voices[index];
+            voice.groups.push_back(group);
+            voice.cursor = group.start + group.length;
+            busy.emplace(voice.cursor, index);
         }
         for (std::size_t vi = 0; vi < voices.size(); ++vi) {
             const auto& voice = voices[vi];

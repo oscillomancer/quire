@@ -316,6 +316,7 @@ struct Clip {
     std::int64_t fadeIn = 0, fadeOut = 0;
     model::FadeShape fadeInShape = model::FadeShape::Linear,
                      fadeOutShape = model::FadeShape::Linear;
+    double fadeInCurve = 0, fadeOutCurve = 0;
     int takeChain = -1;  // >= 0: it plays into that take chain, not the track's sum
 };
 
@@ -343,6 +344,7 @@ struct TakeChain {
     std::int64_t fadeIn = 0, fadeOut = 0;
     model::FadeShape fadeInShape = model::FadeShape::Linear,
                      fadeOutShape = model::FadeShape::Linear;
+    double fadeInCurve = 0, fadeOutCurve = 0;
     Automation volume, pan, mute;  // the take's envelopes (dB, %, 0/1), output side
     Stereo buf;
     bool active = false;  // processed in the last block: the chain is fresh at each entry

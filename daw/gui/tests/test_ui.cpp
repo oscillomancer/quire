@@ -96,6 +96,70 @@ TEST_CASE("a list shorter than one row pages by one row") {
     CHECK(list.selected() == 0);
 }
 
+TEST_CASE("root dispatch defers deletion and resolves targets after callbacks") {
+    REQUIRE_GL();
+    struct Reactive : Node {
+        explicit Reactive(std::string id, bool& dead) : Node(std::move(id)), dead_(dead) {
+            focusable = interactive = true;
+            layout.width = SizeRule::fixed(100);
+        }
+        ~Reactive() override { dead_ = true; }
+        void onFocus(bool value) override {
+            if (auto callback = focusChanged) callback(value);
+        }
+        void onHover(bool value) override {
+            if (auto callback = hoverChanged) callback(value);
+        }
+        std::function<void(bool)> focusChanged, hoverChanged;
+        bool& dead_;
+    };
+    bool oldDead = false, nextDead = false;
+    int clicks = 0;
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("content");
+    content->layout.dir = Layout::Dir::Row;
+    auto& old = content->emplace<Reactive>("old", oldDead);
+    auto& next = content->emplace<Reactive>("next", nextDead);
+    root.setContent(std::move(content));
+    root.frame(false);
+    SUBCASE("blur replaces content during a click") {
+        root.focus(&old);
+        old.focusChanged = [&](bool focused) {
+            if (focused) return;
+            auto replacement = std::make_unique<Node>("replacement");
+            replacement->layout.dir = Layout::Dir::Row;
+            replacement->emplace<Node>("spacer").layout.width = SizeRule::fixed(100);
+            auto& button = replacement->emplace<Button>("new", "New", [&] { ++clicks; });
+            button.layout.width = SizeRule::fixed(100);
+            button.layout.height = SizeRule::fraction();
+            root.setContent(std::move(replacement));
+            CHECK_FALSE(oldDead);
+            CHECK_FALSE(nextDead);
+        };
+        CHECK(root.click("next"));
+        CHECK(oldDead);
+        CHECK(nextDead);
+        CHECK(clicks == 1);
+        CHECK(root.focused() == root.find("new"));
+    }
+    SUBCASE("hover exit removes the next target") {
+        bool entered = false;
+        next.hoverChanged = [&](bool hovered) {
+            if (hovered) entered = true;
+        };
+        old.hoverChanged = [&](bool hovered) {
+            if (hovered) return;
+            (void)root.content()->remove(&next);
+            CHECK_FALSE(nextDead);
+        };
+        root.pointer({PointerEvent::Type::Move, {50, 50}});
+        root.pointer({PointerEvent::Type::Move, {150, 50}});
+        CHECK(nextDead);
+        CHECK_FALSE(entered);
+        CHECK(root.hovered() == nullptr);
+    }
+}
+
 TEST_CASE("stack layout: fixed, content and fractions with padding, gaps and alignment") {
     REQUIRE_GL();
     Root root(*fixture().window, fixture().fonts, Theme::dark());

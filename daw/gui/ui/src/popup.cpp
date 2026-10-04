@@ -134,6 +134,7 @@ class PopupFrame : public Node {
 
 Node& Root::openPopup(std::unique_ptr<Node> content, const Rect& anchor, Placement placement,
                       std::function<void()> onClose) {
+    Dispatch dispatch(*this);
     auto frame = std::make_unique<PopupFrame>(std::move(content), anchor, placement,
                                               std::move(onClose), focused_);
     PopupFrame& f = static_cast<PopupFrame&>(overlay_->add(std::move(frame)));
@@ -152,6 +153,7 @@ Node& Root::openPopup(std::unique_ptr<Node> content, const Rect& anchor, Placeme
 }
 
 void Root::closePopup() {
+    Dispatch dispatch(*this);
     if (popups_.empty()) return;
     auto* f = static_cast<PopupFrame*>(popups_.back());
     popups_.pop_back();

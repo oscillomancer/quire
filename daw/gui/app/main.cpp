@@ -420,6 +420,9 @@ int main(int argc, char** argv) {
         applyLook();
     });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    pluginWindows.onError = [&](const Error& error) {
+        if (shell.onError) shell.onError(error.message);
+    };
     pluginWindows.setOwner(window->get());
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
     gui::RoutingMatrix routing(root, appActions, dispatcher, **app);

@@ -30,6 +30,7 @@ class Fader : public Node {
     void setValue(double db);  // from the model; no callback during a drag
     double value() const { return db_; }
     bool dragging() const { return dragging_; }
+    void cancelGesture() { dragging_ = false; }
 
     Size measure(const Canvas& canvas, Size available) override;
     void paint(Canvas& canvas) override;
@@ -86,6 +87,7 @@ class PanControl : public Node {
     std::function<void(double pan, Gesture)> onChange;
     void setValue(double pan);
     double value() const { return pan_; }
+    void cancelGesture() { dragging_ = false; }
     Size measure(const Canvas& canvas, Size available) override;
     void paint(Canvas& canvas) override;
     bool onPointer(const PointerEvent& e) override;

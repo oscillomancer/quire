@@ -79,6 +79,7 @@ class TrackLayout {
     model::Session session_;
     std::uint64_t indexed_ = ~std::uint64_t{0};
     std::vector<TrackRow> rows_;
+    std::map<model::Id, std::size_t> trackRows_, envRows_;
     std::map<model::Id, float> heights_;
     float globalHeight_ = kDefaultHeight;
     std::vector<float> rowHeights_;

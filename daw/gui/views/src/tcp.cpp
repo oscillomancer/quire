@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "supple/ui/canvas.h"
 #include "supple/ui/popup.h"
@@ -146,6 +147,7 @@ class TcpPanel::Row : public ui::Node {
 
     bool bound() const { return track_.has_value(); }
     void startRename();  // the name becomes an edit field
+    void cancelGestures();
     const model::Id& track() const { return *track_; }
     ui::Node* control(std::string_view what) const;
 
@@ -156,6 +158,7 @@ class TcpPanel::Row : public ui::Node {
   private:
     TcpPanel& panel_;
     std::optional<model::Id> track_;
+    std::optional<model::Id> faderTrack_, panTrack_, renameTrack_, resizeTrack_;
     int depth_ = 0;
     bool channel_ = true;
     bool renaming_ = false;
@@ -193,14 +196,16 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         rename_->visible = false;
         name_->visible = true;
         name_->relayout();
-        if (panel_.cb_.commit && track_.has_value()) {
-            json::Value args = trackArg(*track_);
+        const auto target = std::exchange(renameTrack_, std::nullopt);
+        if (panel_.cb_.commit && target && target == track_) {
+            json::Value args = trackArg(*target);
             args["name"] = text;
             panel_.cb_.commit("track.set", std::move(args), {});
         }
         invalidate();
     };
     rename_->onCancel = [this] {
+        renameTrack_.reset();
         renaming_ = false;
         rename_->visible = false;
         name_->visible = true;
@@ -235,22 +240,40 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
     });
     fader_ = &emplace<ui::Fader>(id + ".fader", ui::Fader::Orientation::Horizontal);
     fader_->onChange = [this, setTrack](double db, ui::Gesture g) {
-        if (g == ui::Gesture::Begin) ++panel_.gestureSerial_;
-        if (g == ui::Gesture::Begin || g == ui::Gesture::End) return;
-        json::Value args = trackArg(*track_);
+        if (g == ui::Gesture::Begin) {
+            ++panel_.gestureSerial_;
+            faderTrack_ = track_;
+            return;
+        }
+        if (g == ui::Gesture::End) {
+            faderTrack_.reset();
+            return;
+        }
+        const auto target = g == ui::Gesture::Move ? faderTrack_ : track_;
+        if (!target || target != track_) return;
+        json::Value args = trackArg(*target);
         args["volume_db"] = db;
         setTrack(std::move(args), g == ui::Gesture::Move
-                                      ? gestureFor("tcp.volume", *track_, panel_.gestureSerial_)
+                                      ? gestureFor("tcp.volume", *target, panel_.gestureSerial_)
                                       : std::string{});
     };
     pan_ = &emplace<ui::PanControl>(id + ".pan");
     pan_->onChange = [this, setTrack](double pan, ui::Gesture g) {
-        if (g == ui::Gesture::Begin) ++panel_.gestureSerial_;
-        if (g == ui::Gesture::Begin || g == ui::Gesture::End) return;
-        json::Value args = trackArg(*track_);
+        if (g == ui::Gesture::Begin) {
+            ++panel_.gestureSerial_;
+            panTrack_ = track_;
+            return;
+        }
+        if (g == ui::Gesture::End) {
+            panTrack_.reset();
+            return;
+        }
+        const auto target = g == ui::Gesture::Move ? panTrack_ : track_;
+        if (!target || target != track_) return;
+        json::Value args = trackArg(*target);
         args["pan"] = pan;
         setTrack(std::move(args), g == ui::Gesture::Move
-                                      ? gestureFor("tcp.pan", *track_, panel_.gestureSerial_)
+                                      ? gestureFor("tcp.pan", *target, panel_.gestureSerial_)
                                       : std::string{});
     };
     // The wheel scrolls the track list, never a strip's level or pan.
@@ -275,6 +298,7 @@ TcpPanel::Row::~Row() = default;
 
 void TcpPanel::Row::bind(const model::Id& track, int depth, const model::Track& tr,
                          const model::Session& session) {
+    if (track_ != track) cancelGestures();
     track_ = track;
     depth_ = depth;
     channel_ = tr.type == model::StripType::Channel;
@@ -325,7 +349,26 @@ void TcpPanel::Row::refresh(const model::Session& session) {
     if (input_->valueText() != inputText) input_->setText(inputText);
 }
 
+void TcpPanel::Row::cancelGestures() {
+    faderTrack_.reset();
+    panTrack_.reset();
+    renameTrack_.reset();
+    resizeTrack_.reset();
+    fader_->cancelGesture();
+    pan_->cancelGesture();
+    resizing_ = renaming_ = false;
+    rename_->visible = false;
+    name_->visible = true;
+    if (auto* owner = root()) {
+        if (owner->focused() == rename_) owner->focus(nullptr);
+        owner->forget(this);
+        owner->forget(fader_);
+        owner->forget(pan_);
+    }
+}
+
 void TcpPanel::Row::unbind() {
+    cancelGestures();
     track_.reset();
     visible = false;
 }
@@ -434,10 +477,13 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
 bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
     using T = ui::PointerEvent::Type;
     if (resizing_) {
-        if ((e.type == T::Move || e.type == T::Up) && track_ && panel_.cb_.resizeTrack)
-            panel_.cb_.resizeTrack(*track_, std::max(1.0f, resizeFrom_ + (e.pos.y - resizeY_)));
+        if ((e.type == T::Move || e.type == T::Up) && resizeTrack_ && resizeTrack_ == track_ &&
+            panel_.cb_.resizeTrack)
+            panel_.cb_.resizeTrack(*resizeTrack_,
+                                   std::max(1.0f, resizeFrom_ + (e.pos.y - resizeY_)));
         if (e.type == T::Up) {
             resizing_ = false;
+            resizeTrack_.reset();
             if (ui::Root* r = root()) r->capture(nullptr);
         }
         return true;
@@ -450,6 +496,7 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
             return true;
         }
         resizing_ = true;
+        resizeTrack_ = track_;
         resizeY_ = e.pos.y;
         resizeFrom_ = bounds().h;
         if (ui::Root* r = root()) r->capture(this);
@@ -470,6 +517,8 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
 }
 
 void TcpPanel::Row::startRename() {
+    if (!track_) return;
+    renameTrack_ = track_;
     renaming_ = true;
     rename_->setText(name_->text());
     rename_->selectAll();
@@ -545,7 +594,7 @@ bool TcpPanel::sendPointer(const ui::PointerEvent& e, const model::Id& from,
         sendPress_ = sendPointer_ = e.pos;
         sendMoved_ = false;
         if (root() && !sendOverlay_) {
-            root()->overlay().add(std::make_unique<SendGhost>(alive_));
+            sendOverlayHandle_ = root()->addOverlay(std::make_unique<SendGhost>(alive_));
             sendOverlay_ = true;
         }
         return true;

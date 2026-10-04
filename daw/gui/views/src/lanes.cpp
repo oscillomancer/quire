@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <functional>
 
+#include "supple/model/fade_shape.h"
+#include "supple/model/source_mapping.h"
 #include "supple/time/timeline.h"
 
 namespace supple::views {
@@ -25,41 +27,6 @@ std::string_view typeToken(model::StripType t) {
 }
 
 double dbToGain(double db) { return std::pow(10.0, db / 20.0); }
-
-// The fade curve: a normalized gain in [0, 1] for a position t in [0, 1]
-// along the fade. `curve` (% −100..100) bends the shape slowly or quickly.
-float fadeGain(model::FadeShape shape, double curve, float t) {
-    t = std::clamp(t, 0.0f, 1.0f);
-    float g = t;
-    switch (shape) {
-        case model::FadeShape::Linear:
-            g = t;
-            break;
-        case model::FadeShape::Slow:
-            g = t * t;
-            break;
-        case model::FadeShape::Fast:
-            g = std::sqrt(t);
-            break;
-        case model::FadeShape::SlowFast:
-            g = t * t * (3.0f - 2.0f * t);
-            break;
-        case model::FadeShape::FastSlow:
-            g = 1.0f - t * t * (3.0f - 2.0f * t);
-            break;
-        case model::FadeShape::Cos:
-            g = 0.5f - 0.5f * std::cos(3.14159265f * t);
-            break;
-        case model::FadeShape::Exp: {
-            const float k = std::exp(3.0f);
-            g = (std::exp(3.0f * t) - 1.0f) / (k - 1.0f);
-            break;
-        }
-    }
-    const float exponent =
-        std::exp2(std::clamp(static_cast<float>(curve), -100.0f, 100.0f) / 50.0f);
-    return std::pow(std::clamp(g, 0.0f, 1.0f), exponent);
-}
 
 }  // namespace
 
@@ -263,6 +230,8 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
     const model::Id envId = *layout_.rows()[row].env;
     // Automation items replace the envelope where they sit: their boxes under
     // the curve, a header band (name or pool), a tick at each loop pass.
+    const double visibleFrom = s.timeMap->beatAt(std::max(0.0, timeAt(bounds().x)));
+    const double visibleTo = s.timeMap->beatAt(std::max(0.0, timeAt(bounds().right())));
     std::vector<std::pair<double, double>> covered;
     for (const auto& e : s.autoItems) {
         const model::AutomationItem& ai = *e.value;
@@ -279,31 +248,33 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
         if (ai.pool > 0) label += "  pool " + std::to_string(ai.pool);
         c.text({box.x + 4, box.y - 1, std::max(0.0f, box.w - 6), kAutoHeader}, label, ui::Font::Ui,
                t.type("caption"), t.color("ink"));
-        if (ai.loop && ai.sourceLength > 0)
-            for (double k = ai.position + ai.sourceLength; k < ai.position + ai.length - 1e-9;
-                 k += ai.sourceLength) {
-                const float x = xAt(s.timeMap->secondsAt(k));
+        std::size_t glyphs = 0;
+        for (const double base : model::visibleLoopPasses(ai.position, ai.length, ai.sourceLength,
+                                                          ai.loop, visibleFrom, visibleTo)) {
+            if (ai.loop && base > ai.position) {
+                const float x = xAt(s.timeMap->secondsAt(base));
                 c.fillRect({x, box.y + kAutoHeader, 1, box.h - kAutoHeader}, ink.withAlpha(0.4f));
             }
-        const int passes =
-            ai.loop ? std::max(1, static_cast<int>(std::ceil(ai.length / ai.sourceLength - 1e-9)))
-                    : 1;
-        for (int k = 0; k < passes; ++k)
-            for (const model::EnvPoint& pt : ai.points) {
-                const double at = ai.position + k * ai.sourceLength + pt.pos;
-                if (pt.pos > ai.sourceLength || at > ai.position + ai.length + 1e-9) continue;
+            for (const auto& point : ai.points) {
+                if (++glyphs > 8192) break;
+                const double at = base + point.pos;
+                if (point.pos > ai.sourceLength || at >= ai.position + ai.length ||
+                    at < visibleFrom || at > visibleTo)
+                    continue;
                 const float x = xAt(s.timeMap->secondsAt(at));
-                c.strokeRect({x - 3, yOf(autoItemValue(ai, pt.value)) - 3, 6, 6}, ink);
+                c.strokeRect({x - 3, yOf(autoItemValue(ai, point.value)) - 3, 6, 6}, ink);
             }
+            if (glyphs > 8192) break;
+        }
     }
-    const std::vector<model::EnvPoint> played = model::effectivePoints(s, envId);
+    const EnvelopeCurve played(s, envId, *scale, visibleFrom, visibleTo);
     const float x0 = std::max(a.x, bounds().x), x1 = std::min(a.right(), bounds().right());
     ui::Point prev{};
     bool have = false;
     for (float x = x0; x <= x1 + 3; x += 3) {
         const float px = std::min(x, x1);
         const double beat = s.timeMap->beatAt(std::max(0.0, timeAt(px)));
-        const ui::Point p{px, yOf(model::pointsValueAt(played, beat, fallback))};
+        const ui::Point p{px, yOf(played.valueAt(beat, fallback))};
         if (have) c.line(prev, p, ink, 1.5f);
         prev = p;
         have = true;
@@ -431,7 +402,8 @@ void Lanes::drawFades(const ui::Rect& r, const model::Item& item, std::uint32_t 
         strips_->beginRun();
         for (int k = 0; k <= steps; ++k) {
             const float t = static_cast<float>(k) / static_cast<float>(steps);
-            const float gain = fadeGain(shape, bend, t0 + (t1 - t0) * t);
+            const float gain = static_cast<float>(
+                model::fadeGain(shape, bend, static_cast<double>(t0 + (t1 - t0) * t)));
             const float x = x0 + (x1 - x0) * t;
             const float y = (r.bottom() - 1) - gain * (r.h - 2);
             strips_->pair(x, y - 0.75f, y + 0.75f, rgba);
@@ -508,17 +480,28 @@ void Lanes::drawMidi(const ui::Rect& r, const model::Item& item, const model::Ta
     const model::ItemSpan span = model::itemSpan(layout_.session(), item);
     const double itemBeat = span.startBeat;
     const double ppq = seq.ppq > 0 ? seq.ppq : 960;
-    for (const midi::Note& n : seq.notes) {
-        const double b0 = static_cast<double>(n.start) / ppq - take.startOffset;
-        const double b1 = b0 + static_cast<double>(n.length) / ppq;
-        if (b1 <= 0) continue;
-        const double s0 = tm.secondsAt(itemBeat + std::max(0.0, b0));
-        if (s0 >= span.endSec) break;  // notes are sorted by start
-        const double s1 = std::min(tm.secondsAt(itemBeat + b1), span.endSec);
-        const float y = top + static_cast<float>(hi->pitch + 1 - n.pitch) * noteH;
-        notes_->add({xAt(s0), y, std::max(1.0f, xAt(s1) - xAt(s0)), noteH}, rgba, border);
-        ++stats_.notes;
-    }
+    const model::SourceBeatMapping mapping{take.startOffset,
+                                           take.playrate > 0 ? take.playrate : 1.0,
+                                           static_cast<double>(seq.length) / ppq};
+    const double visibleFrom =
+        std::max(0.0, tm.beatAt(std::max(0.0, timeAt(bounds().x))) - itemBeat);
+    const double visibleTo =
+        std::min(tm.beatAt(span.endSec) - itemBeat,
+                 tm.beatAt(std::max(0.0, timeAt(bounds().right()))) - itemBeat);
+    std::size_t glyphs = 0;
+    for (const double base : mapping.visibleOrigins(tm.beatAt(span.endSec) - itemBeat, item.loop,
+                                                    visibleFrom, visibleTo))
+        for (const midi::Note& n : seq.notes) {
+            const double b0 = base + static_cast<double>(n.start) / ppq / mapping.rate;
+            const double b1 = b0 + static_cast<double>(n.length) / ppq / mapping.rate;
+            if (b1 <= visibleFrom || b0 >= visibleTo) continue;
+            if (++glyphs > 8192) return;
+            const double s0 = tm.secondsAt(itemBeat + std::max(0.0, b0));
+            const double s1 = std::min(tm.secondsAt(itemBeat + b1), span.endSec);
+            const float y = top + static_cast<float>(hi->pitch + 1 - n.pitch) * noteH;
+            notes_->add({xAt(s0), y, std::max(1.0f, xAt(s1) - xAt(s0)), noteH}, rgba, border);
+            ++stats_.notes;
+        }
 }
 
 }  // namespace supple::views

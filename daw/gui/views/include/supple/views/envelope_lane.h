@@ -19,6 +19,7 @@ struct EnvScale {
     enum class Kind { Volume, Pan, Mute, Plugin };
     Kind kind = Kind::Volume;
     std::shared_ptr<const params::DescribedParam> param;  // Plugin: range, curve, units
+    bool normalizedInterpolation = true;                  // semantic and normalized plug-in lanes
     double toNorm(double value) const;                    // 0 = the lane's bottom, 1 = its top
     double fromNorm(double norm) const;                   // the inverse, clamped to the range
     std::string text(double value) const;                 // "-6.0 dB", "L 30", "muted", "1.20 kHz"
@@ -34,5 +35,24 @@ std::string envTitle(const model::Envelope& env);
 double envValueAt(const model::Envelope& env, double beat, double fallback);
 // The order lanes appear under their track: volume, pan, mute, then others.
 int envOrder(const model::Envelope& env);
+
+// Samples visible automation directly, without expanding repeated source points.
+class EnvelopeCurve {
+  public:
+    EnvelopeCurve(const model::Session& session, model::Id envelope, EnvScale scale, double from,
+                  double to);
+    double valueAt(double beat, double fallback) const;
+
+  private:
+    struct Segment {
+        double start, end, sourceLength, baseline;
+        bool loop;
+        std::vector<model::EnvPoint> points;
+    };
+    EnvScale scale_;
+    bool normalized_ = false;
+    std::vector<model::EnvPoint> points_;
+    std::vector<Segment> segments_;
+};
 
 }  // namespace supple::views

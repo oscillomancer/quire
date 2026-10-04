@@ -2,6 +2,7 @@
 // user would, asserting on the session through the bus (gui.md §10).
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
+#include "product_fixture.h"
 
 #include <unistd.h>
 #include <chrono>
@@ -74,8 +75,8 @@ struct App {
         dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
         app->attachCommands(*dispatcher);
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
-        actions = std::make_unique<gui::AppActions>(registry, *dispatcher, *app, ui,
-                                                    actions::Keymap::defaultFile("quire-test"));
+        actions = std::make_unique<gui::AppActions>(
+            registry, *dispatcher, *app, ui, actions::Keymap::defaultFile(gui::test::slug()));
         actions->addUi("ui.actions", "View: actions list",
                        [this] { gui::openActionsList(*root, *actions); });
         root->onUnhandledKey = [this](const ui::KeyEvent& e) {
@@ -177,7 +178,7 @@ TEST_CASE("app actions: keys, the actions list, prompts, key binding and menus")
     a.key("F5");
     CHECK(a.actions->keysFor("track.add:master") == "F5");
     a.key("Escape");
-    CHECK(std::filesystem::exists(a.dir / "config" / "quire-test" / "keymap.json"));
+    CHECK(std::filesystem::exists(a.dir / "config" / gui::test::slug() / "keymap.json"));
     const std::size_t masters = a.tracks("master");
     a.key("F5");
     CHECK(a.tracks("master") == masters + 1);
@@ -291,6 +292,36 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     dialog.open("envelope");
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.alt")->valueText() == "delete");
+}
+
+TEST_CASE("native dialog completions respect shutdown before posting and running") {
+    int posts = 0, completions = 0;
+    std::vector<std::function<void()>> queued;
+    auto lifetime = std::make_unique<gui::DialogLifetime>();
+    auto complete = lifetime->guard(
+        [&](auto task) {
+            ++posts;
+            queued.push_back(std::move(task));
+        },
+        [&](auto) { ++completions; });
+    SUBCASE("shutdown before the native callback") {
+        lifetime.reset();
+        complete({"example.json"});
+        CHECK(posts == 0);
+    }
+    SUBCASE("shutdown after posting") {
+        complete({"example.json"});
+        REQUIRE(queued.size() == 1);
+        lifetime.reset();
+        queued.front()();
+        CHECK(completions == 0);
+    }
+    SUBCASE("live completion") {
+        complete({"example.json"});
+        REQUIRE(queued.size() == 1);
+        queued.front()();
+        CHECK(completions == 1);
+    }
 }
 
 TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd and accepted") {
@@ -688,7 +719,7 @@ TEST_CASE("the TCP's input menu lists the device's ports and picks one (P5.13)")
         v["midi"] = std::move(midi);
         return v;
     };
-    peaks::PeakService peaks(peaks::defaultCacheDir("quire-test"),
+    peaks::PeakService peaks(peaks::defaultCacheDir(gui::test::slug()),
                              [](std::function<void()> f) { f(); });
     gui::MeterFeed meters;
     gui::Shell shell(*a.app, *a.dispatcher, a.ui, "", peaks, meters, inputs);

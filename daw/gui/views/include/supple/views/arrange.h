@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include "supple/ui/root.h"
 
 #include "supple/model/session.h"
 #include "supple/peaks/peaks.h"
@@ -161,6 +162,7 @@ class ArrangeView : public ui::Node {
     ui::ScrollBar* hbar_ = nullptr;
     ui::ScrollBar* vbar_ = nullptr;
     double lastPollMs_ = -1e9;
+    ui::Root::OverlayHandle overlay_;
     std::shared_ptr<ArrangeView*> alive_;
     bool overlayInstalled_ = false;
 };

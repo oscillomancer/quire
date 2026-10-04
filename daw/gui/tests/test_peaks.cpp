@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -92,6 +93,10 @@ TEST_CASE("pyramids serialize exactly and reject foreign or truncated files") {
     REQUIRE(back);
     CHECK(back->frames() == p.frames());
     CHECK(back->serialize() == bytes);
+    auto old = bytes;
+    old[4] = 1;
+    old[5] = old[6] = old[7] = 0;
+    CHECK_FALSE(peaks::Pyramid::deserialize(old));
     auto truncated = bytes;
     truncated.resize(truncated.size() - 7);
     CHECK_FALSE(peaks::Pyramid::deserialize(truncated));
@@ -224,4 +229,42 @@ TEST_CASE("peak cache rejects inconsistent metadata") {
     REQUIRE(back);
     CHECK(back->frames() == 0);
     CHECK(back->serialize() == serialized);
+}
+
+TEST_CASE("unhashed peaks rebuild replaced files and retry after a missing file appears") {
+    const auto dir = scratch("revisions");
+    const auto wav = dir / "tone.wav";
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::function<void()>> posted;
+    peaks::PeakService service(dir / "cache", [&](auto fn) {
+        std::lock_guard lock(mutex);
+        posted.push_back(std::move(fn));
+        ready.notify_one();
+    });
+    auto drain = [&] {
+        std::vector<std::function<void()>> tasks;
+        {
+            std::unique_lock lock(mutex);
+            ready.wait(lock, [&] { return !posted.empty(); });
+            tasks.swap(posted);
+        }
+        for (auto& task : tasks) task();
+    };
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    CHECK(service.failure("", wav).has_value());
+    REQUIRE(audio::writeWav(wav, tone(24000)));
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    REQUIRE(service.get("", wav));
+    CHECK(service.get("", wav)->frames() == 24000);
+    REQUIRE(audio::writeWav(wav, tone(48000)));
+    CHECK_FALSE(service.get("", wav));
+    drain();
+    REQUIRE(service.get("", wav));
+    CHECK(service.get("", wav)->frames() == 48000);
+    CHECK(service.stats().failed == 1);
+    CHECK(service.stats().built == 2);
+    std::filesystem::remove_all(dir);
 }

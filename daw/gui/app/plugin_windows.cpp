@@ -7,6 +7,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <system_error>
 
 #include "supple/model/session.h"
 
@@ -14,17 +17,43 @@ namespace supple::gui {
 
 // --- FdWatcher
 
-FdWatcher::FdWatcher(std::function<void()> wake) : wake_(std::move(wake)) {
-    if (::pipe2(pipe_, O_CLOEXEC | O_NONBLOCK) != 0) pipe_[0] = pipe_[1] = -1;
-    thread_ = std::jthread([this](std::stop_token stop) { run(stop); });
+Result<std::unique_ptr<FdWatcher>> FdWatcher::create(std::function<void()> wake, Pipe pipe,
+                                                     Poll poll) {
+    auto watcher = std::unique_ptr<FdWatcher>(new FdWatcher(std::move(wake)));
+    const int result =
+        pipe ? pipe(watcher->pipe_) : ::pipe2(watcher->pipe_, O_CLOEXEC | O_NONBLOCK);
+    if (result != 0)
+        return Error("gui.editor.fds",
+                     std::string("cannot start editor FD service: ") + std::strerror(errno), {},
+                     "release file descriptors and retry editor activation");
+    watcher->poll_ = std::move(poll);
+    try {
+        watcher->thread_ =
+            std::jthread([owner = watcher.get()](std::stop_token stop) { owner->run(stop); });
+    } catch (const std::system_error& e) {
+        return Error("gui.editor.fds", std::string("cannot start editor FD worker: ") + e.what());
+    }
+    return watcher;
+}
+
+std::optional<Error> FdWatcher::error() {
+    std::lock_guard lock(mutex_);
+    return error_;
 }
 
 FdWatcher::~FdWatcher() {
     thread_.request_stop();
-    if (pipe_[1] >= 0) (void)::write(pipe_[1], "x", 1);
+    notify();
     if (thread_.joinable()) thread_.join();
     for (int fd : pipe_)
         if (fd >= 0) ::close(fd);
+}
+
+void FdWatcher::notify() {
+    if (pipe_[1] < 0) return;
+    while (::write(pipe_[1], "x", 1) < 0 && errno == EINTR) {
+    }
+    // EAGAIN means a previous wake is already pending.
 }
 
 void FdWatcher::watch(std::vector<std::pair<int, std::uint32_t>> fds) {
@@ -38,7 +67,7 @@ void FdWatcher::watch(std::vector<std::pair<int, std::uint32_t>> fds) {
         if (fds == fds_) return;
         fds_ = std::move(fds);
     }
-    if (pipe_[1] >= 0) (void)::write(pipe_[1], "x", 1);
+    notify();
 }
 
 std::vector<std::pair<int, std::uint32_t>> FdWatcher::takeReady() {
@@ -59,7 +88,17 @@ void FdWatcher::run(std::stop_token stop) {
             }
         }
         polled.push_back({pipe_[0], POLLIN, 0});
-        if (::poll(polled.data(), polled.size(), -1) < 0) continue;  // EINTR
+        if ((poll_ ? poll_(polled) : ::poll(polled.data(), polled.size(), -1)) < 0) {
+            if (errno == EINTR) continue;
+            {
+                std::lock_guard lock(mutex_);
+                error_ = Error("gui.editor.fds",
+                               std::string("editor FD poll failed: ") + std::strerror(errno), {},
+                               "close and reopen the editor after restarting FD service");
+            }
+            if (wake_) wake_();
+            return;
+        }
         if (polled.back().revents & POLLIN) {
             char buf[64];
             while (::read(pipe_[0], buf, sizeof buf) > 0) {
@@ -88,7 +127,13 @@ void FdWatcher::run(std::stop_token stop) {
 
 PluginWindows::PluginWindows(const Platform& platform, engine::EngineApp& app,
                              std::function<void()> wake)
-    : platform_(platform), app_(app), watcher_(std::move(wake)) {}
+    : platform_(platform), app_(app) {
+    auto watcher = FdWatcher::create(std::move(wake));
+    if (watcher)
+        watcher_ = std::move(*watcher);
+    else
+        watcherError_ = watcher.error();
+}
 
 PluginWindows::~PluginWindows() { closeAll(); }
 
@@ -98,6 +143,8 @@ bool PluginWindows::isOpen(model::Id fx) const {
 }
 
 Status PluginWindows::attach(Editor editor, const std::string& title) {
+    if (watcher_)
+        if (auto error = watcher_->error()) watcherError_ = std::move(error);
     if (!editor.instance->hasEditor())
         return Error("gui.editor", title + " has no editor this host can embed", "",
                      "the plugin offers no X11 editor (or its bridge process failed: restart it)");
@@ -119,6 +166,10 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
     auto size = editor.instance->openEditor(parent, static_cast<double>((*window)->pixelRatio()));
     restoreContext();
     if (!size) return std::move(size).error();
+    if (watcherError_ && !editor.instance->watchedFds().empty()) {
+        editor.instance->closeEditor();
+        return *watcherError_;
+    }
     if (size->width > 0 && size->height > 0)
         (*window)->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
     (*window)->setResizable(size->resizable);
@@ -213,6 +264,18 @@ bool PluginWindows::handle(const SDL_Event& e) {
 }
 
 int PluginWindows::service() {
+    if (watcher_)
+        if (auto error = watcher_->error()) watcherError_ = std::move(error);
+    if (watcherError_) {
+        if (!watcherErrorReported_ && onError) {
+            onError(*watcherError_);
+            watcherErrorReported_ = true;
+        }
+        for (std::size_t i = editors_.size(); i-- > 0;)
+            if ((!editors_[i].fx || app_.instanceOf(*editors_[i].fx) == editors_[i].instance) &&
+                !editors_[i].instance->watchedFds().empty())
+                drop(i);
+    }
     // Editors whose instance the engine replaced or dropped close.
     for (std::size_t i = editors_.size(); i-- > 0;) {
         Editor& e = editors_[i];
@@ -230,7 +293,9 @@ int PluginWindows::service() {
             e.window->setSize(static_cast<int>(requests.width), static_cast<int>(requests.height));
     }
     // Ready descriptors go to their plugin, then are watched again.
-    for (const auto& [fd, flags] : watcher_.takeReady())
+    for (const auto& [fd, flags] : watcher_ && !watcherError_
+                                       ? watcher_->takeReady()
+                                       : std::vector<std::pair<int, std::uint32_t>>{})
         for (Editor& e : editors_)
             for (const auto& [wfd, wflags] : e.instance->watchedFds())
                 if (wfd == fd) e.instance->onFd(fd, flags);
@@ -245,7 +310,7 @@ int PluginWindows::service() {
         }
         if (due >= 0) next = next < 0 ? due : std::min(next, due);
     }
-    watcher_.watch(std::move(fds));
+    if (watcher_ && !watcherError_) watcher_->watch(std::move(fds));
     if (!editors_.empty()) restoreContext();
     return next;
 }

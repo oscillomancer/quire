@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 #include <stb_image.h>
+#include "product_fixture.h"
 
 #include <unistd.h>
 #include <chrono>
@@ -68,7 +69,7 @@ struct Fixture {
         options.workdir = dir;
         options.chainDir = dir / "chains";
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
-        options.identity = host::HostIdentity{"Quire test", "Supple Audio", "", "0"};
+        options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
         app = std::move(*a);
@@ -77,10 +78,10 @@ struct Fixture {
         dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
         app->attachCommands(*dispatcher);
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
-        actions = std::make_unique<gui::AppActions>(registry, *dispatcher, *app, ui,
-                                                    actions::Keymap::defaultFile("quire-test"));
+        actions = std::make_unique<gui::AppActions>(
+            registry, *dispatcher, *app, ui, actions::Keymap::defaultFile(gui::test::slug()));
         fx = std::make_unique<gui::FxWindow>(*app, *dispatcher, *root, gui::FxWindow::Hooks{},
-                                             gui::Favourites::defaultFile("quire-test"));
+                                             gui::Favourites::defaultFile(gui::test::slug()));
         render = std::make_unique<gui::RenderDialog>(*app, *dispatcher, *root);
         actions->addUi("ui.fx.chain", "FX: chain…", "track",
                        [this](const json::Value& v) -> Status { return fx->openFor(ui, v); });
@@ -283,17 +284,21 @@ TEST_CASE("render numeric fields reject non-finite values and overflowing intege
     if (!f.ok) return;
     f.render->open();
     f.render->setField("render.end", "4");
-    f.render->setField("render.start", "nan");
-    f.render->setField("render.tail", "inf");
-    f.render->setField("render.sample_rate", "1e100");
-    f.render->setField("render.channels", "nan");
-    f.render->addToQueue();
-    REQUIRE(f.app->renderQueue().size() == 1);
-    const auto& args = f.app->renderQueue().front().args;
-    CHECK_FALSE(args.find("start_beat"));
-    CHECK_FALSE(args.find("tail_s"));
-    CHECK_FALSE(args.find("sample_rate"));
-    CHECK_FALSE(args.find("channels"));
+    for (const auto& [field, value] : {std::pair{"render.start", "nan"},
+                                       {"render.tail", "inf"},
+                                       {"render.sample_rate", "1e100"},
+                                       {"render.channels", "nan"},
+                                       {"render.bit_depth", "17"}}) {
+        f.render->setField(field, value);
+        f.render->addToQueue();
+        CHECK(f.app->renderQueue().empty());
+        CHECK(f.render->statusText().find(field) != std::string::npos);
+        f.render->refreshPreview();
+        CHECK(f.render->preview().find(field) != std::string::npos);
+        f.render->run();
+        CHECK(f.render->job().empty());
+        f.render->setField(field, "");
+    }
 }
 
 TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, favourites") {
@@ -412,7 +417,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.click("fx.add");
     f.type("Plumb");
     f.click("browser.fav");
-    const auto favFile = gui::Favourites::defaultFile("quire-test");
+    const auto favFile = gui::Favourites::defaultFile(gui::test::slug());
     CHECK(std::filesystem::exists(favFile));
     auto loaded = gui::Favourites::load(favFile);
     REQUIRE(loaded);
@@ -523,14 +528,15 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     engine::AppOptions options;
     options.workdir = f.dir / "shadow-work";
     options.pluginPath = {dup, std::filesystem::path(SUPPLE_CLAP_DIR)};
-    options.identity = host::HostIdentity{"Quire test", "Supple Audio", "", "0"};
+    options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
     cmd::Registry registry;
     engine::registerEngineCommands(registry);
     cmd::Dispatcher bus(registry, **app);
     (*app)->attachCommands(bus);
-    gui::PluginBrowser browser(**app, bus, *f.root, f.configDir / "quire-test" / "favourites.json");
+    gui::PluginBrowser browser(**app, bus, *f.root,
+                               f.configDir / gui::test::slug() / "favourites.json");
     browser.open([](const std::string&) {});
     auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
     REQUIRE(search);
@@ -853,4 +859,71 @@ TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input 
     REQUIRE(f.fx->open(track));
     CHECK_FALSE(f.fx->take());
     CHECK(f.fx->chain().empty());
+}
+
+TEST_CASE("FX latency badge follows an effect edit and undo without reopening") {
+    Fixture f;
+    REQUIRE(f.ok);
+    if (!f.stockPlugins()) return;
+    const auto track = f.addTrack("Latency");
+    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Flint")}})));
+    REQUIRE(f.fx->open(track));
+    f.frame();
+    const auto effect = f.fx->chain().front();
+    auto text = [&] {
+        auto* label = f.root->find("fx.latency." + effect.str());
+        REQUIRE(label);
+        return label->valueText();
+    };
+    CHECK(text() == "0 spl");
+    json::Value values = json::Value::object();
+    values["clip"] = true;
+    REQUIRE(f.run("fx.param.set", f.args({{"fx", effect.str()}, {"values", values}})));
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    struct StopEngine {
+        engine::EngineApp& app;
+        ~StopEngine() { app.stopEngine(); }
+    } stop{*f.app};
+    REQUIRE(f.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256},
+                               {.anticipative = false}));
+
+    f.fx->tick();
+    f.frame();
+    CHECK(text() == "72 spl");
+    REQUIRE(f.run("history.undo", json::Value::object()));
+    REQUIRE(f.run("fx.restart", f.args({{"fx", effect.str()}})));
+    f.fx->tick();
+    f.frame();
+    CHECK(text() == "0 spl");
+}
+
+TEST_CASE("render cancellation retains partial files and labels them cancelled") {
+    Fixture f;
+    REQUIRE(f.ok);
+    // Script the bus responses so completion ordering is deterministic.
+    auto response = [&](const char* name, json::Value result) {
+        cmd::Command<json::Value, json::Value> command;
+        command.name = name;
+        command.version = 2;
+        command.kind = cmd::Kind::Query;
+        command.exposure = cmd::Exposure::Internal;
+        command.args = schema::any();
+        command.result = schema::any();
+        command.run = [result](const json::Value&, cmd::Context&) -> Result<json::Value> {
+            return result;
+        };
+        f.registry.add(std::move(command));
+    };
+    response("render.mix", json::parse(R"({"job":"test-job"})").value());
+    response(
+        "job.get",
+        json::parse(
+            R"({"status":"cancelled","result":{"files":[{"path":"partial.wav","seconds":1}]}})")
+            .value());
+    f.render->open();
+    f.render->run();
+    f.render->tick();
+    CHECK(f.render->job().empty());
+    CHECK(f.render->statusText().starts_with("cancelled"));
+    CHECK(f.render->resultFiles() == std::vector<std::string>{"partial.wav"});
 }

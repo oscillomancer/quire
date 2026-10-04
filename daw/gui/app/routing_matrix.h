@@ -4,6 +4,7 @@
 // the routing rules reject are drawn disabled and say why on hover.
 #pragma once
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -41,6 +42,9 @@ struct MatrixModel {
     std::vector<Send> sends;
     std::vector<std::pair<std::string, std::string>> cyclePairs;  // (from, to)
     std::vector<std::string> cyclePaths;
+    void index();
+    std::map<std::pair<std::string, std::string>, std::string> cycleIndex;
+    std::map<std::pair<std::string, std::string>, std::vector<std::size_t>> sendIndex;
     // Why from -> to is refused (empty: allowed).
     std::string blocked(std::size_t row, std::size_t col) const;
     std::vector<const Send*> sendsAt(std::size_t row, std::size_t col) const;

@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "supple/ui/root.h"
 
 #include "supple/json/value.h"
 #include "supple/model/session.h"
@@ -128,6 +129,7 @@ class TcpPanel : public ui::Node {
     ui::Rect sendAnchor_{};
     bool sendMoved_ = false, sendOverlay_ = false;
     bool rearrange_ = false;  // scrolled() since the last arrange
+    ui::Root::OverlayHandle sendOverlayHandle_;
     std::shared_ptr<TcpPanel*> alive_;
 };
 

@@ -24,6 +24,14 @@ std::string fmt(double v, int decimals) {
 
 }  // namespace
 
+void MatrixModel::index() {
+    cycleIndex.clear();
+    sendIndex.clear();
+    for (std::size_t i = 0; i < cyclePairs.size(); ++i) cycleIndex[cyclePairs[i]] = cyclePaths[i];
+    for (std::size_t i = 0; i < sends.size(); ++i)
+        sendIndex[{sends[i].from, sends[i].to}].push_back(i);
+}
+
 std::string MatrixModel::blocked(std::size_t row, std::size_t col) const {
     const Source& s = sources[row];
     const Destination& d = destinations[col];
@@ -34,16 +42,16 @@ std::string MatrixModel::blocked(std::size_t row, std::size_t col) const {
     } else if (s.id == d.track) {
         return "a strip cannot key a plug-in in its own chain";
     }
-    for (std::size_t i = 0; i < cyclePairs.size(); ++i)
-        if (cyclePairs[i].first == s.id && cyclePairs[i].second == d.id)
-            return "it would feed back: " + cyclePaths[i];
+    if (const auto found = cycleIndex.find({s.id, d.id}); found != cycleIndex.end())
+        return "it would feed back: " + found->second;
     return {};
 }
 
 std::vector<const MatrixModel::Send*> MatrixModel::sendsAt(std::size_t row, std::size_t col) const {
     std::vector<const Send*> out;
-    for (const Send& x : sends)
-        if (x.from == sources[row].id && x.to == destinations[col].id) out.push_back(&x);
+    if (const auto found = sendIndex.find({sources[row].id, destinations[col].id});
+        found != sendIndex.end())
+        for (auto index : found->second) out.push_back(&sends[index]);
     return out;
 }
 
@@ -61,6 +69,21 @@ class Grid : public ui::Node {
           selected_(selected) {
         interactive = true;
         layout.height = ui::SizeRule::fraction();
+    }
+
+    void modelChanged() {
+        scrollX_ = std::clamp(scrollX_, 0.0f,
+                              std::max(0.0f, static_cast<float>(m_.destinations.size()) * kCell -
+                                                 std::max(0.0f, bounds().w - kLabelW)));
+        scrollY_ = std::clamp(scrollY_, 0.0f,
+                              std::max(0.0f, static_cast<float>(m_.sources.size()) * kCell -
+                                                 std::max(0.0f, bounds().h - kHeaderH)));
+        hovered_.reset();
+        invalidate();
+    }
+    void arrange(const ui::Canvas& canvas, const ui::Rect& bounds) override {
+        Node::arrange(canvas, bounds);
+        modelChanged();
     }
 
     std::optional<std::pair<std::size_t, std::size_t>> cellAt(ui::Point p) const {
@@ -282,7 +305,9 @@ Status RoutingMatrix::reload() {
         }
         next.sends.push_back(std::move(x));
     }
+    next.index();
     model_ = std::move(next);
+    if (grid_) static_cast<Grid*>(grid_)->modelChanged();
     version_ = app_.head().version;
     if (selected_ && std::none_of(model_.sends.begin(), model_.sends.end(),
                                   [&](const MatrixModel::Send& x) { return x.id == *selected_; }))

@@ -19,7 +19,7 @@ std::int16_t q15(float v) {
 float unq15(std::int16_t v) { return static_cast<float>(v) / 32767.0f; }
 
 constexpr char kMagic[4] = {'S', 'P', 'P', 'K'};
-constexpr std::uint32_t kFormat = 1;
+constexpr std::uint32_t kFormat = 2;
 
 template <class T>
 void put(std::vector<std::uint8_t>& out, T v) {
@@ -45,10 +45,17 @@ std::string hexOf(const std::string& hash) {
     return hex;
 }
 
-// The in-memory key: the content hash, or the media path when the model has
-// none yet (MediaSource::hash is not populated everywhere).
+// The in-memory key: the content hash, or path + size + mtime when the
+// model has none yet (MediaSource::hash is not populated everywhere).
 std::string keyOf(const std::string& hash, const std::filesystem::path& media) {
-    return hash.empty() ? "path:" + media.lexically_normal().string() : hash;
+    if (!hash.empty()) return hash;
+    std::error_code sizeError, timeError;
+    const auto size = std::filesystem::file_size(media, sizeError);
+    const auto mtime =
+        std::filesystem::last_write_time(media, timeError).time_since_epoch().count();
+    return "path:" + media.lexically_normal().string() + ":" +
+           (sizeError ? "missing" : std::to_string(size)) + ":" +
+           (timeError ? "missing" : std::to_string(mtime));
 }
 
 // The cache file name: the hash's hex, or a digest of path, size and

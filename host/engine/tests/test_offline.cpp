@@ -447,6 +447,15 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
           doctest::Approx(0.5 * (4800.0 + 240) / 48000.0 * kStrip).epsilon(1e-5));
     CHECK(media.size() == 1);
 
+    model::EditTxn bent(s, 2);
+    bent.modify<model::Item>(it, [](model::Item& x) { x.fadeIn.curve = 50; });
+    auto curved =
+        renderOffline(commit(bent), pool,
+                      {.startSeconds = 0, .endSeconds = 1.0, .projectDir = dir, .media = &media});
+    REQUIRE(curved);
+    CHECK(double(curved->audio.channels[0][24240]) ==
+          doctest::Approx(0.25 * 5040.0 / 48000.0 * kStrip).epsilon(1e-5));
+
     model::EditTxn t2(s, 2);
     t2.modify<model::Take>(tk, [](model::Take& x) { x.channelMode = model::ChannelMode::Left; });
     auto r2 =

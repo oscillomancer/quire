@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "supple/ui/root.h"
 
 #include "supple/base/result.h"
 #include "supple/json/json.h"
@@ -185,18 +186,21 @@ class ItemGestures {
     ui::Point press_{};
     bool moved_ = false, free_ = false, copy_ = false, cycleFade_ = false;
     std::size_t pressRow_ = 0;
+    ui::Root::OverlayHandle overlay_;
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it
     struct Clip {
         std::uint64_t version = 0;
+        std::optional<model::Id> anchorTrack;
         struct Entry {
             model::Id item;
             double position = 0, end = 0;
-            std::size_t row = 0;
+            model::Id track;
+            std::ptrdiff_t channelOffset = 0;
         };
         std::vector<Entry> items;
     } clipboard_;
     Clip clip() const;  // the selection as a clip of the shown version
-    Status pasteClip(const Clip& clip, double atBeat, std::optional<std::size_t> row,
+    Status pasteClip(const Clip& clip, double atBeat, std::optional<model::Id> track,
                      const std::string& label);
     ui::Root* root_ = nullptr;
 };

@@ -30,6 +30,25 @@ class Root {
     void setContent(std::unique_ptr<Node> content);
     Node* content() const { return content_.get(); }
     Node& overlay() { return *overlay_; }
+    class OverlayHandle {
+      public:
+        OverlayHandle() = default;
+        ~OverlayHandle() { reset(); }
+        OverlayHandle(OverlayHandle&& other) noexcept;
+        OverlayHandle& operator=(OverlayHandle&& other) noexcept;
+        OverlayHandle(const OverlayHandle&) = delete;
+        OverlayHandle& operator=(const OverlayHandle&) = delete;
+        void reset();
+        explicit operator bool() const { return node_ != nullptr; }
+
+      private:
+        friend class Root;
+        OverlayHandle(std::weak_ptr<Root*> root, Node* node)
+            : root_(std::move(root)), node_(node) {}
+        std::weak_ptr<Root*> root_;
+        Node* node_ = nullptr;
+    };
+    OverlayHandle addOverlay(std::unique_ptr<Node> node);
     Node* find(std::string_view id) const;
     const Theme& theme() const { return theme_; }
     void setTheme(Theme theme);
@@ -52,7 +71,7 @@ class Root {
     void focus(Node* node);
     Node* focused() const { return focused_; }
     Node* hovered() const { return hovered_; }
-    void capture(Node* node) { captured_ = node; }
+    void capture(Node* node);
     void forget(Node* node);  // a node is going away
 
     // --- popups (popup.h): returns the content node, now owned by the overlay
@@ -85,6 +104,20 @@ class Root {
     const Stats& stats() const { return stats_; }
 
   private:
+    friend class Node;
+    class Dispatch {
+      public:
+        explicit Dispatch(Root& root) : root_(root) { ++root_.dispatchDepth_; }
+        ~Dispatch() {
+            if (--root_.dispatchDepth_ == 0) root_.retired_.clear();
+        }
+
+      private:
+        Root& root_;
+    };
+    void retire(std::shared_ptr<Node> node);
+    bool attached(const Node* node) const;
+    Node* pointerTarget(Point point);
     void layoutNow(const Canvas& canvas);
     void paintTree(Node& node, Canvas& canvas, const Rect& clip);
     void paintGl(Node& node, const Rect& clip);
@@ -92,7 +125,10 @@ class Root {
     gui::Window& window_;
     gui::Fonts fonts_;
     Theme theme_;
-    std::unique_ptr<Node> content_, overlay_;
+    std::shared_ptr<Node> content_, overlay_;
+    std::shared_ptr<Root*> alive_;
+    unsigned dispatchDepth_ = 0;
+    std::vector<std::shared_ptr<Node>> retired_;
     Node* focused_ = nullptr;
     Node* hovered_ = nullptr;
     Node* captured_ = nullptr;

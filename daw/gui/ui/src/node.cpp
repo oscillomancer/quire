@@ -27,22 +27,24 @@ Node& Node::add(std::unique_ptr<Node> child) {
     return *children_.back();
 }
 
-std::unique_ptr<Node> Node::remove(Node* child) {
+std::shared_ptr<Node> Node::remove(Node* child) {
     auto it = std::find_if(children_.begin(), children_.end(),
                            [&](const auto& c) { return c.get() == child; });
     if (it == children_.end()) return nullptr;
-    forgetSubtree(root(), child);
+    Root* owner = root();
+    forgetSubtree(owner, child);
     invalidate(child->bounds());
-    std::unique_ptr<Node> out = std::move(*it);
+    std::shared_ptr<Node> out = std::move(*it);
     children_.erase(it);
     out->parent_ = nullptr;
+    out->attach(nullptr);
+    if (owner) owner->retire(out);
     relayout();
     return out;
 }
 
 void Node::clear() {
-    for (const auto& c : children_) forgetSubtree(root(), c.get());
-    children_.clear();
+    while (!children_.empty()) (void)remove(children_.back().get());
     invalidate();
     relayout();
 }
@@ -80,6 +82,12 @@ bool Node::hovered() const {
 bool Node::focused() const {
     const Root* r = root();
     return r && r->focused() == this;
+}
+
+bool Node::visibleInTree() const {
+    for (const Node* node = this; node; node = node->parent())
+        if (!node->visible) return false;
+    return true;
 }
 
 Size Node::measure(const Canvas& canvas, Size available) {

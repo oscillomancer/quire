@@ -21,8 +21,10 @@
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/model/session.h"
+#include "supple/model/source_mapping.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
+#include "supple/views/envelope_lane.h"
 #include "supple/views/mouse_map.h"
 
 using namespace supple;
@@ -264,7 +266,7 @@ TEST_CASE("the ruler shows the tempo and meter changes the session carries") {
     CHECK(tm.meterAt(34).numerator == 4);
 }
 
-TEST_CASE("the wheel over the lanes zooms around the playhead, which keeps its place") {
+TEST_CASE("wheel zoom anchors under the pointer and keyboard zoom at the playhead") {
     Gl& g = gl();
     if (!g.ok) return;
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
@@ -277,16 +279,18 @@ TEST_CASE("the wheel over the lanes zooms around the playhead, which keeps its p
     root.damageAll();
     root.frame(false);
     const double before = arrange->viewport().pixelsPerSecond;
-    const float x = arrange->playheadX();
+    const double time = arrange->timeAt(600);
     ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {600, 300}};  // anywhere on the lanes
     wheel.wheelY = 1;
     root.pointer(wheel);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before * 1.25));
-    CHECK(static_cast<double>(arrange->playheadX()) ==
-          doctest::Approx(static_cast<double>(x)).epsilon(0.001));
+    CHECK(arrange->timeAt(600) == doctest::Approx(time).epsilon(0.001));
     wheel.wheelY = -1;  // and back out
     root.pointer(wheel);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before));
+    const float playhead = arrange->playheadX();
+    REQUIRE(arrange->onKey({SDLK_EQUALS}));
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(playhead)));
 }
 
 TEST_CASE("the TCP column and the lanes stay aligned through scroll and height changes") {
@@ -1154,4 +1158,121 @@ TEST_CASE("the mouse map: built-in defaults, per-combination overrides, the file
     CHECK(bad.error().path == "/contexts/fade/alt");
     CHECK(bad.error().hint.find("cycle_shape") != std::string::npos);
     CHECK_FALSE(views::MouseMap::fromJson(json::parse(R"({"schema":"x"})").value()));
+}
+
+TEST_CASE("visible source passes preserve offset and rate with a bounded iteration count") {
+    model::SourceBeatMapping map{2, 2, 8};
+    CHECK(map.itemBeat(4) == doctest::Approx(1));
+    CHECK(map.itemBeat(4, 2) == doctest::Approx(9));
+    CHECK(map.visibleOrigins(20, true, 8, 10) == std::vector<double>{7});
+    CHECK(model::visibleLoopPasses(0, 1e9, 4, true, 100000, 100008) ==
+          std::vector<double>{100000, 100004, 100008});
+    CHECK(model::visibleLoopPasses(0, 100, 0.001, true, 0, 100, 10).size() == 10);
+    CHECK(model::visibleLoopPasses(0, 1, 1e-300, true, 0.5, 0.6).size() <= 1);
+    map.rate = 0;
+    CHECK(map.visibleOrigins(20, true, 8, 10).empty());
+}
+
+TEST_CASE("automation drawing samples playback boundaries without expanding loops") {
+    model::EditTxn txn(model::Session::create(), 1);
+    model::Envelope env;
+    env.target = {model::kMaster, "volume"};
+    bool normalized = false, loop = true;
+    SUBCASE("empty underlying envelope") {}
+    SUBCASE("underlying envelope") { env.points = {{0, 0, model::PointShape::Slow}, {30, 10}}; }
+    SUBCASE("nonlooping source") { loop = false; }
+    SUBCASE("normalized plugin domain") {
+        normalized = true;
+        env.points = {{0, 1, model::PointShape::Slow}, {30, 10}};
+    }
+    const auto id = txn.create(env);
+    model::AutomationItem item;
+    item.envelope = id;
+    item.position = 4;
+    item.length = 9.5;
+    item.sourceLength = 4;
+    item.loop = loop;
+    item.points = {{0, 2, model::PointShape::Slow}, {1, 8, model::PointShape::Square}, {3, 4}};
+    item.baseline = 2;
+    item.amplitude = 0.5;
+    const auto ai = txn.create(item);
+    auto session = txn.preview();
+    views::EnvScale scale;
+    if (normalized) {
+        auto spec = std::make_shared<params::DescribedParam>();
+        spec->spec.min = 1;
+        spec->spec.max = 10;
+        spec->spec.curve = {params::CurveKind::Log};
+        scale.kind = views::EnvScale::Kind::Plugin;
+        scale.param = spec;
+    }
+    auto expanded = model::effectivePoints(session, id);
+    if (normalized)
+        for (auto& point : expanded) point.value = scale.toNorm(point.value);
+    views::EnvelopeCurve curve(session, id, scale, 5, 12);
+    for (int i = 0; i <= 160; ++i) {
+        const double beat = i * 0.125;
+        INFO(beat);
+        const double value = model::pointsValueAt(expanded, beat, normalized ? scale.toNorm(0) : 0);
+        CHECK(curve.valueAt(beat, 0) ==
+              doctest::Approx(normalized ? scale.fromNorm(value) : value));
+    }
+    txn.modify<model::AutomationItem>(ai, [](auto& x) { x.length = 1e9; });
+    views::EnvelopeCurve huge(txn.preview(), id, scale, 1e8, 1e8 + 2);
+    if (loop) CHECK(huge.valueAt(100000004.5, 0) == doctest::Approx(curve.valueAt(4.5, 0)));
+    txn.modify<model::AutomationItem>(ai, [](auto& x) { x.sourceLength = 1e-300; });
+    views::EnvelopeCurve tiny(txn.preview(), id, scale, 1e8, 1e8 + 2);
+    CHECK(std::isfinite(tiny.valueAt(1e8, 0)));
+}
+
+TEST_CASE("plugin automation drawing interpolates logarithmic parameters in normalized units") {
+    model::EditTxn txn(model::Session::create(), 1);
+    model::Envelope env;
+    env.target = {model::kMaster, "volume"};
+    env.points = {{0, 100}, {4, 10000}};
+    const auto id = txn.create(env);
+    auto spec = std::make_shared<params::DescribedParam>();
+    spec->spec.min = 100;
+    spec->spec.max = 10000;
+    spec->spec.curve = {params::CurveKind::Log};
+    views::EnvScale scale;
+    scale.kind = views::EnvScale::Kind::Plugin;
+    scale.param = spec;
+    views::EnvelopeCurve curve(txn.preview(), id, scale, 0, 4);
+    CHECK(curve.valueAt(2, 100) == doctest::Approx(1000));
+    scale.normalizedInterpolation = false;
+    views::EnvelopeCurve plain(txn.preview(), id, scale, 0, 4);
+    CHECK(plain.valueAt(2, 100) == doctest::Approx(5050));
+}
+
+TEST_CASE("meters ignore hidden ancestors and reset their hold on reopening") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto parent = std::make_unique<ui::Node>("panel");
+    auto* panel = parent.get();
+    auto& meter = parent->emplace<ui::Meter>("meter");
+    meter.layout.width = ui::SizeRule::fixed(24);
+    root.setContent(std::move(parent));
+    std::vector<gui::StripReading> readings = {{"tr_1", {1.2f, 1.2f}, {0.5f, 0.5f}}};
+    gui::MeterFeed feed([&] { return readings; });
+    feed.attach("tr_1", &meter);
+    root.frame(false);
+    feed.poll();
+    CHECK(meter.clipped());
+    panel->visible = false;
+    root.damageAll();
+    root.frame(false);
+    const auto repaints = root.stats().repaints;
+    for (int i = 0; i < 30; ++i) {
+        feed.poll();
+        root.frame(false);
+    }
+    CHECK(root.stats().repaints == repaints);
+    panel->visible = true;
+    readings.clear();
+    feed.poll();
+    CHECK_FALSE(meter.clipped());
+    CHECK(meter.shownPeakDb(0) < -100);
+    feed.detach(&meter);
 }

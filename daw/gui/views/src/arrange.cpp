@@ -1097,7 +1097,7 @@ void ArrangeView::applyFollow() {
 bool ArrangeView::installOverlay(ui::Root& root) {
     if (overlayInstalled_) return true;
     overlayInstalled_ = true;
-    root.overlay().add(std::make_unique<Playhead>(alive_));
+    overlay_ = root.addOverlay(std::make_unique<Playhead>(alive_));
     gestures_->installOverlay(root);
     return true;
 }
@@ -1123,7 +1123,7 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
     // Where the pointer is decides: over the track panel the wheel scrolls the
     // tracks (and the lanes with them); over the lanes and the ruler it zooms
-    // around the playhead (Shift: scroll in time, Ctrl: scroll the tracks,
+    // under the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
     // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
@@ -1139,12 +1139,12 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
             std::max(0.0, v.startSeconds - static_cast<double>(dx) * 60.0 / v.pixelsPerSecond);
-    } else {  // horizontal zoom around the playhead: it keeps its place on screen
-        const double keep = playhead_ - v.startSeconds;
+    } else {  // horizontal zoom under the pointer
+        const double keep = static_cast<double>(e.pos.x - lanesRect().x) / v.pixelsPerSecond;
+        const double anchor = v.startSeconds + keep;
         v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
         v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
-        v.startSeconds =
-            std::max(0.0, playhead_ - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
+        v.startSeconds = std::max(0.0, anchor - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
     }
     setViewport(v);
     return true;

@@ -110,9 +110,16 @@ class FxWindow {
     Tab tab_ = Tab::Chain;
     std::string gesture_;  // the active slider drag
     std::uint64_t gestureSerial_ = 0;
-    std::string pendingChain_ = "main";           // where Add plugin… inserts
-    std::map<std::string, std::string> latency_;  // measured once per effect
-    std::set<std::string> failed_;                // engine.status failed_fx
+    std::string pendingChain_ = "main";  // where Add plugin… inserts
+    struct Latency {
+        const model::FxInstance* model = nullptr;
+        host::Instance* live = nullptr;
+        double rate = 0;
+        std::optional<std::uint32_t> samples;
+        std::string text;
+    };
+    std::map<std::string, Latency> latency_;
+    std::set<std::string> failed_;  // engine.status failed_fx
     double failureCheckMs_ = -1e9;
     std::string presetChain_ = "main";
     ui::Button* presetChainButton_ = nullptr;

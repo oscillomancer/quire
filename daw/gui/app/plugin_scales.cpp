@@ -24,6 +24,10 @@ std::optional<views::EnvScale> PluginScales::operator()(const model::Envelope& e
     views::EnvScale scale;
     scale.kind = views::EnvScale::Kind::Plugin;
     scale.param = it->second;
+    if (app_)
+        if (auto* instance = app_->instanceOf(env.target.object))
+            scale.normalizedInterpolation =
+                instance->info().semantic || instance->paramsNormalized();
     return scale;
 }
 

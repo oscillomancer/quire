@@ -11,17 +11,20 @@
 #include <utility>
 
 #include "supple/cmd/bus.h"
+#include "supple/engine/app.h"
 #include "supple/views/envelope_lane.h"
 
 namespace supple::gui {
 
 class PluginScales {
   public:
-    explicit PluginScales(cmd::Dispatcher& dispatcher) : dispatcher_(dispatcher) {}
+    explicit PluginScales(cmd::Dispatcher& dispatcher, engine::EngineApp* app = nullptr)
+        : dispatcher_(dispatcher), app_(app) {}
     std::optional<views::EnvScale> operator()(const model::Envelope& env);
 
   private:
     cmd::Dispatcher& dispatcher_;
+    engine::EngineApp* app_;
     std::map<std::pair<model::Id, std::string>, std::shared_ptr<const params::DescribedParam>>
         cache_;
 };

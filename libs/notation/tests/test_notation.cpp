@@ -342,3 +342,23 @@ TEST_CASE("round-trip random canonical sequences") {
         CHECK(compiled->sequence == s);
     }
 }
+
+TEST_CASE("notation indexes long bar timelines without repeated meter walks") {
+    supple::midi::Sequence sequence;
+    sequence.length = 2000 * 3840;
+    for (int bar = 0; bar < 2000; ++bar) sequence.notes.push_back({bar * 3840, 960, 0, 60, 100, 0});
+    int calls = 0;
+    DecompileOptions options;
+    options.meterAt = [&](int) {
+        ++calls;
+        return supple::midi::Meter{4, 4};
+    };
+    auto written = decompile(sequence, options);
+    REQUIRE(written);
+    CHECK(calls <= 2002);
+    CompileContext context;
+    context.meterAt = [](int) { return supple::midi::Meter{4, 4}; };
+    auto roundtrip = compile(*written, context);
+    REQUIRE(roundtrip);
+    CHECK(roundtrip->sequence == sequence);
+}

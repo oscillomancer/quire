@@ -343,19 +343,25 @@ std::string FxWindow::nameOf(model::Id fx) const {
 }
 
 std::string FxWindow::latencyOf(model::Id fx) {
-    // Measured once per effect and cached; the plugin reports it in samples.
-    auto it = latency_.find(fx.str());
-    if (it != latency_.end()) return it->second;
-    const model::FxInstance* inst = app_.head().fx.find(fx);
-    if (!inst) return "-";
-    std::string text = "-";
-    if (auto latency = app_.fxLatencySamples(fx, *inst)) {
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "%u spl", *latency);
-        text = buf;
+    const auto* model = app_.head().fx.find(fx);
+    if (!model) {
+        latency_.erase(fx.str());
+        return "-";
     }
-    latency_[fx.str()] = text;
-    return text;
+    auto* live = app_.instanceOf(fx);
+    const double rate = app_.head().project->sampleRate;
+    const auto observed = live && live->active() ? std::optional(live->latency()) : std::nullopt;
+    auto& cached = latency_[fx.str()];
+    if (cached.model == model && cached.live == live && cached.rate == rate &&
+        (!observed || cached.samples == observed))
+        return cached.text;
+    cached = {model, live, rate, observed, "-"};
+    auto measured = observed ? Result<std::uint32_t>(*observed) : app_.fxLatencySamples(fx, *model);
+    if (measured) {
+        cached.samples = *measured;
+        cached.text = std::to_string(*measured) + " spl";
+    }
+    return cached.text;
 }
 
 Status FxWindow::dispatch(const char* command, json::Value args) {
@@ -409,6 +415,15 @@ void FxWindow::tick() {
     browser_->tick();
     checkFailures();
     if (page_ && app_.head().version != shownVersion_) refresh();
+    if (page_ && body_)
+        for (const auto& [id, cached] : latency_) {
+            const auto fx = model::Id::parse(id);
+            if (!fx || !app_.head().fx.find(*fx)) continue;
+            const auto text = latencyOf(*fx);
+            for (const char* prefix : {"fx.latency.", "ifx.latency."})
+                if (auto* label = dynamic_cast<ui::Label*>(body_->find(prefix + id)))
+                    label->setText(text);
+        }
 }
 
 void FxWindow::select(model::Id fx) {
@@ -539,6 +554,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
                 json::Value args = json::Value::object();
                 args["fx"] = fx.str();
                 if (dispatch("fx.restart", std::move(args))) {
+                    latency_.erase(fx.str());
                     failed_.erase(fx.str());
                     refresh();
                 }
