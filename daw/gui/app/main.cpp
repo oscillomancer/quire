@@ -41,6 +41,7 @@
 #include "plugin_windows.h"
 #include "render_dialog.h"
 #include "routing_matrix.h"
+#include "screensets.h"
 #include "shell.h"
 #include "supple/base/files.h"
 #include "supple/cmd/bus.h"
@@ -640,23 +641,21 @@ int main(int argc, char** argv) {
             uiState.selectedTracks = ids(v.find("tracks"));
             uiState.selectedItems = ids(v.find("items"));
         });
-    uiFile.add(
-        "panels",
-        [&] {
-            json::Value v = json::Value::object();
-            v["agent"] = agentPanel.visible();
-            v["mixer"] = mixer.visible();
-            v["history"] = history.visible();
-            return v;
-        },
-        [&](const json::Value& v) {
-            if (const json::Value* a = v.find("agent"); a && a->isBool())
-                agentPanel.setVisible(a->asBool());
-            if (const json::Value* m = v.find("mixer"); m && m->isBool())
-                mixer.setVisible(m->asBool());
-            if (const json::Value* h = v.find("history"); h && h->isBool())
-                history.setVisible(h->asBool());
-        });
+    auto panelsSave = [&] {
+        json::Value v = json::Value::object();
+        v["agent"] = agentPanel.visible();
+        v["mixer"] = mixer.visible();
+        v["history"] = history.visible();
+        return v;
+    };
+    auto panelsLoad = [&](const json::Value& v) {
+        if (const json::Value* a = v.find("agent"); a && a->isBool())
+            agentPanel.setVisible(a->asBool());
+        if (const json::Value* m = v.find("mixer"); m && m->isBool()) mixer.setVisible(m->asBool());
+        if (const json::Value* h = v.find("history"); h && h->isBool())
+            history.setVisible(h->asBool());
+    };
+    uiFile.add("panels", panelsSave, panelsLoad);
     uiFile.add(
         "window",
         [&] {
@@ -672,45 +671,87 @@ int main(int argc, char** argv) {
                 (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
         });
     // The arrange view's state (zoom, scroll, row heights, follow).
-    uiFile.add(
-        "arrange",
+    auto arrangeSave = [&] {
+        const views::ArrangeView& a = *shell.arrange();
+        const views::Viewport& vp = a.viewport();
+        json::Value v = json::Value::object();
+        v["start_seconds"] = vp.startSeconds;
+        v["pixels_per_second"] = vp.pixelsPerSecond;
+        v["scroll_y"] = static_cast<double>(vp.scrollY);
+        v["row_height"] = static_cast<double>(a.trackLayout().globalHeight());
+        v["follow"] = std::string(views::followName(a.follow()));
+        json::Value heights = json::Value::object();
+        for (const auto& [track, h] : a.trackLayout().heights())
+            heights[track.str()] = static_cast<double>(h);
+        v["track_heights"] = std::move(heights);
+        return v;
+    };
+    auto arrangeLoad = [&](const json::Value& v) {
+        views::ArrangeView& a = *shell.arrange();
+        views::Viewport vp = a.viewport();
+        auto num = [&](const char* k, auto& out) {
+            if (const json::Value* x = v.find(k); x && x->isNumber())
+                out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
+        };
+        num("start_seconds", vp.startSeconds);
+        num("pixels_per_second", vp.pixelsPerSecond);
+        num("scroll_y", vp.scrollY);
+        a.setViewport(vp);
+        if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
+            a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
+        if (const json::Value* th = v.find("track_heights"); th && th->isObject())
+            for (const auto& m : th->asObject()) {
+                const auto id = model::Id::parse(m.key);
+                if (id && m.value.isNumber())
+                    a.trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
+            }
+        if (const json::Value* f = v.find("follow"); f && f->isString())
+            if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
+    };
+    uiFile.add("arrange", arrangeSave, arrangeLoad);
+    // Named screensets (gap log #38): panels + the arrange view, by name.
+    gui::Screensets screensets(
         [&] {
-            const views::ArrangeView& a = *shell.arrange();
-            const views::Viewport& vp = a.viewport();
             json::Value v = json::Value::object();
-            v["start_seconds"] = vp.startSeconds;
-            v["pixels_per_second"] = vp.pixelsPerSecond;
-            v["scroll_y"] = static_cast<double>(vp.scrollY);
-            v["row_height"] = static_cast<double>(a.trackLayout().globalHeight());
-            v["follow"] = std::string(views::followName(a.follow()));
-            json::Value heights = json::Value::object();
-            for (const auto& [track, h] : a.trackLayout().heights())
-                heights[track.str()] = static_cast<double>(h);
-            v["track_heights"] = std::move(heights);
+            v["panels"] = panelsSave();
+            v["arrange"] = arrangeSave();
             return v;
         },
         [&](const json::Value& v) {
-            views::ArrangeView& a = *shell.arrange();
-            views::Viewport vp = a.viewport();
-            auto num = [&](const char* k, auto& out) {
-                if (const json::Value* x = v.find(k); x && x->isNumber())
-                    out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
-            };
-            num("start_seconds", vp.startSeconds);
-            num("pixels_per_second", vp.pixelsPerSecond);
-            num("scroll_y", vp.scrollY);
-            a.setViewport(vp);
-            if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
-                a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
-            if (const json::Value* th = v.find("track_heights"); th && th->isObject())
-                for (const auto& m : th->asObject()) {
-                    const auto id = model::Id::parse(m.key);
-                    if (id && m.value.isNumber())
-                        a.trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
-                }
-            if (const json::Value* f = v.find("follow"); f && f->isString())
-                if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
+            if (const json::Value* p = v.find("panels")) panelsLoad(*p);
+            if (const json::Value* a = v.find("arrange")) {
+                // A layout's row heights replace the current ones entirely.
+                shell.arrange()->trackLayout().clearTrackHeights();
+                arrangeLoad(*a);
+            }
+            root.damageAll();
         });
+    uiFile.add(
+        "screensets", [&] { return screensets.toJson(); },
+        [&](const json::Value& v) { screensets.fromJson(v); });
+    auto screensetAction = [&](auto op) {
+        return [&, op](const json::Value& v) -> Status {
+            const std::string name = v.isString() ? v.asString() : std::string{};
+            return (screensets.*op)(name);
+        };
+    };
+    appActions.addUi("ui.screenset.save", "View: save screenset…", "name",
+                     screensetAction(&gui::Screensets::save));
+    appActions.addUi("ui.screenset.load", "View: recall screenset…", "name",
+                     [&](const json::Value& v) -> Status {
+                         return screensets.load(v.isString() ? v.asString() : std::string{});
+                     });
+    appActions.addUi("ui.screenset.delete", "View: delete screenset…", "name",
+                     screensetAction(&gui::Screensets::remove));
+    for (int slot = 1; slot <= 5; ++slot) {
+        const std::string n = std::to_string(slot);
+        appActions.addUi("ui.screenset.save:" + n, "View: save screenset " + n,
+                         [&, n] { (void)screensets.save(n); });
+        appActions.addUi("ui.screenset.load:" + n, "View: recall screenset " + n, [&, n] {
+            if (auto r = screensets.load(n); !r && appActions.onError)
+                appActions.onError(r.error().message);
+        });
+    }
     shell.installOverlay(root);  // the playhead paints over the whole window
     if (o.viewStart >= 0) {
         views::Viewport v;

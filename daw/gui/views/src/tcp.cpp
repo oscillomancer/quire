@@ -185,6 +185,9 @@ class TcpPanel::Row : public ui::Node {
     ui::Button* env_ = nullptr;
     OutButton* out_ = nullptr;
     std::string inputText_;  // the full label; arrange() clips it to fit
+    // Dragging the bottom edge (the track's height).
+    bool resizing_ = false;
+    float resizeY_ = 0, resizeFrom_ = 0;
 };
 
 TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
@@ -437,7 +440,29 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
 }
 
 bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
-    if (e.type != ui::PointerEvent::Type::Down || !track_.has_value()) return false;
+    using T = ui::PointerEvent::Type;
+    if (resizing_) {
+        if ((e.type == T::Move || e.type == T::Up) && track_ && panel_.cb_.resizeTrack)
+            panel_.cb_.resizeTrack(*track_, std::max(1.0f, resizeFrom_ + (e.pos.y - resizeY_)));
+        if (e.type == T::Up) {
+            resizing_ = false;
+            if (ui::Root* r = root()) r->capture(nullptr);
+        }
+        return true;
+    }
+    if (e.type != T::Down || !track_.has_value()) return false;
+    // The bottom edge: drag to set this track's height, double-click to reset it.
+    if (e.button == 1 && e.pos.y >= bounds().bottom() - 4 && panel_.cb_.resizeTrack) {
+        if (e.clicks >= 2) {
+            panel_.cb_.resizeTrack(*track_, 0);
+            return true;
+        }
+        resizing_ = true;
+        resizeY_ = e.pos.y;
+        resizeFrom_ = bounds().h;
+        if (ui::Root* r = root()) r->capture(this);
+        return true;
+    }
     if (e.clicks >= 2 && nameRect_.contains(e.pos)) {  // rename in place
         startRename();
         return true;

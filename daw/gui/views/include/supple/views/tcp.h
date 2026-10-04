@@ -64,6 +64,9 @@ struct TcpCallbacks {
     std::function<void(const model::Id& track, const ui::Rect& anchor)> routing;
     // The "mixer" button at the panel's foot: show or hide the mixer.
     std::function<void()> mixer;
+    // Dragging a row's bottom edge sets that track's height (UI state, not a
+    // command; screensets keep it); <= 0 (a double-click there) clears it.
+    std::function<void(const model::Id& track, float height)> resizeTrack;
     // The arrange lanes accept drops too, with the TCP's shared row geometry.
     std::function<ui::Rect()> lanesRect;
 };

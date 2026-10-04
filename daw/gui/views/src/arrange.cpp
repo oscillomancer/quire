@@ -899,6 +899,12 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
     forward.routing = [this](const model::Id& track, const ui::Rect& anchor) {
         if (tcpCallbacks_.routing) tcpCallbacks_.routing(track, anchor);
     };
+    forward.resizeTrack = [this](const model::Id& id, float height) {
+        layout_.setTrackHeight(id, height);
+        clampScroll();
+        if (tcp_) tcp_->scrolled();
+        damageViews();
+    };
     forward.lanesRect = [this] {
         return tcpCallbacks_.lanesRect ? tcpCallbacks_.lanesRect() : ui::Rect{};
     };

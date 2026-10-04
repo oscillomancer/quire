@@ -477,3 +477,31 @@ TEST_CASE("the Delete key removes the selected items") {
     f.sync();
     CHECK(f.app->head().items.size() == 0);
 }
+
+TEST_CASE("TCP: dragging a row's bottom edge sets that track's height; a double-click resets it") {
+    SendsFixture f;
+    const auto row = f.view().trackLayout().indexOf(f.a);
+    REQUIRE(row);
+    const ui::Rect r = f.view().tcpRowRect(*row);
+    const float before = r.h;
+    const ui::Point edge{r.x + 100, r.bottom() - 2};
+    const auto history = f.history();
+    f.pointer(Pointer::Down, edge);
+    f.pointer(Pointer::Move, {edge.x, edge.y + 40});
+    f.pointer(Pointer::Up, {edge.x, edge.y + 40});
+    f.sync();
+    CHECK(f.view().trackLayout().hasTrackHeight(f.a));
+    CHECK(double(f.view().tcpRowRect(*row).h) == doctest::Approx(double(before) + 40));
+    // The lanes follow: the next row starts lower by as much.
+    CHECK(double(f.view().rowRect(*row + 1).y) == doctest::Approx(double(r.y + before) + 40));
+    CHECK(f.history() == history);  // UI state, not an undo step
+    ui::PointerEvent twice{Pointer::Down, {edge.x, r.y + before + 40 - 2}};
+    twice.button = 1;
+    twice.clicks = 2;
+    f.root->pointer(twice);
+    twice.type = Pointer::Up;
+    f.root->pointer(twice);
+    f.sync();
+    CHECK_FALSE(f.view().trackLayout().hasTrackHeight(f.a));
+    CHECK(double(f.view().tcpRowRect(*row).h) == doctest::Approx(double(before)));
+}

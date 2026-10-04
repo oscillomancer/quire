@@ -45,7 +45,7 @@ target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/in
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
+  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
   app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp app/plugin_scales.cpp
   app/midi_event_list.cpp app/appearance.cpp app/track_menu.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -106,6 +106,12 @@ if(SUPPLE_BUILD_TESTS)
            COMMAND ${PRODUCT_SLUG} --offscreen --no-socket --frames 2 --audio none
                    --action ui.no-such-action)
   set_tests_properties(gui.app-unknown-action PROPERTIES LABELS "gui;tsan-skip" WILL_FAIL TRUE
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # Named screensets saved into the UI file and recalled in a later run.
+  add_test(NAME gui.screensets
+           COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_screensets.py
+                   $<TARGET_FILE:${PRODUCT_SLUG}> $<TARGET_FILE:${PRODUCT_SLUG}-engine>)
+  set_tests_properties(gui.screensets PROPERTIES LABELS "gui;tsan-skip"
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   # An agent drives the running GUI through its control socket and the MCP proxy.
   add_test(NAME gui.agent-over-socket

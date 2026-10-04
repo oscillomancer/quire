@@ -130,6 +130,13 @@ Keymap Keymap::defaults() {
     add({"Ctrl+V"}, "arrange", "ui.item.paste");
     add({"Ctrl+D"}, "arrange", "ui.item.duplicate");
     add({"Ctrl+A"}, "arrange", "ui.item.select_all");
+    for (int n = 1; n <= 5; ++n) {  // screensets (gap log #38)
+        const std::string digit = std::to_string(n);
+        const std::string saveKey = "Ctrl+Alt+" + digit, loadKey = "Alt+" + digit;
+        const std::string save = "ui.screenset.save:" + digit, load = "ui.screenset.load:" + digit;
+        add({saveKey.c_str()}, "global", save.c_str());
+        add({loadKey.c_str()}, "global", load.c_str());
+    }
     add({"["}, "arrange", "ui.marker.prev");
     add({"]"}, "arrange", "ui.marker.next");
     k.defaults_ = k.bindings_;

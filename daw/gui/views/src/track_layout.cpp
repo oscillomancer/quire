@@ -88,6 +88,11 @@ void TrackLayout::setTrackHeight(model::Id track, float h) {
     rebuildGeometry();
 }
 
+void TrackLayout::clearTrackHeights() {
+    heights_.clear();
+    rebuildGeometry();
+}
+
 float TrackLayout::baseHeight(model::Id track) const {
     if (auto it = heights_.find(track); it != heights_.end()) return it->second;
     const model::Track* t = session_.tracks.find(track);

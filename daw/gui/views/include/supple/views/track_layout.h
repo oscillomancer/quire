@@ -56,6 +56,7 @@ class TrackLayout {
     void setGlobalHeight(float h);  // vertical zoom
     // Per-track height in design units; <= 0 clears the override.
     void setTrackHeight(model::Id track, float h);
+    void clearTrackHeights();  // every track back to the global height
     bool hasTrackHeight(model::Id track) const { return heights_.count(track) != 0; }
     // The explicit per-track overrides, by track (saving UI state).
     const std::map<model::Id, float>& heights() const { return heights_; }
