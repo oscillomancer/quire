@@ -18,11 +18,15 @@ them for VST3 process queues. Input and output event/parameter arenas have
 fixed capacities and are allocated before processing. The SDK's
 `ParameterChanges` helper is deliberately not used on the audio thread: its
 point vectors grow during `addPoint`. `EventList` uses storage allocated at
-construction. The host still calls a plugin's `plainParamToNormalized` for
-sample offset automation and `normalizedParamToPlain` for output edits on the
-audio thread; these plugin supplied methods need a threading audit for each
-third-party module. A plugin that allocates or locks inside its own `process`
-or conversion methods cannot be made RT safe by the host.
+construction. Controller conversions run on the main thread; process queues
+and output edits carry normalized values. The engine converts automation before
+processing; main-thread consumers must convert output edits before using plain values.
+Output parameter events have flags 0 and note/port/channel/key addresses -1,
+because VST3 parameter-change queues do not supply CLAP event flags or note
+addresses. Native VST3 note-off events are not CLAP note-end notifications.
+`takeIdleOutputs()` is the CLAP params.flush channel; it returns no VST3 events.
+A plugin that allocates or locks inside its own `process` cannot be made RT safe
+by the host.
 
 Modules are opened once and never unloaded (see ADR-0017's notes). Plug-ins
 get a host context for `initialize`; separate controllers are connected to
@@ -38,3 +42,18 @@ notes, latency and isolated processing. The engine test checks a VST3 effect
 in a chain against the offline render. A VST3-specific crashing or hanging
 fixture is not included; the bridge's process-failure paths are exercised by
 the existing CLAP fixtures.
+
+A state load is a queued-edit barrier: it advances the edit generation, and
+only the audio consumer removes old queue entries. Saving an inactive
+instance first sends unconsumed edits through the VST3 zero-sample processor
+flush (no audio buses), then saves component and separate controller state.
+`setParam` followed by inactive `saveState` therefore persists the edit;
+active saves require the audio consumer to have delivered queued edits first.
+The fixture includes a separate-controller gain to exercise this distinction.
+
+Audio layouts are bounded at 16 buses per direction and 64 channels per bus;
+oversized declared or negotiated layouts fail with `host.layout`. Main widths
+are reported accurately; bridged main/key buses have a further 16-channel cap.
+Notes are tracked with counts and note ids in a bounded arena. Wildcard note
+ends and chokes expand to explicit offs; reset releases every tracked count.
+Run-loop snapshots dispatch only handlers that remain registered.

@@ -1,6 +1,7 @@
 #include "supple/host/clap_host.h"
 
 #include "bridge_client.h"
+#include "pending_edits.h"
 #include "vst3_host.h"
 
 #include <dlfcn.h>
@@ -32,7 +33,12 @@ class Library {
         static std::mutex mutex;
         static std::map<std::string, std::weak_ptr<Library>> cache;
         std::lock_guard lock(mutex);
-        const std::string key = fs::weakly_canonical(path).string();
+        std::error_code ec;
+        const auto canonical = fs::weakly_canonical(path, ec);
+        if (ec)
+            return Error("host.load", "cannot resolve " + path.string() + ": " + ec.message(), {},
+                         "check the plugin path and its symlinks");
+        const std::string key = canonical.string();
         if (auto existing = cache[key].lock()) return existing;
 
         void* handle = ::dlopen(key.c_str(), RTLD_NOW | RTLD_LOCAL);
@@ -107,11 +113,6 @@ struct LogLine {
     char text[240];
 };
 
-struct ParamChange {
-    std::uint32_t id;
-    double value;
-};
-
 constexpr std::size_t kMaxInputEvents = 8192;
 
 }  // namespace
@@ -139,8 +140,9 @@ struct Instance::HostState {
     clap_id nextTimer = 1;
 
     // clap.gui requests ([thread-safe]: any thread may call them).
-    std::atomic<bool> guiResize{false}, guiClosed{false};
-    std::atomic<std::uint32_t> guiWidth{0}, guiHeight{0};
+    std::atomic<bool> guiResize{false}, guiClosed{false}, guiShow{false}, guiHide{false};
+    std::atomic<std::uint64_t> guiSize{0};
+    std::optional<Error> restartError;  // main thread only
     // clap.posix-fd-support (main thread).
     std::vector<std::pair<int, std::uint32_t>> fds;
 
@@ -148,12 +150,18 @@ struct Instance::HostState {
     std::mutex logMutex;              // any other thread
     std::vector<std::string> log;
 
-    SpscRing<ParamChange, 1024> paramQueue;  // main -> audio
+    PendingEdits paramQueue;  // main -> audio
 
     // Event conversion arena, sized at activation (never resized on the audio thread).
     std::vector<ClapEvent> events;
     std::uint32_t eventCount = 0;
     OutputEvents* outSink = nullptr;
+    // Only one flush producer runs at a time. Inactive flushes produce on
+    // main; activation/deactivation hand production to/from the audio thread.
+    // The main thread is always the consumer; it never resets the ring.
+    SpscRing<OutputEvent, IdleOutputs::kCapacity> idleOutputs;
+    std::atomic<std::uint64_t> idleDropped{0};
+    bool idleFlush = false;
     clap_input_events_t inEvents{};
     clap_output_events_t outEvents{};
     clap_event_transport_t transport{};
@@ -260,13 +268,18 @@ struct HostCallbacks {
     static void CLAP_ABI guiResizeHintsChanged(const clap_host_t*) {}
     static bool CLAP_ABI guiRequestResize(const clap_host_t* h, uint32_t width, uint32_t height) {
         auto* s = S(h);
-        s->guiWidth = width;
-        s->guiHeight = height;
+        s->guiSize.store((std::uint64_t(width) << 32) | height, std::memory_order_release);
         s->guiResize = true;
         return true;  // applied by the window owner on its next loop pass
     }
-    static bool CLAP_ABI guiRequestShow(const clap_host_t*) { return true; }
-    static bool CLAP_ABI guiRequestHide(const clap_host_t*) { return true; }
+    static bool CLAP_ABI guiRequestShow(const clap_host_t* h) {
+        S(h)->guiShow = true;
+        return true;
+    }
+    static bool CLAP_ABI guiRequestHide(const clap_host_t* h) {
+        S(h)->guiHide = true;
+        return true;
+    }
     static void CLAP_ABI guiClosed(const clap_host_t* h, bool) { S(h)->guiClosed = true; }
 
     // clap.posix-fd-support (main thread)
@@ -310,15 +323,20 @@ struct HostCallbacks {
                                     const clap_event_header_t* e) {
         auto* s = static_cast<Instance::HostState*>(list->ctx);
         OutputEvents* sink = s->outSink;
-        if (!sink || e->space_id != CLAP_CORE_EVENT_SPACE_ID) return true;  // accepted and ignored
+        if ((!sink && !s->idleFlush) || e->space_id != CLAP_CORE_EVENT_SPACE_ID) return true;
         OutputEvent out{};
-        out.time = e->time;
+        out.time = s->idleFlush ? 0 : e->time;
+        out.flags = e->flags;
         switch (e->type) {
             case CLAP_EVENT_PARAM_VALUE: {
                 const auto* p = reinterpret_cast<const clap_event_param_value_t*>(e);
                 out.kind = OutputEvent::Kind::ParamValue;
                 out.paramId = p->param_id;
                 out.value = p->value;
+                out.noteId = p->note_id;
+                out.port = p->port_index;
+                out.channel = p->channel;
+                out.key = p->key;
                 break;
             }
             case CLAP_EVENT_PARAM_GESTURE_BEGIN:
@@ -334,10 +352,18 @@ struct HostCallbacks {
                 const auto* n = reinterpret_cast<const clap_event_note_t*>(e);
                 out.kind = OutputEvent::Kind::NoteEnd;
                 out.noteId = n->note_id;
+                out.port = n->port_index;
+                out.channel = n->channel;
+                out.key = n->key;
                 break;
             }
             default:
                 return true;
+        }
+        if (s->idleFlush) {
+            if (s->idleOutputs.push(out)) return true;
+            s->idleDropped.fetch_add(1, std::memory_order_relaxed);
+            return false;
         }
         if (sink->count < sink->storage.size()) {
             sink->storage[sink->count++] = out;
@@ -638,6 +664,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
                                   offsetof(clap_plugin_supple_semantic_params_t, get_telemetry))
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
+    if (self->extSemantic_) (void)self->semanticSchema();
 
     // Port configuration: prefer stereo main in/out (or stereo out for instruments).
     if (auto* cfg = static_cast<const clap_plugin_audio_ports_config_t*>(
@@ -671,11 +698,17 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         for (bool input : {true, false}) {
             auto& list = input ? h.inPorts : h.outPorts;
             int& main = input ? h.mainIn : h.mainOut;
-            const uint32_t n = std::min<uint32_t>(ports->count(self->plugin_, input), 16);
+            const uint32_t n = ports->count(self->plugin_, input);
+            if (n > 16)
+                return Error("host.layout", "CLAP layout exceeds 16 audio ports", {},
+                             "select a layout with at most 16 ports per direction");
             for (uint32_t i = 0; i < n; ++i) {
                 clap_audio_port_info_t p{};
                 const bool ok = ports->get(self->plugin_, i, input, &p);
-                list.push_back(ok ? std::min<uint32_t>(p.channel_count, 64) : 0);
+                if (ok && p.channel_count > 64)
+                    return Error("host.layout", "CLAP port exceeds 64 channels", {},
+                                 "select a layout with at most 64 channels per port");
+                list.push_back(ok ? p.channel_count : 0);
                 if (ok && main < 0 && (p.flags & CLAP_AUDIO_PORT_IS_MAIN))
                     main = static_cast<int>(i);
             }
@@ -730,6 +763,9 @@ Status Instance::setSidechainActive(bool on) {
 }
 
 Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint32_t maxFrames) {
+    if (!std::isfinite(sampleRate) || sampleRate <= 0 || minFrames == 0 || minFrames > maxFrames)
+        return Error("host.activate", "invalid sample rate or block-size range", {},
+                     "use a finite positive rate and 0 < minFrames <= maxFrames");
     if (vst3_) {
         SUPPLE_TRY(vst3_->activate(sampleRate, maxFrames, keyActive_));
         // What the plug-in settled on (a bus it adapted): the engine sizes its
@@ -776,10 +812,10 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
         }
     }
     if (!plugin_->activate(plugin_, sampleRate, minFrames, maxFrames))
-        return Error("host.activate",
-                     "\"" + info_.id + "\" refused to activate at " +
-                         std::to_string(static_cast<int>(sampleRate)) + " Hz",
-                     {}, "try another sample rate or block size");
+        return Error(
+            "host.activate",
+            "\"" + info_.id + "\" refused to activate at " + std::to_string(sampleRate) + " Hz", {},
+            "try another sample rate or block size");
     active_ = true;
     sampleRate_ = sampleRate;
     maxFrames_ = maxFrames;
@@ -892,12 +928,42 @@ Result<double> Instance::plainParam(std::uint32_t id, double normalized) const {
     return normalized;
 }
 
+namespace {
+void flushIdleOutputs(Instance::HostState& h, const clap_plugin_t* plugin,
+                      const clap_plugin_params_t* params) {
+    h.outSink = nullptr;
+    h.idleFlush = true;
+    params->flush(plugin, &h.inEvents, &h.outEvents);
+    h.idleFlush = false;
+}
+
+void flushInactiveEdits(Instance::HostState& h, const clap_plugin_t* plugin,
+                        const clap_plugin_params_t* params) {
+    const auto edits = h.paramQueue.pending();
+    if (edits.empty() || !params) return;
+    if (h.events.size() < edits.size()) h.events.resize(edits.size());
+    h.eventCount = 0;
+    for (const auto& edit : edits) {
+        auto& e = h.events[h.eventCount++].param;
+        e = {};
+        e.header = {sizeof(e), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
+        e.param_id = edit.id;
+        e.value = edit.value;
+        e.note_id = e.port_index = e.channel = e.key = -1;
+    }
+    flushIdleOutputs(h, plugin, params);
+    h.eventCount = 0;
+    h.paramQueue.barrier();
+}
+}  // namespace
+
 Status Instance::setParam(std::uint32_t id, double clapValue) {
     if (vst3_) return vst3_->setParam(id, clapValue);
     if (remote_) return remote_->setParam(id, clapValue);
     if (!extParams_) return Error("host.param", "the plugin has no parameters");
     if (!active_) {
         // Inactive: flush on the main thread.
+        flushInactiveEdits(*hostState_, plugin_, extParams_);
         HostState& h = *hostState_;
         h.eventCount = 1;
         auto& e = h.events.empty() ? (h.events.assign(1, ClapEvent{}), h.events[0]) : h.events[0];
@@ -910,12 +976,11 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
         e.param.port_index = -1;
         e.param.channel = -1;
         e.param.key = -1;
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
         h.eventCount = 0;
         return okStatus();
     }
-    if (!hostState_->paramQueue.push({id, clapValue}))
+    if (!hostState_->paramQueue.push(id, clapValue))
         return Error("host.param_queue", "too many queued parameter changes", {},
                      "render or flush first");
     return okStatus();
@@ -942,10 +1007,9 @@ bool appendParam(Instance::HostState& h, std::uint32_t time, std::uint32_t id,
 // free; what does not fit stays queued for the next block/flush.
 void drainParamQueue(Instance::HostState& h, std::size_t reserve) SUPPLE_RT {
     const std::size_t limit = h.events.size() > reserve ? h.events.size() - reserve : 0;
-    ParamChange pc{};
-    while (h.eventCount < limit && h.paramQueue.peek(pc)) {
+    PendingEdits::Change pc{};
+    while (h.eventCount < limit && h.paramQueue.pop(pc)) {
         appendParam(h, 0, pc.id, pc.value);
-        h.paramQueue.consume();
     }
 }
 }  // namespace
@@ -965,8 +1029,7 @@ void Instance::flushParams() SUPPLE_RT {
     drainParamQueue(h, 0);
     const bool requested = h.flushRequested.exchange(false);
     if ((h.eventCount || requested) && extParams_) {
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
     }
     h.eventCount = 0;
 }
@@ -1021,6 +1084,7 @@ void Instance::reset() SUPPLE_RT {
 }
 
 bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
+    if (b.frames == 0 || b.frames > maxFrames_) return false;
     if (vst3_) return active_ && processing_ && vst3_->process(b, out);
     if (remote_) return active_ && processing_ && remote_->process(b, out);
     if (!active_ || !processing_) return false;
@@ -1195,7 +1259,53 @@ Result<json::Value> Instance::semanticSchema() {
     StringSink sink;
     if (!extSemantic_->get_schema(plugin_, &sink.stream))
         return Error("host.semantic", "get_schema failed");
-    return json::parse(sink.text);
+    auto schema = json::parse(sink.text);
+    auto valid = [](const json::Value& document) {
+        const auto* entries = document.find("params");
+        if (!document.isObject() || !entries || !entries->isObject()) return false;
+        std::set<std::uint32_t> ids;
+        for (const auto& [key, entry] : entries->asObject()) {
+            const auto* id = entry.find("id");
+            const auto* name = entry.find("name");
+            const auto* type = entry.find("type");
+            if (key.empty() || !entry.isObject() || !id || !id->isNumber() ||
+                !std::isfinite(id->asDouble()) || id->asDouble() < 0 ||
+                id->asDouble() > UINT32_MAX || std::trunc(id->asDouble()) != id->asDouble() ||
+                !ids.insert(static_cast<std::uint32_t>(id->asDouble())).second || !name ||
+                !name->isString() || name->asString().empty() || !type || !type->isString())
+                return false;
+            const auto& kind = type->asString();
+            if (kind == "float" || kind == "int") {
+                const auto* min = entry.find("min");
+                const auto* max = entry.find("max");
+                if (!min || !max || !min->isNumber() || !max->isNumber() ||
+                    !std::isfinite(min->asDouble()) || !std::isfinite(max->asDouble()) ||
+                    min->asDouble() > max->asDouble())
+                    return false;
+                if (kind == "int" && (std::trunc(min->asDouble()) != min->asDouble() ||
+                                      std::trunc(max->asDouble()) != max->asDouble()))
+                    return false;
+            } else if (kind == "enum") {
+                const auto* choices = entry.find("choices");
+                if (!choices || !choices->isArray() || choices->size() == 0) return false;
+                std::set<std::string> seen;
+                for (const auto& choice : choices->asArray())
+                    if (!choice.isString() || choice.asString().empty() ||
+                        !seen.insert(choice.asString()).second)
+                        return false;
+            } else if (kind != "bool")
+                return false;
+        }
+        return true;
+    };
+    if (schema && valid(*schema)) return schema;
+    info_.semantic = false;
+    extSemantic_ = nullptr;
+    std::lock_guard logLock(hostState_->logMutex);
+    hostState_->log.push_back("warning: invalid semantic schema for " + info_.id +
+                              "; using plain CLAP parameters");
+    return Error("host.semantic.unsupported", "invalid semantic schema for " + info_.id, {},
+                 "use plain CLAP parameters");
 }
 
 Result<std::string> Instance::getPatch(bool changedOnly) {
@@ -1238,6 +1348,7 @@ Result<std::vector<std::uint8_t>> Instance::saveState() {
     if (vst3_) return vst3_->saveState();
     if (remote_) return remote_->saveState();
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
+    if (!active_) flushInactiveEdits(*hostState_, plugin_, extParams_);
     ByteSink sink;
     if (!extState_->save(plugin_, &sink.stream))
         return Error("host.state", info_.id + " failed to save its state");
@@ -1248,6 +1359,7 @@ Status Instance::loadState(std::span<const std::uint8_t> bytes) {
     if (vst3_) return vst3_->loadState(bytes);
     if (remote_) return remote_->loadState(bytes);
     if (!extState_) return Error("host.state", info_.id + " has no state extension");
+    hostState_->paramQueue.barrier();
     ByteSource source{bytes};
     if (!extState_->load(plugin_, &source.stream))
         return Error("host.state", info_.id + " rejected the state", {},
@@ -1277,23 +1389,27 @@ bool Instance::serviceMainThread() {
         const double sr = sampleRate_;
         const std::uint32_t maxFrames = maxFrames_;
         deactivate();
-        (void)activate(sr, 1, maxFrames);
+        auto result = activate(sr, 1, maxFrames);
+        if (!result) h.restartError = result.error();
         did = true;
     }
     // While active, a requested flush is served by the next process() or
     // flushParams() on the audio thread (needsAudioFlush()).
     if (!active_ && extParams_ && h.flushRequested.exchange(false)) {
         h.eventCount = 0;
-        h.outSink = nullptr;
-        extParams_->flush(plugin_, &h.inEvents, &h.outEvents);
+        flushIdleOutputs(h, plugin_, extParams_);
         did = true;
     }
     const auto now = std::chrono::steady_clock::now();
     if (extTimer_) {
-        for (auto& t : h.timers) {
+        const auto timers = h.timers;
+        for (const auto& t : timers) {
             if (now >= t.next) {
+                auto live = std::find_if(h.timers.begin(), h.timers.end(),
+                                         [&](const auto& timer) { return timer.id == t.id; });
+                if (live == h.timers.end()) continue;
+                live->next = now + std::chrono::milliseconds(t.periodMs);
                 extTimer_->on_timer(plugin_, t.id);
-                t.next = now + std::chrono::milliseconds(t.periodMs);
                 did = true;
             }
         }
@@ -1346,12 +1462,19 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
         return Error("host.editor", "the plugin refused the parent window");
     }
     EditorSize size;
-    (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    if (!extGui_->get_size(plugin_, &size.width, &size.height)) {
+        extGui_->destroy(plugin_);
+        return Error("host.editor", "the plugin could not report its editor size");
+    }
     size.resizable = extGui_->can_resize(plugin_);
     // Cleared before show: a resize the plug-in asks for while showing stands.
     hostState_->guiClosed = false;
     hostState_->guiResize = false;
-    (void)extGui_->show(plugin_);
+    if (!extGui_->show(plugin_)) {
+        extGui_->destroy(plugin_);
+        hostState_->guiResize = false;
+        return Error("host.editor", "the plugin could not show its editor");
+    }
     editorOpen_ = true;
     return size;
 }
@@ -1402,9 +1525,12 @@ Instance::EditorRequests Instance::takeEditorRequests() {
     HostState& h = *hostState_;
     if (h.guiResize.exchange(false)) {
         r.resize = true;
-        r.width = h.guiWidth;
-        r.height = h.guiHeight;
+        const auto size = h.guiSize.load(std::memory_order_acquire);
+        r.width = static_cast<std::uint32_t>(size >> 32);
+        r.height = static_cast<std::uint32_t>(size);
     }
+    r.show = h.guiShow.exchange(false);
+    r.hide = h.guiHide.exchange(false);
     if (h.guiClosed.exchange(false)) {
         r.closed = true;
         if (editorOpen_) {  // the plugin closed its own window: release it
@@ -1445,6 +1571,7 @@ Instance::Notifications Instance::takeNotifications() {
     if (remote_) return std::exchange(remoteNotes_, Notifications{});
     HostState& h = *hostState_;
     Notifications n;
+    n.restartError = std::exchange(h.restartError, {});
     n.stateDirty = h.stateDirty.exchange(false);
     n.latencyChanged = h.latencyChanged.exchange(false);
     n.semanticChanged = h.semanticChanged.exchange(false);
@@ -1453,6 +1580,19 @@ Instance::Notifications Instance::takeNotifications() {
     n.paramsRescan = h.rescanned.exchange(false);
     n.paramsRescanFlags = h.rescanFlags.exchange(0);
     return n;
+}
+
+Instance::IdleOutputs Instance::takeIdleOutputs() {
+    if (remote_) return remote_->takeIdleOutputs();
+    IdleOutputs out;
+    if (!hostState_) return out;
+    auto& h = *hostState_;
+    const auto count = h.idleOutputs.size();
+    out.events.reserve(count);
+    OutputEvent event;
+    for (std::size_t i = 0; i < count && h.idleOutputs.pop(event); ++i) out.events.push_back(event);
+    out.dropped = h.idleDropped.exchange(0);
+    return out;
 }
 
 std::vector<std::string> Instance::takeLog() {

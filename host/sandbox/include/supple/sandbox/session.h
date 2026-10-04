@@ -203,12 +203,16 @@ class Session {
     // deletes renders made since.
     Status begin();
     void commit();
-    void rollback();
+    Status rollback();
+    // Independent snapshot for one command invocation within an open transaction.
+    Result<std::function<Status()>> invocationSavepoint();
     bool inTransaction() const { return txn_ != nullptr; }
 
   private:
     struct Loaded;
     struct Txn;
+    Result<std::unique_ptr<Txn>> snapshot();
+    Status restore(Txn&);
     explicit Session(SessionOptions options);
     Result<Loaded*> loaded(std::string_view id);
     const Loaded* findLoaded(std::string_view id) const;

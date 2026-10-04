@@ -1,4 +1,4 @@
-// Original MIT test module for the VST3 host. Four classes exercise the
+// Original MIT test module for the VST3 host. Five processor classes exercise the
 // effect, note, latency and sidechain paths without any external installed
 // plug-in. The sidechain gain behaves like strict real plug-ins: it refuses
 // a bus layout that leaves out its sidechain, outputs silence unless given
@@ -14,6 +14,7 @@
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "public.sdk/source/common/pluginview.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 
 using namespace Steinberg;
@@ -24,6 +25,8 @@ const FUID kGainId(0x11000101, 0x22000202, 0x33000303, 0x44000404);
 const FUID kSineId(0x11000102, 0x22000202, 0x33000303, 0x44000404);
 const FUID kDelayId(0x11000103, 0x22000202, 0x33000303, 0x44000404);
 const FUID kSidechainId(0x11000104, 0x22000202, 0x33000303, 0x44000404);
+const FUID kSeparateId(0x11000105, 0x22000202, 0x33000303, 0x44000404);
+const FUID kControllerId(0x11000106, 0x22000202, 0x33000303, 0x44000404);
 constexpr double kTau = 6.28318530717958647692;
 
 // The host must call the edit controller on the thread that initialized the
@@ -31,11 +34,74 @@ constexpr double kTau = 6.28318530717958647692;
 // never from the audio thread while processing. This counts the violations so a
 // test can assert there are none.
 std::atomic<int> gControllerCallsOffThread{0};
+std::atomic<int> gLayoutMode{0};
+
+std::atomic<int> gRunLoopRemovedCalls{0}, gRunLoopTimerCalls{0}, gRunLoopFdCalls{0};
+std::atomic<int> gNoteOffs{0}, gWildcardOffs{0};
+std::array<std::atomic<int>, 64> gNoteIdOffs{};
+
+class TestHandler final
+    : public U::Implements<U::Directly<Linux::ITimerHandler, Linux::IEventHandler>> {
+  public:
+    Linux::IRunLoop* loop = nullptr;
+    TestHandler* other = nullptr;
+    bool first = false;
+    void PLUGIN_API onTimer() override {
+        if (!first) {
+            ++gRunLoopRemovedCalls;
+            return;
+        }
+        loop->unregisterTimer(other);
+        loop->unregisterTimer(this);
+        ++gRunLoopTimerCalls;
+    }
+    void PLUGIN_API onFDIsSet(Linux::FileDescriptor) override {
+        if (!first) {
+            ++gRunLoopRemovedCalls;
+            return;
+        }
+        loop->unregisterEventHandler(other);
+        loop->unregisterEventHandler(this);
+        ++gRunLoopFdCalls;
+    }
+};
+class TestView final : public CPluginView {
+  public:
+    TestView() { rect = {0, 0, 300, 200}; }
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
+        return std::strcmp(type, kPlatformTypeX11EmbedWindowID) == 0 ? kResultOk : kResultFalse;
+    }
+    tresult PLUGIN_API setFrame(IPlugFrame* frame) override {
+        if (loop_) {
+            loop_->unregisterTimer(&first_);
+            loop_->unregisterTimer(&second_);
+            loop_->unregisterEventHandler(&first_);
+            loop_->unregisterEventHandler(&second_);
+        }
+        CPluginView::setFrame(frame);
+        loop_ = FUnknownPtr<Linux::IRunLoop>(frame);
+        if (loop_) {
+            first_.loop = second_.loop = loop_;
+            first_.first = true;
+            first_.other = &second_;
+            loop_->registerEventHandler(&first_, 123);
+            loop_->registerEventHandler(&second_, 123);
+            loop_->registerTimer(&first_, 1);
+            loop_->registerTimer(&second_, 1);
+        }
+        return kResultOk;
+    }
+
+  private:
+    FUnknownPtr<Linux::IRunLoop> loop_;
+    TestHandler first_, second_;
+};
 
 class Fixture final : public SingleComponentEffect {
   public:
-    enum Kind { Gain, Sine, Delay, Sidechain };
-    explicit Fixture(Kind kind) : kind_(kind), value_(kind == Delay ? 0.0 : 0.5) {}
+    enum Kind { Gain, Sine, Delay, Sidechain, Separate };
+    explicit Fixture(Kind kind, bool controller = false)
+        : controller_(controller), kind_(kind), value_(kind == Delay ? 0.0 : 0.5) {}
     tresult PLUGIN_API initialize(FUnknown* context) override {
         if (SingleComponentEffect::initialize(context) != kResultOk) return kResultFalse;
         owner_ = std::this_thread::get_id();
@@ -49,6 +115,25 @@ class Fixture final : public SingleComponentEffect {
                                                                     : STR16("Level"),
                                 nullptr, kind_ == Delay ? 1 : 0, kind_ == Delay ? 0 : 0.5,
                                 ParameterInfo::kCanAutomate, 1);
+        return kResultOk;
+    }
+    int32 PLUGIN_API getBusCount(MediaType type, BusDirection dir) override {
+        return type == kAudio && gLayoutMode.load() == 2
+                   ? 17
+                   : SingleComponentEffect::getBusCount(type, dir);
+    }
+    tresult PLUGIN_API getBusInfo(MediaType type, BusDirection dir, int32 index,
+                                  BusInfo& bus) override {
+        auto result = SingleComponentEffect::getBusInfo(type, dir, index, bus);
+        if (result == kResultOk && type == kAudio && gLayoutMode.load() == 1) bus.channelCount = 65;
+        return result;
+    }
+    IPlugView* PLUGIN_API createView(FIDString name) override {
+        return controller_ && std::strcmp(name, ViewType::kEditor) == 0 ? new TestView : nullptr;
+    }
+    tresult PLUGIN_API getControllerClassId(TUID id) override {
+        if (kind_ != Separate) return kResultFalse;
+        kControllerId.toTUID(id);
         return kResultOk;
     }
     tresult PLUGIN_API setProcessing(TBool state) override {
@@ -87,6 +172,8 @@ class Fixture final : public SingleComponentEffect {
                    : kResultFalse;
     }
     tresult PLUGIN_API setComponentState(IBStream* stream) override { return setState(stream); }
+    tresult PLUGIN_API getEditorState(IBStream* stream) override { return getState(stream); }
+    tresult PLUGIN_API setEditorState(IBStream* stream) override { return setState(stream); }
     tresult PLUGIN_API setParamNormalized(ParamID id, ParamValue value) override {
         if (EditControllerEx1::setParamNormalized(id, value) != kResultOk) return kResultFalse;
         value_ = value;
@@ -97,6 +184,31 @@ class Fixture final : public SingleComponentEffect {
         return kind_ == Delay && value_ >= 0.5 ? 64 : 0;
     }
     tresult PLUGIN_API process(ProcessData& data) override {
+        if (data.inputEvents)
+            for (int32 i = 0; i < data.inputEvents->getEventCount(); ++i) {
+                Event event{};
+                data.inputEvents->getEvent(i, event);
+                if (event.type == Event::kNoteOffEvent) {
+                    ++gNoteOffs;
+                    if (event.noteOff.channel < 0 || event.noteOff.pitch < 0) ++gWildcardOffs;
+                    if (event.noteOff.noteId >= 0 && event.noteOff.noteId < 64)
+                        ++gNoteIdOffs[event.noteOff.noteId];
+                }
+            }
+        if (data.numSamples == 0) {
+            if (data.inputParameterChanges) {
+                for (int32 q = 0; q < data.inputParameterChanges->getParameterCount(); ++q) {
+                    auto* changes = data.inputParameterChanges->getParameterData(q);
+                    for (int32 point = 0; point < changes->getPointCount(); ++point) {
+                        int32 offset = 0;
+                        double value = 0;
+                        changes->getPoint(point, offset, value);
+                        value_ = value;
+                    }
+                }
+            }
+            return kResultOk;
+        }
         if (kind_ == Sidechain && data.numInputs != 2) {
             for (int32 c = 0; c < data.outputs[0].numChannels; ++c)
                 std::fill_n(data.outputs[0].channelBuffers32[c], data.numSamples, 0.0f);
@@ -112,6 +224,12 @@ class Fixture final : public SingleComponentEffect {
                 double value = 0;
                 if (queue->getPoint(nextPoint, offset, value) != kResultOk || offset > i) break;
                 value_ = value;
+                if (data.outputParameterChanges) {
+                    int32 queueIndex = 0, pointIndex = 0;
+                    auto* output = data.outputParameterChanges->addParameterData(
+                        queue->getParameterId(), queueIndex);
+                    if (output) output->addPoint(offset, value, pointIndex);
+                }
                 ++nextPoint;
             }
             while (kind_ == Sine && data.inputEvents &&
@@ -159,6 +277,7 @@ class Fixture final : public SingleComponentEffect {
         if (processing_.load(std::memory_order_relaxed) && std::this_thread::get_id() != owner_)
             gControllerCallsOffThread.fetch_add(1, std::memory_order_relaxed);
     }
+    bool controller_ = false;
     Kind kind_;
     std::atomic<double> value_;
     std::atomic<bool> processing_{false};
@@ -175,22 +294,26 @@ class Factory final
         *info = PFactoryInfo("Supple Audio", "https://supple.audio", "dev@supple.audio", 0);
         return kResultOk;
     }
-    int32 PLUGIN_API countClasses() override { return 4; }
+    int32 PLUGIN_API countClasses() override { return 6; }
     tresult PLUGIN_API getClassInfo(int32 index, PClassInfo* info) override {
-        if (!info || index < 0 || index >= 4) return kInvalidArgument;
-        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
-        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency",
-                               "Test VST3 Sidechain Gain"};
-        *info =
-            PClassInfo(ids[index], PClassInfo::kManyInstances, kVstAudioEffectClass, names[index]);
+        if (!info || index < 0 || index >= 6) return kInvalidArgument;
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId, kSeparateId, kControllerId};
+        const char* names[] = {"Test VST3 Gain",          "Test VST3 Sine",
+                               "Test VST3 Latency",       "Test VST3 Sidechain Gain",
+                               "Test VST3 Separate Gain", "Test VST3 Gain Controller"};
+        *info = PClassInfo(ids[index], PClassInfo::kManyInstances,
+                           index == 5 ? kVstComponentControllerClass : kVstAudioEffectClass,
+                           names[index]);
         return kResultOk;
     }
     tresult PLUGIN_API getClassInfo2(int32 index, PClassInfo2* info) override {
-        if (!info || index < 0 || index >= 4) return kInvalidArgument;
-        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
-        const char* names[] = {"Test VST3 Gain", "Test VST3 Sine", "Test VST3 Latency",
-                               "Test VST3 Sidechain Gain"};
-        *info = PClassInfo2(ids[index], PClassInfo::kManyInstances, kVstAudioEffectClass,
+        if (!info || index < 0 || index >= 6) return kInvalidArgument;
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId, kSeparateId, kControllerId};
+        const char* names[] = {"Test VST3 Gain",          "Test VST3 Sine",
+                               "Test VST3 Latency",       "Test VST3 Sidechain Gain",
+                               "Test VST3 Separate Gain", "Test VST3 Gain Controller"};
+        *info = PClassInfo2(ids[index], PClassInfo::kManyInstances,
+                            index == 5 ? kVstComponentControllerClass : kVstAudioEffectClass,
                             names[index], 0, index == 1 ? "Instrument" : "Fx", "Supple Audio",
                             "1.0", kVstVersionString);
         return kResultOk;
@@ -198,12 +321,18 @@ class Factory final
     tresult PLUGIN_API createInstance(FIDString cid, FIDString iid, void** obj) override {
         if (!obj) return kInvalidArgument;
         *obj = nullptr;
-        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId};
-        for (int i = 0; i < 4; ++i) {
+        const FUID ids[] = {kGainId, kSineId, kDelayId, kSidechainId, kSeparateId, kControllerId};
+        for (int i = 0; i < 5; ++i) {
             if (std::memcmp(cid, ids[i], 16) != 0) continue;
             auto* plugin = new Fixture(static_cast<Fixture::Kind>(i));
             const auto result = plugin->queryInterface(iid, obj);
             plugin->release();
+            return result;
+        }
+        if (std::memcmp(cid, kControllerId, 16) == 0) {
+            auto* controller = new Fixture(Fixture::Gain, true);
+            const auto result = controller->queryInterface(iid, obj);
+            controller->release();
             return result;
         }
         return kNoInterface;
@@ -218,3 +347,12 @@ extern "C" void fixtureResetOffThreadControllerCalls() { gControllerCallsOffThre
 extern "C" bool ModuleEntry(void*) { return true; }
 extern "C" bool ModuleExit() { return true; }
 extern "C" IPluginFactory* GetPluginFactory() { return new Factory; }
+
+extern "C" int fixtureRemovedHandlerCalls() { return gRunLoopRemovedCalls.load(); }
+extern "C" int fixtureTimerCalls() { return gRunLoopTimerCalls.load(); }
+extern "C" int fixtureFdCalls() { return gRunLoopFdCalls.load(); }
+extern "C" int fixtureNoteOffs(int id) {
+    return id == -1 ? gNoteOffs.load() : id == -2 ? gWildcardOffs.load() : gNoteIdOffs[id].load();
+}
+
+extern "C" void fixtureLayoutMode(int mode) { gLayoutMode = mode; }

@@ -67,6 +67,10 @@ void Runtime::event(std::string_view topic, json::Value payload) {
     pending_.emplace_back(std::string(topic), std::move(payload));
 }
 
+std::function<void()> Runtime::eventSavepoint() {
+    return [this, saved = pending_]() mutable { pending_ = std::move(saved); };
+}
+
 void Runtime::deliver() {
     if (pending_.empty()) return;
     if (deliveryDepth_ >= kMaxDeliveryDepth) {

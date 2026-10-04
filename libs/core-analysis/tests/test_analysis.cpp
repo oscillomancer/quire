@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 #include <supple/base/environment.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -454,4 +455,94 @@ TEST_CASE("example reports (docs/specs/examples/analysis)") {
         ss << in.rdbuf();
         CHECK(ss.str() == text);
     }
+}
+
+TEST_CASE("analysis rejects invalid note-off times and ignores times beyond the signal") {
+    auto audio = sine(1000, 0.1, 0.02);
+    Options options;
+    options.loudness = options.spectral = options.harmonic = options.stereo = false;
+    for (double invalid : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+        options.noteOffSeconds = invalid;
+        auto result = analyze(audio.signal(), options);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "analysis.note_off");
+    }
+    options.noteOffSeconds = std::numeric_limits<double>::max();
+    auto result = analyze(audio.signal(), options);
+    REQUIRE(result);
+    CHECK_FALSE(result->envelope->releaseMs);
+}
+TEST_CASE("spectral tilt comparison reports dB per octave") {
+    Report a, b;
+    a.spectral.emplace();
+    b.spectral.emplace();
+    b.spectral->tiltDbPerOct = 2;
+    const auto comparison = compare(a, b);
+    auto found =
+        std::find_if(comparison.deltas.begin(), comparison.deltas.end(),
+                     [](const auto& delta) { return delta.key == "spectral.tilt_db_per_oct"; });
+    REQUIRE(found != comparison.deltas.end());
+    CHECK(found->unit == "dB/oct");
+}
+
+TEST_CASE("offline analysis and masking reject null channels and nonfinite audio") {
+    float sample = 0;
+    const float* valid[] = {&sample};
+    const float* missing[] = {nullptr};
+    const Signal good{valid, 1, kFs, Layout::Mono};
+    const Signal bad{missing, 1, kFs, Layout::Mono};
+    CHECK_FALSE(analyze(bad));
+    CHECK_FALSE(masking(bad, good));
+    CHECK_FALSE(masking(good, bad));
+    for (float invalid :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        sample = invalid;
+        CHECK_FALSE(analyze(good));
+        CHECK_FALSE(masking(good, good));
+    }
+}
+
+TEST_CASE("offline true peak includes the final interpolation filter response") {
+    Options options;
+    options.spectral = options.harmonic = options.envelope = options.stereo = false;
+    auto audio = make(0.01, [](double, std::size_t) { return std::pair{0.0, 0.0}; });
+    for (std::size_t i = audio.l.size() - 8; i < audio.l.size(); ++i)
+        audio.l[i] = audio.r[i] = (i % 4 < 2 ? 0.9f : -0.9f);
+    auto shortReport = analyze(audio.signal(), options);
+    REQUIRE(shortReport);
+    audio.l.resize(audio.l.size() + 32, 0);
+    audio.r.resize(audio.r.size() + 32, 0);
+    auto padded = analyze(audio.signal(), options);
+    REQUIRE(padded);
+    CHECK(shortReport->loudness->truePeak ==
+          doctest::Approx(padded->loudness->truePeak).epsilon(1e-10));
+}
+
+TEST_CASE("LTAS compares the union of active bands, including silence") {
+    Report silent, signal;
+    silent.spectral.emplace();
+    signal.spectral.emplace();
+    silent.spectral->ltasDb.fill(-120);
+    signal.spectral->ltasDb.fill(-120);
+    signal.spectral->ltasDb[10] = -20;
+    CHECK(compare(silent, signal).ltasRmsDb == doctest::Approx(80));
+    CHECK(compare(signal, silent).ltasRmsDb == doctest::Approx(80));
+    CHECK(compare(silent, silent).ltasRmsDb == 0);
+    signal.spectral->ltasDb.fill(-20);
+    CHECK(compare(silent, signal).ltasRmsDb == doctest::Approx(80));
+}
+
+TEST_CASE("profile weighted means stay finite with very large valid weights") {
+    Report report;
+    report.spectral.emplace();
+    report.spectral->centroidHz.median = 1000;
+    report.spectral->rolloffHz.median = 2000;
+    auto profile = json::parse(R"({"schema":"supple.analysis-profile/1.0","targets":{
+        "spectral.centroid_hz.median":{"target":800,"tolerance":100,"weight":1e308},
+        "spectral.rolloff_hz.median":{"target":1700,"tolerance":100,"weight":1e308}}})");
+    REQUIRE(profile);
+    auto result = evaluate(report, *profile);
+    REQUIRE(result);
+    CHECK(result->loss == doctest::Approx(2.5));
 }

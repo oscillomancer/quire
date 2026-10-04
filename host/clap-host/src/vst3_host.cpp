@@ -1,4 +1,5 @@
 #include "vst3_host.h"
+#include "pending_edits.h"
 
 #include <algorithm>
 #include <array>
@@ -48,11 +49,6 @@ using Steinberg::kResultTrue;
 namespace {
 constexpr std::size_t kMaxEvents = 2048;
 constexpr std::size_t kMaxParams = 256;
-struct Change {
-    std::uint32_t id;
-    double value;  // normalized: setParam() converts on the main thread
-};
-
 // The SDK's ParameterChanges grows vectors during addPoint. These bounded
 // queues allocate once at construction, before any audio-thread call.
 class FixedQueue : public Steinberg::U::Implements<Steinberg::U::Directly<vst::IParamValueQueue>> {
@@ -149,13 +145,14 @@ class PlugFrame : public Steinberg::U::Implements<
     std::vector<std::pair<Steinberg::Linux::IEventHandler*, int>> handlers;
     std::vector<Timer> timers;
     std::atomic<bool> resize{false};
-    std::atomic<std::uint32_t> width{0}, height{0};
+    std::atomic<std::uint64_t> size{0};
 
     Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view,
                                              Steinberg::ViewRect* r) override {
         if (!view || !r) return kInvalidArgument;
-        width = static_cast<std::uint32_t>(std::max(0, r->getWidth()));
-        height = static_cast<std::uint32_t>(std::max(0, r->getHeight()));
+        size.store((std::uint64_t(std::max(0, r->getWidth())) << 32) |
+                       static_cast<std::uint32_t>(std::max(0, r->getHeight())),
+                   std::memory_order_release);
         resize = true;
         // The window follows on the UI loop's next pass; the view takes the
         // size now (the common host behaviour).
@@ -370,7 +367,12 @@ struct Vst3Instance::State {
     std::vector<float> padIn, padOut;
     // Notes delivered and not yet ended, per channel and key: a reset() ends
     // them at the next process() (a VST3 has no reset of its own).
-    std::array<bool, 16 * 128> sounding{};
+    struct Note {
+        std::int16_t channel = 0, key = 0;
+        std::int32_t id = -1;
+        std::uint32_t count = 0;
+    };
+    std::array<Note, kMaxEvents> sounding{};
     bool releaseAll = false;
     bool notes = false, active = false;
     bool separateController = false;
@@ -379,7 +381,7 @@ struct Vst3Instance::State {
     FixedChanges inputChanges, outputChanges;
     vst::EventList inputEvents{static_cast<Steinberg::int32>(kMaxEvents)};
     vst::EventList outputEvents{static_cast<Steinberg::int32>(kMaxEvents)};
-    SpscRing<Change, 1024> changes;
+    PendingEdits changes;
     std::atomic<std::uint32_t> dropped{0};
     std::atomic<bool> latencyChanged{false};
 };
@@ -446,7 +448,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     if (s.controller) s.controller->setComponentHandler(s.handler);
     // Editor edits reach the processor through the same queue as setParam().
     s.handler->edit = [state = &s](vst::ParamID param, vst::ParamValue normalized) {
-        return state->changes.push({param, normalized});
+        return state->changes.push(param, normalized);
     };
     for (auto& channel : s.midiParams) channel.fill(vst::kNoParamId);
     if (s.controller) {
@@ -464,17 +466,21 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     for (auto [dir, channels] :
          {std::pair{vst::kInput, &s.inBusChannels}, std::pair{vst::kOutput, &s.outBusChannels}}) {
         const auto count = s.component->getBusCount(vst::kAudio, dir);
+        if (count < 0 || count > 16)
+            return Error("host.layout", "VST3 layout exceeds 16 audio buses");
         for (Steinberg::int32 b = 0; b < count; ++b) {
             vst::BusInfo bus{};
             const bool ok = s.component->getBusInfo(vst::kAudio, dir, b, bus) == kResultOk;
+            if (ok && (bus.channelCount < 0 || bus.channelCount > 64))
+                return Error("host.layout", "VST3 audio bus exceeds 64 channels");
             channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
             if (ok && dir == vst::kInput && b > 0 && bus.busType == vst::kAux && s.keyBus < 0 &&
                 bus.channelCount > 0)
                 s.keyBus = b;
         }
     }
-    s.inputs = s.inBusChannels.empty() ? 0 : std::min<std::uint32_t>(s.inBusChannels[0], 2);
-    s.outputs = s.outBusChannels.empty() ? 0 : std::min<std::uint32_t>(s.outBusChannels[0], 2);
+    s.inputs = s.inBusChannels.empty() ? 0 : s.inBusChannels[0];
+    s.outputs = s.outBusChannels.empty() ? 0 : s.outBusChannels[0];
     s.notes = s.component->getBusCount(vst::kEvent, vst::kInput) > 0;
     if (s.controller) {
         const auto count = s.controller->getParameterCount();
@@ -508,6 +514,8 @@ std::uint32_t Vst3Instance::sidechainChannels() const {
 }
 
 Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidechainActive) {
+    if (maxFrames > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()))
+        return Error("host.activate", "maximum block size exceeds the VST3 limit");
     auto& s = *state_;
     if (s.active) return okStatus();
     // One arrangement per bus: the main buses stereo or mono, auxiliary buses
@@ -540,6 +548,9 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
                 kResultOk)
                 (*channels)[b] = static_cast<std::uint32_t>(vst::SpeakerArr::getChannelCount(a));
         }
+    for (const auto* channels : {&s.inBusChannels, &s.outBusChannels})
+        if (std::any_of(channels->begin(), channels->end(), [](auto n) { return n > 64; }))
+            return Error("host.layout", "negotiated VST3 audio bus exceeds 64 channels");
     if (s.inputs) s.component->activateBus(vst::kAudio, vst::kInput, 0, true);
     if (s.outputs) s.component->activateBus(vst::kAudio, vst::kOutput, 0, true);
     // The main buses are reported (and declared to the plug-in) as the plug-in
@@ -647,13 +658,30 @@ Status Vst3Instance::setParam(std::uint32_t id, double plain) {
         return Error("host.param", "parameter value is outside its range");
     // The conversion is a controller call: main thread, here, not in process().
     const double normalized = s.controller->plainParamToNormalized(id, plain);
-    s.controller->setParamNormalized(id, normalized);
-    if (!s.changes.push({id, normalized}))
+    if (!s.changes.push(id, normalized))
         return Error("host.param_queue", "too many queued parameter changes");
+    s.controller->setParamNormalized(id, normalized);
     return okStatus();
 }
 
 Result<std::vector<std::uint8_t>> Vst3Instance::saveState() {
+    auto& s = *state_;
+    if (!s.active && !s.changes.pending().empty()) {
+        s.inputChanges.clear();
+        for (const auto& edit : s.changes.pending()) {
+            Steinberg::int32 queueIndex = 0, pointIndex = 0;
+            auto* queue = s.inputChanges.addParameterData(edit.id, queueIndex);
+            if (!queue || queue->addPoint(0, edit.value, pointIndex) != kResultOk)
+                return Error("host.state", "too many pending VST3 parameters to flush");
+        }
+        vst::ProcessData data{};
+        data.processMode = vst::kRealtime;
+        data.symbolicSampleSize = vst::kSample32;
+        data.inputParameterChanges = &s.inputChanges;
+        if (s.processor->process(data) != kResultOk)
+            return Error("host.state", "VST3 idle parameter flush failed");
+        s.changes.barrier();
+    }
     Steinberg::ResizableMemoryIBStream component, controller;
     if (state_->component->getState(&component) != kResultOk)
         return Error("host.state", "VST3 component could not save state");
@@ -674,6 +702,7 @@ Status Vst3Instance::loadState(std::span<const std::uint8_t> bytes) {
     component.write(const_cast<std::uint8_t*>(bytes.data() + 16), static_cast<Steinberg::int32>(c),
                     nullptr);
     component.rewind();
+    state_->changes.barrier();
     if (state_->component->setState(&component) != kResultOk)
         return Error("host.state", "VST3 component rejected state");
     if (state_->separateController) {
@@ -687,9 +716,6 @@ Status Vst3Instance::loadState(std::span<const std::uint8_t> bytes) {
             if (state_->controller->setState(&controller) != kResultOk)
                 return Error("host.state", "VST3 controller rejected state");
         }
-    }
-    Change obsolete{};
-    while (state_->changes.pop(obsolete)) {
     }
     return okStatus();
 }
@@ -730,39 +756,55 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
     // paramsNormalized()). No edit-controller call happens on this thread: the
     // controller is not the processor, is not real-time safe, and the host
     // calls it from the main thread only.
-    Change change{};
+    PendingEdits::Change change{};
     while (s.changes.pop(change)) addNormalized(change.id, change.value, 0);
-    // Reset: end every note the host delivered and did not end, ahead of this
-    // block's own events (the list stays sorted by sample offset).
-    if (s.releaseAll) {
-        s.releaseAll = false;
-        for (std::uint32_t at = 0; at < s.sounding.size(); ++at) {
-            if (!s.sounding[at]) continue;
-            if (s.inputEvents.getEventCount() >= static_cast<Steinberg::int32>(kMaxEvents)) {
-                s.releaseAll = true;  // the rest goes out in the next block
-                break;
+    auto endNotes = [&](std::int16_t port, std::int16_t channel, std::int16_t key, std::int32_t id,
+                        std::uint32_t time, float velocity) {
+        if (port != -1 && port != 0) return true;
+        for (auto& note : s.sounding) {
+            if (!note.count || (channel != -1 && channel != note.channel) ||
+                (key != -1 && key != note.key) || (id != -1 && id != note.id))
+                continue;
+            while (note.count) {
+                vst::Event off{};
+                off.busIndex = 0;
+                off.sampleOffset = static_cast<Steinberg::int32>(time);
+                off.type = vst::Event::kNoteOffEvent;
+                off.noteOff = {note.channel, note.key, velocity, note.id, 0};
+                if (s.inputEvents.addEvent(off) != kResultOk) {
+                    s.dropped.fetch_add(1);
+                    return false;
+                }
+                --note.count;
             }
-            vst::Event off{};
-            off.busIndex = 0;
-            off.sampleOffset = 0;
-            off.type = vst::Event::kNoteOffEvent;
-            off.noteOff = {static_cast<Steinberg::int16>(at / 128),
-                           static_cast<Steinberg::int16>(at % 128), 0.0f, -1, 0};
-            if (s.inputEvents.addEvent(off) != kResultOk) {
-                s.dropped.fetch_add(1);
-                s.releaseAll = true;
-                break;
-            }
-            s.sounding[at] = false;
         }
-    }
-    for (const auto& event : block.events) {
+        return true;
+    };
+    if (s.releaseAll) s.releaseAll = !endNotes(-1, -1, -1, -1, 0, 0);
+    for (const auto& incoming : block.events) {
+        Event event = incoming;
+        if (event.kind == Event::Kind::Midi && event.midi[1] < 128 && event.midi[2] < 128) {
+            const auto status = event.midi[0] & 0xf0;
+            if (status == 0x80 || status == 0x90) {
+                event.kind =
+                    status == 0x90 && event.midi[2] ? Event::Kind::NoteOn : Event::Kind::NoteOff;
+                event.port = 0;
+                event.channel = event.midi[0] & 15;
+                event.key = event.midi[1];
+                event.noteId = -1;
+                event.velocity = event.midi[2] / 127.0;
+            }
+        }
         const auto time = std::min(event.time, block.frames ? block.frames - 1 : 0u);
         if (event.kind == Event::Kind::Param) {
             addNormalized(event.paramId, event.value, time);
             continue;
         }
         if (event.kind == Event::Kind::Midi) {
+            if (event.midi[1] >= 128 || event.midi[2] >= 128) {
+                s.dropped.fetch_add(1);
+                continue;
+            }
             const auto channel = event.midi[0] & 15;
             const auto type = event.midi[0] & 0xf0;
             int control = -1;
@@ -783,26 +825,44 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
             }
             continue;
         }
+        if (event.channel < -1 || event.channel >= 16 || event.key < -1 || event.key >= 128 ||
+            event.port < -1 || event.noteId < -1 || !std::isfinite(event.velocity)) {
+            s.dropped.fetch_add(1);
+            continue;
+        }
+        if (event.kind != Event::Kind::NoteOn) {
+            (void)endNotes(event.port, event.channel, event.key, event.noteId, time,
+                           static_cast<float>(event.velocity));
+            continue;
+        }
+        if (event.port != 0 || event.channel < 0 || event.key < 0) {
+            s.dropped.fetch_add(1);
+            continue;
+        }
+        auto note = std::find_if(s.sounding.begin(), s.sounding.end(), [&](const auto& n) {
+            return n.count && n.channel == event.channel && n.key == event.key &&
+                   n.id == event.noteId;
+        });
+        if (note == s.sounding.end())
+            note = std::find_if(s.sounding.begin(), s.sounding.end(),
+                                [](const auto& n) { return n.count == 0; });
+        if (note == s.sounding.end() || note->count == UINT32_MAX) {
+            s.dropped.fetch_add(1);
+            continue;
+        }
         vst::Event e{};
-        // The first event input bus (the one create() found and activate()
-        // enabled); a plug-in that listens for notes on another event bus is
-        // not addressed.
         e.busIndex = 0;
         e.sampleOffset = static_cast<Steinberg::int32>(time);
-        e.type = event.kind == Event::Kind::NoteOn ? vst::Event::kNoteOnEvent
-                                                   : vst::Event::kNoteOffEvent;
-        if (e.type == vst::Event::kNoteOnEvent)
-            e.noteOn = {event.channel, event.key, 0, static_cast<float>(event.velocity), 0,
-                        event.noteId};
-        else
-            e.noteOff = {event.channel, event.key, static_cast<float>(event.velocity), event.noteId,
-                         0};
+        e.type = vst::Event::kNoteOnEvent;
+        e.noteOn = {event.channel, event.key, 0, static_cast<float>(event.velocity), 0,
+                    event.noteId};
         if (s.inputEvents.addEvent(e) != kResultOk) {
             s.dropped.fetch_add(1);
-        } else if (event.channel >= 0 && event.channel < 16 && event.key >= 0 && event.key < 128) {
-            // Remembered for reset(): a VST3 has no all-notes-off of its own.
-            s.sounding[static_cast<std::size_t>(event.channel) * 128 +
-                       static_cast<std::size_t>(event.key)] = e.type == vst::Event::kNoteOnEvent;
+        } else {
+            note->channel = event.channel;
+            note->key = event.key;
+            note->id = event.noteId;
+            ++note->count;
         }
     }
     // Main bus 0: the host's channels, then silence (input) or scratch (output)
@@ -905,9 +965,12 @@ bool Vst3Instance::serviceMainThread() {
     const auto timers = state_->frame->timers;
     for (const auto& t : timers)
         if (now >= t.next) {
-            for (auto& live : state_->frame->timers)
-                if (live.handler == t.handler)
-                    live.next = now + std::chrono::milliseconds(live.periodMs);
+            auto& liveTimers = state_->frame->timers;
+            const auto live =
+                std::find_if(liveTimers.begin(), liveTimers.end(),
+                             [&](const auto& timer) { return timer.handler == t.handler; });
+            if (live == liveTimers.end()) continue;
+            live->next = now + std::chrono::milliseconds(live->periodMs);
             t.handler->onTimer();
             did = true;
         }
@@ -984,8 +1047,9 @@ Instance::EditorRequests Vst3Instance::takeEditorRequests() {
     Instance::EditorRequests r;
     if (state_->frame->resize.exchange(false)) {
         r.resize = true;
-        r.width = state_->frame->width;
-        r.height = state_->frame->height;
+        const auto size = state_->frame->size.load(std::memory_order_acquire);
+        r.width = static_cast<std::uint32_t>(size >> 32);
+        r.height = static_cast<std::uint32_t>(size);
     }
     return r;
 }
@@ -999,7 +1063,9 @@ std::vector<std::pair<int, std::uint32_t>> Vst3Instance::watchedFds() const {
 void Vst3Instance::onFd(int fd) {
     const auto handlers = state_->frame->handlers;  // a callback may unregister
     for (const auto& [h, f] : handlers)
-        if (f == fd) h->onFDIsSet(fd);
+        if (f == fd && std::find(state_->frame->handlers.begin(), state_->frame->handlers.end(),
+                                 std::pair{h, f}) != state_->frame->handlers.end())
+            h->onFDIsSet(fd);
 }
 
 int Vst3Instance::nextTimerMs() const {
@@ -1025,23 +1091,26 @@ Instance::Notifications Vst3Instance::takeNotifications() {
 Result<std::vector<PluginInfo>> scanVst3(std::span<const fs::path> paths) {
     std::vector<fs::path> bundles;
     for (const auto& root : paths) {
+        std::vector<fs::path> found;
         std::error_code ec;
         if (isVst3(root) && fs::is_directory(root, ec)) {
-            bundles.push_back(root);
-            continue;
-        }
-        if (!fs::is_directory(root, ec)) continue;
-        for (auto it = fs::recursive_directory_iterator(
-                 root, fs::directory_options::skip_permission_denied, ec);
-             it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) break;
-            if (it->is_directory(ec) && isVst3(it->path())) {
-                bundles.push_back(it->path());
-                it.disable_recursion_pending();
+            found.push_back(root);
+        } else if (fs::is_directory(root, ec)) {
+            for (auto it = fs::recursive_directory_iterator(
+                     root, fs::directory_options::skip_permission_denied, ec);
+                 it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (it->is_directory(ec) && isVst3(it->path())) {
+                    found.push_back(it->path());
+                    it.disable_recursion_pending();
+                }
             }
         }
+        std::sort(found.begin(), found.end());
+        for (const auto& path : found)
+            if (std::find(bundles.begin(), bundles.end(), path) == bundles.end())
+                bundles.push_back(path);
     }
-    std::sort(bundles.begin(), bundles.end());
     std::vector<PluginInfo> result;
     for (const auto& path : bundles) {
         if (auto listed = scanModuleInfo(path)) {

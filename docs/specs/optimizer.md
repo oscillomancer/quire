@@ -77,8 +77,10 @@ report, compute:
   loudness-matched to the reference (integrated LUFS; gain applied to the
   analysis input, not stored) so that level differences do not dominate
   timbre terms. Then:
-  - `ltas`: RMS of the 1/3-octave LTAS difference after mean removal (dB),
-    weight 1.0, scale 3 dB;
+  - `ltas`: RMS of the 1/3-octave LTAS difference over bands active on either
+    side; missing bands are floored at −100 dB. Level offset is estimated only
+    from bands active on both sides (zero if none), so silence is a mismatch.
+    Weight 1.0, scale 3 dB;
   - `bands`: RMS of the named band level differences (dB), weight 0.5,
     scale 2 dB;
   - `centroid`: |log2(c/c_ref)| in octaves, weight 0.5, scale 0.25 oct;

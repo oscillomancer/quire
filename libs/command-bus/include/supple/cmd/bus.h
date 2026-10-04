@@ -253,7 +253,8 @@ class Host {
     virtual Context makeContext(const Origin&) = 0;
     virtual Result<std::uint64_t> beginTransaction(const Origin&, std::string_view label) = 0;
     virtual Status commitTransaction(std::uint64_t) = 0;
-    virtual void rollbackTransaction(std::uint64_t) = 0;
+    virtual Status rollbackTransaction(std::uint64_t) = 0;
+    virtual std::function<void()> invocationSavepoint() { return {}; }
     virtual void log(const LogRecord&) = 0;
     virtual void emit(std::string_view topic, json::Value payload) = 0;
     // Called on the model thread when a top-level command has finished (its

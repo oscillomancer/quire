@@ -52,7 +52,8 @@ class SandboxHost : public cmd::Host {
     void stopJobs() override;
     Result<std::uint64_t> beginTransaction(const cmd::Origin&, std::string_view label) override;
     Status commitTransaction(std::uint64_t) override;
-    void rollbackTransaction(std::uint64_t) override;
+    Status rollbackTransaction(std::uint64_t) override;
+    std::function<void()> invocationSavepoint() override;
     void log(const cmd::LogRecord&) override;
     void emit(std::string_view topic, json::Value payload) override;
     void commandFinished() override;

@@ -108,10 +108,11 @@ struct ToyHost : cmd::Host {
         emit("session.changed", std::move(event));
         return {};
     }
-    void rollbackTransaction(std::uint64_t) override {
+    Status rollbackTransaction(std::uint64_t) override {
         open = false;
         toy.count = saved;
         ++rollbacks;
+        return okStatus();
     }
     void log(const cmd::LogRecord& record) override { records.push_back(record); }
     void emit(std::string_view topic, json::Value payload) override {

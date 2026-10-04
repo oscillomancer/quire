@@ -22,7 +22,10 @@ struct Host final : supple::cmd::Host {
         return std::uint64_t{1};
     }
     supple::Status commitTransaction(std::uint64_t) override { return {}; }
-    void rollbackTransaction(std::uint64_t) override { total = prior; }
+    Status rollbackTransaction(std::uint64_t) override {
+        total = prior;
+        return okStatus();
+    }
     void log(const supple::cmd::LogRecord&) override {}
     void emit(std::string_view, supple::json::Value) override {}
 };

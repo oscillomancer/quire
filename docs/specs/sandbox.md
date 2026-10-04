@@ -160,7 +160,24 @@ synth, `synth_and_render`).
 
 Transactions: the sandbox implements `beginTransaction` by snapshotting the
 state of affected instances (CLAP state + chain) and restores them on
-rollback. Renders created inside a failed batch are deleted.
+rollback. Begin fails with `sandbox.snapshot_failed` at `/instances/<id>`
+when any state cannot be saved; its `details` retain the plug-in error.
+Rollback returns `sandbox.rollback_failed` with `sandbox.restore_failed`
+details for each instance and nested plug-in errors. The command bus retains
+the initiating command/commit error as a final detail when rollback fails.
+Renders created inside a failed batch are deleted. Invocation savepoints are
+independent of that outer snapshot; a failed step restores its plug-in states,
+chain, settings, render set and pending Lua/host events while the transaction
+remains open. D4's void restore hook reports snapshot/restore failures as `sandbox.savepoint_failed`
+events with the same structured error fields.
+
+Preset documents accept `supple.preset/1.0` (optional numeric `version: 1`).
+An absent schema is legacy; unknown/newer schemas or explicit versions fail
+with `sandbox.preset_schema` or `sandbox.preset_version` before state changes.
+Semantic schema entries require a numeric id, name, recognized type and the
+range/choices for that type. Invalid schemas warn and fall back to plain CLAP
+parameters. State loads invalidate queued pre-restore edits; inactive saves
+flush acknowledged pending edits before writing plug-in state.
 
 ## 5. CLI
 
@@ -197,6 +214,24 @@ paths, locations and hints.
 - Output events go to a caller-preallocated `OutputEvents` sink (fixed
   storage + count + dropped), never a growing container, so `process()` is
   allocation-free; it is `SUPPLE_RT` and exercised under rtsan.
+  `OutputEvent::flags` preserves CLAP event flags, including `DontRecord`
+  (do not record automation) and `IsLive`. Note-end events retain their input
+  note address `(port, channel, key, noteId)`; -1 is an unspecified/wildcard
+  component, so a note id of -1 can be matched using the other components.
+  Parameter values also retain their target address. VST3 output parameter
+  values are normalized, with zero flags and address components of -1.
+  Native VST3 note-off outputs are not synthesized as CLAP note-end events.
+- `takeIdleOutputs()` drains CLAP `params.flush` output gestures/values on the
+  main thread, local or bridged, including active-but-stopped audio-thread
+  flushes. The instance retains a FIFO of 1024 events independently of the
+  process sink; overflow drops newest and the returned `dropped` count is
+  cleared on drain. Returned events have time 0 and the same flags/address
+  form as process outputs. A drain is bounded by the queue's captured size;
+  concurrent flush outputs not in that capture wait for the next drain.
+  No allocation or lock occurs in the flush output callback. The returned
+  vector allocates only on main. This is a CLAP flush channel; the VST3
+  backing does not expose CLAP idle outputs. A failed bridge returns an empty
+  drain and remains observable through `failed()`.
 - `setParam()` flushes immediately through `params.flush` while the plugin is
   inactive (main thread); while active it queues into an SPSC ring delivered
   at time 0 of the next `process()`, or by `flushParams()` on the audio thread

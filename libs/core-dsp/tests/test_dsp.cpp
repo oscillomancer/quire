@@ -4,6 +4,7 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <vector>
 
@@ -103,4 +104,29 @@ TEST_CASE("bilinear prewarp preserves analog cutoff") {
     const auto z = std::polar(1.0, -2 * std::numbers::pi * 1000 / 48000);
     const auto h = (c.b0 + c.b1 * z + c.b2 * z * z) / (1.0 + c.a1 * z + c.a2 * z * z);
     CHECK(20 * std::log10(std::abs(h)) == doctest::Approx(-3.01029995664).epsilon(1e-9));
+}
+
+TEST_CASE("resampler rejects nonfinite and unrepresentable rate ratios") {
+    const std::array<float, 4> input{1, 0, 0, 0};
+    for (double invalid : {0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+        CHECK(resample(input, invalid, 48000).empty());
+        CHECK(resample(input, 48000, invalid).empty());
+    }
+    CHECK(resample(input, 1e-300, 1e300).empty());
+    CHECK(resample(input, 1e300, 1e-300).empty());
+    CHECK(resample(input, 48000, 1e-20).empty());
+}
+
+TEST_CASE("polyphase upsampler ignores short output spans without advancing history") {
+    PolyphaseUpsampler tested, reference;
+    tested.prepare(4);
+    reference.prepare(4);
+    std::array<double, 3> shortOutput{123, 123, 123};
+    tested.process(1, shortOutput);
+    CHECK(shortOutput == std::array<double, 3>{123, 123, 123});
+    std::array<double, 4> actual{}, expected{};
+    tested.process(0.5f, actual);
+    reference.process(0.5f, expected);
+    CHECK(actual == expected);
 }

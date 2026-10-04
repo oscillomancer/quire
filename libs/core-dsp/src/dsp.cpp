@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
-#include <stdexcept>
 
 #if defined(__SSE2__)
 #include <xmmintrin.h>
@@ -103,6 +103,7 @@ void PolyphaseUpsampler::reset() SUPPLE_RT {
     head_ = 0;
 }
 void PolyphaseUpsampler::process(float input, std::span<double> output) SUPPLE_RT {
+    if (coefficients_.empty() || output.size() < static_cast<std::size_t>(factor_)) return;
     delay_[static_cast<std::size_t>(head_)] = static_cast<double>(input);
     for (int p = 0; p < factor_; ++p) {
         double y = 0;
@@ -116,10 +117,20 @@ void PolyphaseUpsampler::process(float input, std::span<double> output) SUPPLE_R
     head_ = (head_ + 1) % 32;
 }
 std::vector<float> resample(std::span<const float> input, double sourceRate, double targetRate) {
-    if (sourceRate <= 0 || targetRate <= 0 || input.empty()) return {};
+    if (!std::isfinite(sourceRate) || !std::isfinite(targetRate) || sourceRate <= 0 ||
+        targetRate <= 0 || input.empty())
+        return {};
+    const double rateRatio = targetRate / sourceRate;
+    const double outputCount = input.size() * rateRatio;
+    if (!std::isfinite(rateRatio) || rateRatio <= 0 || !std::isfinite(outputCount) ||
+        outputCount >= static_cast<double>(std::numeric_limits<std::int64_t>::max()) ||
+        outputCount >= static_cast<double>(std::vector<float>().max_size()))
+        return {};
+    const auto count = static_cast<std::size_t>(std::llround(outputCount));
+    if (count == 0) return {};
     constexpr int phases = 2048;
-    const double ratio = std::min(1.0, targetRate / sourceRate);
-    const int taps = std::clamp(2 * static_cast<int>(std::ceil(32 / ratio)), 64, 4096);
+    const double ratio = std::min(1.0, rateRatio);
+    const int taps = static_cast<int>(std::min(4096.0, 2 * std::ceil(32 / ratio)));
     const int center = taps / 2 - 1;
     const double cutoff = 0.90 * ratio;
     std::vector<double> window(static_cast<std::size_t>(taps));
@@ -135,11 +146,9 @@ std::vector<float> resample(std::span<const float> input, double sourceRate, dou
         }
         for (int t = 0; t < taps; ++t) table[static_cast<std::size_t>(p * taps + t)] /= sum;
     }
-    const auto count =
-        static_cast<std::size_t>(std::llround(input.size() * targetRate / sourceRate));
     std::vector<float> output(count);
     for (std::size_t i = 0; i < count; ++i) {
-        const double position = i * sourceRate / targetRate;
+        const double position = i / rateRatio;
         const auto base = static_cast<std::int64_t>(std::floor(position));
         const int phase = std::min(phases - 1, static_cast<int>((position - base) * phases));
         double y = 0;

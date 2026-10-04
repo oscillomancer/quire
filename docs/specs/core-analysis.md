@@ -214,14 +214,19 @@ Keys are dotted report paths (`loudness.integrated_lufs`,
 thresholds: loudness 1 LU; true peak 0.5 dB; centroid / rolloff 10 %;
 band levels 1.5 dB; tilt 1 dB/oct; flatness 0.05; correlation 0.1; width 0.05;
 attack/decay 20 %; f0 10 cents; harmonics 3 dB. `ltasRmsDb` is the RMS of the
-1/3-octave differences after removing the mean offset (a pure level change is
-not a timbre change).
+1/3-octave differences over bands active on either side (> −100 dB).
+Inactive sides are floored at −100 dB. The mean level offset is estimated
+from bands active on both sides and removed; with no shared active bands the
+offset is zero. A pure gain change retains zero timbre distance, while silence
+against a non-silent signal remains a large mismatch.
 
 **Target profiles** (for agents and the optimizer): a JSON document
 `supple.analysis-profile/1.0` with `targets: { "<key>": {"target": x, "tolerance": t, "weight": w} }`
 or `{"min": a, "max": b}`, plus optional `ltas` (31 target levels, relative).
 `evaluate(report, profile)` returns per-target pass/fail and normalized
-distance `|x − target| / tolerance`, and a weighted total loss.
+distance `|x − target| / tolerance`, and a weighted total loss. The weighted
+mean rescales weights before accumulation so large finite weights cannot
+overflow their sum or weighted products.
 
 **Masking** (masker A, e.g. kick; maskee B, e.g. bass):
 
@@ -371,4 +376,7 @@ levels are current measurements, rather than full-window offline statistics.
 the measured subset of the existing analysis-report field names, with its
 rounding rules; current M/S are single-point series. Unsupported descriptors
 are omitted. This class is intended for a measurement consumer, not the
-plugin audio thread. The analyzer owns queue/overflow/hold/reset semantics.
+plugin audio thread. Before `prepare`, input is ignored. The analyzer owns
+queue/overflow/hold/reset semantics. Live `observe` loudness results retain a
+minimum 3 s horizon even when its requested window is shorter; stereo and
+current spectrum retain their documented window and smoothing behavior.

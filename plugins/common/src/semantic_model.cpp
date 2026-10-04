@@ -10,22 +10,22 @@ namespace supple::clapx {
 namespace {
 
 bool writeAll(const clap_ostream_t* out, std::string_view text) {
-    if (!out) return false;
+    if (!out || !out->write) return false;
     std::size_t off = 0;
     while (off < text.size()) {
         const int64_t n = out->write(out, text.data() + off, text.size() - off);
-        if (n <= 0) return false;
+        if (n <= 0 || static_cast<std::uint64_t>(n) > text.size() - off) return false;
         off += static_cast<std::size_t>(n);
     }
     return true;
 }
 
 bool readStream(const clap_istream_t* in, std::vector<std::uint8_t>& bytes) {
-    if (!in) return false;
+    if (!in || !in->read) return false;
     std::uint8_t buf[4096];
     for (;;) {
         const int64_t n = in->read(in, buf, sizeof buf);
-        if (n < 0) return false;
+        if (n < 0 || n > static_cast<int64_t>(sizeof buf)) return false;
         if (n == 0) return true;
         bytes.insert(bytes.end(), buf, buf + n);
         if (bytes.size() > patch::kMaxStateBytes + 16) return false;
@@ -66,6 +66,7 @@ bool SemanticAdapter::setPatch(std::uint32_t mode, const char* text, std::uint32
     };
     if (mode > CLAP_SUPPLE_SET_VALIDATE_ONLY)
         return fail(Error("patch.mode", "unknown set_patch mode " + std::to_string(mode)));
+    if (!text && size) return fail(Error("patch.input", "patch text is null"));
     auto doc = json::parse(std::string_view(text ? text : "", size));
     if (!doc) return fail(doc.error());
     auto st = model_.apply(mode, *doc);

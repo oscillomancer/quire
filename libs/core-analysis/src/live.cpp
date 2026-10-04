@@ -47,7 +47,7 @@ void LiveMeter::reset() {
 }
 
 void LiveMeter::process(std::span<const float* const> input, int frames) {
-    if (frames <= 0 || input.size() < static_cast<std::size_t>(channels_)) return;
+    if (audio_.empty() || frames <= 0 || input.size() < static_cast<std::size_t>(channels_)) return;
     dsp::DenormalGuard guard;
     for (int i = 0; i < frames; ++i) {
         const double l = static_cast<double>(input[0][i]);

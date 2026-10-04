@@ -314,3 +314,37 @@ TEST_CASE("above 96 kHz true peak uses sample peak") {
     check(meter.truePeak(), 20 * std::log10(.75), 1e-12);
     check(meter.samplePeak(), meter.truePeak(), 1e-12);
 }
+
+TEST_CASE("5.1 loudness excludes LFE and weights both rear channels") {
+    std::array<std::vector<float>, 6> audio;
+    for (auto& channel : audio) channel.resize(48000);
+    std::array<const float*, 6> input;
+    for (std::size_t c = 0; c < input.size(); ++c) input[c] = audio[c].data();
+    double reference = 0;
+    for (auto mode : {LoudnessMeter::Mode::Exact, LoudnessMeter::Mode::Histogram}) {
+        for (std::size_t active = 0; active < audio.size(); ++active) {
+            for (auto& channel : audio) std::fill(channel.begin(), channel.end(), 0);
+            for (std::size_t i = 0; i < audio[active].size(); ++i)
+                audio[active][i] = static_cast<float>(0.1 * std::sin(2 * pi * 1000 * i / 48000));
+            LoudnessMeter meter;
+            meter.prepare(48000, Layout::Surround51, mode, 2);
+            meter.process(input, 48000);
+            if (active == 0) reference = meter.integrated();
+            if (active == 3) {
+                CHECK(std::isinf(meter.integrated()));
+                CHECK(std::isfinite(meter.truePeak()));
+            } else {
+                CHECK(meter.integrated() ==
+                      doctest::Approx(reference + (active >= 4 ? 10 * std::log10(1.41) : 0))
+                          .epsilon(0.001));
+            }
+        }
+    }
+}
+TEST_CASE("unprepared loudness meter safely ignores processing") {
+    LoudnessMeter meter;
+    const float sample = 0;
+    const float* input[] = {&sample, &sample};
+    meter.process(input, 1);
+    CHECK(std::isinf(meter.integrated()));
+}

@@ -507,7 +507,11 @@ void registerOptimizeCommands(cmd::Registry& registry) {
                                              a.instance});
         s.startJob([w](std::stop_token stop) {
             Work& W = *w;
-            auto cancelled = [&] { return stop.stop_requested() || W.jobs->cancelled(W.job); };
+            std::stop_callback onStop(stop, [&] { (void)W.jobs->cancel(W.job); });
+            auto cancelled = [&] {
+                if (stop.stop_requested()) (void)W.jobs->cancel(W.job);
+                return W.jobs->cancelled(W.job);
+            };
             if (cancelled()) return;
             if (W.referenceFile) {
                 if (auto& hook = W.session->options().referencePreparationHook) hook("before_read");
@@ -681,6 +685,13 @@ void registerOptimizeCommands(cmd::Registry& registry) {
                 publishRecord = std::move(rec);
             }
             result["applied"] = false;
+            if (cancelled()) {
+                if (publishRecord) {
+                    std::error_code ignored;
+                    std::filesystem::remove(publishRecord->path, ignored);
+                }
+                return;
+            }
             auto completed = W.jobs->completeWith(W.job, std::move(result), [&] {
                 if (publishRecord) W.session->submitRender(std::move(*publishRecord));
             });

@@ -110,14 +110,21 @@ struct ProcessBlock {
     std::int64_t steadyTime = -1;          // sample counter, or -1
 };
 
-// Events the plugin emits while processing (param gestures/values, notes end).
+// Events the plugin emits in process() or params.flush(). Flags retain CLAP's
+// event flags; DontRecord forbids automation recording and IsLive identifies
+// a live user event. NoteEnd uses the input-note (port, channel, key, noteId)
+// address, including -1 wildcards. ParamValue retains its target address too.
+// VST3 parameter outputs are normalized, have zero flags and no note address.
 struct OutputEvent {
     enum class Kind : std::uint8_t { ParamValue, GestureBegin, GestureEnd, NoteEnd };
-    Kind kind;
-    std::uint32_t time;
-    std::uint32_t paramId;
-    double value;
-    std::int32_t noteId;
+    static constexpr std::uint32_t IsLive = CLAP_EVENT_IS_LIVE, DontRecord = CLAP_EVENT_DONT_RECORD;
+    Kind kind = Kind::ParamValue;
+    std::uint32_t time = 0;
+    std::uint32_t paramId = CLAP_INVALID_ID;
+    double value = 0;
+    std::int32_t noteId = -1;
+    std::uint32_t flags = 0;
+    std::int16_t port = -1, channel = -1, key = -1;
 };
 
 // Caller-owned, preallocated sink for output events (the audio thread never
@@ -213,7 +220,10 @@ class Instance {
     Result<std::string> describe(bool changedOnly);
 
     // --- state (main thread) ---
+    // Inactive saves flush acknowledged main-thread edits into component state.
+    // Active saves require those edits to have been delivered by the audio consumer.
     Result<std::vector<std::uint8_t>> saveState();
+    // Restoring state invalidates edits queued before this call.
     Status loadState(std::span<const std::uint8_t> bytes);
 
     // --- processing (audio thread) ---
@@ -248,10 +258,22 @@ class Instance {
     struct Notifications {
         bool stateDirty = false, paramsRescan = false, latencyChanged = false,
              semanticChanged = false, tailChanged = false;
+        std::optional<Error> restartError;  // failed automatic reactivation, cleared on read
         std::uint32_t paramsRescanFlags = 0;
         std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
     Notifications takeNotifications();
+    struct IdleOutputs {
+        static constexpr std::size_t kCapacity = 1024;
+        std::vector<OutputEvent> events;
+        std::uint64_t dropped = 0;
+    };
+    // Main thread: drains CLAP flush outputs, including active-but-stopped
+    // audio-thread flushes. FIFO, at most kCapacity events; overflow drops the
+    // newest event and is counted since the previous drain. Flush times are 0.
+    // Bridged instances drain over the control channel; bridge failure is
+    // observable through failed(). VST3 has no CLAP flush outputs.
+    IdleOutputs takeIdleOutputs();
 
     // --- editor (main thread): the plugin's GUI embedded in an X11 window
     // (CLAP gui extension, VST3 IPlugView). An isolated instance's editor is
@@ -267,9 +289,9 @@ class Instance {
     Result<EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
     void closeEditor();
     bool editorOpen() const { return editorOpen_; }
-    // What the plugin asked for since the last call (resize, or it closed itself).
+    // What the plugin asked for since the last call; the window owner applies show/hide.
     struct EditorRequests {
-        bool resize = false, closed = false;
+        bool resize = false, closed = false, show = false, hide = false;
         std::uint32_t width = 0, height = 0;
     };
     EditorRequests takeEditorRequests();

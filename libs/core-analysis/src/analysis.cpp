@@ -158,6 +158,11 @@ LoudnessReport loudnessOf(const Signal& s) {
     r.lra = meter.loudnessRange();
     r.maxMomentary = meter.maxMomentary();
     r.maxShortTerm = meter.maxShortTerm();
+    // Drain the 32-tap true-peak interpolator after capturing loudness, so
+    // the final samples' peaks are included without extending the program.
+    const std::array<float, 32> silence{};
+    std::fill(ptr.begin(), ptr.end(), silence.data());
+    meter.process(ptr, static_cast<int>(silence.size()));
     r.truePeak = meter.truePeak();
     r.samplePeak = meter.samplePeak();
     r.plr = r.truePeak - r.integrated;
@@ -475,7 +480,7 @@ EnvelopeReport envelopeOf(const std::vector<double>& x, double fs, std::optional
             r.decay20Ms = static_cast<double>(i - peakIdx) * hopMs;
             break;
         }
-    if (noteOff) {
+    if (noteOff && *noteOff < static_cast<double>(x.size()) / fs) {
         const auto off = static_cast<std::size_t>(std::max(0.0, *noteOff * 1000.0 / hopMs));
         if (off < env.size() && env[off] > 0.0) {
             const double l0 = env[off];
@@ -725,6 +730,16 @@ Result<Report> analyze(const Signal& s, const Options& o) {
     if (s.channels.size() != expected)
         return Error("analysis.layout", "channel count does not match layout", "/channels",
                      "supply channels in the declared layout order");
+    for (const float* channel : s.channels) {
+        if (!channel) return Error("analysis.samples", "channel data is null", "/channels");
+        for (std::int64_t i = 0; i < s.frames; ++i)
+            if (!std::isfinite(channel[i]))
+                return Error("analysis.samples", "audio contains nonfinite samples", "/channels",
+                             "supply finite audio samples");
+    }
+    if (o.noteOffSeconds && (!std::isfinite(*o.noteOffSeconds) || *o.noteOffSeconds < 0))
+        return Error("analysis.note_off", "note-off must be finite and nonnegative",
+                     "/noteOffSeconds", "give the note-off time in seconds");
     if (o.f0RangeHz) {
         const auto [lo, hi] = *o.f0RangeHz;
         const double minHz = s.sampleRate / (std::lround(4096.0 * s.sampleRate / 48000.0) / 2.0);

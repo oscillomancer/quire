@@ -539,12 +539,22 @@ Result<json::Value> Dispatcher::transact(std::string_view label, const Origin& o
     auto result = body();
     --transactionDepth_;
     if (!result) {
-        host_.rollbackTransaction(*transaction);
+        auto rollback = host_.rollbackTransaction(*transaction);
+        if (!rollback) {
+            auto error = rollback.error();
+            error.details.push_back(result.error());
+            return error;
+        }
         return result;
     }
     auto committed = host_.commitTransaction(*transaction);
     if (!committed) {
-        host_.rollbackTransaction(*transaction);
+        auto rollback = host_.rollbackTransaction(*transaction);
+        if (!rollback) {
+            auto error = rollback.error();
+            error.details.push_back(committed.error());
+            return error;
+        }
         return committed.error();
     }
     return result;
@@ -646,11 +656,22 @@ Result<json::Value> Dispatcher::dispatch(const Invocation& invocation, bool inBa
         if (result) {
             auto committed = host_.commitTransaction(*transaction);
             if (!committed) {
-                host_.rollbackTransaction(*transaction);
+                auto rollback = host_.rollbackTransaction(*transaction);
                 result = committed.error();
+                if (!rollback) {
+                    auto error = rollback.error();
+                    error.details.push_back(result.error());
+                    result = std::move(error);
+                }
             }
-        } else
-            host_.rollbackTransaction(*transaction);
+        } else {
+            auto rollback = host_.rollbackTransaction(*transaction);
+            if (!rollback) {
+                auto error = rollback.error();
+                error.details.push_back(result.error());
+                result = std::move(error);
+            }
+        }
     } else
         result = invoke();
     return finish(std::move(result));
@@ -705,18 +726,28 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
         auto resolved =
             resolveReference(rawArgs ? *rawArgs : json::Value::object(), saved, path + "/args");
         if (!resolved) {
-            host_.rollbackTransaction(*transaction);
+            auto rollback = host_.rollbackTransaction(*transaction);
+            if (!rollback) {
+                auto error = rollback.error();
+                error.details.push_back(resolved.error());
+                return error;
+            }
             return resolved.error();
         }
         Invocation invocation{step.find("command")->asString(), std::move(*resolved), origin};
         auto output = dispatch(invocation, true, true);
         if (!output) {
-            host_.rollbackTransaction(*transaction);
+            auto rollback = host_.rollbackTransaction(*transaction);
             auto detail = output.error();
             prefixError(detail, path);
             Error error("batch.step_failed", "batch step " + std::to_string(i) + " failed", path,
                         "fix this step and retry the batch");
             error.details.push_back(std::move(detail));
+            if (!rollback) {
+                auto failure = rollback.error();
+                failure.details.push_back(std::move(error));
+                return failure;
+            }
             return error;
         }
         if (auto* alias = step.find("as"); alias) saved[alias->asString()] = *output;
@@ -724,7 +755,12 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
     }
     auto committed = host_.commitTransaction(*transaction);
     if (!committed) {
-        host_.rollbackTransaction(*transaction);
+        auto rollback = host_.rollbackTransaction(*transaction);
+        if (!rollback) {
+            auto error = rollback.error();
+            error.details.push_back(committed.error());
+            return error;
+        }
         return committed.error();
     }
     return result;

@@ -1460,8 +1460,9 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
     return okStatus();
 }
 
-void EngineApp::rollbackTransaction(std::uint64_t id) {
+Status EngineApp::rollbackTransaction(std::uint64_t id) {
     if (id == txnId_) txn_.reset();
+    return okStatus();
 }
 
 void EngineApp::log(const cmd::LogRecord& record) {
