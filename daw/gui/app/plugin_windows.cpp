@@ -219,6 +219,25 @@ Status PluginWindows::open(host::Instance& instance, const std::string& title) {
     return attach(std::move(editor), title);
 }
 
+bool PluginWindows::reattach(Editor& editor) {
+    host::Instance* instance = app_.instanceOf(*editor.fx);
+    if (!instance || !instance->hasEditor()) return false;
+    auto size = instance->openEditor(editor.window->x11Window(),
+                                     static_cast<double>(editor.window->pixelRatio()));
+    restoreContext();
+    if (!size) return false;
+    if (watcherError_ && !instance->watchedFds().empty()) {
+        instance->closeEditor();
+        return false;
+    }
+    editor.instance = instance;
+    editor.resizable = size->resizable;
+    if (size->width > 0 && size->height > 0)
+        editor.window->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
+    editor.window->setResizable(size->resizable);
+    return true;
+}
+
 void PluginWindows::drop(std::size_t index) {
     Editor& e = editors_[index];
     // The instance may already be gone (the engine replaced it): only close the
@@ -253,7 +272,7 @@ bool PluginWindows::handle(const SDL_Event& e) {
         Editor& ed = editors_[i];
         if (ed.window->id() != id) continue;
         if (ed.fx && app_.instanceOf(*ed.fx) != ed.instance) {
-            drop(i);
+            if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) drop(i);  // else service() reopens
             return true;
         }
         if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -286,12 +305,14 @@ int PluginWindows::service() {
                 !editors_[i].instance->watchedFds().empty())
                 drop(i);
     }
-    // Editors whose instance the engine replaced or dropped close.
+    // The engine closed the editor of an instance it replaced (fx.restart, a
+    // VST3 key change): it reopens in the same window on the new instance.
+    // An effect that is gone, or whose new instance cannot, loses its window.
     for (std::size_t i = editors_.size(); i-- > 0;) {
         Editor& e = editors_[i];
-        if (e.fx && app_.instanceOf(*e.fx) != e.instance) {
-            editors_.erase(editors_.begin() +
-                           static_cast<std::ptrdiff_t>(i));  // its editor died with it
+        if (e.fx && app_.instanceOf(*e.fx) != e.instance && !reattach(e)) {
+            editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
+            restoreContext();
             continue;
         }
         const auto requests = e.instance->takeEditorRequests();

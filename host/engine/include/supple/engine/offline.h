@@ -84,6 +84,7 @@ class InstancePool {
         std::vector<std::uint32_t> clearedAutomation;
         std::string appliedState;  // canonical patch text or blob hash last applied
     };
+    void retire(std::unique_ptr<host::Instance> instance);
     Resolver resolve_;
     host::HostIdentity identity_;
     std::shared_ptr<host::BridgeProcess> sharedBridge_;

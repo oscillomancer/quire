@@ -108,7 +108,7 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
     if (!e.instance || e.pluginId != fx.plugin.id || e.isolation != fx.isolation || freshForState) {
         // The plan playing now may still use the old instance: keep it alive
         // until prune() says every plan that could use it is gone.
-        if (e.instance) retired_.emplace_back(generation_, std::move(e.instance));
+        if (e.instance) retire(std::move(e.instance));
         auto info = resolve_(fx.plugin);
         if (!info) {
             instances_.erase(id);
@@ -161,9 +161,16 @@ void InstancePool::prune(const Session& session, std::uint64_t liveGeneration) {
     std::erase_if(retired_, [&](const auto& r) { return r.first <= liveGeneration; });
 }
 
+void InstancePool::retire(std::unique_ptr<host::Instance> instance) {
+    // Its editor goes now, while the window it is embedded in still exists
+    // (the UI reopens it on the replacement); the instance may play on.
+    instance->closeEditor();
+    retired_.emplace_back(generation_, std::move(instance));
+}
+
 void InstancePool::restart(Id id) {
     if (auto it = instances_.find(id); it != instances_.end()) {
-        if (it->second.instance) retired_.emplace_back(generation_, std::move(it->second.instance));
+        if (it->second.instance) retire(std::move(it->second.instance));
         instances_.erase(it);
     }
 }

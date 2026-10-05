@@ -16,6 +16,8 @@
 
 #include "plugin_windows.h"
 #include "supple/base/environment.h"
+#include "supple/cmd/bus.h"
+#include "supple/engine/app.h"
 #include "supple/host/clap_host.h"
 
 using namespace supple;
@@ -278,4 +280,82 @@ TEST_CASE("editor show and hide requests preserve the offscreen parent window") 
     CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
     CHECK(window.width() == 80);
     CHECK(window.id() == identity);
+}
+
+TEST_CASE("an editor follows its effect onto a replacement instance (needs a display)") {
+    // fx.restart (or a VST3 key change) replaces the instance: the engine
+    // closes the old editor while its window exists, and the window shows the
+    // new instance's editor (it used to keep a dead editor parented to a
+    // destroyed window, which crashed plug-ins and sometimes the app).
+    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 with an X11 DISPLAY");
+        return;
+    }
+    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    REQUIRE(platform);
+    engine::AppOptions options;
+    options.workdir = std::filesystem::temp_directory_path() /
+                      ("supple-editor-replace-" + std::to_string(::getpid()));
+    options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
+    options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
+    auto app = engine::EngineApp::create(options);
+    REQUIRE(app);
+    cmd::Registry registry;
+    engine::registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, **app);
+    (*app)->attachCommands(dispatcher);
+    const cmd::Origin origin{cmd::Origin::Type::Test, "editor-replace-test", {}};
+    auto run = [&](const char* command, json::Value args) {
+        auto r = dispatcher.execute({command, std::move(args), origin});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    json::Value start = json::Value::object();
+    start["backend"] = "dummy";
+    run("engine.start", std::move(start));
+    std::string plugin;
+    json::Value list = run("plugin.list", json::Value::object());
+    for (const json::Value& p : list["plugins"].asArray())
+        if (const json::Value* n = p.find("name"); n && n->isString() && n->asString() == "Plumb")
+            plugin = p.find("id")->asString();
+    if (plugin.empty()) {
+        MESSAGE("skipped: the stock plugins are not built");
+        return;
+    }
+    json::Value track = json::Value::object();
+    track["type"] = "channel";
+    const std::string trackId = run("track.add", std::move(track))["track"].asString();
+    json::Value add = json::Value::object();
+    add["track"] = trackId;
+    add["plugin"] = plugin;
+    const auto fx = *model::Id::parse(run("fx.add", std::move(add))["fx"].asString());
+    {
+        gui::PluginWindows windows(**platform, **app, [] {});
+        auto pump = [&](int ms) {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+            while (std::chrono::steady_clock::now() < until) {
+                (*app)->tick();
+                const int next = windows.service();
+                SDL_Event e;
+                if (SDL_WaitEventTimeout(&e, next < 0 ? 20 : std::min(next, 20))) windows.handle(e);
+            }
+        };
+        REQUIRE(windows.open(fx));
+        host::Instance* const before = (*app)->instanceOf(fx);
+        REQUIRE(before);
+        CHECK(before->editorOpen());
+        pump(200);
+        (*app)->restartFx(fx);
+        host::Instance* const after = (*app)->instanceOf(fx);
+        REQUIRE(after);
+        CHECK(after != before);
+        pump(300);
+        CHECK(windows.isOpen(fx));
+        CHECK(windows.count() == 1);
+        CHECK(after->editorOpen());
+        windows.closeAll();
+        CHECK_FALSE(after->editorOpen());
+    }
+    run("engine.stop", json::Value::object());
+    std::filesystem::remove_all(options.workdir);
 }

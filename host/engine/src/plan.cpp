@@ -2,6 +2,7 @@
 #include "supple/model/fade_shape.h"
 #include "supple/model/source_mapping.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdio>
@@ -245,7 +246,7 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
 }
 
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
-                     double rate) {
+                     double rate, const std::vector<model::Id>* keepLive) {
     Plan p;
     p.pool = &pool;
     p.linearConsole = !s.project->console9;
@@ -567,6 +568,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             }
         n.live = !n.monitorInputs.empty() || n.midiIn.has_value();
         for (std::size_t e : n.in) n.live = n.live || p.nodes[p.edges[e].from].live;
+        if (!n.live && keepLive && std::binary_search(keepLive->begin(), keepLive->end(), n.id))
+            n.live = p.heldLive = true;
         p.anyLive = p.anyLive || n.live;
     }
     // The master is the output: live whenever anything is (even a monitored

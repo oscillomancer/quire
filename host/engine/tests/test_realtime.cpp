@@ -2003,13 +2003,14 @@ TEST_CASE("a long, dense MIDI performance records without overflow (the writer d
     engine.stop();
 }
 
-TEST_CASE("monitoring off while playing: the renderer takes over without a gap" *
+TEST_CASE("monitoring off while playing: the track plays on live, with its instance" *
           doctest::description("rt")) {
     // A monitored instrument track (live) playing short notes every ~1025
-    // frames; monitoring switches off mid-play. The renderer takes the track
-    // at its render horizon, before the callback has let go of the live
-    // instance: a fresh instance keeps the notes coming (it used to pass the
-    // track through for the render-ahead time, ~9600 silent frames).
+    // frames; monitoring switches off mid-play. The renderer could take the
+    // track only at its render horizon, before the callback lets go of the
+    // instance: the track would pass through for the render-ahead time (~9600
+    // silent frames), and a fresh instance instead lost the plugin's state and
+    // editor. It stays live, on the same instance, until the transport stops.
     model::Session s = synthSession(0.0);
     {
         model::EditTxn t(s, 2);
@@ -2032,12 +2033,28 @@ TEST_CASE("monitoring off while playing: the renderer takes over without a gap" 
     REQUIRE(engine.awaitPlan());
     engine.play();
     engine.awaitTransport();
-    backend.run(100);              // 25600 frames, all live (nothing renders ahead)
-    REQUIRE(engine.load(s).ok());  // monitoring off: the renderer takes the graph
+    backend.run(100);  // 25600 frames, all live (nothing renders ahead)
+    const Id fx = s.fx.begin()->id;
+    host::Instance* const instance = pool.find(fx);
+    REQUIRE(instance);
+    REQUIRE(engine.load(s).ok());  // monitoring off: still live while playing
     REQUIRE(engine.awaitPlan());
-    runAhead(engine, backend, 250, 256);
+    CHECK(EngineTestAccess::latestPlan(engine).heldLive);
+    CHECK(pool.find(fx) == instance);
+    backend.run(250);
     CHECK(engine.processErrors() == 0);
     CHECK(engine.transport().sample == 350 * 256);  // no replay from the epoch's start
+    // Stopped, the track leaves the live region, still on the same instance.
+    engine.pause();
+    for (int i = 0; i < 400 && EngineTestAccess::latestPlan(engine).heldLive; ++i) {
+        backend.run(1);
+        engine.service();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const detail::Plan& after = EngineTestAccess::latestPlan(engine);
+    CHECK_FALSE(after.heldLive);
+    CHECK_FALSE(after.anyLive);
+    CHECK(pool.find(fx) == instance);
     engine.stop();
     const auto& L = backend.capture().channels[0];
     std::size_t longest = 0, run = 0;

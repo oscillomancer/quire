@@ -89,6 +89,7 @@ class PluginWindows {
         bool resizable = false;
     };
     Status attach(Editor editor, const std::string& title);
+    bool reattach(Editor& editor);  // the effect's current instance, in the same window
     void drop(std::size_t index);
     void restoreContext() const {
         if (owner_) owner_->forceCurrent();

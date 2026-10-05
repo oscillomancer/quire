@@ -156,19 +156,25 @@ when the machine is busiest, during a recording session).
   is heard while stopped; toggling monitoring while playing moves the
   plugin between executors with no errors; tsan and rtsan clean.
 - Class changes (added after round 12): when a node leaves the live
-  region (monitoring off while playing), the renderer takes it at its
-  render horizon while the callback still plays the old instance up to
-  that point, so `load` gives the renderer a fresh instance
-  (`InstancePool::restart`) instead of waiting for the callback to let go
-  (which passed the track through, unprocessed, for the render-ahead
-  time). While every node is live the renderer renders nothing, but it
+  region (monitoring off while playing), the renderer could take it only
+  at its render horizon while the callback still plays the instance up to
+  that point. Waiting for the callback to let go passed the track
+  through, unprocessed, for the render-ahead time; a fresh instance
+  (round 12) lost the plugin's state (e.g. a sampler's loaded
+  instrument) and orphaned its open editor, which crashed plug-ins and
+  the app. Since 2026-10-04 `load` keeps every node that was live in the
+  live region while the transport plays (`compile`'s `keepLive`; the plan
+  is `heldLive`), unmonitored, on the same instance; `service()` reloads
+  once the transport stops, and the callback, stopped, lets go at once.
+  An instance the pool does replace (fx.restart, a VST3 key change) has
+  its editor closed on retirement while its window exists, and the UI
+  reopens the editor in that window on the new instance.
+  While every node is live the renderer renders nothing, but it
   keeps its stream and timeline positions one render-ahead span past the
   callback (advanced together, through the loop), so a plan that gives it
   work takes over at the edit horizon, not at the epoch's start (which
   replayed from there).
-- Not yet: live multiprocessing (live nodes run on the callback alone), a
-  crossfade at class changes (the fresh instance starts cold: reverb tails
-  and envelopes restart).
+- Not yet: live multiprocessing (live nodes run on the callback alone).
 
 ## Implementation notes: crash recovery (2026-09-27)
 

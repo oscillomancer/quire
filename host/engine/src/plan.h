@@ -487,6 +487,7 @@ struct Plan {
     std::vector<host::Instance*> instances;  // every instance the plan processes, sorted
     std::unique_ptr<TaskGraph> graph;        // node dependencies, for processBlockOn
     bool anyLive = false;                    // some node monitors input
+    bool heldLive = false;                   // some node is live only through keepLive
     // The two executors' shares (ADR-0014): the renderer's nodes (all when
     // nothing is live) with their task graph, the callback's live nodes (in
     // order), each side's instances (sorted), and the frontier edges.
@@ -526,8 +527,9 @@ const Stereo& edgeSignal(const Plan& p, const Edge& e) SUPPLE_RT;
 // origin of sample 0 (0 for the real-time engine). `rate`: the rate the plan
 // runs at (0: the project's; the real-time engine runs at the device's —
 // positions are in seconds and media is resampled, so any rate works).
+// `keepLive`: tracks that stay in the live region even unmonitored (sorted).
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
-                     double rate = 0);
+                     double rate = 0, const std::vector<model::Id>* keepLive = nullptr);
 // Main thread: activates new instances, measures latencies, sizes buffers
 // and delays, compiles events and clips.
 Status prepare(Plan& p, const Session& s);

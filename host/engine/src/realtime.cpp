@@ -258,12 +258,27 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     if (!backend_) return Error("engine.stopped", "start the engine first");
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
+    // ADR-0014: a strip that leaves the live region (monitoring off, or auto
+    // and disarmed) while the transport plays stays live until it stops. The
+    // renderer could take its instance only at the render horizon, while the
+    // callback still plays it up to there: the track would pass through for
+    // the render-ahead time, or need a fresh instance without the plugin's
+    // state and editor. The callback keeps it, unmonitored, and service()
+    // reloads once the transport stands still.
+    std::vector<model::Id> keepLive;
+    if (options_.anticipative && !plans_.empty() &&
+        (wantPlaying_.load(std::memory_order_acquire) ||
+         reportedPlaying_.load(std::memory_order_acquire)))
+        for (const detail::Node& n : plans_.back()->nodes)
+            if (n.live) keepLive.push_back(n.id);
+    std::sort(keepLive.begin(), keepLive.end());
     auto build = [&]() -> Result<std::unique_ptr<detail::Plan>> {
         auto compiled = detail::compile(
             session, plugins_, 0.0,
             options_.anticipative ? std::max(options_.renderBlock, config_.blockSize)
                                   : config_.blockSize,
-            config_.sampleRate);  // the device's rate, whatever the project's
+            config_.sampleRate,  // the device's rate, whatever the project's
+            &keepLive);
         if (!compiled) return std::move(compiled).error();
         auto built = std::make_unique<detail::Plan>(std::move(*compiled));
         built->projectDir = projectDir;
@@ -289,30 +304,6 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
                 }
             });
         if (keyChanged) {
-            auto again = build();
-            if (!again) return std::move(again).error();
-            plan = std::move(*again);
-        }
-    }
-    // ADR-0014: a plugin the callback plays live that the renderer now takes
-    // over (monitoring off) could only be rendered ahead once the callback
-    // lets go at the hand-over point — until then the renderer would pass it
-    // through, a gap of the render-ahead time. It gets a fresh instance from
-    // the model instead; the old one plays live until the hand-over.
-    if (options_.anticipative && !plans_.empty()) {
-        const detail::Plan& prev = *plans_.back();
-        bool moved = false;
-        for (const detail::Node& n : plan->nodes) {
-            if (n.live) continue;
-            detail::forEachStage(n, [&](const detail::Stage& st) {
-                if (st.instance && std::find(prev.liveInstances.begin(), prev.liveInstances.end(),
-                                             st.instance) != prev.liveInstances.end()) {
-                    plugins_.restart(st.fx);
-                    moved = true;
-                }
-            });
-        }
-        if (moved) {
             auto again = build();
             if (!again) return std::move(again).error();
             plan = std::move(*again);
@@ -597,6 +588,11 @@ void Engine::service() {
                     drainIdle(*st.instance, st.fx, (*it)->generation);
                 });
     }
+    // A strip kept live while playing (load()) leaves once the transport stops.
+    if (!plans_.empty() && plans_.back()->heldLive &&
+        !wantPlaying_.load(std::memory_order_acquire) &&
+        !reportedPlaying_.load(std::memory_order_acquire))
+        reload = true;
     if (reload && backend_ && latest_) {
         const auto session = *latest_;
         const auto dir = plans_.empty() ? std::filesystem::path{} : plans_.back()->projectDir;
