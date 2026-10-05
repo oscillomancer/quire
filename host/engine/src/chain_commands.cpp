@@ -34,6 +34,14 @@ struct LoadArgs {
     std::string chain = "main", mode = "append";
 };
 struct NoArgs {};
+struct CopyArgs {
+    std::string fx, track, chain = "main";
+    std::optional<std::int64_t> index;
+};
+struct CopyResult {
+    std::string fx;
+    std::vector<std::string> chain;
+};
 struct SaveResult {
     std::string path;
     std::int64_t effects = 0;
@@ -253,6 +261,31 @@ std::vector<std::string> installEffects(EngineApp& app, std::vector<Prepared>& p
         ids.push_back(id.str());
     }
     return ids;
+}
+
+// A plugin's settings as the running instance has them right now (what the
+// user hears: an editor edit the app has not consumed yet is not in the model),
+// else as the model has them: `fx` gets the state, `blob` its bytes when it is
+// an opaque state.
+Status captureLiveState(EngineApp& app, Id id, model::FxInstance& fx,
+                        std::shared_ptr<const model::Blob>& blob) {
+    host::Instance* live = app.instanceOf(id);
+    if (!live || live->failed()) return {};
+    if (live->info().semantic) {
+        auto patch = live->getPatch(false);
+        if (!patch) return std::move(patch).error();
+        auto parsed = json::parse(*patch);
+        if (!parsed) return std::move(parsed).error();
+        fx.patch = std::move(*parsed);
+        fx.state.reset();
+        return {};
+    }
+    auto state = live->saveState();
+    if (!state) return std::move(state).error();
+    fx.state = stateHash(*state);
+    fx.patch.reset();
+    blob = std::make_shared<const model::Blob>(model::Blob{std::move(*state)});
+    return {};
 }
 
 Result<json::Value> invoke(const char* name, json::Value args, cmd::Context& ctx) {
@@ -679,6 +712,77 @@ void registerChainCommands(cmd::Registry& registry) {
                 return Error("chain.directory",
                              "cannot list " + dir->string() + ": " + ec.message(), {},
                              "check the directory permissions");
+            return result;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<CopyArgs, CopyResult> c;
+        c.name = "fx.copy";
+        c.kind = cmd::Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Copy a plugin and its current settings into a track's FX chain.";
+        c.description =
+            "Adds a new instance of fx's plugin to track's main (default) or input chain, at index "
+            "(default: the end), with the source's options (label, bypass, offline, wet, "
+            "isolation, oversampling, parallel, pdc) and its settings as they are now: the "
+            "running plugin's own state when the engine has one (editor edits included), else the "
+            "model's patch or state. Not copied: envelopes, key routes into the source, and, "
+            "when the track differs, channel pins. The source stays where it is; "
+            "use fx.move to move it. One undo step.";
+        c.tags = {"fx"};
+        c.args = schema::object<CopyArgs>("fx_copy_args")
+                     .field("fx", &CopyArgs::fx, schema::string().pattern("^fx_[0-9]+$", "fx id"))
+                     .field("track", &CopyArgs::track,
+                            schema::string().pattern("^tr_[0-9]+$", "track id"))
+                     .field("index", &CopyArgs::index, schema::integer().min(0))
+                     .field("chain", &CopyArgs::chain,
+                            schema::string().pattern("^(main|input)$", "main or input"))
+                     .defaultValue(std::string("main"))
+                     .build();
+        c.result = schema::object<CopyResult>("fx_copy_result")
+                       .field("fx", &CopyResult::fx, schema::string())
+                       .field("chain", &CopyResult::chain, schema::arrayOf(schema::string()))
+                       .build();
+        c.errors = {
+            {"fx.unknown", "no such plugin instance", "use an id from fx.list"},
+            {"fx.index", "index is past the end of the chain", "use 0 to the chain's size"}};
+        c.examples = {{"Duplicate a plugin at the end of its own chain",
+                       j(R"({"fx":"fx_1","track":"tr_1"})"),
+                       j(R"({"fx":"<any>","chain":["fx_1","fx_2","<any>"]})"), "song_with_fx"}};
+        c.run = [](const CopyArgs& a, cmd::Context& ctx) -> Result<CopyResult> {
+            auto& app = ctx.service<EngineApp>();
+            const auto s = app.view();
+            auto source = Id::parse(a.fx);
+            const model::FxInstance* original =
+                source && source->kind == model::Kind::Fx ? s.fx.find(*source) : nullptr;
+            if (!original)
+                return Error("fx.unknown", "no plugin instance " + a.fx, "/fx",
+                             "use a live id from fx.list");
+            auto target = trackOf(s, a.track);
+            if (!target) return std::move(target).error();
+            const model::Track* strip = s.tracks.find(*target);
+            const bool input = a.chain == "input";
+            std::vector<Id> chain = input ? strip->inputChain : strip->chain;
+            if (a.index && static_cast<std::size_t>(*a.index) > chain.size())
+                return Error("fx.index", "index is past the end of the destination chain", "/index",
+                             "use an index from 0 to " + std::to_string(chain.size()));
+            Prepared copy{*original, {}};
+            // The pins name channels of the source's own track.
+            const auto home = model::trackOfFx(s, *source);
+            if (!home || *home != *target) copy.fx.pins = {};
+            SUPPLE_TRY(captureLiveState(app, *source, copy.fx, copy.blob));
+            if (copy.blob) app.txn().putBlob(*copy.fx.state, copy.blob);
+            const Id id = app.txn().create(std::move(copy.fx));
+            chain.insert(
+                chain.begin() + static_cast<std::ptrdiff_t>(
+                                    a.index ? *a.index : static_cast<std::int64_t>(chain.size())),
+                id);
+            app.txn().modify<model::Track>(*target, [&](model::Track& track) {
+                (input ? track.inputChain : track.chain) = chain;
+            });
+            CopyResult result{id.str(), {}};
+            for (Id f : chain) result.chain.push_back(f.str());
             return result;
         };
         registry.add(std::move(c));

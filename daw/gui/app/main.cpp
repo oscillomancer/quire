@@ -693,6 +693,9 @@ int main(int argc, char** argv) {
         "midi", [&] { return midiEditor.saveLayout(); },
         [&](const json::Value& v) { midiEditor.loadLayout(v); });
     uiFile.add(
+        "mixer", [&] { return mixer.saveLayout(); },
+        [&](const json::Value& v) { mixer.loadLayout(v); });
+    uiFile.add(
         "window",
         [&] {
             json::Value v = json::Value::object();

@@ -232,6 +232,16 @@ q = nil
 ---@field path string
 ---@field effects integer
 
+---@class Quire.fx_copy_args
+---@field fx string
+---@field track string
+---@field index? integer
+---@field chain? string (default: "main")
+
+---@class Quire.fx_copy_result
+---@field fx string
+---@field chain string[]
+
 ---@class Quire.fx_describe_args
 ---@field fx string Plugin instance id, e.g. "fx_1".
 ---@field full? boolean (default: false)
@@ -990,6 +1000,7 @@ q = nil
 
 ---@class Quire.fx
 ---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's (or a take's) FX chain and return its id.
+---@field copy fun(args: Quire.fx_copy_args): Quire.fx_copy_result Copy a plugin and its current settings into a track's FX chain.
 ---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe a plugin instance in words; full adds its parameters and patch.
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).

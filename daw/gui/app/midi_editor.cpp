@@ -1,5 +1,6 @@
 #include "midi_editor.h"
 #include "midi_event_list.h"
+#include "panel_height.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -19,8 +20,7 @@ const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 constexpr float kKeysWidth = 46;
 constexpr float kEdge = 5;  // px at a note's ends that resize it
 constexpr auto kCompileDelay = std::chrono::milliseconds(300);
-constexpr float kGripHeight = 6;        // the top border that resizes the panel
-constexpr float kMinShellHeight = 120;  // what the transport and arrange keep above the panel
+constexpr float kGripHeight = 6;  // the top border that resizes the panel
 
 bool blackKey(int pitch) {
     const int pc = ((pitch % 12) + 12) % 12;
@@ -948,18 +948,7 @@ void MidiEditor::close() {
     }
 }
 
-float MidiEditor::maxHeight() const {
-    const ui::Node* parent = panel_ ? panel_->parent() : nullptr;
-    if (!parent || parent->bounds().h <= 0) return 4000;
-    // What the siblings with their own height (the mixer) keep; the rest, less
-    // a strip of arrange, is ours.
-    float others = 0;
-    for (const auto& sibling : parent->children())
-        if (sibling.get() != panel_ && sibling->visible &&
-            sibling->layout.height.kind != ui::SizeRule::Kind::Fraction)
-            others += sibling->bounds().h;
-    return std::max(kMinHeight, parent->bounds().h - others - kMinShellHeight);
-}
+float MidiEditor::maxHeight() const { return maxPanelHeight(panel_, kMinHeight); }
 
 void MidiEditor::applyHeight() {
     if (!panel_) return;

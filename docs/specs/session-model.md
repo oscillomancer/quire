@@ -456,7 +456,7 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `midi.quantize`, `midi.humanize {seed}`, `midi.import {file, track}`,
   `midi.export` (a).
 - **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
-  `fx.move`, `fx.set {bypass, offline, wet, isolation, oversampling,
+  `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
   `fx.param.get` (q), `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
   `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`,

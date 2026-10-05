@@ -1501,6 +1501,58 @@
     }
   },
   {
+    "name": "fx_copy",
+    "title": "Copy a plugin and its current settings into a track's FX chain.",
+    "description": "Copy a plugin and its current settings into a track's FX chain. Adds a new instance of fx's plugin to track's main (default) or input chain, at index (default: the end), with the source's options (label, bypass, offline, wet, isolation, oversampling, parallel, pdc) and its settings as they are now: the running plugin's own state when the engine has one (editor edits included), else the model's patch or state. Not copied: envelopes, key routes into the source, and, when the track differs, channel pins. The source stays where it is; use fx.move to move it. One undo step. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_copy_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "chain": {
+          "type": "string",
+          "pattern": "^(main|input)$",
+          "default": "main"
+        }
+      },
+      "required": ["fx", "track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_copy_result",
+      "properties": {
+        "fx": {
+          "type": "string"
+        },
+        "chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["fx", "chain"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_describe",
     "title": "Describe a plugin instance in words; full adds its parameters and patch.",
     "description": "Describe a plugin instance in words; full adds its parameters and patch.  See describe for errors and examples.",
