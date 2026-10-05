@@ -614,7 +614,7 @@ void Mixer::rebuild() {
         nameRow.layout.dir = ui::Layout::Dir::Row;
         nameRow.layout.height = ui::SizeRule::fixed(16);
         nameRow.layout.align = ui::Layout::Align::Center;
-        st.name = &nameRow.emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
+        st.name = &nameRow.emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? type : t.name,
                                               ui::Font::UiBold, "caption");
         st.name->layout.width = ui::SizeRule::fraction();
         const bool empty = t.chain.empty();
