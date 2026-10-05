@@ -27,6 +27,23 @@ struct TrackRow {
     std::optional<model::Id> env;  // set on an automation lane
 };
 
+// A parent's children in display order: channels first, then busses (masters
+// last), each type in the parent's own child order. The track list shows this
+// order and the mixer groups its strips from it, so a buss never sits between
+// two channels (gui.md §4.2). The model's child order is untouched.
+std::vector<model::Id> displayChildren(const model::Session& session, const model::Track& parent);
+
+// Where `track.move {track, index}` puts `track` (a pure reorder under its own
+// parent) so it lands in front of its sibling `before`, or after its last
+// sibling of the same type when `before` is empty. Only siblings of the same
+// type are valid targets; nullopt for anything else (a master, an unknown id, a
+// `before` of another type or parent, or `before` the track itself) and for a
+// drop that leaves the same-type siblings in the order they already have. The
+// index is among the parent's children with the track already taken out, as the
+// command reads it. Shared by every view that drags tracks (track list, mixer).
+std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id track,
+                                        std::optional<model::Id> before);
+
 // The arrange view's horizontal viewport and vertical scroll (gui.md §1.2:
 // zoom and scroll are UI state).
 struct Viewport {

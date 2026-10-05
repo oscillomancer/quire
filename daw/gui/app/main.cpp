@@ -491,6 +491,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
     appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
+    appActions.addUi("ui.mouse.zoom", "View: wheel zoom anchor…",
+                     [&] { mouseDialog.open("wheel.zoom"); });
     {
         views::ItemGestures& g = shell.arrange()->gestures();
         g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };

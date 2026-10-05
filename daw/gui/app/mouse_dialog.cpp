@@ -16,6 +16,8 @@ std::string comboLabel(unsigned mods) {
 }
 
 std::string behaviourLabel(std::string_view b) {
+    if (b == "project_cursor") return "the project cursor (the transport position)";
+    if (b == "mouse_pointer") return "the mouse pointer";
     std::string s(b);
     for (char& c : s)
         if (c == '_') c = ' ';
@@ -35,8 +37,10 @@ void MouseDialog::open(std::string context) {
     auto form = std::make_unique<ui::Node>("mouse");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(420);
-    form->layout.height = ui::SizeRule::fixed(
-        96.0f + 30.0f * static_cast<float>(views::MouseMap::combos().size()) + 36.0f);
+    const auto combos = ctx.modifiers ? views::MouseMap::combos()
+                                      : views::MouseMap::combos().first(1);  // the plain press
+    form->layout.height =
+        ui::SizeRule::fixed(96.0f + 30.0f * static_cast<float>(combos.size()) + 36.0f);
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 4;
     form->emplace<ui::Label>("mouse.title", "Mouse modifiers", ui::Font::UiBold, "body");
@@ -56,7 +60,7 @@ void MouseDialog::open(std::string context) {
             ui::makeMenu("mouse.contexts", std::move(items), [this] { root_.closePopup(); }),
             at->bounds());
     };
-    for (unsigned combo : views::MouseMap::combos()) {
+    for (unsigned combo : combos) {
         auto& row = form->emplace<ui::Node>("mouse.row." + views::MouseMap::comboName(combo));
         row.layout.dir = ui::Layout::Dir::Row;
         row.layout.height = ui::SizeRule::fixed(26);

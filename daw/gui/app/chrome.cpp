@@ -88,7 +88,7 @@ ChromeLayout ChromeLayout::defaults() {
         {"Edit", {"history.undo", "history.redo", "-", "ui.actions", "ui.mouse"}},
         {"View",
          {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "ui.agent", "-", "ui.theme.mode",
-          "ui.theme.palette", "-", "ui.screenset.save", "ui.screenset.load",
+          "ui.theme.palette", "ui.mouse.zoom", "-", "ui.screenset.save", "ui.screenset.load",
           "ui.screenset.delete"}},
         {"Track",
          {"track.add:channel", "track.add:buss", "track.add:master", "track.template.load", "-",
@@ -102,9 +102,8 @@ ChromeLayout ChromeLayout::defaults() {
         {"Project",
          {"project.timebase:beats", "project.timebase:time", "project.timebase:beats_position"}},
     };
-    l.toolbar = {"transport.toggle", "transport.record", "transport.loop.toggle",
-                 "history.undo",     "history.redo",     "track.add:channel",
-                 "ui.actions"};
+    // Transport actions live in the transport bar's own row; not duplicated here.
+    l.toolbar = {"history.undo", "history.redo", "track.add:channel", "ui.actions"};
     return l;
 }
 

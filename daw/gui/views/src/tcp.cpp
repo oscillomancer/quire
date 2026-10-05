@@ -154,6 +154,7 @@ class TcpPanel::Row : public ui::Node {
     void arrange(const ui::Canvas& canvas, const ui::Rect& r) override;
     void paint(ui::Canvas& canvas) override;
     bool onPointer(const ui::PointerEvent& e) override;
+    bool onKey(const ui::KeyEvent& e) override;
 
   private:
     TcpPanel& panel_;
@@ -359,6 +360,7 @@ void TcpPanel::Row::cancelGestures() {
     resizing_ = renaming_ = false;
     rename_->visible = false;
     name_->visible = true;
+    if (panel_.reorder_ && panel_.reorder_->track == track_) panel_.endReorder(false);
     if (auto* owner = root()) {
         if (owner->focused() == rename_) owner->focus(nullptr);
         owner->forget(this);
@@ -467,6 +469,9 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
     c.text(badge,
            std::string(1, static_cast<char>(std::toupper(model::stripTypeName(tr->type).front()))),
            ui::Font::UiBold, t.type("caption"), t.color("panel"), ui::kCenter | ui::kMiddle);
+    // The row being dragged to a new place.
+    if (panel_.reorder_ && panel_.reorder_->moved && panel_.reorder_->track == track_)
+        c.fillRect(r, t.color("focus").withAlpha(0.12f));
     // Selection (§4.2): the row is highlighted and outlined.
     if (panel_.cb_.selected && panel_.cb_.selected(*track_)) {
         c.fillRect(r, t.color("selection").withAlpha(0.55f));
@@ -488,6 +493,19 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
         }
         return true;
     }
+    if (panel_.reorder_ && track_ && panel_.reorder_->track == *track_) {
+        if (e.type == T::Move || e.type == T::Up) {
+            if (e.type == T::Move) {
+                panel_.moveReorder(e.pos);
+                if (panel_.reorder_ && panel_.reorder_->moved)
+                    if (ui::Root* r = root()) r->focus(this);  // Escape cancels
+            } else {
+                if (ui::Root* r = root(); r && r->focused() == this) r->focus(nullptr);
+                panel_.endReorder(e.button == 1);
+            }
+            return true;
+        }
+    }
     if (e.type != T::Down || !track_.has_value()) return false;
     // The bottom edge: drag to set this track's height, double-click to reset it.
     if (e.button == 1 && e.pos.y >= bounds().bottom() - 4 && panel_.cb_.resizeTrack) {
@@ -507,11 +525,22 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
         return true;
     }
     if (panel_.cb_.select) panel_.cb_.select(*track_, e.mods);
+    if (e.button == 1) panel_.beginReorder(*track_, e.pos);  // a drag from here moves the track
     // A right-click: the track's menu, at the pointer.
     if (e.button == 3 && panel_.cb_.menu) {
         const model::Id track = *track_;
         TcpPanel* panel = &panel_;
         panel_.cb_.menu(track, {e.pos.x, e.pos.y, 1, 1}, [panel, track] { panel->rename(track); });
+    }
+    return true;
+}
+
+bool TcpPanel::Row::onKey(const ui::KeyEvent& e) {
+    if (e.key != SDLK_ESCAPE || !panel_.reorder_ || !panel_.reorder_->moved) return false;
+    panel_.endReorder(false);
+    if (ui::Root* r = root()) {
+        r->capture(nullptr);
+        if (r->focused() == this) r->focus(nullptr);
     }
     return true;
 }
@@ -621,6 +650,101 @@ bool TcpPanel::sendPointer(const ui::PointerEvent& e, const model::Id& from,
         }
     }
     return true;
+}
+
+// A line between rows where the dragged track would land.
+class TcpPanel::ReorderGhost : public ui::Node {
+  public:
+    explicit ReorderGhost(std::shared_ptr<TcpPanel*> alive)
+        : Node("tcp.reorder-ghost"), alive_(std::move(alive)) {}
+    void arrange(const ui::Canvas&, const ui::Rect&) override {
+        if (parent()) setBounds(parent()->bounds());
+    }
+    void paint(ui::Canvas& c) override {
+        if (!*alive_) return;
+        const auto& panel = **alive_;
+        if (!panel.reorder_ || !panel.reorder_->moved || !panel.reorder_->index) return;
+        const ui::Rect tcp = panel.bounds();
+        const float y = panel.reorder_->markerY;
+        if (y < tcp.y || y > tcp.bottom()) return;
+        const auto colour = c.theme().color("focus");
+        c.fillRect({tcp.x, y - 1, tcp.w, 3}, colour);
+        c.fillRect({tcp.x, y - 4, 4, 9}, colour);
+    }
+
+  private:
+    std::shared_ptr<TcpPanel*> alive_;
+};
+
+void TcpPanel::beginReorder(const model::Id& track, ui::Point press) {
+    const model::Track* t = session_.tracks.find(track);
+    if (!t || t->type == model::StripType::Master) return;
+    reorder_ = Reorder{track, press, false, std::nullopt, 0};
+}
+
+void TcpPanel::moveReorder(ui::Point p) {
+    if (!reorder_) return;
+    if (!reorder_->moved) {
+        if (std::hypot(p.x - reorder_->press.x, p.y - reorder_->press.y) < 4) return;
+        reorder_->moved = true;
+        if (root())
+            reorderOverlayHandle_ = root()->addOverlay(std::make_unique<ReorderGhost>(alive_));
+    }
+    updateReorder(p);
+    invalidate();
+    if (root()) root()->requestAnimationFrame();
+}
+
+// The drop slot under the pointer: in front of the first same-type sibling whose
+// row's middle is below it, else after the last one (and its descendants and
+// automation lanes). Other types and other parents are never targets.
+void TcpPanel::updateReorder(ui::Point p) {
+    Reorder& r = *reorder_;
+    r.index.reset();
+    const model::Track* t = session_.tracks.find(r.track);
+    const model::Track* parent = t && t->parent ? session_.tracks.find(*t->parent) : nullptr;
+    if (!parent) return;
+    std::optional<model::Id> before;
+    std::optional<float> end;
+    float markerY = 0;
+    const auto& rows = layout_.rows();
+    for (model::Id id : displayChildren(session_, *parent)) {
+        const model::Track* s = session_.tracks.find(id);
+        const auto row = layout_.indexOf(id);
+        if (!s || s->type != t->type || id == r.track || !row) continue;
+        const ui::Rect rect = rowRect(*row);
+        if (p.y < rect.y + rect.h / 2) {
+            before = id;
+            markerY = rect.y;
+            break;
+        }
+        std::size_t last = *row;
+        while (last + 1 < rows.size() &&
+               (rows[last + 1].env || rows[last + 1].depth > rows[*row].depth))
+            ++last;
+        end = rowRect(last).bottom();
+    }
+    if (!before) {
+        if (!end) return;  // nothing of this type to reorder among
+        markerY = *end;
+    }
+    const auto index = reorderIndex(session_, r.track, before);
+    if (!index) return;  // not a move
+    r.index = index;
+    r.markerY = markerY;
+}
+
+void TcpPanel::endReorder(bool commit) {
+    if (!reorder_) return;
+    const Reorder r = *reorder_;
+    reorder_.reset();
+    reorderOverlayHandle_.reset();
+    invalidate();
+    if (commit && r.moved && r.index && cb_.commit) {
+        json::Value args = trackArg(r.track);
+        args["index"] = static_cast<std::int64_t>(*r.index);
+        cb_.commit("track.move", std::move(args), {});
+    }
 }
 
 ui::Rect TcpPanel::rowRect(std::size_t row) const {
@@ -738,6 +862,7 @@ class TcpPanel::EnvRow : public ui::Node {
 
 void TcpPanel::setSession(const model::Session& session) {
     session_ = session;
+    if (reorder_ && !session_.tracks.contains(reorder_->track)) endReorder(false);
     rearrange_ = true;
     bindRows();
     for (Row* row : rows_)

@@ -166,7 +166,8 @@ never works around the bus.
 
 Transport bar (play/stop/record/loop/punch, position in bars|beats and
 time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
-toolbar (actions, §6); the arrange area (track control panel + timeline);
+toolbar (actions, §6: only what the transport bar does not already have —
+undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);
 a bottom dock (mixer, MIDI editor, FX chain, routing, render queue, agent,
 command log) with tabs; floating windows for plugin GUIs and any undocked
 view. Window layout is UI state (§1.2).
@@ -181,7 +182,16 @@ balance on masters; the fader's dB scale comes from `libs/console9`'s
 mapping), FX button (chain state: count, bypassed, offline), I/O button
 (drag onto another strip to create a route; drop rules follow
 `route.strip_type`, invalid targets show why before the drop), meters.
-Folder/buss parentage shows as indentation and a parent bar. Adding a strip
+Folder/buss parentage shows as indentation and a parent bar. Under each
+parent the channels are listed first, then the busses (each in the parent's own
+child order, `views::displayChildren`), so a buss never sits between two
+channels; the model's child order is not changed (the mixer groups by type
+too, §4.4). Dragging an empty part of a row (not a
+button) reorders the track among its siblings *of the same type* under the same
+parent: an insertion marker shows the drop, Escape cancels, and the release is
+one `track.move {track, index}` (`views::reorderIndex` computes the index;
+no-op drops commit nothing). A buss cannot be dropped between channels, and
+a track does not change parent by dragging. Adding a strip
 offers exactly **Channel, Buss or Master** (`track.add {type}`).
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
@@ -204,8 +214,11 @@ on release, so a drag is one undo step and never floods versions;
 continuous controls (faders) send coalesced `*.set` edits during the drag
 and one final value (the bus's gesture coalescing). A pooled TCP row pins
 the original track for fader, pan, resize and rename gestures; rebinding
-cancels the gesture. Wheel and pointer gesture zoom anchor at the pointer;
-keyboard zoom anchors at the playhead. Horizontal zoom is continuous;
+cancels the gesture. Wheel zoom holds the **project cursor** (the playhead,
+the transport position the position display shows) still by default, or the
+mouse pointer when the mouse setting `wheel.zoom` is `mouse_pointer` (Edit >
+Mouse modifiers, or View > Wheel zoom anchor); a cursor outside the visible
+lanes falls back to the pointer. Keyboard zoom anchors at the playhead. Horizontal zoom is continuous;
 vertical track height per track and global.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction. Clipboard track offsets are in
@@ -356,7 +369,9 @@ attributed.
   (move, remove) and tempo points (toggle ramp) — from each modifier
   combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
-  Edit > Mouse modifiers edits the live map.
+  Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
+  single setting rather than a modifier map: the wheel's zoom anchor
+  (`project_cursor`, the default, or `mouse_pointer`).
 
 ## 7. Visual identity
 

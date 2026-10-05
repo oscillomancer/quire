@@ -135,6 +135,9 @@ class Ruler : public ui::Node {
         c.fillRect({x0, bounds().bottom() - 1, bounds().w, 1}, t.color("rule"));
         for (const ui::Rect& r : {beatRow, timeRow, tempoRow})
             c.fillRect({r.x, r.bottom() - 1, r.w, 1}, t.color("rule").withAlpha(0.6f));
+        // Labels near the right edge run past it: keep them out of the panel beside.
+        c.save();
+        c.clip(bounds());
 
         const ui::Color ink = t.color("ink");
         const ui::Color quiet = t.color("ink-quiet");
@@ -301,6 +304,7 @@ class Ruler : public ui::Node {
             c.text({x + 8, markRow.y, 90, markRow.h}, mk.name, ui::Font::Ui, t.type("caption"),
                    quiet, ui::kLeft | ui::kMiddle);
         }
+        c.restore();
     }
 
   private:
@@ -1221,7 +1225,7 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
     // Where the pointer is decides: over the track panel the wheel scrolls the
     // tracks (and the lanes with them); over the lanes and the ruler it zooms
-    // under the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
+    // at the project cursor or the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
     // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
@@ -1237,8 +1241,18 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
             std::max(0.0, v.startSeconds - static_cast<double>(dx) * 60.0 / v.pixelsPerSecond);
-    } else {  // horizontal zoom under the pointer
-        const double keep = static_cast<double>(e.pos.x - lanesRect().x) / v.pixelsPerSecond;
+    } else {  // horizontal zoom, held still at the anchor
+        // The anchor is the project cursor (the playhead, the transport position)
+        // by default, or the mouse pointer (the "wheel.zoom" mouse setting). A
+        // cursor outside the lanes' view has nothing to hold still: zoom at the
+        // pointer then, as the cursor would otherwise slide out of reach.
+        const ui::Rect lanes = lanesRect();
+        float anchorX = e.pos.x;
+        if (gestures_->mouse.behaviour("wheel.zoom", e.mods) == "project_cursor") {
+            const float cursorX = playheadX();
+            if (cursorX >= lanes.x && cursorX <= lanes.right()) anchorX = cursorX;
+        }
+        const double keep = static_cast<double>(anchorX - lanes.x) / v.pixelsPerSecond;
         const double anchor = v.startSeconds + keep;
         v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
         v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
