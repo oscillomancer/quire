@@ -64,6 +64,9 @@ class Shell {
     // (an empty rect: the window's centre). The ui.track.color action uses it;
     // the TCP's right-click menu offers it too.
     Status openColorMenu(const model::Id& track, const ui::Rect& anchor);
+    // Adds a strip of a type ("channel", "buss", "master") and selects it: the
+    // TCP's "+ strip", and a double-click on the TCP's or the mixer's empty space.
+    void addStrip(std::string_view type);
 
   private:
     bool isSelected(const model::Id& track) const;

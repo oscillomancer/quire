@@ -259,6 +259,31 @@ TEST_CASE("mixer: the chain takes the room unused sends and arm rows would leave
     CHECK(near(f.strip(bus).fader->bounds().y, f.strip(a).fader->bounds().y));  // faders line up
 }
 
+TEST_CASE("mixer: a double-click on the strips' empty space adds a channel") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    f.refresh();
+    const std::size_t before = f.app->head().tracks.size();
+    auto doubleClick = [&](ui::Point at) {
+        f.pointer(ui::PointerEvent::Type::Down, at, 1);
+        f.pointer(ui::PointerEvent::Type::Up, at);
+        f.pointer(ui::PointerEvent::Type::Down, at, 2);
+        f.pointer(ui::PointerEvent::Type::Up, at);
+    };
+    // On a strip, even its empty part: nothing.
+    doubleClick(f.empty(a));
+    CHECK(f.app->head().tracks.size() == before);
+    // Between the last strip and the pinned masters: a channel.
+    const ui::Rect strip = f.strip(a).node->bounds();
+    doubleClick({strip.right() + 200, strip.y + strip.h / 2});
+    CHECK(f.app->head().tracks.size() == before + 1);
+    f.refresh();
+    REQUIRE(f.mixer->strips().size() >= 3);
+    const auto& added = f.track(f.mixer->strips()[1].track);
+    CHECK(added.type == model::StripType::Channel);
+}
+
 TEST_CASE("mixer: Alt+click on a plug-in removes it, in one undo step") {
     Fixture f;
     if (!f.ok) return;

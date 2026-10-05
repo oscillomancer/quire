@@ -1056,6 +1056,46 @@ TEST_CASE("the TCP's + offers exactly Channel, Buss and Master") {
     CHECK(tcp.error.empty());
 }
 
+TEST_CASE("a double-click on the TCP's empty space adds a channel; on a row it does not") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    Session s;
+    REQUIRE(s.build(2));
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    TcpHarness tcp;
+    views::ArrangeView* arrange = tcp.mount(root, s);
+    arrange->setViewport({0, 40, 0});
+    root.damageAll();
+    root.frame(false);
+    const ui::Rect rows = root.find("tcp.rows")->bounds();
+    const std::size_t before = s.app->head().tracks.size();
+    auto doubleClick = [&](ui::Point at) {
+        root.pointer({ui::PointerEvent::Type::Down, at, 1, 1});
+        root.pointer({ui::PointerEvent::Type::Up, at, 1, 1});
+        root.pointer({ui::PointerEvent::Type::Down, at, 1, 2});
+        root.pointer({ui::PointerEvent::Type::Up, at, 1, 2});
+        root.frame(false);
+    };
+    // On a row (its empty part): no new track.
+    auto* panel = static_cast<views::TcpPanel*>(root.find("tcp"));
+    const ui::Node* first = panel->rowNode(s.app->head().tracks.find(model::kMaster)->children[0]);
+    REQUIRE(first);
+    doubleClick({first->bounds().x + first->bounds().w * 0.6f, first->bounds().bottom() - 8});
+    CHECK(s.app->head().tracks.size() == before);
+    // Below the last row: a channel, selected.
+    doubleClick({rows.x + rows.w / 2, rows.bottom() - 10});
+    CHECK(s.app->head().tracks.size() == before + 1);
+    REQUIRE(tcp.selected.size() == 1);
+    const model::Track* created = s.app->head().tracks.find(*model::Id::parse(tcp.selected[0]));
+    REQUIRE(created);
+    CHECK(created->type == model::StripType::Channel);
+    // A single click there adds nothing.
+    root.pointer({ui::PointerEvent::Type::Down, {rows.x + rows.w / 2, rows.bottom() - 10}, 1, 1});
+    root.pointer({ui::PointerEvent::Type::Up, {rows.x + rows.w / 2, rows.bottom() - 10}, 1, 1});
+    CHECK(s.app->head().tracks.size() == before + 1);
+    CHECK(tcp.error.empty());
+}
+
 TEST_CASE("the TCP meters take readings from the feed and hold peaks") {
     Gl& g = gl();
     if (!g.ok) return;

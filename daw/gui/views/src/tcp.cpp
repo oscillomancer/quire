@@ -594,6 +594,7 @@ TcpPanel::TcpPanel(const TrackLayout& rowLayout, const Viewport& view, TcpCallba
     : Node("tcp", ui::Role::List), layout_(rowLayout), view_(view), cb_(std::move(callbacks)) {
     clipsChildren = true;
     alive_ = std::make_shared<TcpPanel*>(this);
+    interactive = true;  // its empty space takes a double-click
     rowsHost_ = &emplace<RowsHost>();
     foot_ = &emplace<Foot>();  // after the rows: it paints over them
     mixer_ = &foot_->emplace<ui::Button>("tcp.mixer", "mixer", [this] {
@@ -1000,6 +1001,20 @@ void TcpPanel::paint(ui::Canvas& c) {
     // shows them at the new scroll in this same frame.
     if (rearrange_) arrange(c, bounds());
     c.fillRect(bounds(), c.theme().color("panel"));
+}
+
+// A double-click on the panel's empty space (no row, not the foot's buttons)
+// adds a channel, as "+ strip" > Channel does.
+bool TcpPanel::onPointer(const ui::PointerEvent& e) {
+    if (e.type != ui::PointerEvent::Type::Down || e.button != 1 || e.clicks < 2 || !cb_.addStrip)
+        return false;
+    for (const auto& row : rowsHost_->children())
+        if (row->visible && row->bounds().intersect(rowsHost_->bounds()).contains(e.pos))
+            return false;
+    for (const ui::Button* b : {add_, mixer_})
+        if (b->bounds().contains(e.pos)) return false;
+    cb_.addStrip("channel");
+    return true;
 }
 
 ui::Node* TcpPanel::hitTest(ui::Point p) {

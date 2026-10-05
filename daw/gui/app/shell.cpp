@@ -122,19 +122,7 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.commit = [this](std::string_view command, json::Value args, std::string gesture) {
         commit(command, std::move(args), std::move(gesture));
     };
-    tcp.addStrip = [this](std::string_view type) {
-        json::Value args = json::Value::object();
-        args["type"] = std::string(type);
-        cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
-        auto r = dispatcher_.execute({"track.add", std::move(args), std::move(origin)});
-        if (!r) {
-            if (onError) onError(r.error().message);
-            return;
-        }
-        const std::string created = (*r)["track"].asString();
-        ui_.selectedTracks = {created};  // §4.2: the new strip is selected
-        selectAnchor_ = created;
-    };
+    tcp.addStrip = [this](std::string_view type) { addStrip(type); };
     tcp.meterShown = [this](const std::string& track, ui::Meter* meter) {
         meters_.attach(track, meter);
     };
@@ -373,6 +361,20 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
     root_->openPopup(
         ui::makeMenu("tcp.env." + track.str(), std::move(items), [this] { root_->closePopup(); }),
         anchor);
+}
+
+void Shell::addStrip(std::string_view type) {
+    json::Value args = json::Value::object();
+    args["type"] = std::string(type);
+    cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+    auto r = dispatcher_.execute({"track.add", std::move(args), std::move(origin)});
+    if (!r) {
+        if (onError) onError(r.error().message);
+        return;
+    }
+    const std::string created = (*r)["track"].asString();
+    ui_.selectedTracks = {created};  // §4.2: the new strip is selected
+    selectAnchor_ = created;
 }
 
 Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {

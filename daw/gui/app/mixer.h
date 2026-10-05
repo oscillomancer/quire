@@ -47,6 +47,9 @@ class Mixer {
     static float defaultHeight();
     json::Value saveLayout() const;  // the "mixer" section of the UI sidecar
     void loadLayout(const json::Value& v);
+    // A double-click on the strips' empty space adds a channel: the app hands
+    // the shell's addStrip (which selects it); unset, the mixer runs track.add.
+    std::function<void()> onAddChannel;
 
     // Tests.
     struct Strip {

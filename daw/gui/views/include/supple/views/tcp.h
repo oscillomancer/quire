@@ -89,6 +89,7 @@ class TcpPanel : public ui::Node {
                        const std::set<model::Id>& envelopes, const std::set<model::Id>& routes);
     void refresh();  // values only (after a bus edit)
 
+    bool onPointer(const ui::PointerEvent& e) override;
     ui::Rect rowRect(std::size_t row) const;  // same y as the lanes' rows
     std::size_t rowCount() const { return layout_.rowCount(); }
 

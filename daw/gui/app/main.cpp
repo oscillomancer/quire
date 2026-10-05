@@ -430,6 +430,7 @@ int main(int argc, char** argv) {
         routing.open(anchor);
     };
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
+    mixer.onAddChannel = [&shell] { shell.addStrip("channel"); };
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });

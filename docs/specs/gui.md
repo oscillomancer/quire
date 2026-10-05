@@ -194,7 +194,9 @@ no-op drops commit nothing). A buss cannot be dropped between channels, and
 a track does not change parent by dragging. The panel's foot ("mixer",
 "+ strip") is a band the rows never cover; the tracks scroll far enough for
 the last one to clear it. Adding a strip
-offers exactly **Channel, Buss or Master** (`track.add {type}`).
+offers exactly **Channel, Buss or Master** (`track.add {type}`); a
+double-click on the panel's empty space (or the mixer's, §4.4) adds a channel
+and selects it.
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view
@@ -246,7 +248,8 @@ plugin browser on an empty chain, the chain window otherwise); the strip's
 plug-in chain lists every plug-in, scrolling when it is longer than its
 section, and takes the room a strip's unused rows would leave (sends show
 only when there are some, up to two; busses and masters have no arm/monitor
-row). Alt+click on a plug-in removes it (`fx.remove`, one undo step). The
+row). Alt+click on a plug-in removes it (`fx.remove`, one undo step). A
+double-click on the strips' empty space (not on a strip) adds a channel. The
 panel's top edge (shared with the MIDI editor: it lights up under the pointer)
 resizes the mixer by drag and only the chain
 sections follow (meter, fader, buttons keep their size); a double-click on it

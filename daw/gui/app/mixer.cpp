@@ -256,7 +256,13 @@ class StripRow : public ui::Node {
         pinned_->arrange(canvas, {b.right() - pinnedW, b.y, pinnedW, b.h});
     }
     void paint(ui::Canvas& c) override { c.fillRect(bounds(), c.theme().color("ground")); }
+    std::function<void()> onDoubleClick;  // on the row's empty space
     bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks >= 2 &&
+            onDoubleClick && !overStrip(e.pos)) {
+            onDoubleClick();
+            return true;
+        }
         if (e.type != ui::PointerEvent::Type::Wheel) return false;
         scrolled_->scroll = std::max(0.0f, scrolled_->scroll - (e.wheelY + e.wheelX) * 60);
         relayout();
@@ -267,6 +273,14 @@ class StripRow : public ui::Node {
   private:
     void relayout() {
         if (ui::Root* r = root()) r->relayout();
+    }
+    // A strip (as far as its group shows it) or the scroll bar is under `p`.
+    bool overStrip(ui::Point p) const {
+        if (bar_->visible && bar_->bounds().contains(p)) return true;
+        for (const StripGroup* g : {scrolled_, pinned_})
+            for (const auto& c : g->children())
+                if (c->visible && c->bounds().intersect(g->bounds()).contains(p)) return true;
+        return false;
     }
     StripGroup* scrolled_ = nullptr;
     StripGroup* pinned_ = nullptr;
@@ -474,7 +488,19 @@ std::unique_ptr<ui::Node> Mixer::build() {
                                   ui::Font::Ui, "caption", "ink-faint");
     note.layout.width = ui::SizeRule::fraction();
     header.emplace<ui::Button>("mixer.close", "Close", [this] { setVisible(false); });
-    row_ = &panel->add(std::make_unique<StripRow>());
+    auto row = std::make_unique<StripRow>();
+    row->onDoubleClick = [this] {
+        if (onAddChannel) {
+            onAddChannel();
+            return;
+        }
+        json::Value args = json::Value::object();
+        args["type"] = "channel";
+        if (auto r = dispatcher_.execute({"track.add", std::move(args), kOrigin});
+            !r && actions_.onError)
+            actions_.onError(r.error().message);
+    };
+    row_ = &panel->add(std::move(row));
     return panel;
 }
 
