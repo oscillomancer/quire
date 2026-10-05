@@ -86,6 +86,18 @@ class MidiEditor {
     // after a pause in typing, follow the playhead.
     void sync();
 
+    // The panel's height, set by dragging its top border (double-click resets
+    // to kDefaultHeight). The stored height is the preference; sync() shrinks
+    // what is laid out when the window cannot fit it.
+    static constexpr float kDefaultHeight = 420, kMinHeight = 160;
+    float height() const { return height_; }
+    void setHeight(float height);
+    json::Value saveLayout() const;  // {"height"}: the UI sidecar's "midi" section
+    void loadLayout(const json::Value& v);
+    // Row (key) height zoom, anchored at the window y whose pitch stays put.
+    static constexpr float kMinRowHeight = 4, kMaxRowHeight = 48;
+    void zoomRows(float wheel, float anchorY);
+
     // Tests and the actions.
     RollState& state() { return state_; }
     ui::Node* roll() const { return roll_; }
@@ -105,6 +117,8 @@ class MidiEditor {
     void reloadText();
     void compileText(bool write);
     void refreshTitle();
+    float maxHeight() const;
+    void applyHeight();
     void showDiagnostics(const std::vector<ui::TextArea::Mark>& marks, const std::string& summary);
     ui::Root& root_;
     AppActions& actions_;
@@ -112,6 +126,7 @@ class MidiEditor {
     engine::EngineApp& app_;
     UiState& ui_;
     RollState state_;
+    float height_ = kDefaultHeight;
     ui::Node* panel_ = nullptr;
     std::unique_ptr<MidiEventList> eventList_;
     ui::Node* listPane_ = nullptr;

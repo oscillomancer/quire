@@ -688,6 +688,9 @@ int main(int argc, char** argv) {
     };
     uiFile.add("panels", panelsSave, panelsLoad);
     uiFile.add(
+        "midi", [&] { return midiEditor.saveLayout(); },
+        [&](const json::Value& v) { midiEditor.loadLayout(v); });
+    uiFile.add(
         "window",
         [&] {
             json::Value v = json::Value::object();

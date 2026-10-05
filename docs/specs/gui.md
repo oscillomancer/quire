@@ -268,6 +268,15 @@ either side update the other through `item.*` commands. This is the
 LLM-native differentiator: the same text an agent writes is visible and
 editable by the human. Event list view is P1.
 
+The panel's top border is a drag handle: dragging resizes the panel (up is
+taller; up to nearly the whole window, always leaving the transport and a strip
+of arrange, and clamped again whenever the window shrinks or a neighbouring
+dock grows), double-clicking resets it to the default height. The height is
+UI state (the `midi` section of the sidecar, §1.2). Wheel in the roll: scrolls
+pitch; Shift scrolls time; Ctrl zooms time around the pointer; **Alt zooms the
+key/row height** around the pointer's pitch (4–48 px per key), and also works
+over the keys, lanes and header. Row height is not persisted.
+
 Native file-dialog completions check owner lifetime before posting and again
 on the UI thread; outstanding dialogs may safely outlive shutdown.
 
