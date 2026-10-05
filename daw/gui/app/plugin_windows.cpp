@@ -265,12 +265,15 @@ void PluginWindows::closeAll() {
 }
 
 bool PluginWindows::handle(const SDL_Event& e) {
-    const SDL_WindowID id =
-        e.window.windowID;  // the window events' field, shared layout for the ones we use
-    if (e.type < SDL_EVENT_WINDOW_FIRST || e.type > SDL_EVENT_WINDOW_LAST) return false;
+    // Every event of an editor window is consumed here: the plug-in gets its
+    // input from X11 directly, and the app's UI must not see it (a drag in an
+    // editor moved the edit cursor, a click opened what was under it).
+    SDL_Window* target = SDL_GetWindowFromEvent(&e);
+    if (!target) return false;
     for (std::size_t i = 0; i < editors_.size(); ++i) {
         Editor& ed = editors_[i];
-        if (ed.window->id() != id) continue;
+        if (ed.window->sdl() != target) continue;
+        if (e.type < SDL_EVENT_WINDOW_FIRST || e.type > SDL_EVENT_WINDOW_LAST) return true;
         if (ed.fx && app_.instanceOf(*ed.fx) != ed.instance) {
             if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) drop(i);  // else service() reopens
             return true;

@@ -341,6 +341,19 @@ TEST_CASE("an editor follows its effect onto a replacement instance (needs a dis
             }
         };
         REQUIRE(windows.open(fx));
+        {  // the editor window's input is the plug-in's, never the app's
+            int count = 0;
+            SDL_Window** all = SDL_GetWindows(&count);
+            REQUIRE(count == 1);
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+            e.button.windowID = SDL_GetWindowID(all[0]);
+            e.button.button = SDL_BUTTON_LEFT;
+            SDL_free(all);
+            CHECK(windows.handle(e));
+            e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            CHECK(windows.handle(e));
+        }
         host::Instance* const before = (*app)->instanceOf(fx);
         REQUIRE(before);
         CHECK(before->editorOpen());

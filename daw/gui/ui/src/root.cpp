@@ -406,6 +406,9 @@ std::string Root::clipboard() const {
 void Root::setClipboard(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 
 void Root::handle(const SDL_Event& e) {
+    // Input and window events of another window (a plug-in editor) are not
+    // ours: their coordinates are that window's.
+    if (SDL_Window* target = SDL_GetWindowFromEvent(&e); target && target != window_.sdl()) return;
     switch (e.type) {
         case SDL_EVENT_MOUSE_MOTION:
             pointer({PointerEvent::Type::Move,

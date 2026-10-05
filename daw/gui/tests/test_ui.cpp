@@ -266,6 +266,45 @@ TEST_CASE("clicks, focus traversal and keys reach the right nodes") {
     CHECK(ok == 1);
 }
 
+TEST_CASE("input addressed to another window (a plug-in editor) never reaches the root") {
+    REQUIRE_GL();
+    auto other = gui::Window::open(*fixture().platform, {"other", 200, 120, false});
+    REQUIRE(other);
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    int clicks = 0, keys = 0;
+    content->emplace<Button>("ok", "OK", [&] { ++clicks; });
+    root.setContent(std::move(content));
+    root.onUnhandledKey = [&](const KeyEvent&) { return ++keys, true; };
+    root.frame(false);
+    const Rect b = root.find("ok")->bounds();
+    REQUIRE(b.w > 4);
+    auto press = [&](SDL_WindowID window) {
+        for (const auto type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+            SDL_Event e{};
+            e.type = type;
+            e.button.windowID = window;
+            e.button.button = SDL_BUTTON_LEFT;
+            e.button.clicks = 1;
+            e.button.x = b.x + 2;
+            e.button.y = b.y + 2;
+            root.handle(e);
+        }
+        SDL_Event k{};
+        k.type = SDL_EVENT_KEY_DOWN;
+        k.key.windowID = window;
+        k.key.key = SDLK_T;
+        root.handle(k);
+    };
+    press((*other)->id());
+    CHECK(clicks == 0);
+    CHECK(keys == 0);
+    press(fixture().window->id());
+    CHECK(clicks == 1);
+    CHECK(keys == 1);
+}
+
 TEST_CASE("theme JSON overrides tokens and reports bad values with their path") {
     auto doc = json::parse(R"({"schema": "supple.theme/1.0", "name": "test",
         "colors": {"accent": "#102030"}, "space": {"m": 20}})");
