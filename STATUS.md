@@ -194,6 +194,28 @@ walks shared payloads per version and squashed steps keep large invocation
 arguments; track groups are not implemented; a live (pipelined) bridge mode
 does not exist yet, so bridged FX are passed through while monitoring.
 
+## GUI workflow batch (2026-10-05)
+
+Nate's list, done by three Claude Code workers (mixer, tracks, midi), reviewed
+and merged by the orchestrator (main 330a4da):
+- Top bar: only Undo, Redo, Add channel, Actions list (transport buttons live in
+  the transport row).
+- Track list: busses after channels under each parent (`views::displayChildren`;
+  the mixer groups from the same order); drag an empty part of a row to reorder
+  within its type (`views::reorderIndex` → `track.move`), shared with the mixer.
+- Wheel zoom anchors at the project cursor by default; `wheel.zoom` mouse setting
+  (View > Wheel zoom anchor) switches back to the pointer. Ruler labels are clipped
+  (they overlapped the history panel's "Branch: main").
+- Mixer: masters look like other strips; small fx button top right; resizable by its
+  top edge (only the chain grows, double-click = 5 plug-ins, saved in the UI
+  sidecar); drag plug-ins to reorder (`fx.move`) or onto another strip to copy them
+  with their live settings (new `fx.copy`); drag strips to reorder.
+- MIDI editor: resizable by its top edge (double-click resets, saved); Alt+wheel
+  zooms the key rows. Both docks share `panel_height.h`'s clamp.
+- Open: no autoscroll during drags; no resize cursor (the UI toolkit has none);
+  plug-ins drop onto mixer strips only, not track-list rows; `fx.copy` does not
+  copy envelopes or key routes.
+
 ## Team (Hermes workers via Herdr; Codex retired)
 
 Roster + briefs: `~/Projects/quire/.orchestrator/` (git-excluded). Four Codex
