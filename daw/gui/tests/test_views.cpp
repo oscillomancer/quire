@@ -267,7 +267,9 @@ TEST_CASE("the ruler shows the tempo and meter changes the session carries") {
     CHECK(tm.meterAt(34).numerator == 4);
 }
 
-TEST_CASE("wheel zoom anchors under the pointer and keyboard zoom at the playhead") {
+TEST_CASE(
+    "wheel zoom anchors at the project cursor by default, or under the pointer; keys at the "
+    "playhead") {
     Gl& g = gl();
     if (!g.ok) return;
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
@@ -275,6 +277,7 @@ TEST_CASE("wheel zoom anchors under the pointer and keyboard zoom at the playhea
     views::Viewport v;
     v.startSeconds = 40;
     v.pixelsPerSecond = 40;
+    arrange->setFollow(views::Follow::Off);  // moving the cursor must not move the view
     arrange->setViewport(v);
     arrange->setPlayhead(50);
     root.damageAll();
@@ -283,15 +286,53 @@ TEST_CASE("wheel zoom anchors under the pointer and keyboard zoom at the playhea
     const double time = arrange->timeAt(600);
     ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {600, 300}};  // anywhere on the lanes
     wheel.wheelY = 1;
+    // The default: the cursor stays where it is on screen, wherever the pointer is.
+    CHECK(arrange->gestures().mouse.behaviour("wheel.zoom", 0) == "project_cursor");
+    const float cursorX = arrange->playheadX();
     root.pointer(wheel);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before * 1.25));
-    CHECK(arrange->timeAt(600) == doctest::Approx(time).epsilon(0.001));
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
+    CHECK(arrange->timeAt(600) != doctest::Approx(time).epsilon(0.001));
     wheel.wheelY = -1;  // and back out
     root.pointer(wheel);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before));
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
+    // The other setting: the time under the mouse pointer stays put.
+    REQUIRE(arrange->gestures().mouse.set("wheel.zoom", 0, "mouse_pointer"));
+    wheel.wheelY = 1;
+    root.pointer(wheel);
+    CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before * 1.25));
+    CHECK(arrange->timeAt(600) == doctest::Approx(time).epsilon(0.001));
+    wheel.wheelY = -1;
+    root.pointer(wheel);
+    CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(before));
+    // A cursor off screen cannot be held in place: the pointer anchors, as it
+    // would with the other setting.
+    REQUIRE(arrange->gestures().mouse.set("wheel.zoom", 0, "project_cursor"));
+    arrange->setPlayhead(5);  // far left of the view (it starts at 40 s)
+    root.frame(false);
+    REQUIRE(arrange->playheadX() < arrange->lanesRect().x);
+    wheel.wheelY = 1;
+    root.pointer(wheel);
+    CHECK(arrange->timeAt(600) == doctest::Approx(time).epsilon(0.001));
+    arrange->setPlayhead(50);
     const float playhead = arrange->playheadX();
     REQUIRE(arrange->onKey({SDLK_EQUALS}));
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(playhead)));
+}
+
+TEST_CASE("the wheel zoom anchor is a single setting that the mouse file keeps") {
+    views::MouseMap m;
+    const views::MouseMap::Context* c = views::MouseMap::context("wheel.zoom");
+    REQUIRE(c);
+    CHECK_FALSE(c->modifiers);
+    CHECK(m.behaviour("wheel.zoom", 0) == "project_cursor");
+    CHECK(m.toJson()["contexts"].asObject().empty());  // the default is not written
+    REQUIRE(m.set("wheel.zoom", 0, "mouse_pointer"));
+    CHECK_FALSE(m.set("wheel.zoom", 0, "the_moon"));
+    auto back = views::MouseMap::fromJson(m.toJson());
+    REQUIRE(back);
+    CHECK(back->behaviour("wheel.zoom", 0) == "mouse_pointer");
 }
 
 TEST_CASE("the TCP column and the lanes stay aligned through scroll and height changes") {

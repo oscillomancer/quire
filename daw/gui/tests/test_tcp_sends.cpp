@@ -386,7 +386,7 @@ TEST_CASE("shell selection sync replaces equal-sized selections and drops delete
 }
 
 TEST_CASE("TCP rows refresh strip type and depth while keeping the same identity") {
-    SendsFixture f;
+    SendsFixture f(true);  // two busses: a channel would sort ahead of them
     json::Value args = json::Value::object();
     args["track"] = f.b.str();
     args["index"] = 0;
@@ -404,13 +404,13 @@ TEST_CASE("TCP rows refresh strip type and depth while keeping the same identity
     CHECK(name->bounds().x == doctest::Approx(static_cast<double>(before + 14)));
     auto* arm = f.view().tcpPanel().controlNode(f.a, "arm");
     REQUIRE(arm);
-    CHECK(arm->visible);
+    CHECK_FALSE(arm->visible);
     args = json::Value::object();
     args["track"] = f.a.str();
-    args["type"] = "buss";
+    args["type"] = "channel";
     f.exec("track.set", std::move(args));
     f.sync();
-    CHECK_FALSE(arm->visible);
+    CHECK(arm->visible);
 }
 
 TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one undo step each)") {
@@ -545,7 +545,9 @@ TEST_CASE("TCP: the wheel over the tracks scrolls them and the lanes together, n
         }
     CHECK(volumes() == before);  // no fader or pan moved
 
-    // Over the lanes the wheel keeps the time under the pointer in place.
+    // Over the lanes the wheel keeps the time under the pointer in place (the
+    // "mouse_pointer" wheel.zoom setting; the default holds the cursor instead).
+    REQUIRE(f.view().gestures().mouse.set("wheel.zoom", 0, "mouse_pointer"));
     f.view().setPlayhead(4.0);
     f.sync();
     const ui::Rect lanes = f.view().lanesRect();
@@ -618,4 +620,112 @@ TEST_CASE("TCP: dragging a row's bottom edge sets that track's height; a double-
     f.sync();
     CHECK_FALSE(f.view().trackLayout().hasTrackHeight(f.a));
     CHECK(double(f.view().tcpRowRect(*row).h) == doctest::Approx(double(before)));
+}
+
+namespace {
+std::vector<model::Id> trackRows(SendsFixture& f) {
+    std::vector<model::Id> out;
+    for (const views::TrackRow& r : f.view().trackLayout().rows())
+        if (!r.env) out.push_back(r.track);
+    return out;
+}
+std::vector<model::Id> masterChildren(SendsFixture& f) {
+    return f.app->head().tracks.find(model::kMaster)->children;
+}
+// A press on the row's empty part (its name area), then the move and release.
+ui::Point emptyPartOf(SendsFixture& f, model::Id track) {
+    const ui::Rect r = f.view().tcpRowRect(*f.view().trackLayout().indexOf(track));
+    return {r.x + 90, r.y + 10};
+}
+ui::Point above(SendsFixture& f, model::Id track) {
+    const ui::Rect r = f.view().tcpRowRect(*f.view().trackLayout().indexOf(track));
+    return {r.x + 90, r.y + 4};
+}
+ui::Point below(SendsFixture& f, model::Id track) {
+    const ui::Rect r = f.view().tcpRowRect(*f.view().trackLayout().indexOf(track));
+    return {r.x + 90, r.bottom() - 8};
+}
+}  // namespace
+
+TEST_CASE("TCP: busses are listed after the channels, whatever the model's order") {
+    SendsFixture f;  // a channel A, a buss B
+    const model::Id c = f.add("channel", "C");
+    const model::Id d = f.add("buss", "D");
+    f.sync();
+    CHECK(masterChildren(f) ==
+          std::vector<model::Id>{f.a, f.b, c, d});  // the model keeps its order
+    CHECK(trackRows(f) == std::vector<model::Id>{f.a, c, f.b, d});
+}
+
+TEST_CASE("TCP: dragging a row's empty part reorders it among its own type, one undo step") {
+    SendsFixture f;  // A channel, B buss
+    const model::Id c = f.add("channel", "C");
+    const model::Id d = f.add("channel", "D");
+    const model::Id e = f.add("buss", "E");
+    f.sync();
+    REQUIRE(trackRows(f) == std::vector<model::Id>{f.a, c, d, f.b, e});
+    const auto before = f.history();
+
+    // Drag D to the top of the list: it goes first among the channels.
+    f.pointer(Pointer::Down, emptyPartOf(f, d));
+    f.pointer(Pointer::Move, above(f, f.a));
+    f.root->frame(false);
+    CHECK(f.root->find("tcp.reorder-ghost"));
+    CHECK(f.history() == before);  // nothing is committed until the release
+    f.pointer(Pointer::Up, above(f, f.a));
+    f.sync();
+    CHECK_FALSE(f.root->find("tcp.reorder-ghost"));
+    CHECK(trackRows(f) == std::vector<model::Id>{d, f.a, c, f.b, e});
+    CHECK(f.history() == before + 1);
+    CHECK(f.errors.empty());
+    f.root->key(SDLK_Z, ui::kCtrl);
+    f.sync();
+    CHECK(trackRows(f) == std::vector<model::Id>{f.a, c, d, f.b, e});
+
+    // Dropped below the busses, a channel only goes to the end of the channels.
+    f.pointer(Pointer::Down, emptyPartOf(f, f.a));
+    f.pointer(Pointer::Move, below(f, e));
+    f.pointer(Pointer::Up, below(f, e));
+    f.sync();
+    CHECK(trackRows(f) == std::vector<model::Id>{c, d, f.a, f.b, e});
+
+    // A buss moves among busses, never in between channels.
+    f.pointer(Pointer::Down, emptyPartOf(f, e));
+    f.pointer(Pointer::Move, above(f, c));
+    f.pointer(Pointer::Up, above(f, c));
+    f.sync();
+    CHECK(trackRows(f) == std::vector<model::Id>{c, d, f.a, e, f.b});
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("TCP: Escape cancels a row drag; a plain click or a no-op drop commits nothing") {
+    SendsFixture f;
+    const model::Id c = f.add("channel", "C");
+    f.sync();
+    const auto before = f.history();
+    f.pointer(Pointer::Down, emptyPartOf(f, c));
+    f.pointer(Pointer::Move, above(f, f.a));
+    f.root->frame(false);
+    REQUIRE(f.root->find("tcp.reorder-ghost"));
+    f.root->key(SDLK_ESCAPE);
+    f.pointer(Pointer::Up, above(f, f.a));
+    f.sync();
+    CHECK_FALSE(f.root->find("tcp.reorder-ghost"));
+    CHECK(trackRows(f) == std::vector<model::Id>{f.a, c, f.b});
+    // A click selects, and nothing moves.
+    f.pointer(Pointer::Down, emptyPartOf(f, c));
+    f.pointer(Pointer::Up, emptyPartOf(f, c));
+    // Dropping a track where it already is (just below itself) is not an edit.
+    f.pointer(Pointer::Down, emptyPartOf(f, c));
+    f.pointer(Pointer::Move, below(f, c));
+    f.pointer(Pointer::Up, below(f, c));
+    f.sync();
+    CHECK(f.history() == before);
+    // A buss with no other buss has nowhere to go among the channels.
+    f.pointer(Pointer::Down, emptyPartOf(f, f.b));
+    f.pointer(Pointer::Move, above(f, f.a));
+    f.pointer(Pointer::Up, above(f, f.a));
+    f.sync();
+    CHECK(f.history() == before);
+    CHECK(trackRows(f) == std::vector<model::Id>{f.a, c, f.b});
 }

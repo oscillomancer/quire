@@ -110,6 +110,7 @@ class TcpPanel : public ui::Node {
     class EnvRow;  // an automation lane's header (P5.14)
     class OutButton;
     class SendGhost;
+    class ReorderGhost;
     friend class Row;
     friend class EnvRow;
     void bindRows();
@@ -118,6 +119,18 @@ class TcpPanel : public ui::Node {
     bool sendPointer(const ui::PointerEvent& e, const model::Id& from, const ui::Rect& anchor);
     void cancelSend();
     std::optional<std::size_t> sendRowAt(ui::Point p) const;
+    // Dragging a row's empty part reorders it among its same-type siblings.
+    struct Reorder {
+        model::Id track;
+        ui::Point press{};
+        bool moved = false;
+        std::optional<std::size_t> index;  // track.move's index, when the drop would change it
+        float markerY = 0;                 // the insertion marker, in window coordinates
+    };
+    void beginReorder(const model::Id& track, ui::Point press);
+    void moveReorder(ui::Point p);
+    void endReorder(bool commit);
+    void updateReorder(ui::Point p);
 
     const TrackLayout& layout_;
     const Viewport& view_;
@@ -134,6 +147,8 @@ class TcpPanel : public ui::Node {
     bool sendMoved_ = false, sendOverlay_ = false;
     bool rearrange_ = false;  // scrolled() since the last arrange
     ui::Root::OverlayHandle sendOverlayHandle_;
+    std::optional<Reorder> reorder_;
+    ui::Root::OverlayHandle reorderOverlayHandle_;
     std::shared_ptr<TcpPanel*> alive_;
 };
 

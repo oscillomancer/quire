@@ -219,6 +219,12 @@ TEST_CASE("the toolbar and menus are edited in the app and saved (gap log #37)")
         a.root->frame(false);
     }
     CHECK_FALSE(a.root->find("tool.track.add:buss"));
+    // The transport bar has these; the top row keeps only what it does not.
+    CHECK_FALSE(a.root->find("tool.transport.toggle"));
+    CHECK_FALSE(a.root->find("tool.transport.record"));
+    CHECK_FALSE(a.root->find("tool.transport.loop.toggle"));
+    CHECK(a.root->find("tool.history.undo"));
+    CHECK(a.root->find("tool.ui.actions"));
     // Ctrl+T in the actions list puts the action on the toolbar.
     gui::openActionsList(*a.root, *a.actions, &chrome);
     a.type("add buss");
@@ -292,6 +298,15 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     dialog.open("envelope");
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.alt")->valueText() == "delete");
+    // The wheel's zoom anchor is one setting: only the plain row, default the project cursor.
+    dialog.open("wheel.zoom");
+    a.root->frame(false);
+    CHECK_FALSE(a.root->find("mouse.set.alt"));
+    REQUIRE(a.root->find("mouse.set."));
+    CHECK(a.root->find("mouse.set.")->valueText().find("project cursor") != std::string::npos);
+    dialog.set("wheel.zoom", 0, "mouse_pointer");
+    CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
+    CHECK(a.root->find("mouse.set.")->valueText() == "the mouse pointer");
 }
 
 TEST_CASE("native dialog completions respect shutdown before posting and running") {

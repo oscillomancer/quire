@@ -26,6 +26,7 @@ const std::vector<MouseMap::Context>& table() {
         {"envelope", "Press an automation lane", {"edit", "edit_free", "delete"}},
         {"ruler.marker", "Press a marker or region", {"move", "move_free", "remove"}},
         {"ruler.tempo", "Click a tempo point", {"none", "toggle_ramp"}},
+        {"wheel.zoom", "Zoom with the wheel (anchor)", {"project_cursor", "mouse_pointer"}, false},
     };
     return t;
 }
@@ -121,7 +122,7 @@ Status MouseMap::set(std::string_view context, unsigned mods, std::string_view b
         return Error("mouse.context", "unknown mouse context \"" + std::string(context) + "\"",
                      "/contexts",
                      "one of item.drag, item.edge, item.click, fade, lane.drag, "
-                     "envelope, ruler.marker, ruler.tempo");
+                     "envelope, ruler.marker, ruler.tempo, wheel.zoom");
     if (behaviour.empty()) {
         map_[std::string(context)].erase(mods & kMods);
         return {};
