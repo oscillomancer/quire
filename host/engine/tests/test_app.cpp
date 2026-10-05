@@ -2469,6 +2469,7 @@ TEST_CASE("fx.copy takes the running plugin's state, not the model's") {
     REQUIRE(copy);
     REQUIRE(copy->state);
     CHECK(app->head().blobs.at(*copy->state)->data == live);
+    app->stopEngine();  // before the backend goes out of scope
 }
 
 TEST_CASE("app consumes editor gestures as one undo step without echoing to the live instance") {
