@@ -19,6 +19,8 @@ const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 constexpr float kKeysWidth = 46;
 constexpr float kEdge = 5;  // px at a note's ends that resize it
 constexpr auto kCompileDelay = std::chrono::milliseconds(300);
+constexpr float kGripHeight = 6;        // the top border that resizes the panel
+constexpr float kMinShellHeight = 120;  // what the transport and arrange keep above the panel
 
 bool blackKey(int pitch) {
     const int pc = ((pitch % 12) + 12) % 12;
@@ -191,6 +193,8 @@ class Roll : public ui::Node {
                 s_.pixelsPerBeat =
                     std::clamp(s_.pixelsPerBeat * std::pow(1.15, e.wheelY), 8.0, 1200.0);
                 s_.scrollBeat = at - static_cast<double>(e.pos.x - bounds().x) / s_.pixelsPerBeat;
+            } else if (e.mods & ui::kAlt) {  // zoom the keys and rows around the pointer
+                editor_.zoomRows(e.wheelY != 0 ? e.wheelY : e.wheelX, e.pos.y);
             } else if (e.mods & ui::kShift) {
                 s_.scrollBeat -= static_cast<double>(e.wheelY + e.wheelX) * 60 / s_.pixelsPerBeat;
             } else {
@@ -673,6 +677,74 @@ class RollPlayhead : public ui::Node {
     ui::Node*& roll_;
 };
 
+// ----------------------------------------------------------------- panel
+
+// The border along the panel's top: drag to resize, double-click to reset.
+class Grip : public ui::Node {
+  public:
+    explicit Grip(MidiEditor& editor) : Node("midi.grip"), editor_(editor) {
+        interactive = true;
+        layout.height = ui::SizeRule::fixed(kGripHeight);
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const ui::Rect b = bounds();
+        c.fillRect(b, t.color("panel"));
+        c.fillRect({b.x, b.y, b.w, 1}, t.color("rule"));
+        c.fillRect({b.x + b.w / 2 - 14, b.y + b.h / 2, 28, 1}, t.color("ink-faint"));
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        using T = ui::PointerEvent::Type;
+        if (e.type == T::Down && e.button == 1) {
+            if (e.clicks >= 2) {
+                editor_.setHeight(MidiEditor::kDefaultHeight);
+                return true;
+            }
+            dragging_ = true;
+            pressY_ = e.pos.y;
+            pressHeight_ = editor_.height();
+            if (ui::Root* r = root()) r->capture(this);
+            return true;
+        }
+        if (e.type == T::Move && dragging_) {
+            editor_.setHeight(pressHeight_ + (pressY_ - e.pos.y));  // up makes it taller
+            return true;
+        }
+        if (e.type == T::Up && dragging_) {
+            dragging_ = false;
+            if (ui::Root* r = root()) r->capture(nullptr);
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    MidiEditor& editor_;
+    bool dragging_ = false;
+    float pressY_ = 0, pressHeight_ = 0;
+};
+
+// The docked panel. The wheel anywhere in it that no child used (the keys, the
+// lanes, the header) zooms the rows with Alt, the same as over the roll.
+class Panel : public ui::Node {
+  public:
+    explicit Panel(MidiEditor& editor) : Node("midi.editor"), editor_(editor) {
+        interactive = true;
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type != ui::PointerEvent::Type::Wheel || !(e.mods & ui::kAlt) || (e.mods & ui::kCtrl))
+            return false;
+        float y = e.pos.y;
+        if (const ui::Node* roll = editor_.roll())
+            y = std::clamp(y, roll->bounds().y, roll->bounds().bottom());
+        editor_.zoomRows(e.wheelY != 0 ? e.wheelY : e.wheelX, y);
+        return true;
+    }
+
+  private:
+    MidiEditor& editor_;
+};
+
 }  // namespace
 
 // ----------------------------------------------------------------- MidiEditor
@@ -697,11 +769,12 @@ MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dis
 MidiEditor::~MidiEditor() = default;
 
 std::unique_ptr<ui::Node> MidiEditor::build() {
-    auto panel = std::make_unique<ui::Node>("midi.editor");
+    auto panel = std::make_unique<Panel>(*this);
     panel_ = panel.get();
     panel->layout.dir = ui::Layout::Dir::Column;
-    panel->layout.height = ui::SizeRule::fixed(420);
+    panel->layout.height = ui::SizeRule::fixed(height_);
     panel->visible = false;
+    panel->emplace<Grip>(*this);
     auto& header = panel->emplace<ui::Node>("midi.header");
     header.layout.dir = ui::Layout::Dir::Row;
     header.layout.height = ui::SizeRule::fixed(32);
@@ -873,6 +946,56 @@ void MidiEditor::close() {
         root_.relayout();
         root_.damageAll();
     }
+}
+
+float MidiEditor::maxHeight() const {
+    const ui::Node* parent = panel_ ? panel_->parent() : nullptr;
+    if (!parent || parent->bounds().h <= 0) return 4000;
+    // What the siblings with their own height (the mixer) keep; the rest, less
+    // a strip of arrange, is ours.
+    float others = 0;
+    for (const auto& sibling : parent->children())
+        if (sibling.get() != panel_ && sibling->visible &&
+            sibling->layout.height.kind != ui::SizeRule::Kind::Fraction)
+            others += sibling->bounds().h;
+    return std::max(kMinHeight, parent->bounds().h - others - kMinShellHeight);
+}
+
+void MidiEditor::applyHeight() {
+    if (!panel_) return;
+    const float shown = std::clamp(height_, kMinHeight, maxHeight());
+    if (panel_->layout.height.value == shown) return;
+    panel_->layout.height = ui::SizeRule::fixed(shown);
+    root_.relayout();
+    root_.damageAll();
+}
+
+void MidiEditor::setHeight(float height) {
+    height_ = std::clamp(height, kMinHeight, maxHeight());
+    applyHeight();
+}
+
+json::Value MidiEditor::saveLayout() const {
+    json::Value v = json::Value::object();
+    v["height"] = static_cast<double>(height_);
+    return v;
+}
+
+void MidiEditor::loadLayout(const json::Value& v) {
+    if (const json::Value* h = v.find("height"); h && h->isNumber() && std::isfinite(h->asDouble()))
+        setHeight(static_cast<float>(h->asDouble()));
+}
+
+void MidiEditor::zoomRows(float wheel, float anchorY) {
+    if (!roll_) return;
+    const double offset = static_cast<double>(anchorY - roll_->bounds().y);
+    const double at = state_.topPitch - offset / static_cast<double>(state_.rowHeight);
+    state_.rowHeight = std::clamp(static_cast<float>(static_cast<double>(state_.rowHeight) *
+                                                     std::pow(1.15, static_cast<double>(wheel))),
+                                  kMinRowHeight, kMaxRowHeight);
+    state_.topPitch = std::clamp(at + offset / static_cast<double>(state_.rowHeight), 12.0, 127.0);
+    roll_->invalidate();
+    if (keys_) keys_->invalidate();
 }
 
 Status MidiEditor::reload() {
@@ -1137,6 +1260,7 @@ void MidiEditor::duplicate() {
 
 void MidiEditor::sync() {
     if (!isOpen()) return;
+    applyHeight();  // a smaller window or a taller neighbour shrinks the panel
     if (playhead_ && roll_) static_cast<RollPlayhead*>(playhead_)->place(roll_->bounds());
     if (app_.head().version != version_) {
         // The item went away (undo, delete): close; otherwise reload both views.

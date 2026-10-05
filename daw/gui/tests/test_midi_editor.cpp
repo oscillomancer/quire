@@ -25,6 +25,11 @@ using namespace supple;
 
 namespace {
 
+template <class T>
+doctest::Approx near(T v) {
+    return doctest::Approx(static_cast<double>(v));
+}
+
 const cmd::Origin kTest{cmd::Origin::Type::Ui, "test", {}};
 
 struct Fixture {
@@ -125,6 +130,19 @@ struct Fixture {
         return {b.x + static_cast<float>((itemBeat - s.scrollBeat) * s.pixelsPerBeat),
                 b.y + static_cast<float>(s.topPitch - pitch) * s.rowHeight + s.rowHeight / 2};
     }
+    void wheel(ui::Point p, float y, unsigned mods) {
+        ui::PointerEvent e;
+        e.type = ui::PointerEvent::Type::Wheel;
+        e.pos = p;
+        e.wheelY = y;
+        e.mods = mods;
+        root->pointer(e);
+        frame();
+    }
+    ui::Point grip() const {
+        const ui::Rect b = root->find("midi.grip")->bounds();
+        return {b.x + b.w / 2, b.y + b.h / 2};
+    }
     void snapshot(const char* name) {
         const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS");
         if (!out) return;
@@ -135,6 +153,130 @@ struct Fixture {
 };
 
 }  // namespace
+
+TEST_CASE("MIDI editor: dragging the top border resizes the panel; double-click resets") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    ui::Node* panel = f.root->find("midi.editor");
+    REQUIRE(panel);
+    CHECK(panel->bounds().h == near(gui::MidiEditor::kDefaultHeight));
+
+    // Up makes it taller, down shorter; one drag is one resize, no model edit.
+    const auto version = f.app->head().version;
+    ui::Point p = f.grip();
+    f.drag(p, {p.x, p.y - 20});
+    CHECK(panel->bounds().h == near(gui::MidiEditor::kDefaultHeight + 20));
+    p = f.grip();
+    f.drag(p, {p.x, p.y + 150});
+    CHECK(panel->bounds().h == near(gui::MidiEditor::kDefaultHeight - 130));
+    CHECK(f.editor->height() == near(gui::MidiEditor::kDefaultHeight - 130));
+    CHECK(f.app->head().version == version);
+
+    // Clamped: to the minimum, and to what leaves the window's top a strip.
+    p = f.grip();
+    f.drag(p, {p.x, p.y + 2000});
+    CHECK(panel->bounds().h == near(gui::MidiEditor::kMinHeight));
+    p = f.grip();
+    f.drag(p, {p.x, -500});
+    const float window = f.root->find("window")->bounds().h;
+    CHECK(panel->bounds().h > window * 0.7f);
+    CHECK(panel->bounds().h < window);
+    CHECK(f.root->find("arrange")->bounds().h >= 100);
+    CHECK(f.editor->height() == near(panel->bounds().h));
+
+    // Double-click: the default again.
+    f.pointer(ui::PointerEvent::Type::Down, f.grip(), 2);
+    f.pointer(ui::PointerEvent::Type::Up, f.grip());
+    CHECK(panel->bounds().h == near(gui::MidiEditor::kDefaultHeight));
+    CHECK(f.editor->roll()->bounds().h > 100);
+}
+
+TEST_CASE("MIDI editor: the panel height persists, and a too-large one is shown clamped") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    f.editor->setHeight(300);
+    const json::Value saved = f.editor->saveLayout();
+    CHECK(saved.find("height")->asDouble() == near(300));
+    f.editor->setHeight(200);
+    f.editor->loadLayout(saved);
+    f.frame();
+    CHECK(f.root->find("midi.editor")->bounds().h == near(300));
+    // Junk is ignored; an oversized height (a smaller window than the one it
+    // was saved in) is clamped to what fits.
+    f.editor->loadLayout(json::parse(R"({"height":"tall"})").value());
+    CHECK(f.editor->height() == near(300));
+    f.editor->loadLayout(json::parse(R"({"height":99999})").value());
+    f.frame();
+    const float window = f.root->find("window")->bounds().h;
+    CHECK(f.root->find("midi.editor")->bounds().h < window);
+    CHECK(f.root->find("arrange")->bounds().h >= 100);
+}
+
+TEST_CASE("MIDI editor: Alt+wheel zooms the rows around the pointer's pitch") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& s = f.editor->state();
+    const unsigned alt = ui::kAlt;
+    const double beat = s.scrollBeat, ppb = s.pixelsPerBeat;
+    const ui::Rect b = f.editor->roll()->bounds();
+    const ui::Point at{b.x + 200, b.y + 90};
+    auto pitchAt = [&](float y) {
+        return s.topPitch - static_cast<double>((y - b.y) / s.rowHeight);
+    };
+    const double pitch = pitchAt(at.y);
+    const float before = s.rowHeight;
+
+    f.wheel(at, 3, alt);
+    CHECK(s.rowHeight > before);
+    CHECK(pitchAt(at.y) == near(pitch));  // the pointer's pitch stays under it
+    CHECK(s.scrollBeat == near(beat));    // rows only: the time axis is untouched
+    CHECK(s.pixelsPerBeat == near(ppb));
+    f.wheel(at, -3, alt);
+    CHECK(s.rowHeight == near(before));
+    CHECK(pitchAt(at.y) == near(pitch));
+
+    // Clamped both ways.
+    f.wheel(at, 100, alt);
+    CHECK(s.rowHeight == near(gui::MidiEditor::kMaxRowHeight));
+    f.wheel(at, -200, alt);
+    CHECK(s.rowHeight == near(gui::MidiEditor::kMinRowHeight));
+    f.wheel(at, 100, alt);
+
+    // Over the keys and the velocity lane too (anywhere in the editor), but not
+    // with Ctrl (time zoom) held, and the plain wheel still scrolls pitch.
+    s.rowHeight = 12;
+    const ui::Rect keys = f.root->find("midi.keys")->bounds();
+    f.wheel({keys.x + 10, keys.y + 40}, 2, alt);
+    CHECK(s.rowHeight > 12);
+    s.rowHeight = 12;
+    const ui::Rect vel = f.root->find("midi.velocity")->bounds();
+    f.wheel({vel.x + 200, vel.y + 20}, 2, alt);
+    CHECK(s.rowHeight > 12);
+    s.rowHeight = 12;
+    f.wheel(at, 2, ui::kCtrl);
+    CHECK(s.rowHeight == near(12));
+    CHECK(s.pixelsPerBeat > ppb);
+    const double top = s.topPitch;
+    f.wheel(at, 1, 0);
+    CHECK(s.rowHeight == near(12));
+    CHECK(s.topPitch == near(top + 3));
+    f.snapshot("midi-editor-row-zoom.png");
+}
 
 TEST_CASE("MIDI editor: an empty roll can marquee without a note anchor") {
     Fixture f;
