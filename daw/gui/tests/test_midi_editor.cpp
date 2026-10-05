@@ -220,6 +220,7 @@ TEST_CASE("MIDI editor: the panel height persists, and a too-large one is shown 
     const float window = f.root->find("window")->bounds().h;
     CHECK(f.root->find("midi.editor")->bounds().h < window);
     CHECK(f.root->find("arrange")->bounds().h >= 100);
+    CHECK(f.editor->height() > window);  // the preference stays for a larger window
 }
 
 TEST_CASE("MIDI editor: Alt+wheel zooms the rows around the pointer's pitch") {

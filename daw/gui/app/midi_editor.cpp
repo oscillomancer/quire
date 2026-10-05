@@ -982,8 +982,13 @@ json::Value MidiEditor::saveLayout() const {
 }
 
 void MidiEditor::loadLayout(const json::Value& v) {
-    if (const json::Value* h = v.find("height"); h && h->isNumber() && std::isfinite(h->asDouble()))
-        setHeight(static_cast<float>(h->asDouble()));
+    // The saved preference as is: the window may be smaller at load than when
+    // it was saved, and applyHeight() only shrinks what is laid out.
+    if (const json::Value* h = v.find("height");
+        h && h->isNumber() && std::isfinite(h->asDouble())) {
+        height_ = std::clamp(static_cast<float>(h->asDouble()), kMinHeight, 4000.0f);
+        applyHeight();
+    }
 }
 
 void MidiEditor::zoomRows(float wheel, float anchorY) {
