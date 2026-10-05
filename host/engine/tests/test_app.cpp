@@ -2439,6 +2439,38 @@ TEST_CASE("recovery skips an overflowing recording start beside a valid file") {
     CHECK(app->head().items.size() == 1);
 }
 
+TEST_CASE("fx.copy takes the running plugin's state, not the model's") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = bus.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    call("track.add", R"({"name":"A"})");
+    call("track.add", R"({"name":"B"})");
+    call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    backend.run(1);
+    app->tick();
+    auto* instance = app->instanceOf(*model::Id::parse("fx_1"));
+    REQUIRE(instance);
+    // A change only the plugin knows about (the model still has no state).
+    const std::vector<std::uint8_t> live{0, 9, 0, 0};
+    REQUIRE(instance->loadState(live));
+    REQUIRE_FALSE(app->head().fx.find(*model::Id::parse("fx_1"))->state);
+    auto copied = call("fx.copy", R"({"fx":"fx_1","track":"tr_2"})");
+    const auto* copy = app->head().fx.find(*model::Id::parse(copied["fx"].asString()));
+    REQUIRE(copy);
+    REQUIRE(copy->state);
+    CHECK(app->head().blobs.at(*copy->state)->data == live);
+}
+
 TEST_CASE("app consumes editor gestures as one undo step without echoing to the live instance") {
     for (std::uint8_t mode : {30, 31, 32, 35}) {
         Root root;

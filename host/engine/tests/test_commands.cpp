@@ -745,6 +745,58 @@ TEST_CASE("FX chain presets round-trip ordered patches, blobs and options in one
     CHECK(readTextFile(saved["path"].asString()).value() == *text);
 }
 
+TEST_CASE("fx.copy puts a copy of a plugin and its settings last in another track's chain") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("track.add", R"({"name":"Target"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","patch":{"params":{"gain":-9}}})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    f.run("fx.add", R"({"track":"tr_2","plugin":"Test Gain"})");
+    f.run("fx.set", R"({"fx":"fx_1","label":"Quiet","bypass":true,"wet":37})");
+    const auto track = [&](const char* id) {
+        return *f.app->head().tracks.find(*model::Id::parse(id));
+    };
+    const auto before = f.history();
+    auto copied = f.run("fx.copy", R"({"fx":"fx_1","track":"tr_2"})");
+    CHECK(f.history() == before + 1);  // one undo step
+    REQUIRE(track("tr_2").chain.size() == 2);
+    CHECK(track("tr_2").chain[0].str() == "fx_3");
+    CHECK(track("tr_2").chain[1].str() == copied["fx"].asString());
+    CHECK(copied["chain"].size() == 2);
+    CHECK(track("tr_1").chain.size() == 2);  // the original stays
+    const auto& source = *f.app->head().fx.find(*model::Id::parse("fx_1"));
+    const auto& copy = *f.app->head().fx.find(track("tr_2").chain[1]);
+    CHECK(copy.plugin.id == source.plugin.id);
+    CHECK(copy.label == "Quiet");
+    CHECK(copy.bypass);
+    CHECK(copy.wet == 37);
+    CHECK(copy.patch == source.patch);
+    CHECK(f.run("fx.patch.get", "{\"fx\":\"" + copied["fx"].asString() + "\"}") ==
+          f.run("fx.patch.get", R"({"fx":"fx_1"})"));
+    // An index places it; the input chain takes one too.
+    auto edge = f.run("fx.copy", R"({"fx":"fx_2","track":"tr_2","index":0})");
+    CHECK(track("tr_2").chain[0].str() == edge["fx"].asString());
+    CHECK(f.app->head().fx.find(track("tr_2").chain[0])->plugin.id == "com.suppleaudio.test.edge");
+    f.run("fx.copy", R"({"fx":"fx_2","track":"tr_1","chain":"input"})");
+    CHECK(track("tr_1").inputChain.size() == 1);
+    // Onto its own track too.
+    f.run("fx.copy", R"({"fx":"fx_1","track":"tr_1"})");
+    CHECK(track("tr_1").chain.size() == 3);
+    f.run("history.undo");
+    CHECK(track("tr_1").chain.size() == 2);
+    // Refusals leave the model alone.
+    const auto version = f.app->head().version;
+    auto fails = [&](std::string_view args) {
+        auto r = f.bus->execute({"fx.copy", j(args), kOrigin});
+        REQUIRE_FALSE(r);
+        return r.error().code;
+    };
+    CHECK(fails(R"({"fx":"fx_99","track":"tr_2"})") == "fx.unknown");
+    CHECK(fails(R"({"fx":"fx_1","track":"tr_9"})") == "track.unknown");
+    CHECK(fails(R"({"fx":"fx_1","track":"tr_2","index":9})") == "fx.index");
+    CHECK(f.app->head().version == version);
+}
+
 TEST_CASE("FX chain replace removes envelopes and routes and restores them on undo") {
     ChainFixture f;
     f.run("track.add", R"({"name":"Source"})");

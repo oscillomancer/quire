@@ -2015,6 +2015,73 @@ Result:
 
 ```
 
+## `fx.copy@1`
+
+Copy a plugin and its current settings into a track's FX chain.
+
+Adds a new instance of fx's plugin to track's main (default) or input chain, at index (default: the end), with the source's options (label, bypass, offline, wet, isolation, oversampling, parallel, pdc) and its settings as they are now: the running plugin's own state when the engine has one (editor edits included), else the model's patch or state. Not copied: envelopes, key routes into the source, and, when the track differs, channel pins. The source stays where it is; use fx.move to move it. One undo step.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `track` | string |  |  |  |  |
+| `index` | integer |  | 0.0.. |  |  |
+| `chain` | string |  |  | "main" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_copy_result",
+  "properties": {
+    "fx": {
+      "type": "string"
+    },
+    "chain": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["fx", "chain"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown`: no such plugin instance Hint: use an id from fx.list
+- `fx.index`: index is past the end of the chain Hint: use 0 to the chain's size
+
+### Examples
+
+**Copy a plugin to the end of another track's chain** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_1",
+  "track": "tr_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "fx": "<any>",
+  "chain": ["<any>"]
+}
+
+```
+
 ## `fx.describe@1`
 
 Describe a plugin instance in words; full adds its parameters and patch.
