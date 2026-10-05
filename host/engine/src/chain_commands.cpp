@@ -747,9 +747,9 @@ void registerChainCommands(cmd::Registry& registry) {
         c.errors = {
             {"fx.unknown", "no such plugin instance", "use an id from fx.list"},
             {"fx.index", "index is past the end of the chain", "use 0 to the chain's size"}};
-        c.examples = {{"Copy a plugin to the end of another track's chain",
-                       j(R"({"fx":"fx_1","track":"tr_2"})"),
-                       j(R"({"fx":"<any>","chain":["<any>"]})"), "song_with_fx"}};
+        c.examples = {{"Duplicate a plugin at the end of its own chain",
+                       j(R"({"fx":"fx_1","track":"tr_1"})"),
+                       j(R"({"fx":"<any>","chain":["fx_1","fx_2","<any>"]})"), "song_with_fx"}};
         c.run = [](const CopyArgs& a, cmd::Context& ctx) -> Result<CopyResult> {
             auto& app = ctx.service<EngineApp>();
             const auto s = app.view();

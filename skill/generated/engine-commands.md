@@ -2062,12 +2062,12 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 ### Examples
 
-**Copy a plugin to the end of another track's chain** (`song_with_fx`)
+**Duplicate a plugin at the end of its own chain** (`song_with_fx`)
 
 ```json
 {
   "fx": "fx_1",
-  "track": "tr_2"
+  "track": "tr_1"
 }
 
 ```
@@ -2077,7 +2077,7 @@ Result:
 ```json
 {
   "fx": "<any>",
-  "chain": ["<any>"]
+  "chain": ["fx_1", "fx_2", "<any>"]
 }
 
 ```

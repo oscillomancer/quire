@@ -688,6 +688,9 @@ int main(int argc, char** argv) {
     };
     uiFile.add("panels", panelsSave, panelsLoad);
     uiFile.add(
+        "mixer", [&] { return mixer.saveLayout(); },
+        [&](const json::Value& v) { mixer.loadLayout(v); });
+    uiFile.add(
         "window",
         [&] {
             json::Value v = json::Value::object();

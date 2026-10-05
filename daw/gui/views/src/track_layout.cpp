@@ -16,6 +16,51 @@ float clampHeight(float h) {
 
 }  // namespace
 
+std::vector<model::Id> displayChildren(const model::Session& session, const model::Track& parent) {
+    std::vector<model::Id> out;
+    out.reserve(parent.children.size());
+    for (model::StripType type :
+         {model::StripType::Channel, model::StripType::Buss, model::StripType::Master})
+        for (model::Id id : parent.children)
+            if (const model::Track* t = session.tracks.find(id); t && t->type == type)
+                out.push_back(id);
+    return out;
+}
+
+std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id track,
+                                        std::optional<model::Id> before) {
+    const model::Track* t = session.tracks.find(track);
+    if (!t || t->type == model::StripType::Master || !t->parent) return std::nullopt;
+    const model::Track* parent = session.tracks.find(*t->parent);
+    if (!parent || before == track) return std::nullopt;
+    std::vector<model::Id> rest = parent->children;
+    std::erase(rest, track);
+    std::optional<std::size_t> at;
+    if (before) {
+        const model::Track* b = session.tracks.find(*before);
+        if (!b || b->type != t->type || b->parent != t->parent) return std::nullopt;
+        if (const auto found = std::find(rest.begin(), rest.end(), *before); found != rest.end())
+            at = static_cast<std::size_t>(found - rest.begin());
+    } else {  // after the last sibling of this type
+        for (std::size_t i = 0; i < rest.size(); ++i)
+            if (const model::Track* s = session.tracks.find(rest[i]); s && s->type == t->type)
+                at = i + 1;
+    }
+    if (!at) return std::nullopt;
+    // The siblings of this type, before and after: the same order is no move.
+    auto sameType = [&](const std::vector<model::Id>& ids) {
+        std::vector<model::Id> out;
+        for (model::Id id : ids)
+            if (const model::Track* s = session.tracks.find(id); s && s->type == t->type)
+                out.push_back(id);
+        return out;
+    };
+    std::vector<model::Id> after = rest;
+    after.insert(after.begin() + static_cast<std::ptrdiff_t>(*at), track);
+    if (sameType(after) == sameType(parent->children)) return std::nullopt;
+    return at;
+}
+
 bool TrackLayout::show(const model::Session& session, const std::vector<model::Change>* changes) {
     if (session.version == indexed_) return false;
     bool geometry =

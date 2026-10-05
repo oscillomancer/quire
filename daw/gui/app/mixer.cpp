@@ -4,15 +4,40 @@
 #include <cmath>
 #include <cstdio>
 
+#include <SDL3/SDL_keycode.h>
+
+#include "panel_height.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/track_layout.h"
 
 namespace supple::gui {
 namespace {
 
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 constexpr float kStripW = 92;
+// The strip's chain section is the only one that follows the panel's height;
+// the rest (name, sends, rec, pan, fader, value, M/S, gaps, padding) is fixed.
+constexpr float kSlotH = 18, kSlotGap = 2;
+constexpr float kGripH = 5, kHeaderH = 30;
+constexpr float kFaderH = 133;       // the fader and meter row
+constexpr float kStripChrome = 159;  // the fixed rows, their gaps and the padding
+constexpr float kDragThreshold = 4;
+
+// fx.move's index (among the chain without the plug-in) for dropping the
+// plug-in at `from` into the gap before slot `gap`; nullopt when it stays.
+std::optional<std::size_t> chainMoveIndex(std::size_t from, std::size_t gap) {
+    const std::size_t index = gap > from ? gap - 1 : gap;
+    if (index == from) return std::nullopt;
+    return index;
+}
+
+constexpr float chainRows(int n) { return n <= 0 ? 0 : n * kSlotH + (n - 1) * kSlotGap; }
+constexpr float panelHeight(int slots) {
+    return kGripH + kHeaderH + kStripChrome + kFaderH + chainRows(slots);
+}
+constexpr int kDefaultSlots = 5, kMinSlots = 2;
 
 std::string dbText(double db) {
     if (db <= ui::kFaderSilenceDb + 1e-9) return "-inf";
@@ -29,6 +54,182 @@ std::string sendText(const model::Session& session, const model::Route& route) {
     if (route.to.fx) to = route.to.fx->str() + " key";
     return "→ " + to + " " + dbText(route.volumeDb);
 }
+
+// A left-button press that becomes a drag once it moves a few pixels; a press
+// that never does stays a click for the node (nothing is reported then).
+class DragTracker {
+  public:
+    using Phase = Mixer::DragPhase;
+    std::function<void(Phase, ui::Point)> notify;
+    bool down() const { return down_; }
+    bool dragging() const { return dragging_; }
+    void press(ui::Point p) {
+        down_ = true;
+        dragging_ = false;
+        origin_ = p;
+    }
+    // A move: true while a drag is under way.
+    bool move(ui::Point p) {
+        if (!down_) return false;
+        if (!dragging_) {
+            if (std::hypot(p.x - origin_.x, p.y - origin_.y) < kDragThreshold) return false;
+            dragging_ = true;
+            if (notify) notify(Phase::Begin, p);
+        }
+        if (notify) notify(Phase::Move, p);
+        return true;
+    }
+    // A release: true when it ended a drag (so it is not a click).
+    bool release(ui::Point p) {
+        const bool was = dragging_;
+        down_ = dragging_ = false;
+        if (was && notify) notify(Phase::End, p);
+        return was;
+    }
+    bool cancel() {
+        const bool was = dragging_;
+        down_ = dragging_ = false;
+        if (was && notify) notify(Phase::Cancel, {});
+        return was;
+    }
+
+  private:
+    bool down_ = false, dragging_ = false;
+    ui::Point origin_;
+};
+
+// A plug-in in a strip's chain: a click opens its editor (a button), a drag
+// reorders it within the chain or copies it onto another strip.
+class FxSlot : public ui::Button {
+  public:
+    FxSlot(std::string id, std::string text, std::function<void()> click, std::size_t at)
+        : Button(std::move(id), std::move(text), std::move(click)), chainIndex(at) {}
+    const std::size_t chainIndex;  // its place in the track's chain
+    DragTracker drag;
+    bool onPointer(const ui::PointerEvent& e) override {
+        const bool left = e.button == 1;
+        if (e.type == ui::PointerEvent::Type::Down && left) drag.press(e.pos);
+        if (e.type == ui::PointerEvent::Type::Move && drag.move(e.pos)) return true;
+        if (e.type == ui::PointerEvent::Type::Up && left && drag.release(e.pos)) {
+            // Release the button without a click: the pointer is "outside" it.
+            Button::onPointer({e.type, {-1e6f, -1e6f}, e.button, e.clicks, e.mods});
+            return true;
+        }
+        return Button::onPointer(e);
+    }
+    bool onKey(const ui::KeyEvent& e) override {
+        if (e.key == SDLK_ESCAPE && drag.cancel()) {
+            Button::onPointer({ui::PointerEvent::Type::Up, {-1e6f, -1e6f}, 1, 1, 0});
+            if (root()) root()->capture(nullptr);
+            return true;
+        }
+        return Button::onKey(e);
+    }
+};
+
+// A strip's plug-ins, one per row, scrolled by the wheel or a bar when the
+// chain is longer than the room the panel gives it.
+class FxList : public ui::Node {
+  public:
+    explicit FxList(std::string id) : Node(std::move(id)) {
+        clipsChildren = true;
+        layout.height = ui::SizeRule::fraction();
+        auto bar =
+            std::make_unique<ui::ScrollBar>(this->id() + ".bar", ui::ScrollBar::Axis::Vertical);
+        bar_ = bar.get();
+        bar_->onScroll = [this](float v) {
+            scroll_ = v;
+            relayout();
+            invalidate();
+        };
+        add(std::move(bar));
+    }
+    FxSlot& addSlot(std::unique_ptr<FxSlot> slot) {
+        FxSlot& ref = *slot;
+        slots_.push_back(&ref);
+        add(std::move(slot));
+        return ref;
+    }
+    const std::vector<FxSlot*>& slots() const { return slots_; }
+    float content() const { return chainRows(static_cast<int>(slots_.size())); }
+    void arrange(const ui::Canvas& canvas, const ui::Rect& b) override {
+        setBounds(b);
+        const bool bar = content() > b.h + 0.5f;
+        scroll_ = std::clamp(scroll_, 0.0f, std::max(0.0f, content() - b.h));
+        bar_->visible = bar;
+        const float w = b.w - (bar ? ui::ScrollBar::kThickness + 2 : 0);
+        bar_->setRange(content(), b.h);
+        bar_->setValue(scroll_);
+        bar_->arrange(canvas,
+                      {b.right() - ui::ScrollBar::kThickness, b.y, ui::ScrollBar::kThickness, b.h});
+        float y = b.y - scroll_;
+        for (FxSlot* slot : slots_) {
+            slot->arrange(canvas, {b.x, y, w, kSlotH});
+            y += kSlotH + kSlotGap;
+        }
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type != ui::PointerEvent::Type::Wheel || content() <= bounds().h + 0.5f) return false;
+        scroll_ = std::max(0.0f, scroll_ - e.wheelY * (kSlotH + kSlotGap));
+        relayout();
+        invalidate();
+        return true;
+    }
+
+  private:
+    std::vector<FxSlot*> slots_;
+    ui::ScrollBar* bar_ = nullptr;
+    float scroll_ = 0;
+};
+
+// The panel's top edge: drag to resize the mixer (the chain sections take the
+// difference), double-click to restore the default height.
+class ResizeGrip : public ui::Node {
+  public:
+    ResizeGrip() : Node("mixer.grip") {
+        interactive = true;
+        layout.height = ui::SizeRule::fixed(kGripH);
+    }
+    std::function<float()> height;      // the panel's height now
+    std::function<void(float)> resize;  // a new height
+    std::function<void()> reset;        // the default
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const bool live = hovered() || dragging_;
+        c.fillRect(bounds(), live ? t.color("selection") : t.color("panel"));
+        c.fillRect({bounds().x, bounds().y, bounds().w, 1}, t.color("rule"));
+        if (live)
+            c.fillRect({bounds().x + bounds().w / 2 - 16, bounds().y + 1, 32, 2}, t.color("focus"));
+    }
+    void onHover(bool) override { invalidate(); }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
+            if (e.clicks >= 2) {
+                if (reset) reset();
+                return true;
+            }
+            dragging_ = true;
+            pressY_ = e.pos.y;
+            start_ = height ? height() : 0;
+            invalidate();
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Move && dragging_) {
+            if (resize) resize(start_ + (pressY_ - e.pos.y));  // up makes it taller
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Up && dragging_) {
+            dragging_ = false;
+            invalidate();
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    bool dragging_ = false;
+    float pressY_ = 0, start_ = 0;
+};
 
 // A run of strips side by side from `scroll` on (the scrolled ones clip).
 class StripGroup : public ui::Node {
@@ -127,34 +328,99 @@ class ColorStripe : public ui::Node {
     std::string colour_;
 };
 
-// A strip's background: the type's colour along the top and a master's heavier
-// spine down its left side; a right-click anywhere on it opens the track menu.
+// A strip's background: the type's colour along the top; a right-click anywhere
+// on it opens the track menu, and a drag from a part no control uses moves the
+// strip among its own kind.
 class StripFrame : public ui::Node {
   public:
     StripFrame(std::string id, std::string colorToken, std::function<void(ui::Point)> menu)
         : Node(std::move(id)), color_(std::move(colorToken)), menu_(std::move(menu)) {
         interactive = true;
         layout.dir = ui::Layout::Dir::Column;
-        layout.padding = ui::Insets{8, 5, 5, 5};
+        layout.padding = ui::Insets::all(5);
         layout.gap = 4;
     }
+    DragTracker drag;  // notify unset: this strip cannot be dragged
     void paint(ui::Canvas& c) override {
         const ui::Theme& t = c.theme();
         c.fillRect(bounds(), t.color("panel"));
         c.fillRect({bounds().x, bounds().y, bounds().w, 4}, t.color(color_));
-        if (color_ == "master")
-            c.fillRect({bounds().x, bounds().y, 5, bounds().h}, t.color(color_));
         c.fillRect({bounds().right() - 1, bounds().y, 1, bounds().h}, t.color("rule"));
     }
     bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type != ui::PointerEvent::Type::Down || e.button != 3 || !menu_) return false;
-        menu_(e.pos);
-        return true;
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && menu_) {
+            menu_(e.pos);
+            return true;
+        }
+        if (!drag.notify) return false;
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
+            drag.press(e.pos);
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Move && drag.down()) {
+            const bool was = drag.dragging();
+            const bool now = drag.move(e.pos);
+            if (now && !was && root()) root()->focus(this);  // Escape cancels
+            return now;
+        }
+        if (e.type == ui::PointerEvent::Type::Up && e.button == 1 && drag.down()) {
+            (void)drag.release(e.pos);
+            if (root() && root()->focused() == this) root()->focus(nullptr);
+            return true;
+        }
+        return false;
+    }
+    bool onKey(const ui::KeyEvent& e) override {
+        if (e.key == SDLK_ESCAPE && drag.cancel()) {
+            if (root()) {
+                root()->capture(nullptr);
+                root()->focus(nullptr);
+            }
+            return true;
+        }
+        return false;
     }
 
   private:
     std::string color_;
     std::function<void(ui::Point)> menu_;
+};
+
+// The drag's feedback, over everything: the dragged strip dimmed, an insertion
+// bar where it would land, or the strip a plug-in would be copied onto; a plug-in
+// drag carries a chip with its name.
+class DragGhost : public ui::Node {
+  public:
+    explicit DragGhost(std::shared_ptr<const Mixer::DragView> view)
+        : Node("mixer.drag"), view_(std::move(view)) {}
+    void arrange(const ui::Canvas&, const ui::Rect&) override {
+        if (parent()) setBounds(parent()->bounds());
+    }
+    void paint(ui::Canvas& c) override {
+        const Mixer::DragView& d = *view_;
+        if (!d.active) return;
+        const ui::Theme& t = c.theme();
+        const ui::Color accent = t.color("focus");
+        c.fillRect(d.source, t.color("ground").withAlpha(0.45f));
+        if (d.drop == Mixer::DragView::Drop::Reorder) {
+            c.fillRect(d.marker, accent);
+        } else if (d.drop == Mixer::DragView::Drop::Copy) {
+            c.fillRect(d.marker, accent.withAlpha(0.18f));
+            c.strokeRect(d.marker.inset(0.5f), accent, 2);
+        }
+        if (!d.label.empty()) {
+            const float size = t.type("small");
+            const float w = c.textWidth(d.label, ui::Font::UiBold, size) + 16;
+            const ui::Rect chip{d.pos.x + 12, d.pos.y + 10, w, kSlotH + 2};
+            c.fillRound(chip, t.radius("s"), t.color("raised"));
+            c.strokeRound(chip, t.radius("s"), accent);
+            c.text(chip, d.label, ui::Font::UiBold, size, t.color("ink"),
+                   ui::kCenter | ui::kMiddle);
+        }
+    }
+
+  private:
+    std::shared_ptr<const Mixer::DragView> view_;
 };
 
 }  // namespace
@@ -173,7 +439,38 @@ Mixer::Mixer(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
 }
 
 Mixer::~Mixer() {
+    ghost_.reset();
     for (const Strip& s : strips_) meters_.detach(s.meter);
+}
+
+float Mixer::defaultHeight() { return panelHeight(kDefaultSlots); }
+
+float Mixer::maxHeight() const { return maxPanelHeight(panel_, panelHeight(kMinSlots)); }
+
+void Mixer::setHeight(float height) {
+    height_ = std::clamp(height, panelHeight(kMinSlots), 4000.0f);
+    applyHeight();
+}
+
+json::Value Mixer::saveLayout() const {
+    json::Value v = json::Value::object();
+    v["height"] = static_cast<double>(height_);
+    return v;
+}
+
+void Mixer::loadLayout(const json::Value& v) {
+    if (const json::Value* h = v.find("height"); h && h->isNumber())
+        setHeight(static_cast<float>(h->asDouble()));
+}
+
+// The height shown: the one asked for, within what the window gives now.
+void Mixer::applyHeight() {
+    const float shown = std::min(height_, maxHeight());
+    if (!panel_ || shown == shown_) return;
+    shown_ = shown;
+    panel_->layout.height = ui::SizeRule::fixed(shown_);
+    root_.relayout();
+    root_.damageAll();
 }
 
 void Mixer::run(std::string_view action, json::Value args) {
@@ -187,11 +484,16 @@ std::unique_ptr<ui::Node> Mixer::build() {
     auto panel = std::make_unique<ui::Node>("mixer");
     panel_ = panel.get();
     panel->layout.dir = ui::Layout::Dir::Column;
-    panel->layout.height = ui::SizeRule::fixed(380);
+    shown_ = height_;
+    panel->layout.height = ui::SizeRule::fixed(shown_);
     panel->visible = false;
+    auto& grip = panel->emplace<ResizeGrip>();
+    grip.height = [this] { return shown_; };
+    grip.resize = [this](float h) { setHeight(std::min(h, maxHeight())); };
+    grip.reset = [this] { setHeight(defaultHeight()); };
     auto& header = panel->emplace<ui::Node>("mixer.header");
     header.layout.dir = ui::Layout::Dir::Row;
-    header.layout.height = ui::SizeRule::fixed(30);
+    header.layout.height = ui::SizeRule::fixed(kHeaderH);
     header.layout.padding = ui::Insets{4, 8, 4, 8};
     header.layout.gap = 8;
     header.layout.align = ui::Layout::Align::Center;
@@ -273,6 +575,7 @@ Result<json::Value> Mixer::set(const std::string& track, const char* field, json
 }
 
 void Mixer::rebuild() {
+    endDrag(false);  // the nodes it points at are about to go
     for (const Strip& s : strips_) meters_.detach(s.meter);
     strips_.clear();
     // Remove the old strips (the row keeps its scroll bar).
@@ -283,7 +586,7 @@ void Mixer::rebuild() {
         const model::Track* t = s.tracks.find(id);
         if (!t) return;
         order.push_back(id);
-        for (model::Id child : t->children) walk(child);
+        for (model::Id child : views::displayChildren(s, *t)) walk(child);
     };
     for (model::Id m : s.project->masters) walk(m);
     // Grouped by type: channels, busses, masters (each in track order).
@@ -305,21 +608,38 @@ void Mixer::rebuild() {
                 trackMenu_.open(id, {p.x, p.y, 1, 1}, {});
             });
         st.node = frame.get();
-        st.name = &frame->emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
-                                             ui::Font::UiBold, "caption");
-        st.name->layout.height = ui::SizeRule::fixed(16);
+        // The name, with a small "fx" at the strip's top right like the TCP's: the
+        // plugin browser on an empty chain, the chain otherwise.
+        auto& nameRow = frame->emplace<ui::Node>("mixer.namerow." + tid);
+        nameRow.layout.dir = ui::Layout::Dir::Row;
+        nameRow.layout.height = ui::SizeRule::fixed(16);
+        nameRow.layout.align = ui::Layout::Align::Center;
+        st.name = &nameRow.emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? tid : t.name,
+                                              ui::Font::UiBold, "caption");
+        st.name->layout.width = ui::SizeRule::fraction();
+        const bool empty = t.chain.empty();
+        std::string fxText = empty ? "fx" : "fx " + std::to_string(t.chain.size());
+        for (model::Id fx : t.chain)
+            if (const model::FxInstance* f = s.fx.find(fx); f && (f->bypass || f->offline)) {
+                fxText += "~";
+                break;
+            }
+        st.fx = &nameRow.emplace<ui::Button>("mixer.fxadd." + tid, fxText, [this, tid, empty] {
+            json::Value args = json::Value::object();
+            args["track"] = tid;
+            run(empty ? "ui.fx.add" : "ui.fx.chain", std::move(args));
+        });
+        st.fx->layout.width = ui::SizeRule::fixed(fxText.size() > 2 ? 34.0f : 22.0f);
+        st.fx->layout.height = ui::SizeRule::fixed(15);
         frame->emplace<ColorStripe>("mixer.color." + tid, t.color);
-        // FX slots (a click opens or closes the plug-in's editor), then "fx".
-        auto& fxBox = frame->emplace<ui::Node>("mixer.fx." + tid);
-        fxBox.layout.dir = ui::Layout::Dir::Column;
-        fxBox.layout.height = ui::SizeRule::fixed(3 * 18 + 2 * 2);
-        fxBox.layout.gap = 2;
-        int slots = 0;
-        for (model::Id fx : t.chain) {
-            if (slots == 2) break;
+        // The plug-in chain (a click opens or closes the plug-in's editor); the
+        // one section that takes the room the panel's height gives.
+        auto& chain = frame->emplace<FxList>("mixer.fx." + tid);
+        st.chain = &chain;
+        for (std::size_t at = 0; at < t.chain.size(); ++at) {
+            const model::Id fx = t.chain[at];
             const model::FxInstance* f = s.fx.find(fx);
             if (!f) continue;
-            ++slots;
             std::string label = f->label.empty()
                                     ? (f->plugin.name.empty() ? f->plugin.id : f->plugin.name)
                                     : f->label;
@@ -327,26 +647,24 @@ void Mixer::rebuild() {
                 label = "(" + label + ")";
             else if (f->bypass)
                 label = "~" + label;
-            auto& b = fxBox.emplace<ui::Button>("mixer.fx." + fx.str(), label, [this, fx] {
-                json::Value args = json::Value::object();
-                args["fx"] = fx.str();
-                run("ui.fx.editor", std::move(args));
-            });
-            b.layout.height = ui::SizeRule::fixed(18);
-            b.layout.width = ui::SizeRule::fraction();
+            auto slot = std::make_unique<FxSlot>(
+                "mixer.fx." + fx.str(), label,
+                [this, fx] {
+                    json::Value args = json::Value::object();
+                    args["fx"] = fx.str();
+                    run("ui.fx.editor", std::move(args));
+                },
+                at);
+            slot->drag.notify = [this, tid, fx](DragPhase phase, ui::Point p) {
+                dragFx(tid, fx, phase, p);
+            };
+            chain.addSlot(std::move(slot));
         }
-        // "fx" (the plugin browser) on an empty chain, "fx 3" (the chain) otherwise:
-        // the TCP's button.
-        const bool empty = t.chain.empty();
-        auto& add = fxBox.emplace<ui::Button>(
-            "mixer.fxadd." + tid, empty ? "fx" : "fx " + std::to_string(t.chain.size()),
-            [this, tid, empty] {
-                json::Value args = json::Value::object();
-                args["track"] = tid;
-                run(empty ? "ui.fx.add" : "ui.fx.chain", std::move(args));
-            });
-        add.layout.height = ui::SizeRule::fixed(18);
-        add.layout.width = ui::SizeRule::fraction();
+        // Everything but masters can be dragged (tr_0 stays first).
+        if (id != model::kMaster)
+            frame->drag.notify = [this, tid](DragPhase phase, ui::Point p) {
+                dragStrip(tid, phase, p);
+            };
         // Sends: name and level.
         auto& sends = frame->emplace<ui::Node>("mixer.sends." + tid);
         sends.layout.dir = ui::Layout::Dir::Column;
@@ -391,7 +709,7 @@ void Mixer::rebuild() {
         };
         auto& faderRow = frame->emplace<ui::Node>("mixer.faderrow." + tid);
         faderRow.layout.dir = ui::Layout::Dir::Row;
-        faderRow.layout.height = ui::SizeRule::fraction();
+        faderRow.layout.height = ui::SizeRule::fixed(kFaderH);
         faderRow.layout.gap = 4;
         auto& spacer = faderRow.emplace<ui::Node>("mixer.spacer." + tid);
         spacer.layout.width = ui::SizeRule::fraction();
@@ -434,6 +752,173 @@ void Mixer::rebuild() {
     root_.damageAll();
 }
 
+// The visible part of the strip under `p` (a strip scrolled under the pinned
+// masters or past the row's edge is not there).
+const Mixer::Strip* Mixer::stripAt(ui::Point p) const {
+    for (const Strip& st : strips_) {
+        const ui::Rect clip = st.node->parent() ? st.node->parent()->bounds() : st.node->bounds();
+        if (st.node->bounds().intersect(clip).contains(p)) return &st;
+    }
+    return nullptr;
+}
+
+void Mixer::dragStrip(const std::string& track, DragPhase phase, ui::Point p) {
+    DragView& d = *drag_;
+    if (phase == DragPhase::Cancel) return endDrag(false);
+    if (phase == DragPhase::Begin) {
+        endDrag(false);
+        d.kind = DragView::Kind::Strip;
+        d.active = true;
+        d.track = track;
+        ghost_ = root_.addOverlay(std::make_unique<DragGhost>(drag_));
+    }
+    if (d.kind != DragView::Kind::Strip) return;
+    d.pos = p;
+    resolveStripDrop();
+    if (phase == DragPhase::End) return endDrag(true);
+    root_.requestAnimationFrame();
+}
+
+void Mixer::dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p) {
+    DragView& d = *drag_;
+    if (phase == DragPhase::Cancel) return endDrag(false);
+    if (phase == DragPhase::Begin) {
+        endDrag(false);
+        d.kind = DragView::Kind::Fx;
+        d.active = true;
+        d.track = track;
+        d.fx = fx.str();
+        if (ui::Node* slot = root_.find("mixer.fx." + d.fx)) d.label = slot->valueText();
+        ghost_ = root_.addOverlay(std::make_unique<DragGhost>(drag_));
+    }
+    if (d.kind != DragView::Kind::Fx) return;
+    d.pos = p;
+    resolveFxDrop();
+    if (phase == DragPhase::End) return endDrag(true);
+    root_.requestAnimationFrame();
+}
+
+// A strip dropped between two strips of its own type (a master among masters):
+// the index track.move takes, among its parent's children.
+void Mixer::resolveStripDrop() {
+    DragView& d = *drag_;
+    d.drop = DragView::Drop::None;
+    const model::Session& s = app_.head();
+    const auto dragged = model::Id::parse(d.track);
+    const model::Track* track = dragged ? s.tracks.find(*dragged) : nullptr;
+    if (!track) return;
+    std::vector<const Strip*> group;  // its type, in display order
+    std::vector<model::Id> ids;
+    for (const Strip& st : strips_) {
+        if (st.type != std::string(model::stripTypeName(track->type))) continue;
+        group.push_back(&st);
+        ids.push_back(*model::Id::parse(st.track));
+        if (st.track == d.track)
+            d.source = st.node->bounds().intersect(st.node->parent()->bounds());
+    }
+    const ui::Rect row = row_->bounds();
+    if (group.empty() || !row.contains(d.pos)) return;
+    // Over a strip of another kind, or well past this kind's strips: nowhere.
+    if (const Strip* over = stripAt(d.pos); over && over->type != group[0]->type) return;
+    const ui::Rect first = group.front()->node->bounds(), last = group.back()->node->bounds();
+    if (d.pos.x < first.x - kStripW / 2 || d.pos.x > last.right() + kStripW / 2) return;
+    std::size_t gap = 0;
+    for (const Strip* st : group)
+        if (st->node->bounds().x + st->node->bounds().w / 2 < d.pos.x) ++gap;
+    std::optional<std::size_t> index;
+    if (track->type == model::StripType::Master) {
+        // Among the masters, tr_0 staying first.
+        const auto& masters = s.project->masters;
+        std::size_t slot = 0;
+        for (std::size_t i = 0; i < gap; ++i)
+            if (ids[i] != *dragged) ++slot;
+        slot = std::max<std::size_t>(slot, 1);
+        const auto at = static_cast<std::size_t>(
+            std::find(masters.begin(), masters.end(), *dragged) - masters.begin());
+        if (slot != at) index = slot;
+    } else {
+        // In front of the first strip of its own parent and type after the gap.
+        std::optional<model::Id> before;
+        for (std::size_t i = gap; i < ids.size() && !before; ++i)
+            if (ids[i] != *dragged && s.tracks.find(ids[i])->parent == track->parent)
+                before = ids[i];
+        index = views::reorderIndex(s, *dragged, before);
+    }
+    if (!index) return;
+    const float x = gap < group.size() ? group[gap]->node->bounds().x - 2
+                                       : group.back()->node->bounds().right() + 1;
+    d.marker = ui::Rect{x - 1, row.y, 3, row.h}.intersect(row);
+    d.index = *index;
+    d.drop = DragView::Drop::Reorder;
+}
+
+// A plug-in dropped among its strip's plug-ins (reorder) or onto another strip
+// (a copy, last in that chain).
+void Mixer::resolveFxDrop() {
+    DragView& d = *drag_;
+    d.drop = DragView::Drop::None;
+    const Strip* home = nullptr;
+    for (const Strip& st : strips_)
+        if (st.track == d.track) home = &st;
+    auto* homeList = home ? dynamic_cast<FxList*>(home->chain) : nullptr;
+    if (!homeList) return;
+    const FxSlot* dragged = nullptr;
+    for (const FxSlot* slot : homeList->slots())
+        if (slot->id() == "mixer.fx." + d.fx) dragged = slot;
+    if (!dragged) return;
+    d.source = dragged->bounds().intersect(homeList->bounds());
+    const Strip* over = stripAt(d.pos);
+    if (!over) return;
+    if (over != home) {
+        d.drop = DragView::Drop::Copy;
+        d.target = over->track;
+        d.marker = over->node->bounds().intersect(over->node->parent()->bounds());
+        return;
+    }
+    const auto& slots = homeList->slots();
+    std::size_t gap = 0;
+    for (const FxSlot* slot : slots)
+        if (slot->bounds().y + slot->bounds().h / 2 < d.pos.y) ++gap;
+    const auto track = model::Id::parse(d.track);
+    const model::Track* t = track ? app_.head().tracks.find(*track) : nullptr;
+    if (!t) return;
+    const std::size_t chainGap = gap < slots.size() ? slots[gap]->chainIndex : t->chain.size();
+    const auto index = chainMoveIndex(dragged->chainIndex, chainGap);
+    if (!index) return;
+    const float y =
+        gap < slots.size() ? slots[gap]->bounds().y - 2 : slots.back()->bounds().bottom() + 0.5f;
+    d.marker = ui::Rect{homeList->bounds().x, y - 0.5f, homeList->bounds().w, 3}.intersect(
+        homeList->bounds());
+    d.index = *index;
+    d.drop = DragView::Drop::Reorder;
+}
+
+// The drag is over: drop it (one command, one undo step) or let it go.
+void Mixer::endDrag(bool commit) {
+    const DragView done = *drag_;
+    *drag_ = DragView{};
+    ghost_.reset();
+    if (done.kind == DragView::Kind::None) return;
+    root_.requestAnimationFrame();
+    if (!commit || done.drop == DragView::Drop::None) return;
+    json::Value args = json::Value::object();
+    const char* command = "fx.move";
+    if (done.kind == DragView::Kind::Strip) {
+        command = "track.move";
+        args["track"] = done.track;
+        args["index"] = static_cast<std::int64_t>(done.index);
+    } else if (done.drop == DragView::Drop::Copy) {
+        command = "fx.copy";
+        args["fx"] = done.fx;
+        args["track"] = done.target;
+    } else {
+        args["fx"] = done.fx;
+        args["index"] = static_cast<std::int64_t>(done.index);
+    }
+    if (auto r = dispatcher_.execute({command, std::move(args), kOrigin}); !r && actions_.onError)
+        actions_.onError(std::string("mixer: ") + r.error().message);
+}
+
 void Mixer::update() {
     const model::Session& s = app_.head();
     if (console9_) console9_->setOn(s.project->console9);
@@ -464,6 +949,7 @@ void Mixer::update() {
 
 void Mixer::sync() {
     if (!visible()) return;
+    applyHeight();  // the window may have been resized
     if (app_.head().version == version_) return;
     version_ = app_.head().version;
     const std::string now = structure();

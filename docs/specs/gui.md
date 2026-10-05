@@ -226,6 +226,21 @@ channels, fader + pan + meters, Console 9 on/off as a project toggle with its
 level-matched behaviour explained in its tooltip. Meters update only when
 their entire ancestor chain is visible, and clear peak hold on reopening.
 
+A small "fx" button sits at each strip's top right (the TCP's button: the
+plugin browser on an empty chain, the chain window otherwise); the strip's
+plug-in chain lists every plug-in, scrolling when it is longer than its
+section. The panel's top edge resizes the mixer by drag and only the chain
+sections follow (meter, fader, buttons keep their size); a double-click on it
+restores the default, which fits five plug-ins. The height is clamped like the
+MIDI editor's (what the center column leaves less a strip of the shell) and
+saved in the UI sidecar's `mixer` section. Dragging a plug-in within its chain
+reorders it (`fx.move`); dropping it on any part of another strip copies it, with
+its live settings, last in that strip's chain (`fx.copy`). Dragging a strip's
+empty part moves it among the strips of its own type only (`track.move`, an
+index among its parent's children; `views/track_order.h` computes it, shared
+with the TCP). A drag shows an insertion bar or a target outline; Escape or a
+drop outside the strips cancels; each is one undo step.
+
 ### 4.5 FX chain and plugins
 
 Chain list with add (searchable browser over the plugin scan cache;
@@ -367,8 +382,9 @@ Nate on rendered mockups (2026-10-02, HUMAN_REVIEW #17;
   for notation; few font sizes; labels quiet, values prominent.
 - **Strip types as bindings:** Channel blue, Buss amber, Master red, in every
   palette, on the TCP badge, the mixer strip's top edge and the routing
-  matrix's marks. Masters carry a heavier spine (the mixer strip's left edge,
-  the routing marks) and sit pinned at the mixer's right edge. (Busses' double
+  matrix's marks. Masters carry a heavier spine on the routing marks; in the
+  mixer they look like every other strip (the same thin top stripe) and sit
+  pinned at its right edge. (Busses' double
   rule from the proposal is not drawn.)
 - **Track colours, for organizing:** a small set (red, orange, yellow, green,
   teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
