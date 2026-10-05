@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "product_fixture.h"
 
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <string>
@@ -282,6 +283,63 @@ TEST_CASE("mixer: a double-click on the strips' empty space adds a channel") {
     REQUIRE(f.mixer->strips().size() >= 3);
     const auto& added = f.track(f.mixer->strips()[1].track);
     CHECK(added.type == model::StripType::Channel);
+}
+
+TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the selection") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto c = f.addTrack("channel", "C");
+    f.refresh();
+    auto press = [&](const std::string& track, int button, unsigned mods) {
+        ui::PointerEvent e;
+        e.type = ui::PointerEvent::Type::Down;
+        e.pos = f.empty(track);
+        e.button = button;
+        e.mods = mods;
+        f.root->pointer(e);
+        e.type = ui::PointerEvent::Type::Up;
+        f.root->pointer(e);
+        f.refresh();
+    };
+    using V = std::vector<std::string>;
+    press(a, 1, 0);
+    CHECK(f.ui.selectedTracks == V{a});
+    press(c, 1, ui::kShift);  // a range, in strip order
+    CHECK(f.ui.selectedTracks == V{a, b, c});
+    press(b, 1, ui::kCtrl);  // toggled out
+    CHECK(f.ui.selectedTracks == V{a, c});
+    // Selected strips are highlighted.
+    auto pixel = [&](const std::string& track) {
+        f.root->damageAll();
+        f.root->frame(false);
+        const gui::Image image = f.root->readBack();
+        const ui::Rect r = f.strip(track).node->bounds();
+        const float ratio = static_cast<float>(image.width) / 1400.0f;
+        const auto x = static_cast<std::size_t>((r.x + 2) * ratio);
+        const auto y = static_cast<std::size_t>((r.y + r.h / 2) * ratio);
+        const std::size_t at = (y * static_cast<std::size_t>(image.width) + x) * 4;
+        return std::array<int, 3>{image.rgba[at], image.rgba[at + 1], image.rgba[at + 2]};
+    };
+    CHECK(pixel(a) == pixel(c));
+    CHECK(pixel(a) != pixel(b));
+    // A right-click on a selected strip keeps the selection; Delete removes it all.
+    press(c, 3, 0);
+    CHECK(f.ui.selectedTracks == V{a, c});
+    ui::Node* menu = f.root->find("track.menu." + c);
+    REQUIRE(menu);
+    const auto before = f.steps();
+    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 5 * 26 + 13};
+    f.pointer(ui::PointerEvent::Type::Move, del);
+    f.pointer(ui::PointerEvent::Type::Down, del);
+    f.pointer(ui::PointerEvent::Type::Up, del);
+    f.refresh();
+    CHECK_FALSE(f.app->head().tracks.find(*model::Id::parse(a)));
+    CHECK_FALSE(f.app->head().tracks.find(*model::Id::parse(c)));
+    CHECK(f.app->head().tracks.find(*model::Id::parse(b)));
+    CHECK(f.steps() == before + 1);
+    CHECK(f.errors.empty());
 }
 
 TEST_CASE("mixer: Alt+click on a plug-in removes it, in one undo step") {

@@ -1,11 +1,47 @@
 #include "app_actions.h"
+#include "track_menu.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "supple/json/parse.h"
 #include "supple/schema/schema.h"
+#include "supple/ui/node.h"
 
 namespace supple::gui {
+
+void selectTrack(UiState& ui, const std::string& track, unsigned mods,
+                 const std::vector<std::string>& order) {
+    auto& sel = ui.selectedTracks;
+    ui.tracksFocused = true;
+    if (mods & ui::kShift) {  // extend from the anchor, in the view's order
+        const std::string from = ui.trackAnchor.value_or(track);
+        auto a = std::find(order.begin(), order.end(), from);
+        auto b = std::find(order.begin(), order.end(), track);
+        if (a != order.end() && b != order.end()) {
+            if (a > b) std::swap(a, b);
+            sel.assign(a, b + 1);
+        } else {
+            sel = {track};
+        }
+        ui.trackAnchor = from;
+    } else if (mods & ui::kCtrl) {  // toggle one
+        const auto it = std::find(sel.begin(), sel.end(), track);
+        if (it == sel.end())
+            sel.push_back(track);
+        else
+            sel.erase(it);
+        ui.trackAnchor = track;
+    } else {
+        sel = {track};
+        ui.trackAnchor = track;
+    }
+}
+
+bool trackSelected(const UiState& ui, const std::string& track) {
+    return std::find(ui.selectedTracks.begin(), ui.selectedTracks.end(), track) !=
+           ui.selectedTracks.end();
+}
 namespace {
 
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
@@ -104,6 +140,28 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                         obj({{"item", "$each.item"}, {"at", "$playhead.beats"}})));
     registry_.add(bound("item.remove:selected", "Item: remove selected", "item.remove",
                         obj({{"item", "$each.item"}})));
+    actions::Action removeTracks;
+    removeTracks.id = "track.remove:selected";
+    removeTracks.name = "Track: remove selected";
+    removeTracks.description = "Remove every selected track (not the main master), one undo step.";
+    removeTracks.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        if (ui_.selectedTracks.empty()) return Error("action.selection", "select tracks first");
+        SUPPLE_TRY(gui::removeTracks(dispatcher_, app_.head(), ui_.selectedTracks));
+        return json::Value::object();
+    };
+    registry_.add(removeTracks);
+    // Delete: what was selected last, tracks (TCP, mixer) or items (arrange).
+    actions::Action remove;
+    remove.id = "edit.delete";
+    remove.name = "Edit: delete the selection";
+    remove.description =
+        "Remove the selected tracks when tracks were selected last, else the "
+        "selected items.";
+    remove.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        return run(ui_.tracksFocused && !ui_.selectedTracks.empty() ? "track.remove:selected"
+                                                                    : "item.remove:selected");
+    };
+    registry_.add(remove);
     for (auto [name, label] : {std::pair{"beats", "Project: items follow the beat"},
                                {"time", "Project: items follow time"},
                                {"beats_position", "Project: items follow the beat (start only)"}})

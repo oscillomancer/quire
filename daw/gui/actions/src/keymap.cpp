@@ -124,7 +124,7 @@ Keymap Keymap::defaults() {
     add({"S"}, "arrange", "item.split:playhead");
     add({"M"}, "arrange", "ui.marker.add");
     add({"Shift+R"}, "arrange", "ui.region.add");
-    add({"Delete"}, "arrange", "item.remove:selected");
+    add({"Delete"}, "arrange", "edit.delete");
     add({"Ctrl+C"}, "arrange", "ui.item.copy");
     add({"Ctrl+X"}, "arrange", "ui.item.cut");
     add({"Ctrl+V"}, "arrange", "ui.item.paste");

@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "supple/actions/actions.h"
 #include "supple/engine/app.h"
 
@@ -16,7 +20,16 @@ namespace supple::gui {
 // Per-project UI state (gui.md §1.2); persisted later to <project>.ui.json.
 struct UiState {
     std::vector<std::string> selectedTracks, selectedItems;
+    std::optional<std::string> trackAnchor;  // Shift+click extends from here
+    bool tracksFocused = false;  // tracks were selected last (Delete removes them, not items)
 };
+
+// A click on a track in a view that lists `order` (its row or strip order):
+// plain selects it alone, Ctrl toggles it, Shift extends from the anchor
+// (gui.md §4.2). The TCP and the mixer share the selection.
+void selectTrack(UiState& ui, const std::string& track, unsigned mods,
+                 const std::vector<std::string>& order);
+bool trackSelected(const UiState& ui, const std::string& track);
 
 // GUI-only commands: `gui.selection` (read-only selection for agents, §1.2).
 void registerGuiCommands(cmd::Registry& registry, const UiState& ui);
@@ -28,6 +41,7 @@ class AppActions {
 
     actions::ActionRegistry& registry() { return registry_; }
     actions::Keymap& keymap() { return keymap_; }
+    UiState& ui() { return ui_; }
     const std::filesystem::path& keymapFile() const { return keymapFile_; }
     actions::Context context(std::vector<std::string> sections = {"arrange", "global"}) const;
     Result<json::Value> run(const actions::Action& action,

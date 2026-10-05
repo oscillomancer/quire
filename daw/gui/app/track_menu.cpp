@@ -1,5 +1,6 @@
 #include "track_menu.h"
 
+#include <algorithm>
 #include <cctype>
 #include <memory>
 #include <tuple>
@@ -11,6 +12,36 @@
 #include "supple/ui/text_field.h"
 
 namespace supple::gui {
+
+Status removeTracks(cmd::Dispatcher& dispatcher, const model::Session& session,
+                    const std::vector<std::string>& tracks) {
+    // Deepest first: a folder can go once its children have.
+    std::vector<std::pair<int, model::Id>> order;
+    for (const std::string& text : tracks) {
+        const auto id = model::Id::parse(text);
+        if (!id || *id == model::kMaster || !session.tracks.find(*id)) continue;
+        int depth = 0;
+        for (const model::Track* t = session.tracks.find(*id); t && t->parent;
+             t = session.tracks.find(*t->parent))
+            ++depth;
+        order.emplace_back(depth, *id);
+    }
+    if (order.empty()) return {};
+    std::stable_sort(order.begin(), order.end(),
+                     [](const auto& a, const auto& b) { return a.first > b.first; });
+    const cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+    auto r = dispatcher.transact("Remove tracks", origin, [&]() -> Result<json::Value> {
+        for (const auto& [depth, id] : order) {
+            json::Value args = json::Value::object();
+            args["track"] = id.str();
+            auto one = dispatcher.execute({"track.remove", std::move(args), origin});
+            if (!one) return one;
+        }
+        return json::Value::object();
+    });
+    if (!r) return std::move(r).error();
+    return {};
+}
 
 void TrackMenu::commit(std::string_view command, json::Value args) const {
     auto r = dispatcher.execute(
@@ -46,13 +77,20 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
     m.run = [this, track, anchor] { openChannels(track, anchor); };
     items.push_back(std::move(m));
     items.push_back({"", "", {}, true, true});  // separator
+    // Delete: the whole selection when the track is part of it.
+    std::vector<std::string> doomed{track.str()};
+    if (selection) {
+        auto selected = selection();
+        if (std::find(selected.begin(), selected.end(), track.str()) != selected.end())
+            doomed = std::move(selected);
+    }
+    std::erase(doomed, model::kMaster.str());
     m = {};
-    m.label = "Delete";
-    m.enabled = track != model::kMaster;  // the main master stays
-    m.run = [this, track] {
-        json::Value args = json::Value::object();
-        args["track"] = track.str();
-        commit("track.remove", std::move(args));
+    m.label = doomed.size() > 1 ? "Delete " + std::to_string(doomed.size()) + " tracks" : "Delete";
+    m.enabled = !doomed.empty();  // the main master stays
+    m.run = [this, doomed] {
+        if (auto r = removeTracks(dispatcher, app.head(), doomed); !r && onError)
+            onError(r.error().message);
     };
     items.push_back(std::move(m));
     root.openPopup(

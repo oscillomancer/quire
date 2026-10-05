@@ -532,6 +532,7 @@ int main(int argc, char** argv) {
         g.onSelection = [&](const std::vector<model::Id>& items) {
             uiState.selectedItems.clear();
             for (model::Id id : items) uiState.selectedItems.push_back(id.str());
+            if (!items.empty()) uiState.tracksFocused = false;  // Delete takes the items now
         };
         g.onOpenMidi = [&](model::Id item) {
             if (auto r = midiEditor.open(item.str()); !r)
@@ -631,6 +632,7 @@ int main(int argc, char** argv) {
         g.setSelection(all);
         uiState.selectedItems.clear();
         for (model::Id id : all) uiState.selectedItems.push_back(id.str());
+        uiState.tracksFocused = false;
     });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });

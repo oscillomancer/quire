@@ -413,6 +413,67 @@ TEST_CASE("TCP rows refresh strip type and depth while keeping the same identity
     CHECK(arm->visible);
 }
 
+TEST_CASE("TCP: a selection survives a right-click; Delete removes all of it in one step") {
+    SendsFixture f;
+    const model::Id c = f.add("channel", "C");
+    f.sync();
+    auto press = [&](model::Id track, int button, unsigned mods) {
+        const auto row = f.view().trackLayout().indexOf(track);
+        REQUIRE(row);
+        const ui::Rect r = f.view().tcpRowRect(*row);
+        ui::PointerEvent e;
+        e.type = Pointer::Down;
+        e.button = button;
+        e.mods = mods;
+        e.pos = {r.x + 60, r.y + 10};
+        f.root->pointer(e);
+        e.type = Pointer::Up;
+        f.root->pointer(e);
+        f.sync();
+    };
+    press(f.a, 1, 0);
+    press(c, 1, ui::kCtrl);
+    CHECK(f.state.selectedTracks == std::vector<std::string>{f.a.str(), c.str()});
+    // A right-click on one of them keeps both; its menu deletes both, one step.
+    press(c, 3, 0);
+    CHECK(f.state.selectedTracks == std::vector<std::string>{f.a.str(), c.str()});
+    const std::string menu = "track.menu." + c.str();
+    ui::Node* m = f.root->find(menu);
+    REQUIRE(m);
+    const auto before = f.history();
+    const ui::Point del{m->bounds().x + 40, m->bounds().y + 5 * 26 + 13};  // Delete
+    f.pointer(Pointer::Move, del);
+    f.pointer(Pointer::Down, del);
+    f.pointer(Pointer::Up, del);
+    f.sync();
+    CHECK_FALSE(f.app->head().tracks.find(f.a));
+    CHECK_FALSE(f.app->head().tracks.find(c));
+    CHECK(f.app->head().tracks.find(f.b));
+    CHECK(f.history() == before + 1);
+    CHECK(f.state.selectedTracks.empty());
+    f.exec("history.undo");
+    f.sync();
+    CHECK(f.app->head().tracks.find(f.a));
+    CHECK(f.app->head().tracks.find(c));
+    // A right-click on a track outside the selection selects it alone.
+    press(f.a, 1, 0);
+    press(c, 1, ui::kCtrl);
+    press(f.b, 3, 0);
+    CHECK(f.state.selectedTracks == std::vector<std::string>{f.b.str()});
+    f.root->closePopup();
+    // The Delete key removes the selected tracks (tracks were selected last).
+    press(f.a, 1, 0);
+    press(c, 1, ui::kShift);  // a range: A, C (B, a buss, lists after them)
+    CHECK(f.state.selectedTracks.size() == 2);
+    const auto keyed = f.history();
+    f.root->key(SDLK_DELETE);
+    f.sync();
+    CHECK_FALSE(f.app->head().tracks.find(f.a));
+    CHECK_FALSE(f.app->head().tracks.find(c));
+    CHECK(f.history() == keyed + 1);
+    CHECK(f.errors.empty());
+}
+
 TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one undo step each)") {
     SendsFixture f;
     const auto row = f.view().trackLayout().indexOf(f.a);

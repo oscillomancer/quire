@@ -196,7 +196,12 @@ a track does not change parent by dragging. The panel's foot ("mixer",
 the last one to clear it. Adding a strip
 offers exactly **Channel, Buss or Master** (`track.add {type}`); a
 double-click on the panel's empty space (or the mixer's, §4.4) adds a channel
-and selects it.
+and selects it. Track selection is shared by the TCP and the mixer: a click on
+a row's or strip's empty part selects it alone, Ctrl+click toggles, Shift+click
+extends from the last click in that view's order; a right-click on a selected
+track keeps the selection. The track menu's Delete (and the Delete key, when
+tracks were selected after items) removes every selected track as one undo
+step (`track.remove:selected`; the main master stays; children before folders).
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view

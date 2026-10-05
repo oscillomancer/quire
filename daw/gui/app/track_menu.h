@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "supple/base/result.h"
 #include "supple/cmd/bus.h"
@@ -13,11 +14,18 @@
 
 namespace supple::gui {
 
+// Removes the tracks (a selection) as one undo step: the main master stays,
+// children go before their folders, and any refusal rolls the whole step back.
+Status removeTracks(cmd::Dispatcher& dispatcher, const model::Session& session,
+                    const std::vector<std::string>& tracks);
+
 struct TrackMenu {
     ui::Root& root;
     cmd::Dispatcher& dispatcher;
     engine::EngineApp& app;
     std::function<void(const std::string&)> onError;  // a refused command (status line)
+    // The selected tracks: Delete on one of them removes them all.
+    std::function<std::vector<std::string>()> selection;
 
     // `rename` starts the view's own rename (the TCP edits in place); empty:
     // a small rename field opens at the anchor (the mixer).

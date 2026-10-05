@@ -103,7 +103,9 @@ class Mixer {
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     MeterFeed& meters_;
-    TrackMenu trackMenu_;  // a strip's right-click menu
+    TrackMenu trackMenu_;                      // a strip's right-click menu
+    std::vector<std::string> shownSelection_;  // the track selection the strips show
+    void showSelection();
     ui::Node* panel_ = nullptr;
     ui::Node* row_ = nullptr;  // the strips' container
     ui::Toggle* console9_ = nullptr;

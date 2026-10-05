@@ -524,7 +524,10 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
         startRename();
         return true;
     }
-    if (panel_.cb_.select) panel_.cb_.select(*track_, e.mods);
+    // A right-click on a selected track keeps the selection (its menu acts on
+    // all of it); otherwise the press selects as usual.
+    const bool keep = e.button == 3 && panel_.cb_.selected && panel_.cb_.selected(*track_);
+    if (panel_.cb_.select && !keep) panel_.cb_.select(*track_, e.button == 3 ? 0 : e.mods);
     if (e.button == 1) panel_.beginReorder(*track_, e.pos);  // a drag from here moves the track
     // A right-click: the track's menu, at the pointer.
     if (e.button == 3 && panel_.cb_.menu) {

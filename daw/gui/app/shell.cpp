@@ -138,10 +138,11 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
     };
-    trackMenu_ = std::make_unique<TrackMenu>(
-        TrackMenu{root, dispatcher_, app_, [this](const std::string& e) {
-                      if (onError) onError(e);
-                  }});
+    trackMenu_ = std::make_unique<TrackMenu>(TrackMenu{root, dispatcher_, app_,
+                                                       [this](const std::string& e) {
+                                                           if (onError) onError(e);
+                                                       },
+                                                       [this] { return ui_.selectedTracks; }});
     tcp.mixer = [&actions] { (void)actions.run("ui.mixer"); };
     tcp.menu = [this](const model::Id& track, const ui::Rect& anchor,
                       std::function<void()> rename) {
@@ -199,6 +200,10 @@ void Shell::installOverlay(ui::Root& root) {
 void Shell::sync() {
     const model::Session& s = app_.head();
     const bool moved = s.version != shownVersion_;
+    if (ui_.selectedTracks != shownSelection_) {  // the mixer selects too
+        shownSelection_ = ui_.selectedTracks;
+        if (arrange_) arrange_->tcpPanel().invalidate();
+    }
     if (moved) {
         std::erase_if(ui_.selectedItems, [&](const std::string& text) {
             const auto id = model::Id::parse(text);
@@ -374,7 +379,8 @@ void Shell::addStrip(std::string_view type) {
     }
     const std::string created = (*r)["track"].asString();
     ui_.selectedTracks = {created};  // §4.2: the new strip is selected
-    selectAnchor_ = created;
+    ui_.trackAnchor = created;
+    ui_.tracksFocused = true;
 }
 
 Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {
@@ -493,44 +499,14 @@ void Shell::openInputMenu(const model::Id& track, const ui::Rect& anchor) {
         anchor);
 }
 
-bool Shell::isSelected(const model::Id& track) const {
-    const std::string id = track.str();
-    return std::find(ui_.selectedTracks.begin(), ui_.selectedTracks.end(), id) !=
-           ui_.selectedTracks.end();
-}
+bool Shell::isSelected(const model::Id& track) const { return trackSelected(ui_, track.str()); }
 
 void Shell::selectTrack(const model::Id& track, unsigned mods) {
-    const std::string id = track.str();
-    auto& sel = ui_.selectedTracks;
-    if (mods & ui::kShift) {  // extend from the anchor, in row order
-        const auto& rows = arrange_->trackLayout().rows();
-        auto index = [&](const std::string& want) {
-            for (std::size_t i = 0; i < rows.size(); ++i)
-                if (rows[i].track.str() == want) return static_cast<int>(i);
-            return -1;
-        };
-        const std::string from = selectAnchor_.value_or(id);
-        int a = index(from), b = index(id);
-        if (a >= 0 && b >= 0) {
-            if (a > b) std::swap(a, b);
-            sel.clear();
-            for (int i = a; i <= b; ++i)
-                sel.push_back(rows[static_cast<std::size_t>(i)].track.str());
-        } else {
-            sel = {id};
-        }
-        selectAnchor_ = from;
-    } else if (mods & ui::kCtrl) {  // toggle one
-        const auto it = std::find(sel.begin(), sel.end(), id);
-        if (it == sel.end())
-            sel.push_back(id);
-        else
-            sel.erase(it);
-        selectAnchor_ = id;
-    } else {
-        sel = {id};
-        selectAnchor_ = id;
-    }
+    std::vector<std::string> order;
+    for (const auto& row : arrange_->trackLayout().rows())
+        if (!row.env) order.push_back(row.track.str());
+    gui::selectTrack(ui_, track.str(), mods, order);
+    shownSelection_ = ui_.selectedTracks;
     arrange_->tcpPanel().invalidate();  // the highlight is the panel's own
 }
 

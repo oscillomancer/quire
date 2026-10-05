@@ -79,6 +79,7 @@ class Shell {
     // P5.14: the strip's automation lanes (show/hide; created when missing).
     void openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor);
 
+    std::vector<std::string> shownSelection_;  // the track selection the TCP shows
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
     std::unique_ptr<TrackMenu> trackMenu_;  // made in build() (needs the root)
@@ -94,7 +95,6 @@ class Shell {
     json::Value inputs_;
     double inputsAtMs_ = -1e9;
     ui::Root* root_ = nullptr;
-    std::optional<std::string> selectAnchor_;  // Shift+click extends from here
 };
 
 }  // namespace supple::gui

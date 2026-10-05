@@ -315,18 +315,30 @@ class StripFrame : public ui::Node {
         layout.gap = 4;
     }
     DragTracker drag;  // notify unset: this strip cannot be dragged
+    // The track selection the TCP shares (gui.md §4.2): a press on the strip's
+    // empty part selects (Ctrl toggles, Shift extends); a right-click keeps a
+    // selection the strip is part of.
+    std::function<void(unsigned mods)> select;
+    std::function<bool()> selected;
     void paint(ui::Canvas& c) override {
         const ui::Theme& t = c.theme();
         c.fillRect(bounds(), t.color("panel"));
+        if (selected && selected()) {  // highlighted and outlined, as in the TCP
+            c.fillRect(bounds(), t.color("selection").withAlpha(0.55f));
+            c.strokeRect({bounds().x + 0.5f, bounds().y + 0.5f, bounds().w - 1, bounds().h - 1},
+                         t.color("focus"), 1.0f);
+        }
         c.fillRect({bounds().x, bounds().y, bounds().w, 4}, t.color(color_));
         c.fillRect({bounds().right() - 1, bounds().y, 1, bounds().h}, t.color("rule"));
     }
     bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && menu_) {
-            menu_(e.pos);
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 3) {
+            if (select && !(selected && selected())) select(0);
+            if (menu_) menu_(e.pos);
             return true;
         }
-        if (!drag.notify) return false;
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && select) select(e.mods);
+        if (!drag.notify) return e.type == ui::PointerEvent::Type::Down && e.button == 1 && select;
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
             drag.press(e.pos);
             return true;
@@ -406,9 +418,11 @@ Mixer::Mixer(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
       dispatcher_(dispatcher),
       app_(app),
       meters_(meters),
-      trackMenu_{root, dispatcher, app, [this](const std::string& e) {
+      trackMenu_{root, dispatcher, app,
+                 [this](const std::string& e) {
                      if (actions_.onError) actions_.onError(e);
-                 }} {
+                 },
+                 [this] { return actions_.ui().selectedTracks; }} {
     actions_.addUi("ui.mixer", "View: mixer", [this] { toggle(); });
 }
 
@@ -445,6 +459,11 @@ void Mixer::applyHeight() {
     panel_->layout.height = ui::SizeRule::fixed(shown_);
     root_.relayout();
     root_.damageAll();
+}
+
+void Mixer::showSelection() {
+    shownSelection_ = actions_.ui().selectedTracks;
+    for (const Strip& st : strips_) st.node->invalidate();
 }
 
 void Mixer::run(std::string_view action, json::Value args) {
@@ -653,6 +672,13 @@ void Mixer::rebuild() {
             };
             chain.addSlot(std::move(slot));
         }
+        frame->select = [this, tid](unsigned mods) {
+            std::vector<std::string> shown;
+            for (const Strip& x : strips_) shown.push_back(x.track);
+            selectTrack(actions_.ui(), tid, mods, shown);
+            showSelection();
+        };
+        frame->selected = [this, tid] { return trackSelected(actions_.ui(), tid); };
         // Everything but masters can be dragged (tr_0 stays first).
         if (id != model::kMaster)
             frame->drag.notify = [this, tid](DragPhase phase, ui::Point p) {
@@ -945,6 +971,7 @@ void Mixer::update() {
 void Mixer::sync() {
     if (!visible()) return;
     applyHeight();  // the window may have been resized
+    if (actions_.ui().selectedTracks != shownSelection_) showSelection();  // the TCP changed it
     if (app_.head().version == version_) return;
     version_ = app_.head().version;
     const std::string now = structure();
