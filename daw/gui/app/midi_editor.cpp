@@ -1,5 +1,6 @@
 #include "midi_editor.h"
 #include "midi_event_list.h"
+#include "panel_grip.h"
 #include "panel_height.h"
 
 #include <SDL3/SDL_keycode.h>
@@ -679,51 +680,6 @@ class RollPlayhead : public ui::Node {
 
 // ----------------------------------------------------------------- panel
 
-// The border along the panel's top: drag to resize, double-click to reset.
-class Grip : public ui::Node {
-  public:
-    explicit Grip(MidiEditor& editor) : Node("midi.grip"), editor_(editor) {
-        interactive = true;
-        layout.height = ui::SizeRule::fixed(kGripHeight);
-    }
-    void paint(ui::Canvas& c) override {
-        const ui::Theme& t = c.theme();
-        const ui::Rect b = bounds();
-        c.fillRect(b, t.color("panel"));
-        c.fillRect({b.x, b.y, b.w, 1}, t.color("rule"));
-        c.fillRect({b.x + b.w / 2 - 14, b.y + b.h / 2, 28, 1}, t.color("ink-faint"));
-    }
-    bool onPointer(const ui::PointerEvent& e) override {
-        using T = ui::PointerEvent::Type;
-        if (e.type == T::Down && e.button == 1) {
-            if (e.clicks >= 2) {
-                editor_.setHeight(MidiEditor::kDefaultHeight);
-                return true;
-            }
-            dragging_ = true;
-            pressY_ = e.pos.y;
-            pressHeight_ = editor_.height();
-            if (ui::Root* r = root()) r->capture(this);
-            return true;
-        }
-        if (e.type == T::Move && dragging_) {
-            editor_.setHeight(pressHeight_ + (pressY_ - e.pos.y));  // up makes it taller
-            return true;
-        }
-        if (e.type == T::Up && dragging_) {
-            dragging_ = false;
-            if (ui::Root* r = root()) r->capture(nullptr);
-            return true;
-        }
-        return false;
-    }
-
-  private:
-    MidiEditor& editor_;
-    bool dragging_ = false;
-    float pressY_ = 0, pressHeight_ = 0;
-};
-
 // The docked panel. The wheel anywhere in it that no child used (the keys, the
 // lanes, the header) zooms the rows with Alt, the same as over the roll.
 class Panel : public ui::Node {
@@ -774,7 +730,10 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     panel->layout.dir = ui::Layout::Dir::Column;
     panel->layout.height = ui::SizeRule::fixed(height_);
     panel->visible = false;
-    panel->emplace<Grip>(*this);
+    auto& grip = panel->emplace<PanelGrip>("midi.grip", kGripHeight);
+    grip.height = [this] { return panel_->layout.height.value; };
+    grip.resize = [this](float h) { setHeight(h); };
+    grip.reset = [this] { setHeight(kDefaultHeight); };
     auto& header = panel->emplace<ui::Node>("midi.header");
     header.layout.dir = ui::Layout::Dir::Row;
     header.layout.height = ui::SizeRule::fixed(32);

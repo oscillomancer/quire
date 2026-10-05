@@ -142,6 +142,7 @@ class ArrangeView : public ui::Node {
 
   private:
     void damageViews();
+    float scrollHeight() const;
     void clampScroll();
     void applyFollow();
     void syncScrollbars();

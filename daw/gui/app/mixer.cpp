@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_keycode.h>
 
+#include "panel_grip.h"
 #include "panel_height.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
@@ -21,8 +22,11 @@ constexpr float kStripW = 92;
 // the rest (name, sends, rec, pan, fader, value, M/S, gaps, padding) is fixed.
 constexpr float kSlotH = 18, kSlotGap = 2;
 constexpr float kGripH = 5, kHeaderH = 30;
-constexpr float kFaderH = 133;       // the fader and meter row
-constexpr float kStripChrome = 159;  // the fixed rows, their gaps and the padding
+constexpr float kFaderH = 133;  // the fader and meter row
+// The fixed rows of a channel with no sends, their gaps and the padding (each
+// send adds kSendH; busses and masters have no arm/monitor row).
+constexpr float kStripChrome = 127;
+constexpr float kSendH = 14;
 constexpr float kDragThreshold = 4;
 
 // fx.move's index (among the chain without the plug-in) for dropping the
@@ -106,8 +110,13 @@ class FxSlot : public ui::Button {
         : Button(std::move(id), std::move(text), std::move(click)), chainIndex(at) {}
     const std::size_t chainIndex;  // its place in the track's chain
     DragTracker drag;
+    std::function<void()> remove;  // Alt+click
     bool onPointer(const ui::PointerEvent& e) override {
         const bool left = e.button == 1;
+        if (e.type == ui::PointerEvent::Type::Down && left && (e.mods & ui::kAlt) && remove) {
+            remove();  // the press goes no further: no click, no drag
+            return true;
+        }
         if (e.type == ui::PointerEvent::Type::Down && left) drag.press(e.pos);
         if (e.type == ui::PointerEvent::Type::Move && drag.move(e.pos)) return true;
         if (e.type == ui::PointerEvent::Type::Up && left && drag.release(e.pos)) {
@@ -180,55 +189,6 @@ class FxList : public ui::Node {
     std::vector<FxSlot*> slots_;
     ui::ScrollBar* bar_ = nullptr;
     float scroll_ = 0;
-};
-
-// The panel's top edge: drag to resize the mixer (the chain sections take the
-// difference), double-click to restore the default height.
-class ResizeGrip : public ui::Node {
-  public:
-    ResizeGrip() : Node("mixer.grip") {
-        interactive = true;
-        layout.height = ui::SizeRule::fixed(kGripH);
-    }
-    std::function<float()> height;      // the panel's height now
-    std::function<void(float)> resize;  // a new height
-    std::function<void()> reset;        // the default
-    void paint(ui::Canvas& c) override {
-        const ui::Theme& t = c.theme();
-        const bool live = hovered() || dragging_;
-        c.fillRect(bounds(), live ? t.color("selection") : t.color("panel"));
-        c.fillRect({bounds().x, bounds().y, bounds().w, 1}, t.color("rule"));
-        if (live)
-            c.fillRect({bounds().x + bounds().w / 2 - 16, bounds().y + 1, 32, 2}, t.color("focus"));
-    }
-    void onHover(bool) override { invalidate(); }
-    bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
-            if (e.clicks >= 2) {
-                if (reset) reset();
-                return true;
-            }
-            dragging_ = true;
-            pressY_ = e.pos.y;
-            start_ = height ? height() : 0;
-            invalidate();
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Move && dragging_) {
-            if (resize) resize(start_ + (pressY_ - e.pos.y));  // up makes it taller
-            return true;
-        }
-        if (e.type == ui::PointerEvent::Type::Up && dragging_) {
-            dragging_ = false;
-            invalidate();
-            return true;
-        }
-        return false;
-    }
-
-  private:
-    bool dragging_ = false;
-    float pressY_ = 0, start_ = 0;
 };
 
 // A run of strips side by side from `scroll` on (the scrolled ones clip).
@@ -487,7 +447,7 @@ std::unique_ptr<ui::Node> Mixer::build() {
     shown_ = height_;
     panel->layout.height = ui::SizeRule::fixed(shown_);
     panel->visible = false;
-    auto& grip = panel->emplace<ResizeGrip>();
+    auto& grip = panel->emplace<PanelGrip>("mixer.grip", kGripH);
     grip.height = [this] { return shown_; };
     grip.resize = [this](float h) { setHeight(std::min(h, maxHeight())); };
     grip.reset = [this] { setHeight(defaultHeight()); };
@@ -658,6 +618,13 @@ void Mixer::rebuild() {
             slot->drag.notify = [this, tid, fx](DragPhase phase, ui::Point p) {
                 dragFx(tid, fx, phase, p);
             };
+            slot->remove = [this, fx] {
+                json::Value args = json::Value::object();
+                args["fx"] = fx.str();
+                if (auto r = dispatcher_.execute({"fx.remove", std::move(args), kOrigin});
+                    !r && actions_.onError)
+                    actions_.onError(r.error().message);
+            };
             chain.addSlot(std::move(slot));
         }
         // Everything but masters can be dragged (tr_0 stays first).
@@ -665,10 +632,9 @@ void Mixer::rebuild() {
             frame->drag.notify = [this, tid](DragPhase phase, ui::Point p) {
                 dragStrip(tid, phase, p);
             };
-        // Sends: name and level.
+        // Sends: name and level, up to two; none leaves the room to the chain.
         auto& sends = frame->emplace<ui::Node>("mixer.sends." + tid);
         sends.layout.dir = ui::Layout::Dir::Column;
-        sends.layout.height = ui::SizeRule::fixed(2 * 14);
         int shown = 0;
         for (const auto& e : s.routes) {
             if (e.value->from.track != id || shown == 2) continue;
@@ -678,11 +644,14 @@ void Mixer::rebuild() {
                                     "caption", e.value->mute ? "ink-faint" : "ink-quiet")
                 .layout.height = ui::SizeRule::fixed(14);
         }
-        // Channels: arm and monitor.
+        sends.layout.height = ui::SizeRule::fixed(static_cast<float>(shown) * kSendH);
+        sends.visible = shown > 0;
+        // Channels: arm and monitor (busses and masters give the room to the chain).
         auto& rec = frame->emplace<ui::Node>("mixer.rec." + tid);
         rec.layout.dir = ui::Layout::Dir::Row;
         rec.layout.height = ui::SizeRule::fixed(20);
         rec.layout.gap = 3;
+        rec.visible = t.type == model::StripType::Channel;
         if (t.type == model::StripType::Channel) {
             st.arm = &rec.emplace<ui::Toggle>(
                 "mixer.arm." + tid, "R", "armed",

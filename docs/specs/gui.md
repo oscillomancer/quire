@@ -191,7 +191,9 @@ button) reorders the track among its siblings *of the same type* under the same
 parent: an insertion marker shows the drop, Escape cancels, and the release is
 one `track.move {track, index}` (`views::reorderIndex` computes the index;
 no-op drops commit nothing). A buss cannot be dropped between channels, and
-a track does not change parent by dragging. Adding a strip
+a track does not change parent by dragging. The panel's foot ("mixer",
+"+ strip") is a band the rows never cover; the tracks scroll far enough for
+the last one to clear it. Adding a strip
 offers exactly **Channel, Buss or Master** (`track.add {type}`).
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
@@ -242,7 +244,11 @@ their entire ancestor chain is visible, and clear peak hold on reopening.
 A small "fx" button sits at each strip's top right (the TCP's button: the
 plugin browser on an empty chain, the chain window otherwise); the strip's
 plug-in chain lists every plug-in, scrolling when it is longer than its
-section. The panel's top edge resizes the mixer by drag and only the chain
+section, and takes the room a strip's unused rows would leave (sends show
+only when there are some, up to two; busses and masters have no arm/monitor
+row). Alt+click on a plug-in removes it (`fx.remove`, one undo step). The
+panel's top edge (shared with the MIDI editor: it lights up under the pointer)
+resizes the mixer by drag and only the chain
 sections follow (meter, fader, buttons keep their size); a double-click on it
 restores the default, which fits five plug-ins. The height is clamped like the
 MIDI editor's (what the center column leaves less a strip of the shell) and
@@ -250,7 +256,7 @@ saved in the UI sidecar's `mixer` section. Dragging a plug-in within its chain
 reorders it (`fx.move`); dropping it on any part of another strip copies it, with
 its live settings, last in that strip's chain (`fx.copy`). Dragging a strip's
 empty part moves it among the strips of its own type only (`track.move`, an
-index among its parent's children; `views/track_order.h` computes it, shared
+index among its parent's children; `views::reorderIndex` in `track_layout.h` computes it, shared
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
 drop outside the strips cancels; each is one undo step.
 

@@ -78,6 +78,10 @@ class TcpPanel : public ui::Node {
     TcpPanel(const TrackLayout& layout, const Viewport& view, TcpCallbacks callbacks);
     ~TcpPanel() override;
 
+    // The band at the panel's foot ("mixer", "+ strip") that rows never cover;
+    // the arrange view scrolls this much further so the last row clears it.
+    static constexpr float kFootHeight = 26;
+
     // Values come from this session snapshot; the rows are rebound.
     void setSession(const model::Session& session);
     // Geometry stayed fixed: refresh only affected controls without rebinding.
@@ -136,6 +140,8 @@ class TcpPanel : public ui::Node {
     const Viewport& view_;
     TcpCallbacks cb_;
     model::Session session_;
+    ui::Node* rowsHost_ = nullptr;     // the rows, clipped above the foot
+    ui::Node* foot_ = nullptr;         // the foot band with its two buttons
     ui::Button* add_ = nullptr;        // "+ strip", at the panel's foot
     ui::Button* mixer_ = nullptr;      // "mixer" beside it
     std::vector<Row*> rows_;           // a pool: only visible rows exist

@@ -561,16 +561,47 @@ void TcpPanel::Row::startRename() {
 
 // --- the panel ---------------------------------------------------------------------
 
+namespace {
+// The rows' area: placed by the panel, which places each row itself.
+class RowsHost : public ui::Node {
+  public:
+    RowsHost() : Node("tcp.rows") { clipsChildren = true; }
+    void arrange(const ui::Canvas&, const ui::Rect& r) override { setBounds(r); }
+};
+
+// The panel's foot: an opaque band under the rows' area with "mixer" and
+// "+ strip" at its right.
+class Foot : public ui::Node {
+  public:
+    Foot() : Node("tcp.foot") {}
+    void arrange(const ui::Canvas& canvas, const ui::Rect& r) override {
+        setBounds(r);
+        float x = r.right() - 6;
+        for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            x -= 56;
+            (*it)->arrange(canvas, {x, r.bottom() - 22, 56, 18});
+            x -= 4;
+        }
+    }
+    void paint(ui::Canvas& c) override {
+        c.fillRect(bounds(), c.theme().color("panel"));
+        c.fillRect({bounds().x, bounds().y, bounds().w, 1}, c.theme().color("rule"));
+    }
+};
+}  // namespace
+
 TcpPanel::TcpPanel(const TrackLayout& rowLayout, const Viewport& view, TcpCallbacks callbacks)
     : Node("tcp", ui::Role::List), layout_(rowLayout), view_(view), cb_(std::move(callbacks)) {
     clipsChildren = true;
     alive_ = std::make_shared<TcpPanel*>(this);
-    add_ = &emplace<ui::Button>("tcp.add", "+ strip", [this] { openAddMenu(); });
-    add_->layout.width = ui::SizeRule::fixed(56);
-    add_->layout.height = ui::SizeRule::fixed(18);
-    mixer_ = &emplace<ui::Button>("tcp.mixer", "mixer", [this] {
+    rowsHost_ = &emplace<RowsHost>();
+    foot_ = &emplace<Foot>();  // after the rows: it paints over them
+    mixer_ = &foot_->emplace<ui::Button>("tcp.mixer", "mixer", [this] {
         if (cb_.mixer) cb_.mixer();
     });
+    add_ = &foot_->emplace<ui::Button>("tcp.add", "+ strip", [this] { openAddMenu(); });
+    add_->layout.width = ui::SizeRule::fixed(56);
+    add_->layout.height = ui::SizeRule::fixed(18);
 }
 
 // The three strip types, offered by the "+" (ADR-0019: exactly these).
@@ -902,11 +933,11 @@ void TcpPanel::bindRows() {
     for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
         const ui::Rect r = rowRect(i);
         if (r.bottom() <= bounds().y) continue;
-        if (r.y >= bounds().bottom()) break;
+        if (r.y >= bounds().bottom() - kFootHeight) break;  // under the foot
         (layout_.rows()[i].env ? shownLanes : shownRows).push_back(i);
     }
     while (envRows_.size() < shownLanes.size())
-        envRows_.push_back(&emplace<EnvRow>(*this, envRows_.size()));
+        envRows_.push_back(&rowsHost_->emplace<EnvRow>(*this, envRows_.size()));
     for (std::size_t i = 0; i < envRows_.size(); ++i) {
         if (i >= shownLanes.size()) {
             envRows_[i]->unbind();
@@ -916,7 +947,8 @@ void TcpPanel::bindRows() {
         envRows_[i]->visible = true;
         envRows_[i]->bind(*spec.env, spec.depth, session_);
     }
-    while (rows_.size() < shownRows.size()) rows_.push_back(&emplace<Row>(*this, rows_.size()));
+    while (rows_.size() < shownRows.size())
+        rows_.push_back(&rowsHost_->emplace<Row>(*this, rows_.size()));
     for (std::size_t i = 0; i < rows_.size(); ++i) {
         Row* row = rows_[i];
         if (i >= shownRows.size()) {  // scrolled away: release the meter, keep the node
@@ -940,6 +972,9 @@ void TcpPanel::bindRows() {
 void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
     rearrange_ = false;
+    const float foot = std::min(kFootHeight, r.h);
+    rowsHost_->arrange(canvas, {r.x, r.y, r.w, r.h - foot});
+    foot_->arrange(canvas, {r.x, r.bottom() - foot, r.w, foot});
     bindRows();
     for (Row* row : rows_) {
         if (!row->visible || !row->bound()) continue;
@@ -953,9 +988,6 @@ void TcpPanel::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         if (!row->visible || !row->bound()) continue;
         if (const auto at = layout_.indexOfEnv(row->env())) row->arrange(canvas, rowRect(*at));
     }
-    // The panel's foot: "mixer" (show or hide it) and "+ strip".
-    if (add_) add_->arrange(canvas, {r.right() - 62, r.bottom() - 22, 56, 18});
-    if (mixer_) mixer_->arrange(canvas, {r.right() - 122, r.bottom() - 22, 56, 18});
 }
 
 void TcpPanel::scrolled() {

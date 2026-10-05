@@ -1012,6 +1012,18 @@ TEST_CASE("golden: the TCP with one strip of each type") {
     root.damageAll();
     root.frame(false);
     golden(root, "tcp-strips.png");
+    // Scrolled to the end, the last strip clears the foot's "mixer" and
+    // "+ strip"; rows never paint or take clicks there.
+    auto* panel = static_cast<views::TcpPanel*>(root.find("tcp"));
+    const ui::Rect foot = root.find("tcp.foot")->bounds();
+    REQUIRE(panel->rowNode(*model::Id::parse(child)));
+    CHECK(panel->rowNode(*model::Id::parse(child))->bounds().bottom() <= foot.y + 0.5f);
+    CHECK(root.find("tcp.rows")->bounds().bottom() <= foot.y + 0.5f);
+    CHECK(root.content()->hitTest({foot.x + 10, foot.y + foot.h / 2}) !=
+          panel->rowNode(*model::Id::parse(child)));
+    const ui::Rect add = root.find("tcp.add")->bounds();
+    CHECK(add.y >= foot.y);
+    CHECK(root.content()->hitTest({add.x + 5, add.y + 5}) == root.find("tcp.add"));
 }
 
 TEST_CASE("the TCP's + offers exactly Channel, Buss and Master") {

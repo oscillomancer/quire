@@ -1125,19 +1125,25 @@ void ArrangeView::setViewport(const Viewport& v) {
     damageViews();
 }
 
+// The rows plus room past the last one, so it can scroll clear of the track
+// panel's foot (its "mixer" and "+ strip" band).
+float ArrangeView::scrollHeight() const {
+    return layout_.contentHeight() + (tcp_ ? TcpPanel::kFootHeight : 0.0f);
+}
+
 void ArrangeView::syncScrollbars() {
     if (!hbar_ || !vbar_) return;
     hbar_->setRange(static_cast<float>(totalSeconds()), static_cast<float>(viewWidthSeconds()));
     hbar_->setValue(static_cast<float>(view_.startSeconds));
     const float shown = lanes_ ? lanes_->bounds().h : 0.0f;
-    vbar_->setRange(layout_.contentHeight(), shown);
+    vbar_->setRange(scrollHeight(), shown);
     vbar_->setValue(view_.scrollY);
 }
 
 void ArrangeView::clampScroll() {
     const float visibleHeight = lanes_ ? lanes_->bounds().h : 0.0f;
     if (visibleHeight <= 0) return;  // not laid out yet: keep what was asked for
-    const float maxScroll = std::max(0.0f, layout_.contentHeight() - visibleHeight);
+    const float maxScroll = std::max(0.0f, scrollHeight() - visibleHeight);
     view_.scrollY = std::clamp(view_.scrollY, 0.0f, maxScroll);
 }
 
@@ -1145,8 +1151,7 @@ void ArrangeView::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     // Clamp before arranging: the rows the TCP binds must match the scroll the
     // frame will actually paint with (the visible height is known from `r`).
     const float visibleHeight = std::max(0.0f, r.h - kRulerHeight - ui::ScrollBar::kThickness);
-    view_.scrollY =
-        std::clamp(view_.scrollY, 0.0f, std::max(0.0f, layout_.contentHeight() - visibleHeight));
+    view_.scrollY = std::clamp(view_.scrollY, 0.0f, std::max(0.0f, scrollHeight() - visibleHeight));
     ui::Node::arrange(canvas, r);
     clampScroll();  // exact, now that the children have their bounds
     syncScrollbars();

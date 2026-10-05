@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_keycode.h>
 
+#include <array>
 #include <filesystem>
 #include <thread>
 
@@ -194,6 +195,34 @@ TEST_CASE("MIDI editor: dragging the top border resizes the panel; double-click 
     f.pointer(ui::PointerEvent::Type::Up, f.grip());
     CHECK(panel->bounds().h == near(gui::MidiEditor::kDefaultHeight));
     CHECK(f.editor->roll()->bounds().h > 100);
+}
+
+TEST_CASE("MIDI editor: its top border lights up under the pointer, like the mixer's") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto pixel = [&] {
+        f.root->damageAll();
+        f.root->frame(false);
+        const gui::Image image = f.root->readBack();
+        const ui::Point p = f.grip();
+        const float ratio = static_cast<float>(image.width) / f.root->find("window")->bounds().w;
+        const auto x = static_cast<std::size_t>(p.x * ratio),
+                   y = static_cast<std::size_t>(p.y * ratio);
+        const std::size_t at = (y * static_cast<std::size_t>(image.width) + x) * 4;
+        return std::array<int, 3>{image.rgba[at], image.rgba[at + 1], image.rgba[at + 2]};
+    };
+    const auto idle = pixel();
+    ui::PointerEvent move;
+    move.type = ui::PointerEvent::Type::Move;
+    move.pos = {f.grip().x - 60, f.grip().y};
+    f.root->pointer(move);
+    CHECK(f.root->find("midi.grip")->hovered());
+    CHECK(pixel() != idle);
 }
 
 TEST_CASE("MIDI editor: the panel height persists, and a too-large one is shown clamped") {

@@ -162,8 +162,8 @@ struct Fixture {
                      from.y + (to.y - from.y) * static_cast<float>(i) / 4});
         if (release) pointer(ui::PointerEvent::Type::Up, to);
     }
-    // A point on a strip no control uses: its sends rows.
-    ui::Point empty(const std::string& track) { return centre(node("mixer.sends." + track)); }
+    // A point on a strip no control uses: its name.
+    ui::Point empty(const std::string& track) { return centre(node("mixer.name." + track)); }
     void snapshot(const char* name) {
         const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS");
         if (!out) return;
@@ -237,6 +237,52 @@ TEST_CASE(
     // Slots that are scrolled out are not hit.
     CHECK(f.root->content()->hitTest({list->bounds().x + 5, list->bounds().y - 6}) !=
           f.node("mixer.fx.fx_1"));
+}
+
+TEST_CASE("mixer: the chain takes the room unused sends and arm rows would leave empty") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto bus = f.addTrack("buss", "Bus");
+    f.exec("route.add", R"({"from":")" + b + R"(","to":")" + bus + R"("})");
+    f.refresh();
+    // No sends: the chain reaches down to the arm/monitor row.
+    CHECK_FALSE(f.node("mixer.sends." + a)->visible);
+    CHECK(f.node("mixer.rec." + a)->bounds().y - f.strip(a).chain->bounds().bottom() <= 4.5f);
+    // A send takes one row out of the chain section.
+    CHECK(f.node("mixer.sends." + b)->visible);
+    CHECK(near(f.strip(a).chain->bounds().h - f.strip(b).chain->bounds().h, 14 + 4));
+    // A buss has no arm/monitor row: its chain reaches down to the pan.
+    CHECK_FALSE(f.node("mixer.rec." + bus)->visible);
+    CHECK(f.strip(bus).chain->bounds().h > f.strip(a).chain->bounds().h);
+    CHECK(near(f.strip(bus).fader->bounds().y, f.strip(a).fader->bounds().y));  // faders line up
+}
+
+TEST_CASE("mixer: Alt+click on a plug-in removes it, in one undo step") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto p1 = f.addFx(a, "Plumb");
+    const auto p2 = f.addFx(a, "Plumb");
+    f.refresh();
+    const auto before = f.steps();
+    ui::PointerEvent down;
+    down.type = ui::PointerEvent::Type::Down;
+    down.pos = f.centre(f.node("mixer.fx." + p1));
+    down.button = 1;
+    down.mods = ui::kAlt;
+    f.root->pointer(down);
+    ui::PointerEvent up = down;
+    up.type = ui::PointerEvent::Type::Up;
+    f.root->pointer(up);
+    f.root->frame(false);
+    CHECK(f.chain(a) == std::vector<std::string>{p2});
+    CHECK(f.steps() == before + 1);
+    f.refresh();
+    CHECK(f.root->find("mixer.fx." + p1) == nullptr);
+    f.exec("history.undo", "{}");
+    CHECK(f.chain(a) == std::vector<std::string>{p1, p2});
 }
 
 TEST_CASE("mixer: dragging the top edge resizes only the chain section; double-click resets") {
