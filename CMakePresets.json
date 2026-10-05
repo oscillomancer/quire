@@ -10,7 +10,7 @@
     { "name": "dev", "inherits": "base", "displayName": "Clang Debug",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON" } },
     { "name": "release", "inherits": "base", "displayName": "Clang Release",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "SUPPLE_WERROR": "ON" } },
     { "name": "gcc", "inherits": "base", "displayName": "GCC Debug",
       "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++",
                           "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON" } },

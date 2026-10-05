@@ -29,7 +29,7 @@ std::string exposureName(Exposure exposure) {
     }
     return {};
 }
-bool validName(std::string_view name) {
+[[maybe_unused]] bool validName(std::string_view name) {
     if (name.empty()) return false;
     bool segmentStart = true;
     for (char ch : name) {

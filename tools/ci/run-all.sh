@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 presets=("$@")
-[ ${#presets[@]} -eq 0 ] && presets=(dev gcc asan ubsan tsan rtsan)
+[ ${#presets[@]} -eq 0 ] && presets=(dev release gcc asan ubsan tsan rtsan)
 fail=0
 declare -A result
 python3 tools/license-check/check.py --root . && result[license]=pass || { result[license]=FAIL; fail=1; }

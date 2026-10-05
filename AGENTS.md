@@ -63,7 +63,7 @@ rather than picking one silently.
 ```sh
 tools/ci/build.sh            # configure + build + test, default dev preset
 cmake --workflow --preset dev
-tools/ci/run-all.sh          # every preset: dev, gcc, asan, ubsan, tsan, rtsan + license + format
+tools/ci/run-all.sh          # every preset: dev, release, gcc, asan, ubsan, tsan, rtsan + license + format
 tools/validator/build.sh     # pinned clap-validator 0.4.1 in the user-space cache
 tools/validator/run.sh build/dev/plugins/clap/ProbeSynth.clap build/dev/plugins/clap/Orrery.clap
 ```
