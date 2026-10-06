@@ -237,6 +237,11 @@ Nate's next list, done by the orchestrator:
   (play/stop only); R records, L loops; Alt+D the mixer; Alt+E the MIDI editor.
 - FX chain: rows reorder by drag (no arrows). Arrange: the marquee published its
   selection only on release, so the app's per-frame selection sync undid it.
+- Plug-in latency modes (Ferric, Plateau "Low Latency"): a restart a plug-in asks
+  for while the engine runs is now served (the plan takes it off the executors,
+  the same instance restarts, the new latency is compensated); VST3
+  kLatencyChanged reactivates as the SDK requires. VST3 builds made with
+  clap-wrapper only forward the request while their editor is open.
 
 ## Team (Hermes workers via Herdr; Codex retired)
 
