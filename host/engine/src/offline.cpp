@@ -194,9 +194,15 @@ host::Instance::Notifications InstancePool::service(Id id) {
     auto it = instances_.find(id);
     if (it == instances_.end() || !it->second.instance) return {};
     auto& entry = it->second;
-    if (entry.instance->active()) entry.latency = entry.instance->latency();
+    // A restart requested while processing happens here once it has stopped.
     entry.instance->serviceMainThread();
     auto notes = entry.instance->takeNotifications();
+    entry.restarting = entry.instance->restartPending();
+    if (entry.instance->active()) {
+        const std::uint32_t latency = entry.instance->latency();
+        notes.latencyChanged |= latency != entry.latency;
+        entry.latency = latency;
+    }
     if (!entry.instance->active() && !entry.failure && !notes.restartError &&
         entry.instance->processRequested() && entry.instance->sampleRate() > 0 &&
         entry.instance->maxFrames() > 0) {
@@ -217,6 +223,21 @@ host::Instance::Notifications InstancePool::service(Id id) {
                 entry.clearedAutomation.push_back(clear.id);
         }
     return notes;
+}
+
+void InstancePool::rememberLatency(Id id, std::uint32_t latency) {
+    if (auto it = instances_.find(id); it != instances_.end()) it->second.latency = latency;
+}
+
+bool InstancePool::restarting(Id id) const {
+    auto it = instances_.find(id);
+    return it != instances_.end() && it->second.restarting;
+}
+
+bool InstancePool::restarting(const host::Instance* instance) const {
+    for (const auto& [id, e] : instances_)
+        if (e.instance.get() == instance) return e.restarting;
+    return false;
 }
 
 std::uint32_t InstancePool::rememberedLatency(Id id) const {

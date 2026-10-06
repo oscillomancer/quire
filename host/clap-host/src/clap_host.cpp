@@ -1355,8 +1355,29 @@ bool Instance::needsAudioFlush() const {
     return active_ && hostState_->flushRequested.load();
 }
 
+bool Instance::restartPending() const {
+    if (vst3_) return active_ && vst3_->restartWanted();
+    if (remote_) return active_ && remote_->restartPending();
+    return active_ && hostState_->restartRequested.load();
+}
+
 bool Instance::serviceMainThread() {
-    if (vst3_) return vst3_->serviceMainThread();
+    if (vst3_) {
+        bool did = vst3_->serviceMainThread();
+        // kLatencyChanged: reactivate once processing has stopped.
+        if (!active_) {
+            vst3_->clearRestart();  // the next activation picks up the change
+        } else if (!processing_ && vst3_->restartWanted()) {
+            vst3_->clearRestart();
+            const double sr = sampleRate_;
+            const std::uint32_t maxFrames = maxFrames_;
+            deactivate();
+            if (auto result = activate(sr, 1, maxFrames); !result)
+                vst3RestartError_ = result.error();
+            did = true;
+        }
+        return did;
+    }
     if (remote_) return remote_->service(remoteNotes_, remoteLog_);
     HostState& h = *hostState_;
     bool did = false;
@@ -1563,7 +1584,11 @@ bool Instance::sleeping() const SUPPLE_RT {
 }
 
 Instance::Notifications Instance::takeNotifications() {
-    if (vst3_) return vst3_->takeNotifications();
+    if (vst3_) {
+        auto n = vst3_->takeNotifications();
+        n.restartError = std::exchange(vst3RestartError_, {});
+        return n;
+    }
     if (remote_) return std::exchange(remoteNotes_, Notifications{});
     HostState& h = *hostState_;
     Notifications n;

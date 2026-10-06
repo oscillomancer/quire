@@ -657,6 +657,7 @@ Status prepare(Plan& p, const Session& s) {
             }
             st.keyChannels = std::min<std::uint32_t>(in.sidechainChannels(), 2);
             st.latency = p.pool->failure(st.fx) ? p.pool->rememberedLatency(st.fx) : in.latency();
+            if (in.active()) p.pool->rememberLatency(st.fx, st.latency);
             st.instrument = in.audioInputChannels() == 0;
             if (in.audioOutputChannels() != 2)
                 return Error("engine.layout", in.info().name + " does not have a stereo output");
@@ -753,7 +754,9 @@ Status prepare(Plan& p, const Session& s) {
                 st.lanes.push_back(std::move(resolved->lane));
             }
         });
-    std::erase_if(p.instances, [](auto* in) { return !in->active(); });
+    // Inactive, or waiting for a restart it asked for: no executor runs it (the
+    // executors stop it on adopting this plan), so the restart can happen.
+    std::erase_if(p.instances, [&](auto* in) { return !in->active() || p.pool->restarting(in); });
     // Latency compensation, in topological order. A key lines up with its
     // stage's input: the node's input latency plus the stages before it.
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
@@ -1033,15 +1036,19 @@ Status prepare(Plan& p, const Session& s) {
     // The executors' shares (ADR-0014). Live propagates downstream, so a
     // renderer node never depends on a live one.
     std::vector<std::uint32_t> task(p.nodes.size(), 0);
+    // As p.instances: an instance waiting for its restart runs on neither.
+    auto runs = [&](const host::Instance* in) {
+        return in && in->active() && !(p.pool && p.pool->restarting(in));
+    };
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         (p.nodes[i].live ? p.liveNodes : p.rendererNodes).push_back(i);
         task[i] = static_cast<std::uint32_t>(p.rendererNodes.size() - 1);
         for (const Stage& st : p.nodes[i].chain)
-            if (st.instance && st.instance->active())
+            if (runs(st.instance))
                 (p.nodes[i].live ? p.liveInstances : p.rendererInstances).push_back(st.instance);
         for (const TakeChain& tc : p.nodes[i].takeChains)
             for (const Stage& st : tc.chain)
-                if (st.instance && st.instance->active())
+                if (runs(st.instance))
                     (p.nodes[i].live ? p.liveInstances : p.rendererInstances)
                         .push_back(st.instance);
     }

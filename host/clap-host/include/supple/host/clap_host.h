@@ -281,6 +281,11 @@ class Instance {
     // Handles request_callback, request_restart (while active), pending flushes
     // and due timers. Returns true if anything was done.
     bool serviceMainThread();
+    // The plug-in asked to be deactivated and reactivated (CLAP request_restart,
+    // a VST3 latency change), and the restart waits for processing to stop:
+    // the engine takes the instance off its executors, the next
+    // serviceMainThread() restarts it, and its new latency applies.
+    bool restartPending() const;
     // Flags the plugin raised since the last call (cleared on read).
     struct Notifications {
         bool stateDirty = false, paramsRescan = false, latencyChanged = false,
@@ -374,6 +379,7 @@ class Instance {
     std::unique_ptr<Vst3Instance> vst3_;
     std::atomic<const void*> owner_{nullptr};
     Notifications remoteNotes_;
+    std::optional<Error> vst3RestartError_;  // a failed VST3 reactivation, until read
     std::vector<std::string> remoteLog_;
     bool remoteEditor_ = false;        // the bridged plugin has an embeddable editor
     std::int64_t remotePolledMs_ = 0;  // when its editor requests were last asked for

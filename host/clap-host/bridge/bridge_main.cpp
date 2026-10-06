@@ -383,6 +383,7 @@ struct Bridge {
                 w.u32(instance->latency());  // a restart may have changed them silently
                 w.u32(instance->tail());
                 w.u8(instance->reportsTail() ? 1 : 0);
+                w.u8(instance->restartPending() ? 1 : 0);  // waits for processing to stop
                 w.u8(n.restartError ? 1 : 0);
                 if (n.restartError) w.error(*n.restartError);
                 return reply(w);

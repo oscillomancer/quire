@@ -31,7 +31,7 @@ namespace supple::host::bridge {
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 6 (unreleased): error details, restart failures, complete output event
 // metadata in shared memory, an idle-output drain, process wake and ordered clears.
-inline constexpr std::uint32_t kVersion = 6;
+inline constexpr std::uint32_t kVersion = 7;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;

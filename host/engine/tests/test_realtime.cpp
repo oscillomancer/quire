@@ -1379,6 +1379,68 @@ TEST_CASE("anticipative monitoring: heard while stopped; arming mid-play hands t
     CHECK(engine.lastStopOnAudioThread());
 }
 
+// A plug-in's latency mode (Ferric's and Plateau's "Low Latency"): changing
+// it while the engine runs makes the plug-in request a restart, which waits
+// for processing to stop. The engine takes it off its executors, restarts the
+// same instance and compensates its new latency.
+TEST_CASE("a plug-in that asks to restart while processing gets restarted with its new latency" *
+          doctest::description("rt")) {
+    for (const bool anticipative : {false, true}) {
+        INFO("anticipative " << anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend(rampInput(96000));
+        Engine engine(pool, media, anticipative ? EngineOptions{.workers = 2} : kInCallback);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        auto withLatency = [](const char* choice) {
+            auto s = synthSession(0, "com.suppleaudio.test.gain");
+            model::EditTxn t(s, 5);
+            for (const auto& e : s.fx)
+                if (e.value->plugin.id == "com.suppleaudio.test.gain")
+                    t.modify<model::FxInstance>(e.id, [&](model::FxInstance& fx) {
+                        fx.patch =
+                            json::parse(
+                                std::string(
+                                    R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": ")") +
+                                choice + R"("}})")
+                                .value();
+                    });
+            return t.commit().value();
+        };
+        const auto none = withLatency("none");
+        Id gain;
+        for (const auto& e : none.fx)
+            if (e.value->plugin.id == "com.suppleaudio.test.gain") gain = e.id;
+        REQUIRE(engine.load(none).ok());
+        REQUIRE(engine.awaitPlan());
+        engine.play();
+        auto run = [&](int cycles) {
+            if (anticipative)
+                runAhead(engine, backend, cycles, 256);
+            else
+                backend.run(cycles);
+            engine.service();
+        };
+        run(20);
+        host::Instance* instance = pool.find(gain);
+        REQUIRE(instance);
+        CHECK(instance->latency() == 0);
+        CHECK(instance->processing());
+        // The mode changes while playing: the plug-in asks for a restart.
+        REQUIRE(engine.load(withLatency("short")).ok());
+        for (int i = 0; i < 40 && instance->latency() != 64; ++i) run(4);
+        CHECK(pool.find(gain) == instance);  // restarted, not recreated
+        CHECK(instance->latency() == 64);
+        CHECK(pool.rememberedLatency(gain) == 64);
+        CHECK_FALSE(pool.restarting(gain));
+        // Back on its executor, processing, with the new compensation.
+        for (int i = 0; i < 20 && !instance->processing(); ++i) run(4);
+        CHECK(instance->processing());
+        CHECK(engine.processErrors() == 0);
+        engine.stop();
+    }
+}
+
 // --- the transport loop (ADR-0015) --------------------------------------------------------------
 
 TEST_CASE("loop playback wraps without a gap: the output is the offline render, unrolled" *

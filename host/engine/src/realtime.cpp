@@ -572,9 +572,13 @@ void Engine::service() {
             if (!instance) continue;
             serviced.insert(instance);
             const bool active = instance->active();
+            const bool restarting = plugins_.restarting(fx.id);
             auto notes = plugins_.service(fx.id);
+            // A restart waiting on processing takes the plug-in off the
+            // executors; once restarted, its (new) latency is compensated.
             reload |= notes.paramsRescan || !notes.paramsClear.empty() ||
-                      notes.restartError.has_value() || active != instance->active();
+                      notes.restartError.has_value() || active != instance->active() ||
+                      notes.latencyChanged || restarting != plugins_.restarting(fx.id);
             drainIdle(*instance, fx.id, publishedGen_);
         }
         // Replaced instances still belong to older executor plans. Keep their

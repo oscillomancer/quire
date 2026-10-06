@@ -383,6 +383,7 @@ struct Vst3Instance::State {
     PendingEdits changes;
     std::atomic<std::uint32_t> dropped{0};
     std::atomic<bool> latencyChanged{false};
+    std::atomic<bool> restartWanted{false};  // kLatencyChanged: reactivate to apply
 };
 
 Vst3Instance::Vst3Instance() : state_(std::make_unique<State>()) {}
@@ -598,6 +599,10 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
         return Error("host.activate", "VST3 component refused processing setup");
     s.active = true;
     s.rate = rate;
+    // A latency the plug-in reports while being activated is already current:
+    // a notification, not a request to activate it again.
+    if (s.handler->restart.fetch_and(~vst::kLatencyChanged) & vst::kLatencyChanged)
+        s.latencyChanged = true;
     return okStatus();
 }
 void Vst3Instance::deactivate() {
@@ -957,7 +962,10 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
 
 bool Vst3Instance::serviceMainThread() {
     const auto flags = state_->handler->restart.exchange(0);
-    if (flags & vst::kLatencyChanged) state_->latencyChanged = true;
+    if (flags & vst::kLatencyChanged) {
+        state_->latencyChanged = true;
+        state_->restartWanted = true;  // "the host has to deactivate and reactivate"
+    }
     bool did = flags != 0;
     const auto now = std::chrono::steady_clock::now();
     // Copy first: a timer callback may (un)register timers.
@@ -1079,6 +1087,9 @@ int Vst3Instance::nextTimerMs() const {
 }
 
 bool Vst3Instance::takeEdited() { return state_->handler->edited.exchange(false); }
+bool Vst3Instance::restartWanted() const { return state_->restartWanted.load(); }
+void Vst3Instance::clearRestart() { state_->restartWanted = false; }
+
 Instance::Notifications Vst3Instance::takeNotifications() {
     Instance::Notifications n;
     n.latencyChanged = state_->latencyChanged.exchange(false);

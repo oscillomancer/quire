@@ -200,6 +200,18 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     CHECK((*delay)->serviceMainThread());
     CHECK((*delay)->takeNotifications().latencyChanged);
     CHECK((*delay)->latency() == 64);
+    CHECK_FALSE((*delay)->restartPending());  // not processing: reactivated at once
+    // kLatencyChanged while processing: the reactivation VST3 asks for waits.
+    REQUIRE((*delay)->startProcessing());
+    REQUIRE((*delay)->setParam(1, 0).ok());
+    (*delay)->serviceMainThread();
+    CHECK((*delay)->restartPending());
+    CHECK((*delay)->active());
+    (*delay)->stopProcessing();
+    CHECK((*delay)->serviceMainThread());
+    CHECK_FALSE((*delay)->restartPending());
+    CHECK((*delay)->active());
+    CHECK((*delay)->latency() == 0);
     (*delay)->deactivate();
 
     auto gain = named("Test VST3 Gain");
@@ -703,7 +715,8 @@ TEST_CASE("lifecycle: a restart requested while processing waits until processin
     g.serviceMainThread();  // still processing: must not restart, must keep the request
     CHECK(g.active());
     CHECK(g.latency() == 0);
-    g.deactivate();  // refused while processing
+    CHECK(g.restartPending());  // the engine takes it off its executors for this
+    g.deactivate();             // refused while processing
     CHECK(g.active());
     bool logged = false;
     for (const auto& line : g.takeLog())
@@ -713,6 +726,27 @@ TEST_CASE("lifecycle: a restart requested while processing waits until processin
     CHECK(g.serviceMainThread());
     CHECK(g.active());
     CHECK(g.latency() == 64);
+    CHECK_FALSE(g.restartPending());
+}
+
+TEST_CASE("lifecycle: a bridged plug-in's restart waits for processing too, and says so") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE_MESSAGE(inst, (inst ? "" : inst.error().message));
+    auto& g = **inst;
+    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.startProcessing());
+    Buffers buf(64);
+    Event e{.kind = Event::Kind::Param, .paramId = 1, .value = 1.0};  // latency "short"
+    REQUIRE(g.process(buf.block(64, std::span<const Event>(&e, 1))));
+    g.serviceMainThread();
+    CHECK(g.restartPending());
+    CHECK(g.latency() == 0);
+    g.stopProcessing();
+    for (int i = 0; i < 10 && g.latency() != 64; ++i) g.serviceMainThread();
+    CHECK(g.latency() == 64);
+    CHECK_FALSE(g.restartPending());
+    g.deactivate();
 }
 
 TEST_CASE("lifecycle: request_flush while active is served on the audio thread") {
@@ -1427,7 +1461,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 6);
+    CHECK(bridge::kVersion == 7);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {

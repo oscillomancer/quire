@@ -86,7 +86,15 @@ never by concurrent accumulation — so results are thread-count independent.
   plus the monitored chain's latency so it lands where it was played.
 - Runtime latency changes follow ARCHITECTURE §6: `request_restart` → new
   plan built in the background → swap at a block boundary with a 10 ms
-  crossfade on affected paths.
+  crossfade on affected paths. As built (2026-10-06): a restart the plug-in
+  asks for while processing (CLAP `request_restart`, VST3 `kLatencyChanged`,
+  e.g. a "Low Latency" mode) is `Instance::restartPending()`; the pool marks it
+  `restarting`, the engine reloads, and that plan leaves the instance off both
+  executors' instance lists (its stage passes through, compensated). Once the
+  executors have adopted it the instance is no longer processing, the next
+  `InstancePool::service()` restarts the same instance (its state kept), and a
+  latency that moved since the last service (`latencyChanged`) reloads the plan
+  with the new compensation.
 
 ### 1.4 Automation
 

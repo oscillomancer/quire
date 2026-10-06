@@ -59,10 +59,18 @@ class InstancePool {
     std::vector<std::pair<model::Id, std::string>> failed() const;
     host::Instance* find(model::Id id) const;
     // Main thread: service and retain restart failures until fx.restart/replacement.
+    // A latency that moved since the last service (a plug-in restarted, e.g. a
+    // low-latency mode) is reported as latencyChanged.
     host::Instance::Notifications service(model::Id id);
+    // The plug-in asked for a restart that waits for its processing to stop:
+    // plans leave it off their executors (its stage passes through,
+    // compensated) until service() has restarted it.
+    bool restarting(model::Id id) const;
+    bool restarting(const host::Instance* instance) const;
     std::vector<std::pair<model::Id, Error>> failedErrors() const;
     const Error* failure(model::Id id) const;
     std::uint32_t rememberedLatency(model::Id id) const;
+    void rememberLatency(model::Id id, std::uint32_t latency);  // what a plan compensated
     bool automationCleared(model::Id id, std::uint32_t param) const;
     void resetAutomation(model::Id id);  // explicit model reload
     // Main thread, only after applying plug-in-originated values to its model
@@ -80,6 +88,7 @@ class InstancePool {
         std::string pluginId;
         model::Isolation isolation = model::Isolation::InProcess;
         std::uint32_t latency = 0;
+        bool restarting = false;  // a restart the plug-in asked for waits on processing
         std::optional<Error> failure;
         std::vector<std::uint32_t> clearedAutomation;
         std::string appliedState;  // canonical patch text or blob hash last applied

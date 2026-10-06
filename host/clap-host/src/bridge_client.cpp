@@ -491,6 +491,7 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     latency_ = r.u32();
     tail_ = r.u32();
     reportsTail_ = r.u8() != 0;
+    restartPending_ = r.u8() != 0;
     if (r.u8()) notes.restartError = r.error();
     notes.stateDirty |= n.stateDirty;
     if (n.paramsRescan) notes.paramsClear.clear();

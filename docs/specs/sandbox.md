@@ -266,7 +266,9 @@ paths, locations and hints.
   refuses (then `process()` returns false); `deactivate()` while processing is
   ignored and logged; destroying a processing instance stops it first (caller
   bug, recovered). `request_restart` raised while processing stays pending
-  until processing stops; `request_flush` while active is served by the next
+  until processing stops (`restartPending()` says so, also for a bridged
+  instance and a VST3 `kLatencyChanged`, which VST3 answers with a
+  deactivate/activate; one reported during activation is only a notification); `request_flush` while active is served by the next
   `process()`/`flushParams()` on the audio thread (`needsAudioFlush()`).
 - **Event arena:** queued `setParam()` changes only take the slots left after
   the block's own events; the rest stay queued for the next block. Block

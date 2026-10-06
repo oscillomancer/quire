@@ -93,7 +93,8 @@ syscalls per block for the data, not just the wake-up).
   when bridged. The one audio-thread syscall exception is scoped with
   `rt::ScopedSanctionedSyscall` (rtsan).
 - Latency and tail come back with every `Service` reply (a restart inside
-  the bridge may change them without a notification).
+  the bridge may change them without a notification), with whether a restart
+  waits for processing to stop (protocol version 7).
 - Engine: `InstancePool` creates bridged instances for `dedicated` and (for
   now) `shared_bridge`; replaced or restarted instances are retired and freed
   at the next safe prune. `fx.set {isolation}`, `fx.restart {fx}`,

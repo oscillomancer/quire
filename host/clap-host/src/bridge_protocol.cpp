@@ -258,7 +258,7 @@ bool validReply(Op op, Reader r) {
             r.skip(5);  // droppedEvents, needsAudioFlush
             const auto lines = r.u32();
             for (std::uint32_t i = 0; i < lines && r.ok(); ++i) r.skipString();
-            r.skip(9);
+            r.skip(10);  // latency, tail, reportsTail, restartPending
             if (r.u8()) (void)r.error();
             break;
         }

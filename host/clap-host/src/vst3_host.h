@@ -35,6 +35,10 @@ class Vst3Instance {
     void flushParams() SUPPLE_RT;
     void reset() SUPPLE_RT;
     bool serviceMainThread();  // also runs the editor's due run-loop timers
+    // kLatencyChanged: the plug-in must be deactivated and reactivated (the
+    // Instance does it once processing has stopped).
+    bool restartWanted() const;
+    void clearRestart();
     // Editor (main thread): see Instance's editor API.
     bool hasEditor();
     Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);

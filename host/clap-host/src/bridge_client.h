@@ -79,6 +79,7 @@ class RemoteInstance {
     // serviceMainThread + notifications + log in one round trip.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
     bool needsAudioFlush() const { return needsAudioFlush_; }
+    bool restartPending() const { return restartPending_; }  // as of the last service()
     bool processRequested() const SUPPLE_RT {
         return processRequested_.load(std::memory_order_acquire);
     }
@@ -119,7 +120,7 @@ class RemoteInstance {
     std::uint32_t seq_ = 0;
     int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
     std::uint32_t latency_ = 0, tail_ = 0;
-    bool reportsTail_ = false, needsAudioFlush_ = false;
+    bool reportsTail_ = false, needsAudioFlush_ = false, restartPending_ = false;
     std::atomic<bool> processRequested_{false};
 };
 
