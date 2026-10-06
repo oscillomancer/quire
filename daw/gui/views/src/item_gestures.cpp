@@ -715,6 +715,9 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                             selection_.push_back(item.id);
                     }
                 }
+                // Published as it grows: the app re-applies its selection every
+                // frame, which would otherwise undo the marquee before release.
+                changed();
                 break;
             }
             case Drag::Comp:

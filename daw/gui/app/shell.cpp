@@ -74,6 +74,7 @@ Shell::Shell(engine::EngineApp& app, cmd::Dispatcher& dispatcher, UiState& ui, s
              peaks::PeakService& peaks, MeterFeed& meters, InputsSource inputs)
     : app_(app),
       dispatcher_(dispatcher),
+      selectionEdit_(dispatcher, app, ui),
       ui_(ui),
       status_(std::move(status)),
       peaks_(peaks),
@@ -148,16 +149,16 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
                       std::function<void()> rename) {
         trackMenu_->open(track, anchor, std::move(rename));
     };
-    // "fx": the chain, or straight to the plugin browser when it is empty.
-    tcp.fx = [this, &actions](const model::Id& track) {
-        const model::Track* t = app_.head().tracks.find(track);
-        const actions::Action* action =
-            actions.registry().find(t && !t->chain.empty() ? "ui.fx.chain" : "ui.fx.add");
+    // "fx": the chain window; "+": the plugin browser on its own.
+    auto runFor = [this, &actions](const char* id, const model::Id& track) {
+        const actions::Action* action = actions.registry().find(id);
         if (!action) return;
         json::Value args = json::Value::object();
         args["track"] = track.str();
         if (auto r = actions.run(*action, args); !r && onError) onError(r.error().message);
     };
+    tcp.fx = [runFor](const model::Id& track) { runFor("ui.fx.chain", track); };
+    tcp.addFx = [runFor](const model::Id& track) { runFor("ui.fx.add", track); };
     tcp.addSend = [this](const model::Id& from, const model::Id& to) {
         json::Value args = json::Value::object();
         args["from"] = from.str();
@@ -270,6 +271,16 @@ std::string Shell::inputText(const model::Id& track, const std::string& channels
         out += name;
     }
     return out.empty() ? ("in " + channels) : out;
+}
+
+std::string Shell::inputLabel(const model::Id& track) const {
+    const model::Session& s = app_.head();
+    std::string channels;
+    if (const model::Track* tr = s.tracks.find(track); tr && tr->record.input)
+        if (const model::Route* r = s.routes.find(*tr->record.input); r && r->from.hwChannels)
+            for (std::size_t i = 0; i < r->from.hwChannels->size(); ++i)
+                channels += (i ? "/" : "") + std::to_string((*r->from.hwChannels)[i]);
+    return inputText(track, channels);
 }
 
 void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
@@ -511,6 +522,11 @@ void Shell::selectTrack(const model::Id& track, unsigned mods) {
 }
 
 void Shell::commit(std::string_view command, json::Value args, std::string gesture) {
+    if (command == "track.set") {  // a strip control: the whole selection when it is selected
+        if (auto r = selectionEdit_.set(std::move(args), gesture); !r && onError)
+            onError(r.error().message);
+        return;
+    }
     cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
     origin.gesture = std::move(gesture);
     auto r = dispatcher_.execute({std::string(command), std::move(args), std::move(origin)});

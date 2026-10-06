@@ -34,7 +34,9 @@ Theme Theme::dark(Palette palette) {
                         {"armed", 0xd6453au},
                         {"agent", 0x9b84d6u},
                         {"meter", 0x8fb27au},
-                        {"meter-hot", 0xd8b04au}})
+                        {"meter-hot", 0xd8b04au},
+                        {"mute", 0xd9773fu},
+                        {"solo", 0xe0c341u}})
         t.colors_[k] = Color::hex(v);
     // Track colours: muted enough for the graphite ground.
     for (auto [k, v] : {std::pair{"track-red", 0xc96a5eu},
@@ -82,7 +84,9 @@ Theme Theme::light(Palette palette) {
                         {"focus", 0x3f6ea8u},
                         {"channel", 0x3f6ea8u},
                         {"buss", 0xa57d24u},
-                        {"master", 0xa4442fu}})
+                        {"master", 0xa4442fu},
+                        {"mute", 0xc0612au},
+                        {"solo", 0xa8890fu}})
         t.colors_[k] = Color::hex(v);
     for (auto [k, v] : {std::pair{"track-red", 0xb4493cu},
                         {"track-orange", 0xb8692au},

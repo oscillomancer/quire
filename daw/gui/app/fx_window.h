@@ -37,6 +37,8 @@ class FxWindow {
         // Open (or close, when open) a plugin's own editor (PluginWindows in the app);
         // errors are shown.
         std::function<Status(model::Id)> openEditor;
+        // A failure with no window open to show it (the browser's add).
+        std::function<void(const std::string&)> onError = {};
     };
 
     FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root, Hooks hooks,
@@ -50,7 +52,7 @@ class FxWindow {
     std::optional<model::Id> take() const { return take_; }
     // The `ui.fx.chain` action: a track id in `prompt`, else the selected track.
     Status openFor(const UiState& ui, const json::Value& prompt);
-    // The same, with the plugin browser open on top (ui.fx.add).
+    // The plugin browser alone, adding to that track's chain (ui.fx.add).
     Status openToAdd(const UiState& ui, const json::Value& prompt);
     void close();
     bool isOpen() const { return page_ != nullptr; }
@@ -91,7 +93,9 @@ class FxWindow {
     std::string nameOf(model::Id fx) const;
     std::string latencyOf(model::Id fx);
     void moveFx(model::Id fx, int delta);
+    void dragRow(model::Id fx, int phase, ui::Point p);  // phase: Row::Phase
     void addFx(const std::string& pluginId);
+    void addFxTo(model::Id track, const std::string& pluginId);
     void promptSaveChain();
     void saveChain();
     void loadChainMenu(bool replace);

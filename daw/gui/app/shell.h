@@ -11,6 +11,7 @@
 
 #include "app_actions.h"
 #include "meter_feed.h"
+#include "selection_edit.h"
 #include "supple/engine/app.h"
 #include "supple/json/value.h"
 #include "supple/peaks/peaks.h"
@@ -67,6 +68,10 @@ class Shell {
     // Adds a strip of a type ("channel", "buss", "master") and selects it: the
     // TCP's "+ strip", and a double-click on the TCP's or the mixer's empty space.
     void addStrip(std::string_view type);
+    // The record input picker at `anchor` and what a strip's input button says
+    // (the TCP's and the mixer's): the port names, "midi *", or "in —".
+    void openInputMenu(const model::Id& track, const ui::Rect& anchor);
+    std::string inputLabel(const model::Id& track) const;
 
   private:
     bool isSelected(const model::Id& track) const;
@@ -75,13 +80,13 @@ class Shell {
     // What the strip's input button says: the port names when the engine's list
     // is at hand, the channel numbers otherwise.
     std::string inputText(const model::Id& track, const std::string& channels) const;
-    void openInputMenu(const model::Id& track, const ui::Rect& anchor);
     // P5.14: the strip's automation lanes (show/hide; created when missing).
     void openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor);
 
     std::vector<std::string> shownSelection_;  // the track selection the TCP shows
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
+    SelectionEdit selectionEdit_;           // a strip control on a selected track: all of them
     std::unique_ptr<TrackMenu> trackMenu_;  // made in build() (needs the root)
     UiState& ui_;
     std::string status_;

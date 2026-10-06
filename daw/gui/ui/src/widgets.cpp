@@ -93,8 +93,9 @@ bool Button::onPointer(const PointerEvent& e) {
     }
 }
 
+// Enter activates; Space is never a button's (it is play/stop everywhere).
 bool Button::onKey(const KeyEvent& e) {
-    if (e.key == SDLK_RETURN || e.key == SDLK_SPACE) {
+    if (e.key == SDLK_RETURN || e.key == SDLK_KP_ENTER) {
         auto callback = onClick;
         if (callback) callback();
         return true;

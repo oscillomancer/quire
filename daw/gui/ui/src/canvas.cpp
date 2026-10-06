@@ -64,6 +64,54 @@ void Canvas::line(Point a, Point b, Color c, float width) {
     nvgStroke(vg_);
 }
 
+void Canvas::fillCircle(Point centre, float radius, Color c) {
+    nvgBeginPath(vg_);
+    nvgCircle(vg_, centre.x, centre.y, radius);
+    nvgFillColor(vg_, nvg(c));
+    nvgFill(vg_);
+}
+
+void Canvas::strokeCircle(Point centre, float radius, Color c, float width) {
+    nvgBeginPath(vg_);
+    nvgCircle(vg_, centre.x, centre.y, radius - width / 2);
+    nvgStrokeColor(vg_, nvg(c));
+    nvgStrokeWidth(vg_, width);
+    nvgStroke(vg_);
+}
+
+void Canvas::fillPath(const std::vector<Point>& points, Color c) {
+    if (points.size() < 3) return;
+    nvgBeginPath(vg_);
+    nvgMoveTo(vg_, points[0].x, points[0].y);
+    for (std::size_t i = 1; i < points.size(); ++i) nvgLineTo(vg_, points[i].x, points[i].y);
+    nvgClosePath(vg_);
+    nvgFillColor(vg_, nvg(c));
+    nvgFill(vg_);
+}
+
+void Canvas::strokePath(const std::vector<Point>& points, Color c, float width, bool closed) {
+    if (points.size() < 2) return;
+    nvgBeginPath(vg_);
+    nvgMoveTo(vg_, points[0].x, points[0].y);
+    for (std::size_t i = 1; i < points.size(); ++i) nvgLineTo(vg_, points[i].x, points[i].y);
+    if (closed) nvgClosePath(vg_);
+    nvgLineJoin(vg_, NVG_ROUND);
+    nvgStrokeColor(vg_, nvg(c));
+    nvgStrokeWidth(vg_, width);
+    nvgStroke(vg_);
+    nvgLineJoin(vg_, NVG_MITER);  // the state is shared: later strokes keep the default
+}
+
+void Canvas::strokeArc(Point centre, float radius, float a0, float a1, Color c, float width) {
+    nvgBeginPath(vg_);
+    nvgArc(vg_, centre.x, centre.y, radius, a0, a1, NVG_CW);
+    nvgLineCap(vg_, NVG_ROUND);
+    nvgStrokeColor(vg_, nvg(c));
+    nvgStrokeWidth(vg_, width);
+    nvgStroke(vg_);
+    nvgLineCap(vg_, NVG_BUTT);  // the default, for the strokes after this one
+}
+
 float Canvas::textWidth(std::string_view s, Font font, float size) const {
     nvgFontFaceId(vg_, face(font));
     nvgFontSize(vg_, size);

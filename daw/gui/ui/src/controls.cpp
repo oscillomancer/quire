@@ -556,6 +556,21 @@ Size Toggle::measure(const Canvas& canvas, Size) {
 void Toggle::paint(Canvas& c) {
     const Theme& t = c.theme();
     const Rect b = bounds();
+    if (pill) {
+        const float r = std::min(b.w, b.h) / 2;
+        const Color colour = t.color(onColor_);
+        if (on_) {
+            c.fillRound(b, r, colour);
+        } else {
+            c.fillRound(b, r, pressed_ ? t.color("selection") : t.color("ground"));
+            if (hovered()) c.fillRound(b, r, colour.withAlpha(0.15f));
+            c.strokeRound(b, r, colour.withAlpha(0.55f));
+        }
+        if (focused()) c.strokeRound(b.inset(-1), r + 1, t.color("focus"));
+        c.text(b, text_, Font::UiBold, t.type("caption"),
+               on_ ? t.color("ground") : colour.withAlpha(0.9f), kCenter | kMiddle);
+        return;
+    }
     const Color face = on_         ? t.color(onColor_)
                        : pressed_  ? t.color("selection")
                        : hovered() ? t.color("raised")
@@ -590,7 +605,7 @@ bool Toggle::onPointer(const PointerEvent& e) {
 }
 
 bool Toggle::onKey(const KeyEvent& e) {
-    if (e.key == SDLK_RETURN || e.key == SDLK_SPACE) {
+    if (e.key == SDLK_RETURN || e.key == SDLK_KP_ENTER) {
         on_ = !on_;
         invalidate();
         auto callback = onToggle;
@@ -598,6 +613,100 @@ bool Toggle::onKey(const KeyEvent& e) {
         return true;
     }
     return false;
+}
+
+// ----------------------------------------------------------------- ArmButton
+
+ArmButton::ArmButton(std::string id, std::function<void(bool)> toggle)
+    : Toggle(std::move(id), "", "armed", std::move(toggle)) {
+    layout.width = SizeRule::fixed(20);
+    layout.height = SizeRule::fixed(20);
+}
+
+void ArmButton::paint(Canvas& c) {
+    const Theme& t = c.theme();
+    const Rect b = bounds();
+    const Point centre{b.x + b.w / 2, b.y + b.h / 2};
+    const float r = std::max(2.0f, std::min(b.w, b.h) / 2 - 1);
+    const Color red = t.color("armed");
+    if (on()) {
+        c.fillCircle(centre, r, red);
+        c.fillCircle({centre.x - r * 0.3f, centre.y - r * 0.3f}, r * 0.3f,
+                     Color{1, 1, 1, 0.25f});  // a little shine
+    } else {
+        c.fillCircle(centre, r, red.withAlpha(pressed() ? 0.5f : hovered() ? 0.4f : 0.28f));
+        c.strokeCircle(centre, r, red.withAlpha(0.6f));
+    }
+    if (focused()) c.strokeCircle(centre, r + 2, t.color("focus"));
+}
+
+// ----------------------------------------------------------------- MonitorButton
+
+MonitorButton::MonitorButton(std::string id, std::function<void()> click)
+    : Node(std::move(id), Role::Button), onClick(std::move(click)) {
+    focusable = true;
+    interactive = true;
+    layout.width = SizeRule::fixed(20);
+    layout.height = SizeRule::fixed(20);
+}
+
+void MonitorButton::setMode(Mode mode) {
+    if (mode == mode_) return;
+    mode_ = mode;
+    invalidate();
+}
+
+void MonitorButton::paint(Canvas& c) {
+    const Theme& t = c.theme();
+    const Rect b = bounds();
+    if (pressed_ || hovered())
+        c.fillRound(b, t.radius("s"), pressed_ ? t.color("selection") : t.color("raised"));
+    if (focused()) c.strokeRound(b, t.radius("s"), t.color("focus"));
+    // The speaker in a square that fits the button, left of its centre so the
+    // waves have room.
+    const float s = std::min(b.w, b.h) - 4;
+    const float x = b.x + (b.w - s) / 2, y = b.y + (b.h - s) / 2;
+    const std::vector<Point> speaker = {
+        {x + s * 0.08f, y + s * 0.36f}, {x + s * 0.28f, y + s * 0.36f},
+        {x + s * 0.54f, y + s * 0.12f}, {x + s * 0.54f, y + s * 0.88f},
+        {x + s * 0.28f, y + s * 0.64f}, {x + s * 0.08f, y + s * 0.64f}};
+    const Color ink = mode_ == Mode::Auto ? t.color("meter")
+                      : mode_ == Mode::On ? t.color("ink")
+                                          : t.color("ink-quiet");
+    if (mode_ == Mode::Off) {
+        c.strokePath(speaker, ink, 1.2f);
+        return;
+    }
+    c.fillPath(speaker, ink);
+    const Point centre{x + s * 0.54f, y + s * 0.5f};
+    c.strokeArc(centre, s * 0.2f, -0.9f, 0.9f, ink, 1.4f);
+    c.strokeArc(centre, s * 0.38f, -0.9f, 0.9f, ink, 1.4f);
+}
+
+bool MonitorButton::onPointer(const PointerEvent& e) {
+    if (e.button != 1 && e.type != PointerEvent::Type::Move) return false;
+    switch (e.type) {
+        case PointerEvent::Type::Down:
+            pressed_ = true;
+            invalidate();
+            return true;
+        case PointerEvent::Type::Up: {
+            const bool fire = pressed_ && bounds().contains(e.pos);
+            pressed_ = false;
+            invalidate();
+            auto callback = onClick;
+            if (fire && callback) callback();
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+bool MonitorButton::onKey(const KeyEvent& e) {
+    if (e.key != SDLK_RETURN && e.key != SDLK_KP_ENTER) return false;
+    if (auto callback = onClick) callback();
+    return true;
 }
 
 }  // namespace supple::ui

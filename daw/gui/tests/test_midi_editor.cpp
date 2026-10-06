@@ -155,6 +155,24 @@ struct Fixture {
 
 }  // namespace
 
+TEST_CASE("MIDI editor: Alt+E shows and hides it on the item it had last") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.actions->run("ui.midi.toggle"));  // never opened: the first MIDI item
+    CHECK(f.editor->isOpen());
+    CHECK(f.editor->state().item == f.item);
+    REQUIRE(f.actions->run("ui.midi.toggle"));
+    CHECK_FALSE(f.editor->isOpen());
+    CHECK(f.actions->keysFor("ui.midi.toggle") == "Alt+E");
+    CHECK(f.actions->key(SDLK_E, ui::kAlt, false));
+    CHECK(f.editor->isOpen());
+    // With no MIDI item left, it does nothing.
+    f.editor->close();
+    f.exec("item.remove", R"({"item":")" + f.item + R"("})");
+    REQUIRE(f.actions->run("ui.midi.toggle"));
+    CHECK_FALSE(f.editor->isOpen());
+}
+
 TEST_CASE("MIDI editor: dragging the top border resizes the panel; double-click resets") {
     Fixture f;
     if (!f.ok) {
@@ -794,8 +812,9 @@ TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, C
     CHECK(track(buss)->solo == model::Solo::On);
     REQUIRE(f.root->click("mixer.arm." + keys));
     CHECK(track(keys)->record.armed);
+    CHECK(track(keys)->record.monitor == model::Monitor::On);  // the default
     REQUIRE(f.root->click("mixer.monitor." + keys));
-    CHECK(track(keys)->record.monitor == model::Monitor::On);
+    CHECK(track(keys)->record.monitor == model::Monitor::Auto);
     // Pan drag right.
     const ui::Rect pb = strips[0].pan->bounds();
     f.drag({pb.x + pb.w / 2, pb.y + 8}, {pb.right() - 2, pb.y + 8});

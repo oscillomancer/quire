@@ -126,6 +126,7 @@ class MidiEditor {
     engine::EngineApp& app_;
     UiState& ui_;
     RollState state_;
+    std::string lastItem_;  // the item opened last (ui.midi.toggle reopens it)
     float height_ = kDefaultHeight;
     ui::Node* panel_ = nullptr;
     std::unique_ptr<MidiEventList> eventList_;

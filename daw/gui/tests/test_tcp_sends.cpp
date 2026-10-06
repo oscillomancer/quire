@@ -543,17 +543,27 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     CHECK(f.history() == before + 1);
 }
 
-TEST_CASE("TCP: the fx button opens the plugin browser for an empty chain") {
+TEST_CASE("TCP: \"fx\" opens the chain and \"+\" the plugin browser, even for an empty chain") {
     SendsFixture f;
-    std::vector<std::string> added;
+    std::vector<std::string> added, chains;
     f.actions->addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
         added.push_back(v.asString());
         return {};
     });
+    f.actions->addUi("ui.fx.chain", "FX: chain…", "track", [&](const json::Value& v) -> Status {
+        chains.push_back(v.asString());
+        return {};
+    });
     auto* fx = f.view().tcpPanel().controlNode(f.a, "fx");
+    auto* plus = f.view().tcpPanel().controlNode(f.a, "addfx");
     REQUIRE(fx);
+    REQUIRE(plus);
     CHECK(fx->valueText() == "fx");
+    CHECK(plus->valueText() == "+");
     REQUIRE(f.root->click(fx->id()));
+    CHECK(chains == std::vector<std::string>{f.a.str()});
+    CHECK(added.empty());
+    REQUIRE(f.root->click(plus->id()));
     CHECK(added == std::vector<std::string>{f.a.str()});
 }
 
@@ -789,4 +799,49 @@ TEST_CASE("TCP: Escape cancels a row drag; a plain click or a no-op drop commits
     f.sync();
     CHECK(f.history() == before);
     CHECK(trackRows(f) == std::vector<model::Id>{f.a, c, f.b});
+}
+
+TEST_CASE("TCP: a selected row's controls act on every selected track; Space stays play/stop") {
+    SendsFixture f;
+    const model::Id c = f.add("channel", "C");
+    const model::Id d = f.add("channel", "D");
+    f.state.selectedTracks = {f.a.str(), f.b.str(), c.str()};
+    f.sync();
+    auto* mute = f.view().tcpPanel().controlNode(f.a, "mute");
+    REQUIRE(mute);
+    const auto before = f.history();
+    REQUIRE(f.root->click(mute->id()));
+    CHECK(f.app->head().tracks.find(f.a)->mute);
+    CHECK(f.app->head().tracks.find(f.b)->mute);
+    CHECK(f.app->head().tracks.find(c)->mute);
+    CHECK_FALSE(f.app->head().tracks.find(d)->mute);
+    CHECK(f.history() == before + 1);
+    f.sync();
+    // Arm: the channels of the selection (B is a buss).
+    REQUIRE(f.root->click(f.view().tcpPanel().controlNode(c, "arm")->id()));
+    CHECK(f.app->head().tracks.find(f.a)->record.armed);
+    CHECK(f.app->head().tracks.find(c)->record.armed);
+    CHECK_FALSE(f.app->head().tracks.find(d)->record.armed);
+    f.sync();
+    // Space after a click never presses that control again.
+    const bool muted = f.app->head().tracks.find(f.a)->mute;
+    f.root->key(SDLK_SPACE);
+    CHECK(f.app->head().tracks.find(f.a)->mute == muted);
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("TCP: a click anywhere else ends a rename and keeps the edit") {
+    SendsFixture f;
+    REQUIRE(f.view().tcpPanel().rename(f.a));
+    f.sync();
+    auto* field = dynamic_cast<ui::TextField*>(f.view().tcpPanel().controlNode(f.a, "rename"));
+    REQUIRE(field);
+    REQUIRE(f.root->focused() == field);
+    f.root->text("Guitar");
+    const ui::Rect lanes = f.view().lanesRect();
+    f.root->pointer({ui::PointerEvent::Type::Down, {lanes.right() - 20, lanes.bottom() - 20}, 1});
+    f.root->pointer({ui::PointerEvent::Type::Up, {lanes.right() - 20, lanes.bottom() - 20}, 1});
+    CHECK(f.app->head().tracks.find(f.a)->name == "Guitar");
+    CHECK_FALSE(field->visible);
+    CHECK(f.root->focused() != field);
 }

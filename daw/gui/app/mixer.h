@@ -1,12 +1,15 @@
 // The mixer (docs/specs/gui.md §4.4), docked under the arrange view: strips
 // in track order grouped by type — channels, busses, masters — each with its
-// type colour, a small "fx" button at its top right, the plug-in chain (click:
-// the plug-in's editor; drag: reorder it, or copy it onto another strip),
-// sends, input/arm/monitor on channels, pan, fader and meter, mute and solo;
-// Console 9 as a project toggle in the header. The panel's top edge resizes it
-// (only the chain section grows). Dragging a strip's empty part reorders it
-// among its own kind. Every change is a command; a fader or pan drag, a
-// reorder or a copy is one undo step.
+// type colour, its name (a double-click renames it), "fx" (the chain) and "+"
+// (the plugin browser) at its top right, the plug-in chain (click: the
+// plug-in's editor; drag: reorder it, or copy it onto another strip; a
+// double-click on its empty part: the browser), sends, the input and "out"
+// (click: the routing matrix; drag: a send), monitoring and arm on channels,
+// pan, fader and meter, mute and solo; Console 9 as a project toggle in the
+// header. The panel's top edge resizes it (only the chain section grows).
+// Dragging a strip's empty part reorders it among its own kind. Every change
+// is a command, and a control on a selected strip acts on the whole selection
+// (SelectionEdit); a fader or pan drag, a reorder or a copy is one undo step.
 #pragma once
 
 #include <memory>
@@ -15,6 +18,7 @@
 
 #include "app_actions.h"
 #include "meter_feed.h"
+#include "selection_edit.h"
 #include "supple/ui/root.h"
 #include "track_menu.h"
 
@@ -25,6 +29,7 @@ class PanControl;
 class Toggle;
 class Button;
 class Meter;
+class MonitorButton;
 }  // namespace supple::ui
 
 namespace supple::gui {
@@ -50,6 +55,10 @@ class Mixer {
     // A double-click on the strips' empty space adds a channel: the app hands
     // the shell's addStrip (which selects it); unset, the mixer runs track.add.
     std::function<void()> onAddChannel;
+    // The channels' input button: what it says and its picker (the shell's,
+    // shared with the TCP).
+    std::function<std::string(const model::Id& track)> inputText;
+    std::function<void(const model::Id& track, const ui::Rect& anchor)> pickInput;
 
     // Tests.
     struct Strip {
@@ -59,18 +68,22 @@ class Mixer {
         ui::Fader* fader = nullptr;
         ui::PanControl* pan = nullptr;
         ui::Toggle *mute = nullptr, *solo = nullptr, *arm = nullptr;
-        ui::Button* monitor = nullptr;
+        ui::MonitorButton* monitor = nullptr;
         ui::Label* value = nullptr;
         ui::Meter* meter = nullptr;
-        ui::Button* fx = nullptr;   // "fx" at the strip's top right
-        ui::Node* chain = nullptr;  // the plug-in list
+        ui::Button* fx = nullptr;     // "fx" at the strip's top right: the chain
+        ui::Button* addFx = nullptr;  // "+" beside it: the plugin browser
+        ui::Button* input = nullptr;  // channels: the record input
+        ui::Button* out = nullptr;    // the output (click: matrix; drag: a send)
+        ui::Node* rename = nullptr;   // the name's in-place editor (a double-click)
+        ui::Node* chain = nullptr;    // the plug-in list
     };
     const std::vector<Strip>& strips() const { return strips_; }
 
     enum class DragPhase { Begin, Move, End, Cancel };
     // A drag in progress, for the feedback layer (and tests).
     struct DragView {
-        enum class Kind { None, Strip, Fx } kind = Kind::None;
+        enum class Kind { None, Strip, Fx, Send } kind = Kind::None;
         enum class Drop { None, Reorder, Copy } drop = Drop::None;
         bool active = false;  // past the movement threshold
         std::string track;    // the dragged strip, or the plug-in's own strip
@@ -91,6 +104,7 @@ class Mixer {
     void update();
     void dragStrip(const std::string& track, DragPhase phase, ui::Point p);
     void dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p);
+    void dragSend(const std::string& track, DragPhase phase, ui::Point p);
     void endDrag(bool commit);
     void resolveStripDrop();
     void resolveFxDrop();
@@ -103,6 +117,7 @@ class Mixer {
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     MeterFeed& meters_;
+    SelectionEdit selectionEdit_;              // a strip control on a selected track: all of them
     TrackMenu trackMenu_;                      // a strip's right-click menu
     std::vector<std::string> shownSelection_;  // the track selection the strips show
     void showSelection();

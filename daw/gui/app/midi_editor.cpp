@@ -719,6 +719,28 @@ MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dis
                        return open(v.asString());
                    });
     actions_.addUi("ui.midi.close", "MIDI: close editor", [this] { close(); });
+    // Alt+E: hide the editor, or show it on the item it had last (else the
+    // selected MIDI item, else the first); nothing when there is no MIDI item.
+    actions_.addUi("ui.midi.toggle", "MIDI: show or hide the editor", [this] {
+        if (isOpen()) {
+            close();
+            return;
+        }
+        const model::Session& s = app_.head();
+        auto isMidi = [&s](const std::string& text) {
+            const auto id = model::Id::parse(text);
+            const model::Item* it = id ? s.items.find(*id) : nullptr;
+            const model::Take* take =
+                it && it->activeTake ? s.takes.find(*it->activeTake) : nullptr;
+            return take && take->source && s.midi.find(*take->source);
+        };
+        std::vector<std::string> candidates;
+        if (!lastItem_.empty()) candidates.push_back(lastItem_);
+        for (const std::string& it : ui_.selectedItems) candidates.push_back(it);
+        for (const auto& e : s.items) candidates.push_back(e.id.str());
+        for (const std::string& it : candidates)
+            if (isMidi(it) && open(it)) return;
+    });
     actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes", [this] { quantize(); });
 }
 
@@ -859,6 +881,7 @@ Status MidiEditor::open(const std::string& item) {
         state_.item = previous;
         return r;
     }
+    lastItem_ = item;
     // Center the view on the notes (or middle C).
     int lo = 127, hi = 0;
     for (const RollNote& n : state_.notes) {

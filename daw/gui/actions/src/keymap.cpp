@@ -98,8 +98,9 @@ Keymap Keymap::defaults() {
     };
     // Close to the common DAW keys (key choices, not copied assets).
     add({"Space"}, "global", "transport.toggle");
+    add({"R"}, "global", "transport.record");
     add({"Ctrl+R"}, "global", "transport.record");
-    add({"R"}, "global", "transport.loop.toggle");
+    add({"L"}, "global", "transport.loop.toggle");
     add({"Home"}, "global", "transport.seek:start");
     add({"W"}, "global", "transport.seek:start");
     add({"End"}, "global", "transport.seek:end");
@@ -114,6 +115,8 @@ Keymap Keymap::defaults() {
     add({"Ctrl+E"}, "global", "ui.midi.edit");
     add({"Alt+R"}, "global", "ui.routing");
     add({"Ctrl+M"}, "global", "ui.mixer");
+    add({"Alt+D"}, "global", "ui.mixer");
+    add({"Alt+E"}, "global", "ui.midi.toggle");
     add({"Ctrl+H"}, "global", "ui.history");
     add({"Ctrl+Alt+R"}, "global", "ui.render");
     add({"Ctrl+T"}, "global", "track.add:channel");

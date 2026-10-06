@@ -335,6 +335,27 @@ TEST_CASE("arrange gestures: select, move (snapped, free, across tracks), trim, 
     CHECK(f.item(b).position == posB);
 }
 
+// The app re-applies its own copy of the selection every frame (Shell::sync):
+// a frame between the marquee's last move and its release must not undo it.
+TEST_CASE("arrange gestures: a marquee survives the app re-applying the selection each frame") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    std::vector<model::Id> published;
+    g.onSelection = [&](const std::vector<model::Id>& items) { published = items; };
+    const ui::Rect lanes = f.view->lanesRect();
+    const ui::Rect r0 = f.view->rowRect(0), r1 = f.view->rowRect(1);
+    const ui::Point from{lanes.x + 4, r0.y + 4}, to{lanes.x + 200, r1.bottom() - 4};
+    using T = ui::PointerEvent::Type;
+    f.pointer(T::Down, from, 3);
+    f.pointer(T::Move, {(from.x + to.x) / 2, (from.y + to.y) / 2}, 3);
+    f.pointer(T::Move, to, 3);
+    g.setSelection(published);  // a frame: the app's copy goes back to the view
+    f.pointer(T::Up, to, 3);
+    CHECK(published.size() >= 2);
+    CHECK(g.selection() == published);
+}
+
 TEST_CASE("arrange gestures: marquee, click to seek, take badge, double-click MIDI, file drop") {
     Fixture f;
     if (!f.ok) return;

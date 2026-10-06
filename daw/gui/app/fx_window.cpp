@@ -3,8 +3,11 @@
 #include <SDL3/SDL_keycode.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
+#include <optional>
+#include <utility>
 
 #include "app_actions.h"
 #include "supple/ui/controls.h"
@@ -33,10 +36,11 @@ bool draggingSlider(const ui::Node& node) {
     return false;
 }
 
-// A chain row: paints its selection, selects the effect on a left press and
-// reorders with Alt+Up / Alt+Down (fx.move).
+// A chain row: paints its selection, selects the effect on a left press,
+// and reorders by dragging (onDrag) or with Alt+Up / Alt+Down (fx.move).
 class Row : public ui::Node {
   public:
+    enum class Phase { Move, Drop, Cancel };
     Row(std::string id, std::function<void()> onSelect, std::function<void(int)> onMove = {})
         : Node(std::move(id)), onSelect_(std::move(onSelect)), onMove_(std::move(onMove)) {
         interactive = true;
@@ -47,19 +51,53 @@ class Row : public ui::Node {
         layout.padding = ui::Insets::xy(4, 2);
     }
     bool selected = false;
+    bool dragged = false;                          // being dragged: dimmed
+    bool markerTop = false, markerBottom = false;  // where a dragged row would land
+    std::function<void(Phase, ui::Point)> onDrag;  // unset: the row stays put
     void paint(ui::Canvas& c) override {
-        if (selected)
-            c.fillRound(bounds(), c.theme().radius("s"),
-                        c.theme().color("selection").withAlpha(0.55f));
+        const ui::Theme& t = c.theme();
+        if (selected) c.fillRound(bounds(), t.radius("s"), t.color("selection").withAlpha(0.55f));
+        if (dragged) c.fillRound(bounds(), t.radius("s"), t.color("ground").withAlpha(0.5f));
+        const ui::Rect b = bounds();
+        if (markerTop) c.fillRect({b.x, b.y - 3, b.w, 3}, t.color("focus"));
+        if (markerBottom) c.fillRect({b.x, b.bottom(), b.w, 3}, t.color("focus"));
     }
     bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
-            if (auto callback = onSelect_) callback();
+        using T = ui::PointerEvent::Type;
+        if (e.type == T::Down && e.button == 1) {
+            pressAt_ = e.pos;
+            moving_ = false;
+            if (auto callback = onSelect_) callback();  // may rebuild the rows: nothing after
             return true;
         }
-        return e.type == ui::PointerEvent::Type::Up;
+        if (e.type == T::Move && onDrag && pressAt_) {
+            if (!moving_ && std::hypot(e.pos.x - pressAt_->x, e.pos.y - pressAt_->y) < 4)
+                return true;
+            if (!moving_ && root()) root()->focus(this);  // Escape cancels
+            moving_ = true;
+            auto callback = onDrag;
+            callback(Phase::Move, e.pos);
+            return true;
+        }
+        if (e.type == T::Up && e.button == 1) {
+            const bool was = std::exchange(moving_, false);
+            pressAt_.reset();
+            if (was && onDrag) {
+                auto callback = onDrag;
+                callback(Phase::Drop, e.pos);  // rebuilds the rows: nothing after
+            }
+            return true;
+        }
+        return false;
     }
     bool onKey(const ui::KeyEvent& e) override {
+        if (e.key == SDLK_ESCAPE && moving_) {
+            moving_ = false;
+            pressAt_.reset();
+            if (root()) root()->capture(nullptr);
+            if (auto callback = onDrag) callback(Phase::Cancel, {});
+            return true;
+        }
         if (!onMove_ || !(e.mods & ui::kAlt)) return false;
         if (e.key == SDLK_UP) {
             auto callback = onMove_;
@@ -77,6 +115,8 @@ class Row : public ui::Node {
   private:
     std::function<void()> onSelect_;
     std::function<void(int)> onMove_;
+    std::optional<ui::Point> pressAt_;
+    bool moving_ = false;
 };
 
 // Modifier-aware buttons and menu activation keep scripted input and SDL
@@ -306,10 +346,42 @@ Status FxWindow::openFor(const UiState& ui, const json::Value& prompt) {
     return open(*id);
 }
 
+// The plugin browser on its own (the strips' "+"): what it adds goes last in
+// the track's chain; a chain window open on that track shows it.
 Status FxWindow::openToAdd(const UiState& ui, const json::Value& prompt) {
-    if (auto opened = openFor(ui, prompt); !opened) return opened;
-    browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
+    std::string text;
+    if (prompt.isString()) text = prompt.asString();
+    if (const json::Value* t = prompt.isObject() ? prompt.find("track") : nullptr;
+        t && t->isString())
+        text = t->asString();
+    if (text.empty() && !ui.selectedTracks.empty()) text = ui.selectedTracks.front();
+    const auto id = model::Id::parse(text);
+    if (!id || !app_.head().tracks.find(*id))
+        return Error("gui.track",
+                     text.empty() ? "no track given and nothing is selected" : "no track " + text,
+                     "/track", "select a track, or give a track id like tr_1");
+    const model::Id track = *id;
+    browser_->open([this, track](const std::string& pluginId) { addFxTo(track, pluginId); },
+                   "Add plugin to " + model::trackLabel(app_.head(), track));
     return {};
+}
+
+void FxWindow::addFxTo(model::Id track, const std::string& pluginId) {
+    json::Value args = json::Value::object();
+    args["track"] = track.str();
+    args["plugin"] = pluginId;
+    auto result = dispatcher_.execute({"fx.add", std::move(args), kUiOrigin});
+    if (!result) {
+        const std::string message = "fx.add: " + result.error().message;
+        if (page_) setStatus(message);
+        if (hooks_.onError) hooks_.onError(message);
+        return;
+    }
+    if (!page_ || track_ != track || take_) return;
+    if (const json::Value* made = result->find("fx"); made && made->isString())
+        if (auto made_id = model::Id::parse(made->asString())) selected_ = *made_id;
+    setStatus("added " + pluginId);
+    refresh();
 }
 
 void FxWindow::close() {
@@ -535,6 +607,10 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
         input ? std::function<void(int)>{}
               : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
     row.selected = selected_ == fx;
+    if (!input)  // drag the row to reorder the chain
+        row.onDrag = [this, fx](Row::Phase phase, ui::Point p) {
+            dragRow(fx, static_cast<int>(phase), p);
+        };
     const bool isFailed = failed_.count(id) != 0;
 
     {
@@ -579,10 +655,6 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
                     setStatus("editor: " + opened.error().message);
             }
         });
-        if (!input) {
-            l1.emplace<ui::Button>(prefix + "up." + id, "^", [this, fx] { moveFx(fx, -1); });
-            l1.emplace<ui::Button>(prefix + "down." + id, "v", [this, fx] { moveFx(fx, 1); });
-        }
         l1.emplace<ui::Button>(prefix + "params." + id, "params", [this, fx] {
             selected_ = fx;
             showParamsTab();
@@ -757,6 +829,34 @@ void FxWindow::buildParams(ui::Node& body) {
     if (auto built = params_.build(body, selected_); !built)
         body.emplace<ui::Label>("fx.params.error", built.error().message, ui::Font::Ui, "small",
                                 "clip");
+}
+
+// A chain row dragged among the others: the insertion bar follows the pointer
+// (in front of the first row whose middle is below it); the drop is one fx.move.
+void FxWindow::dragRow(model::Id fx, int phase, ui::Point p) {
+    const std::vector<model::Id> c = chain();
+    std::vector<Row*> rows;
+    for (model::Id id : c)
+        if (auto* row = dynamic_cast<Row*>(root_.find("fx.row." + id.str()))) rows.push_back(row);
+    if (rows.size() != c.size()) return;
+    const auto from = static_cast<std::size_t>(std::find(c.begin(), c.end(), fx) - c.begin());
+    std::size_t gap = 0;
+    for (Row* row : rows)
+        if (row->bounds().y + row->bounds().h / 2 < p.y) ++gap;
+    const std::size_t index = gap > from ? gap - 1 : gap;
+    const auto shown = static_cast<Row::Phase>(phase);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const bool moving = shown == Row::Phase::Move && index != from;
+        rows[i]->dragged = shown == Row::Phase::Move && i == from;
+        rows[i]->markerTop = moving && i == gap;
+        rows[i]->markerBottom = moving && gap == rows.size() && i + 1 == rows.size();
+    }
+    root_.damageAll();
+    if (shown != Row::Phase::Drop || index == from || from >= c.size()) return;
+    json::Value args = json::Value::object();
+    args["fx"] = fx.str();
+    args["index"] = static_cast<std::int64_t>(index);
+    if (dispatch("fx.move", std::move(args))) refresh();
 }
 
 void FxWindow::moveFx(model::Id fx, int delta) {

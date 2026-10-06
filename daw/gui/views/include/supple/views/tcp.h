@@ -25,8 +25,10 @@
 #include "supple/views/track_layout.h"
 
 namespace supple::ui {
+class ArmButton;
 class Button;
 class Meter;
+class MonitorButton;
 }  // namespace supple::ui
 
 namespace supple::views {
@@ -52,9 +54,10 @@ struct TcpCallbacks {
     // The strip's "env" button: the app's menu of its automation lanes
     // (show/hide volume, pan, mute; creating the envelope when missing).
     std::function<void(const model::Id& track, const ui::Rect& anchor)> envelopes;
-    // The strip's "fx" button: its chain (the app opens the plugin browser
-    // when the chain is empty).
+    // The strip's "fx" button: its chain; "+" beside it: the plugin browser,
+    // adding to the end of the chain.
     std::function<void(const model::Id& track)> fx;
+    std::function<void(const model::Id& track)> addFx;
     // A right-click on the row: the track's menu (rename, colour, delete) at
     // the pointer, in window coordinates; `rename` starts the in-place rename.
     std::function<void(const model::Id& track, const ui::Rect& anchor,

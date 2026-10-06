@@ -852,14 +852,18 @@ TEST_CASE("the TCP toggles mute, solo, arm and monitor on the strip") {
     press(root, panel->controlNode(tr2, "arm"));
     CHECK(s.app->head().tracks.find(tr2)->record.armed);
     sync();
-    press(root, panel->controlNode(tr2, "monitor"));  // Off -> On
+    // A new channel monitors (on, once armed) by default.
     CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::On);
-    sync();
     press(root, panel->controlNode(tr2, "monitor"));  // On -> Auto
     CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::Auto);
+    CHECK(panel->controlNode(tr2, "monitor")->valueText() == "on");  // until the view syncs
     sync();
+    CHECK(panel->controlNode(tr2, "monitor")->valueText() == "auto");
     press(root, panel->controlNode(tr2, "monitor"));  // Auto -> Off
     CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::Off);
+    sync();
+    press(root, panel->controlNode(tr2, "monitor"));  // Off -> On
+    CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::On);
     CHECK(tcp.error.empty());
     // A master has neither arm nor monitor.
     const model::Id master = model::kMaster;

@@ -331,7 +331,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.app->head().fx.find(fx1)->plugin.name == "Plumb");
     CHECK(f.app->head().fx.find(fx1)->plugin.id == plumb);
 
-    // Add a second one and reorder with the keyboard-free ▲/▼ buttons (fx.move).
+    // Add a second one and reorder it by dragging (fx.move).
     f.click("fx.add");
     f.type("Facet");
     f.key("Return");
@@ -342,11 +342,26 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.fx->select(fx1);
     f.frame();
     CHECK(f.root->readBack().rgba != secondSelected.rgba);
-    f.click("fx.up." + fx2.str());
+    // Drag the second row above the first (one fx.move), then back below it.
+    auto dragRow = [&](const model::Id& fx, const model::Id& over, bool above) {
+        const ui::Rect from = f.root->find("fx.row." + fx.str())->bounds();
+        const ui::Rect to = f.root->find("fx.row." + over.str())->bounds();
+        const ui::Point start{from.x + 40, from.y + from.h / 2};
+        const ui::Point end{to.x + 40, above ? to.y + 2 : to.bottom() - 2};
+        f.root->pointer({ui::PointerEvent::Type::Down, start, 1});
+        for (int i = 1; i <= 8; ++i)
+            f.root->pointer({ui::PointerEvent::Type::Move,
+                             {start.x, start.y + (end.y - start.y) * static_cast<float>(i) / 8},
+                             1});
+        f.root->pointer({ui::PointerEvent::Type::Up, end, 1});
+        f.frame();
+    };
+    CHECK_FALSE(f.root->find("fx.up." + fx2.str()));  // no arrow buttons: drag instead
+    dragRow(fx2, fx1, true);
     REQUIRE(f.fx->chain().size() == 2);
     CHECK(f.fx->chain()[0] == fx2);
     CHECK(f.fx->chain()[1] == fx1);
-    f.click("fx.down." + fx2.str());
+    dragRow(fx2, fx1, false);
     CHECK(f.fx->chain()[0] == fx1);
 
     // Reorder by keyboard too (Alt+Down / Alt+Up on a focused row).
@@ -443,12 +458,23 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.fx->close();
     gui::UiState selection;
     selection.selectedTracks = {track.str()};
+    // The strips' "+": the browser alone (no chain window), with its own Close.
+    REQUIRE(f.fx->openToAdd(selection, json::Value::object()));
+    f.frame();
+    CHECK_FALSE(f.fx->isOpen());
+    REQUIRE(f.fx->browser().isOpen());
+    CHECK(f.root->find("browser.title")->valueText() == "Add plugin to Guitar");
+    f.click("browser.close");
+    CHECK_FALSE(f.fx->browser().isOpen());
     REQUIRE(f.fx->openToAdd(selection, json::Value::object()));
     f.frame();
     f.type("Plumb");
     f.key("Return");
+    CHECK_FALSE(f.fx->browser().isOpen());
     CHECK(f.fx->inputChain().empty());
     REQUIRE(f.fx->chain().size() == 3);
+    REQUIRE(f.fx->open(track));
+    f.frame();
     f.click("fx.remove." + f.fx->chain().back().str());
 
     // Remove (from the chain tab: the rows live there).

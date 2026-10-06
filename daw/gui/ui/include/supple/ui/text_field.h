@@ -18,6 +18,7 @@ class TextField : public Node {
     std::function<void(const std::string&)> onChange;  // every edit
     std::function<void(const std::string&)> onSubmit;  // Enter
     std::function<void()> onCancel;                    // Escape
+    std::function<void(const std::string&)> onBlur;    // focus moved away (a click elsewhere)
     // Keys the field does not use (Up/Down for a list under a search field).
     std::function<bool(const KeyEvent&)> onOtherKey;
     bool secret = false;  // show dots (API keys); copy and cut are disabled

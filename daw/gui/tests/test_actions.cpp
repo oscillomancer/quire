@@ -204,19 +204,19 @@ TEST_CASE("keymaps save only the user's changes and load them over the defaults"
     const auto file = std::filesystem::temp_directory_path() /
                       ("supple-keymap-test-" + std::to_string(::getpid())) / "keymap.json";
     Keymap k = Keymap::defaults();
-    k.unbind({{*parseChord("R")}, "global", "transport.loop.toggle"});
-    k.bind({{*parseChord("L")}, "global", "transport.loop.toggle"});
+    k.unbind({{*parseChord("L")}, "global", "transport.loop.toggle"});
+    k.bind({{*parseChord("P")}, "global", "transport.loop.toggle"});
     REQUIRE(k.save(file));
     auto text = readFile(file);
     REQUIRE(text);
     const std::string s(text->begin(), text->end());
-    CHECK(s.find("\"L\"") != std::string::npos);
+    CHECK(s.find("\"P\"") != std::string::npos);
     CHECK(s.find("history.undo") == std::string::npos);  // defaults are not written
     auto loaded = Keymap::load(file);
     REQUIRE(loaded);
     CHECK(loaded->bindingsFor("transport.loop.toggle").size() == 1);
-    CHECK(loaded->bindingsFor("transport.loop.toggle")[0].keys[0] == *parseChord("L"));
-    CHECK_FALSE(loaded->press(*parseChord("R"), {"global"}));
+    CHECK(loaded->bindingsFor("transport.loop.toggle")[0].keys[0] == *parseChord("P"));
+    CHECK_FALSE(loaded->press(*parseChord("L"), {"global"}));
     REQUIRE(writeFileAtomic(
         file,
         std::string(

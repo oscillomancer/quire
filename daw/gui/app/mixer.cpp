@@ -10,6 +10,7 @@
 #include "panel_height.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
+#include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 #include "supple/views/track_layout.h"
 
@@ -25,7 +26,7 @@ constexpr float kGripH = 5, kHeaderH = 30;
 constexpr float kFaderH = 133;  // the fader and meter row
 // The fixed rows of a channel with no sends, their gaps and the padding (each
 // send adds kSendH; busses and masters have no arm/monitor row).
-constexpr float kStripChrome = 127;
+constexpr float kStripChrome = 149;
 constexpr float kSendH = 14;
 constexpr float kDragThreshold = 4;
 
@@ -52,9 +53,8 @@ std::string dbText(double db) {
 
 std::string sendText(const model::Session& session, const model::Route& route) {
     std::string to = "?";
-    if (route.to.track)
-        if (const auto* dest = session.tracks.find(*route.to.track))
-            to = dest->name.empty() ? route.to.track->str() : dest->name;
+    if (route.to.track && session.tracks.find(*route.to.track))
+        to = model::trackLabel(session, *route.to.track);
     if (route.to.fx) to = route.to.fx->str() + " key";
     return "→ " + to + " " + dbText(route.volumeDb);
 }
@@ -102,21 +102,14 @@ class DragTracker {
     ui::Point origin_;
 };
 
-// A plug-in in a strip's chain: a click opens its editor (a button), a drag
-// reorders it within the chain or copies it onto another strip.
-class FxSlot : public ui::Button {
+// A button that can also be dragged: a press that moves becomes a drag (no
+// click then); one that does not stays a click.
+class DragButton : public ui::Button {
   public:
-    FxSlot(std::string id, std::string text, std::function<void()> click, std::size_t at)
-        : Button(std::move(id), std::move(text), std::move(click)), chainIndex(at) {}
-    const std::size_t chainIndex;  // its place in the track's chain
+    using Button::Button;
     DragTracker drag;
-    std::function<void()> remove;  // Alt+click
     bool onPointer(const ui::PointerEvent& e) override {
         const bool left = e.button == 1;
-        if (e.type == ui::PointerEvent::Type::Down && left && (e.mods & ui::kAlt) && remove) {
-            remove();  // the press goes no further: no click, no drag
-            return true;
-        }
         if (e.type == ui::PointerEvent::Type::Down && left) drag.press(e.pos);
         if (e.type == ui::PointerEvent::Type::Move && drag.move(e.pos)) return true;
         if (e.type == ui::PointerEvent::Type::Up && left && drag.release(e.pos)) {
@@ -136,12 +129,93 @@ class FxSlot : public ui::Button {
     }
 };
 
+// A plug-in in a strip's chain: a click opens its editor (a button), a drag
+// reorders it within the chain or copies it onto another strip.
+class FxSlot : public DragButton {
+  public:
+    FxSlot(std::string id, std::string text, std::function<void()> click, std::size_t at)
+        : DragButton(std::move(id), std::move(text), std::move(click)), chainIndex(at) {}
+    const std::size_t chainIndex;  // its place in the track's chain
+    std::function<void()> remove;  // Alt+click
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && (e.mods & ui::kAlt) &&
+            remove) {
+            remove();  // the press goes no further: no click, no drag
+            return true;
+        }
+        return DragButton::onPointer(e);
+    }
+};
+
+// A strip's name: a double-click edits it in place; Enter or a click anywhere
+// else keeps the edit, Escape drops it. A single press goes on to the strip.
+class NameEdit : public ui::Node {
+  public:
+    NameEdit(const std::string& tid, const std::string& name,
+             std::function<void(const std::string&)> commit)
+        : Node("mixer.nameedit." + tid), commit_(std::move(commit)) {
+        interactive = true;
+        layout.width = ui::SizeRule::fraction();
+        label_ = &emplace<ui::Label>("mixer.name." + tid, name, ui::Font::UiBold, "caption");
+        label_->align = ui::kLeft | ui::kMiddle;
+        field_ = &emplace<ui::TextField>("mixer.rename." + tid, name);
+        field_->visible = false;
+        field_->onSubmit = [this](const std::string& text) { finish(text, true); };
+        field_->onBlur = [this](const std::string& text) { finish(text, true); };
+        field_->onCancel = [this] { finish({}, false); };
+    }
+    ui::Label* label() const { return label_; }
+    bool editing() const { return editing_; }
+    void start() {
+        editing_ = true;
+        field_->setText(label_->text());
+        field_->selectAll();
+        field_->visible = true;
+        label_->visible = false;
+        if (ui::Root* r = root()) {
+            r->relayout();
+            r->focus(field_);
+        }
+        invalidate();
+    }
+    void arrange(const ui::Canvas& canvas, const ui::Rect& r) override {
+        setBounds(r);
+        label_->arrange(canvas, r);
+        field_->arrange(canvas, {r.x, r.y - 1, r.w, r.h + 2});
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type != ui::PointerEvent::Type::Down || e.button != 1 || e.clicks < 2 || editing_)
+            return false;
+        start();
+        return true;
+    }
+
+  private:
+    void finish(const std::string& text, bool keep) {
+        if (!editing_) return;
+        editing_ = false;
+        field_->visible = false;
+        label_->visible = true;
+        if (ui::Root* r = root()) {
+            if (r->focused() == field_) r->focus(nullptr);  // Space plays again
+            r->relayout();
+        }
+        invalidate();
+        if (keep && text != label_->text() && commit_) commit_(text);
+    }
+    ui::Label* label_ = nullptr;
+    ui::TextField* field_ = nullptr;
+    std::function<void(const std::string&)> commit_;
+    bool editing_ = false;
+};
+
 // A strip's plug-ins, one per row, scrolled by the wheel or a bar when the
 // chain is longer than the room the panel gives it.
 class FxList : public ui::Node {
   public:
     explicit FxList(std::string id) : Node(std::move(id)) {
         clipsChildren = true;
+        interactive = true;  // its empty part takes a double-click
         layout.height = ui::SizeRule::fraction();
         auto bar =
             std::make_unique<ui::ScrollBar>(this->id() + ".bar", ui::ScrollBar::Axis::Vertical);
@@ -177,7 +251,15 @@ class FxList : public ui::Node {
             y += kSlotH + kSlotGap;
         }
     }
+    std::function<void()> onDoubleClick;  // on the list's empty part: add a plug-in
     bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks >= 2 &&
+            onDoubleClick && std::none_of(slots_.begin(), slots_.end(), [&](const FxSlot* slot) {
+                return slot->bounds().contains(e.pos);
+            })) {
+            onDoubleClick();
+            return true;
+        }
         if (e.type != ui::PointerEvent::Type::Wheel || content() <= bounds().h + 0.5f) return false;
         scroll_ = std::max(0.0f, scroll_ - e.wheelY * (kSlotH + kSlotGap));
         relayout();
@@ -418,6 +500,7 @@ Mixer::Mixer(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
       dispatcher_(dispatcher),
       app_(app),
       meters_(meters),
+      selectionEdit_(dispatcher, app, actions.ui()),
       trackMenu_{root, dispatcher, app,
                  [this](const std::string& e) {
                      if (actions_.onError) actions_.onError(e);
@@ -572,9 +655,7 @@ Result<json::Value> Mixer::set(const std::string& track, const char* field, json
     json::Value args = json::Value::object();
     args["track"] = track;
     args[field] = std::move(value);
-    cmd::Origin origin = kOrigin;
-    origin.gesture = gesture;
-    auto r = dispatcher_.execute({"track.set", std::move(args), origin});
+    auto r = selectionEdit_.set(std::move(args), gesture);
     if (!r && actions_.onError) actions_.onError(std::string("mixer: ") + r.error().message);
     return r;
 }
@@ -613,34 +694,42 @@ void Mixer::rebuild() {
                 trackMenu_.open(id, {p.x, p.y, 1, 1}, {});
             });
         st.node = frame.get();
-        // The name, with a small "fx" at the strip's top right like the TCP's: the
-        // plugin browser on an empty chain, the chain otherwise.
+        // The name (a double-click renames it), with "fx" (the chain) and "+"
+        // (the plugin browser) at the strip's top right, as in the TCP.
         auto& nameRow = frame->emplace<ui::Node>("mixer.namerow." + tid);
         nameRow.layout.dir = ui::Layout::Dir::Row;
         nameRow.layout.height = ui::SizeRule::fixed(16);
         nameRow.layout.align = ui::Layout::Align::Center;
-        st.name = &nameRow.emplace<ui::Label>("mixer.name." + tid, t.name.empty() ? type : t.name,
-                                              ui::Font::UiBold, "caption");
-        st.name->layout.width = ui::SizeRule::fraction();
-        const bool empty = t.chain.empty();
-        std::string fxText = empty ? "fx" : "fx " + std::to_string(t.chain.size());
-        for (model::Id fx : t.chain)
-            if (const model::FxInstance* f = s.fx.find(fx); f && (f->bypass || f->offline)) {
-                fxText += "~";
-                break;
-            }
-        st.fx = &nameRow.emplace<ui::Button>("mixer.fxadd." + tid, fxText, [this, tid, empty] {
+        nameRow.layout.gap = 2;
+        auto& nameEdit = nameRow.emplace<NameEdit>(
+            tid, model::trackLabel(s, id),
+            [this, tid](const std::string& name) { (void)set(tid, "name", json::Value(name)); });
+        st.name = nameEdit.label();
+        st.rename = &nameEdit;
+        st.fx = &nameRow.emplace<ui::Button>("mixer.fxadd." + tid, "fx", [this, tid] {
             json::Value args = json::Value::object();
             args["track"] = tid;
-            run(empty ? "ui.fx.add" : "ui.fx.chain", std::move(args));
+            run("ui.fx.chain", std::move(args));
         });
-        st.fx->layout.width = ui::SizeRule::fixed(fxText.size() > 2 ? 34.0f : 22.0f);
+        st.fx->layout.width = ui::SizeRule::fixed(22);
         st.fx->layout.height = ui::SizeRule::fixed(15);
+        st.addFx = &nameRow.emplace<ui::Button>("mixer.addfx." + tid, "+", [this, tid] {
+            json::Value args = json::Value::object();
+            args["track"] = tid;
+            run("ui.fx.add", std::move(args));
+        });
+        st.addFx->layout.width = ui::SizeRule::fixed(16);
+        st.addFx->layout.height = ui::SizeRule::fixed(15);
         frame->emplace<ColorStripe>("mixer.color." + tid, t.color);
         // The plug-in chain (a click opens or closes the plug-in's editor); the
         // one section that takes the room the panel's height gives.
         auto& chain = frame->emplace<FxList>("mixer.fx." + tid);
         st.chain = &chain;
+        chain.onDoubleClick = [this, tid] {
+            json::Value args = json::Value::object();
+            args["track"] = tid;
+            run("ui.fx.add", std::move(args));
+        };
         for (std::size_t at = 0; at < t.chain.size(); ++at) {
             const model::Id fx = t.chain[at];
             const model::FxInstance* f = s.fx.find(fx);
@@ -698,17 +787,43 @@ void Mixer::rebuild() {
         }
         sends.layout.height = ui::SizeRule::fixed(static_cast<float>(shown) * kSendH);
         sends.visible = shown > 0;
-        // Channels: arm and monitor (busses and masters give the room to the chain).
-        auto& rec = frame->emplace<ui::Node>("mixer.rec." + tid);
-        rec.layout.dir = ui::Layout::Dir::Row;
-        rec.layout.height = ui::SizeRule::fixed(20);
-        rec.layout.gap = 3;
-        rec.visible = t.type == model::StripType::Channel;
+        // The record input and the output ("out": a click opens the routing
+        // matrix, a drag onto a buss or master makes a send), as in the TCP.
+        if (t.type != model::StripType::Master) {
+            auto& io = frame->emplace<ui::Node>("mixer.io." + tid);
+            io.layout.dir = ui::Layout::Dir::Row;
+            io.layout.height = ui::SizeRule::fixed(18);
+            io.layout.gap = 3;
+            if (t.type == model::StripType::Channel) {
+                st.input = &io.emplace<ui::Button>("mixer.input." + tid, "in \u2014");
+                st.input->onClick = [this, id, button = st.input] {
+                    if (pickInput) pickInput(id, button->bounds());
+                };
+                st.input->layout.width = ui::SizeRule::fraction();
+                st.input->layout.height = ui::SizeRule::fixed(18);
+            }
+            auto out = std::make_unique<DragButton>("mixer.out." + tid, "out", [this, tid] {
+                json::Value args = json::Value::object();
+                args["track"] = tid;
+                run("ui.routing", std::move(args));
+            });
+            out->drag.notify = [this, tid](DragPhase phase, ui::Point p) {
+                dragSend(tid, phase, p);
+            };
+            out->layout.width = t.type == model::StripType::Channel ? ui::SizeRule::fixed(30)
+                                                                    : ui::SizeRule::fraction();
+            out->layout.height = ui::SizeRule::fixed(18);
+            st.out = static_cast<ui::Button*>(&io.add(std::move(out)));
+        }
+        // Channels: monitoring and arm, the arm centred (busses and masters give
+        // the room to the chain).
         if (t.type == model::StripType::Channel) {
-            st.arm = &rec.emplace<ui::Toggle>(
-                "mixer.arm." + tid, "R", "armed",
-                [this, tid](bool on) { (void)set(tid, "armed", json::Value(on)); });
-            st.monitor = &rec.emplace<ui::Button>("mixer.monitor." + tid, "Mon", [this, tid] {
+            auto& rec = frame->emplace<ui::Node>("mixer.rec." + tid);
+            rec.layout.dir = ui::Layout::Dir::Row;
+            rec.layout.height = ui::SizeRule::fixed(20);
+            rec.layout.gap = 6;
+            rec.emplace<ui::Node>("mixer.rec.l." + tid).layout.width = ui::SizeRule::fraction();
+            st.monitor = &rec.emplace<ui::MonitorButton>("mixer.monitor." + tid, [this, tid] {
                 const auto parsed = model::Id::parse(tid);
                 const model::Track* tr = parsed ? app_.head().tracks.find(*parsed) : nullptr;
                 if (!tr) return;
@@ -717,8 +832,12 @@ void Mixer::rebuild() {
                                                                               : "off";
                 (void)set(tid, "monitor", json::Value(std::string(next)));
             });
-            st.monitor->layout.height = ui::SizeRule::fixed(20);
-            st.monitor->layout.width = ui::SizeRule::fraction();
+            st.arm = &rec.emplace<ui::ArmButton>("mixer.arm." + tid, [this, tid](bool on) {
+                (void)set(tid, "armed", json::Value(on));
+            });
+            rec.emplace<ui::Node>("mixer.rec.balance." + tid).layout.width =
+                ui::SizeRule::fixed(20);  // as wide as the monitor: the arm stays centred
+            rec.emplace<ui::Node>("mixer.rec.r." + tid).layout.width = ui::SizeRule::fraction();
         }
         st.pan = &frame->emplace<ui::PanControl>("mixer.pan." + tid);
         st.pan->onChange = [this, tid](double pan, ui::Gesture g) {
@@ -756,14 +875,15 @@ void Mixer::rebuild() {
         ms.layout.dir = ui::Layout::Dir::Row;
         ms.layout.height = ui::SizeRule::fixed(20);
         ms.layout.gap = 3;
-        st.mute = &ms.emplace<ui::Toggle>(
-            "mixer.mute." + tid, "M", "meter-hot",
-            [this, tid](bool on) { (void)set(tid, "mute", json::Value(on)); });
+        st.mute = &ms.emplace<ui::Toggle>("mixer.mute." + tid, "M", "mute", [this, tid](bool on) {
+            (void)set(tid, "mute", json::Value(on));
+        });
         st.mute->layout.width = ui::SizeRule::fraction();
-        st.solo = &ms.emplace<ui::Toggle>("mixer.solo." + tid, "S", "meter", [this, tid](bool on) {
+        st.solo = &ms.emplace<ui::Toggle>("mixer.solo." + tid, "S", "solo", [this, tid](bool on) {
             (void)set(tid, "solo", json::Value(std::string(on ? "on" : "off")));
         });
         st.solo->layout.width = ui::SizeRule::fraction();
+        st.mute->pill = st.solo->pill = true;
         meters_.attach(tid, st.meter);
         static_cast<StripRow*>(row_)->addStrip(std::move(frame),
                                                t.type == model::StripType::Master);
@@ -815,6 +935,32 @@ void Mixer::dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::
     if (d.kind != DragView::Kind::Fx) return;
     d.pos = p;
     resolveFxDrop();
+    if (phase == DragPhase::End) return endDrag(true);
+    root_.requestAnimationFrame();
+}
+
+void Mixer::dragSend(const std::string& track, DragPhase phase, ui::Point p) {
+    DragView& d = *drag_;
+    if (phase == DragPhase::Cancel) return endDrag(false);
+    if (phase == DragPhase::Begin) {
+        endDrag(false);
+        d.kind = DragView::Kind::Send;
+        d.active = true;
+        d.track = track;
+        d.label = "send";
+        ghost_ = root_.addOverlay(std::make_unique<DragGhost>(drag_));
+    }
+    if (d.kind != DragView::Kind::Send) return;
+    d.pos = p;
+    d.drop = DragView::Drop::None;
+    for (const Strip& st : strips_)
+        if (st.track == track) d.source = st.node->bounds().intersect(st.node->parent()->bounds());
+    // Busses and masters take sends; a channel takes only hardware input.
+    if (const Strip* over = stripAt(p); over && over->track != track && over->type != "channel") {
+        d.drop = DragView::Drop::Copy;
+        d.target = over->track;
+        d.marker = over->node->bounds().intersect(over->node->parent()->bounds());
+    }
     if (phase == DragPhase::End) return endDrag(true);
     root_.requestAnimationFrame();
 }
@@ -924,7 +1070,11 @@ void Mixer::endDrag(bool commit) {
     if (!commit || done.drop == DragView::Drop::None) return;
     json::Value args = json::Value::object();
     const char* command = "fx.move";
-    if (done.kind == DragView::Kind::Strip) {
+    if (done.kind == DragView::Kind::Send) {
+        command = "route.add";
+        args["from"] = done.track;
+        args["to"] = done.target;
+    } else if (done.kind == DragView::Kind::Strip) {
         command = "track.move";
         args["track"] = done.track;
         args["index"] = static_cast<std::int64_t>(done.index);
@@ -962,9 +1112,11 @@ void Mixer::update() {
         st.solo->setOn(t->solo != model::Solo::Off);
         if (st.arm) st.arm->setOn(t->record.armed);
         if (st.monitor)
-            st.monitor->setText(t->record.monitor == model::Monitor::Off  ? "Mon off"
-                                : t->record.monitor == model::Monitor::On ? "Mon on"
-                                                                          : "Mon auto");
+            st.monitor->setMode(
+                t->record.monitor == model::Monitor::Off  ? ui::MonitorButton::Mode::Off
+                : t->record.monitor == model::Monitor::On ? ui::MonitorButton::Mode::On
+                                                          : ui::MonitorButton::Mode::Auto);
+        if (st.input && inputText) st.input->setText(inputText(*id));
     }
 }
 

@@ -40,6 +40,7 @@
 #include "mixer.h"
 #include "mouse_dialog.h"
 #include "plugin_windows.h"
+#include "preferences.h"
 #include "render_dialog.h"
 #include "routing_matrix.h"
 #include "screensets.h"
@@ -431,6 +432,10 @@ int main(int argc, char** argv) {
     };
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
     mixer.onAddChannel = [&shell] { shell.addStrip("channel"); };
+    mixer.inputText = [&shell](const model::Id& track) { return shell.inputLabel(track); };
+    mixer.pickInput = [&shell](const model::Id& track, const ui::Rect& anchor) {
+        shell.openInputMenu(track, anchor);
+    };
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
@@ -440,10 +445,12 @@ int main(int argc, char** argv) {
             if (!id) return Error("gui.editor", "an effect id like fx_3", "/fx");
             return pluginWindows.toggle(*id);
         });
-    gui::FxWindow fxWindow(**app, dispatcher, root, gui::FxWindow::Hooks{[&](model::Id id) {
-        return pluginWindows.toggle(id);
-    }},
-                           gui::Favourites::defaultFile(product::kSlug));
+    gui::FxWindow fxWindow(
+        **app, dispatcher, root,
+        gui::FxWindow::Hooks{
+            [&](model::Id id) { return pluginWindows.toggle(id); },
+            [](const std::string& message) { std::fprintf(stderr, "%s\n", message.c_str()); }},
+        gui::Favourites::defaultFile(product::kSlug));
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
     appActions.addUi("ui.track.color", "Track: color…", "track",
@@ -494,6 +501,23 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
     appActions.addUi("ui.mouse.zoom", "View: wheel zoom anchor…",
                      [&] { mouseDialog.open("wheel.zoom"); });
+    // Preferences (Edit menu): the default monitoring of new channels, the
+    // wheel zoom anchor, a way into the mouse modifiers.
+    const fs::path prefsFile = gui::Preferences::defaultFile(product::kSlug);
+    gui::Preferences prefs;
+    if (!o.offscreen) {
+        if (auto loaded = gui::Preferences::load(prefsFile))
+            prefs = *loaded;
+        else
+            std::fprintf(stderr, "preferences: %s (using the defaults)\n",
+                         loaded.error().toString().c_str());
+    }
+    gui::PreferencesDialog preferences(root, **app, mouseDialog, shell.arrange()->gestures().mouse,
+                                       prefs, o.offscreen ? fs::path{} : prefsFile);
+    preferences.onError = [](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+    };
+    appActions.addUi("ui.preferences", "Edit: preferences…", [&] { preferences.open(); });
     {
         views::ItemGestures& g = shell.arrange()->gestures();
         g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };

@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "product_fixture.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -15,11 +16,13 @@
 #include "app_actions.h"
 #include "meter_feed.h"
 #include "mixer.h"
+#include "preferences.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/root.h"
+#include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 
 using namespace supple;
@@ -196,18 +199,20 @@ TEST_CASE("mixer: a master looks like the others, and \"fx\" sits small at the s
                                          image.rgba.begin() + static_cast<std::ptrdiff_t>(at) + 4);
     };
     CHECK(pixel(sm.node->bounds()) == pixel(sa.node->bounds()));
-    // Small, at the top right, with the name beside it.
-    const ui::Rect strip = sa.node->bounds(), fx = sa.fx->bounds();
+    // Small, at the top right ("fx", then "+"), with the name beside them.
+    const ui::Rect strip = sa.node->bounds(), fx = sa.fx->bounds(), plus = sa.addFx->bounds();
     CHECK(sa.fx->valueText() == "fx");
+    CHECK(sa.addFx->valueText() == "+");
     CHECK(fx.w <= 34);
     CHECK(fx.h <= 16);
-    CHECK(fx.right() >= strip.right() - 8);
+    CHECK(plus.right() >= strip.right() - 8);
+    CHECK(fx.right() <= plus.x);
     CHECK(fx.y < strip.y + 12);
     CHECK(sa.name->bounds().right() <= fx.x + 1);
-    // Empty chain: the plug-in browser; filled: the chain, with the count.
+    // No plug-in count beside "fx", however long the chain.
     f.addFx(a, "Plumb");
     f.refresh();
-    CHECK(f.strip(a).fx->valueText() == "fx 1");
+    CHECK(f.strip(a).fx->valueText() == "fx");
 }
 
 TEST_CASE(
@@ -248,14 +253,16 @@ TEST_CASE("mixer: the chain takes the room unused sends and arm rows would leave
     const auto bus = f.addTrack("buss", "Bus");
     f.exec("route.add", R"({"from":")" + b + R"(","to":")" + bus + R"("})");
     f.refresh();
-    // No sends: the chain reaches down to the arm/monitor row.
+    // No sends: the chain reaches down to the input/output row.
     CHECK_FALSE(f.node("mixer.sends." + a)->visible);
-    CHECK(f.node("mixer.rec." + a)->bounds().y - f.strip(a).chain->bounds().bottom() <= 4.5f);
+    CHECK(f.node("mixer.io." + a)->bounds().y - f.strip(a).chain->bounds().bottom() <= 4.5f);
     // A send takes one row out of the chain section.
     CHECK(f.node("mixer.sends." + b)->visible);
     CHECK(near(f.strip(a).chain->bounds().h - f.strip(b).chain->bounds().h, 14 + 4));
-    // A buss has no arm/monitor row: its chain reaches down to the pan.
-    CHECK_FALSE(f.node("mixer.rec." + bus)->visible);
+    // A buss has no arm/monitor row (nor an input): its chain takes that room.
+    CHECK_FALSE(f.root->find("mixer.rec." + bus));
+    CHECK_FALSE(f.root->find("mixer.input." + bus));
+    CHECK(f.root->find("mixer.out." + bus));
     CHECK(f.strip(bus).chain->bounds().h > f.strip(a).chain->bounds().h);
     CHECK(near(f.strip(bus).fader->bounds().y, f.strip(a).fader->bounds().y));  // faders line up
 }
@@ -502,7 +509,7 @@ TEST_CASE(
     CHECK(copy.wet == 40);
     CHECK(f.steps() == before + 1);
     f.refresh();
-    CHECK(f.strip(b).fx->valueText() == "fx 2");
+    CHECK(f.chain(b).size() == 2);
     // Onto a master too; and one undo takes the copy away.
     f.drag(f.centre(f.node("mixer.fx." + p1)), f.empty(master));
     CHECK(f.chain(master).size() == 1);
@@ -586,4 +593,181 @@ TEST_CASE("mixer: masters reorder among masters; tr_0 stays first") {
     f.drag(f.empty(m2), {f.strip("tr_0").node->bounds().x + 5, f.empty("tr_0").y});
     CHECK(order()[0] == "tr_0");
     CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: a selected strip's controls act on every selected track, one undo step each") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto bus = f.addTrack("buss", "Bus");
+    const auto c = f.addTrack("channel", "C");
+    f.exec("track.set", R"({"track":")" + b + R"(","volume_db":-6,"pan":-20})");
+    f.ui.selectedTracks = {a, b, bus};
+    f.refresh();
+    auto steps = [&] { return f.steps(); };
+    // Mute: all three, one step.
+    auto s0 = steps();
+    REQUIRE(f.root->click("mixer.mute." + a));
+    CHECK(f.track(a).mute);
+    CHECK(f.track(b).mute);
+    CHECK(f.track(bus).mute);
+    CHECK_FALSE(f.track(c).mute);
+    CHECK(steps() == s0 + 1);
+    f.refresh();
+    // Arm and monitoring: the channels only (a buss records nothing).
+    REQUIRE(f.root->click("mixer.arm." + b));
+    CHECK(f.track(a).record.armed);
+    CHECK(f.track(b).record.armed);
+    CHECK_FALSE(f.track(c).record.armed);
+    f.refresh();
+    REQUIRE(f.root->click("mixer.monitor." + a));  // on (the default) -> auto
+    CHECK(f.track(a).record.monitor == model::Monitor::Auto);
+    CHECK(f.track(b).record.monitor == model::Monitor::Auto);
+    CHECK(f.track(bus).record.monitor == model::Monitor::Off);
+    CHECK(f.track(c).record.monitor == model::Monitor::On);
+    f.refresh();
+    // A fader drag moves each selected strip by the same amount; one step.
+    s0 = steps();
+    const ui::Rect fb = f.strip(a).fader->bounds();
+    const ui::Point cap{fb.x + fb.w / 2,
+                        fb.bottom() - 8 - static_cast<float>(ui::faderPosition(0)) * (fb.h - 16)};
+    f.drag(cap, {cap.x, cap.y + 30});
+    const double moved = f.track(a).volumeDb;
+    CHECK(moved < -1);
+    CHECK(f.track(b).volumeDb == doctest::Approx(-6 + moved));
+    CHECK(f.track(bus).volumeDb == doctest::Approx(moved));
+    CHECK(f.track(c).volumeDb == 0.0);
+    CHECK(steps() == s0 + 1);
+    f.refresh();
+    // Pan the same way: relative, clamped.
+    const ui::Rect pb = f.strip(a).pan->bounds();
+    f.drag({pb.x + pb.w / 2, pb.y + 8}, {pb.right() - 2, pb.y + 8});
+    CHECK(f.track(a).pan > 50);
+    CHECK(f.track(b).pan == doctest::Approx(std::clamp(-20 + f.track(a).pan, -100.0, 100.0)));
+    f.refresh();
+    // A strip outside the selection acts alone.
+    REQUIRE(f.root->click("mixer.solo." + c));
+    CHECK(f.track(c).solo == model::Solo::On);
+    CHECK(f.track(a).solo == model::Solo::Off);
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: a double-click on a name renames it in place; a click elsewhere keeps it") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    f.refresh();
+    const ui::Point name = f.centre(f.node("mixer.name." + a));
+    f.pointer(ui::PointerEvent::Type::Down, name);
+    f.pointer(ui::PointerEvent::Type::Up, name);
+    f.pointer(ui::PointerEvent::Type::Down, name, 2);
+    f.pointer(ui::PointerEvent::Type::Up, name);
+    auto* field = dynamic_cast<ui::TextField*>(f.root->find("mixer.rename." + a));
+    REQUIRE(field);
+    CHECK(field->visible);
+    CHECK(f.root->focused() == field);
+    f.root->text("Lead");  // replaces the selected name
+    // A click on empty space elsewhere ends the edit and keeps it.
+    const ui::Rect strips = f.node("mixer.strips")->bounds();
+    f.pointer(ui::PointerEvent::Type::Down, {strips.right() - 300, strips.y + 40});
+    f.pointer(ui::PointerEvent::Type::Up, {strips.right() - 300, strips.y + 40});
+    CHECK(f.track(a).name == "Lead");
+    CHECK(f.root->focused() == nullptr);  // Space is play/stop again
+    f.refresh();
+    CHECK(f.strip(a).name->text() == "Lead");
+    // Escape drops an edit.
+    const ui::Point again = f.centre(f.node("mixer.name." + a));
+    f.pointer(ui::PointerEvent::Type::Down, again, 2);
+    f.pointer(ui::PointerEvent::Type::Up, again);
+    f.root->text("Nope");
+    f.root->key(SDLK_ESCAPE);
+    CHECK(f.track(a).name == "Lead");
+}
+
+TEST_CASE("mixer: \"out\" opens the routing matrix, and a drag onto a buss makes a send") {
+    Fixture f;
+    if (!f.ok) return;
+    int routing = 0;
+    f.actions->addUi("ui.routing", "View: routing matrix", [&] { ++routing; });
+    const auto a = f.addTrack("channel", "A");
+    const auto bus = f.addTrack("buss", "Bus");
+    f.refresh();
+    REQUIRE(f.root->click("mixer.out." + a));
+    CHECK(routing == 1);
+    const auto before = f.steps();
+    f.drag(f.centre(f.node("mixer.out." + a)), f.centre(f.node("mixer.faderrow." + bus)), false);
+    CHECK(f.mixer->drag().kind == gui::Mixer::DragView::Kind::Send);
+    CHECK(f.mixer->drag().target == bus);
+    f.pointer(ui::PointerEvent::Type::Up, f.centre(f.node("mixer.faderrow." + bus)));
+    CHECK(routing == 1);  // a drag is not a click
+    CHECK(f.steps() == before + 1);
+    bool sent = false;
+    for (const auto& e : f.app->head().routes)
+        sent = sent || (e.value->from.track && e.value->from.track->str() == a &&
+                        e.value->to.track && e.value->to.track->str() == bus);
+    CHECK(sent);
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: the chain's empty part takes a double-click (plugin browser); input picks") {
+    Fixture f;
+    if (!f.ok) return;
+    std::vector<std::string> added;
+    f.actions->addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
+        added.push_back(v.isString() ? v.asString() : v.find("track")->asString());
+        return {};
+    });
+    std::vector<model::Id> picked;
+    f.mixer->pickInput = [&](const model::Id& track, const ui::Rect&) { picked.push_back(track); };
+    f.mixer->inputText = [](const model::Id&) { return std::string("AUX0"); };
+    const auto a = f.addTrack("channel", "A");
+    f.refresh();
+    const auto strips = f.mixer->strips().size();
+    const ui::Point chain = f.centre(f.strip(a).chain);
+    f.pointer(ui::PointerEvent::Type::Down, chain);
+    f.pointer(ui::PointerEvent::Type::Up, chain);
+    f.pointer(ui::PointerEvent::Type::Down, chain, 2);
+    f.pointer(ui::PointerEvent::Type::Up, chain);
+    CHECK(added == std::vector<std::string>{a});
+    f.refresh();
+    CHECK(f.mixer->strips().size() == strips);  // not a new channel
+    REQUIRE(f.strip(a).input);
+    CHECK(f.strip(a).input->valueText() == "AUX0");
+    REQUIRE(f.root->click("mixer.input." + a));
+    REQUIRE(picked.size() == 1);
+    CHECK(picked[0].str() == a);
+}
+
+TEST_CASE("preferences: new channels' monitoring and the wheel zoom anchor, saved") {
+    Fixture f;
+    if (!f.ok) return;
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "config" / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, gui::Preferences{}, file);
+    CHECK(f.app->defaultMonitor() == model::Monitor::On);  // the default
+    prefs.open();
+    f.root->frame(false);
+    REQUIRE(prefs.isOpen());
+    CHECK(f.node("prefs.monitor.set")->valueText() == "On (while armed)");
+    CHECK(f.node("prefs.zoom.set")->valueText() == "The project cursor");
+    prefs.setDefaultMonitor(model::Monitor::Off);
+    CHECK(f.node("prefs.monitor.set")->valueText() == "Off");
+    const auto a = f.addTrack("channel", "A");
+    CHECK(f.track(a).record.monitor == model::Monitor::Off);
+    auto loaded = gui::Preferences::load(file);
+    REQUIRE(loaded);
+    CHECK(loaded->defaultMonitor == model::Monitor::Off);
+    prefs.setZoomAnchor("mouse_pointer");
+    CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
+    CHECK(f.node("prefs.zoom.set")->valueText() == "The mouse pointer");
+    REQUIRE(f.root->click("prefs.close"));
+    CHECK_FALSE(prefs.isOpen());
+    // A file says auto: a new dialog applies it to the app at once.
+    REQUIRE(gui::Preferences{model::Monitor::Auto}.save(file));
+    auto reread = gui::Preferences::load(file);
+    REQUIRE(reread);
+    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *reread, {});
+    CHECK(f.app->defaultMonitor() == model::Monitor::Auto);
 }

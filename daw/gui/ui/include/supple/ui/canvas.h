@@ -40,6 +40,14 @@ class Canvas {
     void strokeRect(const Rect& r, Color c, float width = 1.0f);
     void strokeRound(const Rect& r, float radius, Color c, float width = 1.0f);
     void line(Point a, Point b, Color c, float width = 1.0f);
+    void fillCircle(Point centre, float radius, Color c);
+    void strokeCircle(Point centre, float radius, Color c, float width = 1.0f);
+    // A polygon through `points` (icons): filled, or outlined (closed or open).
+    void fillPath(const std::vector<Point>& points, Color c);
+    void strokePath(const std::vector<Point>& points, Color c, float width = 1.0f,
+                    bool closed = true);
+    // An arc around `centre` from angle a0 to a1 (radians, clockwise from +x).
+    void strokeArc(Point centre, float radius, float a0, float a1, Color c, float width = 1.0f);
     // Text inside `box`, aligned with `align`; clipped to the box when it
     // does not fit (an ellipsis replaces the cut).
     void text(const Rect& box, std::string_view s, Font font, float size, Color c,

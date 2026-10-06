@@ -136,10 +136,44 @@ class Toggle : public Node {
     bool onPointer(const PointerEvent& e) override;
     bool onKey(const KeyEvent& e) override;
     std::string valueText() const override { return on_ ? "on" : "off"; }
+    // A strip's mute and solo: a rounded pill whose letter and outline carry
+    // the "on" colour, filled with it when on.
+    bool pill = false;
+
+  protected:
+    bool pressed() const { return pressed_; }
 
   private:
     std::string text_, onColor_;
     bool on_ = false, pressed_ = false;
+};
+
+// Record arm: a red disc, faded when off and solid when armed.
+class ArmButton : public Toggle {
+  public:
+    explicit ArmButton(std::string id, std::function<void(bool)> onToggle = {});
+    void paint(Canvas& canvas) override;
+};
+
+// Input monitoring (off, on, auto): a small speaker, an outline when off,
+// solid when on, green when auto. A click runs onClick (the owner cycles it).
+class MonitorButton : public Node {
+  public:
+    enum class Mode { Off, On, Auto };
+    explicit MonitorButton(std::string id, std::function<void()> onClick = {});
+    std::function<void()> onClick;
+    void setMode(Mode mode);
+    Mode mode() const { return mode_; }
+    void paint(Canvas& canvas) override;
+    bool onPointer(const PointerEvent& e) override;
+    bool onKey(const KeyEvent& e) override;
+    std::string valueText() const override {
+        return mode_ == Mode::Off ? "off" : mode_ == Mode::On ? "on" : "auto";
+    }
+
+  private:
+    Mode mode_ = Mode::Off;
+    bool pressed_ = false;
 };
 
 }  // namespace supple::ui

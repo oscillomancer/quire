@@ -36,8 +36,9 @@ class PluginBrowser {
   public:
     PluginBrowser(engine::EngineApp&, cmd::Dispatcher& dispatcher, ui::Root& root,
                   std::filesystem::path favouritesFile);
-    // Opens the browser; `onAdd` runs with a plugin id on Enter or a double click.
-    void open(std::function<void(const std::string&)> onAdd);
+    // Opens the browser (titled `title`, default "Add plugin"); `onAdd` runs
+    // with a plugin id on Enter or a double click. Its Close button closes it.
+    void open(std::function<void(const std::string&)> onAdd, std::string title = {});
     void close();
     bool isOpen() const { return page_ != nullptr; }
 
@@ -93,6 +94,8 @@ class PluginBrowser {
     ui::List* list_ = nullptr;
     ui::Label* status_ = nullptr;
     ui::Label* detailLabel_ = nullptr;
+    ui::Label* title_ = nullptr;
+    std::string titleText_ = "Add plugin";
     std::string detail_;
     bool scanPending_ = false;
 };

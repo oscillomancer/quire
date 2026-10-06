@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-04 by the orchestrator. Compact and current: what's done,
+Updated 2026-10-06 by the orchestrator. Compact and current: what's done,
 in progress, blocked, next. Task IDs are stable (P<phase>.<n>).
 
 ## Phase 0 — Reconnaissance and foundations
@@ -215,6 +215,28 @@ and merged by the orchestrator (main 330a4da):
 - Open: no autoscroll during drags; no resize cursor (the UI toolkit has none);
   plug-ins drop onto mixer strips only, not track-list rows; `fx.copy` does not
   copy envelopes or key routes.
+
+## Strips, routing and monitoring batch (2026-10-06)
+
+Nate's next list, done by the orchestrator:
+- Monitoring needs the arm (REAPER's rule): `on` while armed, `auto` while armed
+  and stopped or recording (tape style, decided per block in `processNode`).
+  New channels monitor `on` by default; Edit > Preferences (new,
+  `preferences.json`) switches the default and holds the wheel zoom anchor.
+- Names: track.add numbers new strips `ch_N`, `buss_N`, `mstr_N` (tr_0 stays
+  "Master"); `model::trackLabel` gives every view (and `route.matrix`) the same
+  label. The routing matrix lists strips in the views' order, masters last.
+- Strip controls, the same in the TCP and the mixer: pill M/S in their own
+  colours, a red arm disc, a speaker for monitoring (outline/solid/green),
+  "fx" (chain) + "+" (the plugin browser alone, with its own Close; no count).
+  The mixer gains the input button, "out" (click: matrix; drag: a send) and
+  rename by double-click; a double-click on a chain's empty part opens the browser.
+- A control on a selected track acts on the whole selection (`gui::SelectionEdit`):
+  toggles, monitoring and input set; fader and pan drags move relatively; one undo step.
+- A click elsewhere ends a rename and keeps it; Space never presses a button
+  (play/stop only); R records, L loops; Alt+D the mixer; Alt+E the MIDI editor.
+- FX chain: rows reorder by drag (no arrows). Arrange: the marquee published its
+  selection only on release, so the app's per-frame selection sync undid it.
 
 ## Team (Hermes workers via Herdr; Codex retired)
 

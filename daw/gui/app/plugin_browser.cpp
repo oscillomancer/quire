@@ -110,7 +110,13 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
     page->layout.height = ui::SizeRule::fixed(440);
     page->layout.padding = ui::Insets::all(12);
     page->layout.gap = 8;
-    page->emplace<ui::Label>("browser.title", "Add plugin", ui::Font::UiBold, "body");
+    auto& header = page->emplace<ui::Node>("browser.header");
+    header.layout.dir = ui::Layout::Dir::Row;
+    header.layout.height = ui::SizeRule::fixed(28);
+    header.layout.align = ui::Layout::Align::Center;
+    title_ = &header.emplace<ui::Label>("browser.title", titleText_, ui::Font::UiBold, "body");
+    title_->layout.width = ui::SizeRule::fraction();
+    header.emplace<ui::Button>("browser.close", "Close", [this] { close(); });
     search_ = &page->emplace<ui::TextField>("browser.search", "", "Search plugins…");
     search_->layout.height = ui::SizeRule::fixed(26);
     list_ = &page->emplace<ui::List>("browser.results");
@@ -193,9 +199,11 @@ void PluginBrowser::updateDetail() {
     if (detailLabel_) detailLabel_->setText(detail_);
 }
 
-void PluginBrowser::open(std::function<void(const std::string&)> onAdd) {
+void PluginBrowser::open(std::function<void(const std::string&)> onAdd, std::string title) {
     onAdd_ = std::move(onAdd);
+    titleText_ = title.empty() ? std::string("Add plugin") : std::move(title);
     if (page_) {  // already open: raise it
+        if (title_) title_->setText(titleText_);
         refresh();
         return;
     }
@@ -206,8 +214,10 @@ void PluginBrowser::open(std::function<void(const std::string&)> onAdd) {
         list_ = nullptr;
         status_ = nullptr;
         detailLabel_ = nullptr;
+        title_ = nullptr;
         scanPending_ = false;
     });
+    if (search_) root_.focus(search_);  // typing searches (not the header's Close)
 }
 
 void PluginBrowser::close() {

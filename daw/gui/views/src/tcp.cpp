@@ -168,12 +168,13 @@ class TcpPanel::Row : public ui::Node {
     ui::TextField* rename_ = nullptr;
     ui::Toggle* mute_ = nullptr;
     ui::Toggle* solo_ = nullptr;
-    ui::Toggle* arm_ = nullptr;
-    ui::Toggle* monitor_ = nullptr;
+    ui::ArmButton* arm_ = nullptr;
+    ui::MonitorButton* monitor_ = nullptr;
     ui::Fader* fader_ = nullptr;
     ui::PanControl* pan_ = nullptr;
     ui::Meter* meter_ = nullptr;
     ui::Button* fx_ = nullptr;
+    ui::Button* addFx_ = nullptr;  // "+" beside "fx": the plugin browser alone
     ui::Button* input_ = nullptr;
     ui::Button* env_ = nullptr;
     OutButton* out_ = nullptr;
@@ -193,10 +194,13 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
     rename_ = &emplace<ui::TextField>(id + ".rename", "");
     rename_->visible = false;
     rename_->onSubmit = [this](const std::string& text) {
+        if (!renaming_) return;
         renaming_ = false;
         rename_->visible = false;
         name_->visible = true;
         name_->relayout();
+        // Keys go back to the shortcuts (Space plays again).
+        if (ui::Root* r = root(); r && r->focused() == rename_) r->focus(nullptr);
         const auto target = std::exchange(renameTrack_, std::nullopt);
         if (panel_.cb_.commit && target && target == track_) {
             json::Value args = trackArg(*target);
@@ -205,34 +209,40 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         }
         invalidate();
     };
+    // A click anywhere else ends the rename and keeps the edit.
+    rename_->onBlur = [this](const std::string& text) {
+        if (renaming_) rename_->onSubmit(text);
+    };
     rename_->onCancel = [this] {
         renameTrack_.reset();
         renaming_ = false;
         rename_->visible = false;
         name_->visible = true;
         name_->relayout();
+        if (ui::Root* r = root(); r && r->focused() == rename_) r->focus(nullptr);
         invalidate();
     };
     auto setTrack = [this](json::Value args, std::string gesture) {
         if (!panel_.cb_.commit || !track_.has_value()) return;
         panel_.cb_.commit("track.set", std::move(args), std::move(gesture));
     };
-    mute_ = &emplace<ui::Toggle>(id + ".mute", "M", "meter-hot", [this, setTrack](bool on) {
+    mute_ = &emplace<ui::Toggle>(id + ".mute", "M", "mute", [this, setTrack](bool on) {
         json::Value args = trackArg(*track_);
         args["mute"] = on;
         setTrack(std::move(args), {});
     });
-    solo_ = &emplace<ui::Toggle>(id + ".solo", "S", "meter", [this, setTrack](bool on) {
+    solo_ = &emplace<ui::Toggle>(id + ".solo", "S", "solo", [this, setTrack](bool on) {
         json::Value args = trackArg(*track_);
         args["solo"] = on ? "on" : "off";
         setTrack(std::move(args), {});
     });
-    arm_ = &emplace<ui::Toggle>(id + ".arm", "A", "clip", [this, setTrack](bool on) {
+    mute_->pill = solo_->pill = true;
+    arm_ = &emplace<ui::ArmButton>(id + ".arm", [this, setTrack](bool on) {
         json::Value args = trackArg(*track_);
         args["armed"] = on;
         setTrack(std::move(args), {});
     });
-    monitor_ = &emplace<ui::Toggle>(id + ".monitor", "mon", "meter", [this, setTrack](bool) {
+    monitor_ = &emplace<ui::MonitorButton>(id + ".monitor", [this, setTrack] {
         const model::Track* tr =
             track_.has_value() ? panel_.session_.tracks.find(*track_) : nullptr;
         json::Value args = trackArg(*track_);
@@ -284,6 +294,9 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
     fx_ = &emplace<ui::Button>(id + ".fx", "fx", [this] {
         if (track_ && panel_.cb_.fx) panel_.cb_.fx(*track_);
     });
+    addFx_ = &emplace<ui::Button>(id + ".addfx", "+", [this] {
+        if (track_ && panel_.cb_.addFx) panel_.cb_.addFx(*track_);
+    });
     input_ = &emplace<ui::Button>(id + ".input", "in \u2014", [this] {
         if (!track_ || !panel_.cb_.pickInput) return;
         panel_.cb_.pickInput(*track_, input_->bounds());
@@ -323,20 +336,11 @@ void TcpPanel::Row::refresh(const model::Session& session) {
     mute_->setOn(tr->mute);
     solo_->setOn(tr->solo != model::Solo::Off);
     arm_->setOn(tr->record.armed);
-    monitor_->setOn(tr->record.monitor != model::Monitor::Off);
+    monitor_->setMode(tr->record.monitor == model::Monitor::Off  ? ui::MonitorButton::Mode::Off
+                      : tr->record.monitor == model::Monitor::On ? ui::MonitorButton::Mode::On
+                                                                 : ui::MonitorButton::Mode::Auto);
     fader_->setValue(tr->volumeDb);
     pan_->setValue(tr->pan);
-    int fx = 0, bypassed = 0, offline = 0;
-    for (model::Id id : tr->chain)
-        if (const model::FxInstance* f = session.fx.find(id)) {
-            ++fx;
-            bypassed += f->bypass ? 1 : 0;
-            offline += f->offline ? 1 : 0;
-        }
-    // "fx", "fx 3"; a trailing "~" when one is bypassed or offline.
-    std::string fxText = fx == 0 ? "fx" : "fx " + std::to_string(fx);
-    if (bypassed || offline) fxText += "~";
-    if (fx_->valueText() != fxText) fx_->setText(fxText);
     // The record input: the view knows the channels, the app knows the device's
     // port names (engine.inputs), so the app writes the label.
     std::string channels;
@@ -388,6 +392,7 @@ ui::Node* TcpPanel::Row::control(std::string_view what) const {
     if (what == "pan") return pan_;
     if (what == "meter") return meter_;
     if (what == "fx") return fx_;
+    if (what == "addfx") return addFx_;
     if (what == "input") return input_;
     return nullptr;
 }
@@ -396,10 +401,12 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     setBounds(r);
     const float x = r.x, right = r.right();
     const float indent = 14.0f * static_cast<float>(depth_);
-    // The "fx" button ends the name line, so every row has it at any height.
-    const float fxWidth = fx_->valueText().size() > 2 ? 34.0f : 22.0f;
-    fx_->arrange(canvas, {right - 10 - fxWidth, r.y + 3, fxWidth, 15});
-    nameRect_ = {x + 26 + indent, r.y + 2, std::max(20.0f, right - x - 40 - fxWidth - indent), 18};
+    // "fx" and "+" end the name line, so every row has them at any height.
+    const float fxWidth = 22.0f, addWidth = 16.0f;
+    addFx_->arrange(canvas, {right - 10 - addWidth, r.y + 3, addWidth, 15});
+    fx_->arrange(canvas, {right - 12 - addWidth - fxWidth, r.y + 3, fxWidth, 15});
+    nameRect_ = {x + 26 + indent, r.y + 2,
+                 std::max(20.0f, right - x - 42 - fxWidth - addWidth - indent), 18};
     name_->arrange(canvas, nameRect_);
     rename_->arrange(canvas, {nameRect_.x, nameRect_.y + 1, nameRect_.w, 17});
     meter_->arrange(canvas, {right - 5, r.y + 3, 4, std::max(4.0f, r.h - 6)});
@@ -416,12 +423,15 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     out_->visible = controls;
     // Keep both I/O buttons inside the TCP, even on deeply nested channels.
     float tx = x + std::min(26 + indent, std::max(6.0f, r.w - 180));
-    for (ui::Node* n : {static_cast<ui::Node*>(mute_), static_cast<ui::Node*>(solo_),
-                        static_cast<ui::Node*>(arm_), static_cast<ui::Node*>(monitor_)}) {
+    for (ui::Node* n : {static_cast<ui::Node*>(mute_), static_cast<ui::Node*>(solo_)}) {
+        n->arrange(canvas, {tx, ty, 19, 14});
+        tx += 21;
+    }
+    // Arm and monitor are drawn controls, a little taller than the buttons.
+    for (ui::Node* n : {static_cast<ui::Node*>(arm_), static_cast<ui::Node*>(monitor_)}) {
         if (!n->visible) continue;
-        const bool wide = n == monitor_;  // "mon" needs a little more room
-        n->arrange(canvas, {tx, ty, wide ? 28.0f : 19.0f, 14});
-        tx += wide ? 30.0f : 21.0f;
+        n->arrange(canvas, {tx, ty - 1, 16, 16});
+        tx += 18;
     }
     if (input_->visible) {
         // The input names the device's ports; the strip has room for a short

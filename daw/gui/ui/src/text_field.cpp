@@ -312,6 +312,8 @@ void TextField::onFocus(bool focused) {
         dragging_ = false;
     }
     invalidate();
+    if (!focused)
+        if (auto callback = onBlur) callback(text_);
 }
 
 }  // namespace supple::ui

@@ -174,14 +174,30 @@ view. Window layout is UI state (§1.2).
 
 ### 4.2 Track control panel (TCP)
 
-Per strip: name (rename in place), **strip-type badge** (Channel / Buss /
+Per strip: name (rename in place: a double-click; Enter or a click anywhere
+else keeps the edit, Escape drops it), **strip-type badge** (Channel / Buss /
 Master: colour, shape and label differ — clear at a glance, ADR-0019),
-mute/solo, arm, input and monitor (channels only), volume fader and pan
+mute/solo (rounded pills in their own colours), arm (a red disc: faded off,
+solid armed), monitor (a speaker: an outline off, solid on, green auto),
+input (channels only for these three), volume fader and pan
 (Console 9 Channel's controls on channels and busses; plain gain and
 balance on masters; the fader's dB scale comes from `libs/console9`'s
-mapping), FX button (chain state: count, bypassed, offline), I/O button
-(drag onto another strip to create a route; drop rules follow
-`route.strip_type`, invalid targets show why before the drop), meters.
+mapping), "fx" (the chain window) with "+" beside it (the plugin browser
+alone, adding last in the chain; no count, to save room), the "out" button
+(a click opens the routing matrix; drag onto another strip to create a
+route; drop rules follow `route.strip_type`, invalid targets show why before
+the drop), meters. The mixer's strips carry the same controls in the same
+looks (§4.4). Every view names a track the same way (`model::trackLabel`):
+its name, which track.add sets to the first free `ch_N`, `buss_N` or
+`mstr_N` (the session's own master is "Master"); an unnamed track from an
+older session shows that kind of label too.
+
+A strip control used on a selected track acts on the whole selection, in the
+TCP and the mixer alike (`gui::SelectionEdit`): mute, solo, arm, monitoring
+and the input set the same value on each (arm, monitoring and input only on
+its channels); a fader or pan drag moves each selected track by the same
+amount from where it started (clamped). A click is one undo step, a drag is
+one. A control on a track outside the selection acts on that track alone.
 Folder/buss parentage shows as indentation and a parent bar. Under each
 parent the channels are listed first, then the busses (each in the parent's own
 child order, `views::displayChildren`), so a buss never sits between two
@@ -248,13 +264,18 @@ channels, fader + pan + meters, Console 9 on/off as a project toggle with its
 level-matched behaviour explained in its tooltip. Meters update only when
 their entire ancestor chain is visible, and clear peak hold on reopening.
 
-A small "fx" button sits at each strip's top right (the TCP's button: the
-plugin browser on an empty chain, the chain window otherwise); the strip's
-plug-in chain lists every plug-in, scrolling when it is longer than its
-section, and takes the room a strip's unused rows would leave (sends show
-only when there are some, up to two; busses and masters have no arm/monitor
-row). Alt+click on a plug-in removes it (`fx.remove`, one undo step). A
-double-click on the strips' empty space (not on a strip) adds a channel. The
+Small "fx" and "+" buttons sit at each strip's top right (the TCP's: the
+chain window, and the plugin browser alone); a double-click on the name
+renames the strip in place, as in the TCP. Under the chain, an input button
+(channels) and "out" (not on masters: a click opens the routing matrix, a drag
+onto a buss or master makes a send); then, on channels, monitoring and the
+arm, the arm centred. The strip's plug-in chain lists every plug-in,
+scrolling when it is longer than its section, and takes the room a strip's
+unused rows would leave (sends show only when there are some, up to two;
+busses and masters have no arm/monitor row). Alt+click on a plug-in removes it
+(`fx.remove`, one undo step); a double-click on the chain's empty part opens
+the plugin browser for that strip. A double-click on the strips' empty space
+(not on a strip) adds a channel. The
 panel's top edge (shared with the MIDI editor: it lights up under the pointer)
 resizes the mixer by drag and only the chain
 sections follow (meter, fader, buttons keep their size); a double-click on it
@@ -271,7 +292,10 @@ drop outside the strips cancels; each is one undo step.
 ### 4.5 FX chain and plugins
 
 Chain list with add (searchable browser over the plugin scan cache;
-favourites and stock plugins first), reorder by drag, bypass vs offline
+favourites and stock plugins first; the browser also opens on its own from a
+strip's "+", titled with the track and with its own Close), reorder by
+dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
+row too; no arrow buttons), bypass vs offline
 (distinct, `reaper-ux.md` addendum), wet/dry, per-FX latency and CPU, preset
 menu, and the plugin's own GUI (embedded X11 child of an SDL window,
 ADR-0005 §2, `clap.timer-support`, resize negotiated from observed
@@ -295,7 +319,10 @@ inputs, MIDI inputs) × destinations (parent, strips, plugin keys, hardware
 outputs); a cell creates/edits a route (tap, channels, level, pan/follow,
 mute, invert, mono); cells that `route.strip_type` would reject are drawn
 disabled with the rule as their tooltip; record-input assignments appear in
-the same grid. A graph view (nodes and edges, PDC per node) is P1.
+the same grid. A graph view (nodes and edges, PDC per node) is P1. Strips are listed in the
+views' order (`route.matrix`): each master's tree with a parent's channels
+before its busses, then the masters at the bottom, under the views' labels
+(§4.2). A strip's "out" button opens it (TCP and mixer).
 Matrix updates clamp scroll to the current endpoint range; paint uses
 endpoint-pair indexes for send and cycle rules.
 Commands: `route.*`, `track.set {record_input}`.
@@ -383,7 +410,12 @@ attributed.
   text field), chords allowed, conflicts shown in the editor; stored as
   canonical JSON in user config; defaults close to REAPER's common keys
   where they are not proprietary assets (key choices are not copyrightable
-  expression; no REAPER files are copied).
+  expression; no REAPER files are copied). Among the defaults: Space
+  play/stop, R record (also Ctrl+R), L loop, Ctrl+M or Alt+D the mixer,
+  Alt+E the MIDI editor on the item it had last (else the selected or first
+  MIDI item; nothing without one). Space is never a button's: buttons and
+  toggles take Enter, so Space after a click still plays or stops, and a
+  rename that ends gives the keys back to the shortcuts.
 - **Macros:** a sequence of actions (or a Lua script) run as one batch (one
   undo step), with typed prompts.
 - **Toolbars and menus:** built from actions; customizable; stored in user
@@ -401,6 +433,12 @@ attributed.
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
   single setting rather than a modifier map: the wheel's zoom anchor
   (`project_cursor`, the default, or `mouse_pointer`).
+- **Preferences** (Edit > Preferences…): app-wide settings, never project
+  state. The default monitoring of new channels (off, on — the default — or
+  auto; `preferences.json`, supple.preferences/1.0, sets
+  `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
+  wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
+  modifiers.
 
 ## 7. Visual identity
 
