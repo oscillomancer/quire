@@ -737,21 +737,29 @@ void registerExtraCommands(cmd::Registry& registry) {
                 r["hint"] = hint;
                 return r;
             };
-            // Tracks in tree order with depth.
+            // Tracks in the order the views show them: each master's tree
+            // (under a parent, its channels before its busses), then the
+            // masters themselves.
             std::vector<std::pair<Id, int>> order;
             std::function<void(Id, int)> walk = [&](Id id, int depth) {
                 const model::Track* t = s.tracks.find(id);
                 if (!t) return;
-                order.emplace_back(id, depth);
-                for (Id child : t->children) walk(child, depth + 1);
+                if (t->type != model::StripType::Master) order.emplace_back(id, depth);
+                const int below = t->type == model::StripType::Master ? depth : depth + 1;
+                for (model::StripType type : {model::StripType::Channel, model::StripType::Buss})
+                    for (Id child : t->children)
+                        if (const model::Track* kid = s.tracks.find(child);
+                            kid && kid->type == type)
+                            walk(child, below);
             };
             for (Id m : s.project->masters) walk(m, 0);
+            for (Id m : s.project->masters) order.emplace_back(m, 0);
             json::Value sources = json::Value::array(), destinations = json::Value::array();
             for (const auto& [id, depth] : order) {
                 const model::Track& t = *s.tracks.find(id);
                 json::Value src = json::Value::object();
                 src["id"] = id.str();
-                src["name"] = t.name;
+                src["name"] = model::trackLabel(s, id);
                 src["type"] = std::string(model::stripTypeName(t.type));
                 src["depth"] = depth;
                 if (t.parent) {
@@ -765,7 +773,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 sources.push_back(src);
                 json::Value dst = json::Value::object();
                 dst["id"] = id.str();
-                dst["name"] = t.name;
+                dst["name"] = model::trackLabel(s, id);
                 dst["kind"] = "track";
                 dst["type"] = std::string(model::stripTypeName(t.type));
                 if (t.type == model::StripType::Channel)

@@ -852,6 +852,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         // For monitored inputs (audio and MIDI).
         plan->deviceIn = in;
         plan->deviceInChannels = deviceInputs_;
+        plan->deviceRecording = recorder_.load() != nullptr;
         plan->deviceMidi = midiSource_->midiInput();
         plan->deviceMidiOffset = midiBase;
     }
@@ -1383,6 +1384,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     }
     p.deviceIn = in;
     p.deviceInChannels = deviceInputs_;
+    p.deviceRecording = recorder_.load() != nullptr;
     p.deviceMidi = midiSource_->midiInput();
     p.deviceMidiOffset = offset;
     host::Transport t = detail::transportAt(p, livePos_, &loopC_);

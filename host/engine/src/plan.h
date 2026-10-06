@@ -438,6 +438,7 @@ struct Node {
     // one = mono to both sides), and whether it is live (monitors, or is fed
     // by a node that does).
     std::vector<int> monitorInputs;
+    bool tapeAuto = false;  // monitor auto: the input is heard only while stopped or recording
     // MIDI monitoring (ADR-0016): the device and channel mapping this track
     // plays live; the engine resolves the device to ports.
     struct MidiIn {
@@ -512,6 +513,7 @@ struct Plan {
     // processes live nodes (null: no device, e.g. offline).
     const float* const* deviceIn = nullptr;
     std::uint32_t deviceInChannels = 0;
+    bool deviceRecording = false;  // a take is being recorded (auto monitoring hears the input)
     // The callback's device MIDI (frames within the cycle) and where the part
     // of the cycle being processed starts.
     std::span<const MidiInputEvent> deviceMidi;

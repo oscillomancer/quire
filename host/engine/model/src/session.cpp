@@ -775,6 +775,43 @@ std::optional<Id> trackOfFx(const Session& s, Id fx) {
     return std::nullopt;
 }
 
+namespace {
+std::string_view labelPrefix(StripType type) {
+    switch (type) {
+        case StripType::Channel:
+            return "ch_";
+        case StripType::Buss:
+            return "buss_";
+        case StripType::Master:
+            return "mstr_";
+    }
+    return "ch_";
+}
+}  // namespace
+
+std::string trackLabel(const Session& s, Id track) {
+    const Track* t = s.tracks.find(track);
+    if (!t) return track.str();
+    if (!t->name.empty()) return t->name;
+    if (track == kMaster) return "Master";
+    std::size_t place = 0;
+    for (const auto& e : s.tracks) {
+        if (e.value->type != t->type || e.id == kMaster) continue;
+        ++place;
+        if (e.id == track) break;
+    }
+    return std::string(labelPrefix(t->type)) + std::to_string(place);
+}
+
+std::string nextTrackName(const Session& s, StripType type) {
+    std::set<std::string> taken;
+    for (const auto& e : s.tracks) taken.insert(trackLabel(s, e.id));
+    for (std::size_t n = 1;; ++n) {
+        std::string name = std::string(labelPrefix(type)) + std::to_string(n);
+        if (!taken.contains(name)) return name;
+    }
+}
+
 std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash) {
     if (hash.empty()) return std::nullopt;  // an unhashed source is not an identity
     for (const auto& e : s.media)

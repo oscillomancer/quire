@@ -6939,7 +6939,7 @@ Result:
 
 Add a channel, buss or master strip and return its id.
 
-parent: a buss/master id (default tr_0); masters have no parent; index: position among its siblings.
+parent: a buss/master id (default tr_0); masters have no parent; index: position among its siblings; name: default the first free ch_N, buss_N or mstr_N. A new channel gets the user's default monitoring (on unless set otherwise; monitoring needs the track armed).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 

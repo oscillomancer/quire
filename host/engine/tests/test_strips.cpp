@@ -68,6 +68,7 @@ model::Session monitored(bool on, int count = 1, bool buss = false) {
         const Id inputId = t.create(input);
         t.modify<model::Track>(ch, [&](auto& tr) {
             tr.record.monitor = model::Monitor::On;
+            tr.record.armed = true;  // monitoring needs the arm
             tr.record.input = inputId;
         });
     }
@@ -259,6 +260,7 @@ TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and determinist
             const Id inputId = t.create(input);
             t.modify<model::Track>(ch, [&](auto& tr) {
                 tr.record.monitor = model::Monitor::On;
+                tr.record.armed = true;  // monitoring needs the arm
                 tr.record.input = inputId;
                 tr.volumeDb = -static_cast<double>(random() % 20);
                 tr.pan = static_cast<double>(random() % 201) - 100;

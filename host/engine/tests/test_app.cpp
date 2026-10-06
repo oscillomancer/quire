@@ -1881,6 +1881,44 @@ TEST_CASE("midi.notes / midi.edit: ops by original index, one undo step, selecti
     CHECK(r->find("cc")->size() == 2);
 }
 
+TEST_CASE("track.add: numbered names by type and the app's default monitoring") {
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto add = [&](const char* args) {
+        auto r = d.execute({"track.add", j(args), kTest});
+        REQUIRE(r);
+        return *model::Id::parse(r->find("track")->asString());
+    };
+    const model::Id ch1 = add("{}"), ch2 = add("{}"), buss = add(R"({"type":"buss"})");
+    const model::Id master = add(R"({"type":"master"})"), named = add(R"({"name":"Vox"})");
+    const model::Session& s = app->head();
+    CHECK(s.tracks.find(ch1)->name == "ch_1");
+    CHECK(s.tracks.find(ch2)->name == "ch_2");
+    CHECK(s.tracks.find(buss)->name == "buss_1");
+    CHECK(s.tracks.find(master)->name == "mstr_1");
+    CHECK(s.tracks.find(named)->name == "Vox");
+    CHECK(model::trackLabel(s, model::kMaster) == "Master");
+    // A new channel monitors (once armed) by default; the preference changes it.
+    CHECK(s.tracks.find(ch1)->record.monitor == model::Monitor::On);
+    CHECK(s.tracks.find(buss)->record.monitor == model::Monitor::Off);
+    app->setDefaultMonitor(model::Monitor::Auto);
+    const model::Id ch3 = add("{}");
+    CHECK(app->head().tracks.find(ch3)->record.monitor == model::Monitor::Auto);
+    CHECK(app->head().tracks.find(ch3)->name == "ch_3");
+    // An unnamed track shows a label by type; a freed number is used again.
+    REQUIRE(d.execute({"track.set", j(R"({"track":")" + ch2.str() + R"(","name":""})"), kTest}));
+    CHECK(model::trackLabel(app->head(), ch2) == "ch_2");
+    REQUIRE(d.execute({"track.remove", j(R"({"track":")" + ch1.str() + R"("})"), kTest}));
+    const model::Id again = add(R"({"type":"buss"})");
+    CHECK(app->head().tracks.find(again)->name == "buss_2");
+    REQUIRE(d.execute({"track.remove", j(R"({"track":")" + buss.str() + R"("})"), kTest}));
+    const model::Id reused = add(R"({"type":"buss"})");
+    CHECK(app->head().tracks.find(reused)->name == "buss_1");
+}
+
 TEST_CASE("route.matrix: type rules, cycles and existing sends") {
     Root root;
     cmd::Registry registry;
@@ -1902,18 +1940,19 @@ TEST_CASE("route.matrix: type rules, cycles and existing sends") {
     REQUIRE(send);
     auto m = d.execute({"route.matrix", json::Value::object(), kTest});
     REQUIRE(m);
-    // Sources in tree order with depth; the master's rule; a channel's rule as a destination.
+    // Sources in the views' order (the master's tree, a parent's channels before
+    // its busses, the masters last) with depth and the views' labels; the
+    // master's rule; a channel's rule as a destination.
     const auto& sources = *m->find("sources");
-    CHECK(sources.at(0).find("id")->asString() == "tr_0");
-    CHECK(sources.at(0).find("rule")->find("code")->asString() == "route.strip_type");
-    bool vox = false;
-    for (const auto& src : sources.asArray())
-        if (src.find("id")->asString() == ch) {
-            vox = true;
-            CHECK(src.find("depth")->asInt() == 2);
-            CHECK(src.find("parent")->asString() == a);
-        }
-    CHECK(vox);
+    REQUIRE(sources.size() == 4);
+    CHECK(sources.at(0).find("id")->asString() == a);
+    CHECK(sources.at(1).find("id")->asString() == ch);
+    CHECK(sources.at(2).find("id")->asString() == b);
+    CHECK(sources.at(3).find("id")->asString() == "tr_0");
+    CHECK(sources.at(3).find("name")->asString() == "Master");
+    CHECK(sources.at(3).find("rule")->find("code")->asString() == "route.strip_type");
+    CHECK(sources.at(1).find("depth")->asInt() == 1);
+    CHECK(sources.at(1).find("parent")->asString() == a);
     for (const auto& dst : m->find("destinations")->asArray())
         if (dst.find("id")->asString() == ch) CHECK(dst.find("rule") != nullptr);
     // A -> B exists, so B -> A (and Vox -> B -> A is fine; B -> A feeds back) is listed.

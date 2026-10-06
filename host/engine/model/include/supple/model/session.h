@@ -220,6 +220,14 @@ Status validateStripRules(const Session& s);
 // The track whose FX chain holds `fx` (not input chains or take FX), if any.
 std::optional<Id> trackOfFx(const Session& s, Id fx);
 
+// What every view calls a track: its name, or for an unnamed one a numbered
+// label by type ("ch_2", "buss_1", "mstr_1"; the first master, tr_0, is
+// "Master"), numbered by its place among that type's tracks in id order.
+std::string trackLabel(const Session& s, Id track);
+// The name track.add gives a new strip of `type`: the first "ch_N", "buss_N" or
+// "mstr_N" (N from 1) that no track is labelled with.
+std::string nextTrackName(const Session& s, StripType type);
+
 // The media source holding the bytes `hash` identifies ("sha256:<hex>"), if the
 // session has one: a file added twice is one source, not two.
 std::optional<Id> mediaSourceWithHash(const Session& s, std::string_view hash);

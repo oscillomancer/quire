@@ -250,6 +250,10 @@ class EngineApp : public cmd::Host {
     // media/ before the project has one. Recordings go to its rec/.
     std::filesystem::path mediaDir() const;
     std::filesystem::path recordDir() const { return mediaDir() / "rec"; }
+    // The monitoring mode track.add gives a new channel (a user preference the
+    // GUI sets; on: it monitors once armed).
+    model::Monitor defaultMonitor() const { return defaultMonitor_; }
+    void setDefaultMonitor(model::Monitor m) { defaultMonitor_ = m; }
     // Recordings in recordDir() with a sidecar that no version uses and that
     // are not being recorded now, oldest name first.
     std::vector<RecoverableInfo> recoverable(
@@ -339,6 +343,7 @@ class EngineApp : public cmd::Host {
     void setFixedClock(std::uint64_t ms) { fixedClock_ = ms; }
 
   private:
+    model::Monitor defaultMonitor_ = model::Monitor::On;
     void finalizeRecordingHash(model::Id source, model::MediaSource expected, RecordedTake take,
                                std::string hash, std::string branch, std::uint64_t generation);
     void startPlaying(int countInBars);  // engine play(), after a count-in when > 0

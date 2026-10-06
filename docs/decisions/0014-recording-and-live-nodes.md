@@ -42,7 +42,7 @@ streaming, crash recovery) and live paths at 64 frames.
    by the model are offered as recovered takes (`project.recover` lists and
    imports them); the header rewrite makes them readable.
 4. **The live region (monitoring).** A node is live when it monitors input
-   (`record.monitor` on, or auto while armed) or is fed by a live node
+   (an armed track whose `record.monitor` is on or auto) or is fed by a live node
    (children → folder, routes → targets, and the master). Live nodes run in
    the audio callback at the device block size, in topological order;
    everything else keeps rendering ahead. Where an anticipative node feeds a
@@ -130,9 +130,16 @@ when the machine is busiest, during a recording session).
 
 ## Implementation notes: the live region (2026-09-27)
 
-- Compile marks a node live when it monitors (`monitor: on`, or `auto`
-  while armed, with a hw_input record route) or is fed by a live node; the
-  master is live whenever anything is. Monitored input is added to the
+- Compile marks a node live when it monitors (armed, `monitor: on` or
+  `auto`, with a hw_input record route) or is fed by a live node; the
+  master is live whenever anything is. Monitoring needs the arm, as in
+  REAPER (2026-10-06): `on` hears the input whenever the track is armed;
+  `auto` (tape style) only while stopped or recording — `processNode` skips
+  the input (audio and device MIDI) while playing without a take
+  (`Plan::deviceRecording`, set by the callback from the recorder), so the
+  node stays live and the timeline plays instead. track.add gives a new
+  channel the app's default monitoring (`EngineApp::defaultMonitor`, `on`
+  unless the GUI's preferences say otherwise). Monitored input is added to the
   node's input sum (before the pre-FX tap). Stopped, a plan with live nodes
   still runs them (plugins process, items and MIDI do not play).
 - `prepare` splits each plan: renderer nodes with their own task graph,

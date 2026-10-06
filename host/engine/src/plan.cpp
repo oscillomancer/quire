@@ -550,13 +550,14 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             p.warnings.push_back(e.id.str() + ": automation of " + o.str() + " " + param +
                                  " is not rendered yet");
     }
-    // Input monitoring and the live region (ADR-0014): a track monitors its
-    // record input when monitor is on, or auto while armed; whatever it feeds
+    // Input monitoring and the live region (ADR-0014): an armed track monitors
+    // its record input when monitor is on or auto (auto, tape style, only while
+    // stopped or recording: processNode decides per block); whatever it feeds
     // is live too (nodes are in topological order, so one pass propagates).
     for (Node& n : p.nodes) {
         const model::Track& t = *s.tracks.find(n.id);
-        const bool monitoring = t.record.monitor == model::Monitor::On ||
-                                (t.record.monitor == model::Monitor::Auto && t.record.armed);
+        const bool monitoring = t.record.armed && t.record.monitor != model::Monitor::Off;
+        n.tapeAuto = t.record.monitor == model::Monitor::Auto;
         if (monitoring && t.record.input)
             if (const model::Route* in = s.routes.find(*t.record.input)) {
                 if (in->from.hwChannels)
@@ -1608,8 +1609,10 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     for (std::size_t ei : node.in)
         if (p.edges[ei].stage < 0 && !p.edges[ei].auxOnly)
             addEdge(p, p.edges[ei], -3.0, node.sum, pos, n);
-    // Monitored device input enters with the inputs (spec §1.1).
-    if (!node.monitorInputs.empty() && p.deviceIn) {
+    // Monitored device input enters with the inputs (spec §1.1); auto
+    // monitoring plays the timeline instead while playing without recording.
+    const bool hearInput = !node.tapeAuto || !transport.playing || p.deviceRecording;
+    if (hearInput && !node.monitorInputs.empty() && p.deviceIn) {
         const auto channel = [&](std::size_t k) -> const float* {
             const int c = node.monitorInputs[std::min(k, node.monitorInputs.size() - 1)];
             return c >= 0 && static_cast<std::uint32_t>(c) < p.deviceInChannels ? p.deviceIn[c]
@@ -1681,7 +1684,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // Live MIDI from the device (ADR-0016), playing or not, after timeline MIDI
     // at the same frame; not counted as held (a loop wrap does not cut what
     // the performer holds).
-    if (node.midiIn && node.noteTarget >= 0 && !p.deviceMidi.empty()) {
+    if (hearInput && node.midiIn && node.noteTarget >= 0 && !p.deviceMidi.empty()) {
         auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
         const std::size_t before = target.size();
         for (const MidiInputEvent& ev : p.deviceMidi) {

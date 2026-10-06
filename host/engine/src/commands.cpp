@@ -1190,8 +1190,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Add a channel, buss or master strip and return its id.";
         c.description =
             "parent: a buss/master id (default tr_0); masters have no parent; index: position "
-            "among its "
-            "siblings.";
+            "among its siblings; name: default the first free ch_N, buss_N or mstr_N. A new "
+            "channel gets the user's default monitoring (on unless set otherwise; monitoring "
+            "needs the track armed).";
         c.tags = {"track"};
         c.args = schema::object<TrackAddArgs>("track_add_args")
                      .field("type", &TrackAddArgs::type, model::stripTypeSchema())
@@ -1229,6 +1230,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             model::Track tr;
             tr.type = a.type;
             tr.name = a.name.value_or("");
+            if (tr.name.empty()) tr.name = model::nextTrackName(t.preview(), a.type);
+            if (a.type == model::StripType::Channel) tr.record.monitor = A(ctx).defaultMonitor();
             if (a.type != model::StripType::Master) tr.parent = parent;
             if (a.channels) tr.channels = static_cast<int>(*a.channels);
             const Id id = t.create(tr);
@@ -1435,7 +1438,12 @@ void registerEngineCommands(cmd::Registry& registry) {
                                              [&](auto& tr) { tr.children.push_back(*id); });
                     txn.modify<model::Track>(*id, [](auto& tr) { tr.parent = model::kMaster; });
                 }
-                txn.modify<model::Track>(*id, [&](auto& tr) { tr.type = *a.type; });
+                txn.modify<model::Track>(*id, [&](auto& tr) {
+                    tr.type = *a.type;
+                    // A new channel's default monitoring goes with the channel.
+                    if (*a.type != model::StripType::Channel)
+                        tr.record.monitor = model::Monitor::Off;
+                });
             }
             // The record input is a route from the device inputs (hw_input).
             std::optional<Id> input = s.tracks.find(*id)->record.input;

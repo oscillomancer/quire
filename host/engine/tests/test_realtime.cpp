@@ -1164,9 +1164,10 @@ TEST_CASE("recording through a playback dropout keeps the take on the timeline" 
 }
 
 namespace {
-// `s` with its first track monitoring device inputs 1-2 (monitor on).
+// `s` with its first track monitoring device inputs 1-2 (monitor on, armed:
+// monitoring needs the arm).
 model::Session monitoring(model::Session s, model::Monitor mode = model::Monitor::On,
-                          bool armed = false) {
+                          bool armed = true) {
     model::EditTxn t(s, 9);
     Id track;
     for (const auto& e : s.tracks)
@@ -1220,6 +1221,31 @@ TEST_CASE("monitoring in the callback: the input is heard through the track, sto
 }
 
 namespace {
+TEST_CASE("monitoring needs the arm; auto hears the input stopped, the timeline playing" *
+          doctest::description("rt")) {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend(constantInput(48000));
+    Engine engine(pool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    const auto& cap = backend.capture();
+    const double g = 0.5 * 0.472135955;
+    // Monitor on, not armed: nothing is heard.
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::On, false)).ok());
+    backend.run(4);
+    CHECK(double(cap.channels[0][600]) == 0.0);
+    // Auto, armed: heard while stopped...
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::Auto, true)).ok());
+    backend.run(4);
+    CHECK(double(cap.channels[0][1024 + 600]) == doctest::Approx(0.5 * g).epsilon(1e-4));
+    // ...and not while playing without recording (1.75 s is between the notes).
+    engine.seek(1.75);
+    engine.play();
+    backend.run(4);
+    CHECK(double(cap.channels[0][2048 + 600]) == 0.0);
+    engine.stop();
+}
+
 // The sine track plus a "Vocal" track (a gain plugin at -6 dB) that monitors
 // device inputs 1-2 when `monitored`.
 model::Session withVocal(bool monitored) {
@@ -1244,6 +1270,7 @@ model::Session withVocal(bool monitored) {
     t.modify<model::Track>(vocal, [&](model::Track& x) {
         x.record.input = in;
         x.record.monitor = monitored ? model::Monitor::On : model::Monitor::Off;
+        x.record.armed = monitored;
     });
     return t.commit().value();
 }
@@ -1570,7 +1597,7 @@ model::Session keyboardSession(bool armed = false) {
     t.modify<model::Track>(track, [&](model::Track& x) {
         x.chain.push_back(f);
         x.record.input = r;
-        x.record.armed = armed;
+        x.record.armed = true;  // monitoring needs the arm; auto when it records
         x.record.monitor = armed ? model::Monitor::Auto : model::Monitor::On;
     });
     return t.commit().value();
@@ -2889,6 +2916,7 @@ model::Session edgeSession(std::uint8_t mode, bool automaticBypass = false, bool
         edit.modify<model::Track>(tr, [&](auto& t) {
             t.record.input = route;
             t.record.monitor = model::Monitor::On;
+            t.record.armed = true;
         });
     }
     return edit.commit().value();
