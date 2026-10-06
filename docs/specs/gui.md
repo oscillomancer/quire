@@ -212,7 +212,8 @@ a track does not change parent by dragging. The panel's foot ("mixer",
 the last one to clear it. Adding a strip
 offers exactly **Channel, Buss or Master** (`track.add {type}`); a
 double-click on the panel's empty space (or the mixer's, §4.4) adds a channel
-and selects it. Track selection is shared by the TCP and the mixer: a click on
+and selects it; a right-click there opens the same Channel / Buss / Master menu
+at the pointer. Track selection is shared by the TCP and the mixer: a click on
 a row's or strip's empty part selects it alone, Ctrl+click toggles, Shift+click
 extends from the last click in that view's order; a right-click on a selected
 track keeps the selection. The track menu's Delete (and the Delete key, when
@@ -275,7 +276,9 @@ unused rows would leave (sends show only when there are some, up to two;
 busses and masters have no arm/monitor row). Alt+click on a plug-in removes it
 (`fx.remove`, one undo step); a double-click on the chain's empty part opens
 the plugin browser for that strip. A double-click on the strips' empty space
-(not on a strip) adds a channel. The
+(not on a strip) adds a channel; a right-click there offers Channel, Buss or
+Master, as the TCP's "+ strip". A send dragged from "out" draws a wire from the
+button and outlines the strip it would feed, as in the TCP. The
 panel's top edge (shared with the MIDI editor: it lights up under the pointer)
 resizes the mixer by drag and only the chain
 sections follow (meter, fader, buttons keep their size); a double-click on it

@@ -290,6 +290,24 @@ TEST_CASE("mixer: a double-click on the strips' empty space adds a channel") {
     REQUIRE(f.mixer->strips().size() >= 3);
     const auto& added = f.track(f.mixer->strips()[1].track);
     CHECK(added.type == model::StripType::Channel);
+    // A right-click there: channel, buss or master (the TCP's "+ strip" menu).
+    const ui::Point at{strip.right() + 200, strip.y + strip.h / 2};
+    ui::PointerEvent right;
+    right.type = ui::PointerEvent::Type::Down;
+    right.pos = at;
+    right.button = 3;
+    f.root->pointer(right);
+    right.type = ui::PointerEvent::Type::Up;
+    f.root->pointer(right);
+    f.root->frame(false);
+    ui::Node* menu = f.node("mixer.addmenu");
+    const ui::Point master{menu->bounds().x + 40, menu->bounds().y + 2 * 26 + 13};
+    f.pointer(ui::PointerEvent::Type::Move, master);
+    f.pointer(ui::PointerEvent::Type::Down, master);
+    f.pointer(ui::PointerEvent::Type::Up, master);
+    CHECK(f.app->head().tracks.size() == before + 2);
+    CHECK(f.app->head().project->masters.size() == 2);
+    CHECK(f.errors.empty());
 }
 
 TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the selection") {
@@ -699,6 +717,10 @@ TEST_CASE("mixer: \"out\" opens the routing matrix, and a drag onto a buss makes
     f.drag(f.centre(f.node("mixer.out." + a)), f.centre(f.node("mixer.faderrow." + bus)), false);
     CHECK(f.mixer->drag().kind == gui::Mixer::DragView::Kind::Send);
     CHECK(f.mixer->drag().target == bus);
+    // A wire from "out" (as in the TCP), no label chip.
+    CHECK(f.mixer->drag().label.empty());
+    CHECK(f.mixer->drag().source.contains(f.centre(f.node("mixer.out." + a))));
+    f.snapshot("mixer-send-wire.png");
     f.pointer(ui::PointerEvent::Type::Up, f.centre(f.node("mixer.faderrow." + bus)));
     CHECK(routing == 1);  // a drag is not a click
     CHECK(f.steps() == before + 1);

@@ -1,6 +1,7 @@
 #include "mixer.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 
@@ -10,6 +11,7 @@
 #include "panel_height.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 #include "supple/views/track_layout.h"
@@ -338,11 +340,17 @@ class StripRow : public ui::Node {
         pinned_->arrange(canvas, {b.right() - pinnedW, b.y, pinnedW, b.h});
     }
     void paint(ui::Canvas& c) override { c.fillRect(bounds(), c.theme().color("ground")); }
-    std::function<void()> onDoubleClick;  // on the row's empty space
+    std::function<void()> onDoubleClick;           // on the row's empty space
+    std::function<void(ui::Point)> onContextMenu;  // a right-click there
     bool onPointer(const ui::PointerEvent& e) override {
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks >= 2 &&
             onDoubleClick && !overStrip(e.pos)) {
             onDoubleClick();
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && onContextMenu &&
+            !overStrip(e.pos)) {
+            onContextMenu(e.pos);
             return true;
         }
         if (e.type != ui::PointerEvent::Type::Wheel) return false;
@@ -469,6 +477,15 @@ class DragGhost : public ui::Node {
         if (!d.active) return;
         const ui::Theme& t = c.theme();
         const ui::Color accent = t.color("focus");
+        if (d.kind == Mixer::DragView::Kind::Send) {
+            // As the TCP's: the strip it would feed outlined, a wire from "out".
+            if (d.drop == Mixer::DragView::Drop::Copy) {
+                c.fillRect(d.marker, accent.withAlpha(0.2f));
+                c.strokeRect(d.marker.inset(0.5f), accent, 1);
+            }
+            c.line({d.source.x + d.source.w / 2, d.source.y + d.source.h / 2}, d.pos, accent, 2);
+            return;
+        }
         c.fillRect(d.source, t.color("ground").withAlpha(0.45f));
         if (d.drop == Mixer::DragView::Drop::Reorder) {
             c.fillRect(d.marker, accent);
@@ -583,27 +600,40 @@ std::unique_ptr<ui::Node> Mixer::build() {
                 actions_.onError("Console 9: " + r.error().message);
         });
     console9_->layout.width = ui::SizeRule::content();
-    auto& note =
-        header.emplace<ui::Label>("mixer.console9.note",
-                                  "Console 9 sums through console-style channel and buss stages, "
-                                  "level-matched: unity in sounds like unity out.",
-                                  ui::Font::Ui, "caption", "ink-faint");
+    auto& note = header.emplace<ui::Label>("mixer.console9.note",
+                                           "Subtle analog summing emulation by Airwindows",
+                                           ui::Font::Ui, "caption", "ink-faint");
     note.layout.width = ui::SizeRule::fraction();
     header.emplace<ui::Button>("mixer.close", "Close", [this] { setVisible(false); });
     auto row = std::make_unique<StripRow>();
-    row->onDoubleClick = [this] {
-        if (onAddChannel) {
-            onAddChannel();
-            return;
+    row->onDoubleClick = [this] { addStrip("channel"); };
+    // A right-click on the empty space: the TCP's "+ strip" menu.
+    row->onContextMenu = [this](ui::Point p) {
+        std::vector<ui::MenuItem> items;
+        for (const char* type : {"Channel", "Buss", "Master"}) {
+            std::string lower(type);
+            for (char& ch : lower)
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            items.push_back({type, {}, [this, lower] { addStrip(lower); }, true, false, false});
         }
-        json::Value args = json::Value::object();
-        args["type"] = "channel";
-        if (auto r = dispatcher_.execute({"track.add", std::move(args), kOrigin});
-            !r && actions_.onError)
-            actions_.onError(r.error().message);
+        root_.openPopup(
+            ui::makeMenu("mixer.addmenu", std::move(items), [this] { root_.closePopup(); }),
+            {p.x, p.y, 1, 1});
     };
     row_ = &panel->add(std::move(row));
     return panel;
+}
+
+void Mixer::addStrip(const std::string& type) {
+    if (onAddStrip) {
+        onAddStrip(type);
+        return;
+    }
+    json::Value args = json::Value::object();
+    args["type"] = type;
+    if (auto r = dispatcher_.execute({"track.add", std::move(args), kOrigin});
+        !r && actions_.onError)
+        actions_.onError(r.error().message);
 }
 
 void Mixer::toggle() { setVisible(!visible()); }
@@ -947,14 +977,13 @@ void Mixer::dragSend(const std::string& track, DragPhase phase, ui::Point p) {
         d.kind = DragView::Kind::Send;
         d.active = true;
         d.track = track;
-        d.label = "send";
         ghost_ = root_.addOverlay(std::make_unique<DragGhost>(drag_));
     }
     if (d.kind != DragView::Kind::Send) return;
     d.pos = p;
     d.drop = DragView::Drop::None;
     for (const Strip& st : strips_)
-        if (st.track == track) d.source = st.node->bounds().intersect(st.node->parent()->bounds());
+        if (st.track == track && st.out) d.source = st.out->bounds();  // the wire's end
     // Busses and masters take sends; a channel takes only hardware input.
     if (const Strip* over = stripAt(p); over && over->track != track && over->type != "channel") {
         d.drop = DragView::Drop::Copy;

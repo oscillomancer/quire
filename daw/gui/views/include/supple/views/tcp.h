@@ -122,7 +122,7 @@ class TcpPanel : public ui::Node {
     friend class Row;
     friend class EnvRow;
     void bindRows();
-    void openAddMenu();
+    void openAddMenu(const ui::Rect& anchor, ui::Placement placement);
     ui::Meter* meterOf(Row* row) const;
     bool sendPointer(const ui::PointerEvent& e, const model::Id& from, const ui::Rect& anchor);
     void cancelSend();

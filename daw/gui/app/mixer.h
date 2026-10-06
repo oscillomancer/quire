@@ -52,9 +52,10 @@ class Mixer {
     static float defaultHeight();
     json::Value saveLayout() const;  // the "mixer" section of the UI sidecar
     void loadLayout(const json::Value& v);
-    // A double-click on the strips' empty space adds a channel: the app hands
-    // the shell's addStrip (which selects it); unset, the mixer runs track.add.
-    std::function<void()> onAddChannel;
+    // A double-click on the strips' empty space adds a channel, a right-click
+    // there offers channel, buss or master: the app hands the shell's addStrip
+    // (which selects it); unset, the mixer runs track.add.
+    std::function<void(const std::string& type)> onAddStrip;
     // The channels' input button: what it says and its picker (the shell's,
     // shared with the TCP).
     std::function<std::string(const model::Id& track)> inputText;
@@ -98,6 +99,7 @@ class Mixer {
 
   private:
     void run(std::string_view action, json::Value args);  // an app action; errors to onError
+    void addStrip(const std::string& type);
     float maxHeight() const;
     void applyHeight();
     void rebuild();

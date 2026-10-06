@@ -1097,6 +1097,22 @@ TEST_CASE("a double-click on the TCP's empty space adds a channel; on a row it d
     root.pointer({ui::PointerEvent::Type::Down, {rows.x + rows.w / 2, rows.bottom() - 10}, 1, 1});
     root.pointer({ui::PointerEvent::Type::Up, {rows.x + rows.w / 2, rows.bottom() - 10}, 1, 1});
     CHECK(s.app->head().tracks.size() == before + 1);
+    // A right-click there: the "+ strip" menu at the pointer; its second row adds a buss.
+    const ui::Point at{rows.x + rows.w / 2, rows.bottom() - 10};
+    root.pointer({ui::PointerEvent::Type::Down, at, 3, 1});
+    root.pointer({ui::PointerEvent::Type::Up, at, 3, 1});
+    root.frame(false);
+    ui::Node* menu = root.find("tcp.addmenu");
+    REQUIRE(menu);
+    CHECK(std::abs(menu->bounds().x - at.x) < 2);
+    const ui::Point buss{menu->bounds().x + 40, menu->bounds().y + 26 + 13};
+    root.pointer({ui::PointerEvent::Type::Move, buss});
+    root.pointer({ui::PointerEvent::Type::Down, buss, 1, 1});
+    root.pointer({ui::PointerEvent::Type::Up, buss, 1, 1});
+    CHECK(s.app->head().tracks.size() == before + 2);
+    REQUIRE(tcp.selected.size() == 1);
+    CHECK(s.app->head().tracks.find(*model::Id::parse(tcp.selected[0]))->type ==
+          model::StripType::Buss);
     CHECK(tcp.error.empty());
 }
 

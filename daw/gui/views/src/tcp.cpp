@@ -613,13 +613,15 @@ TcpPanel::TcpPanel(const TrackLayout& rowLayout, const Viewport& view, TcpCallba
     mixer_ = &foot_->emplace<ui::Button>("tcp.mixer", "mixer", [this] {
         if (cb_.mixer) cb_.mixer();
     });
-    add_ = &foot_->emplace<ui::Button>("tcp.add", "+ strip", [this] { openAddMenu(); });
+    add_ = &foot_->emplace<ui::Button>(
+        "tcp.add", "+ strip", [this] { openAddMenu(add_->bounds(), ui::Placement::Above); });
     add_->layout.width = ui::SizeRule::fixed(56);
     add_->layout.height = ui::SizeRule::fixed(18);
 }
 
-// The three strip types, offered by the "+" (ADR-0019: exactly these).
-void TcpPanel::openAddMenu() {
+// The three strip types, offered by the "+" and by a right-click on the panel's
+// empty space (ADR-0019: exactly these).
+void TcpPanel::openAddMenu(const ui::Rect& anchor, ui::Placement placement) {
     ui::Root* r = root();
     if (!r || !cb_.addStrip) return;
     std::vector<ui::MenuItem> items;
@@ -632,8 +634,8 @@ void TcpPanel::openAddMenu() {
         }();
         items.push_back({type, {}, [this, lower] { cb_.addStrip(lower); }, true, false, false});
     }
-    r->openPopup(ui::makeMenu("tcp.addmenu", std::move(items), [r] { r->closePopup(); }),
-                 add_->bounds(), ui::Placement::Above);
+    r->openPopup(ui::makeMenu("tcp.addmenu", std::move(items), [r] { r->closePopup(); }), anchor,
+                 placement);
 }
 
 TcpPanel::~TcpPanel() {
@@ -1017,16 +1019,21 @@ void TcpPanel::paint(ui::Canvas& c) {
 }
 
 // A double-click on the panel's empty space (no row, not the foot's buttons)
-// adds a channel, as "+ strip" > Channel does.
+// adds a channel, as "+ strip" > Channel does; a right-click there opens the
+// "+ strip" menu at the pointer.
 bool TcpPanel::onPointer(const ui::PointerEvent& e) {
-    if (e.type != ui::PointerEvent::Type::Down || e.button != 1 || e.clicks < 2 || !cb_.addStrip)
+    const bool doubleClick = e.button == 1 && e.clicks >= 2;
+    if (e.type != ui::PointerEvent::Type::Down || !(doubleClick || e.button == 3) || !cb_.addStrip)
         return false;
     for (const auto& row : rowsHost_->children())
         if (row->visible && row->bounds().intersect(rowsHost_->bounds()).contains(e.pos))
             return false;
     for (const ui::Button* b : {add_, mixer_})
         if (b->bounds().contains(e.pos)) return false;
-    cb_.addStrip("channel");
+    if (e.button == 3)
+        openAddMenu({e.pos.x, e.pos.y, 1, 1}, ui::Placement::Below);
+    else
+        cb_.addStrip("channel");
     return true;
 }
 

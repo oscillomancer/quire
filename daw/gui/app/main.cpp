@@ -431,7 +431,7 @@ int main(int argc, char** argv) {
         routing.open(anchor);
     };
     gui::Mixer mixer(root, appActions, dispatcher, **app, meterFeed);
-    mixer.onAddChannel = [&shell] { shell.addStrip("channel"); };
+    mixer.onAddStrip = [&shell](const std::string& type) { shell.addStrip(type); };
     mixer.inputText = [&shell](const model::Id& track) { return shell.inputLabel(track); };
     mixer.pickInput = [&shell](const model::Id& track, const ui::Rect& anchor) {
         shell.openInputMenu(track, anchor);
