@@ -399,12 +399,17 @@ class Schema {
             }
         }
         if constexpr (std::is_same_v<T, std::string>) {
-            if ((minLength_ && out.size() < *minLength_) ||
-                (maxLength_ && out.size() > *maxLength_)) {
+            // In characters (code points), as JSON Schema's minLength/maxLength.
+            const auto length =
+                static_cast<std::size_t>(std::count_if(out.begin(), out.end(), [](char ch) {
+                    return (static_cast<unsigned char>(ch) & 0xc0) != 0x80;
+                }));
+            if ((minLength_ && length < *minLength_) || (maxLength_ && length > *maxLength_)) {
                 c.error("schema.length", "string length is outside limits", path,
                         "length must be " + std::to_string(minLength_.value_or(0)) + " .. " +
                             std::to_string(
-                                maxLength_.value_or(std::numeric_limits<std::size_t>::max())));
+                                maxLength_.value_or(std::numeric_limits<std::size_t>::max())) +
+                            " characters");
                 return false;
             }
             if (pattern_ && !std::regex_match(out, std::regex(*pattern_))) {

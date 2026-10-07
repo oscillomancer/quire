@@ -268,7 +268,8 @@ Constraint and doc modifiers on any `Schema<T>` (each returns a modified copy):
 .min(x) .max(x) .range(lo, hi) .exclusiveMin(x) .exclusiveMax(x)
 .unit(Unit::Hz)                      // see B.3; exported as "x-unit"; enables unit strings
 // strings
-.minLength(n) .maxLength(n) .pattern("^[a-z][a-z0-9_]*$", "lowercase identifier")  // ECMA regex; the label is used in messages
+.minLength(n) .maxLength(n)  // characters (code points), as JSON Schema counts them
+.pattern("^[a-z][a-z0-9_]*$", "lowercase identifier")  // ECMA regex; the label is used in messages
 .format("id:tr")                     // free-form tag exported as "format"
 // arrays / maps
 .minItems(n) .maxItems(n) .uniqueItems()

@@ -370,3 +370,13 @@ TEST_CASE("R3 integer constraints compare exactly with floating bounds") {
     CHECK(s.range(-1e100, 1e100).decode(hi));
     CHECK(s.range(-1e100, 1e100).decode(lo));
 }
+
+TEST_CASE("string lengths count characters, as the exported JSON Schema does") {
+    auto one = string().maxLength(1);
+    CHECK(one.decode(json::Value("\xc3\xa9")));          // é: two bytes, one character
+    CHECK(one.decode(json::Value("\xf0\x9f\x8e\xb5")));  // 🎵: four bytes
+    CHECK_FALSE(one.decode(json::Value("ab")));
+    auto three = string().minLength(3);
+    CHECK_FALSE(three.decode(json::Value("\xc3\xa9\xc3\xa9")));  // four bytes, two characters
+    CHECK(three.decode(json::Value("\xc3\xa9\xc3\xa9\xc3\xa9")));
+}
