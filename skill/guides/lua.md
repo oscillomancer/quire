@@ -34,7 +34,9 @@ base library only. There is no `io`, `os`, `debug`, `package`, `require`,
 `dofile` or `loadfile` — a script cannot touch the filesystem, the clock or the
 process. `budget_ms` (default 250 ms) stops a script that runs away with
 `script.budget`; a memory cap stops one that allocates too much with
-`script.memory`.
+`script.memory`. A value passed to a command or returned is converted to JSON
+with at most 1,000,000 values and 16 MiB of text (`script.value_too_large`);
+a table used twice counts twice.
 
 Editor support: `skill/generated/engine.lua` (and `sandbox.lua`) are LuaLS
 annotations generated from the registry — point `lua-language-server` at them

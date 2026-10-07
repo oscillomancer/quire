@@ -144,14 +144,34 @@ Node itemSchema(const Node& at) {
     return child(node, nullptr);
 }
 
+// What one conversion may produce. The values are built outside the Lua
+// allocator and after a script's instruction limit, and a table referenced
+// twice is converted twice, so depth alone cannot bound the work.
+struct Budget {
+    static constexpr std::size_t kMaxValues = 1'000'000;
+    static constexpr std::size_t kMaxBytes = 16u << 20;  // strings and keys
+    std::size_t values = 0, bytes = 0;
+    Status take(std::size_t valueCount, std::size_t byteCount, const std::string& path) {
+        values += valueCount;
+        bytes += byteCount;
+        if (values > kMaxValues || bytes > kMaxBytes)
+            return Error("script.value_too_large",
+                         "the value exceeds the JSON conversion limit of 1,000,000 values and "
+                         "16 MiB of text",
+                         path, "return or pass less data (a shared table counts once per use)");
+        return {};
+    }
+};
+
 Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
-                                const std::string& path, int depth);
+                                const std::string& path, int depth, Budget& budget);
 
 Result<json::Value> valueToJson(lua_State* L, int index, const Node& schema,
-                                const std::string& path, int depth) {
+                                const std::string& path, int depth, Budget& budget) {
     if (depth > 64 || !lua_checkstack(L, 4))
         return Error("script.value", "table nesting exceeds the JSON conversion limit", path,
                      "use an acyclic table with at most 64 levels");
+    SUPPLE_TRY(budget.take(1, 0, path));
     switch (lua_type(L, index)) {
         case LUA_TNIL:
             return json::Value();
@@ -169,10 +189,11 @@ Result<json::Value> valueToJson(lua_State* L, int index, const Node& schema,
         case LUA_TSTRING: {
             std::size_t length = 0;
             const char* text = lua_tolstring(L, index, &length);
+            SUPPLE_TRY(budget.take(0, length, path));
             return json::Value(std::string(text, length));
         }
         case LUA_TTABLE:
-            return tableToJson(L, index, schema, path, depth);
+            return tableToJson(L, index, schema, path, depth, budget);
         case LUA_TLIGHTUSERDATA:
             if (isNull(L, index)) return json::Value();
             break;
@@ -186,7 +207,7 @@ Result<json::Value> valueToJson(lua_State* L, int index, const Node& schema,
 }
 
 Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
-                                const std::string& path, int depth) {
+                                const std::string& path, int depth, Budget& budget) {
     const int table = lua_absindex(L, index);
     const Kind kind = kindOf(L, table, schema);
     const std::size_t length = lua_rawlen(L, table);
@@ -199,7 +220,8 @@ Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
         const Node items = itemSchema(schema);
         for (std::size_t i = 1; i <= length; ++i) {
             lua_rawgeti(L, table, static_cast<lua_Integer>(i));
-            auto item = valueToJson(L, -1, items, path + "/" + std::to_string(i - 1), depth + 1);
+            auto item =
+                valueToJson(L, -1, items, path + "/" + std::to_string(i - 1), depth + 1, budget);
             lua_pop(L, 1);
             if (!item) return item.error();
             out.push_back(std::move(*item));
@@ -225,8 +247,12 @@ Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
         else
             return Error("script.table", "object keys must be strings", path,
                          "use {\"name\": value} with string keys");
+        if (auto taken = budget.take(0, key.size(), path); !taken) {
+            lua_pop(L, 2);  // the value and the key: lua_next is not resumed
+            return taken.error();
+        }
         const Node member = memberSchema(schema, key);
-        auto value = valueToJson(L, -1, member, json::pointerJoin(path, key), depth + 1);
+        auto value = valueToJson(L, -1, member, json::pointerJoin(path, key), depth + 1, budget);
         lua_pop(L, 1);
         if (!value) return value.error();
         out[key] = std::move(*value);
@@ -322,7 +348,8 @@ void pushJson(lua_State* L, const json::Value& value) { pushJsonAt(L, value, 0);
 
 Result<json::Value> toJson(lua_State* L, int index, const json::Value* schema,
                            const std::string& path) {
-    return valueToJson(L, index, Node{schema, schema, nullptr}, path, 0);
+    Budget budget;
+    return valueToJson(L, index, Node{schema, schema, nullptr}, path, 0, budget);
 }
 
 void pushError(lua_State* L, const Error& error) { pushErrorAt(L, error, 0); }

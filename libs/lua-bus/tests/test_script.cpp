@@ -122,6 +122,22 @@ TEST_CASE("the memory cap stops a script that allocates too much") {
     CHECK(out.error().message.find("memory") != std::string::npos);
 }
 
+TEST_CASE("a shared table cannot multiply into an unbounded result") {
+    ScriptOptions options;
+    options.memoryLimitBytes = 128 * 1024;
+    options.instructionLimit = 10000;
+    Scene scene(options);
+    // 2^30 leaves from a few hundred bytes of Lua: each level references the
+    // one below twice, and conversion copies every use.
+    auto out = scene.run("local t = {0} for i = 1, 30 do t = {t, t} end return t", 8000.0);
+    REQUIRE(!out);
+    CHECK(out.error().code == "script.value_too_large");
+    CHECK_FALSE(out.error().hint.empty());
+    // A large, ordinary result still converts.
+    auto fine = scene.run("local t = {} for i = 1, 1000 do t[i] = i end return t", 8000.0);
+    REQUIRE(fine);
+}
+
 TEST_CASE("every schema kind survives the round trip through Lua") {
     Scene scene;
     auto out = scene.run(std::string("return q.toy.echo{") + R"(
