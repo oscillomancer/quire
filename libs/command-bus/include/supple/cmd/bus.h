@@ -316,7 +316,13 @@ class Dispatcher {
     // the next loop tick when posted from a job's worker. A failure is emitted
     // as `bus.post_failed` {label, error}. Commands reach the dispatcher with
     // ctx.service<cmd::Dispatcher>().
-    void post(std::string label, std::function<Status()> work);
+    // `Edit` work changes the project on the caller's behalf (adding renders):
+    // while a transact() transaction is open (a batch or script waiting in
+    // job.wait) it stays queued and runs after that transaction closes, so it
+    // never joins an unrelated undo step or rollback. `Service` work (job
+    // completion) runs at any flush, so job.wait can see the job finish.
+    enum class PostKind { Service, Edit };
+    void post(std::string label, std::function<Status()> work, PostKind kind = PostKind::Service);
     // Runs posted work, then emits pending job events. Call it from the loop's
     // tick too: job events and follow-ups from workers wait for it.
     void flushJobEvents();
@@ -332,7 +338,12 @@ class Dispatcher {
     int transactionDepth_ = 0;  // > 0: commands join the open transact() transaction
     std::optional<Error> transactionFailure_;
     std::mutex postedMutex_;
-    std::vector<std::pair<std::string, std::function<Status()>>> posted_;
+    struct Posted {
+        std::string label;
+        std::function<Status()> work;
+        PostKind kind;
+    };
+    std::vector<Posted> posted_;
 };
 
 using FixtureFactory = std::function<std::unique_ptr<Host>(std::string_view)>;

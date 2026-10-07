@@ -580,22 +580,32 @@ Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     host_.commandFinished();
     return result;
 }
-void Dispatcher::post(std::string label, std::function<Status()> work) {
+void Dispatcher::post(std::string label, std::function<Status()> work, PostKind kind) {
     std::lock_guard lock(postedMutex_);
-    posted_.emplace_back(std::move(label), std::move(work));
+    posted_.push_back({std::move(label), std::move(work), kind});
 }
 
 void Dispatcher::flushJobEvents() {
     // Posted work first (it may execute commands, which flush again: the queue
     // is taken before running so nothing runs twice).
     for (;;) {
-        std::vector<std::pair<std::string, std::function<Status()>>> work;
+        std::vector<Posted> work;
         {
             std::lock_guard lock(postedMutex_);
             work.swap(posted_);
+            if (transactionDepth_ > 0) {
+                // Edits wait for the open transaction to close; they keep
+                // their place ahead of anything posted later.
+                auto edits = std::stable_partition(work.begin(), work.end(), [](const Posted& p) {
+                    return p.kind != PostKind::Edit;
+                });
+                posted_.insert(posted_.begin(), std::make_move_iterator(edits),
+                               std::make_move_iterator(work.end()));
+                work.erase(edits, work.end());
+            }
         }
         if (work.empty()) break;
-        for (auto& [label, fn] : work)
+        for (auto& [label, fn, kind] : work)
             if (auto done = fn(); !done) {
                 json::Value payload = json::Value::object();
                 payload["label"] = label;

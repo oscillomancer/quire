@@ -353,7 +353,12 @@ committed as `docs/demos/mcp-orrery-session.md` and drift-tested
   worker and must stop/join workers before destroying the dispatcher. Job
   updates are thread-safe. Progress and completion events queue for the model
   thread, which calls `Dispatcher::flushJobEvents()` (also called after every
-  `execute`). `job.get` reads status and progress (`job.status` remains an
+  `execute`). Model-thread follow-ups go through `Dispatcher::post`;
+  work posted as `PostKind::Edit` (a render's `add_to_project` import) stays
+  queued while a `transact()` transaction is open, so a batch or script
+  waiting in `job.wait` sees the job finish but does not take the import into
+  its own undo step or rollback: the import runs as its own step once that
+  transaction closes. `job.get` reads status and progress (`job.status` remains an
   alias). `job.cancel` marks a job cancelled immediately and sets its
   cancellation flag for the worker. The most recent progress is retained even
   when progress events are throttled to 2 Hz.

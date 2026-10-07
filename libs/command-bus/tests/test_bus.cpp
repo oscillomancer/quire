@@ -378,6 +378,24 @@ TEST_CASE("job lifecycle, cancellation, timeout and event throttling") {
     CHECK(published);
 }
 
+TEST_CASE("posted edits wait for the open transaction to close") {
+    auto registry = makeRegistry();
+    FakeHost host;
+    Dispatcher dispatcher(registry, host);
+    std::vector<std::string> ran;
+    auto result = dispatcher.transact("batch", testOrigin, [&]() -> Result<json::Value> {
+        dispatcher.post(
+            "edit", [&] { return ran.push_back("edit"), Status{}; }, Dispatcher::PostKind::Edit);
+        dispatcher.post("service", [&] { return ran.push_back("service"), Status{}; });
+        dispatcher.flushJobEvents();  // what job.wait does inside a batch
+        CHECK(ran == std::vector<std::string>{"service"});
+        return json::Value::object();
+    });
+    REQUIRE(result);
+    CHECK(ran == std::vector<std::string>{"service"});
+    dispatcher.flushJobEvents();
+    CHECK(ran == std::vector<std::string>{"service", "edit"});
+}
 TEST_CASE("generated registry, tools and reference match golden files") {
     auto registry = makeRegistry();
     const auto directory = std::filesystem::path(__FILE__).parent_path() / "golden";

@@ -1471,6 +1471,27 @@ TEST_CASE("add_to_project puts renders on new tracks as one undo step (sync and 
     const auto& files = *done->find("result")->find("files");
     REQUIRE(files.size() >= 1);
     for (const auto& f : files.asArray()) CHECK(itemsWithFile(f.find("path")->asString()) == 1);
+
+    // A batch that waits for the job does not take the import into its own
+    // undo step: the import follows as its own step once the batch closes.
+    started = d.execute(
+        {"render.stems",
+         j(R"({"end_beat":3,"job":true,"pattern":"late-{track}","add_to_project":true})"), kTest});
+    REQUIRE(started);
+    const json::Value batch = j(R"({"label":"waits","steps":[
+        {"command":"track.add","args":{"name":"Mine"}},
+        {"command":"job.wait","args":{"timeout_s":30,"job":")" +
+                                started->find("job")->asString() + R"("}}]})");
+    const std::size_t before = app->head().tracks.size();
+    auto waited = d.execute({"batch", batch, kTest});
+    REQUIRE(waited);
+    const auto& late = *waited->find("results")->asArray().back().find("result")->find("files");
+    REQUIRE(late.size() >= 1);
+    // One new track per file (identical silent stems share one media entry).
+    CHECK(app->head().tracks.size() == before + 1 + late.size());
+    CHECK(app->versions().history(1).front()->txn.label == "Add renders to project");
+    REQUIRE(d.execute({"history.undo", json::Value::object(), kTest}));
+    CHECK(app->head().tracks.size() == before + 1);  // the batch's own track stays
 }
 
 TEST_CASE("stem render job publishes files and analysis summaries") {

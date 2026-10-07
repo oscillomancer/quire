@@ -1057,7 +1057,8 @@ void postAddToProject(EngineApp& app, RenderTarget target, cmd::Dispatcher& disp
                 });
             if (!done) return std::move(done).error();
             return {};
-        });
+        },
+        cmd::Dispatcher::PostKind::Edit);
 }
 
 namespace {
