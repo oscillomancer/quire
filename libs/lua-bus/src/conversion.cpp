@@ -235,6 +235,11 @@ Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
     }
     json::Value out = json::Value::object();
     lua_pushnil(L);
+    // An early return leaves lua_next unfinished: pop its key and value.
+    auto fail = [&](Error error) {
+        lua_pop(L, 2);
+        return error;
+    };
     while (lua_next(L, table) != 0) {
         std::string key;
         if (lua_type(L, -2) == LUA_TSTRING) {
@@ -247,21 +252,19 @@ Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
             // which is more useful than refusing it here.
             key = std::to_string(lua_tointeger(L, -2));
         else if (lua_type(L, -2) == LUA_TNUMBER)
-            return Error("script.table", "object keys must be strings or integers", path,
-                         "use {\"name\": value} with string keys");
+            return fail(Error("script.table", "object keys must be strings or integers", path,
+                              "use {\"name\": value} with string keys"));
         else
-            return Error("script.table", "object keys must be strings", path,
-                         "use {\"name\": value} with string keys");
+            return fail(Error("script.table", "object keys must be strings", path,
+                              "use {\"name\": value} with string keys"));
         if (json::firstInvalidUtf8(key) != std::string_view::npos)
-            return Error("script.table", "an object key is not valid UTF-8", path, "use text keys");
-        if (auto taken = budget.take(0, key.size(), path); !taken) {
-            lua_pop(L, 2);  // the value and the key: lua_next is not resumed
-            return taken.error();
-        }
+            return fail(
+                Error("script.table", "an object key is not valid UTF-8", path, "use text keys"));
+        if (auto taken = budget.take(0, key.size(), path); !taken) return fail(taken.error());
         const Node member = memberSchema(schema, key);
         auto value = valueToJson(L, -1, member, json::pointerJoin(path, key), depth + 1, budget);
+        if (!value) return fail(value.error());
         lua_pop(L, 1);
-        if (!value) return value.error();
         out[key] = std::move(*value);
     }
     return out;
