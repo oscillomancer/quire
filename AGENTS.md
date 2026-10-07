@@ -101,13 +101,17 @@ same change, and say what you found.
 cmake --workflow --preset dev    # configure, build and test (Clang, Debug)
 tools/ci/format.sh               # clang-format; --check to verify only
 tools/ci/run-all.sh              # full local CI: license, format and every preset
+tools/ci/clean-clone.sh          # fresh offline clone of HEAD: build and test (dev)
 ```
 
 Presets: `dev`, `release`, `gcc`, `asan`, `ubsan`, `tsan`, `rtsan`. Build
 the whole `gcc` preset when checking GCC, not only test targets: warnings
 such as `-Wshadow` show up in the app sources. `run-all.sh` prints a
 summary table and exits non-zero on any failure; read both. A full run takes
-about half an hour.
+about half an hour. `clean-clone.sh` tests committed files only, from scratch
+and with downloads disabled: run it before a release and after adding files
+or dependencies. Keep `TMPDIR` short; socket tests fail when their path
+exceeds the 108-byte Unix socket limit.
 
 Code conventions: C++20, CMake and Ninja, warning-clean with
 `-Wall -Wextra -Wpedantic` on Clang and GCC; `.clang-format` at the root
