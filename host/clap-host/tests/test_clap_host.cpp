@@ -1964,3 +1964,33 @@ TEST_CASE("oversized acknowledged bridge output count fails silently without are
         CHECK_FALSE(query.error().hint.empty());
     }
 }
+
+TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
+        return p.name == "Test VST3 Separate Gain";
+    });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    auto state = (*made)->saveState();
+    REQUIRE(state);
+    const auto before = (*made)->paramValue(1);
+    REQUIRE(before);
+    // The component's 8-byte value changed to 0.9, then a one-byte
+    // controller state the controller refuses (framing stays valid).
+    const double changed = 0.9;
+    std::memcpy(state->data() + 16, &changed, 8);
+    state->resize(25);
+    (*state)[12] = 1;
+    (*state)[13] = (*state)[14] = (*state)[15] = 0;
+    (*state)[24] = 0;
+    auto loaded = (*made)->loadState(*state);
+    REQUIRE_FALSE(loaded);
+    CHECK(loaded.error().code == "host.state");
+    CHECK_FALSE(loaded.error().hint.empty());
+    const auto after = (*made)->paramValue(1);
+    REQUIRE(after);
+    CHECK(*after == doctest::Approx(*before));
+}

@@ -723,34 +723,52 @@ Result<std::vector<std::uint8_t>> Vst3Instance::saveState() {
     return encodeState(component.take(), controller.take());
 }
 Status Vst3Instance::loadState(std::span<const std::uint8_t> bytes) {
-    if (bytes.size() < 16 || read32(bytes, 0) != 0x33545356 || read32(bytes, 4) != 1)
-        return Error("host.state", "invalid VST3 state header");
-    const auto c = read32(bytes, 8), e = read32(bytes, 12);
-    if (std::uint64_t(c) + e != bytes.size() - 16)
-        return Error("host.state", "invalid VST3 state lengths");
-    if (c > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()) ||
-        e > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()))
-        return Error("host.state", "VST3 state is too large");
-    Steinberg::ResizableMemoryIBStream component, controller;
-    component.write(const_cast<std::uint8_t*>(bytes.data() + 16), static_cast<Steinberg::int32>(c),
-                    nullptr);
-    component.rewind();
-    state_->changes.barrier();
-    if (state_->component->setState(&component) != kResultOk)
-        return Error("host.state", "VST3 component rejected state");
-    if (state_->separateController) {
+    // Framing first; then the component, the controller's copy of it and the
+    // controller's own state. A rejection at any step restores the state the
+    // plug-in had before, so a failed load leaves it as it was.
+    auto check = [](std::span<const std::uint8_t> b) -> Status {
+        if (b.size() < 16 || read32(b, 0) != 0x33545356 || read32(b, 4) != 1)
+            return Error("host.state", "invalid VST3 state header");
+        const auto c = read32(b, 8), e = read32(b, 12);
+        if (std::uint64_t(c) + e != b.size() - 16)
+            return Error("host.state", "invalid VST3 state lengths");
+        if (c > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()) ||
+            e > static_cast<std::uint32_t>(std::numeric_limits<Steinberg::int32>::max()))
+            return Error("host.state", "VST3 state is too large");
+        return okStatus();
+    };
+    auto apply = [&](std::span<const std::uint8_t> b) -> Status {
+        const auto c = read32(b, 8), e = read32(b, 12);
+        Steinberg::ResizableMemoryIBStream component, controller;
+        component.write(const_cast<std::uint8_t*>(b.data() + 16), static_cast<Steinberg::int32>(c),
+                        nullptr);
         component.rewind();
-        if (state_->controller->setComponentState(&component) != kResultOk)
-            return Error("host.state", "VST3 controller rejected component state");
-        if (e) {
-            controller.write(const_cast<std::uint8_t*>(bytes.data() + 16 + c),
-                             static_cast<Steinberg::int32>(e), nullptr);
-            controller.rewind();
-            if (state_->controller->setState(&controller) != kResultOk)
-                return Error("host.state", "VST3 controller rejected state");
+        if (state_->component->setState(&component) != kResultOk)
+            return Error("host.state", "VST3 component rejected state");
+        if (state_->separateController) {
+            component.rewind();
+            if (state_->controller->setComponentState(&component) != kResultOk)
+                return Error("host.state", "VST3 controller rejected component state");
+            if (e) {
+                controller.write(const_cast<std::uint8_t*>(b.data() + 16 + c),
+                                 static_cast<Steinberg::int32>(e), nullptr);
+                controller.rewind();
+                if (state_->controller->setState(&controller) != kResultOk)
+                    return Error("host.state", "VST3 controller rejected state");
+            }
         }
-    }
-    return okStatus();
+        return okStatus();
+    };
+    SUPPLE_TRY(check(bytes));
+    auto previous = saveState();
+    state_->changes.barrier();
+    auto status = apply(bytes);
+    if (status) return status;
+    Error error = status.error();
+    if (!previous || !check(*previous) || !apply(*previous))
+        error.message += "; restoring the previous state also failed";
+    error.hint = "check that the state was saved by this plug-in and version";
+    return error;
 }
 
 bool Vst3Instance::startProcessing() SUPPLE_RT {
