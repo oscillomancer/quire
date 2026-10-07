@@ -3006,7 +3006,7 @@ TEST_CASE("recording recovery requires a complete valid sidecar") {
                 v["segments"] = json::parse("[[0,-4],[0,0]]").value();
                 break;
             case 10:
-                v["loop"] = json::parse("[0,0]").value();
+                v["loop"] = json::parse("[4,2]").value();
                 break;
             case 11:
                 v["segments"] = json::parse("[[0,0],[10,0]]").value();
@@ -3608,4 +3608,28 @@ TEST_CASE("a monitored input is heard through its input FX" * doctest::descripti
         CHECK(engine.processErrors() == 0);
         engine.stop();
     }
+}
+
+TEST_CASE("a recording split by a seek, not a loop, has a sidecar its reader accepts") {
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-rec-seek-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    detail::Recorder recorder({{Id{model::Kind::Track, 1}, {0}, dir / "take.wav", {}}}, 48000, 0);
+    REQUIRE(recorder.open());
+    const std::array<float, 64> data{};
+    const float* in[] = {data.data()};
+    recorder.capture(in, 1, 64, 0);
+    recorder.capture(in, 1, 64, 48000);  // a seek during capture: a second run
+    // A loop range that is set but switched off does not make the runs passes.
+    const auto takes = recorder.finish({.start = 24000, .end = 96000, .on = false});
+    REQUIRE(takes.size() == 1);
+    REQUIRE(takes[0].segments.size() == 2);
+    CHECK(takes[0].loop.start == 0);
+    CHECK(takes[0].loop.end == 0);
+    const auto side = detail::readSidecar(dir / "take.wav");
+    REQUIRE_MESSAGE(side, (side ? std::string() : side.error().toString()));
+    CHECK(side->segments.size() == 2);
+    CHECK(side->segments[1].timeline == 48000);
+    CHECK(side->loopEnd == 0);
+    std::filesystem::remove_all(dir);
 }

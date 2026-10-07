@@ -103,8 +103,6 @@ Engine and hosting:
 - FX containers are not implemented; parallel FX run in series on pinned
   stages and strips with auxiliary channels, and oversampling is not
   available to plug-ins with auxiliary outputs.
-- A recording seeked during capture (without a loop) writes a segment table
-  its own crash-recovery reader rejects.
 - VST3: a state load the controller rejects leaves the component changed;
   an isolated VST3 does not pick up bus widths negotiated at activation.
 - The sandbox fixes a render's tail length before queued tempo and

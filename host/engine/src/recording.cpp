@@ -69,8 +69,9 @@ Result<RecordingInfo> readSidecar(const std::filesystem::path& wav) {
             return invalid("/segments", "loop and nonempty segments must be supplied together");
         info.loopStart = loop->at(0).asInt();
         info.loopEnd = loop->at(1).asInt();
-        if (info.loopStart < 0 || info.loopEnd <= info.loopStart)
-            return invalid("/loop", "expected a nonnegative, increasing loop range");
+        const bool noLoop = info.loopStart == 0 && info.loopEnd == 0;  // runs split by seeks
+        if (!noLoop && (info.loopStart < 0 || info.loopEnd <= info.loopStart))
+            return invalid("/loop", "expected [0, 0] or a nonnegative, increasing loop range");
         for (std::size_t i = 0; i < segs->size(); ++i) {
             const auto& row = segs->at(i);
             if (!row.isArray() || row.size() != 2 || !row.at(0).isInt() || !row.at(1).isInt() ||
@@ -350,6 +351,8 @@ void Recorder::writerLoop() {
 }
 
 std::vector<RecordedTake> Recorder::finish(LoopRange loop) {
+    // Runs split by a seek, not a loop, carry no loop range ([0, 0]).
+    if (!loop.active()) loop = {};
     finishingLoop_ = loop;
     stop_.store(true, std::memory_order_release);
     if (writer_.joinable()) writer_.join();

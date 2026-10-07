@@ -333,7 +333,9 @@ preset's engine tests (with the dummy backend).
   when full, capture stops adding input and returns retained passes with a
   structured `recording.loop_runs_full` warning for the commit. Sidecars require
   `supple.recording/1.0`, a track id, a positive finite sample rate, and complete,
-  ordered loop runs beginning at file frame zero; invalid sidecars return a
+  ordered loop runs beginning at file frame zero, with the loop range they were
+  recorded in, or `[0, 0]` when seeks split the runs while no loop was active
+  (an inactive loop range is never recorded); invalid sidecars return a
   structured error and must be skipped during recovery. Placement sidecars
   survive pending hash jobs (including finalized loop runs at stop); the
   background finalization adds an optional `hash` without changing their

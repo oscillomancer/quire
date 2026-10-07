@@ -77,7 +77,8 @@ struct RecordedTake {
     std::int64_t startSample = 0;  // timeline sample of the file's first frame (may be < 0)
     std::int64_t frames = 0;
     // The runs, in file order; the first is {0, startSample}. More than one:
-    // loop passes (`loop` is the loop they were recorded in).
+    // loop passes (`loop` is the loop they were recorded in), or runs split
+    // by seeks while no loop was active (`loop` is then [0, 0]).
     std::vector<RecordedSegment> segments;
     struct {
         std::int64_t start = 0, end = 0;
