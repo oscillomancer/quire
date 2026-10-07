@@ -469,9 +469,25 @@ int main(int argc, char** argv) {
     });
     gui::RenderDialog renderDialog(**app, dispatcher, root);
     appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
+    appActions.onPrompt = [&](const actions::Action& action) {
+        gui::openActionPrompt(root, appActions, action);
+    };
     root.onUnhandledKey = [&](const ui::KeyEvent& e) {
         const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
-        return appActions.key(e.key, e.mods, typing);
+        // The keymap's sections, innermost first: a text field, the MIDI
+        // editor or the mixer when the focus is inside it, then the arrange
+        // view (its defaults edit the selection, shared by every panel) and
+        // global bindings.
+        std::vector<std::string> sections;
+        if (typing) sections.push_back("text");
+        for (const ui::Node* n = root.focused(); n; n = n->parent())
+            if (n->id() == "midi.editor" || n->id() == "mixer") {
+                sections.push_back(n->id() == "mixer" ? "mixer" : "midi");
+                break;
+            }
+        sections.push_back("arrange");
+        sections.push_back("global");
+        return appActions.key(e.key, e.mods, typing, sections);
     };
     {
         auto frame = std::make_unique<ui::Node>("window");

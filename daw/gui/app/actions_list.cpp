@@ -172,7 +172,7 @@ class ActionsPanel : public ui::Node {
             (void)actions.run(action);
             return;
         }
-        openPrompt(root, actions, action);
+        openActionPrompt(root, actions, action);
     }
 
     void startCapture() {
@@ -199,39 +199,6 @@ class ActionsPanel : public ui::Node {
         list_->invalidate();
     }
 
-    static void openPrompt(ui::Root& root, AppActions& actions, const actions::Action& action) {
-        auto form = std::make_unique<ui::Node>("actions.prompt");
-        form->layout.dir = ui::Layout::Dir::Column;
-        form->layout.width = ui::SizeRule::fixed(420);
-        form->layout.height =
-            ui::SizeRule::fixed(64.0f + 56.0f * static_cast<float>(action.prompts.size()));
-        form->layout.padding = ui::Insets::all(12);
-        form->layout.gap = 6;
-        form->emplace<ui::Label>("actions.prompt.title", action.name, ui::Font::UiBold, "body");
-        auto fields = std::make_shared<std::vector<ui::TextField*>>();
-        for (const std::string& p : action.prompts) {
-            form->emplace<ui::Label>("actions.prompt.label." + p, p, ui::Font::Mono, "caption",
-                                     "ink-quiet");
-            fields->push_back(&form->emplace<ui::TextField>("actions.prompt." + p));
-        }
-        auto submit = [rootp = &root, actionsp = &actions, action, fields](const std::string&) {
-            json::Value values = json::Value::object();
-            for (std::size_t i = 0; i < fields->size(); ++i) {
-                const std::string& text = (*fields)[i]->text();
-                auto parsed = json::parse(text);  // numbers, booleans, arrays; else the text itself
-                values[action.prompts[i]] = parsed ? *parsed : json::Value(text);
-            }
-            // closePopup destroys this lambda (it lives in the form): copy first.
-            ui::Root* owner = rootp;
-            AppActions* runner = actionsp;
-            const actions::Action act = action;
-            owner->closePopup();
-            (void)runner->run(act, values);
-        };
-        for (ui::TextField* f : *fields) f->onSubmit = submit;
-        root.openPopup(std::move(form), {}, ui::Placement::Center);
-    }
-
     ui::Root& root_;
     AppActions& actions_;
     Chrome* chrome_ = nullptr;
@@ -244,6 +211,39 @@ class ActionsPanel : public ui::Node {
 };
 
 }  // namespace
+
+void openActionPrompt(ui::Root& root, AppActions& actions, const actions::Action& action) {
+    auto form = std::make_unique<ui::Node>("actions.prompt");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(420);
+    form->layout.height =
+        ui::SizeRule::fixed(64.0f + 56.0f * static_cast<float>(action.prompts.size()));
+    form->layout.padding = ui::Insets::all(12);
+    form->layout.gap = 6;
+    form->emplace<ui::Label>("actions.prompt.title", action.name, ui::Font::UiBold, "body");
+    auto fields = std::make_shared<std::vector<ui::TextField*>>();
+    for (const std::string& p : action.prompts) {
+        form->emplace<ui::Label>("actions.prompt.label." + p, p, ui::Font::Mono, "caption",
+                                 "ink-quiet");
+        fields->push_back(&form->emplace<ui::TextField>("actions.prompt." + p));
+    }
+    auto submit = [rootp = &root, actionsp = &actions, action, fields](const std::string&) {
+        json::Value values = json::Value::object();
+        for (std::size_t i = 0; i < fields->size(); ++i) {
+            const std::string& text = (*fields)[i]->text();
+            auto parsed = json::parse(text);  // numbers, booleans, arrays; else the text itself
+            values[action.prompts[i]] = parsed ? *parsed : json::Value(text);
+        }
+        // closePopup destroys this lambda (it lives in the form): copy first.
+        ui::Root* owner = rootp;
+        AppActions* runner = actionsp;
+        const actions::Action act = action;
+        owner->closePopup();
+        (void)runner->run(act, values);
+    };
+    for (ui::TextField* f : *fields) f->onSubmit = submit;
+    root.openPopup(std::move(form), {}, ui::Placement::Center);
+}
 
 void openActionsList(ui::Root& root, AppActions& actions, Chrome* chrome) {
     if (root.popupOpen()) root.closePopups();

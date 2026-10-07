@@ -1155,3 +1155,68 @@ TEST_CASE("audit3: unsupported sidecar major resets defaults and stays byte-iden
     REQUIRE(bytes);
     CHECK(std::string(bytes->begin(), bytes->end()) == future);
 }
+
+TEST_CASE("mixer and MIDI editor key bindings run when their section is active") {
+    App a;
+    REQUIRE(a.ok);
+    a.actions->keymap().bind({{*actions::parseChord("Ctrl+Alt+Q")}, "mixer", "track.add:channel"});
+    const auto before = a.tracks("channel");
+    CHECK_FALSE(a.actions->key(SDLK_Q, ui::kCtrl | ui::kAlt, false));  // arrange, global
+    CHECK(a.tracks("channel") == before);
+    CHECK(a.actions->key(SDLK_Q, ui::kCtrl | ui::kAlt, false, {"mixer", "arrange", "global"}));
+    CHECK(a.tracks("channel") == before + 1);
+}
+
+TEST_CASE("toolbar, menu and key actions that need typed arguments ask for them") {
+    App a;
+    REQUIRE(a.ok);
+    std::string seen;
+    a.actions->onPrompt = [&](const actions::Action& action) {
+        gui::openActionPrompt(*a.root, *a.actions, action);
+    };
+    a.actions->addUi("probe.prompt", "Prompt", "name", [&](const json::Value& v) -> Status {
+        seen = v.isString() ? v.asString() : "?";
+        return {};
+    });
+    gui::ChromeLayout layout;
+    layout.toolbar = {"probe.prompt"};
+    auto frame = std::make_unique<ui::Node>("window");
+    frame->add(gui::makeChrome(*a.root, *a.actions, layout));
+    a.root->setContent(std::move(frame));
+    a.root->frame(false);
+    auto* button = dynamic_cast<ui::Button*>(a.root->find("tool.probe.prompt"));
+    REQUIRE(button);
+    button->onClick();
+    REQUIRE(a.root->popupOpen());  // the form, as in the actions list
+    auto* field = dynamic_cast<ui::TextField*>(a.root->find("actions.prompt.name"));
+    REQUIRE(field);
+    field->setText("Lead");
+    REQUIRE(field->onSubmit);
+    field->onSubmit("Lead");
+    CHECK(seen == "Lead");
+}
+
+TEST_CASE("a macro passes its typed arguments to the steps that ask for them") {
+    App a;
+    REQUIRE(a.ok);
+    std::string seen;
+    a.actions->addUi("probe.typed", "Typed step", "name", [&](const json::Value& v) -> Status {
+        seen = v.isString() ? v.asString() : "?";
+        return {};
+    });
+    actions::Action macro;
+    macro.id = "macro:typed";
+    macro.name = "Typed macro";
+    macro.prompts = {"name"};
+    macro.steps = {"probe.typed"};
+    REQUIRE(a.actions->run(macro, json::parse(R"({"name":"provided"})").value()));
+    CHECK(seen == "provided");
+    actions::Action loop;  // a macro that contains itself stops instead of recursing
+    loop.id = "macro:loop";
+    loop.name = "Loop";
+    loop.steps = {"macro:loop"};
+    a.actions->registry().add(loop);
+    auto r = a.actions->run(*a.actions->registry().find("macro:loop"));
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code == "action.macro_depth");
+}

@@ -480,7 +480,10 @@ leave the head version unchanged.
 - **Actions list** (`?`): fuzzy search over names, descriptions and
   commands; shows bound keys; runs, binds, adds to toolbar/menu.
 - **Keymaps:** per context section (global, arrange, MIDI editor, mixer,
-  text field), chords allowed, conflicts shown in the editor; stored as
+  text field), chords allowed, conflicts shown in the editor. A key looks in
+  `text` while a text field has focus, in `midi` or `mixer` while the focus
+  is inside that panel, then in `arrange` (its defaults edit the shared
+  selection) and `global`, innermost first. Stored as
   canonical JSON in user config; defaults close to REAPER's common keys
   where they are not proprietary assets (key choices are not copyrightable
   expression; no REAPER files are copied). Among the defaults: Space
@@ -490,7 +493,11 @@ leave the head version unchanged.
   toggles take Enter, so Space after a click still plays or stops, and a
   rename that ends gives the keys back to the shortcuts.
 - **Macros:** a sequence of actions (or a Lua script) run as one batch (one
-  undo step), with typed prompts.
+  undo step), with typed prompts; the values given reach every step, each
+  taking the ones its own prompts name. Macros nest up to 16 deep.
+- **Prompts:** an action run from a menu, the toolbar or a key that still
+  needs typed arguments the selection does not supply opens the same form
+  as the actions list.
 - **Toolbars and menus:** built from actions; customizable; stored in user
   config (`menus.json`, supple.menus/1.0). Edited in the app: Ctrl+T in the
   actions list puts the selected action on the toolbar (or takes it off),

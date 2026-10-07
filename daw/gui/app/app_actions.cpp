@@ -228,13 +228,30 @@ Result<json::Value> AppActions::run(std::string_view id) {
     return run(*a);
 }
 
-bool AppActions::key(int keycode, unsigned mods, bool typing) {
+void AppActions::invoke(const actions::Action& action) {
+    auto r = runner_.run(action, context());
+    if (!r && r.error().code == "action.prompt" && onPrompt) {
+        onPrompt(action);
+        return;
+    }
+    if (!r && onError) onError(action.name + ": " + r.error().message);
+}
+
+void AppActions::invoke(std::string_view id) {
+    if (const actions::Action* a = registry_.find(id))
+        invoke(*a);
+    else if (onError)
+        onError("no action " + std::string(id));
+}
+
+bool AppActions::key(int keycode, unsigned mods, bool typing,
+                     const std::vector<std::string>& sections) {
     if (typing && !(mods & (2u | 4u | 8u)) && !keymap_.pending()) return false;  // plain keys type
     const bool wasPending = keymap_.pending();
-    const auto action = keymap_.press({keycode, mods}, {"arrange", "global"});
+    const auto action = keymap_.press({keycode, mods}, sections);
     if (action) {
         if (const actions::Action* a = registry_.find(*action))
-            (void)run(*a);
+            invoke(*a);
         else if (onError)
             onError("no action " + *action + " (bound to a key)");
         return true;

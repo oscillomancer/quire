@@ -83,6 +83,7 @@ class Runner {
                              const json::Value& prompted);
     const ActionRegistry& registry_;
     cmd::Dispatcher& dispatcher_;
+    int depth_ = 0;  // macro nesting while a step runs
 };
 
 // --- keys

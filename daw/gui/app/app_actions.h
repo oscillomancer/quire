@@ -47,9 +47,17 @@ class AppActions {
     Result<json::Value> run(const actions::Action& action,
                             const json::Value& prompted = json::Value::object());
     Result<json::Value> run(std::string_view id);
+    // From a menu, the toolbar or a key: runs the action, or, when it still
+    // needs typed arguments the selection does not give, asks for them
+    // (onPrompt opens the same form as the actions list).
+    void invoke(const actions::Action& action);
+    void invoke(std::string_view id);
+    std::function<void(const actions::Action&)> onPrompt;
     // A key the focused widget did not use: true when it ran (or started) a
-    // binding. `typing` (a text field has focus) lets only modified chords through.
-    bool key(int keycode, unsigned mods, bool typing);
+    // binding. `typing` (a text field has focus) lets only modified chords
+    // through; `sections` are the keymap's, innermost first.
+    bool key(int keycode, unsigned mods, bool typing,
+             const std::vector<std::string>& sections = {"arrange", "global"});
     // Built-in UI actions the app provides (open the actions list, …).
     void addUi(std::string id, std::string name, std::function<void()> run);
     // A built-in with one prompted argument (the actions list asks for it).

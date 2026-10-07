@@ -172,14 +172,27 @@ Result<json::Value> Runner::step(const Action& a, const Context& c, const json::
         return a.builtin(withArgs);
     }
     if (!a.steps.empty()) {
+        // The macro's values reach every step; each takes the ones its own
+        // prompts name. Macros may nest, but not without end.
+        if (depth_ >= 16)
+            return Error("action.macro_depth", a.name + " nests macros more than 16 deep", {},
+                         "remove the macro step that leads back to itself");
+        ++depth_;
         json::Value results = json::Value::array();
         for (const std::string& id : a.steps) {
             const Action* s = registry_.find(id);
-            if (!s) return Error("action.unknown", "macro step " + id + " is not an action");
-            auto r = step(*s, c, json::Value::object());
-            if (!r) return r;
+            if (!s) {
+                --depth_;
+                return Error("action.unknown", "macro step " + id + " is not an action");
+            }
+            auto r = step(*s, c, prompted);
+            if (!r) {
+                --depth_;
+                return r;
+            }
             results.push_back(std::move(*r));
         }
+        --depth_;
         return results;
     }
     auto args = resolve(a.args, c);

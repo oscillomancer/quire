@@ -206,7 +206,7 @@ void fillChrome(ui::Node& bar, ui::Root& root, AppActions& actions, const Chrome
                     if (!a) continue;  // unknown ids in a user file are skipped
                     const std::string name = shortName(*a) + (a->prompts.empty() ? "" : "…");
                     entries.push_back(
-                        {name, actions.keysFor(id), [&actions, id] { (void)actions.run(id); }});
+                        {name, actions.keysFor(id), [&actions, id] { actions.invoke(id); }});
                 }
                 root.openPopup(ui::makeMenu("menu." + title + ".items", std::move(entries),
                                             [&root] { root.closePopup(); }),
@@ -221,7 +221,7 @@ void fillChrome(ui::Node& bar, ui::Root& root, AppActions& actions, const Chrome
         std::function<void(const ui::Rect&)> context;
         if (toolMenu) context = [toolMenu, id](const ui::Rect& r) { toolMenu(id, r); };
         auto& b = bar.emplace<ToolButton>(
-            "tool." + id, shortName(*a), [&actions, id] { (void)actions.run(id); }, context);
+            "tool." + id, shortName(*a), [&actions, id] { actions.invoke(id); }, context);
         b.layout.height = ui::SizeRule::fixed(26);
     }
 }

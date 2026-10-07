@@ -11,5 +11,8 @@ namespace supple::gui {
 class Chrome;
 
 void openActionsList(ui::Root& root, AppActions& actions, Chrome* chrome = nullptr);
+// A form asking for an action's typed arguments, then running it (the actions
+// list, menus, the toolbar and keys share it through AppActions::onPrompt).
+void openActionPrompt(ui::Root& root, AppActions& actions, const actions::Action& action);
 
 }  // namespace supple::gui
