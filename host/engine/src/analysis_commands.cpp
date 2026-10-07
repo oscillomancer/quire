@@ -99,13 +99,9 @@ Result<analysis::Report> measure(Loaded& audio) { return analysis_commands::anal
 
 Result<json::Value> analyzeAudio(const audio::AudioData& data, analysis::Detail detail) {
     std::vector<const float*> channels;
-    for (const auto& channel : data.channels) channels.push_back(channel.data());
-    const auto layout = channels.size() >= 2 ? analysis::Layout::Stereo : analysis::Layout::Mono;
-    const analysis::Signal signal{
-        std::span<const float* const>(channels.data(), std::min<std::size_t>(channels.size(), 2)),
-        data.channels.empty() ? 0 : static_cast<std::int64_t>(data.channels[0].size()),
-        data.sampleRate, layout};
-    auto result = analysis::analyze(signal);
+    auto signal = analysis_commands::signalOf(data, channels);
+    if (!signal) return std::move(signal).error();
+    auto result = analysis::analyze(*signal);
     if (!result) return std::move(result).error();
     return analysis_commands::reportJson(*result, detail);
 }
@@ -225,7 +221,11 @@ void registerEngineAnalysisCommands(cmd::Registry& registry) {
                 if (error.path == "/track") error.path = "/maskee_track";
                 return error;
             }
-            auto report = analysis::masking(masker->signal(), maskee->signal());
+            auto maskerSignal = masker->signal();
+            if (!maskerSignal) return std::move(maskerSignal).error();
+            auto maskeeSignal = maskee->signal();
+            if (!maskeeSignal) return std::move(maskeeSignal).error();
+            auto report = analysis::masking(*maskerSignal, *maskeeSignal);
             if (!report) return std::move(report).error();
             return analysis::toJson(*report);
         };

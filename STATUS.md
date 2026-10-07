@@ -129,11 +129,6 @@ Plugins:
 - Stock plugins are tested as Linux CLAP builds; their VST3 and AUv2
   builds are optional and not covered by CI.
 
-Analysis and scripting:
-- Pitch detection can report a pitch for pure DC; complete stereo
-  cancellation reports zero mono loss; file analysis in the sandbox reads
-  only the first two channels of a surround file.
-
 Smaller recorded items: `describeFlat` skips hidden parameters in full
 detail; core-params formats magnitudes beyond six decimals imprecisely;
 `Rng::uniform` at extreme endpoints; forced-schedule tests for `RtHandoff`.

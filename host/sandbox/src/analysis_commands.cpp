@@ -142,7 +142,9 @@ Result<json::Value> analyzeRender(Session& s, const std::string& render, analysi
     if (!l) return std::move(l).error();
     analysis::Options o;
     o.noteOffSeconds = l->noteOff;
-    auto r = analysis::analyze(l->signal(), o);
+    auto lSignal = l->signal();
+    if (!lSignal) return std::move(lSignal).error();
+    auto r = analysis::analyze(*lSignal, o);
     if (!r) return std::move(r).error();
     return analysis_commands::reportJson(*r, detail);
 }
@@ -186,7 +188,9 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             if (!l) return std::move(l).error();
             analysis::Options o;
             o.noteOffSeconds = a.noteOffS ? a.noteOffS : l->noteOff;
-            auto r = analysis::analyze(l->signal(), o);
+            auto lSignal = l->signal();
+            if (!lSignal) return std::move(lSignal).error();
+            auto r = analysis::analyze(*lSignal, o);
             if (!r) return std::move(r).error();
             return AnalyzeResult{analysis::toJson(*r, analysis_commands::toDetail(a.detail)),
                                  analysis::summarize(*r)};
@@ -249,10 +253,14 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             }
             analysis::Options o;
             o.noteOffSeconds = refNoteOff;
-            auto ra = analysis::analyze(ref->signal(), o);
+            auto refSignal = ref->signal();
+            if (!refSignal) return std::move(refSignal).error();
+            auto ra = analysis::analyze(*refSignal, o);
             if (!ra) return std::move(ra).error();
             o.noteOffSeconds = testNoteOff;
-            auto rb = analysis::analyze(test->signal(), o);
+            auto testSignal = test->signal();
+            if (!testSignal) return std::move(testSignal).error();
+            auto rb = analysis::analyze(*testSignal, o);
             if (!rb) return std::move(rb).error();
             CompareResult base = analysis_commands::compare(*ra, *rb);
             auto scored = detail::referenceScore(ref->data, refNoteOff, test->data, testNoteOff);
@@ -292,7 +300,11 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             if (!m) return std::move(m).error();
             auto e = load(S(ctx), a.maskee, "/maskee");
             if (!e) return std::move(e).error();
-            auto r = analysis::masking(m->signal(), e->signal());
+            auto mSignal = m->signal();
+            if (!mSignal) return std::move(mSignal).error();
+            auto eSignal = e->signal();
+            if (!eSignal) return std::move(eSignal).error();
+            auto r = analysis::masking(*mSignal, *eSignal);
             if (!r) return std::move(r).error();
             return JsonResult{analysis::toJson(*r)};
         };
@@ -331,7 +343,9 @@ void registerAnalysisCommands(cmd::Registry& registry) {
             if (!l) return std::move(l).error();
             analysis::Options o;
             o.noteOffSeconds = l->noteOff;
-            auto r = analysis::analyze(l->signal(), o);
+            auto lSignal = l->signal();
+            if (!lSignal) return std::move(lSignal).error();
+            auto r = analysis::analyze(*lSignal, o);
             if (!r) return std::move(r).error();
             auto e = analysis::evaluate(*r, a.profile);
             if (!e) {

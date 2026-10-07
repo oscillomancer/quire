@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "supple/analysis/analysis.h"
@@ -26,24 +27,51 @@ inline schema::Schema<DetailArg> detailSchema() {
         .doc("summary: key scalars; standard: + percentiles and spectrum; full: + time series.");
 }
 
+// The analysis signal of decoded audio, by channel count: mono, stereo, 5.0
+// or 5.1 (WAV order: L R C [LFE] Ls Rs). Other counts are refused, never
+// silently cut to their first two channels. `ptr` holds the channel pointers.
+inline Result<analysis::Signal> signalOf(const audio::AudioData& data,
+                                         std::vector<const float*>& ptr) {
+    ptr.clear();
+    for (const auto& c : data.channels) ptr.push_back(c.data());
+    analysis::Layout layout = analysis::Layout::Stereo;
+    switch (ptr.size()) {
+        case 1:
+            layout = analysis::Layout::Mono;
+            break;
+        case 2:
+            layout = analysis::Layout::Stereo;
+            break;
+        case 5:
+            layout = analysis::Layout::Surround50;
+            break;
+        case 6:
+            layout = analysis::Layout::Surround51;
+            break;
+        default:
+            return Error("analysis.layout",
+                         std::to_string(ptr.size()) + "-channel audio has no analysis layout", {},
+                         "analyze mono, stereo, 5.0 or 5.1 audio (or render a stereo mix)");
+    }
+    return analysis::Signal{
+        std::span<const float* const>(ptr.data(), ptr.size()),
+        data.channels.empty() ? 0 : static_cast<std::int64_t>(data.channels[0].size()),
+        data.sampleRate, layout};
+}
+
 struct Loaded {
     audio::AudioData data;
     std::vector<const float*> ptr;
     std::optional<double> noteOff;
-    analysis::Signal signal() {
-        ptr.clear();
-        for (const auto& c : data.channels) ptr.push_back(c.data());
-        const auto layout = ptr.size() >= 2 ? analysis::Layout::Stereo : analysis::Layout::Mono;
-        return {std::span<const float* const>(ptr.data(), std::min<std::size_t>(ptr.size(), 2)),
-                data.channels.empty() ? 0 : static_cast<std::int64_t>(data.channels[0].size()),
-                data.sampleRate, layout};
-    }
+    Result<analysis::Signal> signal() { return signalOf(data, ptr); }
 };
 
 inline Result<analysis::Report> analyze(Loaded& l) {
     analysis::Options options;
     options.noteOffSeconds = l.noteOff;
-    return analysis::analyze(l.signal(), options);
+    auto signal = l.signal();
+    if (!signal) return std::move(signal).error();
+    return analysis::analyze(*signal, options);
 }
 
 inline json::Value reportJson(const analysis::Report& report, analysis::Detail detail) {

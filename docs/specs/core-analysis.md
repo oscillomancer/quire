@@ -153,7 +153,9 @@ bin frequency `f_k = k·fs/N`, k = 1 .. N/2 (DC excluded).
 - **f0:** YIN (cumulative mean normalized difference, threshold 0.10,
   parabolic interpolation), frame 4096 at 48 kHz (scale with fs), hop
   10 ms, range 30–4000 Hz (overridable). Confidence = 1 − d′ at the chosen
-  lag; a frame is voiced when confidence ≥ 0.85 and not silent.
+  lag; a frame is voiced when confidence ≥ 0.85, not silent and not constant
+  (its RMS about its mean is at least the silence floor and 1e-4 of its RMS;
+  DC has no period).
 - Summary: `pitched` (voiced ≥ 50 % of non-silent frames), median f0 (Hz),
   nearest note name with cents (`A3+4c`), f0 stability (std in cents over
   voiced frames), voiced %.
@@ -199,7 +201,13 @@ bin frequency `f_k = k·fs/N`, k = 1 .. N/2 (DC excluded).
 - **Balance** (dB): `10·log10(E_R / E_L)` (positive = right louder).
 - **Mono loss** (LU): integrated loudness of the stereo signal minus that of
   the mono downmix fed to both channels (0 for identical channels, ≈ 3 for
-  uncorrelated).
+  uncorrelated). A downmix that cancels below the −70 LUFS absolute gate is
+  measured against −70; when the stereo loudness itself is not measurable
+  (under one 400 ms block) mono loss is `null` (and absent from flattened
+values). The engine's
+  and the sandbox's commands analyze mono, stereo, 5.0 and 5.1 audio by
+  channel count (WAV order L R C [LFE] Ls Rs) and refuse other counts with
+  `analysis.layout`.
 
 ## 6. Comparison, profiles and masking
 

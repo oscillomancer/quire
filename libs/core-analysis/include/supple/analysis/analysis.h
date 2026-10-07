@@ -86,6 +86,9 @@ struct StereoReport {
     double width = 0.0;
     std::array<double, kBandCount> bandWidth{};
     double balanceDb = 0.0;
+    // Stereo minus mono-downmix integrated loudness: NaN (null in JSON) when
+    // the stereo loudness is not measurable; a downmix below the -70 LUFS absolute
+    // gate (cancellation) is measured against the gate.
     double monoLossLu = 0.0;
 };
 

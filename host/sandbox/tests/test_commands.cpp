@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
 #include <supple/sandbox/commands.h>
 
@@ -64,6 +65,37 @@ TEST_CASE("audio filenames beginning with rd_ are not render identifiers") {
     auto analyzed = dispatcher.execute({"analyze", std::move(args), kTest});
     REQUIRE_MESSAGE(analyzed, (analyzed ? "" : analyzed.error().toString()));
     CHECK((*analyzed)["report"]["source"]["seconds"].asDouble() == 1);
+}
+
+TEST_CASE("a surround file is analyzed with all its channels; other counts are refused") {
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    auto host = makeHost(root.path / "s");
+    cmd::Dispatcher dispatcher(registry, *host);
+    auto analyzeChannels = [&](std::size_t count) {
+        audio::AudioData audio;
+        audio.sampleRate = 48000.0;
+        for (std::size_t c = 0; c < count; ++c) {
+            std::vector<float> channel(48000);
+            for (std::size_t i = 0; i < channel.size(); ++i)  // only the surrounds sound
+                channel[i] = c >= count - 2 ? 0.3f * static_cast<float>(std::sin(0.05 * i)) : 0.0f;
+            audio.channels.push_back(std::move(channel));
+        }
+        const fs::path file = root.path / ("ch" + std::to_string(count) + ".wav");
+        REQUIRE(audio::writeWav(file, audio, {}).ok());
+        auto args = json::Value::object();
+        args["source"] = file.string();
+        return dispatcher.execute({"analyze", std::move(args), kTest});
+    };
+    auto surround = analyzeChannels(6);
+    REQUIRE_MESSAGE(surround, (surround ? "" : surround.error().toString()));
+    CHECK((*surround)["report"]["source"]["channels"].asInt() == 6);
+    CHECK((*surround)["report"]["source"]["layout"].asString() == "5.1");
+    CHECK((*surround)["report"]["loudness"]["integrated_lufs"].isNumber());  // not silence
+    auto odd = analyzeChannels(3);
+    REQUIRE_FALSE(odd);
+    CHECK(odd.error().code == "analysis.layout");
 }
 
 TEST_CASE("every sandbox command example runs against its fixture" * doctest::description("rt")) {

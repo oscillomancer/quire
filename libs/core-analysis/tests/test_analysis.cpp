@@ -559,3 +559,28 @@ TEST_CASE("R20 short audible buffers are not summarized as silence") {
         CHECK(summarize(run(silent)).find("Silent") != std::string::npos);
     }
 }
+
+TEST_CASE("a constant (DC) signal has no pitch") {
+    Audio dc = make(1.0, [](double, std::size_t) { return std::pair{0.25, 0.25}; });
+    const Report r = run(dc);
+    REQUIRE(r.harmonic);
+    CHECK_FALSE(r.harmonic->pitched);
+}
+
+TEST_CASE("mono loss: full cancellation is large, unmeasurable stereo is unavailable") {
+    Audio anti = make(2.0, [](double t, std::size_t) {
+        const double v = 0.4 * std::sin(2 * kPi * 440 * t);
+        return std::pair{v, -v};
+    });
+    const Report r = run(anti);
+    REQUIRE(r.stereo);
+    CHECK(r.stereo->monoLossLu > 40.0);  // the downmix is silent: against the -70 LUFS gate
+    Audio brief = make(0.2, [](double t, std::size_t) {
+        const double v = 0.4 * std::sin(2 * kPi * 440 * t);
+        return std::pair{v, v};
+    });
+    const Report b = run(brief);
+    REQUIRE(b.stereo);
+    CHECK(std::isnan(b.stereo->monoLossLu));
+    CHECK(flatten(b).count("stereo.mono_loss_lu") == 0);
+}

@@ -321,8 +321,17 @@ HarmonicReport harmonicOf(const std::vector<double>& x, double fs, std::pair<dou
         if (start + w > x.size()) break;
         const double* f = x.data() + start;
         r.f0Track.push_back(0.0);
-        if (rms(f, w) < kSilence) continue;
+        const double level = rms(f, w);
+        if (level < kSilence) continue;
         ++nonSilent;
+        // Without variation there is no period to find: a constant (DC)
+        // frame's roundoff would otherwise read as a confident trough.
+        double mean = 0.0;
+        for (std::size_t i = 0; i < w; ++i) mean += f[i];
+        mean /= static_cast<double>(w);
+        double ac = 0.0;
+        for (std::size_t i = 0; i < w; ++i) ac += (f[i] - mean) * (f[i] - mean);
+        if (std::sqrt(ac / static_cast<double>(w)) < std::max(kSilence, 1e-4 * level)) continue;
         std::fill(a.begin(), a.end(), 0.0);
         std::fill(b.begin(), b.end(), 0.0);
         for (std::size_t i = 0; i < integ; ++i) a[i] = f[i];
@@ -647,9 +656,12 @@ StereoReport stereoOf(const Signal& s, bool monoLoss, const LoudnessReport* loud
     const float* both[2] = {m32.data(), m32.data()};
     Signal mono{std::span<const float* const>(both, 2), s.frames, s.sampleRate, Layout::Stereo};
     const LoudnessReport monoL = loudnessOf(mono);
-    r.monoLossLu = std::isfinite(stereoIntegrated) && std::isfinite(monoL.integrated)
-                       ? stereoIntegrated - monoL.integrated
-                       : 0.0;
+    // Unavailable (NaN, left out of reports) when the stereo loudness is not
+    // measurable (under one 400 ms block); a downmix that cancels below the
+    // absolute gate is measured against that gate, -70 LUFS.
+    r.monoLossLu = !std::isfinite(stereoIntegrated)  ? std::numeric_limits<double>::quiet_NaN()
+                   : std::isfinite(monoL.integrated) ? stereoIntegrated - monoL.integrated
+                                                     : stereoIntegrated + 70.0;
     return r;
 }
 
