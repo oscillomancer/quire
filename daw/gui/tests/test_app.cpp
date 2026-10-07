@@ -17,7 +17,10 @@
 #include "chrome.h"
 #include "fake_llm.h"
 #include "file_actions.h"
+#include "history_panel.h"
+#include "mixer.h"
 #include "mouse_dialog.h"
+#include "screensets.h"
 #include "shell.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
@@ -408,6 +411,85 @@ TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd 
     CHECK(a.tracks("buss") == 1);
     CHECK_FALSE(a.root->find("agent.review")->visible);
     CHECK(panel.session()->branch().empty());
+}
+
+TEST_CASE("agent settings recover an out-of-range current endpoint") {
+    App a;
+    if (!a.ok) return;
+    const auto file = a.dir / "config" / "agent.json";
+    agent::Config config;
+    config.endpoints.push_back({agent::Endpoint::Kind::OpenAI, "existing", "http://localhost/v1",
+                                "existing-model", "existing-key"});
+    config.current = 42;
+    REQUIRE(config.save(file));
+    gui::AgentPanel panel(
+        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, file, SUPPLE_SKILL_DIR);
+    auto frame = std::make_unique<ui::Node>("window");
+    frame->layout.dir = ui::Layout::Dir::Row;
+    frame->add(panel.build());
+    a.root->setContent(std::move(frame));
+    panel.openSettings();
+    auto* model = dynamic_cast<ui::TextField*>(a.root->find("agent.settings.model"));
+    REQUIRE(model);
+    model->setText("new-model");
+    a.root->frame(false);
+    REQUIRE(a.root->click("agent.settings.save"));
+    const auto loaded = agent::Config::load(file);
+    REQUIRE(loaded);
+    REQUIRE(loaded->active());
+    CHECK(loaded->active()->model == "new-model");
+    REQUIRE(loaded->endpoints.size() == 2);
+    CHECK(loaded->endpoints.front().model == "existing-model");
+    CHECK(loaded->endpoints.front().apiKey == "existing-key");
+}
+
+TEST_CASE("hidden docks release their own focus and preserve focus elsewhere") {
+    App a;
+    if (!a.ok) return;
+    gui::AgentPanel agentPanel(
+        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, a.dir / "config" / "agent.json",
+        SUPPLE_SKILL_DIR);
+    gui::HistoryPanel history(*a.root, *a.actions, *a.dispatcher, *a.app);
+    gui::MeterFeed feed;
+    gui::Mixer mixer(*a.root, *a.actions, *a.dispatcher, *a.app, feed);
+    auto frame = std::make_unique<ui::Node>("window");
+    auto& outside = frame->emplace<ui::TextField>("outside");
+    frame->add(agentPanel.build());
+    frame->add(history.build());
+    frame->add(mixer.build());
+    a.root->setContent(std::move(frame));
+    auto check = [&](auto& dock, const char* id) {
+        dock.setVisible(true);
+        a.root->frame(false);
+        auto* target = a.root->find(id);
+        REQUIRE(target);
+        a.root->focus(target);
+        dock.setVisible(false);
+        CHECK(a.root->focused() == nullptr);
+        if (auto* input = dynamic_cast<ui::TextField*>(target)) {
+            const auto before = input->text();
+            a.root->text("hidden");
+            CHECK(input->text() == before);
+        }
+        dock.setVisible(true);
+        a.root->focus(&outside);
+        dock.setVisible(false);
+        CHECK(a.root->focused() == &outside);
+    };
+    check(agentPanel, "agent.input");
+    check(history, "history.newname");
+    check(mixer, "mixer.close");
+    mixer.setVisible(true);
+    a.root->frame(false);
+    auto* name = a.root->find("mixer.nameedit.tr_0");
+    REQUIRE(name);
+    REQUIRE(name->onPointer({ui::PointerEvent::Type::Down, {}, 1, 2}));
+    auto* rename = dynamic_cast<ui::TextField*>(a.root->find("mixer.rename.tr_0"));
+    REQUIRE(rename);
+    REQUIRE(a.root->focused() == rename);
+    mixer.setVisible(false);
+    CHECK(a.root->focused() == nullptr);
+    CHECK_FALSE(rename->visible);
 }
 
 TEST_CASE("the appearance: warm and dark by default, saved and read back, palettes differ") {
@@ -817,4 +899,227 @@ TEST_CASE("the TCP's input menu lists the device's ports and picks one (P5.13)")
     // out.
     a.root->closePopups();
     a.root->setContent(std::make_unique<ui::Node>("detached"));
+}
+
+// Diagnostic tests asserting the observed buggy behavior; not proposed regressions.
+TEST_CASE("audit3: same-version project replacement resnapshots the arrange") {
+    App a;
+    REQUIRE(a.ok);
+    auto add = [&](const char* name) {
+        json::Value args = json::Value::object();
+        args["name"] = name;
+        auto r = a.dispatcher->execute({"track.add", args, {}});
+        REQUIRE(r);
+        return *model::Id::parse((*r)["track"].asString());
+    };
+    const auto id = add("Old project");
+    REQUIRE(a.app->save(a.dir / "old.json"));
+    REQUIRE(a.app->newProject({}));
+    REQUIRE(add("New project") == id);
+    REQUIRE(a.app->save(a.dir / "new.json"));
+    REQUIRE(a.app->open(a.dir / "old.json"));
+    peaks::PeakService peaks(a.dir / "peaks", [](auto) {});
+    gui::MeterFeed meters;
+    gui::Shell shell(*a.app, *a.dispatcher, a.ui, "", peaks, meters);
+    a.root->setContent(shell.build(*a.root, *a.actions));
+    shell.sync();
+    const auto shown = shell.arrange()->session().version;
+    REQUIRE(a.app->open(a.dir / "new.json"));
+    REQUIRE(a.app->head().version == shown);
+    shell.sync();
+    CHECK(a.app->head().tracks.find(id)->name == "New project");
+    CHECK(shell.arrange()->session().tracks.find(id)->name == "New project");
+}
+
+TEST_CASE("audit3: missing sidecar restores defaults") {
+    App a;
+    REQUIRE(a.ok);
+    const auto first = a.dir / "first.json", second = a.dir / "second.json";
+    int value = 1;
+    gui::UiPersistence persistence;
+    persistence.add(
+        "value", [&] { return json::Value(value); },
+        [&](const auto& v) { value = static_cast<int>(v.asInt()); });
+    persistence.tick(first);
+    value = 123;
+    REQUIRE(persistence.flush(first));
+    persistence.tick(second);
+    CHECK(value == 1);
+    REQUIRE(persistence.flush(second));
+    auto bytes = readFile(gui::UiPersistence::fileFor(second));
+    REQUIRE(bytes);
+    const auto doc = json::parse(std::string(bytes->begin(), bytes->end()));
+    REQUIRE(doc);
+    CHECK(doc->find("value")->asInt() == 1);
+}
+
+TEST_CASE("audit3: project replacement clears the item clipboard") {
+    App a;
+    REQUIRE(a.ok);
+    auto run = [&](const char* command, json::Value args) {
+        auto r = a.dispatcher->execute({command, std::move(args), {}});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    auto make = [&](const char* name) {
+        auto t = run("track.add", json::Value::object());
+        json::Value item = json::Value::object();
+        item["track"] = t["track"];
+        item["notation"] = "voice lead\n1: C4:q r:*\n";
+        item["name"] = name;
+        auto i = run("item.add", std::move(item));
+        return std::pair{*model::Id::parse(t["track"].asString()),
+                         *model::Id::parse(i["item"].asString())};
+    };
+    const auto [track, item] = make("OLD CLIPBOARD");
+    peaks::PeakService peaks(a.dir / "peaks", [](auto) {});
+    gui::MeterFeed meters;
+    gui::Shell shell(*a.app, *a.dispatcher, a.ui, "", peaks, meters);
+    a.root->setContent(shell.build(*a.root, *a.actions));
+    shell.sync();
+    auto& gestures = shell.arrange()->gestures();
+    gestures.pinVersion = [&](auto version) { return a.app->versions().pin(version); };
+    gestures.run = [&](const auto&, const auto& steps) {
+        return a.dispatcher->execute({steps.back().command, steps.back().args, {}});
+    };
+    gestures.setSelection({item});
+    gestures.copySelection();
+    REQUIRE(a.app->newProject({}));
+    CHECK_FALSE(gestures.canPaste());
+    REQUIRE(gestures.paste(8, track));
+    CHECK(a.app->head().items.empty());
+    CHECK(make("NEW PROJECT ITEM") == std::pair{track, item});
+    json::Value edit = json::Value::object();
+    edit["track"] = track.str();
+    edit["mute"] = true;
+    run("track.set", edit);  // advance the replacement so view refreshes
+    shell.sync();
+    CHECK_FALSE(gestures.canPaste());
+    const auto version = a.app->head().version;
+    REQUIRE(gestures.paste(8, track));
+    CHECK(a.app->head().version == version);
+}
+
+TEST_CASE("audit3: popup close cannot restore focus into a hidden dock") {
+    App a;
+    REQUIRE(a.ok);
+    gui::AgentPanel panel(
+        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, a.dir / "config" / "agent.json",
+        SUPPLE_SKILL_DIR);
+    auto frame = std::make_unique<ui::Node>("window");
+    frame->add(panel.build());
+    a.root->setContent(std::move(frame));
+    panel.setVisible(true);
+    a.root->frame(false);
+    panel.openSettings();
+    panel.setVisible(false);
+    a.root->closePopup();
+    CHECK(a.root->focused() == nullptr);
+}
+
+TEST_CASE("audit3: screenset import trims names and keeps the first collision") {
+    json::Value applied;
+    gui::Screensets sets([] { return json::Value::object(); }, [&](const auto& v) { applied = v; });
+    sets.fromJson(
+        json::parse(R"({" mixing ":{"first":true},"mixing":{"first":false},"   ":{}})").value());
+    CHECK(sets.names() == std::vector<std::string>{"mixing"});
+    REQUIRE(sets.load(" mixing "));
+    CHECK(applied["first"].asBool());
+    REQUIRE(sets.remove("mixing"));
+}
+TEST_CASE("audit3: history notices branches that share the current head") {
+    App a;
+    REQUIRE(a.ok);
+    gui::HistoryPanel panel(*a.root, *a.actions, *a.dispatcher, *a.app);
+    a.root->setContent(panel.build());
+    panel.setVisible(true);
+    panel.sync();
+    auto args = json::Value::object();
+    args["name"] = "same-head";
+    args["switch"] = true;
+    REQUIRE(a.dispatcher->execute({"branch.create", args, {}}));
+    panel.sync();
+    CHECK(panel.branches() == std::vector<std::string>{"main", "same-head"});
+    CHECK(a.root->find("history.branch")->valueText() == "Branch: same-head");
+    args = json::Value::object();
+    args["name"] = "main";
+    REQUIRE(a.dispatcher->execute({"branch.switch", args, {}}));
+    args["name"] = "same-head";
+    REQUIRE(a.dispatcher->execute({"branch.delete", args, {}}));
+    panel.sync();
+    CHECK(panel.branches() == std::vector<std::string>{"main"});
+}
+
+TEST_CASE(
+    "audit3: sidecars flush before replacement, reset missing sections and preserve Save As") {
+    App a;
+    REQUIRE(a.ok);
+    const auto one = a.dir / "one.json", two = a.dir / "two.json", copy = a.dir / "copy.json";
+    int zoom = 40, panel = 0;
+    gui::UiPersistence p;
+    p.add(
+        "zoom", [&] { return json::Value(zoom); },
+        [&](const auto& v) { zoom = static_cast<int>(v.asInt()); });
+    p.add(
+        "panel", [&] { return json::Value(panel); },
+        [&](const auto& v) { panel = static_cast<int>(v.asInt()); });
+    p.tick(one, 1);
+    zoom = 123;
+    panel = 1;
+    p.prepareProjectSwitch();  // still the old UI, before file-action callbacks clear it
+    zoom = 99;
+    panel = 9;
+    REQUIRE(writeFileAtomic(gui::UiPersistence::fileFor(two),
+                            R"({"schema":"supple.ui/1.0","zoom":80})"));
+    p.tick(two, 2);
+    CHECK(zoom == 80);
+    CHECK(panel == 0);
+    auto bytes = readFile(gui::UiPersistence::fileFor(one));
+    REQUIRE(bytes);
+    auto old = json::parse(std::string(bytes->begin(), bytes->end()));
+    REQUIRE(old);
+    CHECK((*old)["zoom"].asInt() == 123);
+    CHECK((*old)["panel"].asInt() == 1);
+    zoom = 160;
+    panel = 1;
+    REQUIRE(writeFileAtomic(gui::UiPersistence::fileFor(copy),
+                            R"({"schema":"supple.ui/1.0","zoom":12,"panel":0})"));
+    p.tick(copy, 2);
+    CHECK(zoom == 160);
+    CHECK(panel == 1);
+    REQUIRE(p.flush(copy));
+    p.tick(one, 3);
+    CHECK(zoom == 123);
+    CHECK(panel == 1);
+    // Reopening the same pathname is also a replacement.
+    REQUIRE(writeFileAtomic(gui::UiPersistence::fileFor(one),
+                            R"({"schema":"supple.ui/1.0","zoom":65})"));
+    p.prepareProjectSwitch();  // updates the old sidecar first
+    REQUIRE(writeFileAtomic(gui::UiPersistence::fileFor(one),
+                            R"({"schema":"supple.ui/1.0","zoom":65})"));
+    p.tick(one, 4);
+    CHECK(zoom == 65);
+    CHECK(panel == 0);
+}
+TEST_CASE("audit3: unsupported sidecar major resets defaults and stays byte-identical") {
+    App a;
+    REQUIRE(a.ok);
+    const auto project = a.dir / "future.json";
+    const std::string future = R"({"schema":"supple.ui/2.0","zoom":777})";
+    REQUIRE(writeFileAtomic(gui::UiPersistence::fileFor(project), future));
+    int zoom = 40;
+    gui::UiPersistence p;
+    p.add(
+        "zoom", [&] { return json::Value(zoom); },
+        [&](const auto& v) { zoom = static_cast<int>(v.asInt()); });
+    zoom = 123;
+    p.tick(project, 1);
+    CHECK(zoom == 40);
+    zoom = 160;
+    REQUIRE(p.flush(project));
+    p.prepareProjectSwitch();
+    p.tick(a.dir / "next.json", 2);
+    auto bytes = readFile(gui::UiPersistence::fileFor(project));
+    REQUIRE(bytes);
+    CHECK(std::string(bytes->begin(), bytes->end()) == future);
 }

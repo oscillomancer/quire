@@ -104,11 +104,13 @@ Result<json::Value> FileActions::exec(const std::string& command, json::Value ar
 
 void FileActions::markSaved() {
     savedVersion_ = app_.head().version;
+    projectGeneration_ = app_.projectGeneration();
     savedBranch_ = app_.versions().branch();
 }
 
 bool FileActions::dirty() const {
-    return app_.head().version != savedVersion_ || app_.versions().branch() != savedBranch_;
+    return app_.projectGeneration() != projectGeneration_ || app_.head().version != savedVersion_ ||
+           app_.versions().branch() != savedBranch_;
 }
 
 void FileActions::showError(const std::string& message) {

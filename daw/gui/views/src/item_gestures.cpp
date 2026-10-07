@@ -346,6 +346,8 @@ Result<model::Id> ItemGestures::newMidiItem(model::Id track, double fromBeat,
 
 ItemGestures::Clip ItemGestures::clip() const {
     Clip c;
+    c.generation = view_.projectGeneration();
+    if (projectGeneration && projectGeneration() != c.generation) return c;
     const model::Session& s = view_.session();
     c.version = s.version;
     if (pinVersion) c.pin = pinVersion(c.version);
@@ -393,6 +395,7 @@ Status ItemGestures::cutSelection() {
 }
 
 Status ItemGestures::paste(double atBeat, std::optional<model::Id> track) {
+    if (!canPaste()) clearClipboard();
     return pasteClip(clipboard_, atBeat, track,
                      clipboard_.items.size() == 1 ? "Paste item" : "Paste items");
 }
@@ -537,6 +540,12 @@ std::optional<ItemGestures::Hit> ItemGestures::hit(ui::Point p) const {
 bool ItemGestures::pointer(const ui::PointerEvent& e) {
     using T = ui::PointerEvent::Type;
     const model::Session& s = view_.session();
+    if (e.type == T::Cancel) {
+        state_ = State{};
+        moved_ = false;
+        changed();
+        return true;
+    }
     if (e.type == T::Down && (e.button == 1 || e.button == 3)) {
         if (!view_.lanesRect().contains(e.pos)) return false;
         press_ = e.pos;

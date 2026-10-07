@@ -163,6 +163,7 @@ bool HistoryPanel::visible() const { return panel_ && panel_->visible; }
 void HistoryPanel::setVisible(bool visible) {
     if (!panel_ || panel_->visible == visible) return;
     panel_->visible = visible;
+    if (!visible) root_.releaseWithin(panel_);
     if (visible) {
         version_ = ~0ull;
         sync();
@@ -197,6 +198,7 @@ void HistoryPanel::reloadHistory() {
         undo->enabled = canUndo_;
     if (auto* redo = dynamic_cast<ui::Button*>(root_.find("history.redo")))
         redo->enabled = canRedo_;
+    projectGeneration_ = app_.projectGeneration();
     version_ = app_.head().version;
 }
 
@@ -276,7 +278,9 @@ Status HistoryPanel::createBranch(const std::string& name) {
 
 void HistoryPanel::sync() {
     if (!visible()) return;
-    if (app_.head().version != version_) reloadHistory();
+    if (app_.projectGeneration() != projectGeneration_ || app_.head().version != version_ ||
+        app_.versions().branches() != branches_ || app_.versions().branch() != current_)
+        reloadHistory();
     pollLog();
 }
 

@@ -405,6 +405,20 @@ std::string code(const Result<Turn>& turn) { return turn ? "ok" : turn.error().c
 
 }  // namespace
 
+TEST_CASE("HTTP error bodies obey the response size limit") {
+    FakeServer server;
+    FakeServer::Reply reply;
+    reply.status = 500;
+    const std::string chunk(4096, 'x');
+    for (std::size_t bytes = 0; bytes <= kMaxResponseBytes; bytes += chunk.size())
+        reply.chunks.push_back(chunk);
+    server.push(std::move(reply));
+    const auto result =
+        complete({Endpoint::Kind::OpenAI, "fake", server.url(), "test-model", ""}, {}, {});
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "agent.stream_too_large");
+}
+
 TEST_CASE("SSE events beyond the size limit fail instead of buffering") {
     SseParser p;
     auto ignore = [](std::string_view, std::string_view) {};
@@ -698,4 +712,58 @@ TEST_CASE("nested Lua cannot switch out of the agent branch") {
     const auto requests = server.requests();
     REQUIRE(requests.size() == 2);
     CHECK(json::writeCompact(requests[1]).find("agent.denied") != std::string::npos);
+}
+
+// Diagnostic test asserting current buggy behavior, not a proposed regression.
+TEST_CASE("audit3: review refuses namesake branches in a replacement project") {
+    Rig rig;
+    FakeServer server;
+    server.push(anthropicTurn("Old proposal", {}));
+    Session session({Endpoint::Kind::Anthropic, "fake", server.url(), "model", ""}, rig.registry,
+                    *rig.dispatcher, rig.post(), skillOptions(rig.dir / "skill"));
+    REQUIRE(session.send("Start"));
+    REQUIRE(rig.pump([&] { return !session.busy(); }));
+    const auto name = session.branch();
+    REQUIRE(rig.app->newProject({}));
+    json::Value create = json::Value::object();
+    create["name"] = name;
+    create["switch"] = true;
+    REQUIRE(rig.dispatcher->execute({"branch.create", create, {}}));
+    json::Value add = json::Value::object();
+    add["name"] = "UNRELATED PROPOSAL";
+    REQUIRE(rig.dispatcher->execute({"track.add", add, {}}));
+    auto diff = session.diff();
+    CHECK_FALSE(diff);
+    if (!diff) CHECK(diff.error().code == "agent.project_changed");
+    CHECK_FALSE(session.audition(false));
+    CHECK_FALSE(session.audition(true));
+    auto accepted = session.accept();
+    CHECK_FALSE(accepted);
+    if (!accepted) CHECK(accepted.error().code == "agent.project_changed");
+    CHECK_FALSE(session.reject());
+    CHECK_FALSE(session.send("Follow up"));
+    CHECK(rig.branch() == name);
+    CHECK(rig.tracks("UNRELATED PROPOSAL") == 1);
+    CHECK(rig.app->versions().head(name));
+}
+
+TEST_CASE("audit3: proposal review refuses a changed project path") {
+    Rig rig;
+    FakeServer server;
+    server.push(anthropicTurn("Proposal", {}));
+    Session session({Endpoint::Kind::Anthropic, "fake", server.url(), "model", ""}, rig.registry,
+                    *rig.dispatcher, rig.post(), skillOptions(rig.dir / "skill"));
+    REQUIRE(session.send("Start"));
+    REQUIRE(rig.pump([&] { return !session.busy(); }));
+    const auto generation = rig.app->projectGeneration();
+    REQUIRE(rig.app->save(rig.dir / "renamed.json"));
+    REQUIRE(rig.app->projectGeneration() == generation);
+    std::string message;
+    session.events.error = [&](const auto& error) { message = error; };
+    CHECK_FALSE(session.diff());
+    CHECK_FALSE(session.audition(false));
+    CHECK_FALSE(session.accept());
+    CHECK_FALSE(session.reject());
+    CHECK_FALSE(session.send("Follow up"));
+    CHECK(message.find("different project") != std::string::npos);
 }

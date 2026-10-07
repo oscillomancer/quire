@@ -187,6 +187,11 @@ class Roll : public ui::Node {
     bool onPointer(const ui::PointerEvent& e) override {
         const Geometry g{s_, bounds()};
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Cancel) {
+            s_.cancelGesture();
+            if (root()) root()->requestAnimationFrame();
+            return true;
+        }
         if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         if (e.type == T::Wheel) {
             if (e.mods & ui::kCtrl) {  // zoom around the pointer
@@ -464,6 +469,11 @@ class VelocityLane : public ui::Node {
     }
     bool onPointer(const ui::PointerEvent& e) override {
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Cancel) {
+            s_.cancelGesture();
+            if (root()) root()->requestAnimationFrame();
+            return true;
+        }
         if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         const ui::Rect a = area();
         const Geometry g{s_, roll_ ? roll_->bounds() : a};
@@ -581,6 +591,11 @@ class CcLane : public ui::Node {
     }
     bool onPointer(const ui::PointerEvent& e) override {
         using T = ui::PointerEvent::Type;
+        if (e.type == T::Cancel) {
+            s_.cancelGesture();
+            if (root()) root()->requestAnimationFrame();
+            return true;
+        }
         if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         const ui::Rect a = area();
         const Geometry g{s_, roll_ ? roll_->bounds() : a};
@@ -626,6 +641,7 @@ class CcLane : public ui::Node {
             json::Value clear = json::Value::object();
             clear["op"] = "cc.clear";
             clear["number"] = s_.ccNumber;
+            clear["channel"] = 1;
             clear["from"] = s_.ccFrom;
             clear["to"] = s_.ccTo;
             ops.push_back(std::move(clear));
@@ -796,6 +812,7 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
     header.emplace<ui::Button>("midi.notation.toggle", "Notation", [this] {
         if (!notationPane_) return;
         notationPane_->visible = !notationPane_->visible;
+        if (!notationPane_->visible) root_.releaseWithin(notationPane_);
         root_.relayout();
         root_.damageAll();
     });
@@ -922,8 +939,7 @@ void MidiEditor::close() {
     state_.ccErasing = false;
     if (eventList_) eventList_->sync();
     if (panel_ && panel_->visible) {
-        if (root_.focused() && (root_.focused() == roll_ || root_.focused() == text_))
-            root_.focus(nullptr);
+        root_.releaseWithin(panel_);
         panel_->visible = false;
         root_.relayout();
         root_.damageAll();
@@ -981,22 +997,26 @@ Status MidiEditor::reload() {
     if (!r) return std::move(r).error();
     // A reload replaces note indices and CC data; an old preview cannot be
     // committed against the new sequence (including undo and item switches).
-    state_.drag = RollState::Drag::None;
-    state_.dBeats = state_.dLength = state_.dStart = 0;
-    state_.dPitch = state_.dVelocity = 0;
-    state_.velocityNote.reset();
-    state_.ccDraft.clear();
-    state_.ccErasing = false;
-    state_.itemPosition = (*r)["position"].asDouble();
-    state_.itemLength = (*r)["length"].asDouble();
+    state_.cancelGesture();
+    const auto itemId = model::Id::parse(state_.item);
+    const auto* item = itemId ? app_.head().items.find(*itemId) : nullptr;
+    const auto* take =
+        item && item->activeTake ? app_.head().takes.find(*item->activeTake) : nullptr;
+    const auto* source = take && take->source ? app_.head().midi.find(*take->source) : nullptr;
+    if (!item || !take || !source) return Error("gui.midi", "no MIDI source", "/item");
+    const auto span = model::itemSpan(app_.head(), *item);
+    state_.itemPosition = span.startBeat;
+    state_.itemLength = model::itemLengthBeats(app_.head(), *item);
+    const double rate = take->playrate > 0 ? take->playrate : 1.0;
     state_.notes.clear();
-    for (const json::Value& n : (*r)["notes"].asArray()) {
+    for (const auto& n : source->sequence.notes) {
         RollNote note;
-        note.pitch = static_cast<int>(n.find("pitch")->asInt());
-        note.start = n.find("start")->asDouble();
-        note.length = n.find("length")->asDouble();
-        note.velocity = static_cast<int>(n.find("velocity")->asInt());
-        if (const json::Value* ch = n.find("channel")) note.channel = static_cast<int>(ch->asInt());
+        note.pitch = n.pitch;
+        note.start =
+            (static_cast<double>(n.start) / source->sequence.ppq - take->startOffset) / rate;
+        note.length = static_cast<double>(n.length) / (source->sequence.ppq * rate);
+        note.velocity = n.velocity;
+        note.channel = n.channel + 1;
         state_.notes.push_back(note);
     }
     std::erase_if(state_.selected, [&](std::size_t i) { return i >= state_.notes.size(); });
@@ -1016,6 +1036,7 @@ Status MidiEditor::reload() {
         if (at > state_.itemPosition + state_.itemLength + 64) break;
         state_.barLines.push_back(at);
     }
+    projectGeneration_ = app_.projectGeneration();
     version_ = app_.head().version;
     if (title_) {
         std::string name = state_.item;
@@ -1057,8 +1078,8 @@ std::function<midi::Meter(int)> meterAtItem(const model::Session& session, doubl
 
 void MidiEditor::reloadText() {
     if (!text_) return;
-    const auto id = model::Id::parse(state_.item);
-    const auto* item = id ? app_.head().items.find(*id) : nullptr;
+    const auto itemId = model::Id::parse(state_.item);
+    const auto* item = itemId ? app_.head().items.find(*itemId) : nullptr;
     const auto* take =
         item && item->activeTake ? app_.head().takes.find(*item->activeTake) : nullptr;
     const auto* source = take && take->source ? app_.head().midi.find(*take->source) : nullptr;
@@ -1136,11 +1157,13 @@ void MidiEditor::compileText(bool write) {
 
 std::uint64_t MidiEditor::beginGesture() {
     sync();
+    gestureGeneration_ = app_.projectGeneration();
     return app_.head().version;
 }
 
 Status MidiEditor::edit(json::Value ops, std::optional<std::uint64_t> expectedVersion) {
-    if (expectedVersion && *expectedVersion != app_.head().version) {
+    if (expectedVersion && (*expectedVersion != app_.head().version ||
+                            gestureGeneration_ != app_.projectGeneration())) {
         sync();
         return Error("gui.midi.stale", "the MIDI item changed during the gesture", "/item",
                      "start the gesture again against the current item");
@@ -1238,7 +1261,13 @@ void MidiEditor::sync() {
     if (!isOpen()) return;
     applyHeight();  // a smaller window or a taller neighbour shrinks the panel
     if (playhead_ && roll_) static_cast<RollPlayhead*>(playhead_)->place(roll_->bounds());
-    if (app_.head().version != version_) {
+    const bool replaced = app_.projectGeneration() != projectGeneration_;
+    if (replaced || app_.head().version != version_) {
+        if (replaced) {
+            textDirty_ = false;
+            compilePending_ = false;
+            root_.releaseWithin(panel_);
+        }
         // The item went away (undo, delete): close; otherwise reload both views.
         auto id = model::Id::parse(state_.item);
         if (!id || !app_.head().items.find(*id)) {
@@ -1250,7 +1279,7 @@ void MidiEditor::sync() {
             close();
             return;
         }
-        if (!text_ || !text_->focused() || !textDirty_) reloadText();
+        if (replaced || !text_ || !text_->focused() || !textDirty_) reloadText();
     }
     if (compilePending_ && std::chrono::steady_clock::now() - lastEdit_ > kCompileDelay) {
         compilePending_ = false;  // a failed compile waits for the next edit

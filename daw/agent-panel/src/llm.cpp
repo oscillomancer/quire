@@ -84,7 +84,6 @@ size_t onWrite(char* data, size_t size, size_t count, void* user) {
     if (s->head.size() < 2048) s->head.append(data, std::min(n, 2048 - s->head.size()));
     long status = 0;
     curl_easy_getinfo(s->curl, CURLINFO_RESPONSE_CODE, &status);
-    if (status < 200 || status >= 300) return n;  // an error body: reported from `head`
     s->total += n;
     if (s->total > kMaxResponseBytes) {
         s->failure =
@@ -93,6 +92,7 @@ size_t onWrite(char* data, size_t size, size_t count, void* user) {
                   {}, "lower max_tokens or check the endpoint");
         return 0;
     }
+    if (status < 200 || status >= 300) return n;  // an error body: reported from `head`
     if (auto fed = s->onBytes(std::string_view(data, n)); !fed) {
         s->failure = std::move(fed).error();
         return 0;
@@ -130,10 +130,10 @@ Status post(const std::string& url, const std::vector<std::string>& headers,
     curl_slist_free_all(list);
     curl_easy_cleanup(curl);
     if (stop.stop_requested()) return Error("agent.cancelled", "the request was cancelled");
+    if (s.failure) return std::move(*s.failure);
     if (s.status != 0 && (s.status < 200 || s.status >= 300))
         return Error("agent.http", "HTTP " + std::to_string(s.status) + ": " + s.head, url,
                      s.status == 401 || s.status == 403 ? "check the API key" : "");
-    if (s.failure) return std::move(*s.failure);
     if (rc != CURLE_OK)
         return Error("agent.http", std::string("request failed: ") + curl_easy_strerror(rc), url);
     return {};

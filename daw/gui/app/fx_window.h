@@ -135,6 +135,7 @@ class FxWindow {
     ui::Label* title_ = nullptr;
     ui::Label* status_ = nullptr;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
 };
 
 }  // namespace supple::gui

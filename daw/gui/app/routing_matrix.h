@@ -88,6 +88,7 @@ class RoutingMatrix {
     engine::EngineApp& app_;
     MatrixModel model_;
     std::uint64_t version_ = 0;
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     std::optional<std::string> selected_;
     ui::Node* grid_ = nullptr;
     ui::Label* status_ = nullptr;

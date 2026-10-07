@@ -96,14 +96,17 @@ class EventRows : public ui::List {
         mods = e.mods;
         if (e.type == ui::PointerEvent::Type::Down || e.type == ui::PointerEvent::Type::Wheel)
             if (cancelEdit) cancelEdit();
+        const float rowPosition = (e.pos.y - bounds().y + scroll()) / rowHeight;
+        const auto row = static_cast<std::size_t>(std::max(0.0f, rowPosition));
+        const bool rowHit = bounds().contains(e.pos) && rowPosition >= 0 && row < count() &&
+                            e.pos.x < bounds().right() - ui::ScrollBar::kThickness;
         const bool handled = List::onPointer(e);
-        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks >= 2 &&
-            selected()) {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks >= 2 && rowHit) {
             const float width = (bounds().w - ui::ScrollBar::kThickness) / kColumns;
             if (width > 0) {
                 const auto column =
                     static_cast<std::size_t>(std::max(0.0f, e.pos.x - bounds().x) / width);
-                if (column < kColumns && editCell) editCell(*selected(), column);
+                if (column < kColumns && editCell) editCell(row, column);
             }
         }
         return handled;
@@ -183,7 +186,7 @@ void MidiEventList::status(std::string text) {
 void MidiEventList::cancel() {
     editing_.reset();
     if (field_) {
-        if (field_->focused()) root_.focus(nullptr);
+        root_.releaseWithin(field_);
         field_->visible = false;
         list_->invalidate();
     }
@@ -191,9 +194,12 @@ void MidiEventList::cancel() {
 
 void MidiEventList::sync() {
     const auto& s = app_.head();
-    if (item_ == editor_.state().item && version_ == s.version) return;
+    if (app_.projectGeneration() == projectGeneration_ && item_ == editor_.state().item &&
+        version_ == s.version)
+        return;
     cancel();
     item_ = editor_.state().item;
+    projectGeneration_ = app_.projectGeneration();
     version_ = s.version;
     rows_.clear();
     selectedCc_.clear();
@@ -247,7 +253,7 @@ void MidiEventList::refreshSelection() {
 
 void MidiEventList::activate(bool shown) {
     cancel();
-    if (!shown && list_ && list_->focused()) root_.focus(nullptr);
+    if (!shown) root_.releaseWithin(list_);
     if (shown) {
         sync();
         refreshSelection();
@@ -317,7 +323,8 @@ void MidiEventList::begin(std::size_t row, Column column) {
 
 void MidiEventList::submit(const std::string& text) {
     if (!editing_) return;
-    if (app_.head().version != version_ || editor_.state().item != item_) {
+    if (app_.projectGeneration() != projectGeneration_ || app_.head().version != version_ ||
+        editor_.state().item != item_) {
         cancel();
         status("Events changed; edit the cell again.");
         return;

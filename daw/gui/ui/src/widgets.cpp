@@ -74,10 +74,15 @@ void Button::paint(Canvas& canvas) {
 }
 
 bool Button::onPointer(const PointerEvent& e) {
-    if (e.button != 1 && e.type != PointerEvent::Type::Move) return false;
+    if (e.button != 1 && e.type != PointerEvent::Type::Move && e.type != PointerEvent::Type::Cancel)
+        return false;
     switch (e.type) {
         case PointerEvent::Type::Down:
             pressed_ = true;
+            invalidate();
+            return true;
+        case PointerEvent::Type::Cancel:
+            pressed_ = false;
             invalidate();
             return true;
         case PointerEvent::Type::Up: {

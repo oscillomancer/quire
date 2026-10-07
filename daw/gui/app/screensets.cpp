@@ -54,7 +54,10 @@ void Screensets::fromJson(const json::Value& v) {
     sets_.clear();
     if (!v.isObject()) return;
     for (const auto& m : v.asObject())
-        if (m.value.isObject()) sets_[m.key] = m.value;
+        if (m.value.isObject()) {
+            auto name = trimmed(m.key);
+            if (!name.empty()) sets_.try_emplace(std::move(name), m.value);
+        }
 }
 
 }  // namespace supple::gui

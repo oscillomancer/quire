@@ -1,8 +1,8 @@
 // Plugin editors in their own windows (docs/specs/gui.md §4.5): an X11
 // window per open editor, the plugin's GUI embedded in it (CLAP gui), its
 // timers and file descriptors serviced from the UI thread (= the plugin's main
-// thread), its resize requests applied. Editors follow their instance: if the
-// engine replaces or drops it, the window closes.
+// thread), its resize requests applied. On instance replacement, the editor
+// reopens in the same window; removing the effect closes its window.
 #pragma once
 
 #include <poll.h>

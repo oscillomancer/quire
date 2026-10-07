@@ -67,8 +67,16 @@ struct RollState {
     std::optional<std::size_t> velocityNote;  // the note a velocity drag picked
     ui::Rect marquee{};
     // Project grid for bars/beats (from the time map).
-    std::vector<double> barLines;            // project beats of bar starts in view
-    double playheadBeat = -1;                // project beats; < 0: hidden
+    std::vector<double> barLines;  // project beats of bar starts in view
+    double playheadBeat = -1;      // project beats; < 0: hidden
+    void cancelGesture() {
+        drag = Drag::None;
+        dBeats = dLength = dStart = 0;
+        dPitch = dVelocity = 0;
+        velocityNote.reset();
+        ccDraft.clear();
+        ccErasing = false;
+    }
     double snapBeat(double itemBeat) const;  // to the project grid when snapping
 };
 
@@ -144,6 +152,8 @@ class MidiEditor {
     ui::Root::OverlayHandle playheadHandle_;
     ui::Node* playhead_ = nullptr;  // in the root's overlay
     std::uint64_t version_ = 0;
+    std::uint64_t gestureGeneration_ = 0;
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     std::string appliedText_;  // the text last compiled into the item
     std::string titleBase_;
     bool textDirty_ = false, compilePending_ = false;

@@ -45,7 +45,8 @@ class PanelGrip : public ui::Node {
             if (resize) resize(start_ + (pressY_ - e.pos.y));  // up makes it taller
             return true;
         }
-        if (e.type == ui::PointerEvent::Type::Up && dragging_) {
+        if ((e.type == ui::PointerEvent::Type::Up || e.type == ui::PointerEvent::Type::Cancel) &&
+            dragging_) {
             dragging_ = false;
             invalidate();
             return true;

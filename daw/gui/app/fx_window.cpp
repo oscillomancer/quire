@@ -298,7 +298,10 @@ Status FxWindow::open(model::Id track) {
     tab_ = Tab::Chain;
     presetChain_ = "main";
     if (presetChainButton_) presetChainButton_->setText("Main chain");
-    if (savePrompt_) savePrompt_->visible = false;
+    if (savePrompt_) {
+        savePrompt_->visible = false;
+        root_.releaseWithin(savePrompt_);
+    }
     latency_.clear();  // a fresh window measures each effect again
     if (page_) {       // already open: switch track in place
         refresh();
@@ -486,7 +489,15 @@ void FxWindow::checkFailures() {
 void FxWindow::tick() {
     browser_->tick();
     checkFailures();
-    if (page_ && app_.head().version != shownVersion_) refresh();
+    if (app_.projectGeneration() != projectGeneration_) {
+        latency_.clear();
+        failed_.clear();
+        selected_ = {};
+        if (page_) root_.releaseWithin(page_);
+    }
+    if (page_ &&
+        (app_.projectGeneration() != projectGeneration_ || app_.head().version != shownVersion_))
+        refresh();
     if (page_ && body_)
         for (const auto& [id, cached] : latency_) {
             const auto fx = model::Id::parse(id);
@@ -534,6 +545,7 @@ void FxWindow::refresh() {
         body_->clear();
         selected_ = {};
         shownVersion_ = app_.head().version;
+        projectGeneration_ = app_.projectGeneration();
         setStatus("the track is gone");
         return;
     }
@@ -556,6 +568,7 @@ void FxWindow::refresh() {
     else
         buildParams(*body_);
     shownVersion_ = app_.head().version;
+    projectGeneration_ = app_.projectGeneration();
     root_.relayout();
     root_.damageAll();
     if (!focusId.empty())

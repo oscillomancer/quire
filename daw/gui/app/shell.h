@@ -91,6 +91,7 @@ class Shell {
     UiState& ui_;
     std::string status_;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     ui::Label* counts_ = nullptr;
     peaks::PeakService& peaks_;
     views::ArrangeView* arrange_ = nullptr;

@@ -828,3 +828,55 @@ TEST_CASE("preferences: new channels' monitoring and the wheel zoom anchor, save
     gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *reread, {});
     CHECK(f.app->defaultMonitor() == model::Monitor::Auto);
 }
+
+TEST_CASE("audit3: hiding a mixer ends its captured fader gesture") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto t = f.addTrack("channel", "hidden drag");
+    f.refresh();
+    auto p = f.centre(f.node("mixer.fader." + t));
+    auto before = f.track(t).volumeDb;
+    auto steps = f.steps();
+    f.pointer(ui::PointerEvent::Type::Down, p);
+    f.pointer(ui::PointerEvent::Type::Move, {p.x, p.y - 10});
+    REQUIRE(f.track(t).volumeDb != before);
+    before = f.track(t).volumeDb;
+    f.mixer->setVisible(false);
+    CHECK_FALSE(dynamic_cast<ui::Fader*>(f.node("mixer.fader." + t))->dragging());
+    f.pointer(ui::PointerEvent::Type::Move, {p.x, p.y - 30});
+    CHECK(f.track(t).volumeDb == before);
+    f.pointer(ui::PointerEvent::Type::Up, {p.x, p.y - 30});
+    CHECK(f.steps() == steps + 1);
+    f.mixer->setVisible(true);
+    f.refresh();
+    f.pointer(ui::PointerEvent::Type::Move, {p.x, p.y - 40});
+    CHECK(f.track(t).volumeDb == before);
+}
+
+TEST_CASE("audit3: mixer resnapshots identical IDs and versions in a replacement project") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto track = f.addTrack("channel", "old");
+    f.exec("track.set", R"({"track":")" + track + R"(","volume_db":-6})");
+    REQUIRE(f.app->save(f.dir / "old.json"));
+    REQUIRE(f.app->newProject({}));
+    REQUIRE(f.addTrack("channel", "new") == track);
+    f.exec("track.set", R"({"track":")" + track + R"(","volume_db":-20})");
+    REQUIRE(f.app->save(f.dir / "new.json"));
+    REQUIRE(f.app->open(f.dir / "old.json"));
+    f.refresh();
+    auto version = f.app->head().version;
+    const auto name = f.centre(f.node("mixer.name." + track));
+    f.pointer(ui::PointerEvent::Type::Down, name, 2);
+    f.pointer(ui::PointerEvent::Type::Up, name);
+    f.root->text("old pending rename");
+    REQUIRE(f.app->open(f.dir / "new.json"));
+    REQUIRE(f.app->head().version == version);
+    f.mixer->setVisible(false);
+    CHECK(f.track(track).name == "new");
+    f.mixer->setVisible(true);
+    f.refresh();
+    auto* fader = dynamic_cast<ui::Fader*>(f.node("mixer.fader." + track));
+    REQUIRE(fader);
+    CHECK(fader->value() == -20);
+}

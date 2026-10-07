@@ -62,6 +62,7 @@ class MidiEventList {
     std::optional<std::pair<std::size_t, Column>> editing_;
     std::string item_;
     std::uint64_t version_ = 0;
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     double tickBeat_ = 1.0 / 960;
 };
 }  // namespace supple::gui

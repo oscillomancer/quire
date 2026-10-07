@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 
 #include "supple/gui/png.h"
 #include "supple/json/parse.h"
@@ -848,4 +849,104 @@ TEST_CASE("unchanged button text and scrollbar ranges leave the content cache in
     bar.setRange(10, 100);  // changed range also clamps its value
     CHECK(bar.value() == 0);
     CHECK(root.wantsFrame());
+}
+
+TEST_CASE("audit3: subtree release cancels capture without clicking and preserves outside focus") {
+    REQUIRE_GL();
+    auto& f = fixture();
+    Root root(*f.window, f.fonts, Theme::dark());
+    auto content = std::make_unique<Node>("content");
+    content->layout.dir = Layout::Dir::Column;
+    auto& dock = content->emplace<Node>("dock");
+    dock.layout.dir = Layout::Dir::Column;
+    int clicks = 0, ends = 0;
+    auto& button = dock.emplace<Button>("button", "Button", [&] { ++clicks; });
+    auto& fader = dock.emplace<Fader>("fader");
+    fader.onChange = [&](double, Gesture g) {
+        if (g == Gesture::End) ++ends;
+    };
+    auto& outside = content->emplace<TextField>("outside", "");
+    root.setContent(std::move(content));
+    root.frame(false);
+    auto centre = [](const Node& n) {
+        return Point{n.bounds().x + n.bounds().w / 2, n.bounds().y + n.bounds().h / 2};
+    };
+    const auto b = centre(button);
+    root.pointer({PointerEvent::Type::Down, b, 1});
+    root.focus(&outside);
+    dock.visible = false;
+    root.releaseWithin(&dock);
+    CHECK(root.focused() == &outside);
+    root.pointer({PointerEvent::Type::Up, b, 1});
+    CHECK(clicks == 0);
+    dock.visible = true;
+    root.frame(false);
+    auto p = centre(fader);
+    root.pointer({PointerEvent::Type::Down, p, 1});
+    REQUIRE(fader.dragging());
+    fader.enabled = false;
+    root.releaseWithin(&dock);
+    CHECK_FALSE(fader.dragging());
+    CHECK(ends == 1);
+    CHECK(root.focused() == nullptr);
+    root.releaseWithin(&dock);
+    CHECK(ends == 1);
+}
+TEST_CASE("audit3: popup restoration refuses hidden or disabled prior focus") {
+    REQUIRE_GL();
+    auto& f = fixture();
+    Root root(*f.window, f.fonts, Theme::dark());
+    auto content = std::make_unique<Node>("content");
+    auto& field = content->emplace<TextField>("field", "");
+    root.setContent(std::move(content));
+    root.frame(false);
+    for (int mode = 0; mode < 4; ++mode) {
+        field.visible = true;
+        field.enabled = true;
+        root.content()->enabled = true;
+        root.focus(&field);
+        root.openPopup(std::make_unique<TextField>("popup.field", ""), {});
+        if (mode == 0)
+            field.visible = false;
+        else if (mode == 1)
+            field.enabled = false;
+        if (mode == 3) root.content()->enabled = false;
+        root.closePopup();
+        CHECK(root.focused() == (mode == 2 ? &field : nullptr));
+    }
+}
+
+TEST_CASE("audit3: theme colours and sizes are strictly validated") {
+    for (const auto* colour : {"#-00001", "#+00001", "# 00001", "#12345g"}) {
+        auto doc = json::Value::object();
+        doc["schema"] = "supple.theme/1.0";
+        doc["colors"] = json::Value::object();
+        doc["colors"]["accent"] = colour;
+        auto result = ui::Theme::fromJson(doc, ui::Theme::dark());
+        CHECK_FALSE(result);
+        if (!result) CHECK(result.error().path == "/colors/accent");
+        CHECK_FALSE(ui::Theme::dark().trackColor(colour));
+    }
+    auto result = ui::Theme::fromJson(
+        json::parse(R"({"schema":"supple.theme/1.0","type":{"body":1e300}})").value(),
+        ui::Theme::dark());
+    CHECK_FALSE(result);
+    if (!result) CHECK(result.error().path == "/type/body");
+}
+
+TEST_CASE("audit3: theme rejects non-finite sizes and escapes error paths") {
+    for (double size :
+         {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN(), -1.0, 1e-300}) {
+        auto doc = json::Value::object();
+        doc["schema"] = "supple.theme/1.0";
+        doc["radius"] = json::Value::object();
+        doc["radius"]["a/b~c"] = size;
+        auto result = Theme::fromJson(doc, Theme::dark());
+        REQUIRE_FALSE(result);
+        CHECK(result.error().path == "/radius/a~1b~0c");
+    }
+    CHECK(parseColor("#aBcD12") == Color::hex(0xabcd12));
+    CHECK_FALSE(parseColor("#1234567"));
+    CHECK_FALSE(parseColor("#12345"));
 }

@@ -175,6 +175,67 @@ TEST_CASE("MIDI editor: Alt+E shows and hides it on the item it had last") {
     CHECK_FALSE(f.editor->isOpen());
 }
 
+TEST_CASE("MIDI editor: hidden notation and dock controls release focus") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto* text = f.editor->notation();
+    REQUIRE(text);
+    REQUIRE(text->visibleInTree());
+    f.root->focus(text);
+    // Invoke the button without a pointer press moving focus away first.
+    auto* toggle = dynamic_cast<ui::Button*>(f.root->find("midi.notation.toggle"));
+    REQUIRE(toggle);
+    toggle->onClick();
+    CHECK(f.root->focused() == nullptr);
+    const auto before = text->text();
+    f.root->text("hidden");
+    CHECK(text->text() == before);
+    f.root->focus(f.root->find("midi.close"));
+    f.editor->close();
+    CHECK(f.root->focused() == nullptr);
+}
+
+TEST_CASE("MIDI CC lane edits only its displayed channel in one undo step") {
+    Fixture f;
+    if (!f.ok) return;
+    f.exec("midi.edit", R"({"item":")" + f.item + R"(","ops":[
+      {"op":"cc.set","number":1,"channel":1,"points":[{"beat":0,"value":10}]},
+      {"op":"cc.set","number":1,"channel":2,"points":[{"beat":0,"value":20}]}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    const auto before = f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"];
+    const auto steps = f.app->versions().history(1000).size();
+    const auto bounds = f.root->find("midi.cc")->bounds();
+    const ui::Point p{f.at(0.05, 60).x, bounds.y + bounds.h / 2};
+    f.pointer(ui::PointerEvent::Type::Down, p);
+    f.pointer(ui::PointerEvent::Type::Up, p);
+    const auto after = f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"];
+    REQUIRE(after.size() == 2);
+    bool preserved = false;
+    for (const auto& cc : after.asArray())
+        if (const auto* channel = cc.find("channel"); channel && channel->asInt() == 2) {
+            CHECK(cc.find("value")->asInt() == 20);
+            preserved = true;
+        }
+    CHECK(preserved);
+    CHECK(f.app->versions().history(1000).size() == steps + 1);
+    f.exec("history.undo", "{}");
+    CHECK(f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"] == before);
+    f.frame();
+    f.root->pointer({ui::PointerEvent::Type::Down, p, 3});
+    f.root->pointer({ui::PointerEvent::Type::Up, p, 3});
+    f.frame();
+    const auto erased = f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"];
+    REQUIRE(erased.size() == 1);
+    CHECK(erased.asArray().front().find("channel")->asInt() == 2);
+    CHECK(erased.asArray().front().find("value")->asInt() == 20);
+    CHECK(f.app->versions().history(1000).size() == steps + 1);
+    f.exec("history.undo", "{}");
+    CHECK(f.exec("midi.notes", R"({"item":")" + f.item + R"("})")["cc"] == before);
+}
+
 TEST_CASE("MIDI editor: dragging the top border resizes the panel; double-click resets") {
     Fixture f;
     if (!f.ok) {
@@ -704,6 +765,7 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     CHECK(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
     REQUIRE(f.root->click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
+    CHECK(f.root->focused() == nullptr);
 }
 
 TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send them (ADR-0021)") {
@@ -1277,4 +1339,74 @@ TEST_CASE("routing matrix clamps scrolling when channel rows are deleted") {
     REQUIRE(status);
     CHECK(status->valueText().find(matrix.model().blocked(0, 0)) != std::string::npos);
     CHECK(status->valueText().find("not allowed") != std::string::npos);
+}
+
+TEST_CASE("audit3: empty event-list double-click never edits the old selection") {
+    Fixture f;
+    REQUIRE(f.ok);
+    showEventList(f);
+    auto* list = f.root->find("midi.list.rows");
+    REQUIRE(list);
+    const auto b = list->bounds();
+    f.pointer(ui::PointerEvent::Type::Down, {b.x + 30, b.y + 8});
+    f.pointer(ui::PointerEvent::Type::Up, {b.x + 30, b.y + 8});
+    const auto count = f.editor->eventList()->list()->count();
+    const auto y = b.y + static_cast<float>(count) * 24 + 10;
+    REQUIRE(y < b.bottom());
+    f.pointer(ui::PointerEvent::Type::Down, {b.x + 30, y}, 2);
+    CHECK_FALSE(f.root->find("midi.list.edit")->visible);
+    CHECK(f.root->focused() != f.root->find("midi.list.edit"));
+    f.pointer(ui::PointerEvent::Type::Up, {b.x + 30, y});
+    f.pointer(ui::PointerEvent::Type::Down, {b.x + 30, b.y + 26 + 8}, 2);
+    CHECK(f.root->find("midi.list.edit")->visible);
+    CHECK(f.root->find("midi.list.edit")->valueText() == f.editor->eventList()->rowText(1)[0]);
+}
+
+TEST_CASE("audit3: fast take snapped drag reaches its exact source tick") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto id = *model::Id::parse(f.item);
+    auto take = *f.app->head().items.find(id)->activeTake;
+    f.exec("take.set", R"({"take":")" + take.str() + R"(","playrate":16})");
+    f.exec("midi.edit",
+           R"({"item":")" + f.item +
+               R"(","ops":[{"op":"move","notes":[0],"beats":0.00006510416666666667}]})");
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    f.editor->state().pixelsPerBeat = 1200;
+    f.frame();
+    auto start = f.at(f.editor->state().notes[0].start + .03, 60);
+    f.drag(start, {start.x + 300, start.y});
+    auto source = *f.app->head().takes.find(take)->source;
+    const auto& seq = f.app->head().midi.find(source)->sequence;
+    for (const auto& n : seq.notes)
+        if (n.pitch == 60) CHECK(n.start == 3840);  // exact quarter-beat grid is 3840 ticks
+}
+
+TEST_CASE("audit3: MIDI and event-list snapshots refresh across equal-version projects") {
+    Fixture f;
+    REQUIRE(f.ok);
+    auto old = f.dir / "old.json", next = f.dir / "next.json";
+    REQUIRE(f.app->save(old));
+    REQUIRE(f.app->newProject({}));
+    auto t = f.exec("track.add", R"({"name":"New keys"})");
+    auto it =
+        f.exec("item.add", R"({"track":")" + t["track"].asString() +
+                               R"(","position":4,"notation":"voice v; 1: D4:q F4:q A4:q D5:q"})");
+    REQUIRE(it["item"].asString() == f.item);
+    REQUIRE(f.app->save(next));
+    REQUIRE(f.app->open(old));
+    showEventList(f);
+    auto version = f.app->head().version;
+    REQUIRE(f.editor->state().notes[0].pitch == 60);
+    REQUIRE(f.app->open(next));
+    REQUIRE(f.app->head().version == version);
+    f.frame();
+    CHECK(f.editor->state().notes[0].pitch == 62);
+    CHECK(f.editor->eventList()->rowText(0)[3] == "D4");
+    auto gesture = f.editor->beginGesture();
+    REQUIRE(f.app->open(old));
+    auto ops = json::parse(R"([{"op":"velocity","notes":[0],"velocity":37}])").value();
+    CHECK_FALSE(f.editor->edit(ops, gesture));
+    CHECK(f.notes().asArray()[0]["velocity"].asInt() != 37);
 }

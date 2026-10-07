@@ -72,6 +72,8 @@ class Root {
     Node* focused() const { return focused_; }
     Node* hovered() const { return hovered_; }
     void capture(Node* node);
+    // Release focus and cancel a captured gesture inside a hidden subtree.
+    void releaseWithin(const Node* subtree);
     void forget(Node* node);  // a node is going away
 
     // --- popups (popup.h): returns the content node, now owned by the overlay

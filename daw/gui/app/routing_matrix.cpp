@@ -343,6 +343,7 @@ Status RoutingMatrix::reload() {
     next.index();
     model_ = std::move(next);
     if (grid_) static_cast<Grid*>(grid_)->modelChanged();
+    projectGeneration_ = app_.projectGeneration();
     version_ = app_.head().version;
     if (selected_ && std::none_of(model_.sends.begin(), model_.sends.end(),
                                   [&](const MatrixModel::Send& x) { return x.id == *selected_; }))
@@ -643,7 +644,9 @@ Status RoutingMatrix::clickCell(std::size_t row, std::size_t col) {
 }
 
 void RoutingMatrix::sync() {
-    if (isOpen() && app_.head().version != version_) (void)reload();
+    if (isOpen() &&
+        (app_.projectGeneration() != projectGeneration_ || app_.head().version != version_))
+        (void)reload();
 }
 
 }  // namespace supple::gui

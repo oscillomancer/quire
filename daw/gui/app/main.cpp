@@ -768,6 +768,7 @@ int main(int argc, char** argv) {
         a.setViewport(vp);
         if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
             a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
+        a.trackLayout().clearTrackHeights();
         if (const json::Value* th = v.find("track_heights"); th && th->isObject())
             for (const auto& m : th->asObject()) {
                 const auto id = model::Id::parse(m.key);
@@ -821,6 +822,7 @@ int main(int argc, char** argv) {
                 appActions.onError(r.error().message);
         });
     }
+    uiFile.tick((*app)->projectPath(), (*app)->projectGeneration());
     shell.installOverlay(root);  // the playhead paints over the whole window
     if (o.viewStart >= 0) {
         views::Viewport v;
@@ -834,11 +836,25 @@ int main(int argc, char** argv) {
     // Counted runs (--frames) first wait, uncounted, until every visible
     // pyramid is ready; --script then moves the viewport every frame.
     bool warm = o.frames == 0;
+    auto preserveUi = [&](const std::function<void()>& work) {
+        (void)dispatcher.guarded(
+            [&](const cmd::Invocation& invocation) -> Status {
+                const auto name = invocation.command.substr(0, invocation.command.find('@'));
+                if (name == "project.new" || name == "project.open") uiFile.prepareProjectSwitch();
+                return {};
+            },
+            [&]() -> Result<json::Value> {
+                work();
+                return json::Value();
+            });
+    };
     const double warmUntil = wallMs() + 60000;
     int step = 0;
     while (!quit && !loop.stopRequested()) {
         const double t0 = wallMs();
-        int next = loop.pump();
+        int next = -1;
+        preserveUi([&] { next = loop.pump(); });
+        uiFile.tick((*app)->projectPath(), (*app)->projectGeneration());
         if (const int plugin = pluginWindows.service(); plugin >= 0)
             next = next < 0 ? plugin : std::min(next, plugin);
         if (const double ms = wallMs() - t0; ms > 2.0) {
@@ -853,7 +869,6 @@ int main(int argc, char** argv) {
         meterFeed.poll();
         fxWindow.tick();
         renderDialog.tick();
-        uiFile.tick((*app)->projectPath());
         // --action: after the first tick has read the project's UI state.
         for (const auto& spec : std::exchange(o.actions, {})) {
             const auto space = spec.find(' ');
@@ -861,10 +876,12 @@ int main(int argc, char** argv) {
             const actions::Action* action = appActions.registry().find(id);
             Result<json::Value> inputs = json::Value::object();
             if (space != std::string::npos) inputs = json::parse(spec.substr(space + 1));
-            Result<json::Value> r =
-                !action   ? Result<json::Value>(Error("action.unknown", "no action " + id))
-                : !inputs ? Result<json::Value>(inputs.error())
-                          : appActions.run(*action, *inputs);
+            Result<json::Value> r = json::Value();
+            preserveUi([&] {
+                r = !action   ? Result<json::Value>(Error("action.unknown", "no action " + id))
+                    : !inputs ? Result<json::Value>(inputs.error())
+                              : appActions.run(*action, *inputs);
+            });
             if (!r) {
                 std::fprintf(stderr, "action %s: %s\n", id.c_str(), r.error().toString().c_str());
                 return 1;
@@ -920,7 +937,9 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr, "drop: %s\n", r.error().toString().c_str());
                 dropped.clear();
             } else
-                root.handle(e);  // the wake event is ignored: it only interrupts the wait
+                preserveUi([&] {
+                    root.handle(e);
+                });  // the wake event is ignored: it only interrupts the wait
         }
     }
     double idleCpuPercent = -1;

@@ -218,8 +218,9 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     actions.layout.gap = 6;
     actions.layout.align = ui::Layout::Align::Center;
     actions.emplace<ui::Button>("render.run", "Render", [this] { run(); });
-    addButton_ = &actions.emplace<ui::Button>("render.add", "[ ] Add to project",
-                                              [this] { setAddToProject(!addToProject_); });
+    addButton_ = &actions.emplace<ui::Button>(
+        "render.add", addToProject_ ? "[x] Add to project" : "[ ] Add to project",
+        [this] { setAddToProject(!addToProject_); });
     actions.emplace<ui::Button>("render.queue.add", "Add to queue", [this] { addToQueue(); });
     queueButton_ = &actions.emplace<ui::Button>("render.queue", "Queue", [this] { openQueue(); });
     status_ =
@@ -275,7 +276,10 @@ void RenderDialog::setSource(Source source) {
                        : source == Source::Stems ? "stems"
                                                  : "regions";
     if (sourceLabel_) sourceLabel_->setText(std::string("Source: ") + name);
-    if (stemsRow_) stemsRow_->visible = source == Source::Stems;
+    if (stemsRow_) {
+        stemsRow_->visible = source == Source::Stems;
+        if (!stemsRow_->visible) root_.releaseWithin(stemsRow_);
+    }
     // Stems-only fields only exist for stems; keep them out of other args.
     if (mode_.empty()) mode_ = "isolated";
     if (tap_.empty()) tap_ = "post_fader";
@@ -471,6 +475,10 @@ void RenderDialog::refreshPreview() {
 }
 
 void RenderDialog::run() {
+    if (!job_.empty()) {
+        setStatus("a render job is already active; wait for it to finish");
+        return;
+    }
     if (auto valid = validateFields(); !valid) {
         setStatus(valid.error().message);
         return;
@@ -565,6 +573,10 @@ void RenderDialog::openQueue() {
 }
 
 void RenderDialog::runQueue() {
+    if (!job_.empty()) {
+        setStatus("a render job is already active; wait for it to finish");
+        return;
+    }
     json::Value a = json::Value::object();
     a["job"] = true;
     auto result = dispatcher_.execute({"render.queue.run", std::move(a), kUiOrigin});

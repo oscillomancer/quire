@@ -25,6 +25,9 @@ struct Color {
     bool operator==(const Color&) const = default;
 };
 
+// A literal colour requires exactly six hexadecimal digits after #.
+std::optional<Color> parseColor(std::string_view text);
+
 // The accent family (gui.md §7): Warm (an orange ink, the app's default) or
 // Ink (blue). Either one comes in a dark and a light theme.
 enum class Palette { Warm, Ink };

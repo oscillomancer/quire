@@ -88,6 +88,25 @@ bool Root::attached(const Node* node) const { return node && node->root() == thi
 
 void Root::capture(Node* node) { captured_ = attached(node) ? node : nullptr; }
 
+void Root::releaseWithin(const Node* subtree) {
+    Dispatch dispatch(*this);
+    if (!subtree) return;
+    auto within = [&](const Node* node) {
+        for (; node; node = node->parent())
+            if (node == subtree) return true;
+        return false;
+    };
+    if (within(captured_)) {
+        Node* target = std::exchange(captured_, nullptr);
+        // Cancel reaches disabled controls too: their gesture still needs ending.
+        for (Node* n = target; n && attached(n);) {
+            if (n->onPointer({PointerEvent::Type::Cancel, {}, 1})) break;
+            n = attached(n) ? n->parent() : nullptr;
+        }
+    }
+    if (within(focused_)) focus(nullptr);
+}
+
 Root::OverlayHandle::OverlayHandle(OverlayHandle&& other) noexcept
     : root_(std::move(other.root_)), node_(std::exchange(other.node_, nullptr)) {}
 

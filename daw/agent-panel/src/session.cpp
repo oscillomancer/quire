@@ -130,6 +130,7 @@ Session::Session(Endpoint endpoint, const cmd::Registry& registry, cmd::Dispatch
     };
     json::Value hello = schemaOf(R"({"protocolVersion": "2025-06-18", "clientInfo": {}})");
     hello["clientInfo"]["name"] = options_.client;  // recorded as the origin's client
+    hello["_meta"]["agent"] = endpoint_.model;
     rpc("initialize", std::move(hello));
     if (auto listed = rpc("tools/list", json::Value::object()); listed && listed->find("result"))
         for (const json::Value& t : at(at((*listed), "result"), "tools").asArray())
@@ -177,6 +178,8 @@ Result<json::Value> Session::exec(const std::string& command, json::Value args) 
 
 Status Session::ensureBranch() {
     if (!branch_.empty()) return audition(true);
+    auto project = exec("project.get", json::Value::object());
+    if (!project) return std::move(project).error();
     auto list = exec("branch.list", json::Value::object());
     if (!list) return std::move(list).error();
     base_ = at((*list), "current").asString();
@@ -194,6 +197,8 @@ Status Session::ensureBranch() {
     auto created = exec("branch.create", std::move(args));
     if (!created) return std::move(created).error();
     branch_ = name;
+    projectGeneration_ = at(*project, "generation").asInt();
+    projectPath_ = at(*project, "path").asString();
     return {};
 }
 
@@ -203,14 +208,6 @@ bool Session::send(std::string prompt) {
         if (events.error) events.error("could not start a branch: " + b.error().message);
         return false;
     }
-    auto project = exec("project.get", json::Value::object());
-    if (!project) {
-        if (events.error) events.error("could not read the project: " + project.error().message);
-        return false;
-    }
-    projectGeneration_ =
-        at(*project, "generation").isInt() ? at(*project, "generation").asInt() : 0;
-    projectPath_ = at(*project, "path").isString() ? at(*project, "path").asString() : "";
     {
         std::lock_guard lock(mutex_);
         Message m;
@@ -246,6 +243,17 @@ Status Session::admit(const ToolCall& c) const {
     if (it == toolCommands_.end()) return {};  // describe, query, skill_read, listen
     if (it->second == "batch") return admitBatch(c.input, "/arguments");
     return admitCommand(it->second, c.input, "/name");
+}
+
+Status Session::proposalProject() {
+    auto project = exec("project.get", json::Value::object());
+    if (!project) return std::move(project).error();
+    const auto& path = at(*project, "path");
+    if (at(*project, "generation").asInt() != projectGeneration_ || !path.isString() ||
+        path.asString() != projectPath_)
+        return Error("agent.project_changed", "this proposal belongs to a different project",
+                     "/project", "start a new agent session for the current project");
+    return {};
 }
 
 Status Session::pinned() {
@@ -436,6 +444,7 @@ void Session::work(std::stop_token stop, std::weak_ptr<int> alive, std::uint64_t
 
 Result<json::Value> Session::diff() {
     if (branch_.empty()) return json::Value::object();
+    if (auto same = proposalProject(); !same) return std::move(same).error();
     json::Value args = json::Value::object();
     args["a"] = base_;
     args["b"] = branch_;
@@ -445,6 +454,7 @@ Result<json::Value> Session::diff() {
 Status Session::audition(bool agentBranch) {
     if (busy_) return Error("agent.busy", "wait until the agent is done");
     if (branch_.empty()) return Error("agent.branch", "the agent has not made changes yet");
+    if (auto same = proposalProject(); !same) return std::move(same).error();
     json::Value args = json::Value::object();
     args["name"] = agentBranch ? branch_ : base_;
     auto r = exec("branch.switch", std::move(args));
@@ -455,6 +465,7 @@ Status Session::audition(bool agentBranch) {
 Result<json::Value> Session::accept() {
     if (busy_) return Error("agent.busy", "wait until the agent is done");
     if (branch_.empty()) return Error("agent.branch", "nothing to accept");
+    if (auto same = proposalProject(); !same) return std::move(same).error();
     json::Value merge = json::Value::object();
     merge["from"] = branch_;
     merge["into"] = base_;
@@ -467,6 +478,7 @@ Result<json::Value> Session::accept() {
 Status Session::reject() {
     if (busy_) return Error("agent.busy", "wait until the agent is done");
     if (branch_.empty()) return {};
+    if (auto same = proposalProject(); !same) return std::move(same).error();
     json::Value sw = json::Value::object();
     sw["name"] = base_;
     if (auto r = exec("branch.switch", std::move(sw)); !r) return std::move(r).error();

@@ -1,8 +1,21 @@
 #include "supple/ui/theme.h"
 
-#include <cstdlib>
+#include <charconv>
+#include <cmath>
+#include <limits>
+
+#include "supple/json/pointer.h"
 
 namespace supple::ui {
+
+std::optional<Color> parseColor(std::string_view text) {
+    if (text.size() != 7 || text.front() != '#') return std::nullopt;
+    std::uint32_t rgb = 0;
+    const auto end = text.data() + text.size();
+    auto result = std::from_chars(text.data() + 1, end, rgb, 16);
+    if (result.ec != std::errc{} || result.ptr != end) return std::nullopt;
+    return Color::hex(rgb);
+}
 
 std::string_view paletteName(Palette palette) { return palette == Palette::Warm ? "warm" : "ink"; }
 
@@ -119,14 +132,10 @@ Result<Theme> Theme::fromJson(const json::Value& document, const Theme& baseThem
         if (!colors->isObject())
             return Error("theme.colors", "colors must be an object", "/colors");
         for (const auto& m : colors->asObject()) {
-            const std::string path = "/colors/" + m.key;
-            if (!m.value.isString() || m.value.asString().size() != 7 ||
-                m.value.asString()[0] != '#')
-                return Error("theme.color", "a colour is \"#rrggbb\"", path);
-            char* end = nullptr;
-            const auto rgb = std::strtoul(m.value.asString().c_str() + 1, &end, 16);
-            if (*end != '\0') return Error("theme.color", "a colour is \"#rrggbb\"", path);
-            t.colors_[m.key] = Color::hex(static_cast<std::uint32_t>(rgb));
+            const std::string path = "/colors/" + json::pointerEscape(m.key);
+            auto colour = m.value.isString() ? parseColor(m.value.asString()) : std::nullopt;
+            if (!colour) return Error("theme.color", "a colour is \"#rrggbb\"", path);
+            t.colors_[m.key] = *colour;
         }
     }
     for (auto [section, target] :
@@ -137,9 +146,14 @@ Result<Theme> Theme::fromJson(const json::Value& document, const Theme& baseThem
             return Error("theme.section", std::string(section) + " must be an object",
                          std::string("/") + section);
         for (const auto& m : block->asObject()) {
-            if (!m.value.isNumber() || m.value.asDouble() < 0)
-                return Error("theme.value", "a size is a non-negative number",
-                             std::string("/") + section + "/" + m.key);
+            if (!m.value.isNumber() || !std::isfinite(m.value.asDouble()) ||
+                m.value.asDouble() < 0 ||
+                m.value.asDouble() > static_cast<double>(std::numeric_limits<float>::max()) ||
+                (m.value.asDouble() > 0 &&
+                 m.value.asDouble() <
+                     static_cast<double>(std::numeric_limits<float>::denorm_min())))
+                return Error("theme.value", "a size is a finite non-negative float",
+                             std::string("/") + section + "/" + json::pointerEscape(m.key));
             (*target)[m.key] = static_cast<float>(m.value.asDouble());
         }
     }
@@ -147,13 +161,7 @@ Result<Theme> Theme::fromJson(const json::Value& document, const Theme& baseThem
 }
 
 std::optional<Color> Theme::trackColor(std::string_view name) const {
-    if (name.size() == 7 && name[0] == '#') {
-        char* end = nullptr;
-        const std::string digits(name.substr(1));
-        const auto rgb = std::strtoul(digits.c_str(), &end, 16);
-        if (*end == '\0') return Color::hex(static_cast<std::uint32_t>(rgb));
-        return std::nullopt;
-    }
+    if (name.starts_with('#')) return parseColor(name);
     if (name.empty()) return std::nullopt;
     auto it = colors_.find("track-" + std::string(name));
     if (it == colors_.end()) return std::nullopt;

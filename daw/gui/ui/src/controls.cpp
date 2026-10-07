@@ -145,6 +145,7 @@ bool Fader::onPointer(const PointerEvent& e) {
             change(faderDb(pos), Gesture::Move);
             return true;
         }
+        case T::Cancel:
         case T::Up:
             if (!dragging_) return false;
             dragging_ = false;
@@ -256,6 +257,7 @@ bool PanControl::onPointer(const PointerEvent& e) {
                    Gesture::Move);
             return true;
         }
+        case T::Cancel:
         case T::Up:
             if (!dragging_) return false;
             dragging_ = false;
@@ -359,6 +361,7 @@ bool Slider::onPointer(const PointerEvent& e) {
             change(pressValue_ + delta * scale, Gesture::Move);
             return true;
         }
+        case T::Cancel:
         case T::Up:
             if (!dragging_) return false;
             dragging_ = false;
@@ -582,10 +585,15 @@ void Toggle::paint(Canvas& c) {
 }
 
 bool Toggle::onPointer(const PointerEvent& e) {
-    if (e.button != 1 && e.type != PointerEvent::Type::Move) return false;
+    if (e.button != 1 && e.type != PointerEvent::Type::Move && e.type != PointerEvent::Type::Cancel)
+        return false;
     switch (e.type) {
         case PointerEvent::Type::Down:
             pressed_ = true;
+            invalidate();
+            return true;
+        case PointerEvent::Type::Cancel:
+            pressed_ = false;
             invalidate();
             return true;
         case PointerEvent::Type::Up: {
@@ -684,10 +692,15 @@ void MonitorButton::paint(Canvas& c) {
 }
 
 bool MonitorButton::onPointer(const PointerEvent& e) {
-    if (e.button != 1 && e.type != PointerEvent::Type::Move) return false;
+    if (e.button != 1 && e.type != PointerEvent::Type::Move && e.type != PointerEvent::Type::Cancel)
+        return false;
     switch (e.type) {
         case PointerEvent::Type::Down:
             pressed_ = true;
+            invalidate();
+            return true;
+        case PointerEvent::Type::Cancel:
+            pressed_ = false;
             invalidate();
             return true;
         case PointerEvent::Type::Up: {

@@ -316,6 +316,7 @@ bool TextArea::onPointer(const PointerEvent& e) {
         case PointerEvent::Type::Move:
             if (dragging_) moveTo(hit(e.pos), true);
             return dragging_;
+        case PointerEvent::Type::Cancel:
         case PointerEvent::Type::Up:
             dragging_ = false;
             return true;

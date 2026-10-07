@@ -1,11 +1,12 @@
 // Per-project UI state (docs/specs/gui.md §1.2): zoom, scroll, selection,
 // panels and window size live in <project stem>.ui.json beside the project
 // (canonical JSON, never in the project or its diff). Views register a
-// section each; the file is read when the project path changes and written
+// section each; the file is read on project replacement and written
 // (at most once a second) when the serialized state differs from the file.
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -24,6 +25,9 @@ class UiPersistence {
 
     // Call every loop pass with the project's current path (empty: unsaved).
     void tick(const std::filesystem::path& project);
+    void tick(const std::filesystem::path& project, std::uint64_t generation);
+    // Before project.new/open, while callbacks still describe the old project.
+    void prepareProjectSwitch();
     // Writes now if the state differs (exit, explicit save).
     Status flush(const std::filesystem::path& project);
     static std::filesystem::path fileFor(const std::filesystem::path& project);
@@ -35,9 +39,12 @@ class UiPersistence {
         std::string name;
         Save save;
         Load load;
+        json::Value defaults;
     };
     std::vector<Section> sections_;
     std::filesystem::path current_;
+    std::uint64_t generation_ = 0;
+    bool initialized_ = false, prepared_ = false, protectedFile_ = false;
     std::string written_;  // canonical text last read or written
     std::chrono::steady_clock::time_point nextCheck_{};
 };

@@ -64,6 +64,7 @@ class FileActions {
     Post post_;
     DialogLifetime dialogs_;
     std::uint64_t savedVersion_ = 0;
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     std::string savedBranch_;
 };
 

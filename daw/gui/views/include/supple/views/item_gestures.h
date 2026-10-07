@@ -9,8 +9,9 @@
 // MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
 // that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
 // an automation lane: click adds a point, drag moves one (snapped; Shift frees), Alt+click deletes
-// one. A right-click on an item (without dragging) opens its menu: Delete. Each gesture previews as
-// a ghost on the root's overlay and commits ONE transaction on release.
+// one. A right-click on an item (without dragging) opens its menu: Delete, timebase,
+// take FX and take envelopes. Each gesture previews as a ghost on the root's overlay
+// and commits ONE transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -52,6 +53,8 @@ class ItemGestures {
     ~ItemGestures();
 
     Runner run;
+    std::function<std::uint64_t()>
+        projectGeneration;  // app identity, even before the next resnapshot
     // Keep the copied version available to item.paste until the clipboard changes.
     std::function<std::shared_ptr<const model::Session>(std::uint64_t)> pinVersion;
     std::function<void(const std::vector<model::Id>&)> onSelection;  // after every change
@@ -90,13 +93,17 @@ class ItemGestures {
     // even after a cut. A paste puts the earliest item at `atBeat` and the
     // topmost one on `track` (default: where it was), keeping the others'
     // offsets in time and rows; the pasted items become the selection.
+    void clearClipboard() { clipboard_ = {}; }
     void copySelection();
     Status cutSelection();
     Status paste(double atBeat, std::optional<model::Id> track = {});
     Status duplicateSelection();  // right after the selection, on the same tracks
     // Removes the selected items (one undo step): the item menu's Delete.
     Status deleteSelection();
-    bool canPaste() const { return !clipboard_.items.empty(); }
+    bool canPaste() const {
+        return !clipboard_.items.empty() &&
+               (!projectGeneration || projectGeneration() == clipboard_.generation);
+    }
     // The play rate that keeps a take's material filling the item when its
     // end moves by `deltaBeats` (the stretch gesture).
     double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
@@ -170,7 +177,7 @@ class ItemGestures {
 
   private:
     double beatAtX(float x) const;
-    // A right-click on an item (no drag): the menu of the selection (Delete).
+    // A right-click on an item (no drag): selection deletion/timebase and active take FX/envelopes.
     void openItemMenu(ui::Point at);
     // A right-click on an automation lane: insert an item, or edit the one
     // under the pointer (duplicate, unpool, loop, delete).
@@ -191,7 +198,7 @@ class ItemGestures {
     ui::Root::OverlayHandle overlay_;
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it
     struct Clip {
-        std::uint64_t version = 0;
+        std::uint64_t generation = 0, version = 0;
         std::shared_ptr<const model::Session> pin;
         std::optional<model::Id> anchorTrack;
         struct Entry {

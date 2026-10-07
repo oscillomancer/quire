@@ -94,7 +94,8 @@ class Session {
     Result<json::Value> exec(const std::string& command, json::Value args);  // model thread
     Status ensureBranch();                                                   // model thread
     Status admit(const ToolCall& call) const;                                // the isolation policy
-    Status pinned();  // model thread: still on the agent's branch?
+    Status proposalProject();  // model thread: review only in the proposal's project
+    Status pinned();           // model thread: still on the agent's branch?
 
     Endpoint endpoint_;
     cmd::Dispatcher& dispatcher_;
@@ -105,7 +106,7 @@ class Session {
     std::string system_;
     std::string branch_, base_;
     std::int64_t projectGeneration_ = 0;
-    std::string projectPath_;                          // pinned at send
+    std::string projectPath_;                          // pinned when the proposal branch is created
     std::map<std::string, std::string> toolCommands_;  // dedicated MCP tool → command
     std::uint64_t generation_ = 0;                     // model thread: the live turn
     mutable std::mutex mutex_;

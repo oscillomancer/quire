@@ -112,6 +112,10 @@ class DragButton : public ui::Button {
     using Button::Button;
     DragTracker drag;
     bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Cancel) {
+            drag.cancel();
+            return Button::onPointer(e);
+        }
         const bool left = e.button == 1;
         if (e.type == ui::PointerEvent::Type::Down && left) drag.press(e.pos);
         if (e.type == ui::PointerEvent::Type::Move && drag.move(e.pos)) return true;
@@ -200,7 +204,7 @@ class NameEdit : public ui::Node {
         field_->visible = false;
         label_->visible = true;
         if (ui::Root* r = root()) {
-            if (r->focused() == field_) r->focus(nullptr);  // Space plays again
+            r->releaseWithin(field_);  // Space plays again
             r->relayout();
         }
         invalidate();
@@ -429,6 +433,10 @@ class StripFrame : public ui::Node {
             return true;
         }
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && select) select(e.mods);
+        if (e.type == ui::PointerEvent::Type::Cancel) {
+            drag.cancel();
+            return true;
+        }
         if (!drag.notify) return e.type == ui::PointerEvent::Type::Down && e.button == 1 && select;
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1) {
             drag.press(e.pos);
@@ -644,6 +652,7 @@ bool Mixer::visible() const { return panel_ && panel_->visible; }
 void Mixer::setVisible(bool visible) {
     if (!panel_ || panel_->visible == visible) return;
     panel_->visible = visible;
+    if (!visible) root_.releaseWithin(panel_);
     if (visible) {
         version_ = ~0ull;
         sync();
@@ -683,6 +692,9 @@ std::string Mixer::structure() const {
 
 Result<json::Value> Mixer::set(const std::string& track, const char* field, json::Value value,
                                const std::string& gesture) {
+    if (projectGeneration_ != app_.projectGeneration())
+        return Error("gui.mixer.stale", "the project changed; edit the control again", "/track",
+                     "wait for the mixer to refresh");
     json::Value args = json::Value::object();
     args["track"] = track;
     args[field] = std::move(value);
@@ -1177,10 +1189,12 @@ void Mixer::sync() {
     if (!visible()) return;
     applyHeight();  // the window may have been resized
     if (actions_.ui().selectedTracks != shownSelection_) showSelection();  // the TCP changed it
-    if (app_.head().version == version_) return;
+    const bool replaced = app_.projectGeneration() != projectGeneration_;
+    if (!replaced && app_.head().version == version_) return;
+    projectGeneration_ = app_.projectGeneration();
     version_ = app_.head().version;
     const std::string now = structure();
-    if (now != structure_) {
+    if (replaced || now != structure_) {
         structure_ = now;
         rebuild();
     }

@@ -504,6 +504,14 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
 
 bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
     using T = ui::PointerEvent::Type;
+    if (e.type == T::Cancel) {
+        resizing_ = false;
+        resizeTrack_.reset();
+        panel_.endReorder(false);
+        panel_.cancelSend();
+        invalidate();
+        return true;
+    }
     if (resizing_) {
         if ((e.type == T::Move || e.type == T::Up) && resizeTrack_ && resizeTrack_ == track_ &&
             panel_.cb_.resizeTrack)

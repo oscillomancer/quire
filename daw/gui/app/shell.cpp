@@ -115,6 +115,7 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
             return t;
         });
     arrange_->layout.width = ui::SizeRule::fraction();
+    arrange_->gestures().projectGeneration = [this] { return app_.projectGeneration(); };
     // The TCP talks to the app through these: selection state, commands (with
     // a drag's gesture) and the meters it pools with its rows.
     views::TcpCallbacks tcp;
@@ -200,7 +201,8 @@ void Shell::installOverlay(ui::Root& root) {
 
 void Shell::sync() {
     const model::Session& s = app_.head();
-    const bool moved = s.version != shownVersion_;
+    const bool replaced = app_.projectGeneration() != projectGeneration_;
+    const bool moved = replaced || s.version != shownVersion_;
     if (ui_.selectedTracks != shownSelection_) {  // the mixer selects too
         shownSelection_ = ui_.selectedTracks;
         if (arrange_) arrange_->tcpPanel().invalidate();
@@ -217,15 +219,17 @@ void Shell::sync() {
         const std::vector<model::Change>* changes = nullptr;
         const auto* next = app_.versions().version(s.version);
         const auto* previous = app_.versions().version(shownVersion_);
-        if (next && !next->parents.empty() && next->parents.front() == shownVersion_)
+        if (!replaced && next && !next->parents.empty() && next->parents.front() == shownVersion_)
             changes = &next->changes;
-        else if (previous && !previous->parents.empty() && previous->parents.front() == s.version)
+        else if (!replaced && previous && !previous->parents.empty() &&
+                 previous->parents.front() == s.version)
             changes = &previous->changes;
         shownVersion_ = s.version;
+        projectGeneration_ = app_.projectGeneration();
         const int strips = static_cast<int>(s.tracks.size());
         counts_->setText(std::to_string(strips) + (strips == 1 ? " strip  " : " strips  ") +
                          "version " + std::to_string(s.version));
-        arrange_->show(s, changes);
+        arrange_->show(s, changes, projectGeneration_);
     }
     std::vector<model::Id> selected;
     for (const auto& text : ui_.selectedItems)
@@ -522,6 +526,10 @@ void Shell::selectTrack(const model::Id& track, unsigned mods) {
 }
 
 void Shell::commit(std::string_view command, json::Value args, std::string gesture) {
+    if (arrange_ && arrange_->projectGeneration() != app_.projectGeneration()) {
+        if (onError) onError("the project changed; edit the control again");
+        return;
+    }
     if (command == "track.set") {  // a strip control: the whole selection when it is selected
         if (auto r = selectionEdit_.set(std::move(args), gesture); !r && onError)
             onError(r.error().message);

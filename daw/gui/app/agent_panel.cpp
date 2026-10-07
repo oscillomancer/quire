@@ -151,6 +151,7 @@ bool AgentPanel::visible() const { return panel_ && panel_->visible; }
 void AgentPanel::toggle() {
     if (!panel_) return;
     panel_->visible = !panel_->visible;
+    if (!panel_->visible) root_.releaseWithin(panel_);
     root_.relayout();
     root_.damageAll();
     if (panel_->visible) root_.focus(input_);
@@ -383,9 +384,10 @@ void AgentPanel::openSettings() {
     auto save = [this, kind, &name, &url, &model, &key,
                  maxTokens = ep.maxTokens](const std::string&) {
         agent::Endpoint e{*kind, name.text(), url.text(), model.text(), key.text(), maxTokens};
-        if (config_.endpoints.empty())
+        if (config_.current >= config_.endpoints.size()) {
+            config_.current = config_.endpoints.size();
             config_.endpoints.push_back(e);
-        else
+        } else
             config_.endpoints[config_.current] = e;
         ui::Root& root = root_;  // closePopup destroys this lambda: copy what follows first
         AgentPanel* self = this;

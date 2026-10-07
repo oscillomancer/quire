@@ -61,10 +61,14 @@ std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id
     return at;
 }
 
-bool TrackLayout::show(const model::Session& session, const std::vector<model::Change>* changes) {
-    if (session.version == indexed_) return false;
-    bool geometry =
-        indexed_ == ~std::uint64_t{0} || session.project->masters != session_.project->masters;
+bool TrackLayout::show(const model::Session& session, const std::vector<model::Change>* changes,
+                       std::uint64_t generation) {
+    const bool replaced = generation != generation_;
+    if (!replaced && session.version == indexed_) return false;
+    if (replaced) changes = nullptr;
+    generation_ = generation;
+    bool geometry = replaced || indexed_ == ~std::uint64_t{0} ||
+                    session.project->masters != session_.project->masters;
     for (auto id : changedObjects(session_.tracks, session.tracks, changes)) {
         const auto* before = session_.tracks.find(id);
         const auto* after = session.tracks.find(id);

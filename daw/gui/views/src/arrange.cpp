@@ -68,11 +68,7 @@ std::string formatBpm(double bpm) {
 }
 
 ui::Color parseColor(const std::string& text, ui::Color fallback) {
-    if (text.size() != 7 || text[0] != '#') return fallback;
-    char* end = nullptr;
-    const auto rgb = std::strtoul(text.c_str() + 1, &end, 16);
-    if (*end != '\0') return fallback;
-    return ui::Color::hex(static_cast<std::uint32_t>(rgb));
+    return ui::parseColor(text).value_or(fallback);
 }
 
 // The finest nice time interval whose labels clear the previous one by the
@@ -557,6 +553,12 @@ class Ruler : public ui::Node {
 };
 
 bool Ruler::onPointer(const ui::PointerEvent& e) {
+    if (e.type == ui::PointerEvent::Type::Cancel) {
+        drag_ = Drag::None;
+        moved_ = false;
+        invalidate();
+        return true;
+    }
     if (e.type == ui::PointerEvent::Type::Wheel) return false;
     if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && bounds().contains(e.pos))
         return contextMenu(e.pos);
@@ -964,10 +966,18 @@ ArrangeView::ArrangeView(peaks::PeakService& peaks, Resolve resolve, TransportSo
 
 ArrangeView::~ArrangeView() { *alive_ = nullptr; }
 
-void ArrangeView::show(const model::Session& session, const std::vector<model::Change>* changes) {
+void ArrangeView::show(const model::Session& session, const std::vector<model::Change>* changes,
+                       std::uint64_t generation) {
     const auto before = layout_.session();
-    if (before.version == session.version && layout_.rebuilds() != 0) return;
-    if (layout_.show(session, changes)) {
+    const bool replaced = generation != generation_;
+    if (!replaced && before.version == session.version && layout_.rebuilds() != 0) return;
+    if (replaced) {
+        changes = nullptr;
+        gestures_->clearClipboard();
+        if (root()) root()->releaseWithin(this);
+    }
+    generation_ = generation;
+    if (layout_.show(session, changes, generation)) {
         lanes_->rebuild();
         tcp_->setSession(session);
         header_->invalidate();

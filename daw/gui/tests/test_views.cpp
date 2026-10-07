@@ -1783,3 +1783,32 @@ TEST_CASE(
         draw(*edited, 0, 1, 8192);  // keep the pass/glyph drawing budget
     }
 }
+
+TEST_CASE("audit3: arrange and layout ignore version deltas across generations") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    Session s;
+    REQUIRE(s.build(1));
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto node =
+        std::make_unique<views::ArrangeView>(*s.peaks, s.resolve(), views::TransportSource{});
+    auto* view = node.get();
+    root.setContent(std::move(node));
+    auto before = s.app->head();
+    view->show(before, nullptr, 1);
+    root.frame(false);
+    auto track = before.tracks.begin()[1].id;
+    auto args = json::Value::object();
+    args["track"] = track.str();
+    args["name"] = "replacement";
+    REQUIRE(s.dispatcher->execute({"track.set", args, {}}));
+    auto after = s.app->head();
+    after.version = before.version;
+    const auto rebuilds = view->trackLayout().rebuilds();
+    std::vector<model::Change> emptyDelta;
+    view->show(after, &emptyDelta, 2);
+    CHECK(view->trackLayout().rebuilds() == rebuilds + 1);
+    CHECK(view->session().tracks.find(track)->name == "replacement");
+    CHECK_FALSE(view->trackLayout().show(after, nullptr, 2));
+    CHECK(view->trackLayout().show(after, &emptyDelta, 3));
+}

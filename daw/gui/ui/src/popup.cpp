@@ -159,6 +159,7 @@ void Root::closePopup() {
     popups_.pop_back();
     auto onClose = std::move(f->onClose);
     Node* restore = f->restoreFocus;
+    releaseWithin(f);
     focus(nullptr);
     overlay_->remove(f);  // destroys it
     requestAnimationFrame();
@@ -169,7 +170,12 @@ void Root::closePopup() {
             if (alive(*c)) return true;
         return false;
     };
-    if (restore && ((content_ && alive(*content_)) || alive(*overlay_))) focus(restore);
+    if (restore && ((content_ && alive(*content_)) || alive(*overlay_)) &&
+        restore->visibleInTree()) {
+        bool enabled = true;
+        for (Node* n = restore; n; n = n->parent()) enabled &= n->enabled;
+        if (enabled) focus(restore);
+    }
     if (onClose) onClose();
 }
 

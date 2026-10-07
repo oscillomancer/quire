@@ -224,6 +224,39 @@ struct Fixture {
 
 }  // namespace
 
+TEST_CASE("FX and render hidden subpanels release focus; popup close releases it too") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto track = f.app->head().project->masters.front();
+    REQUIRE(f.fx->open(track));
+    REQUIRE(f.click("fx.chain.save"));
+    auto* name = dynamic_cast<ui::TextField*>(f.root->find("fx.chain.name"));
+    REQUIRE(name);
+    REQUIRE(f.root->focused() == name);
+    REQUIRE(f.fx->open(track));
+    CHECK(f.root->focused() == nullptr);
+    const auto before = name->text();
+    f.root->text("hidden");
+    CHECK(name->text() == before);
+    f.root->focus(f.root->find("fx.close"));
+    f.fx->close();
+    CHECK(f.root->focused() == nullptr);
+    f.render->open();
+    f.render->setSource(gui::RenderDialog::Source::Stems);
+    f.frame();
+    auto* mode = dynamic_cast<ui::TextField*>(f.root->find("render.mode"));
+    REQUIRE(mode);
+    f.root->focus(mode);
+    f.render->setSource(gui::RenderDialog::Source::Master);
+    CHECK(f.root->focused() == nullptr);
+    const auto modeBefore = mode->text();
+    f.root->text("hidden");
+    CHECK(mode->text() == modeBefore);
+    f.root->focus(f.root->find("render.pattern"));
+    f.render->close();
+    CHECK(f.root->focused() == nullptr);
+}
+
 TEST_CASE("FX drags survive model refresh and separate drags have separate undo steps") {
     Fixture f;
     if (!f.ok || !f.stockPlugins()) return;
@@ -952,4 +985,46 @@ TEST_CASE("render cancellation retains partial files and labels them cancelled")
     CHECK(f.render->job().empty());
     CHECK(f.render->statusText().starts_with("cancelled"));
     CHECK(f.render->resultFiles() == std::vector<std::string>{"partial.wav"});
+}
+
+TEST_CASE("audit3: reopened render add button matches its stored value") {
+    Fixture f;
+    REQUIRE(f.ok);
+    f.render->open();
+    f.render->setAddToProject(true);
+    f.render->close();
+    f.render->open();
+    CHECK(f.render->addToProject());
+    CHECK(f.root->find("render.add")->valueText() == "[x] Add to project");
+}
+TEST_CASE("audit3: active render refuses additional launches") {
+    Fixture f;
+    REQUIRE(f.ok);
+    int starts = 0;
+    for (const char* name : {"render.mix", "render.queue.run"}) {
+        cmd::Command<json::Value, json::Value> c;
+        c.name = name;
+        c.version = 2;
+        c.kind = cmd::Kind::Query;
+        c.exposure = cmd::Exposure::Internal;
+        c.args = schema::any();
+        c.result = schema::any();
+        c.run = [&](const json::Value&, cmd::Context&) -> Result<json::Value> {
+            auto result = json::Value::object();
+            result["job"] = "probe-" + std::to_string(++starts);
+            return result;
+        };
+        f.registry.add(std::move(c));
+    }
+    f.render->open();
+    SUBCASE("render job") { f.render->run(); }
+    SUBCASE("queue job") { f.render->runQueue(); }
+    CHECK(f.render->job() == "probe-1");
+    f.render->run();
+    CHECK(f.render->job() == "probe-1");
+    CHECK(starts == 1);
+    f.render->runQueue();
+    CHECK(f.render->job() == "probe-1");
+    CHECK(starts == 1);
+    CHECK(f.root->find("render.status")->valueText().find("active") != std::string::npos);
 }

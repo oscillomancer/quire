@@ -67,6 +67,7 @@ class HistoryPanel {
     std::string current_;
     std::vector<Entry> entries_;
     std::uint64_t version_ = ~0ull;
+    std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     std::int64_t lastSeq_ = 0;
     bool canUndo_ = false, canRedo_ = false;
 };

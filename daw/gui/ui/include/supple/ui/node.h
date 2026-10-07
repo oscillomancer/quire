@@ -33,7 +33,7 @@ enum class Role {
 enum Mod : unsigned { kShift = 1, kCtrl = 2, kAlt = 4, kSuper = 8 };
 
 struct PointerEvent {
-    enum class Type { Down, Up, Move, Wheel, Enter, Leave } type = Type::Move;
+    enum class Type { Down, Up, Move, Wheel, Enter, Leave, Cancel } type = Type::Move;
     Point pos;          // window coordinates, design units
     int button = 0;     // 1 left, 2 middle, 3 right
     int clicks = 1;     // 2 for a double click

@@ -47,11 +47,14 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
 Views observe the session through the bus's event stream (per-topic
 sequence numbers; `event.dropped` → resnapshot, `ARCHITECTURE.md` §3). Each
 view keeps a **view model** keyed by stable object ids (`tr_12`, `it_7`…)
-and, on a version change, diffs the objects it shows (the model's
+and keys its snapshot cache by (project generation, version). Project
+replacement forces a full resnapshot, even when ids and versions repeat.
+Within a generation, a version change diffs the objects it shows (the model's
 `diff(versionA, versionB)` already exists for ADR-0008) and invalidates only
 the affected nodes. A view never caches pixels across versions without a
 key that includes the object's content revision. The arrange view uses the
-version store's change list for adjacent edits and undo; branch jumps compare
+version store's change list for adjacent edits and undo within the same
+generation; branch jumps compare
 shared object identities. Track geometry changes rebuild the rows; other
 edits update affected controls, item indexes and old/new item footprints.
 Unrelated FX parameter edits preserve TCP control/capture identity and do
@@ -68,6 +71,16 @@ canonical JSON, never in the project's diff) plus per-user settings
 (`$XDG_CONFIG_HOME/<slug>/`). Selection is exposed read-only to agents
 (`gui.selection` query) because "the selected items" is useful context;
 agents never depend on it for correctness.
+
+Before project replacement, the old project's sidecar is flushed. The new
+project's sections reset to their registered defaults before loading its
+sidecar; absent files or sections retain those defaults. Sidecars use
+`supple.ui/1.0`; a file without a `schema` reads as 1.x, and a different
+schema major is treated as absent and its file is left untouched. Save As preserves the current layout and copies it to
+the new sidecar, subject to the same schema protection.
+
+Screenset names trim leading and trailing spaces and tabs. Import skips
+empty names and silently keeps the first entry when trimmed names collide.
 
 ## 2. Toolkit (`daw/gui/ui`)
 
@@ -90,7 +103,13 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   Keyboard: focus chain, Tab navigation, shortcuts resolved by the actions
   system (§6) with context sections (arrange, MIDI editor, mixer, text
   field). Text input through SDL3 text-input events (IME composition shown
-  inline).
+  inline). Hiding a dock or panel releases focus and pointer capture within
+  its subtree (`Root::releaseWithin`), sending `Cancel` to the captured
+  control. Continuous edits end as one undo step; uncommitted drag previews
+  and pending button clicks are discarded. Focus and capture outside the
+  subtree are preserved. A closing popup restores focus only to a node
+  still in the tree, visible through all ancestors and enabled through all
+  ancestors; otherwise it restores no focus.
 - **Damage.** Each window keeps a dirty-rect list; nodes invalidate
   themselves; a frame redraws only damaged regions (scissored). Removed nodes
   survive the current input dispatch; focus, hover and capture are resolved
@@ -113,7 +132,11 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   motion durations, strip-type colours) loaded from JSON; light and dark
   variants; widgets read tokens only, never literals. Extends the plugin
   template's `Theme.h` contract so stock plugin editors and the DAW share
-  tokens.
+  tokens. Colour values are `#` followed by exactly six hexadecimal digits.
+  Sizes (`type`, `space`, `radius`) are finite, non-negative numbers within
+  the nonzero range of `float`, or zero. Invalid values produce structured
+  errors with escaped JSON-pointer paths. Theme and arrange hex colours share
+  the same strict colour parser.
 - **Animation.** Explicit, short, interruptible (eased, ≤ 150 ms) and only
   on state changes the user caused; animation requests frames, idle stops
   them.
@@ -236,7 +259,8 @@ on strips; plugin parameters), time selection, snapping grid, playhead with
 follow modes. On every version change, deleted track and item IDs are
 pruned from transient selection; undo restores objects, not old selection.
 MIDI editor selection clears on external version changes, and a gesture
-cannot commit against a version newer than the one where it started.
+cannot commit against a different project generation or version from the
+one where it started.
 
 Gestures (P0, `reaper-ux.md` 8–13): drop files onto tracks/timeline, move,
 trim edges, split (S), duplicate, slip (Alt-drag), stretch (with the rate
@@ -255,7 +279,8 @@ vertical track height per track and global.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction. Clipboard track offsets are in
 channel order; pasting skips envelope rows and reports items dropped for
-lack of a target channel. MIDI thumbnails map offset, rate and loop passes
+lack of a target channel. Project replacement clears the item clipboard.
+MIDI thumbnails map offset, rate and loop passes
 as playback does. Fade shapes and curve bends share playback's evaluator.
 Automation drawing samples only visible time and bounds loop glyph work;
 plugin automation interpolates in the playback parameter domain (ADR-0010).
@@ -353,9 +378,12 @@ Piano roll (instanced notes; draw, select, move, resize, velocity drag,
 quantize, transpose), velocity and CC lanes, and a **notation panel**: the
 item's notation text (`libs/notation`) beside the roll, editable with live
 compile diagnostics (the compiler's located errors and hints); edits in
-either side update the other through `item.*` commands. This is the
+either side update the other through `midi.edit` (event edits) and
+`midi.write` (notation replacement). This is the
 LLM-native differentiator: the same text an agent writes is visible and
-editable by the human. Event list view is P1.
+editable by the human. The event list edits notes and CC events;
+double-click editing requires a row hit and edits that row. Roll gesture
+anchors use exact model timing rather than the rounded `midi.notes` query.
 
 The panel's top border is a drag handle: dragging resizes the panel (up is
 taller; up to nearly the whole window, always leaving the transport and a strip
@@ -379,6 +407,9 @@ add-to-project, queue. Every option maps to a schema field; nothing is
 GUI-only. A nonempty invalid numeric field blocks preview, queue insertion
 and rendering with a field diagnostic. Cancelled jobs remain labelled
 cancelled and retain any partial result files returned by the engine.
+The Add-to-project checkbox reflects its stored flag whenever the dialog
+opens. The dialog tracks one render or queue job at a time; a second launch
+is refused with a status message while it tracks that job.
 
 ### 4.9 Recording
 
@@ -392,6 +423,9 @@ A dock showing the command log (every command with origin — GUI, agent,
 Lua, MCP — arguments, result/error) and the version history per branch
 (undo/redo, jump to version, branch list). Agent commands are visibly
 attributed.
+The history panel refreshes on changes to the project generation, head
+version, branch list or current branch name, including branch changes that
+leave the head version unchanged.
 
 ## 5. Agent panel (`daw/agent-panel`)
 
@@ -412,6 +446,10 @@ attributed.
   crossfaded). **Accept** merges (fast-forward or the replay merge), **reject**
   deletes the branch. Every agent action is in the undo history and the
   command log.
+- **Proposal identity:** a proposal belongs to the project generation and
+  path at branch creation. Audition, diff, accept, reject and follow-up send
+  check both and refuse a mismatch with a message that the proposal belongs
+  to a different project. Save As also changes this identity through the path.
 - **Listening requests:** when the skill says "ask the human to listen",
   the agent posts a listening card (what to listen for, which region, A/B
   targets) instead of deciding alone.

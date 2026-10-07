@@ -81,6 +81,7 @@ bool ScrollBar::onPointer(const PointerEvent& e) {
                 return true;
             }
             return grab_.has_value();
+        case PointerEvent::Type::Cancel:
         case PointerEvent::Type::Up:
             grab_.reset();
             invalidate();

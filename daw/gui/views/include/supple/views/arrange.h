@@ -82,7 +82,8 @@ class ArrangeView : public ui::Node {
     // Takes the session to show (cheap: sessions share structure) and
     // updates only the affected rows/items; history hints are relative to the
     // currently displayed snapshot (forward or backward).
-    void show(const model::Session& session, const std::vector<model::Change>* changes = nullptr);
+    void show(const model::Session& session, const std::vector<model::Change>* changes = nullptr,
+              std::uint64_t generation = 0);
     // Reads the transport (at most once per 16 ms) and moves the playhead;
     // true when the playhead moved (the app loop keeps its wait short then).
     bool poll();
@@ -128,6 +129,7 @@ class ArrangeView : public ui::Node {
     float rowHeight() const { return layout_.globalHeight(); }
     const RulerStats& rulerStats() const;
 
+    std::uint64_t projectGeneration() const { return generation_; }
     const model::Session& session() const { return layout_.session(); }
     double timeAt(float x) const { return lanes_->timeAt(x); }
     float xAt(double seconds) const { return lanes_->xAt(seconds); }
@@ -150,6 +152,7 @@ class ArrangeView : public ui::Node {
     peaks::PeakService& peaks_;
     Resolve resolve_;
     TransportSource transportSource_;
+    std::uint64_t generation_ = ~std::uint64_t{0};
     TrackLayout layout_;
     Viewport view_;
     Transport transport_;
