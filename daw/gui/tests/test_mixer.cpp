@@ -668,6 +668,25 @@ TEST_CASE("mixer: a selected strip's controls act on every selected track, one u
     REQUIRE(f.root->click("mixer.solo." + c));
     CHECK(f.track(c).solo == model::Solo::On);
     CHECK(f.track(a).solo == model::Solo::Off);
+    f.refresh();
+    // Polarity and mono (ADR-0022) spread like mute, busses included.
+    s0 = steps();
+    REQUIRE(f.root->click("mixer.polarity." + bus));
+    CHECK(f.track(a).phaseInvert);
+    CHECK(f.track(b).phaseInvert);
+    CHECK(f.track(bus).phaseInvert);
+    CHECK_FALSE(f.track(c).phaseInvert);
+    CHECK(steps() == s0 + 1);
+    f.refresh();
+    CHECK(f.strip(b).polarity->on());
+    REQUIRE(f.root->click("mixer.mono." + c));
+    CHECK(f.track(c).mono);
+    CHECK_FALSE(f.track(a).mono);
+    f.refresh();
+    REQUIRE(f.root->click("mixer.mono.tr_0"));  // the master's: a mono check of the mix
+    CHECK(f.track("tr_0").mono);
+    f.refresh();
+    CHECK(f.strip("tr_0").mono->on());
     CHECK(f.errors.empty());
 }
 

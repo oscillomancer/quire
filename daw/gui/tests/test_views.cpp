@@ -864,6 +864,20 @@ TEST_CASE("the TCP toggles mute, solo, arm and monitor on the strip") {
     sync();
     press(root, panel->controlNode(tr2, "monitor"));  // Off -> On
     CHECK(s.app->head().tracks.find(tr2)->record.monitor == model::Monitor::On);
+    sync();
+    // Polarity and mono sit on the level row, before the fader (ADR-0022).
+    REQUIRE(panel->controlNode(tr2, "polarity"));
+    CHECK(panel->controlNode(tr2, "mono")->bounds().right() <=
+          panel->controlNode(tr2, "fader")->bounds().x);
+    press(root, panel->controlNode(tr2, "polarity"));
+    CHECK(s.app->head().tracks.find(tr2)->phaseInvert);
+    sync();
+    press(root, panel->controlNode(tr2, "mono"));
+    CHECK(s.app->head().tracks.find(tr2)->mono);
+    sync();
+    CHECK(panel->controlNode(tr2, "polarity")->valueText() == "on");
+    press(root, panel->controlNode(tr2, "polarity"));
+    CHECK_FALSE(s.app->head().tracks.find(tr2)->phaseInvert);
     CHECK(tcp.error.empty());
     // A master has neither arm nor monitor.
     const model::Id master = model::kMaster;

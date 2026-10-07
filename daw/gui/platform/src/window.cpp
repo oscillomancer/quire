@@ -91,6 +91,30 @@ std::uint32_t Window::id() const { return SDL_GetWindowID(window_); }
 
 void Window::setSize(int width, int height) { SDL_SetWindowSize(window_, width, height); }
 
+void Window::setPosition(int x, int y) { SDL_SetWindowPosition(window_, x, y); }
+
+std::pair<int, int> Window::position() const {
+    int x = 0, y = 0;
+    SDL_GetWindowPosition(window_, &x, &y);
+    return {x, y};
+}
+
+bool onDisplay(int x, int y, int width, int height) {
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    if (!displays) return false;
+    bool shown = false;
+    for (int i = 0; i < count && !shown; ++i) {
+        SDL_Rect b{};
+        if (!SDL_GetDisplayBounds(displays[i], &b)) continue;
+        const int w = std::min(x + width, b.x + b.w) - std::max(x, b.x);
+        const int h = std::min(y + height, b.y + b.h) - std::max(y, b.y);
+        shown = w >= std::min(48, width) && h >= std::min(48, height);
+    }
+    SDL_free(displays);
+    return shown;
+}
+
 void Window::setResizable(bool resizable) { SDL_SetWindowResizable(window_, resizable); }
 
 void Window::setTitle(const std::string& title) { SDL_SetWindowTitle(window_, title.c_str()); }

@@ -131,6 +131,11 @@ TEST_CASE("a multi-out instrument grows its track and pins its outputs (ADR-0021
     CHECK(track("tr_4").channels == 98);
     CHECK(fx("fx_3").pins.out.size() == 98);
     CHECK(fx("fx_3").pins.out.back() == 98);
+    // The project saves and reopens with them.
+    auto reopened = model::parseProject(model::serializeProject(app->head()));
+    REQUIRE_MESSAGE(reopened, (reopened ? "" : reopened.error().message));
+    CHECK(reopened->tracks.find(*model::Id::parse("tr_4"))->channels == 98);
+    CHECK(reopened->fx.find(*model::Id::parse("fx_3"))->pins.out.size() == 98);
     // An effect's extra outputs (the key mix's) stay unconnected; the input
     // chain stays stereo.
     run(bus, "fx.add", R"({"track":"tr_3","plugin":"com.suppleaudio.test.keymix"})");
@@ -139,8 +144,7 @@ TEST_CASE("a multi-out instrument grows its track and pins its outputs (ADR-0021
         R"({"track":"tr_2","plugin":"com.suppleaudio.test.multiout","chain":"input"})");
     CHECK(track("tr_2").channels == 4);
     // The kick's pair, sent to the buss, is what the buss hears.
-    run(bus, "route.add",
-        R"({"from":"tr_1","to":"tr_3","channels":{"from":[3,4],"to":[1,2]}})");
+    run(bus, "route.add", R"({"from":"tr_1","to":"tr_3","channels":{"from":[3,4],"to":[1,2]}})");
     // fx.set: 0 leaves an auxiliary output unconnected, never a main one.
     run(bus, "fx.set", R"({"fx":"fx_1","pins":{"out":[1,2,0,0,5,6]}})");
     auto zero = bus.execute({"fx.set", j(R"({"fx":"fx_1","pins":{"out":[0,2]}})"), kOrigin});

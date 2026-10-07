@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include "plan.h"
 
@@ -238,6 +239,98 @@ TEST_CASE("Console 9: envelope activation and reversed mode fades preserve contr
     CHECK(std::abs(source(back).post.l[0] - last) < 1e-4f);
     CHECK(source(back).post.l[0] >= last);
     CHECK(source(back).encoder.left == 479);
+}
+
+namespace {
+using TrackEdit = std::function<void(model::Track&)>;
+// A channel hearing device inputs 1 and 2 (a stereo source), its track and
+// the master's edited.
+model::Session stereoSource(bool console9, const TrackEdit& channel = {},
+                            const TrackEdit& master = {}) {
+    model::EditTxn t(model::Session::create({.console9 = console9, .seed = 777}), 1);
+    const Id ch = strip(t, model::StripType::Channel);
+    model::Route input;
+    input.from.hwChannels = std::vector<int>{1, 2};
+    input.to.track = ch;
+    const Id inputId = t.create(input);
+    t.modify<model::Track>(ch, [&](auto& tr) {
+        tr.record.monitor = model::Monitor::On;
+        tr.record.armed = true;
+        tr.record.input = inputId;
+        if (channel) channel(tr);
+    });
+    if (master) t.modify<model::Track>(kMaster, [&](auto& tr) { master(tr); });
+    auto s = t.commit();
+    REQUIRE(s);
+    return *s;
+}
+// The master's output (left, right) for a constant stereo input.
+std::pair<std::vector<double>, std::vector<double>> runStereo(Plan& p, float l, float r,
+                                                              std::uint32_t total = 2048) {
+    std::vector<float> left(p.block, l), right(p.block, r);
+    std::vector<double> outL, outR;
+    const float* inputs[] = {left.data(), right.data()};
+    p.deviceIn = inputs;
+    p.deviceInChannels = 2;
+    for (std::uint32_t pos = 0; pos < total; pos += p.block) {
+        REQUIRE(processBlock(p, pos, p.block));
+        const auto& post = p.nodes[p.mainMaster].post;
+        for (std::uint32_t i = 0; i < p.block; ++i) {
+            outL.push_back(static_cast<double>(post.l[i]));
+            outR.push_back(static_cast<double>(post.r[i]));
+        }
+    }
+    p.deviceIn = nullptr;
+    return {outL, outR};
+}
+}  // namespace
+
+TEST_CASE("strip polarity and mono act before the fader and the encode, ramped (ADR-0022)") {
+    auto pool = emptyPool();
+    for (bool console9 : {false, true}) {
+        CAPTURE(console9);
+        auto base = plan(stereoSource(console9), pool, 128);
+        const auto [l0, r0] = runStereo(base, .25f, .05f);
+        REQUIRE(l0[1000] > r0[1000]);
+        // Polarity: the same signal, negated (Console 9's curves are odd; its
+        // dither is far below this tolerance).
+        auto inverted = plan(
+            stereoSource(console9, [](model::Track& ch) { ch.phaseInvert = true; }), pool, 128);
+        const auto [li, ri] = runStereo(inverted, .25f, .05f);
+        CHECK(li[1000] == doctest::Approx(-l0[1000]).epsilon(1e-5));
+        CHECK(ri[1000] == doctest::Approx(-r0[1000]).epsilon(1e-5));
+        // Mono on the channel: as if both inputs carried their mean, before the pan.
+        auto mono = plan(stereoSource(console9,
+                                      [](model::Track& ch) {
+                                          ch.mono = true;
+                                          ch.pan = 30;
+                                      }),
+                         pool, 128);
+        auto mean = plan(stereoSource(console9, [](model::Track& ch) { ch.pan = 30; }), pool, 128);
+        const auto [lm, rm] = runStereo(mono, .25f, .05f);
+        const auto [le, re] = runStereo(mean, .15f, .15f);
+        CHECK(lm[1000] == doctest::Approx(le[1000]).epsilon(1e-5));
+        CHECK(rm[1000] == doctest::Approx(re[1000]).epsilon(1e-5));
+        CHECK(rm[1000] > lm[1000]);  // the pan (right) still places it
+        // Mono on the master: both outputs equal.
+        auto master =
+            plan(stereoSource(console9, {}, [](model::Track& m) { m.mono = true; }), pool, 128);
+        const auto [lM, rM] = runStereo(master, .25f, .05f);
+        CHECK(lM[1000] == doctest::Approx(rM[1000]).epsilon(1e-6));
+        CHECK(lM[1000] == doctest::Approx(.5 * (l0[1000] + r0[1000])).epsilon(1e-4));
+    }
+    // A switch ramps over the smoothing time when the plan changes: no step.
+    auto before = plan(stereoSource(false), pool, 128);
+    const auto [l0, r0] = runStereo(before, .25f, .05f);
+    auto after =
+        plan(stereoSource(false, [](model::Track& ch) { ch.phaseInvert = true; }), pool, 128);
+    carryMix(before, after, -1);
+    const auto [l, r] = runStereo(after, .25f, .05f);
+    const double settled = l0.back();
+    CHECK(l[0] > .9 * settled);
+    CHECK(l[after.smoothFrames + 10] == doctest::Approx(-settled).epsilon(1e-5));
+    for (std::uint32_t i = 1; i < after.smoothFrames; ++i)
+        CHECK(std::abs(l[i] - l[i - 1]) < 4.0 * settled / after.smoothFrames);
 }
 
 TEST_CASE("engine.strips-fuzz: typed graphs, all taps, keys, PDC and deterministic renders") {

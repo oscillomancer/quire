@@ -168,6 +168,8 @@ class TcpPanel::Row : public ui::Node {
     ui::TextField* rename_ = nullptr;
     ui::Toggle* mute_ = nullptr;
     ui::Toggle* solo_ = nullptr;
+    ui::Toggle* polarity_ = nullptr;  // polarity and mono (ADR-0022), on the fader row
+    ui::Toggle* mono_ = nullptr;
     ui::ArmButton* arm_ = nullptr;
     ui::MonitorButton* monitor_ = nullptr;
     ui::Fader* fader_ = nullptr;
@@ -236,7 +238,18 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         args["solo"] = on ? "on" : "off";
         setTrack(std::move(args), {});
     });
-    mute_->pill = solo_->pill = true;
+    polarity_ =
+        &emplace<ui::Toggle>(id + ".polarity", "\u00d8", "polarity", [this, setTrack](bool on) {
+            json::Value args = trackArg(*track_);
+            args["phase_invert"] = on;
+            setTrack(std::move(args), {});
+        });
+    mono_ = &emplace<ui::Toggle>(id + ".mono", "mono", "mono", [this, setTrack](bool on) {
+        json::Value args = trackArg(*track_);
+        args["mono"] = on;
+        setTrack(std::move(args), {});
+    });
+    mute_->pill = solo_->pill = polarity_->pill = mono_->pill = true;
     arm_ = &emplace<ui::ArmButton>(id + ".arm", [this, setTrack](bool on) {
         json::Value args = trackArg(*track_);
         args["armed"] = on;
@@ -335,6 +348,8 @@ void TcpPanel::Row::refresh(const model::Session& session) {
     if (!renaming_) rename_->setText(name);
     mute_->setOn(tr->mute);
     solo_->setOn(tr->solo != model::Solo::Off);
+    polarity_->setOn(tr->phaseInvert);
+    mono_->setOn(tr->mono);
     arm_->setOn(tr->record.armed);
     monitor_->setMode(tr->record.monitor == model::Monitor::Off  ? ui::MonitorButton::Mode::Off
                       : tr->record.monitor == model::Monitor::On ? ui::MonitorButton::Mode::On
@@ -386,6 +401,8 @@ ui::Node* TcpPanel::Row::control(std::string_view what) const {
     if (what == "rename") return rename_;
     if (what == "mute") return mute_;
     if (what == "solo") return solo_;
+    if (what == "polarity") return polarity_;
+    if (what == "mono") return mono_;
     if (what == "arm") return arm_;
     if (what == "monitor") return monitor_;
     if (what == "fader") return fader_;
@@ -448,10 +465,12 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         out_->arrange(canvas, {tx, ty, 28, 14});
         tx += 30;
     }
-    fader_->visible = big;
-    pan_->visible = big;
+    // The level row, in signal order: polarity and mono, the fader, the pan.
+    fader_->visible = pan_->visible = polarity_->visible = mono_->visible = big;
     if (big) {
-        fader_->arrange(canvas, {x + 6, r.y + 42, std::max(30.0f, right - x - 64), 14});
+        polarity_->arrange(canvas, {x + 6, r.y + 42, 18, 14});
+        mono_->arrange(canvas, {x + 26, r.y + 42, 36, 14});
+        fader_->arrange(canvas, {x + 66, r.y + 42, std::max(30.0f, right - x - 124), 14});
         pan_->arrange(canvas, {right - 52, r.y + 42, 42, 14});
     }
 }

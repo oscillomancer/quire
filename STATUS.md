@@ -257,6 +257,16 @@ Nate's next list, done by the orchestrator:
   x24/x48 DirectOut variants have 25/49 and were refused at 16) and 128 track
   channels. A plain plugin's state is captured on mark_dirty and before every
   save (sample paths were never saved).
+- Projects with a strip over 8 channels saved but would not reopen (the
+  project schema still capped `channels` at 8); fixed, with a save/reopen check.
+- Strip polarity and mono (ADR-0022, amends ADR-0019 §5): `phase_invert` and
+  `mono` on every strip, after the inserts and before the fader (never between
+  a Console 9 encode and decode), ramped like mute. "Ø" and "mono" pills on
+  the TCP's level row and in a mixer row above the pan; they follow the
+  selection.
+- Plug-in editors reopen where they were last and at their last size
+  (resizable editors), per effect, kept in the UI file's `plugin_windows`
+  section so they survive reopening the project.
 
 ## Team (Hermes workers via Herdr; Codex retired)
 

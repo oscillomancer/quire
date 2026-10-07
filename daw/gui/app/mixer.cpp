@@ -22,13 +22,14 @@ namespace {
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 constexpr float kStripW = 92;
 // The strip's chain section is the only one that follows the panel's height;
-// the rest (name, sends, rec, pan, fader, value, M/S, gaps, padding) is fixed.
+// the rest (name, sends, rec, polarity/mono, pan, fader, value, M/S, gaps,
+// padding) is fixed.
 constexpr float kSlotH = 18, kSlotGap = 2;
 constexpr float kGripH = 5, kHeaderH = 30;
 constexpr float kFaderH = 133;  // the fader and meter row
 // The fixed rows of a channel with no sends, their gaps and the padding (each
 // send adds kSendH; busses and masters have no arm/monitor row).
-constexpr float kStripChrome = 149;
+constexpr float kStripChrome = 171;
 constexpr float kSendH = 14;
 constexpr float kDragThreshold = 4;
 
@@ -869,6 +870,19 @@ void Mixer::rebuild() {
                 ui::SizeRule::fixed(20);  // as wide as the monitor: the arm stays centred
             rec.emplace<ui::Node>("mixer.rec.r." + tid).layout.width = ui::SizeRule::fraction();
         }
+        // Polarity and mono (ADR-0022): after the chain, before the pan and the fader.
+        auto& util = frame->emplace<ui::Node>("mixer.util." + tid);
+        util.layout.dir = ui::Layout::Dir::Row;
+        util.layout.height = ui::SizeRule::fixed(18);
+        util.layout.gap = 3;
+        st.polarity = &util.emplace<ui::Toggle>(
+            "mixer.polarity." + tid, "\u00d8", "polarity",
+            [this, tid](bool on) { (void)set(tid, "phase_invert", json::Value(on)); });
+        st.mono = &util.emplace<ui::Toggle>(
+            "mixer.mono." + tid, "mono", "mono",
+            [this, tid](bool on) { (void)set(tid, "mono", json::Value(on)); });
+        st.polarity->layout.width = st.mono->layout.width = ui::SizeRule::fraction();
+        st.polarity->pill = st.mono->pill = true;
         st.pan = &frame->emplace<ui::PanControl>("mixer.pan." + tid);
         st.pan->onChange = [this, tid](double pan, ui::Gesture g) {
             if (g == ui::Gesture::Begin) ++gesture_;
@@ -987,7 +1001,8 @@ void Mixer::dragSend(const std::string& track, DragPhase phase, ui::Point p) {
     // Busses and masters take sends; a channel takes only hardware input. A
     // strip the track already sends to takes no second one.
     const Strip* over = stripAt(p);
-    const auto from = model::Id::parse(track), to = over ? model::Id::parse(over->track) : std::nullopt;
+    const auto from = model::Id::parse(track),
+               to = over ? model::Id::parse(over->track) : std::nullopt;
     if (over && over->track != track && over->type != "channel" && from && to &&
         !model::sendsTo(app_.head(), *from, *to)) {
         d.drop = DragView::Drop::Copy;
@@ -1143,6 +1158,8 @@ void Mixer::update() {
         st.pan->setValue(t->pan);
         st.mute->setOn(t->mute);
         st.solo->setOn(t->solo != model::Solo::Off);
+        st.polarity->setOn(t->phaseInvert);
+        st.mono->setOn(t->mono);
         if (st.arm) st.arm->setOn(t->record.armed);
         if (st.monitor)
             st.monitor->setMode(

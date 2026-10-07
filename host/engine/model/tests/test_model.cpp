@@ -382,6 +382,8 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
     CHECK(migrated->project->masters == std::vector<Id>{kMaster});
     CHECK(migrated->tracks.find(Id{Kind::Track, 1})->type == StripType::Buss);
     CHECK(migrated->tracks.find(Id{Kind::Track, 3})->type == StripType::Buss);
+    CHECK(
+        migrated->tracks.find(Id{Kind::Track, 1})->phaseInvert);  // a strip field again (ADR-0022)
     const Id child{Kind::Track, 4};
     CHECK(migrated->tracks.find(child)->name == "Folder items");
     CHECK(migrated->tracks.find(Id{Kind::Track, 1})->children.front() == child);
@@ -391,7 +393,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
     CHECK(migrated->next[Kind::Track] == 5);
     CHECK_FALSE(migrated->routes.contains(Id{Kind::Route, 3}));
     CHECK(migrated->envelopes.empty());
-    CHECK(warnings.size() == 7);
+    CHECK(warnings.size() == 6);
     bool staging = false;
     for (const auto& w : warnings) {
         CHECK_FALSE(w.path.empty());

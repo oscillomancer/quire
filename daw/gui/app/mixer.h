@@ -69,6 +69,7 @@ class Mixer {
         ui::Fader* fader = nullptr;
         ui::PanControl* pan = nullptr;
         ui::Toggle *mute = nullptr, *solo = nullptr, *arm = nullptr;
+        ui::Toggle *polarity = nullptr, *mono = nullptr;  // ADR-0022
         ui::MonitorButton* monitor = nullptr;
         ui::Label* value = nullptr;
         ui::Meter* meter = nullptr;

@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <condition_variable>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -18,6 +19,7 @@
 
 #include "supple/engine/app.h"
 #include "supple/gui/window.h"
+#include "supple/json/value.h"
 
 union SDL_Event;
 
@@ -75,6 +77,12 @@ class PluginWindows {
     bool isOpen(model::Id fx) const;
     std::function<void(const Error&)> onError;
 
+    // Where each effect's editor was last: its position and, when the editor
+    // is resizable, its size. An editor opens there again; the project's UI
+    // file keeps them ({fx id: {x, y, width, height}}).
+    json::Value saveLayout() const;
+    void loadLayout(const json::Value& layout);
+
     // Events addressed to editor windows; true when consumed.
     bool handle(const SDL_Event& e);
     // Runs due plugin timers, ready fds and resize/close requests; returns the
@@ -88,6 +96,13 @@ class PluginWindows {
         std::unique_ptr<Window> window;
         bool resizable = false;
     };
+    struct Placement {
+        int x = 0, y = 0;
+        int width = 0, height = 0;  // 0: the editor's own size (not resizable)
+    };
+    static std::optional<Placement> placementOf(const Editor& editor);
+    void remember(const Editor& editor);
+    void place(Editor& editor);  // before the window is shown
     Status attach(Editor editor, const std::string& title);
     bool reattach(Editor& editor);  // the effect's current instance, in the same window
     void drop(std::size_t index);
@@ -98,6 +113,7 @@ class PluginWindows {
     const Window* owner_ = nullptr;
     engine::EngineApp& app_;
     std::vector<Editor> editors_;
+    std::map<model::Id, Placement> placements_;
     std::unique_ptr<FdWatcher> watcher_;
     std::optional<Error> watcherError_;
     bool watcherErrorReported_ = false;

@@ -372,3 +372,147 @@ TEST_CASE("an editor follows its effect onto a replacement instance (needs a dis
     run("engine.stop", json::Value::object());
     std::filesystem::remove_all(options.workdir);
 }
+
+TEST_CASE("editor placements round-trip through the UI file's section") {
+    auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+    REQUIRE(platform);
+    engine::AppOptions options;
+    options.workdir = std::filesystem::temp_directory_path() /
+                      ("supple-editor-layout-" + std::to_string(::getpid()));
+    auto app = engine::EngineApp::create(options);
+    REQUIRE(app);
+    gui::PluginWindows windows(**platform, **app, [] {});
+    auto layout = json::parse(R"({"fx_3": {"x": 120, "y": -40, "width": 800, "height": 500},
+                                  "fx_7": {"x": 5, "y": 6},
+                                  "fx_8": {"x": 1, "y": 2, "width": 0, "height": 300},
+                                  "tr_1": {"x": 1, "y": 2}, "fx_9": {"y": 2}, "junk": 3})");
+    REQUIRE(layout);
+    windows.loadLayout(*layout);
+    // Effects only, with a position; a size only when both sides are given.
+    const auto saved = json::parse(R"({"fx_3": {"x": 120, "y": -40, "width": 800, "height": 500},
+                                       "fx_7": {"x": 5, "y": 6}, "fx_8": {"x": 1, "y": 2}})");
+    REQUIRE(saved);
+    CHECK(windows.saveLayout() == *saved);
+    windows.loadLayout(json::Value::object());  // another project's file
+    CHECK(windows.saveLayout() == json::Value::object());
+    std::filesystem::remove_all(options.workdir);
+}
+
+TEST_CASE("an effect's editor reopens where it was moved and at its size (needs a display)") {
+    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 with an X11 DISPLAY");
+        return;
+    }
+    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    REQUIRE(platform);
+    engine::AppOptions options;
+    options.workdir = std::filesystem::temp_directory_path() /
+                      ("supple-editor-place-" + std::to_string(::getpid()));
+    options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
+    options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
+    auto app = engine::EngineApp::create(options);
+    REQUIRE(app);
+    cmd::Registry registry;
+    engine::registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, **app);
+    (*app)->attachCommands(dispatcher);
+    const cmd::Origin origin{cmd::Origin::Type::Test, "editor-place-test", {}};
+    auto run = [&](const char* command, json::Value args) {
+        auto r = dispatcher.execute({command, std::move(args), origin});
+        REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+        return *r;
+    };
+    json::Value start = json::Value::object();
+    start["backend"] = "dummy";
+    run("engine.start", std::move(start));
+    // SUPPLE_EDITOR_ONLY=<name> picks the plug-in (default: the first resizable one).
+    const char* only = std::getenv("SUPPLE_EDITOR_ONLY");
+    json::Value track = json::Value::object();
+    track["type"] = "channel";
+    const std::string trackId = run("track.add", std::move(track))["track"].asString();
+    json::Value list = run("plugin.list", json::Value::object());
+    {
+        gui::PluginWindows windows(**platform, **app, [] {});
+        auto pump = [&](int ms) {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+            while (std::chrono::steady_clock::now() < until) {
+                (*app)->tick();
+                const int next = windows.service();
+                SDL_Event e;
+                if (SDL_WaitEventTimeout(&e, next < 0 ? 20 : std::min(next, 20))) windows.handle(e);
+            }
+        };
+        auto editorWindow = [] {
+            int count = 0;
+            SDL_Window** all = SDL_GetWindows(&count);
+            SDL_Window* w = count == 1 ? all[0] : nullptr;
+            SDL_free(all);
+            return w;
+        };
+        std::optional<model::Id> fx;
+        bool resizable = false;
+        for (const json::Value& p : list["plugins"].asArray()) {
+            const json::Value* n = p.find("name");
+            if (!n || !n->isString() || (only && n->asString() != only)) continue;
+            if (const json::Value* f = p.find("format");
+                f && f->isString() && f->asString() != "clap")
+                continue;
+            json::Value add = json::Value::object();
+            add["track"] = trackId;
+            add["plugin"] = p.find("id")->asString();
+            auto added = dispatcher.execute({"fx.add", std::move(add), origin});
+            if (!added) continue;
+            const auto id = *model::Id::parse((*added)["fx"].asString());
+            if (!windows.open(id)) continue;
+            pump(100);
+            resizable = (SDL_GetWindowFlags(editorWindow()) & SDL_WINDOW_RESIZABLE) != 0;
+            if (resizable || only) {
+                fx = id;
+                MESSAGE("editor of " << n->asString() << (resizable ? " (resizable)" : ""));
+                break;
+            }
+            windows.close(id);
+        }
+        if (!fx) {
+            MESSAGE("skipped: no plug-in with an editor");
+        } else {
+            SDL_Window* w = editorWindow();
+            REQUIRE(w);
+            int x0 = 0, y0 = 0, w0 = 0, h0 = 0;
+            SDL_GetWindowPosition(w, &x0, &y0);
+            SDL_GetWindowSize(w, &w0, &h0);
+            // The user moves it (and makes it larger), as a window manager would.
+            SDL_SetWindowPosition(w, x0 + 97, y0 + 61);
+            if (resizable) SDL_SetWindowSize(w, w0 + 120, h0 + 80);
+            SDL_SyncWindow(w);
+            pump(300);
+            int x1 = 0, y1 = 0, w1 = 0, h1 = 0;
+            SDL_GetWindowPosition(w, &x1, &y1);
+            SDL_GetWindowSize(w, &w1, &h1);
+            MESSAGE("opened at " << x0 << "," << y0 << " " << w0 << "x" << h0 << "; moved to " << x1
+                                 << "," << y1 << " " << w1 << "x" << h1);
+            windows.close(*fx);
+            pump(100);
+            REQUIRE(windows.open(*fx));
+            w = editorWindow();
+            REQUIRE(w);
+            SDL_SyncWindow(w);
+            pump(300);
+            int x2 = 0, y2 = 0, w2 = 0, h2 = 0;
+            SDL_GetWindowPosition(w, &x2, &y2);
+            SDL_GetWindowSize(w, &w2, &h2);
+            MESSAGE("reopened at " << x2 << "," << y2 << " " << w2 << "x" << h2);
+            CHECK(x2 == x1);
+            CHECK(y2 == y1);
+            CHECK(w2 == w1);
+            CHECK(h2 == h1);
+            // And it is in the UI file's section.
+            const json::Value saved = windows.saveLayout();
+            REQUIRE(saved.find(fx->str()));
+            CHECK(saved.find(fx->str())->find("x")->asInt() == x2);
+            windows.closeAll();
+        }
+    }
+    run("engine.stop", json::Value::object());
+    std::filesystem::remove_all(options.workdir);
+}

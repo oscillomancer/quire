@@ -91,6 +91,9 @@ struct Track {
     double volumeDb = 0.0;
     double pan = 0.0;  // % -100..100
     bool mute = false;
+    // Polarity and mono switches on the main pair, after the chain and before
+    // the fader (ADR-0022).
+    bool phaseInvert = false, mono = false;
     Solo solo = Solo::Off;
     ParentSend parentSend;
     RecordSettings record;

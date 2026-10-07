@@ -817,6 +817,8 @@ q = nil
 ---@field volume_db? number|string Quantity strings are range-checked by the server.
 ---@field pan? number|string Quantity strings are range-checked by the server.
 ---@field mute? boolean
+---@field phase_invert? boolean Flip the polarity of the main pair (after the FX chain, before the fader)
+---@field mono? boolean Sum the main pair to mono (after the FX chain, before the fader and pan): a mono check on the master
 ---@field solo? string
 ---@field armed? boolean
 ---@field record_input? integer[]
@@ -1126,7 +1128,7 @@ q = nil
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
----@field set fun(args: Quire.track_set_args): table Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
+---@field set fun(args: Quire.track_set_args): table Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
 
 ---@class Quire.track.template
 ---@field list fun(): Quire.track_template_list_result List saved track templates by name, path and effect count.

@@ -60,7 +60,8 @@ lane or take's item.
 
 ### 1.2 UI state is not session state
 
-Zoom, scroll, selection, window layout, open editors, docking and
+Zoom, scroll, selection, window layout, open editors, plug-in editor
+placements, docking and
 screensets live in a separate per-project UI file (`<name>.ui.json`,
 canonical JSON, never in the project's diff) plus per-user settings
 (keymaps, toolbars, theme) under the user config directory
@@ -179,7 +180,8 @@ else keeps the edit, Escape drops it), **strip-type badge** (Channel / Buss /
 Master: colour, shape and label differ — clear at a glance, ADR-0019),
 mute/solo (rounded pills in their own colours), arm (a red disc: faded off,
 solid armed), monitor (a speaker: an outline off, solid on, green auto),
-input (channels only for these three), volume fader and pan
+input (channels only for these three), polarity ("Ø") and mono pills at the
+start of the level row (ADR-0022), volume fader and pan
 (Console 9 Channel's controls on channels and busses; plain gain and
 balance on masters; the fader's dB scale comes from `libs/console9`'s
 mapping), "fx" (the chain window) with "+" beside it (the plugin browser
@@ -194,10 +196,10 @@ its name, which track.add sets to the first free `ch_N`, `buss_N` or
 older session shows that kind of label too.
 
 A strip control used on a selected track acts on the whole selection, in the
-TCP and the mixer alike (`gui::SelectionEdit`): mute, solo, arm, monitoring
-and the input set the same value on each (arm, monitoring and input only on
-its channels); a fader or pan drag moves each selected track by the same
-amount from where it started (clamped). A click is one undo step, a drag is
+TCP and the mixer alike (`gui::SelectionEdit`): mute, solo, polarity, mono,
+arm, monitoring and the input set the same value on each (arm, monitoring and
+input only on its channels); a fader or pan drag moves each selected track by
+the same amount from where it started (clamped). A click is one undo step, a drag is
 one. A control on a track outside the selection acts on that track alone.
 Folder/buss parentage shows as indentation and a parent bar. Under each
 parent the channels are listed first, then the busses (each in the parent's own
@@ -271,7 +273,8 @@ chain window, and the plugin browser alone); a double-click on the name
 renames the strip in place, as in the TCP. Under the chain, an input button
 (channels) and "out" (not on masters: a click opens the routing matrix, a drag
 onto a buss or master makes a send); then, on channels, monitoring and the
-arm, the arm centred. The strip's plug-in chain lists every plug-in,
+arm, the arm centred; then, on every strip, the polarity ("Ø") and mono pills
+above the pan (ADR-0022). The strip's plug-in chain lists every plug-in,
 scrolling when it is longer than its section, and takes the room a strip's
 unused rows would leave (sends show only when there are some, up to two;
 busses and masters have no arm/monitor row). Alt+click on a plug-in removes it
@@ -313,8 +316,12 @@ and poll failures are reported; editors requiring unavailable FD service
 cannot remain open. Plugin show/hide requests change the parent window's
 visibility while retaining the editor and its timer/FD service. Close takes
 precedence; when show and hide are coalesced together, hide takes precedence.
-Opening an existing hidden editor shows and raises that same window.
-Commands: `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
+Opening an existing hidden editor shows and raises that same window. Each
+effect's editor reopens where it was last, at its last size when it is
+resizable (a plug-in may adjust the size it is offered); placements are kept
+per effect in the UI file's `plugin_windows` section (`{fx id: {x, y, width,
+height}}`), so they survive closing the project. A position no longer on any
+display (a monitor that is gone) is not used. Commands: `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix
 

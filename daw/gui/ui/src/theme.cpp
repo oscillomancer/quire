@@ -36,7 +36,9 @@ Theme Theme::dark(Palette palette) {
                         {"meter", 0x8fb27au},
                         {"meter-hot", 0xd8b04au},
                         {"mute", 0xd9773fu},
-                        {"solo", 0xe0c341u}})
+                        {"solo", 0xe0c341u},
+                        {"polarity", 0x6db3c2u},
+                        {"mono", 0xb48ad0u}})
         t.colors_[k] = Color::hex(v);
     // Track colours: muted enough for the graphite ground.
     for (auto [k, v] : {std::pair{"track-red", 0xc96a5eu},
@@ -86,7 +88,9 @@ Theme Theme::light(Palette palette) {
                         {"buss", 0xa57d24u},
                         {"master", 0xa4442fu},
                         {"mute", 0xc0612au},
-                        {"solo", 0xa8890fu}})
+                        {"solo", 0xa8890fu},
+                        {"polarity", 0x2c7c8cu},
+                        {"mono", 0x8456a6u}})
         t.colors_[k] = Color::hex(v);
     for (auto [k, v] : {std::pair{"track-red", 0xb4493cu},
                         {"track-orange", 0xb8692au},

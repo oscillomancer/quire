@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "supple/base/result.h"
@@ -84,6 +85,9 @@ class Window {
     void show();
     void hide();
     void setSize(int width, int height);  // design units
+    // The position on the desktop (screen coordinates of the client area).
+    void setPosition(int x, int y);
+    std::pair<int, int> position() const;
     void setResizable(bool resizable);
     void setTitle(const std::string& title);
     std::string renderer() const;  // GL_RENDERER and GL_VERSION, for reports
@@ -101,6 +105,11 @@ class Window {
     void* context_ = nullptr;  // SDL_GLContext
     NVGcontext* vg_ = nullptr;
 };
+
+// True when a window at (x, y) of this size would show at least a corner
+// (48 x 48) on one of the current displays: a remembered position from a
+// monitor that is gone is not used.
+bool onDisplay(int x, int y, int width, int height);
 
 // Loads the bundled fonts (Inter, IBM Plex Mono) from `dir` into `vg`.
 Result<Fonts> loadFonts(NVGcontext* vg, const std::filesystem::path& dir);

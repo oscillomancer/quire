@@ -278,6 +278,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         n.keyEncoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 1), p.linearConsole);
         n.decoder.init(console9::seedsFor(s.project->seed, (n.id.n << 3) | 2), p.linearConsole);
         n.mute = t.mute;
+        n.phaseInvert = t.phaseInvert;
+        n.mono = t.mono;
         auto makeStage = [&](Id fxId) {
             const model::FxInstance& fx = *s.fx.find(fxId);
             Stage st;
@@ -320,7 +322,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             // out: the main pair, then the auxiliary outputs' channels (ADR-0021).
             const std::vector<int> mainOut(
                 pins.out.begin(),
-                pins.out.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(2, pins.out.size())));
+                pins.out.begin() +
+                    static_cast<std::ptrdiff_t>(std::min<std::size_t>(2, pins.out.size())));
             if (valid(mainOut, "output")) {
                 st.outPin[0] = mainOut[0] - 1;
                 st.outPin[1] = mainOut.size() > 1 ? mainOut[1] - 1 : -1;
@@ -1515,7 +1518,8 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
 void writeAuxOutputs(Node& node, const Stage& st, std::uint32_t n) SUPPLE_RT {
     if (!st.auxWritten || st.bypass) return;
     for (std::size_t k = 0; k < st.auxOutPin.size(); ++k)
-        if (st.auxOutPin[k] >= 0) std::copy_n(st.auxOut[k].data(), n, node.channel(st.auxOutPin[k]));
+        if (st.auxOutPin[k] >= 0)
+            std::copy_n(st.auxOut[k].data(), n, node.channel(st.auxOutPin[k]));
 }
 
 // A stage of a strip with auxiliary channels, or with pins (ADR-0020): the
@@ -1796,6 +1800,10 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     if (node.noteTarget >= 0)
         trackVoices(node.chain[static_cast<std::size_t>(node.noteTarget)], node.held,
                     &node.liveHeld);
+    // 3b. Polarity and mono (ADR-0022), on the main pair after the chain:
+    // before the fader and the Console 9 encode, as the pre-fader taps hear it.
+    node.utility.set(node.phaseInvert, node.mono, p.smoothFrames);
+    if (!node.utility.transparent()) node.utility.process(node.sum.l.data(), node.sum.r.data(), n);
     node.preFader.copyFrom(node.sum, n);
     // Metering (P5.3c): a strip's meter shows the signal before the Console 9
     // encode — after the fader and after the pan law (one multiply per channel
@@ -2014,6 +2022,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
             n.keyFader.reset();
             n.decoder.reset();
             n.fader.reset();
+            n.utility.reset();
         }
         for (std::size_t ei : n.out) {
             Edge& e = p.edges[ei];
@@ -2072,6 +2081,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
             n.keyFader.reset();
             n.decoder.reset();
             n.fader.reset();
+            n.utility.reset();
         }
         for (std::size_t ei : n.out) {
             Edge& e = p.edges[ei];
@@ -2206,6 +2216,7 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
             }
             if (n.type == old.type) {
                 n.fader = old.fader;
+                n.utility = old.utility;
                 n.encoder.carry(old.encoder, to.smoothFrames);
                 n.keyEncoder.carry(old.keyEncoder, to.smoothFrames);
                 n.keyFader = old.keyFader;

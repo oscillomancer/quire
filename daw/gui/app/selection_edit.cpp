@@ -8,8 +8,9 @@ namespace supple::gui {
 namespace {
 
 constexpr double kSilenceDb = -150.0, kTopDb = 12.0;
-constexpr const char* kShared[] = {"mute",         "solo",        "armed",     "monitor",
-                                   "record_input", "record_midi", "volume_db", "pan"};
+constexpr const char* kShared[] = {"mute",         "solo", "armed",        "monitor",
+                                   "phase_invert", "mono", "record_input", "record_midi",
+                                   "volume_db",    "pan"};
 
 const model::Track* trackOf(const model::Session& s, const std::string& text) {
     const auto id = model::Id::parse(text);

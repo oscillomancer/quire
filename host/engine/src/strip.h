@@ -43,6 +43,34 @@ struct FaderControl {
     }
     void reset() SUPPLE_RT { *this = {}; }
 };
+// The strip's polarity and mono switches (ADR-0022). A switch ramps over the
+// smoothing time like mute (polarity through silence), so it never clicks.
+struct UtilityControl {
+    ControlRamp polarity, mono;
+    bool valid = false;
+    void set(bool invert, bool sum, std::uint32_t frames) SUPPLE_RT {
+        if (!valid) {
+            polarity.value = polarity.target = invert ? -1 : 1;
+            mono.value = mono.target = sum ? 1 : 0;
+            valid = true;
+        }
+        polarity.set(invert ? -1 : 1, frames);
+        mono.set(sum ? 1 : 0, frames);
+    }
+    bool transparent() const SUPPLE_RT {
+        return !polarity.left && !mono.left && polarity.value == 1 && mono.value == 0;
+    }
+    void process(float* l, float* r, std::uint32_t n) SUPPLE_RT {
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const auto g = static_cast<float>(polarity.next());
+            const auto m = static_cast<float>(mono.next());
+            const float mid = .5f * (l[i] + r[i]);
+            l[i] = (l[i] + (mid - l[i]) * m) * g;
+            r[i] = (r[i] + (mid - r[i]) * m) * g;
+        }
+    }
+    void reset() SUPPLE_RT { *this = {}; }
+};
 
 template <class Stage>
 struct ConsoleStage {

@@ -540,7 +540,7 @@ const Schema<Track>& schemaOf<Track>() {
         b.field("parent", &Track::parent, idSchema());
         b.field("children", &Track::children, ids());
         dflt(b, d.children);
-        b.field("channels", &Track::channels, intS().range(1, 8));
+        b.field("channels", &Track::channels, intS().range(1, kMaxTrackChannels));
         dflt(b, d.channels);
         b.field("volume_db", &Track::volumeDb, num().range(kSilenceDb, 12));
         dflt(b, d.volumeDb);
@@ -548,6 +548,10 @@ const Schema<Track>& schemaOf<Track>() {
         dflt(b, d.pan);
         b.field("mute", &Track::mute, boolean());
         dflt(b, d.mute);
+        b.field("phase_invert", &Track::phaseInvert, boolean());
+        dflt(b, d.phaseInvert);
+        b.field("mono", &Track::mono, boolean());
+        dflt(b, d.mono);
         b.field("solo", &Track::solo,
                 en<Solo>({{Solo::Off, "off"},
                           {Solo::On, "on"},

@@ -75,6 +75,8 @@ is decoded, so the universal track has to become typed.
    The C9 Buss is fixed at neutral (A = B = 0.5) and has no fields.
    `width`, `trim` and `phase_invert` leave the strip (a utility insert does
    them); envelopes target `{track, param: volume|pan|mute}` only.
+   *(Amended 2026-10-06, ADR-0022: `phase_invert` and `mono` are strip
+   fields again, after the inserts and before the fader.)*
 6. **Console 9 off** (level-matched; Nate, 2026-09-30, HUMAN_REVIEW #13).
    `project.console9` (bool, default `true`). Off, every Console 9 stage keeps
    its gains and pan law but runs linear: no encode/decode curves, no

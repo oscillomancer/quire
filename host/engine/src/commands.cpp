@@ -465,7 +465,7 @@ struct TrackSetArgs {
     std::optional<std::string> name, color, notes;
     std::optional<double> volumeDb, pan;
     std::optional<model::StripType> type;
-    std::optional<bool> mute;
+    std::optional<bool> mute, phaseInvert, mono;
     std::optional<std::string> solo;
     std::optional<bool> armed;
     std::optional<std::vector<std::int64_t>> recordInput;
@@ -1330,7 +1330,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "track.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Set track fields: type, name, volume, pan, mute, solo, parent send, arming.";
+        c.summary =
+            "Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.";
         c.description =
             "Only the given fields change. solo: off | on | in_place | defeat. armed + "
             "record_input (device input channels, 1-based) prepare a track for "
@@ -1354,6 +1355,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("pan", &TrackSetArgs::pan,
                        schema::number().range(-100, 100).unit(units::Unit::percent))
                 .field("mute", &TrackSetArgs::mute, schema::boolean())
+                .field("phase_invert", &TrackSetArgs::phaseInvert,
+                       schema::boolean().doc("Flip the polarity of the main pair (after the FX "
+                                             "chain, before the fader)"))
+                .field("mono", &TrackSetArgs::mono,
+                       schema::boolean().doc("Sum the main pair to mono (after the FX chain, "
+                                             "before the fader and pan): a mono check on the "
+                                             "master"))
                 .field("solo", &TrackSetArgs::solo,
                        schema::string().pattern("^(off|on|in_place|defeat)$",
                                                 "off, on, in_place or defeat"))
@@ -1379,11 +1387,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                            "What this channel's items follow when the tempo changes (those "
                            "that inherit it): project, beats, time or beats_position; they keep "
                            "their place now"))
-                .field("channels", &TrackSetArgs::channels,
-                       schema::integer().range(1, model::kMaxTrackChannels).doc(
-                           "1-2: the strip's main pair; up to 128 adds auxiliary channels 3-128 "
-                           "for routes and plug-in pins (a detector on 3/4, a multi-out "
-                           "instrument's outputs), outside the fader, pan and parent send"))
+                .field(
+                    "channels", &TrackSetArgs::channels,
+                    schema::integer()
+                        .range(1, model::kMaxTrackChannels)
+                        .doc("1-2: the strip's main pair; up to 128 adds auxiliary channels 3-128 "
+                             "for routes and plug-in pins (a detector on 3/4, a multi-out "
+                             "instrument's outputs), outside the fader, pan and parent send"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1396,6 +1406,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"Play and record a MIDI keyboard (any device, channel 1)",
              obj(R"({"track": "tr_1", "armed": true, "record_midi": "*", "midi_channel": 1, "monitor": "auto"})"),
              obj("{}"), "song"},
+            {"Check the mix in mono", obj(R"({"track": "tr_0", "mono": true})"), obj("{}"), "song"},
             {"Four channels: a key signal can arrive on 3/4",
              obj(R"({"track": "tr_1", "channels": 4})"), obj("{}"), "song"}};
         c.run = [](const TrackSetArgs& a, Context& ctx) -> Result<Empty> {
@@ -1498,6 +1509,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (a.volumeDb) t.volumeDb = *a.volumeDb;
                 if (a.pan) t.pan = *a.pan;
                 if (a.mute) t.mute = *a.mute;
+                if (a.phaseInvert) t.phaseInvert = *a.phaseInvert;
+                if (a.mono) t.mono = *a.mono;
                 if (a.parentSend) t.parentSend.enabled = *a.parentSend;
                 if (a.timebase) t.timebase = *a.timebase;
                 if (a.channels) t.channels = static_cast<int>(*a.channels);

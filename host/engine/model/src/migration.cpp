@@ -68,7 +68,7 @@ Result<json::Value> migrateProject1(json::Value doc, std::vector<schema::Warning
         tr["type"] = stripTypeName(type);
         if (type == StripType::Master) tr["parent"] = nullptr;
         for (const auto& [key, def] : std::initializer_list<std::pair<const char*, json::Value>>{
-                 {"width", 100.0}, {"trim", 0.0}, {"trim_db", 0.0}, {"phase_invert", false}}) {
+                 {"width", 100.0}, {"trim", 0.0}, {"trim_db", 0.0}}) {
             if (const auto* value = tr.find(key)) {
                 if (*value != def)
                     warn("dropped strip " + std::string(key) + "; use a utility insert",

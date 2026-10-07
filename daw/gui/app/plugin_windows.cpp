@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstring>
 #include <system_error>
+#include <tuple>
 
 #include "supple/model/session.h"
 
@@ -151,6 +152,76 @@ bool PluginWindows::isOpen(model::Id fx) const {
                        [&](const Editor& e) { return e.fx == fx; });
 }
 
+std::optional<PluginWindows::Placement> PluginWindows::placementOf(const Editor& editor) {
+    if (!editor.fx || !editor.window) return std::nullopt;
+    Placement p;
+    std::tie(p.x, p.y) = editor.window->position();
+    if (editor.resizable) {
+        p.width = static_cast<int>(editor.window->width());
+        p.height = static_cast<int>(editor.window->height());
+    }
+    return p;
+}
+
+void PluginWindows::remember(const Editor& editor) {
+    if (auto p = placementOf(editor)) placements_[*editor.fx] = *p;
+}
+
+void PluginWindows::place(Editor& editor) {
+    if (!editor.fx) return;
+    const auto it = placements_.find(*editor.fx);
+    if (it == placements_.end()) return;
+    const Placement& p = it->second;
+    if (editor.resizable && p.width > 0 && p.height > 0) {
+        auto accepted = editor.instance->resizeEditor(static_cast<std::uint32_t>(p.width),
+                                                      static_cast<std::uint32_t>(p.height));
+        restoreContext();
+        if (accepted && accepted->width > 0 && accepted->height > 0)
+            editor.window->setSize(static_cast<int>(accepted->width),
+                                   static_cast<int>(accepted->height));
+    }
+    const int w = static_cast<int>(editor.window->width());
+    const int h = static_cast<int>(editor.window->height());
+    if (onDisplay(p.x, p.y, w, h)) editor.window->setPosition(p.x, p.y);
+}
+
+json::Value PluginWindows::saveLayout() const {
+    std::map<model::Id, Placement> all = placements_;
+    for (const Editor& e : editors_)
+        if (auto p = placementOf(e)) all[*e.fx] = *p;
+    json::Value out = json::Value::object();
+    for (const auto& [fx, p] : all) {
+        json::Value v = json::Value::object();
+        v["x"] = static_cast<std::int64_t>(p.x);
+        v["y"] = static_cast<std::int64_t>(p.y);
+        if (p.width > 0 && p.height > 0) {
+            v["width"] = static_cast<std::int64_t>(p.width);
+            v["height"] = static_cast<std::int64_t>(p.height);
+        }
+        out[fx.str()] = std::move(v);
+    }
+    return out;
+}
+
+void PluginWindows::loadLayout(const json::Value& layout) {
+    placements_.clear();
+    if (!layout.isObject()) return;
+    for (const auto& m : layout.asObject()) {
+        const auto fx = model::Id::parse(m.key);
+        if (!fx || fx->kind != model::Kind::Fx || !m.value.isObject()) continue;
+        auto number = [&](const char* key) -> std::optional<int> {
+            const json::Value* v = m.value.find(key);
+            if (!v || !v->isNumber()) return std::nullopt;
+            return static_cast<int>(std::clamp<double>(v->asDouble(), -1e6, 1e6));
+        };
+        const auto x = number("x"), y = number("y");
+        if (!x || !y) continue;
+        Placement p{*x, *y, number("width").value_or(0), number("height").value_or(0)};
+        if (p.width <= 0 || p.height <= 0) p.width = p.height = 0;
+        placements_[*fx] = p;
+    }
+}
+
 Status PluginWindows::attach(Editor editor, const std::string& title) {
     if (watcher_)
         if (auto error = watcher_->error()) watcherError_ = std::move(error);
@@ -182,9 +253,10 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
     if (size->width > 0 && size->height > 0)
         (*window)->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
     (*window)->setResizable(size->resizable);
-    (*window)->show();
     editor.window = std::move(*window);
     editor.resizable = size->resizable;
+    place(editor);  // where this effect's editor was last
+    editor.window->show();
     editors_.push_back(std::move(editor));
     return {};
 }
@@ -231,6 +303,16 @@ bool PluginWindows::reattach(Editor& editor) {
         return false;
     }
     editor.instance = instance;
+    // A resizable editor keeps the window's size; the window keeps its place.
+    if (size->resizable && editor.resizable) {
+        if (auto kept =
+                instance->resizeEditor(static_cast<std::uint32_t>(editor.window->width()),
+                                       static_cast<std::uint32_t>(editor.window->height()))) {
+            size->width = kept->width;
+            size->height = kept->height;
+        }
+        restoreContext();
+    }
     editor.resizable = size->resizable;
     if (size->width > 0 && size->height > 0)
         editor.window->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
@@ -240,6 +322,7 @@ bool PluginWindows::reattach(Editor& editor) {
 
 void PluginWindows::drop(std::size_t index) {
     Editor& e = editors_[index];
+    remember(e);
     // The instance may already be gone (the engine replaced it): only close the
     // editor of the instance that is still the effect's.
     if (!e.fx || app_.instanceOf(*e.fx) == e.instance) e.instance->closeEditor();
@@ -314,12 +397,14 @@ int PluginWindows::service() {
     for (std::size_t i = editors_.size(); i-- > 0;) {
         Editor& e = editors_[i];
         if (e.fx && app_.instanceOf(*e.fx) != e.instance && !reattach(e)) {
+            remember(e);
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
             restoreContext();
             continue;
         }
         const auto requests = e.instance->takeEditorRequests();
         if (requests.closed) {
+            remember(e);
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }

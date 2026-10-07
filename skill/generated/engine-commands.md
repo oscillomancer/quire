@@ -7191,7 +7191,7 @@ Result:
 
 ## `track.set@1`
 
-Set track fields: type, name, volume, pan, mute, solo, parent send, arming.
+Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
 
 Only the given fields change. solo: off | on | in_place | defeat. armed + record_input (device input channels, 1-based) prepare a track for transport.record; record_midi records MIDI instead: a device name (substring of the MIDI port, "*" = every device) with midi_channel 1-16 (0 = all). monitor: off | on | auto (auto: while armed) — a monitored track hears its input live (an instrument plays the keyboard), also while stopped. record_mode: input (new items), midi_overdub (merge into the MIDI item under the start, as a new take), midi_replace. color: red | orange | yellow | green | teal | blue | violet | grey | "#rrggbb" ("" clears it), shown as a stripe on the track.
 
@@ -7209,6 +7209,8 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `mute` | boolean |  |  |  |  |
+| `phase_invert` | boolean |  |  |  | Flip the polarity of the main pair (after the FX chain, before the fader) |
+| `mono` | boolean |  |  |  | Sum the main pair to mono (after the FX chain, before the fader and pan): a mono check on the master |
 | `solo` | string |  |  |  |  |
 | `armed` | boolean |  |  |  |  |
 | `record_input` | array |  |  |  |  |
@@ -7296,6 +7298,23 @@ Result:
   "record_midi": "*",
   "midi_channel": 1,
   "monitor": "auto"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+**Check the mix in mono** (`song`)
+
+```json
+{
+  "track": "tr_0",
+  "mono": true
 }
 
 ```

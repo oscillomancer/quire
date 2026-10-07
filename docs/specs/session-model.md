@@ -109,6 +109,7 @@ Fields:
 | `volume` | dB (−inf..+12) | the fader: C9 Channel Fader on channels/busses (0 dB = native unity; +12.04 is the native top, clamped to +12), plain gain on masters |
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
+| `phase_invert`, `mono` | bool | the main pair's polarity flip and mono sum, after the inserts and before the fader (ADR-0022), ramped like mute |
 | `parent_send` | `{enabled, channels: {from: [..], to: [..]}}` | the encoded output into the parent (no level of its own) |
 | `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | channels only |
 | `timebase` | enum or `project` | default for its items (channels) |
@@ -116,8 +117,8 @@ Fields:
 | `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only (Phase 5 UI; model now) |
 | `locked`, `hidden_tcp`, `hidden_mixer`, `folder_compact` | bool / enum | UI state kept in the model because it is user intent, but tagged `ui: true` so diffs/merges can ignore it |
 
-`volume`, `pan` and `mute` are automatable (§1.9). Width, trim and polarity
-are not strip fields: insert a utility (Plumb) for them.
+`volume`, `pan` and `mute` are automatable (§1.9). Width and trim are not
+strip fields: insert a utility (Plumb) for them.
 
 ### 1.5 Items and takes
 
@@ -305,8 +306,9 @@ markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ### 5.1 Shape
 
 *(Schema `supple.project/2.0` since ADR-0019: strip `type`,
-`project.console9`, `project.masters`; strip `width`/`trim`/`phase_invert`
-removed. 1.x files migrate as ADR-0019 §11 says, with warnings.)*
+`project.console9`, `project.masters`; strip `width`/`trim` removed, and
+`phase_invert` kept since ADR-0022. 1.x files migrate as ADR-0019 §11 says,
+with warnings.)*
 
 The loader accepts 1.x and 2.x documents and saves 2.0. Migration allocates
 child channel IDs in track-ID order, inserts each child first, and moves the

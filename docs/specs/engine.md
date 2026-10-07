@@ -23,11 +23,13 @@ plan (built incrementally from the previous one where possible, §1.6).
 ### 1.1 Nodes
 
 - **StripNode** per track *(amended 2026-09-30, ADR-0019)*, stages by strip type:
-  channel `inputs → [tap: pre_fx] → items/takes → inserts → [tap: pre_fader]
-  → C9 Channel (fader, pan, mute) → [tap: post_fader]`; buss `input sum → C9
-  Buss → [pre_fx] → inserts → [pre_fader] → C9 Channel → [post_fader]`;
-  master `input sum → C9 Buss → [pre_fx] → inserts → [pre_fader] → plain
-  gain/pan → [post_fader]` → outputs/renders/monitor chain. With
+  channel `inputs → [tap: pre_fx] → items/takes → inserts → mono/polarity →
+  [tap: pre_fader] → C9 Channel (fader, pan, mute) → [tap: post_fader]`; buss
+  `input sum → C9 Buss → [pre_fx] → inserts → mono/polarity → [pre_fader] →
+  C9 Channel → [post_fader]`; master `input sum → C9 Buss → [pre_fx] →
+  inserts → mono/polarity → [pre_fader] → plain gain/pan → [post_fader]` →
+  outputs/renders/monitor chain. Mono and polarity (ADR-0022) act on the
+  main pair, ramped like mute, never between an encode and a decode. With
   `project.console9` off the C9 stages run linear (same gains and pan law,
   no curves, noise or dither; ADR-0019 §6). Items play *before* the
   chain (as in REAPER); input monitoring and record inputs enter channels

@@ -434,6 +434,8 @@ struct Node {
     double staticGain = 1, staticPan = .5;
     model::StripType type = model::StripType::Channel;
     bool mute = false, master = false, decodeInput = false;
+    bool phaseInvert = false, mono = false;
+    UtilityControl utility;
     bool soloSilenced = false;
     bool postKeyed = false;
     ConsoleStage<console9::Buss> decoder;
