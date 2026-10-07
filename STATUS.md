@@ -130,8 +130,6 @@ Plugins:
   builds are optional and not covered by CI.
 
 Analysis and scripting:
-- The JSON writer does not validate UTF-8, so a Lua string with invalid
-  bytes can produce JSON the parser rejects.
 - Schema string lengths are checked in bytes but exported as characters.
 - Pitch detection can report a pitch for pure DC; complete stereo
   cancellation reports zero mono loss; file analysis in the sandbox reads

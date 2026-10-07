@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "supple/json/utf8.h"
+
 namespace supple::lua {
 namespace {
 
@@ -190,6 +192,9 @@ Result<json::Value> valueToJson(lua_State* L, int index, const Node& schema,
             std::size_t length = 0;
             const char* text = lua_tolstring(L, index, &length);
             SUPPLE_TRY(budget.take(0, length, path));
+            if (json::firstInvalidUtf8({text, length}) != std::string_view::npos)
+                return Error("script.value", "the string is not valid UTF-8", path,
+                             "pass text; binary data has no JSON form");
             return json::Value(std::string(text, length));
         }
         case LUA_TTABLE:
@@ -247,6 +252,8 @@ Result<json::Value> tableToJson(lua_State* L, int index, const Node& schema,
         else
             return Error("script.table", "object keys must be strings", path,
                          "use {\"name\": value} with string keys");
+        if (json::firstInvalidUtf8(key) != std::string_view::npos)
+            return Error("script.table", "an object key is not valid UTF-8", path, "use text keys");
         if (auto taken = budget.take(0, key.size(), path); !taken) {
             lua_pop(L, 2);  // the value and the key: lua_next is not resumed
             return taken.error();

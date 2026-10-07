@@ -166,10 +166,15 @@ round-trip text (`std::to_chars`) containing `.` or `e` (append `.0` if
 needed), `-0.0` prints `0.0`, exponent form as `to_chars` produces it (e.g.
 `1e-07` is fine; do not reformat); strings raw UTF-8 with escapes only for
 `"`, `\\`, `\n`, `\t`, `\r`, `\b`, `\f`, other controls `\u00XX` (lowercase hex).
+A string or key holding bytes that are not UTF-8 is written with U+FFFD for
+each byte that does not start a valid sequence, so everything written
+parses; `supple/json/utf8.h` (`utf8SequenceLength`, `firstInvalidUtf8`)
+lets callers refuse such text before it reaches a `Value` (Lua does).
 
-**Invariant (tested, fuzzed):** for any `v` that writes successfully,
-`identical(parse(writeCanonical(v)), v)` (same types, same member order;
-the one exception is `-0.0`, which canonicalizes to `0.0`), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
+**Invariant (tested, fuzzed):** for any `v` that writes successfully and
+whose strings are UTF-8, `identical(parse(writeCanonical(v)), v)` (same
+types, same member order; the one exception is `-0.0`, which canonicalizes
+to `0.0`), and `writeCanonical(parse(writeCanonical(v)))` is byte-identical.
 
 ### A.4 JSON Pointer (RFC 6901)
 

@@ -293,3 +293,25 @@ TEST_CASE("fragment references resolve JSON pointers against the root") {
     CHECK(resolveFragment(*doc, "#/$defs/a%zz") == nullptr);
     CHECK(resolveFragment(*doc, "#/missing") == nullptr);
 }
+
+TEST_CASE("the writer replaces bytes that are not UTF-8, so its output parses back") {
+    using namespace supple::json;
+    const std::string valid = "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x8e\xb5";  // é € 🎵
+    auto kept = parse(writeCompact(Value(valid)));
+    REQUIRE(kept);
+    CHECK(kept->asString() == valid);
+    for (const std::string& bad : {std::string("\xff"), std::string("a\xc3"),
+                                   std::string("\xed\xa0\x80"), std::string("\xc0\xaf")}) {
+        Value object = Value::object();
+        object[bad] = bad;
+        auto written = write(object);
+        REQUIRE(written);
+        auto back = parse(*written);
+        REQUIRE_MESSAGE(back, *written);
+        CHECK(firstInvalidUtf8(back->asObject().begin()->value.asString()) ==
+              std::string_view::npos);
+    }
+    CHECK(*parse(writeCompact(Value(std::string("a\xff"
+                                                "b")))) == Value("a\xef\xbf\xbd"
+                                                                 "b"));
+}

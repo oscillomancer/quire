@@ -1,38 +1,10 @@
 #include <supple/json/parse.h>
+#include <supple/json/utf8.h>
 #include <charconv>
 #include <cmath>
 #include <limits>
 namespace supple::json {
 namespace {
-// Returns the offset of the first byte that starts an invalid UTF-8 sequence,
-// or npos when the whole input is valid.
-std::size_t firstInvalidUtf8(std::string_view s) {
-    for (std::size_t i = 0; i < s.size();) {
-        auto c = static_cast<unsigned char>(s[i]);
-        if (c < 0x80) {
-            ++i;
-            continue;
-        }
-        unsigned count = c >= 0xf0 && c <= 0xf4   ? 4
-                         : c >= 0xe0 && c <= 0xef ? 3
-                         : c >= 0xc2 && c <= 0xdf ? 2
-                                                  : 0;
-        if (!count || i + count > s.size()) return i;
-        unsigned cp = c & (count == 2 ? 0x1f : count == 3 ? 0x0f : 0x07);
-        for (unsigned j = 1; j < count; ++j) {
-            auto d = static_cast<unsigned char>(s[i + j]);
-            if ((d & 0xc0) != 0x80) return i;
-            cp = (cp << 6) | (d & 0x3f);
-        }
-        if (cp < (count == 2   ? 0x80u
-                  : count == 3 ? 0x800u
-                               : 0x10000u) ||
-            cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
-            return i;
-        i += count;
-    }
-    return std::string_view::npos;
-}
 void appendUtf8(std::string& s, unsigned cp) {
     if (cp < 0x80)
         s += static_cast<char>(cp);

@@ -133,6 +133,10 @@ TEST_CASE("a shared table cannot multiply into an unbounded result") {
     REQUIRE(!out);
     CHECK(out.error().code == "script.value_too_large");
     CHECK_FALSE(out.error().hint.empty());
+    // Text only: a byte string with no UTF-8 form is refused where it is made.
+    auto binary = scene.run("return string.char(255)", 8000.0);
+    REQUIRE(!binary);
+    CHECK(binary.error().code == "script.value");
     // A large, ordinary result still converts.
     auto fine = scene.run("local t = {} for i = 1, 1000 do t[i] = i end return t", 8000.0);
     REQUIRE(fine);

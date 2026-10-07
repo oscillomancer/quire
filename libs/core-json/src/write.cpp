@@ -1,3 +1,4 @@
+#include <supple/json/utf8.h>
 #include <supple/json/write.h>
 #include <algorithm>
 #include <cassert>
@@ -14,10 +15,22 @@ std::string formatDouble(double d) {
     return out;
 }
 namespace {
+// A string's bytes that do not form UTF-8 are written as U+FFFD, one per
+// invalid byte, so whatever is written parses back.
 void quote(std::string& out, std::string_view s) {
     static constexpr char hex[] = "0123456789abcdef";
     out += '"';
-    for (unsigned char c : s) {
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c >= 0x80) {
+            if (const std::size_t n = utf8SequenceLength(s, i)) {
+                out.append(s.substr(i, n));
+                i += n - 1;
+            } else {
+                out += "\xEF\xBF\xBD";
+            }
+            continue;
+        }
         switch (c) {
             case '"':
                 out += "\\\"";
