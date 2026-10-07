@@ -74,6 +74,8 @@ ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
   (v1): `t(b) = t0 + (60 · (b1 − b0) / (v1 − v0)) · ln(v(b) / v0)` with
   `v(b) = v0 + (v1 − v0)(b − b0)/(b1 − b0)`; step segments are linear. The
   inverse is closed-form. The first point is at beat 0; there is always one.
+  Points are at least `1e-6` beats apart (`TimeMap::kMinTempoSpacing`), so
+  every ramp has a finite slope.
 - **Meter changes** `ts_*`: `{bar, numerator, denominator}` at bar starts
   (bar 1 is the first bar; the first change is at bar 1). Bars are derived:
   `beatOfBar(n)` sums bar lengths (`4·num/den` beats each).

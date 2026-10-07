@@ -50,6 +50,9 @@ Result<TimeMap> TimeMap::create(std::vector<TempoPoint> tempo, std::vector<Meter
         if (i > 0 && !(t.beat > tempo[i - 1].beat))
             bad(p + "/beat", "tempo points must be in increasing beat order",
                 "sort them, no duplicates");
+        else if (i > 0 && t.beat - tempo[i - 1].beat < kMinTempoSpacing)
+            bad(p + "/beat", "tempo points are too close together",
+                "keep points at least 1e-6 beats apart");
         if (!std::isfinite(t.beat)) bad(p + "/beat", "beat is not finite", "");
         if (!(t.bpm >= 1.0 && t.bpm <= 1000.0))
             bad(p + "/bpm", "tempo out of range", "1 .. 1000 BPM");

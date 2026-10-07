@@ -51,10 +51,13 @@ class TimeMap {
     // A constant tempo and meter.
     TimeMap();
     static TimeMap constant(double bpm, int numerator = 4, int denominator = 4);
-    // Validates: tempo points strictly increasing, the first at beat 0, bpm
-    // in [1, 1000]; meter changes strictly increasing, the first at bar 1,
-    // numerator 1..64, denominator a power of two 1..64. Errors carry paths
-    // (/tempo/<i>/beat, /meter/<i>/bar, …) — code "time.map".
+    // Tempo points closer than this have no finite ramp slope to speak of.
+    static constexpr double kMinTempoSpacing = 1e-6;  // beats
+    // Validates: tempo points increasing by at least kMinTempoSpacing, the
+    // first at beat 0, bpm in [1, 1000]; meter changes strictly increasing,
+    // the first at bar 1, numerator 1..64, denominator a power of two 1..64.
+    // Errors carry paths (/tempo/<i>/beat, /meter/<i>/bar, …) — code
+    // "time.map".
     static Result<TimeMap> create(std::vector<TempoPoint> tempo, std::vector<MeterChange> meter);
 
     const std::vector<TempoPoint>& tempo() const { return tempo_; }

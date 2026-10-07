@@ -160,6 +160,17 @@ TEST_CASE("validation errors carry paths") {
     CHECK(e.error().details[1].path == "/meter/0/bar");
     CHECK(e.error().details[2].path == "/meter/0/denominator");
     CHECK(TimeMap::constant(0.0) == TimeMap::constant(120.0));  // invalid -> 120 BPM 4/4
+    // A ramp over a subnormal interval would have an infinite slope.
+    e = TimeMap::create(
+        {{0, 120, TempoShape::Ramp}, {std::numeric_limits<double>::denorm_min(), 121}},
+        {{1, 4, 4}});
+    REQUIRE(!e);
+    CHECK(e.error().path == "/tempo/1/beat");
+    auto spaced = TimeMap::create({{0, 120, TempoShape::Ramp}, {TimeMap::kMinTempoSpacing, 1000}},
+                                  {{1, 4, 4}});
+    REQUIRE(spaced);
+    CHECK(std::isfinite(spaced->secondsAt(TimeMap::kMinTempoSpacing)));
+    CHECK(std::isfinite(spaced->secondsAt(1.0)));
 }
 
 TEST_CASE("samples round half to even") {
