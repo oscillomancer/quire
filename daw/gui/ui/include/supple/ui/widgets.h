@@ -1,5 +1,5 @@
 // Basic widgets. Each reads theme tokens only and exposes its value for
-// tests (valueText). The set grows with the views (gui.md §11).
+// tests (valueText).
 #pragma once
 
 #include <functional>

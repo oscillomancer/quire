@@ -275,11 +275,10 @@ TEST_CASE("a render depends only on the patch, not on the session's history") {
     double worst = 0.0;
     for (std::size_t i = 0; i < x.size(); ++i)
         worst = std::max(worst, std::fabs(static_cast<double>(x[i]) - static_cast<double>(y[i])));
-    // NOTE (open): this covers the dispatcher path. The same sequence driven
-    // through the MCP server (what tools/eval-harness uses) still differs in the
-    // first ~40 ms after a level change (1922 of 211456 samples, max 1e-2, which
-    // `analyze` turns into decay20_ms 348 vs 585): see
-    // docs/benchmarks/eval/2026-10-01-p3.4c-reference-rerun.md.
+    // This covers the dispatcher path. The same sequence driven through the MCP
+    // server once differed in the first ~40 ms after a level change (decay20_ms
+    // 348 vs 585): a stale installed copy of the plugin shadowed the build's,
+    // fixed by letting the first location on the search path win.
     INFO("worst sample difference: " << worst);
     CHECK(worst == 0.0);
 }

@@ -248,7 +248,7 @@ if (DELAY_BUILD_PLUGIN)
     endif()
 
     # CUSTOMIZE BEFORE SHIPPING: every product needs permanent unique IDs and
-    # AU four-character codes (see the checklist in AGENTS.md).
+    # AU four-character codes: permanent, they identify saved sessions.
     make_clapfirst_plugins(
         TARGET_NAME delay-plugin
         IMPL_TARGET delay-impl

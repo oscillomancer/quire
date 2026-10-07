@@ -153,17 +153,6 @@ def publish(report):
         stream.write(f"| {date} | {suite} | `{report['git_hash'][:10]}` | `{report['skill_hash'][:12]}` | "
                      f"{report['runner']}/{report['model']} | {report['pass_rate']:.1%} | {report['median_loss']} | "
                      f"[{basename}](eval/{destination.name}) |\n")
-    if report["runner"] == "dry":
-        return destination  # Scripted answers are infrastructure coverage, not listening material.
-    review = ROOT / "HUMAN_REVIEW.md"
-    text = review.read_text()
-    ids = [int(n) for n in re.findall(r"(?m)^### (\d+)\.", text)]
-    item = (f"### {max(ids, default=0) + 1}. Evaluation listening — {report['run_id']}\n"
-            f"Suite: {suite}, runner/model: {report['runner']}/{report['model']}. "
-            "Do the renders fit these descriptions, and do the numeric best/worst rankings match your ears?\n\n"
-            + "\n".join(listening or ["- No valid renders; inspect the report's failures."]) + "\n\n")
-    # Keep new items in the active queue, ahead of resolved decisions.
-    review.write_text(text.replace("## Resolved", item + "## Resolved", 1))
     return destination
 
 
@@ -185,7 +174,7 @@ def main(argv=None):
                         help="Dedicated evaluation profile model config; no default-profile fallback")
     parser.add_argument("--credentials", default=str(evaluation_profile() / ".env"),
                         help="Dedicated evaluation profile credential .env to reference; never copied")
-    parser.add_argument("--publish", action="store_true", help="Write benchmarks and one listening queue item; default for real Hermes runs")
+    parser.add_argument("--publish", action="store_true", help="Write the report, its listening list and the history row; default for real Hermes runs")
     options = parser.parse_args(argv)
     if not 1 <= options.repeat <= 100 or not 0 <= options.seed <= 1000000000 or not 1 <= options.jobs <= 16:
         parser.error("repeat must be 1..100, jobs 1..16 and seed 0..1e9")

@@ -5,7 +5,7 @@
 // Searching each parameter's whole range spreads the population over values
 // that cannot be right (the frequency range is ten octaves, so one σ = 0.2 of
 // it is a factor of ~8), and the run stagnates without improving on the start
-// (docs/benchmarks/optimizer/, campaign finding 3). An agent that knows the
+// (docs/benchmarks/optimizer/2026-10-01-tuning.md). An agent that knows the
 // answer is far outside the window can still name the key with min/max, which
 // keeps the full range.
 #pragma once

@@ -73,7 +73,7 @@ def main() -> int:
         tag = d["name"]
         if not license_ok(d["license"], allowed):
             errors.append(f"{tag}: license '{d['license']}' is not on the allow-list "
-                          f"(needs an approved HUMAN_REVIEW.md entry and a manifest exception)")
+                          f"(needs the maintainer's approval and a manifest exception)")
         if d.get("dir") and not (tp / d["dir"]).is_dir():
             errors.append(f"{tag}: manifest dir third_party/{d['dir']} does not exist")
         lf = d.get("license_file")

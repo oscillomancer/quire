@@ -36,7 +36,8 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 // Initial step size of a search against a reference (normalized domain). The
 // start is the agent's own structure, already close to the answer; see the note
 // where the options are built.
-constexpr double kReferenceSigma = 0.05;  // measured: docs/benchmarks/optimizer/
+// Measured: docs/benchmarks/optimizer/2026-10-01-tuning.md.
+constexpr double kReferenceSigma = 0.05;
 
 struct OptimizeArgs {
     std::string instance;
@@ -468,7 +469,7 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         // at the default σ = 0.2 of a parameter's full range a single standard
         // step is a factor of ~8 on a log-scaled time, so the population lands
         // far from the start and the run stagnates without ever improving on it
-        // (docs/benchmarks/optimizer/2026-10-01-baseline.md, campaign finding 3).
+        // (docs/benchmarks/optimizer/2026-10-01-tuning.md, the baseline rows).
         if (referenceFile) options.sigma = kReferenceSigma;
         JobStarted out{job, "running", {}, best.id};
         for (const auto& t : *tuned) out.params.push_back(t.key);
