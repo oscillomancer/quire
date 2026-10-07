@@ -23,10 +23,12 @@ be heard through its main pair.
    every non-main output port. When the plug-in offers port configurations,
    the host picks, among those with a stereo main output (and a stereo or no
    main input), the one with the most output ports. VST3: every auxiliary
-   output bus, now activated. The bridge carries up to 64 auxiliary output
-   channels in shared memory and their ports in Create (protocol 8).
-2. **Strips grow to 64 channels** (`model::kMaxTrackChannels`): the main pair
-   and 62 auxiliary channels, which keep ADR-0020's meaning (linear, never
+   output bus, now activated. Up to 128 ports (buses) per direction are taken
+   (LSP's x48 DirectOut multi-sampler has 49; the old limit was 16). The
+   bridge carries up to 128 auxiliary output channels in shared memory and
+   their ports in Create (protocol 8).
+2. **Strips grow to 128 channels** (`model::kMaxTrackChannels`): the main pair
+   and 126 auxiliary channels, which keep ADR-0020's meaning (linear, never
    faded, panned or sent to the parent).
 3. **`pins.out` goes on past the main pair**: an entry per auxiliary output
    channel, in order, naming the track channel it writes (0: unconnected).
@@ -55,7 +57,7 @@ be heard through its main pair.
   Auxiliary outputs cost a copy per channel per block; unconnected ones none.
 - VST3 auxiliary output buses are active even when nothing reads them.
 - Not covered: main output ports wider than stereo (the host still prefers a
-  stereo main), auxiliary outputs beyond 64 channels through the bridge,
+  stereo main), auxiliary outputs beyond 128 channels through the bridge,
   per-output meters, and a dialog to choose which outputs to connect.
 
 ## Tests

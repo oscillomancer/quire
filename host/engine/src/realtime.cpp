@@ -544,6 +544,8 @@ void Engine::collectPlans() {
     });
 }
 
+std::vector<model::Id> Engine::takeDirtyStates() { return std::exchange(dirtyStates_, {}); }
+
 void Engine::service() {
     bool reload = false;
     if (latest_) {
@@ -574,6 +576,9 @@ void Engine::service() {
             const bool active = instance->active();
             const bool restarting = plugins_.restarting(fx.id);
             auto notes = plugins_.service(fx.id);
+            if (notes.stateDirty &&
+                std::find(dirtyStates_.begin(), dirtyStates_.end(), fx.id) == dirtyStates_.end())
+                dirtyStates_.push_back(fx.id);
             // A restart waiting on processing takes the plug-in off the
             // executors; once restarted, its (new) latency is compensated.
             reload |= notes.paramsRescan || !notes.paramsClear.empty() ||
@@ -838,6 +843,19 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
     if (const bool want = wantNow(); want != playing_) {
         playing_ = want;
         if (!want) resetOwned(processing_, plan);  // no hanging notes
+        // Starting: what ran while stopped (plugins, the Console 9 noise)
+        // starts over, as in the renderer; monitored strips play on.
+        if (want && plan) {
+            detail::locateClass(*plan, pos_, false);
+            for (detail::Node& node : plan->nodes)
+                if (!node.live)
+                    detail::forEachStage(node, [](detail::Stage& st) {
+                        if (st.instance && st.instance->processing()) st.instance->reset();
+                        st.voices.clear();
+                        st.pendingVoices.clear();
+                        st.sleeping = false;
+                    });
+        }
     }
     if (xportNew) {
         xportSeen_ = xportSeq;
@@ -860,13 +878,10 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         plan->deviceMidi = midiSource_->midiInput();
         plan->deviceMidiOffset = midiBase;
     }
-    bool wake = false;
-    if (!playing_)
-        for (auto* instance : processing_)
-            wake |= instance->processRequested() || instance->needsAudioFlush();
-    if (plan && !playing_ && (plan->anyLive || wake) && !shutDown_.load() &&
-        frames <= plan->block) {
-        // Stopped, but a track monitors its input: plugins run, nothing plays.
+    if (plan && !playing_ && !shutDown_.load() && frames <= plan->block) {
+        // Stopped: plugins keep running (monitored input is heard, editors
+        // answer, a sampler loads what its editor picked: it does so only in
+        // process()), nothing plays.
         if (detail::processBlock(*plan, pos_, frames, false)) {
             publishPluginOutputs(*plan, false, rtEpoch_, pos_, rtStream_.load());
             const detail::Node& master = plan->nodes[plan->mainMaster];
@@ -1149,6 +1164,9 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
 void Engine::rendererLoop(std::uint64_t seen) {
     const std::uint32_t block = options_.renderBlock;
     const auto nap = std::chrono::duration<double>(0.25 * block / config_.sampleRate);
+    const auto blockTime = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(static_cast<double>(block) / config_.sampleRate));
+    auto idleNext = std::chrono::steady_clock::now();  // the next stopped block
     const void* self = &processing_;
     while (!rendererQuit_.load(std::memory_order_acquire)) {
         if (playing_ && plan_ && plan_->split && plan_->frontier.empty()) {
@@ -1188,20 +1206,33 @@ void Engine::rendererLoop(std::uint64_t seen) {
         if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
             playing_ = want;
             if (!want) resetOwned(processing_, plan_);  // no hanging notes
+            // Starting: what ran while stopped (plugins, the Console 9 noise)
+            // starts over, so playback is the offline render's.
+            if (want && plan_) {
+                detail::locateClass(*plan_, pos_, false);
+                resetOwned(processing_, plan_);
+            }
             reportedPlaying_.store(playing_);
         }
         const std::int64_t ahead = streamLocal_ - playedStream(seen);
         const bool held = hold_.load(std::memory_order_acquire);
         if (held) holdSeen_.store(true, std::memory_order_release);
+        // Stopped: the renderer's plugins keep running at the device's pace
+        // (nothing plays): they load files, answer their editors and ring out
+        // as hosts run them; one that asks to be processed runs at once.
         bool wake = false;
         if (!playing_ && plan_)
             for (auto* instance : plan_->rendererInstances)
                 wake |= instance->processRequested() || instance->needsAudioFlush();
-        if (wake && !held) {
-            const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block, self,
-                                                         &loopR_, false);
-            if (!ok) processErrors_.fetch_add(1);
-            publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
+        if (!playing_ && plan_ && !held) {
+            const auto now = std::chrono::steady_clock::now();
+            if (wake || now >= idleNext) {
+                const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block,
+                                                             self, &loopR_, false);
+                if (!ok) processErrors_.fetch_add(1);
+                publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
+                idleNext = std::max(idleNext, now - 4 * blockTime) + blockTime;
+            }
         }
         bool room = playing_ && plan_ && !held && ahead < aheadFrames_;
         if (room && plan_->split) {

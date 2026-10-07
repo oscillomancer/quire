@@ -37,8 +37,8 @@ inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 // Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
 // to scratch in the bridge.
-inline constexpr std::uint32_t kMaxAuxChannels = 64;
-inline constexpr std::uint32_t kMaxAuxPorts = 16;
+inline constexpr std::uint32_t kMaxAuxChannels = 128;
+inline constexpr std::uint32_t kMaxAuxPorts = 128;
 inline constexpr std::uint32_t kMaxEvents = 2048;
 inline constexpr std::uint32_t kMaxOutEvents = 1024;
 inline constexpr std::uint32_t kMaxParamClears = 4096;

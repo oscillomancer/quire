@@ -98,9 +98,9 @@ Status validateStripRules(const Session& s) {
         // The main pair, plus auxiliary channels (ADR-0020).
         if (t.channels < 1 || t.channels > kMaxTrackChannels ||
             (t.type != StripType::Channel && t.channels < 2))
-            return trackError("a strip has 1-64 channels; busses and masters at least 2",
+            return trackError("a strip has 1-128 channels; busses and masters at least 2",
                               path + "/channels",
-                              "use 2 for a stereo strip, more for auxiliary channels 3-64");
+                              "use 2 for a stereo strip, more for auxiliary channels 3-128");
         if (t.type == StripType::Channel && !t.children.empty())
             return trackError("a channel cannot have children", path + "/children",
                               "add a buss and place the channels under it");

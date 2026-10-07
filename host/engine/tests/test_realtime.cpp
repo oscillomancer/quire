@@ -3166,6 +3166,33 @@ TEST_CASE("request_process wakes a silent sleeping FX at the next block") {
     CHECK(instance->active());  // lifecycle stays on main
 }
 
+TEST_CASE("plug-ins keep running while the transport is stopped, in both executors") {
+    // Hosts run plug-ins while stopped: a sampler loads the file its editor
+    // picked only in process() (LSP's multi-samplers do). The edge fixture
+    // reports every call with an output event.
+    for (const EngineOptions& options :
+         {kInCallback, EngineOptions{.renderBlock = 64, .renderAheadMs = 20, .workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 2}));
+        REQUIRE(engine.load(edgeSession(0)));
+        if (options.anticipative) REQUIRE(engine.awaitPlan());
+        std::size_t calls = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (calls < 8 && std::chrono::steady_clock::now() < deadline) {
+            backend.run(1);
+            calls += engine.takePluginOutputs().events.size();
+            if (options.anticipative) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(calls >= 8);
+        CHECK(engine.processErrors() == 0);
+        engine.stop();
+    }
+}
+
 TEST_CASE("both anticipative executors publish plug-in outputs through their own queues") {
     auto pool = makePool();
     MediaCache media;

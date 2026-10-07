@@ -342,6 +342,10 @@ class Engine {
     // Main thread: FIFO per executor; no ordering is implied between executor
     // queues and idle flushes. Metadata identifies the plan and transport epoch.
     PluginOutputs takePluginOutputs();
+    // Plug-ins that said their state changed (clap.state mark_dirty) beyond
+    // what their parameters hold — a sampler's loaded file — since the last
+    // call; serviced on the main thread.
+    std::vector<model::Id> takeDirtyStates();
     // Main-thread watermark for deferring anticipative output recording.
     std::int64_t playedStream(std::uint64_t epoch) const;
     std::uint64_t planGeneration() const { return publishedGen_; }  // main thread
@@ -503,6 +507,7 @@ class Engine {
     bool prunePending_ = false;
     std::uint32_t outputLatency_ = 0;
     std::vector<std::string> warnings_;
+    std::vector<model::Id> dirtyStates_;
     // The meter bank (P5.3c): created by start(), kept across plan swaps, and
     // written by the renderer and the callback.
     std::shared_ptr<MeterBank> meters_;

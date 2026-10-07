@@ -141,7 +141,12 @@ when the machine is busiest, during a recording session).
   channel the app's default monitoring (`EngineApp::defaultMonitor`, `on`
   unless the GUI's preferences say otherwise). Monitored input is added to the
   node's input sum (before the pre-FX tap). Stopped, a plan with live nodes
-  still runs them (plugins process, items and MIDI do not play).
+  still runs them (plugins process, items and MIDI do not play). Since
+  2026-10-06 every plugin runs while stopped, as hosts run them (a sampler
+  loads the file its editor picked only in process()): the callback runs the
+  whole plan in callback mode; the renderer runs its share at the device's
+  pace, unheard. Starting playback re-locates the renderer's nodes and resets
+  their plugins, so playback still equals the offline render.
 - `prepare` splits each plan: renderer nodes with their own task graph,
   live nodes in order, each side's instances, and the frontier edges; the
   anticipative engine gives each frontier edge a chunk ring and sets

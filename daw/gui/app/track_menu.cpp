@@ -135,7 +135,8 @@ void TrackMenu::openChannels(const model::Id& track, const ui::Rect& anchor) con
     std::vector<ui::MenuItem> items;
     std::vector<std::pair<std::string, int>> counts = {
         {"Mono (1)", 1},     {"Stereo (2)", 2},     {"4: aux 3/4", 4},    {"6: aux 3-6", 6},
-        {"8: aux 3-8", 8},   {"16: aux 3-16", 16},  {"32: aux 3-32", 32}, {"64: aux 3-64", 64}};
+        {"8: aux 3-8", 8},   {"16: aux 3-16", 16},  {"32: aux 3-32", 32}, {"64: aux 3-64", 64},
+        {"128: aux 3-128", 128}};
     // A count set elsewhere (a multi-out instrument's, ADR-0021) shows too.
     if (std::none_of(counts.begin(), counts.end(),
                      [&](const auto& c) { return c.second == tr->channels; })) {

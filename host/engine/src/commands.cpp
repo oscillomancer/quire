@@ -1227,7 +1227,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                              "add a buss and place the channels under it");
             if (a.type != model::StripType::Channel && a.channels.value_or(2) < 2)
                 return Error("track.channels", "busses and masters require at least two channels",
-                             "/channels", "use 2..64 channels");
+                             "/channels", "use 2..128 channels");
             model::Track tr;
             tr.type = a.type;
             tr.name = a.name.value_or("");
@@ -1381,7 +1381,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                            "their place now"))
                 .field("channels", &TrackSetArgs::channels,
                        schema::integer().range(1, model::kMaxTrackChannels).doc(
-                           "1-2: the strip's main pair; up to 64 adds auxiliary channels 3-64 "
+                           "1-2: the strip's main pair; up to 128 adds auxiliary channels 3-128 "
                            "for routes and plug-in pins (a detector on 3/4, a multi-out "
                            "instrument's outputs), outside the fader, pan and parent send"))
                 .build();
@@ -2084,7 +2084,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             "isolation: in_process, dedicated (the plugin runs in a process of its own: a "
             "crash silences only it), shared_bridge (one process for all such plugins), "
             "inherit (the project default: in_process). pins: which of the track's channels "
-            "(1-based; track.set channels adds 3-64) the plugin reads ({in: [l, r]}), writes "
+            "(1-based; track.set channels adds 3-128) the plugin reads ({in: [l, r]}), writes "
             "({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin "
             "with a sidechain input); {} restores 1/2 in and out. out past its first two "
             "entries: a track channel for each of the plugin's auxiliary output channels in "
@@ -2139,7 +2139,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                                          "the track has " + std::to_string(std::max(channels, 2)) +
                                              " channels",
                                          std::string("/pins/") + name + "/" + std::to_string(k),
-                                         "track.set channels adds channels 3-64");
+                                         "track.set channels adds channels 3-128");
                     }
                 }
             }

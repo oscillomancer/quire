@@ -318,7 +318,7 @@ bool checkedGain(const clap_plugin_t* p) {
            !std::strcmp(p->desc->id, badCurveDescriptor()->id);
 }
 uint32_t CLAP_ABI gainPortCount(const clap_plugin_t* p, bool input) {
-    if (!std::strcmp(p->desc->id, oversizedDescriptor(true)->id)) return 17;
+    if (!std::strcmp(p->desc->id, oversizedDescriptor(true)->id)) return 129;
     return input && checkedGain(p) ? 0 : 1;
 }
 bool CLAP_ABI gainPortGet(const clap_plugin_t* p, uint32_t index, bool isInput,
@@ -879,6 +879,9 @@ struct EdgeControl {
     void (*rescan)(const clap_plugin_t*, bool);
     void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
     void (*restart)(const clap_plugin_t*);
+    // State beyond the parameters (a sampler's file): its last byte, then
+    // clap.state mark_dirty, as an editor would.
+    void (*markDirty)(const clap_plugin_t*, std::uint8_t);
 };
 void edgeRequestProcess(const clap_plugin_t* pl) { E(pl)->host->request_process(E(pl)->host); }
 void edgeRescan(const clap_plugin_t* pl, bool removed) {
@@ -893,7 +896,14 @@ void edgeClear(const clap_plugin_t* pl, clap_id id, clap_param_clear_flags flags
     hp->clear(E(pl)->host, id, flags);
 }
 void edgeRestart(const clap_plugin_t* pl) { E(pl)->host->request_restart(E(pl)->host); }
-const EdgeControl kEdgeControl = {edgeRequestProcess, edgeRescan, edgeClear, edgeRestart};
+void edgeMarkDirty(const clap_plugin_t* pl, std::uint8_t value) {
+    E(pl)->config[3] = value;
+    const auto* hs = static_cast<const clap_host_state_t*>(
+        E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_STATE));
+    hs->mark_dirty(E(pl)->host);
+}
+const EdgeControl kEdgeControl = {edgeRequestProcess, edgeRescan, edgeClear, edgeRestart,
+                                  edgeMarkDirty};
 uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) { return E(pl)->config[0] == 5 ? 64 : 0; }
 const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
 
@@ -1048,19 +1058,36 @@ const clap_plugin_descriptor_t* multiOutDescriptor() {
                                                features};
     return &d;
 }
+// "Test Multi-Out x48" has 48 stereo outputs past the main one ("Out 2" to
+// "Out 49", 0.5 each), more ports than a 16-port host takes (LSP's x48
+// DirectOut multi-sampler has 49).
+const clap_plugin_descriptor_t* multiOut48Descriptor() {
+    static clap_plugin_descriptor_t d = *multiOutDescriptor();
+    d.id = "com.suppleaudio.test.multiout-x48";
+    d.name = "Test Multi-Out x48";
+    return &d;
+}
 struct MultiOut {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
 };
 constexpr float kMultiOutLevels[3] = {0.125f, 0.25f, 0.5f};
-uint32_t CLAP_ABI multiOutPortCount(const clap_plugin_t*, bool input) { return input ? 0 : 3; }
-bool CLAP_ABI multiOutPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
+uint32_t multiOutPorts(const clap_plugin_t* p) {
+    return !std::strcmp(p->desc->id, multiOut48Descriptor()->id) ? 49 : 3;
+}
+uint32_t CLAP_ABI multiOutPortCount(const clap_plugin_t* p, bool input) {
+    return input ? 0 : multiOutPorts(p);
+}
+bool CLAP_ABI multiOutPortGet(const clap_plugin_t* p, uint32_t index, bool isInput,
                               clap_audio_port_info_t* info) {
-    if (isInput || index >= 3) return false;
+    if (isInput || index >= multiOutPorts(p)) return false;
     std::memset(info, 0, sizeof(*info));
     info->id = index;
     const char* names[3] = {"Main", "Kick", "Snare"};
-    std::snprintf(info->name, sizeof(info->name), "%s", names[index]);
+    if (multiOutPorts(p) == 3)
+        std::snprintf(info->name, sizeof(info->name), "%s", names[index]);
+    else
+        std::snprintf(info->name, sizeof(info->name), index ? "Out %u" : "Main", index + 1);
     info->flags = index == 0 ? CLAP_AUDIO_PORT_IS_MAIN : 0;
     info->channel_count = 2;
     info->port_type = CLAP_PORT_STEREO;
@@ -1072,12 +1099,13 @@ const void* CLAP_ABI multiOutExt(const clap_plugin_t*, const char* id) {
     return !std::strcmp(id, CLAP_EXT_AUDIO_PORTS) ? &kMultiOutPorts : nullptr;
 }
 bool CLAP_ABI multiOutActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
-clap_process_status CLAP_ABI multiOutProcess(const clap_plugin_t*, const clap_process_t* p) {
-    if (p->audio_outputs_count != 3) return CLAP_PROCESS_ERROR;
-    for (uint32_t port = 0; port < 3; ++port) {
+clap_process_status CLAP_ABI multiOutProcess(const clap_plugin_t* pl, const clap_process_t* p) {
+    if (p->audio_outputs_count != multiOutPorts(pl)) return CLAP_PROCESS_ERROR;
+    for (uint32_t port = 0; port < p->audio_outputs_count; ++port) {
         if (p->audio_outputs[port].channel_count != 2) return CLAP_PROCESS_ERROR;
         for (uint32_t c = 0; c < 2; ++c)
-            std::fill_n(p->audio_outputs[port].data32[c], p->frames_count, kMultiOutLevels[port]);
+            std::fill_n(p->audio_outputs[port].data32[c], p->frames_count,
+                        kMultiOutLevels[std::min(port, 2u)]);
     }
     return CLAP_PROCESS_CONTINUE;
 }
@@ -1199,7 +1227,7 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 13; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 14; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0    ? gainDescriptor()
            : i == 1  ? sineDescriptor()
@@ -1214,6 +1242,7 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
            : i == 10 ? oversizedDescriptor(true)
            : i == 11 ? oversizedDescriptor(false)
            : i == 12 ? multiOutDescriptor()
+           : i == 13 ? multiOut48Descriptor()
                      : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
@@ -1271,9 +1300,9 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
         return make<Crash>(host, crashDescriptor(), crashActivate, crashProcess, crashExt);
     if (!std::strcmp(id, keyMixDescriptor()->id))
         return make<KeyMix>(host, keyMixDescriptor(), keyMixActivate, keyMixProcess, keyMixExt);
-    if (!std::strcmp(id, multiOutDescriptor()->id))
-        return make<MultiOut>(host, multiOutDescriptor(), multiOutActivate, multiOutProcess,
-                              multiOutExt);
+    for (const auto* desc : {multiOutDescriptor(), multiOut48Descriptor()})
+        if (!std::strcmp(id, desc->id))
+            return make<MultiOut>(host, desc, multiOutActivate, multiOutProcess, multiOutExt);
     return nullptr;
 }
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};

@@ -136,7 +136,7 @@ class Fixture final : public SingleComponentEffect {
     }
     int32 PLUGIN_API getBusCount(MediaType type, BusDirection dir) override {
         return type == kAudio && gLayoutMode.load() == 2
-                   ? 17
+                   ? 129
                    : SingleComponentEffect::getBusCount(type, dir);
     }
     tresult PLUGIN_API getBusInfo(MediaType type, BusDirection dir, int32 index,

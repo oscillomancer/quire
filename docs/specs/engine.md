@@ -581,8 +581,14 @@ Local CLAP `request_process` is an atomic wake request. The audio owner consumes
 it at the next processed block. With `auto_bypass_on_silence`, a stage may idle
 only after `CLAP_PROCESS_SLEEP`, with exactly silent main/key inputs and no
 input events or pending flush. Notes, automation, nonzero input, queued main
-parameter changes and `request_process` resume it. A stopped transport also
-services a requested render block without advancing its position. An inactive
+parameter changes and `request_process` resume it. A stopped transport keeps
+running every plugin without advancing its position (ADR-0014): the callback's
+plan each cycle, the renderer's share at the device's pace (a request runs at
+once); play re-locates the non-live nodes and resets their plugins.
+A plain plugin's state reaches the model when it calls `clap.state
+mark_dirty` (a coalesced "Plug-in state" step per plugin) and, for every
+running plugin, before each save: a sampler's loaded files are saved even
+when it never says so (LSP's multi-samplers do not). An inactive
 instance is activated on main using its last activation configuration; a never
 activated instance is configured by plan preparation. Explicit bypass is kept; queued note/parameter events are still processed with
 compensated dry output so note releases are not lost while bypassed.

@@ -416,6 +416,11 @@ class EngineApp : public cmd::Host {
     bool outputOverflow_ = false;
     static json::Value pluginErrorJson(const Error& error);
     void consumePluginOutputs();
+    // A running plug-in's state into the model (its blob), when it differs:
+    // one coalesced undo step per plug-in. For plug-ins that report a state
+    // change their parameters do not show, and for every one before a save.
+    bool captureFxState(model::Id fx);
+    void captureFxStates(const std::vector<model::Id>& fx);
     Status commitOutputGesture(const OutputKey& key, const OutputGesture& gesture);
     void recordAutomationAt(model::Id object, const std::string& param, double value, double beat);
     void beginAutomationPass(double beat);

@@ -105,7 +105,7 @@ Fields:
 | `name`, `color`, `notes` | string | |
 | `parent` | track id or null | a buss or master; null exactly for masters (the roots) |
 | `children` | [track id] | order among siblings; empty on channels |
-| `channels` | int | 1-64 (busses and masters ≥ 2): 1/2 are the main pair (fader, pan, Console 9, meters, parent send); 3-64 are auxiliary channels that routes and plug-in pins address, never faded, panned or sent to the parent (ADR-0020); a multi-out instrument's outputs land there (ADR-0021). A mono channel is placed by its pan |
+| `channels` | int | 1-128 (busses and masters ≥ 2): 1/2 are the main pair (fader, pan, Console 9, meters, parent send); 3-128 are auxiliary channels that routes and plug-in pins address, never faded, panned or sent to the parent (ADR-0020); a multi-out instrument's outputs land there (ADR-0021). A mono channel is placed by its pan |
 | `volume` | dB (−inf..+12) | the fader: C9 Channel Fader on channels/busses (0 dB = native unity; +12.04 is the native top, clamped to +12), plain gain on masters |
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |

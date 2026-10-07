@@ -76,8 +76,8 @@ inline constexpr std::array<std::string_view, 8> kTrackColors = {
 bool validTrackColor(std::string_view color);
 
 // A strip's channels at most (ADR-0020, ADR-0021): the main pair and up to
-// 62 auxiliary channels (a multi-out instrument's outputs).
-inline constexpr int kMaxTrackChannels = 64;
+// 126 auxiliary channels (a multi-out instrument's outputs), as REAPER.
+inline constexpr int kMaxTrackChannels = 128;
 
 struct Track {
     StripType type = StripType::Channel;

@@ -443,6 +443,11 @@ fs::path EngineApp::resolve(const fs::path& path) const {
 
 Status EngineApp::save(const fs::path& where) {
     const fs::path path = resolve(where);
+    // What running plug-ins hold now (a sampler's loaded files), as hosts
+    // save it, whether or not they said it changed.
+    std::vector<model::Id> running;
+    for (const auto& e : head().fx) running.push_back(e.id);
+    captureFxStates(running);
     SUPPLE_TRY(model::checkInvariants(head()));
     const bool fromScratch = projectPath_.empty() && !options_.scratchDir.empty();
     if (fromScratch && engine_ && engine_->recording())
@@ -749,6 +754,7 @@ void EngineApp::tick() {
     if (engine_) {
         engine_->service();
         consumePluginOutputs();
+        captureFxStates(engine_->takeDirtyStates());
         // Failures reach subscribers without a client asking.
         checkFailures();
         if (backend_) {
@@ -854,6 +860,39 @@ fs::path EngineApp::newerAutosave(const fs::path& project) const {
         }
     }
     return best;
+}
+
+bool EngineApp::captureFxState(model::Id id) {
+    if (txn_ || !pool_) return false;
+    const model::FxInstance* fx = head().fx.find(id);
+    host::Instance* instance = pool_->find(id);
+    // Semantic plug-ins keep their patch in the model already.
+    if (!fx || fx->patch || !instance || instance->info().semantic || pool_->failure(id))
+        return false;
+    auto saved = instance->saveState();
+    if (!saved || saved->empty()) return false;
+    const std::string hash = "sha256:" + sha256Hex(*saved);
+    if (fx->state == hash) return false;
+    cmd::Origin origin{cmd::Origin::Type::Internal, "plugin", ""};
+    origin.gesture = "state:" + id.str();  // later changes to it join this step
+    auto txid = beginTransaction(origin, "Plug-in state");
+    if (!txid) return false;
+    txn().putBlob(hash, std::make_shared<const model::Blob>(model::Blob{std::move(*saved)}));
+    model::FxInstance next = *fx;
+    next.state = hash;
+    const std::string previous = fx->state.value_or("");
+    txn().put<model::FxInstance>(id, std::move(next));
+    pool_->acknowledgeOutputState(id, hash);  // the instance holds it: no reload
+    if (!commitTransaction(*txid)) {
+        (void)rollbackTransaction(*txid);
+        pool_->acknowledgeOutputState(id, previous);
+        return false;
+    }
+    return true;
+}
+
+void EngineApp::captureFxStates(const std::vector<model::Id>& fx) {
+    for (model::Id id : fx) (void)captureFxState(id);
 }
 
 void EngineApp::autosave() {

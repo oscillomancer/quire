@@ -97,9 +97,9 @@ TEST_CASE("auxiliary channels over the bus: channels, routes to 3/4, key pins (A
     // {} restores the default pins.
     run(bus, "fx.set", R"({"fx":"fx_2","pins":{}})");
     CHECK(app->head().fx.find(*model::Id::parse("fx_2"))->pins.empty());
-    // Strips stay within 1-64 channels.
+    // Strips stay within 1-128 channels.
     run(bus, "track.set", R"({"track":"tr_2","channels":9})");
-    CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":65})"), kOrigin}));
+    CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":129})"), kOrigin}));
 }
 
 TEST_CASE("a multi-out instrument grows its track and pins its outputs (ADR-0021)") {
@@ -125,6 +125,12 @@ TEST_CASE("a multi-out instrument grows its track and pins its outputs (ADR-0021
     run(bus, "history.undo", "{}");
     CHECK(track("tr_2").channels == 4);
     CHECK(track("tr_2").chain.empty());
+    // 48 stereo outputs past the main pair: 98 channels.
+    run(bus, "track.add", R"({"name":"Big"})");
+    run(bus, "fx.add", R"({"track":"tr_4","plugin":"com.suppleaudio.test.multiout-x48"})");
+    CHECK(track("tr_4").channels == 98);
+    CHECK(fx("fx_3").pins.out.size() == 98);
+    CHECK(fx("fx_3").pins.out.back() == 98);
     // An effect's extra outputs (the key mix's) stay unconnected; the input
     // chain stays stereo.
     run(bus, "fx.add", R"({"track":"tr_3","plugin":"com.suppleaudio.test.keymix"})");

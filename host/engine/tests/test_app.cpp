@@ -2774,3 +2774,67 @@ TEST_CASE("app holds anticipative plug-in edits until their stream position has 
     engine.holdRenderer(false);
     app->stopEngine();
 }
+
+TEST_CASE("a plug-in's state change beyond its parameters reaches the project, and every save") {
+    // A sampler loading a file from its editor changes no parameter; it calls
+    // clap.state mark_dirty (the edge fixture's markDirty does the same).
+    Root root;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    auto app = makeApp(root.path);
+    cmd::Dispatcher d(registry, *app);
+    auto call = [&](std::string command, std::string_view args) {
+        auto r = d.execute({std::move(command), j(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("track.add", "{}");
+    call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                             {.anticipative = false})
+                .ok());
+    backend.run(2);
+    const auto fx = *model::Id::parse("fx_1");
+    host::Instance* instance = app->instanceOf(fx);
+    REQUIRE(instance);
+    struct Control {
+        void (*requestProcess)(const clap_plugin_t*);
+        void (*rescan)(const clap_plugin_t*, bool);
+        void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
+        void (*restart)(const clap_plugin_t*);
+        void (*markDirty)(const clap_plugin_t*, std::uint8_t);
+    };
+    const auto* control = static_cast<const Control*>(
+        instance->raw()->get_extension(instance->raw(), "supple.test.edge-control"));
+    REQUIRE(control);
+    auto blob = [&] {
+        const auto& state = app->head().fx.find(fx)->state;
+        REQUIRE(state);
+        return app->head().blobs.at(*state)->data;
+    };
+    const auto steps = [&] { return call("history.list", "{}")["versions"].size(); };
+    const auto before = steps();
+    control->markDirty(instance->raw(), 7);
+    app->tick();
+    CHECK(blob() == std::vector<std::uint8_t>{0, 0, 0, 7});
+    CHECK(steps() == before + 1);
+    CHECK(app->instanceOf(fx) == instance);  // the same instance: nothing reloaded
+    // Another change to the same plug-in joins that undo step.
+    control->markDirty(instance->raw(), 8);
+    app->tick();
+    CHECK(blob() == std::vector<std::uint8_t>{0, 0, 0, 8});
+    CHECK(steps() == before + 1);
+    // A change it did not report is saved with the project anyway.
+    REQUIRE(instance->loadState(std::vector<std::uint8_t>{0, 0, 0, 9}));
+    call("project.save", R"({"path":"state.json"})");
+    CHECK(blob() == std::vector<std::uint8_t>{0, 0, 0, 9});
+    auto text = readTextFile(root.path / "state.json");
+    REQUIRE(text);
+    auto reopened = model::parseProject(*text);
+    REQUIRE(reopened);
+    const auto& saved = reopened->fx.find(fx)->state;
+    REQUIRE(saved);
+    CHECK(reopened->blobs.at(*saved)->data == std::vector<std::uint8_t>{0, 0, 0, 9});
+    app->stopEngine();
+}

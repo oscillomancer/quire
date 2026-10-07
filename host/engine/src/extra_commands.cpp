@@ -431,7 +431,7 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
         // The main pair, plus a strip's auxiliary channels (ADR-0020).
         const int sourceChannels = std::max(2, s.tracks.find(*r.from.track)->channels);
         const int targetChannels = r.to.fx ? 2 : std::max(2, s.tracks.find(*target)->channels);
-        const std::string more = "track.set channels adds channels 3-64";
+        const std::string more = "track.set channels adds channels 3-128";
         for (std::size_t k = 0; k < m.from.size(); ++k) {
             if (m.from[k] > sourceChannels)
                 return Error("route.channels",

@@ -247,9 +247,16 @@ Nate's next list, done by the orchestrator:
   minimum). A send drag onto a strip the track already sends to adds nothing.
 - Multi-output plug-ins (ADR-0021): a CLAP plug-in's extra output ports and a
   VST3's auxiliary output buses reach the engine (bridge protocol 8); strips
-  have up to 64 channels; `fx.add` gives an instrument's outputs new channels
+  have up to 128 channels; `fx.add` gives an instrument's outputs new channels
   (`pins.out` past the main pair); the routing matrix has a row per pair
   ("3/4 Kick") that sends it on. RT ≡ offline, in process and bridged.
+- LSP Multi-Sampler (Nate's report): plugins now run while the transport is
+  stopped (they were processed only when monitoring or on request_process, and
+  LSP loads samples only in process()); play re-locates and resets the
+  renderer's share so RT ≡ offline holds. Up to 128 ports per direction (the
+  x24/x48 DirectOut variants have 25/49 and were refused at 16) and 128 track
+  channels. A plain plugin's state is captured on mark_dirty and before every
+  save (sample paths were never saved).
 
 ## Team (Hermes workers via Herdr; Codex retired)
 

@@ -339,7 +339,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 13);
+    REQUIRE(list->size() == 14);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -382,6 +382,35 @@ TEST_CASE("a multi-out instrument's auxiliary outputs reach the block, in proces
         // Without aux buffers the plug-in still gets every port (scratch).
         REQUIRE(p.process(buf.block(32, {}, false)));
         CHECK(buf.orr[0] == 0.125f);
+        p.stopProcessing();
+        p.deactivate();
+    }
+}
+
+TEST_CASE("a 49-port instrument loads with all its outputs, in process and bridged") {
+    // LSP's x48 DirectOut multi-sampler has 49 output ports.
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(find("com.suppleaudio.test.multiout-x48"), {}, isolated);
+        REQUIRE_MESSAGE(made, (made ? "" : made.error().toString()));
+        Instance& p = **made;
+        REQUIRE(p.auxOutputPorts().size() == 48);
+        CHECK(p.auxOutputPorts()[47].name == "Out 49");
+        CHECK(p.auxOutputChannels() == 96);
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.startProcessing());
+        Buffers buf(16);
+        std::vector<std::vector<float>> aux(96, std::vector<float>(16, -1.0f));
+        std::vector<float*> ptrs;
+        for (auto& a : aux) ptrs.push_back(a.data());
+        ProcessBlock b = buf.block(16, {}, false);
+        b.auxOutputs = ptrs.data();
+        b.auxOutputChannels = 96;
+        REQUIRE(p.process(b));
+        CHECK(buf.ol[0] == 0.125f);
+        CHECK(aux[0][0] == 0.25f);
+        CHECK(aux[95][15] == 0.5f);
         p.stopProcessing();
         p.deactivate();
     }

@@ -687,9 +687,9 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
             auto& list = input ? h.inPorts : h.outPorts;
             int& main = input ? h.mainIn : h.mainOut;
             const uint32_t n = ports->count(self->plugin_, input);
-            if (n > 16)
-                return Error("host.layout", "CLAP layout exceeds 16 audio ports", {},
-                             "select a layout with at most 16 ports per direction");
+            if (n > 128)
+                return Error("host.layout", "CLAP layout exceeds 128 audio ports", {},
+                             "select a layout with at most 128 ports per direction");
             std::vector<std::string> names;
             for (uint32_t i = 0; i < n; ++i) {
                 clap_audio_port_info_t p{};

@@ -470,8 +470,8 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
     for (auto [dir, channels] :
          {std::pair{vst::kInput, &s.inBusChannels}, std::pair{vst::kOutput, &s.outBusChannels}}) {
         const auto count = s.component->getBusCount(vst::kAudio, dir);
-        if (count < 0 || count > 16)
-            return Error("host.layout", "VST3 layout exceeds 16 audio buses");
+        if (count < 0 || count > 128)
+            return Error("host.layout", "VST3 layout exceeds 128 audio buses");
         for (Steinberg::int32 b = 0; b < count; ++b) {
             vst::BusInfo bus{};
             const bool ok = s.component->getBusInfo(vst::kAudio, dir, b, bus) == kResultOk;
