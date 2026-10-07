@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-06. This file describes the present: what works, what is
+Updated 2026-10-07. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -98,6 +98,17 @@ Engine and hosting:
   state blob.
 - The engine does not read plugin telemetry (Gauge's measurements reach its
   own editor and agents through the extension only).
+- Settings that are stored and accepted but not yet executed: input FX
+  chains (neither monitored nor recorded audio passes through them), an FX
+  instance's `pdc: ignore`, `parallel` FX groups (run in series) and FX
+  `oversampling`.
+- A recording seeked during capture (without a loop) writes a segment table
+  its own crash-recovery reader rejects.
+- VST3: a state load the controller rejects leaves the component changed;
+  an isolated VST3 does not pick up bus widths negotiated at activation.
+- The sandbox fixes a render's tail length before queued tempo and
+  parameter changes reach the plugin, so the first render after such a
+  change can be cut short.
 
 Session and editing:
 - Take `stretch_markers` are stored but not applied; stretching and
@@ -108,16 +119,41 @@ Session and editing:
 - `fx.copy` does not copy envelopes or key routes; take FX cannot be keyed.
 - The history budget's size estimate walks shared payloads per version, and
   squashed steps keep large invocation arguments.
+- `item.set` and `item.split` respect an item's lock; `item.move` and
+  `midi.edit` do not.
+- MIDI queries round positions to four decimal beats, finer than a tick at
+  usual tempos but coarser at very high PPQ or playrate.
+- A posted job (`render.add_to_project`) that runs during another batch's
+  `job.wait` joins that batch's transaction.
 
 GUI:
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
   mixer strips but not onto track-panel rows.
+- Plugin rescans, UI sidecar writes (with fsync) and hashless waveform
+  lookups run synchronously on the UI thread; the long-task counter covers
+  only part of the main loop.
+- A dirty notation draft and an automation drag commit whole-object
+  replacements, overwriting edits made meanwhile by other clients.
+- Key bindings use only the arrange and global contexts; actions that need
+  typed arguments run only from the actions list; macros do not pass their
+  arguments to steps.
+- Changing the agent endpoint while a proposal is pending drops the review.
 
 Plugins:
 - Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
   reaching 3 % needs a structure-of-arrays voice bank.
 - Stock plugins are tested as Linux CLAP builds; their VST3 and AUv2
   builds are optional and not covered by CI.
+
+Analysis and scripting:
+- Lua values converted to JSON are bounded in depth only, outside the
+  script's memory and instruction limits.
+- The JSON writer does not validate UTF-8, so a Lua string with invalid
+  bytes can produce JSON the parser rejects.
+- Schema string lengths are checked in bytes but exported as characters.
+- Pitch detection can report a pitch for pure DC; complete stereo
+  cancellation reports zero mono loss; file analysis in the sandbox reads
+  only the first two channels of a surround file.
 
 Smaller recorded items: `describeFlat` skips hidden parameters in full
 detail; core-params formats magnitudes beyond six decimals imprecisely;
