@@ -3443,3 +3443,169 @@ TEST_CASE("replaced media plans null against fresh offline in both executors" *
     }
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("parallel, oversampled and pdc-ignored FX: real-time output equals the offline render" *
+          doctest::description("rt")) {
+    model::Session base = synthSession(-3.0);
+    model::EditTxn t(base, 2);
+    Id track;
+    for (const auto& e : base.tracks)
+        if (e.value->type == model::StripType::Channel) track = e.id;
+    auto gain = [&](const char* latency, auto&& edit) {
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.gain";
+        fx.patch = json::parse(std::string(R"({"schema": "supple.test-gain-patch/1.0", "params": )"
+                                           R"({"gain": -6, "latency": ")") +
+                               latency + "\"}}")
+                       .value();
+        edit(fx);
+        const Id f = t.create(fx);
+        t.modify<model::Track>(track, [&](model::Track& x) { x.chain.push_back(f); });
+    };
+    gain("short", [](model::FxInstance& f) { f.oversampling = 4; });
+    gain("none", [](model::FxInstance& f) { f.parallel = true; });
+    gain("short", [](model::FxInstance& f) { f.pdc = model::PdcMode::Ignore; });
+    const model::Session s = t.commit().value();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 2.0}).value();
+        CHECK(offline.warnings.empty());
+        CHECK(offline.outputLatency == 80 + 16);  // 4x round trip, 64 at the high rate
+        auto rtPool = makePool();
+        MediaCache media;
+        DummyBackend backend(
+            {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
+        Engine engine(rtPool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+        REQUIRE(engine.load(s).ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
+        else
+            backend.run((48000 * 2 + 4096) / 128);
+        engine.stop();
+        const std::uint32_t L = engine.outputLatency();
+        CHECK(L == 96u);
+        CHECK(engine.processErrors() == 0);
+        for (std::size_t c = 0; c < 2; ++c)
+            CHECK(maxDiff(backend.capture().channels[c], L, offline.audio.channels[c], 96000) ==
+                  0.0);
+    }
+}
+
+TEST_CASE("input FX process the armed input: monitored and recorded, aligned with the plain input" *
+          doctest::description("rt")) {
+    for (const EngineOptions& options : {kInCallback, EngineOptions{}}) {
+        INFO("anticipative " << options.anticipative);
+        // Two channels armed on the same inputs; the second has a -6 dB input
+        // FX with 64 samples of latency, and is not monitored.
+        model::Session base = monitoring(synthSession(0.0), model::Monitor::Off);
+        model::EditTxn t(base, 3);
+        Id plain;
+        for (const auto& e : base.tracks)
+            if (e.value->type == model::StripType::Channel) plain = e.id;
+        model::Track second;
+        second.name = "Processed";
+        second.parent = kMaster;
+        const Id processed = t.create(second);
+        t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(processed); });
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.gain";
+        fx.patch =
+            json::parse(
+                R"({"schema": "supple.test-gain-patch/1.0", "params": {"gain": -6, "latency": "short"}})")
+                .value();
+        const Id f = t.create(fx);
+        model::Route input;
+        input.from.hwChannels = std::vector<int>{1, 2};
+        input.to.track = processed;
+        const Id route = t.create(input);
+        t.modify<model::Track>(processed, [&](model::Track& x) {
+            x.inputChain = {f};
+            x.record.input = route;
+            x.record.armed = true;
+            x.record.monitor = model::Monitor::Off;
+        });
+        auto committed = t.commit();
+        REQUIRE_MESSAGE(committed, (committed ? std::string() : committed.error().toString()));
+        const model::Session s = std::move(*committed);
+
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                              .input = [](float* const* in, std::uint32_t channels, std::uint32_t n,
+                                          std::int64_t frame) {
+                                  for (std::uint32_t c = 0; c < channels; ++c)
+                                      for (std::uint32_t i = 0; i < n; ++i)
+                                          in[c][i] = static_cast<float>((frame + i) % 1000) /
+                                                     1000.0f * (c ? -1.0f : 1.0f);
+                              }});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.load(s).ok());
+        CHECK(engine.processErrors() == 0);
+        const auto dir = std::filesystem::temp_directory_path() /
+                         ("supple-inputfx-" + std::to_string(::getpid()));
+        std::filesystem::remove_all(dir);
+        REQUIRE(engine
+                    .startRecording({{plain, {0, 1}, dir / "plain.wav", {}},
+                                     {processed, {0, 1}, dir / "processed.wav", {}}})
+                    .ok());
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 100, 256);
+        else
+            backend.run(100);
+        auto takes = engine.stopRecording();
+        engine.stop();
+        REQUIRE(takes);
+        REQUIRE(takes->size() == 2);
+        auto a = audio::readAudio((*takes)[0].track == plain ? (*takes)[0].file : (*takes)[1].file);
+        auto b = audio::readAudio((*takes)[0].track == plain ? (*takes)[1].file : (*takes)[0].file);
+        REQUIRE(a);
+        REQUIRE(b);
+        const double g = std::pow(10.0, -6.0 / 20.0);
+        const std::size_t frames = 100 * 256 - 64;  // the processed file's last 64 are padding
+        double worst = 0;
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t i = 0; i < frames; ++i)
+                worst = std::max(
+                    worst, std::fabs(double(b->channels[c][i]) - g * double(a->channels[c][i])));
+        CHECK(worst < 1e-6);
+        CHECK(engine.processErrors() == 0);
+        std::filesystem::remove_all(dir);
+    }
+}
+
+TEST_CASE("a monitored input is heard through its input FX" * doctest::description("rt")) {
+    model::Session base = monitoring(synthSession(-6.0206));
+    model::EditTxn t(base, 3);
+    Id track;
+    for (const auto& e : base.tracks)
+        if (e.value->type == model::StripType::Channel) track = e.id;
+    model::FxInstance fx;
+    fx.plugin.id = "com.suppleaudio.test.gain";
+    fx.patch =
+        json::parse(R"({"schema": "supple.test-gain-patch/1.0", "params": {"gain": -6}})").value();
+    const Id f = t.create(fx);
+    t.modify<model::Track>(track, [&](model::Track& x) { x.inputChain = {f}; });
+    const model::Session s = t.commit().value();
+    for (const EngineOptions& options : {kInCallback, EngineOptions{}}) {
+        INFO("anticipative " << options.anticipative);
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend(constantInput(48000));
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.awaitPlan());
+        backend.run(20);  // stopped: the input, the input FX, the fader and centre pan
+        const auto& cap = backend.capture();
+        const double g = 0.5 * 0.472135955 * std::pow(10.0, -6.0 / 20.0);
+        CHECK(double(cap.channels[0][4000]) == doctest::Approx(0.5 * g).epsilon(1e-4));
+        CHECK(double(cap.channels[1][4000]) == doctest::Approx(-0.25 * g).epsilon(1e-4));
+        CHECK(engine.processErrors() == 0);
+        engine.stop();
+    }
+}

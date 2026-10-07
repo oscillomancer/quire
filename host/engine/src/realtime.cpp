@@ -935,7 +935,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         std::copy_n(master.post.r.begin(), k, out[1] + done);
         addClicks(*plan, out, done, pos_, k);
         if (detail::Recorder* r = recorder_.load()) {
-            r->capture(ins, deviceInputs_, k, pos_);
+            r->capture(ins, deviceInputs_, k, pos_, plan->processedInputs);
             r->captureMidi(plan->deviceMidi, midiBase + done, k, pos_);
         }
         // Metering (P5.3c): no anticipation here, so the callback renders and
@@ -1462,7 +1462,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     if (playing) addClicks(p, out, 0, livePos_, k);
     if (playing) {
         if (detail::Recorder* r = recorder_.load()) {
-            r->capture(in, deviceInputs_, k, livePos_);
+            r->capture(in, deviceInputs_, k, livePos_, p.processedInputs);
             r->captureMidi(p.deviceMidi, offset, k, livePos_);
         }
         const std::int64_t next = loopC_.next(livePos_, livePos_ + k);

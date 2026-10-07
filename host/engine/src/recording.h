@@ -52,6 +52,14 @@ struct RecordingInfo {
     std::int64_t loopStart = 0, loopEnd = 0;
     std::string hash = {};  // optional; finalized by the background recording job
 };
+// A track's device input after its input FX (ADR-0014): what it records
+// instead of the raw device channels, and the latency of those FX.
+struct ProcessedInput {
+    model::Id track;
+    const float* channels[2] = {nullptr, nullptr};
+    std::int64_t latency = 0;
+};
+
 std::filesystem::path sidecarPath(const std::filesystem::path& wav);
 Status writeSidecar(const std::filesystem::path& wav, const RecordingInfo& info);
 Result<RecordingInfo> readSidecar(const std::filesystem::path& wav);
@@ -62,8 +70,10 @@ class Recorder {
     ~Recorder();
     Status open();  // creates the files and starts the writer thread
     // Audio thread: `pos` is the timeline sample of this callback's output.
+    // A track listed in `processed` records that signal, its first `latency`
+    // frames dropped so the file lines up with what was played.
     void capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
-                 std::int64_t pos) SUPPLE_RT;
+                 std::int64_t pos, std::span<const ProcessedInput> processed = {}) SUPPLE_RT;
     // Audio thread, after capture() for the same part of the cycle: the
     // device MIDI in frames [offset, offset + frames) of `events` (ADR-0016).
     void captureMidi(std::span<const MidiInputEvent> events, std::uint32_t offset,
@@ -87,6 +97,9 @@ class Recorder {
         Status writeError = okStatus();  // writer thread, then finish after join
         Status sidecarError = okStatus();
         Status firstError = okStatus();
+        // Input FX latency (set at the first frame): `skip` frames still to
+        // drop, `shift` how far the file runs behind the captured frames.
+        std::int64_t skip = 0, shift = 0;
     };
     // MIDI: events stamped with the captured-frame position they arrived at
     // (placed on the timeline by finish(), knowing the runs).

@@ -19,7 +19,9 @@
 #include <tuple>
 #include <vector>
 
+#include "recording.h"
 #include "strip.h"
+#include "supple/dsp/oversampler.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
 #include "supple/model/env_shape.h"
@@ -356,7 +358,30 @@ struct Stage {
     std::uint64_t voiceDropped = 0;
     std::vector<host::OutputEvent> outStorage;
     host::OutputEvents outEvents;
+    // PDC policy (fx.pdc): an ignored stage keeps its own dry delay but adds
+    // nothing to its chain's compensation.
+    bool pdcIgnore = false;
+    // Parallel groups (fx.parallel): a stage marked parallel runs beside the
+    // one before it on the same input; the branches' outputs, each delayed to
+    // the group's latency (align), are summed. `group` is the index of the
+    // group's first stage (-1: serial), whose groupIn/groupOut hold the block.
+    bool parallel = false;
+    int group = -1;
+    bool groupEnd = false;
+    std::int64_t before = 0;  // compensated latency of its chain ahead of its input
+    Delay align;
+    Stereo groupIn, groupOut;
+    // Oversampling (fx.oversampling): the plug-in runs at `os` times the plan
+    // rate behind half-band resamplers (L/R in and out, then key L/R up); its
+    // latency is padded at the high rate to a whole number of plan samples.
+    int os = 1;
+    std::vector<dsp::Oversampler> osFilters;
+    std::vector<float> osIn[2], osOut[2], osKey[2];
+    Delay osPad;
 };
+
+// The latency a stage adds to its chain's compensation.
+inline std::int64_t compLatency(const Stage& st) { return st.pdcIgnore ? 0 : st.latency; }
 
 // An audio item ready to play: which source frames land on which samples.
 struct Clip {
@@ -419,6 +444,14 @@ struct Node {
     std::vector<std::size_t> in;   // incoming edges, in summation order
     std::vector<std::size_t> out;  // source-owned send encoders
     std::vector<Stage> chain;
+    // Input FX (a channel's input_chain): they process its record input, which
+    // is then monitored and recorded, whenever the track is armed with an
+    // audio input. Live (the device input exists only in the callback) and
+    // outside compensation; `inputBuf` holds this block's processed input.
+    std::vector<Stage> inputChain;
+    std::vector<int> recordInputs;  // device channels, 0-based (one = mono to both)
+    std::int64_t inputLatency = 0;
+    Stereo inputBuf;
     std::int64_t latIn = 0, latChain = 0;
     Stereo sum, preFx, preFader, post, postKey;
     std::vector<TimedEvent> events;
@@ -471,6 +504,7 @@ struct Node {
 // Every stage of a node: its chain's, then its take chains'.
 template <class N, class F>
 void forEachStage(N& node, F&& f) {
+    for (auto& st : node.inputChain) f(st);
     for (auto& st : node.chain) f(st);
     for (auto& tc : node.takeChains)
         for (auto& st : tc.chain) f(st);
@@ -527,6 +561,9 @@ struct Plan {
     // of the cycle being processed starts.
     std::span<const MidiInputEvent> deviceMidi;
     std::uint32_t deviceMidiOffset = 0;
+    // Armed channels with input FX: what the recorder takes instead of the
+    // raw device input (filled by prepare(), pointing into the nodes).
+    std::vector<ProcessedInput> processedInputs;
 };
 
 // Structural invariant checker, also exposed to the randomized plan tests.

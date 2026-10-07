@@ -2006,3 +2006,114 @@ TEST_CASE("media cache releases originals used only to build playback variants")
     CHECK(original.expired());
     std::filesystem::remove_all(dir);
 }
+
+namespace {
+json::Value gainPatch(double db, const char* latency = "none") {
+    json::Value patch = json::parse(R"({"schema": "supple.test-gain-patch/1.0"})").value();
+    patch["params"]["gain"] = db;
+    patch["params"]["latency"] = latency;
+    return patch;
+}
+
+// The largest difference between two signals over [from, to).
+double maxDiffFrom(const std::vector<float>& a, const std::vector<float>& b, double scaleB,
+                   std::size_t from, std::size_t to) {
+    double m = 0;
+    for (std::size_t i = from; i < std::min({to, a.size(), b.size()}); ++i)
+        m = std::max(m, std::fabs(double(a[i]) - scaleB * double(b[i])));
+    return m;
+}
+}  // namespace
+
+TEST_CASE("pdc ignore leaves a plug-in's latency out of compensation") {
+    std::size_t onset[2] = {0, 0};
+    for (bool ignore : {false, true}) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id channel = addTrack(t, "Channel");
+        addFx(t, channel, kSine);
+        const Id fx = addFx(t, channel, kGain, gainPatch(0, "short"));
+        if (ignore)
+            t.modify<model::FxInstance>(
+                fx, [](model::FxInstance& f) { f.pdc = model::PdcMode::Ignore; });
+        addNote(t, channel, 0, 2);
+        const auto s = commit(t);
+        auto pool = makePool();
+        const auto r = render(s, pool, 0.5);
+        CHECK(r.outputLatency == (ignore ? 0 : 64));
+        onset[ignore] = firstNonZero(r.audio.channels[0]);
+    }
+    CHECK(onset[1] == onset[0] + 64);  // nothing waits for it: it arrives late
+}
+
+TEST_CASE("parallel FX share their input and sum, aligned to the slowest branch") {
+    auto build = [](bool parallel, bool withGains) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id channel = addTrack(t, "Channel");
+        addFx(t, channel, kSine);
+        if (withGains) {
+            addFx(t, channel, kGain, gainPatch(-6, "short"));
+            const Id second = addFx(t, channel, kGain, gainPatch(-6));
+            t.modify<model::FxInstance>(second,
+                                        [&](model::FxInstance& f) { f.parallel = parallel; });
+        }
+        addNote(t, channel, 0, 2);
+        return commit(t);
+    };
+    auto referencePool = makePool(), serialPool = makePool(), parallelPool = makePool();
+    const auto reference = render(build(false, false), referencePool, 0.5);
+    const auto serial = render(build(false, true), serialPool, 0.5);
+    const auto parallel = render(build(true, true), parallelPool, 0.5);
+    REQUIRE(peak(reference.audio.channels[0]) > 0.1);
+    const double g = std::pow(10.0, -6.0 / 20.0);
+    CHECK(serial.outputLatency == 64);
+    CHECK(parallel.outputLatency == 64);  // the slowest branch, not the sum
+    const auto n = reference.audio.channels[0].size();
+    for (int c = 0; c < 2; ++c) {
+        const auto& ref = reference.audio.channels[static_cast<std::size_t>(c)];
+        CHECK(maxDiffFrom(serial.audio.channels[static_cast<std::size_t>(c)], ref, g * g, 0, n) <
+              1e-5);
+        // Both branches hear the sine; the faster one waits for the slower.
+        CHECK(maxDiffFrom(parallel.audio.channels[static_cast<std::size_t>(c)], ref, 2 * g, 0, n) <
+              1e-5);
+    }
+}
+
+TEST_CASE("an oversampled plug-in runs at a multiple of the rate, compensated exactly") {
+    auto build = [](int os, const char* latency, bool effect) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id channel = addTrack(t, "Channel");
+        const Id sine = addFx(t, channel, kSine);
+        if (effect) {
+            const Id fx = addFx(t, channel, kGain, gainPatch(0, latency));
+            t.modify<model::FxInstance>(fx, [&](model::FxInstance& f) { f.oversampling = os; });
+        } else {
+            t.modify<model::FxInstance>(sine, [&](model::FxInstance& f) { f.oversampling = os; });
+        }
+        addNote(t, channel, 0, 2);
+        return commit(t);
+    };
+    auto referencePool = makePool();
+    const auto reference = render(build(1, "none", false), referencePool, 0.5);
+    const auto n = reference.audio.channels[0].size();
+    struct Case {
+        int os;
+        const char* latency;
+        bool effect;
+        std::int64_t expected;
+    };
+    // The resamplers' round trip is 72/80/83 samples at 2/4/8x; an
+    // instrument's output only crosses the downward half; the plug-in's own
+    // 64 high-rate samples are padded to whole plan samples.
+    for (const Case& k :
+         {Case{2, "none", true, 72}, Case{4, "none", true, 80}, Case{8, "none", true, 83},
+          Case{2, "short", true, 72 + 32}, Case{8, "short", true, 91}, Case{2, "none", false, 36},
+          Case{8, "none", false, 42}}) {
+        INFO("os " << k.os << " latency " << k.latency << " effect " << k.effect);
+        auto pool = makePool();
+        const auto r = render(build(k.os, k.latency, k.effect), pool, 0.5);
+        CHECK(r.outputLatency == k.expected);
+        // A 440 Hz sine is far inside the protected band: once the note's
+        // onset has rung out, the result matches the plain render.
+        CHECK(maxDiffFrom(r.audio.channels[0], reference.audio.channels[0], 1.0, 2000, n) < 1e-3);
+    }
+}

@@ -298,6 +298,11 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             st.bypass = fx.bypass || fx.offline;
             st.wet = fx.wet / 100.0;
             st.autoBypassOnSilence = fx.autoBypassOnSilence;
+            st.pdcIgnore = fx.pdc == model::PdcMode::Ignore;
+            st.parallel = fx.parallel;
+            st.os = fx.oversampling == 2 || fx.oversampling == 4 || fx.oversampling == 8
+                        ? fx.oversampling
+                        : 1;
             if (!fx.offline) {
                 auto inst = pool.get(fxId, fx, s);
                 if (!inst) {
@@ -360,8 +365,21 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                     st.keyed = true;
                 }
             }
+            if (st.os > 1 && !st.auxOutPin.empty()) {
+                p.warnings.push_back(fxId.str() +
+                                     ": oversampling is not available with auxiliary outputs; "
+                                     "it runs at the project rate");
+                st.os = 1;
+            }
+            if (st.parallel && !n.chain.empty() && (st.pinned || n.auxCount > 0))
+                p.warnings.push_back(fxId.str() +
+                                     ": parallel is not available with pins or auxiliary "
+                                     "channels; it runs in series");
             n.chain.push_back(std::move(st));
         }
+        // Input FX (channels only): run on the record input, see processNode.
+        if (t.type == model::StripType::Channel)
+            for (Id fxId : t.inputChain) n.inputChain.push_back(makeStage(fxId));
         // Takes with FX or envelopes play through a chain of their own (gap log #22).
         for (const auto& e : s.items) {
             const model::Item& it = *e.value;
@@ -381,13 +399,10 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             n.takeChains.push_back(std::move(tc));
         }
     }
-    for (const Node& n : p.nodes) {
-        for (const Stage& st : n.chain)
+    for (const Node& n : p.nodes)
+        forEachStage(n, [&](const Stage& st) {
             if (st.instance) p.instances.push_back(st.instance);
-        for (const TakeChain& tc : n.takeChains)
-            for (const Stage& st : tc.chain)
-                if (st.instance) p.instances.push_back(st.instance);
-    }
+        });
     std::sort(p.instances.begin(), p.instances.end());
     p.instances.erase(std::unique(p.instances.begin(), p.instances.end()), p.instances.end());
     // Edges: children's parent sends, then routes; each target sums its
@@ -586,6 +601,9 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         const model::Track& t = *s.tracks.find(n.id);
         const bool monitoring = t.record.armed && t.record.monitor != model::Monitor::Off;
         n.tapeAuto = t.record.monitor == model::Monitor::Auto;
+        if (t.record.armed && t.record.input && !n.inputChain.empty())
+            if (const model::Route* in = s.routes.find(*t.record.input); in && in->from.hwChannels)
+                for (int ch : *in->from.hwChannels) n.recordInputs.push_back(ch - 1);
         if (monitoring && t.record.input)
             if (const model::Route* in = s.routes.find(*t.record.input)) {
                 if (in->from.hwChannels)
@@ -595,7 +613,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                         Node::MidiIn{*in->from.midiDevice, in->midi ? in->midi->fromChannel : 0,
                                      in->midi ? in->midi->toChannel : 0, 0};
             }
-        n.live = !n.monitorInputs.empty() || n.midiIn.has_value();
+        n.live = !n.monitorInputs.empty() || n.midiIn.has_value() || !n.recordInputs.empty();
         for (std::size_t e : n.in) n.live = n.live || p.nodes[p.edges[e].from].live;
         if (!n.live && keepLive && std::binary_search(keepLive->begin(), keepLive->end(), n.id))
             n.live = p.heldLive = true;
@@ -667,6 +685,34 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
     return p;
 }
 
+namespace {
+// Parallel groups and compensated latency of one chain (stages prepared): a
+// group's latency is its slowest branch's, the others delayed to match.
+std::int64_t layoutChain(std::vector<Stage>& chain, bool allowParallel, std::size_t block) {
+    std::int64_t total = 0;
+    for (std::size_t k = 0; k < chain.size();) {
+        std::size_t end = k + 1;
+        if (allowParallel && !chain[k].pinned)
+            while (end < chain.size() && chain[end].parallel && !chain[end].pinned) ++end;
+        std::int64_t latency = 0;
+        for (std::size_t j = k; j < end; ++j) latency = std::max(latency, compLatency(chain[j]));
+        const bool grouped = end - k > 1;
+        for (std::size_t j = k; j < end; ++j) {
+            Stage& st = chain[j];
+            st.before = total;
+            st.group = grouped ? static_cast<int>(k) : -1;
+            st.groupEnd = grouped && j + 1 == end;
+            st.align.init(grouped ? latency - compLatency(st) : 0);
+        }
+        chain[k].groupIn.init(grouped ? block : 0);
+        chain[k].groupOut.init(grouped ? block : 0);
+        total += latency;
+        k = end;
+    }
+    return total;
+}
+}  // namespace
+
 // Activates instances, measures latencies, sizes buffers and delays.
 Status prepare(Plan& p, const Session& s) {
     const std::size_t block = p.block;
@@ -675,18 +721,39 @@ Status prepare(Plan& p, const Session& s) {
         if (st.instance) {
             host::Instance& in = *st.instance;
             p.pool->service(st.fx);
+            const auto os = static_cast<std::uint32_t>(st.os);
             const bool keyChanged = in.sidechainActive() != (st.keyed && in.sidechainChannels());
-            if (in.active() && (in.sampleRate() != p.rate || in.maxFrames() < block ||
+            if (in.active() && (in.sampleRate() != p.rate * os || in.maxFrames() < block * os ||
                                 (keyChanged && !in.processing())))
                 in.deactivate();
             if (!in.active() && !p.pool->failure(st.fx)) {
                 SUPPLE_TRY(in.setSidechainActive(st.keyed));
-                SUPPLE_TRY(in.activate(p.rate, 1, p.block));
+                SUPPLE_TRY(in.activate(p.rate * os, 1, p.block * os));
             }
             st.keyChannels = std::min<std::uint32_t>(in.sidechainChannels(), 2);
-            st.latency = p.pool->failure(st.fx) ? p.pool->rememberedLatency(st.fx) : in.latency();
-            if (in.active()) p.pool->rememberLatency(st.fx, st.latency);
             st.instrument = in.audioInputChannels() == 0;
+            if (p.pool->failure(st.fx)) {
+                st.latency = p.pool->rememberedLatency(st.fx);
+            } else if (os > 1) {
+                // The resamplers' round trip (an instrument's output only its
+                // downward half) plus the plug-in's own latency, at the high
+                // rate, padded to a whole number of plan samples.
+                st.osFilters.assign(4, {});
+                for (auto& f : st.osFilters) f.prepare(st.os);
+                const std::int64_t trip = st.osFilters[0].latency() * os;
+                const std::int64_t high = in.latency() + (st.instrument ? trip / 2 : trip);
+                const std::int64_t pad = (os - high % os) % os;
+                st.osPad.init(pad);
+                st.latency = (high + pad) / os;
+                for (int c = 0; c < 2; ++c) {
+                    st.osIn[c].assign(block * os, 0.0f);
+                    st.osOut[c].assign(block * os, 0.0f);
+                    st.osKey[c].assign(st.keyed ? block * os : 0, 0.0f);
+                }
+            } else {
+                st.latency = in.latency();
+            }
+            if (in.active()) p.pool->rememberLatency(st.fx, static_cast<std::uint32_t>(st.latency));
             if (in.audioOutputChannels() != 2)
                 return Error(
                     "engine.layout", in.info().name + " does not have a stereo output", {},
@@ -707,20 +774,25 @@ Status prepare(Plan& p, const Session& s) {
         st.outEvents.storage = st.outStorage;
         return {};
     };
+    p.processedInputs.clear();
     for (Node& n : p.nodes) {
+        for (Stage& st : n.inputChain) SUPPLE_TRY(prepareStage(st));
+        n.inputLatency = layoutChain(n.inputChain, true, block);
+        n.inputBuf.init(n.inputChain.empty() ? 0 : block);
+        if (!n.inputChain.empty() && !n.recordInputs.empty())
+            p.processedInputs.push_back(
+                {n.id, {n.inputBuf.l.data(), n.inputBuf.r.data()}, n.inputLatency});
         for (TakeChain& tc : n.takeChains) {
-            tc.latency = 0;
             int stageIndex = 0;
             for (Stage& st : tc.chain) {
                 SUPPLE_TRY(prepareStage(st));
                 if (tc.noteTarget < 0 && st.instance && st.instance->acceptsNotes())
                     tc.noteTarget = stageIndex;
-                tc.latency += st.latency;
                 ++stageIndex;
             }
+            tc.latency = layoutChain(tc.chain, true, block);
             tc.buf.init(block);
         }
-        n.latChain = 0;
         int stageIndex = 0;
         for (Stage& st : n.chain) {
             SUPPLE_TRY(prepareStage(st));
@@ -739,9 +811,9 @@ Status prepare(Plan& p, const Session& s) {
                 for (MonoDelay& d : st.chanDelay) d.init(st.latency);
                 st.pinBuf.init(block);
             }
-            n.latChain += st.latency;
             ++stageIndex;
         }
+        n.latChain = layoutChain(n.chain, n.auxCount == 0, block);
         n.aux.assign(static_cast<std::size_t>(n.auxCount), std::vector<float>(block, 0.0f));
         n.sum.init(block);
         n.preFx.init(block);
@@ -798,11 +870,9 @@ Status prepare(Plan& p, const Session& s) {
     // stage's input: the node's input latency plus the stages before it.
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         Node& n = p.nodes[i];
-        std::vector<std::int64_t> before(n.chain.size() + 1, 0);
-        for (std::size_t k = 0; k < n.chain.size(); ++k)
-            before[k + 1] = before[k] + n.chain[k].latency;
         auto at = [&](const Edge& ed) {
-            return ed.stage < 0 ? std::int64_t{0} : before[static_cast<std::size_t>(ed.stage)];
+            return ed.stage < 0 ? std::int64_t{0}
+                                : n.chain[static_cast<std::size_t>(ed.stage)].before;
         };
         // An auxiliary link reads a source's aux channel after its chain, a
         // main channel at the route's tap (ADR-0020).
@@ -838,30 +908,25 @@ Status prepare(Plan& p, const Session& s) {
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
             auto shift = e.encode ? latTap(p.nodes[e.from], e.tap) : n.latIn;
-            if (e.stage >= 0)
-                for (int k = 0; k < e.stage; ++k)
-                    shift += n.chain[static_cast<std::size_t>(k)].latency;
+            if (e.stage >= 0) shift += n.chain[static_cast<std::size_t>(e.stage)].before;
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
                 a->shift(shift);
         }
         // A plugin's parameters: its input is the track's, delayed by the
         // stages before it.
-        std::int64_t before = n.latIn;
         for (Stage& st : n.chain) {
-            st.inputLatency = before;
-            for (ParamLane& ln : st.lanes) ln.curve.shift(before);
-            before += st.latency;
+            st.inputLatency = n.latIn + st.before;
+            for (ParamLane& ln : st.lanes) ln.curve.shift(st.inputLatency);
         }
         // A take chain's output lines up with the track's input; its stages
         // run its latency ahead of it.
         for (TakeChain& tc : n.takeChains) {
             for (Automation* a : {&tc.volume, &tc.pan, &tc.mute}) a->shift(n.latIn);
-            std::int64_t ahead = n.latIn - tc.latency;
+            const std::int64_t ahead = n.latIn - tc.latency;
             for (Stage& st : tc.chain) {
-                st.inputLatency = ahead;
-                for (ParamLane& ln : st.lanes) ln.curve.shift(ahead);
-                ahead += st.latency;
+                st.inputLatency = ahead + st.before;
+                for (ParamLane& ln : st.lanes) ln.curve.shift(st.inputLatency);
             }
         }
     }
@@ -1080,14 +1145,10 @@ Status prepare(Plan& p, const Session& s) {
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         (p.nodes[i].live ? p.liveNodes : p.rendererNodes).push_back(i);
         task[i] = static_cast<std::uint32_t>(p.rendererNodes.size() - 1);
-        for (const Stage& st : p.nodes[i].chain)
+        forEachStage(p.nodes[i], [&](const Stage& st) {
             if (runs(st.instance))
                 (p.nodes[i].live ? p.liveInstances : p.rendererInstances).push_back(st.instance);
-        for (const TakeChain& tc : p.nodes[i].takeChains)
-            for (const Stage& st : tc.chain)
-                if (runs(st.instance))
-                    (p.nodes[i].live ? p.liveInstances : p.rendererInstances)
-                        .push_back(st.instance);
+        });
     }
     std::vector<std::vector<std::uint32_t>> rdeps;
     for (std::size_t i : p.rendererNodes) {
@@ -1446,6 +1507,58 @@ void releaseVoices(Stage& st, bool includeLive, bool onlyPending = false,
     st.releases = st.blockEvents.size();
 }
 
+// The half-band resamplers of an oversampled stage (dsp::Oversampler: one
+// sample in, `os` out, and back).
+void upsample(dsp::Oversampler& f, const float* x, float* y, std::uint32_t n,
+              std::uint32_t os) SUPPLE_RT {
+    std::array<double, 8> tmp{};
+    for (std::uint32_t i = 0; i < n; ++i) {
+        f.upsample(static_cast<double>(x[i]), std::span<double>(tmp.data(), os));
+        for (std::uint32_t j = 0; j < os; ++j) y[i * os + j] = static_cast<float>(tmp[j]);
+    }
+}
+void downsample(dsp::Oversampler& f, const float* x, float* y, std::uint32_t n,
+                std::uint32_t os) SUPPLE_RT {
+    std::array<double, 8> tmp{};
+    for (std::uint32_t i = 0; i < n; ++i) {
+        for (std::uint32_t j = 0; j < os; ++j) tmp[j] = static_cast<double>(x[i * os + j]);
+        y[i] = static_cast<float>(f.downsample(std::span<const double>(tmp.data(), os)));
+    }
+}
+
+// Parallel groups: before a stage runs, the group's first stage keeps its
+// input and the later branches start from it; after it, each branch is
+// aligned to the group's latency and summed, the sum leaving the last one.
+void enterGroup(std::vector<Stage>& chain, Stage& st, Stereo& sum, std::uint32_t n) SUPPLE_RT {
+    if (st.group < 0) return;
+    Stage& first = chain[static_cast<std::size_t>(st.group)];
+    if (&first == &st) {
+        first.groupIn.copyFrom(sum, n);
+        first.groupOut.clear(n);
+    } else {
+        sum.copyFrom(first.groupIn, n);
+    }
+}
+void leaveGroup(std::vector<Stage>& chain, Stage& st, Stereo& sum, std::uint32_t n) SUPPLE_RT {
+    if (st.group < 0) return;
+    Stage& first = chain[static_cast<std::size_t>(st.group)];
+    st.align.process(sum.l.data(), sum.r.data(), n);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        first.groupOut.l[i] += sum.l[i];
+        first.groupOut.r[i] += sum.r[i];
+    }
+    if (st.groupEnd) sum.copyFrom(first.groupOut, n);
+}
+
+// Clears what a stage carries from block to block outside its plug-in.
+void clearStageDelays(Stage& st) SUPPLE_RT {
+    st.dry.clear();
+    st.align.clear();
+    st.osPad.clear();
+    for (auto& f : st.osFilters) f.reset();
+    for (MonoDelay& d : st.chanDelay) d.clear();
+}
+
 bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Transport& transport,
               std::int64_t pos, const void* self) SUPPLE_RT {
     st.outEvents.clear();
@@ -1486,15 +1599,32 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
             return true;
         }
     }
+    const auto os = static_cast<std::uint32_t>(st.os);
     const float* in[2] = {sum.l.data(), sum.r.data()};
     float* out[2] = {st.out.l.data(), st.out.r.data()};
+    const float* key[2] = {st.key.l.data(), st.key.r.data()};
     prepareNoteIds(st);
+    if (os > 1) {
+        if (!st.instrument)
+            for (int c = 0; c < 2; ++c)
+                upsample(st.osFilters[static_cast<std::size_t>(c)], in[c], st.osIn[c].data(), n,
+                         os);
+        if (st.keyed)
+            for (int c = 0; c < 2; ++c)
+                upsample(st.osFilters[static_cast<std::size_t>(2 + c)], key[c], st.osKey[c].data(),
+                         n, os);
+        for (int c = 0; c < 2; ++c) {
+            in[c] = st.osIn[c].data();
+            out[c] = st.osOut[c].data();
+            key[c] = st.osKey[c].data();
+        }
+        for (host::Event& e : st.blockEvents) e.time *= os;
+    }
     host::ProcessBlock b;
     b.inputs = st.instrument ? nullptr : in;
     b.inputChannels = st.instrument ? 0 : 2;
     b.outputs = out;
     b.outputChannels = 2;
-    const float* key[2] = {st.key.l.data(), st.key.r.data()};
     if (st.keyed) {
         b.sidechain = key;
         b.sidechainChannels = st.keyChannels;
@@ -1503,11 +1633,22 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
         b.auxOutputs = st.auxOutPtr.data();
         b.auxOutputChannels = static_cast<std::uint32_t>(st.auxOutPtr.size());
     }
-    b.frames = n;
+    b.frames = n * os;
     b.events = st.blockEvents;
     b.transport = &transport;
-    b.steadyTime = pos;
-    if (!st.instance->process(b, &st.outEvents)) return false;
+    b.steadyTime = pos * os;
+    const bool processed = st.instance->process(b, &st.outEvents);
+    if (os > 1) {
+        for (host::Event& e : st.blockEvents) e.time /= os;
+        for (std::size_t k = 0; k < st.outEvents.count; ++k) st.outEvents.storage[k].time /= os;
+        if (processed) {
+            st.osPad.process(st.osOut[0].data(), st.osOut[1].data(), n * os);
+            for (int c = 0; c < 2; ++c)
+                downsample(st.osFilters[static_cast<std::size_t>(c)], st.osOut[c].data(),
+                           c == 0 ? st.out.l.data() : st.out.r.data(), n, os);
+        }
+    }
+    if (!processed) return false;
     st.processed = true;
     st.auxWritten = true;
     st.sleeping = st.autoBypassOnSilence && st.instance->sleeping();
@@ -1617,7 +1758,7 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         for (Stage& st : tc.chain) {
             st.voices.clear();
             st.sleeping = false;
-            st.dry.clear();
+            clearStageDelays(st);
             if (!st.callbackBypass && st.instance && st.instance->processing() &&
                 (!self || st.instance->owner() == self))
                 st.instance->reset();
@@ -1642,8 +1783,11 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         }
     }
     for (Stage& st : tc.chain) automateStage(st, pos, n, time::samplesAt(p.startSeconds, p.rate));
-    for (Stage& st : tc.chain)
+    for (Stage& st : tc.chain) {
+        enterGroup(tc.chain, st, tc.buf, n);
         if (!runStage(p, st, tc.buf, n, transport, pos, self)) return false;
+        leaveGroup(tc.chain, st, tc.buf, n);
+    }
     if (tc.noteTarget >= 0) trackVoices(tc.chain[static_cast<std::size_t>(tc.noteTarget)], tc.held);
     const std::int64_t length = tc.end - tc.start;
     for (std::uint32_t i = 0; i < n; ++i) {
@@ -1694,15 +1838,37 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // monitored inputs and must not read it concurrently with liveRender().
     const bool hearInput = (!node.monitorInputs.empty() || node.midiIn.has_value()) &&
                            (!node.tapeAuto || !transport.playing || p.deviceRecording);
+    const auto deviceChannel = [&](const std::vector<int>& inputs, std::size_t k) -> const float* {
+        const int c = inputs[std::min(k, inputs.size() - 1)];
+        return c >= 0 && static_cast<std::uint32_t>(c) < p.deviceInChannels ? p.deviceIn[c]
+                                                                            : nullptr;
+    };
+    // Input FX: the armed record input through the input chain, every block
+    // (recorded whether or not it is heard; ADR-0014).
+    const bool inputFx = !node.recordInputs.empty() && p.deviceIn;
+    if (inputFx) {
+        for (int c = 0; c < 2; ++c) {
+            const float* x = deviceChannel(node.recordInputs, static_cast<std::size_t>(c));
+            float* y = c == 0 ? node.inputBuf.l.data() : node.inputBuf.r.data();
+            if (x)
+                std::copy_n(x, n, y);
+            else
+                std::fill_n(y, n, 0.0f);
+        }
+        for (Stage& st : node.inputChain) {
+            st.blockEvents.clear();
+            automateStage(st, pos, n, time::samplesAt(p.startSeconds, p.rate));
+            enterGroup(node.inputChain, st, node.inputBuf, n);
+            if (!runStage(p, st, node.inputBuf, n, transport, pos, self)) return false;
+            leaveGroup(node.inputChain, st, node.inputBuf, n);
+        }
+    }
     if (hearInput && !node.monitorInputs.empty() && p.deviceIn) {
-        const auto channel = [&](std::size_t k) -> const float* {
-            const int c = node.monitorInputs[std::min(k, node.monitorInputs.size() - 1)];
-            return c >= 0 && static_cast<std::uint32_t>(c) < p.deviceInChannels ? p.deviceIn[c]
-                                                                                : nullptr;
-        };
-        if (const float* l = channel(0))
+        const float* l = inputFx ? node.inputBuf.l.data() : deviceChannel(node.monitorInputs, 0);
+        const float* r = inputFx ? node.inputBuf.r.data() : deviceChannel(node.monitorInputs, 1);
+        if (l)
             for (std::uint32_t i = 0; i < n; ++i) node.sum.l[i] += l[i];
-        if (const float* r = channel(1))
+        if (r)
             for (std::uint32_t i = 0; i < n; ++i) node.sum.r[i] += r[i];
     }
     if (node.decodeInput)
@@ -1824,7 +1990,9 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                     st.key.l[i] = 0.5f * (st.key.l[i] + st.key.r[i]);
         }
         if (st.chanDelay.empty()) {
+            enterGroup(node.chain, st, node.sum, n);
             if (!runStage(p, st, node.sum, n, transport, pos, self)) return false;
+            leaveGroup(node.chain, st, node.sum, n);
         } else if (!runPinned(p, node, st, n, transport, pos, self)) {
             return false;
         }
@@ -2023,7 +2191,7 @@ void locateTakes(Node& n, std::int64_t pos, bool wrap, bool keepPlaying = false)
                 st.voices.clear();
                 st.sleeping = false;
             }
-            if (!wrap && !st.preserveDryOnLocate) st.dry.clear();
+            if (!wrap && !st.preserveDryOnLocate) clearStageDelays(st);
             st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
@@ -2073,10 +2241,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
                 st.voices.clear();
                 st.sleeping = false;
             }
-            if (!st.preserveDryOnLocate) {
-                st.dry.clear();
-                for (MonoDelay& d : st.chanDelay) d.clear();
-            }
+            if (!st.preserveDryOnLocate) clearStageDelays(st);
             st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
@@ -2132,10 +2297,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
                 st.voices.clear();
                 st.sleeping = false;
             }
-            if (!st.preserveDryOnLocate) {
-                st.dry.clear();
-                for (MonoDelay& d : st.chanDelay) d.clear();
-            }
+            if (!st.preserveDryOnLocate) clearStageDelays(st);
             st.preserveDryOnLocate = false;
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;
@@ -2310,11 +2472,18 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                             st.rampFromWet = os.rampFromWet;
                             st.rampToWet = os.rampToWet;
                             st.wetRampLeft = os.wetRampLeft;
-                            if (st.dry.length == os.dry.length) {
-                                std::swap(st.dry.buf[0], os.dry.buf[0]);
-                                std::swap(st.dry.buf[1], os.dry.buf[1]);
-                                st.dry.pos = os.dry.pos;
+                            auto carryDelay = [](Delay& to, Delay& from) {
+                                if (to.length != from.length) return false;
+                                std::swap(to.buf[0], from.buf[0]);
+                                std::swap(to.buf[1], from.buf[1]);
+                                to.pos = from.pos;
+                                return true;
+                            };
+                            if (carryDelay(st.dry, os.dry)) {
                                 st.preserveDryOnLocate = true;
+                                carryDelay(st.align, os.align);
+                                if (st.os == os.os && carryDelay(st.osPad, os.osPad))
+                                    std::swap(st.osFilters, os.osFilters);
                             }
                             if (st.chanDelay.size() == os.chanDelay.size() &&
                                 std::equal(std::begin(st.outPin), std::end(st.outPin),
@@ -2330,6 +2499,7 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                             break;
                         }
             };
+            carryStages(n.inputChain, old.inputChain);
             carryStages(n.chain, old.chain);
             // A take chain playing on keeps playing (no reset at the swap).
             for (TakeChain& tc : n.takeChains)

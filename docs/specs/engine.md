@@ -46,7 +46,15 @@ plan (built incrementally from the previous one where possible, §1.6).
   and loop), take FX chain, take envelopes, item gain/fades/crossfades.
 - **FxInstance** wrappers around `host::Instance` (in-process) or a bridge
   proxy (§5), with wet/dry, bypass, pins, oversampling, parallel groups and
-  containers compiled into a small per-chain program.
+  containers compiled into a small per-chain program. As built: containers
+  are not implemented. A stage with `parallel` runs beside the one before it
+  on the same input and the branches' outputs are summed (each branch is
+  what that plug-in would produce in series, so a bypassed branch adds its
+  dry input); pinned stages and strips with auxiliary channels run in
+  series, with a warning. `oversampling` 2/4/8 runs the plug-in at that
+  multiple of the plan rate behind `dsp::Oversampler` half-band resamplers
+  on its main pair and key (not with auxiliary outputs: those run at the
+  plan rate, with a warning); event times scale by the factor.
 - **RouteEdge**: copy from a source tap with gain/pan/channel map (and MIDI
   filter), plus its PDC delay line.
 - **HwInput / HwOutput** nodes bound to backend ports.
@@ -82,10 +90,22 @@ never by concurrent accumulation — so results are thread-count independent.
   early so they line up at the output. Pre-FX taps from a track with
   latency get delayed like any other.
 - `fx.pdc = ignore` excludes an instance from compensation (for low-latency
-  monitoring chains).
+  monitoring chains): its own wet/dry and pin delays still match it, but
+  its chain reports none of its latency, so its track arrives late.
+- An oversampled stage's latency is the resamplers' round trip (72/80/83
+  samples at 2/4/8x; an instrument's output crosses only the downward half)
+  plus the plug-in's own latency at the high rate, padded at the high rate to
+  a whole number of plan samples, so compensation stays exact.
 - Input monitoring paths are not delayed to align with playback (they are
   live); recorded material is offset by the backend's reported input latency
   plus the monitored chain's latency so it lands where it was played.
+- Input FX (a channel's `input_chain`) process its record input whenever
+  the channel is armed with an audio input, monitored or not: such a channel
+  is live (the device input exists only in the callback). Monitoring hears
+  the processed input, and the recorder records it, dropping the input
+  chain's latency from the file's start so the take lines up with what was
+  played (the file ends with that many frames of silence). Input FX are
+  outside compensation and play no part in offline renders.
 - Runtime latency changes follow ARCHITECTURE §6: `request_restart` → new
   plan built in the background → swap at a block boundary with a 10 ms
   crossfade on affected paths. As built (2026-10-06): a restart the plug-in

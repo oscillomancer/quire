@@ -25,7 +25,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 - **Engine** (`specs/engine.md`): deterministic offline renders with
   real-time output bit-identical to them; anticipative rendering for
   non-live tracks (ADR-0012) and a live region for monitored tracks
-  (ADR-0014); a DAG worker pool; plugin delay compensation; plugins keep
+  (ADR-0014); a DAG worker pool; plugin delay compensation (with per-FX
+  `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
+  FX on armed channels, monitored and recorded; plugins keep
   running while the transport is stopped; smooth plan swaps (10 ms ramps).
 - **Strips and routing** (ADR-0019 to ADR-0022): typed channel, buss and
   master strips with Console 9 summing (switchable, level-matched); routes
@@ -98,10 +100,9 @@ Engine and hosting:
   state blob.
 - The engine does not read plugin telemetry (Gauge's measurements reach its
   own editor and agents through the extension only).
-- Settings that are stored and accepted but not yet executed: input FX
-  chains (neither monitored nor recorded audio passes through them), an FX
-  instance's `pdc: ignore`, `parallel` FX groups (run in series) and FX
-  `oversampling`.
+- FX containers are not implemented; parallel FX run in series on pinned
+  stages and strips with auxiliary channels, and oversampling is not
+  available to plug-ins with auxiliary outputs.
 - A recording seeked during capture (without a loop) writes a segment table
   its own crash-recovery reader rejects.
 - VST3: a state load the controller rejects leaves the component changed;

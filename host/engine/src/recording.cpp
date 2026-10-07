@@ -166,7 +166,7 @@ Status Recorder::open() {
 }
 
 void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::uint32_t frames,
-                       std::int64_t pos) SUPPLE_RT {
+                       std::int64_t pos, std::span<const ProcessedInput> processed) SUPPLE_RT {
     if (frames == 0 || runsFull_) return;
     if (!started_.load(std::memory_order_relaxed)) {
         // What the performer heard at `pos` reaches us a round trip later.
@@ -183,9 +183,30 @@ void Recorder::capture(const float* const* in, std::uint32_t inChannels, std::ui
         }
     }
     expected_ = pos + frames;
+    static constexpr int kPair[2] = {0, 1};
     for (auto& t : tracks_) {
-        const std::size_t n = t->ring.write(in, inChannels, t->target.inputs, frames, captured_);
-        if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
+        const ProcessedInput* own = nullptr;
+        for (const ProcessedInput& p : processed)
+            if (p.track == t->target.track) {
+                own = &p;
+                break;
+            }
+        if (!own) {
+            const std::size_t n =
+                t->ring.write(in, inChannels, t->target.inputs, frames, captured_);
+            if (n < frames) t->overflow.fetch_add(frames - n, std::memory_order_relaxed);
+            continue;
+        }
+        if (captured_ == 0) t->skip = t->shift = own->latency;
+        const auto from = static_cast<std::uint32_t>(std::min<std::int64_t>(frames, t->skip));
+        t->skip -= from;
+        if (from == frames) continue;
+        const float* channels[2] = {own->channels[0] + from, own->channels[1] + from};
+        const std::span<const int> select(kPair, std::min<std::uint32_t>(t->ring.channels(), 2));
+        const std::uint32_t count = frames - from;
+        const std::size_t n =
+            t->ring.write(channels, 2, select, count, captured_ + from - t->shift);
+        if (n < count) t->overflow.fetch_add(count - n, std::memory_order_relaxed);
     }
     captured_ += frames;
 }
