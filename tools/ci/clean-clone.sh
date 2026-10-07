@@ -12,8 +12,10 @@ git clone -q --no-hardlinks "$repo" "$tmp/src"
 cd "$tmp/src"
 echo "clean-clone: $(git log --oneline -1) -> $tmp/src (preset $preset)"
 # Any network access during configure/build is a failure of the vendoring policy.
-export FETCHCONTENT_FULLY_DISCONNECTED=ON
-if tools/ci/build.sh "$preset" > "$tmp/build.log" 2>&1; then
+# FetchContent reads this as a cache variable; an environment variable has no effect.
+if { cmake --preset "$preset" -DFETCHCONTENT_FULLY_DISCONNECTED=ON &&
+     cmake --build --preset "$preset" &&
+     ctest --preset "$preset"; } > "$tmp/build.log" 2>&1; then
   grep -E 'tests passed|Total Test' "$tmp/build.log" | tail -2
   echo "clean-clone: PASS"
 else

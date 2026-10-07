@@ -19,24 +19,79 @@ import pathlib
 import re
 import sys
 
-FIRST_PARTY_DIRS = ["libs", "host", "plugins", "daw", "mcp", "tools", "tests"]
+FIRST_PARTY_DIRS = ["cmake", "libs", "host", "plugins", "daw", "mcp", "tools", "tests"]
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm", ".py", ".lua", ".cmake"}
 # Built by concatenation so this file does not match its own pattern.
 FORBIDDEN_SPDX = re.compile("SPDX-License-" + r"Identifier:[ \t]*[^\n]*\b(A?GPL|LGPL)", re.IGNORECASE)
-FETCH_RE = re.compile(r"(?:FetchContent_Declare|ExternalProject_Add)\s*\(\s*([A-Za-z0-9_.+-]+)")
+FETCH_RE = re.compile(r"(?:FetchContent_Declare|ExternalProject_Add)\s*\(\s*([A-Za-z0-9_.+-]+)", re.IGNORECASE)
 SKIP_PARTS = {"build", "_deps", ".git", "third_party", "node_modules"}
 
 
 def license_ok(expr: str, allowed: set) -> bool:
-    expr = expr.strip().strip("()")
-    if " OR " in expr:
-        return any(license_ok(p, allowed) for p in expr.split(" OR "))
-    if " AND " in expr:
-        return all(license_ok(p, allowed) for p in expr.split(" AND "))
-    return expr in allowed
+    # Parse the whole expression before evaluating: an allowed OR alternative
+    # must never hide malformed syntax. WITH terms need explicit approval as a
+    # complete license/exception pair, not just approval of the base license.
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9.+:-]*|[()]|[^\s]", expr)
+    at = 0
+
+    def take(token):
+        nonlocal at
+        if at < len(tokens) and tokens[at] == token:
+            at += 1
+            return True
+        return False
+
+    def identifier(exception=False):
+        nonlocal at
+        if at >= len(tokens) or tokens[at] in {"AND", "OR", "WITH"}:
+            raise ValueError("expected SPDX identifier")
+        token = tokens[at]
+        if exception:
+            pattern = r"[A-Za-z0-9][A-Za-z0-9.-]*"
+        elif token.startswith(("LicenseRef-", "DocumentRef-")):
+            pattern = r"(?:DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+"
+        else:
+            pattern = r"[A-Za-z0-9][A-Za-z0-9.-]*\+?"
+        if not re.fullmatch(pattern, token):
+            raise ValueError("invalid SPDX identifier")
+        at += 1
+        return token
+
+    def primary():
+        if take("("):
+            value = disjunction()
+            if not take(")"):
+                raise ValueError("missing closing parenthesis")
+            return value
+        term = identifier()
+        if take("WITH"):
+            term += " WITH " + identifier(exception=True)
+        return term in allowed
+
+    def conjunction():
+        value = primary()
+        while take("AND"):
+            right = primary()
+            value = value and right
+        return value
+
+    def disjunction():
+        value = conjunction()
+        while take("OR"):
+            right = conjunction()
+            value = value or right
+        return value
+
+    try:
+        value = disjunction()
+        return at == len(tokens) and value
+    except (ValueError, RecursionError):
+        return False
 
 
 def first_party_files(root: pathlib.Path):
+    if (root / "CMakeLists.txt").is_file():
+        yield root / "CMakeLists.txt"
     for d in FIRST_PARTY_DIRS:
         base = root / d
         if not base.exists():
