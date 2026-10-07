@@ -36,7 +36,12 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
   scanning, renders, analysis, file dialogs' I/O and Lua scripts run on
   workers and commit results as commands or post completion events. Budget:
   no synchronous task on the UI thread over 2 ms (`ARCHITECTURE.md` §3),
-  measured (§9).
+  measured (§9). As built: the browser's Rescan runs `plugin.scan
+  {wait: false}` (every module in the supervised scanner, the catalogue
+  installed when its job is done); the UI sidecar's periodic writes go to a
+  writer thread (exit and project switches write synchronously, after it);
+  waveform lookups of media without a content hash read the file's size and
+  mtime at most every two seconds and again on each new session version.
 - **Event-driven loop.** `SDL_WaitEventTimeout` with the timeout set by the
   nearest deadline: CLAP timers, the bus service tick (`ModelLoop::every`,
   `engine.md` §6), animation frames, meter refresh (30 Hz while audio runs, 0 while
@@ -543,7 +548,9 @@ exposes the selection to agents.
 - `<slug> --bench gui` opens a generated 64-track session (audio items with
   peaks prebuilt, MIDI items, automation), runs scripted zoom/scroll/drag
   sequences offscreen and reports per-frame CPU time (p50/p95/max), UI-thread
-  task durations over 2 ms, idle CPU over 10 s and cold start to first
+  task durations over 2 ms (each bus pump with its sidecar and editor
+  service, each panels' sync pass, each input event; frames are counted on
+  their own), idle CPU over 10 s and cold start to first
   interactive frame. Results in `docs/benchmarks/gui.md`; the gates of
   ADR-0005 §5 are acceptance criteria.
 - Telemetry for long main-thread tasks in debug builds (a watchdog that

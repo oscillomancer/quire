@@ -6,6 +6,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -79,8 +80,13 @@ class PeakService {
     PeakService& operator=(const PeakService&) = delete;
 
     // `hash` is the media's "sha256:<hex>" (model::MediaSource::hash); when
-    // empty, path, size and mtime key both memory and disk caches.
+    // empty, path, size and mtime key both memory and disk caches. A file's
+    // size and mtime are read again at most every two seconds, so a repaint
+    // does not touch the file system.
     std::shared_ptr<const Pyramid> get(const std::string& hash, const std::filesystem::path& media);
+    // Forget the remembered sizes and mtimes (the session changed, so files
+    // may have been replaced): the next lookups read them again.
+    void revalidate();
     // Called on the owner's thread when a pyramid becomes ready (or fails),
     // with the key: the hash, or "path:<media>:<size>:<mtime>".
     std::function<void(const std::string& key)> onReady;
@@ -94,9 +100,13 @@ class PeakService {
 
   private:
     void run(std::stop_token stop);
+    std::string key(const std::string& hash, const std::filesystem::path& media) const;
     std::filesystem::path cacheDir_;
     Post post_;
     mutable std::mutex mutex_;
+    // Hashless media: the key last read for a path, and when.
+    mutable std::map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>>
+        pathKeys_;
     std::condition_variable_any wake_;
     struct Job {
         std::string key, hash;

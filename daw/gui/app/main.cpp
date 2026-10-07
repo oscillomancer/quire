@@ -850,25 +850,35 @@ int main(int argc, char** argv) {
     };
     const double warmUntil = wallMs() + 60000;
     int step = 0;
-    while (!quit && !loop.stopRequested()) {
+    // The main-thread budget (docs/benchmarks/gui.md): each synchronous task
+    // (the bus pump, the panels' sync pass, one input event) should finish in
+    // 2 ms; frames are measured on their own.
+    auto timed = [&](auto&& work) {
         const double t0 = wallMs();
-        int next = -1;
-        preserveUi([&] { next = loop.pump(); });
-        uiFile.tick((*app)->projectPath(), (*app)->projectGeneration());
-        if (const int plugin = pluginWindows.service(); plugin >= 0)
-            next = next < 0 ? plugin : std::min(next, plugin);
+        work();
         if (const double ms = wallMs() - t0; ms > 2.0) {
             ++longTasks;
             longestTaskMs = std::max(longestTaskMs, ms);
         }
-        shell.sync();
-        midiEditor.sync();
-        routing.sync();
-        mixer.sync();
-        history.sync();
-        meterFeed.poll();
-        fxWindow.tick();
-        renderDialog.tick();
+    };
+    while (!quit && !loop.stopRequested()) {
+        int next = -1;
+        timed([&] {
+            preserveUi([&] { next = loop.pump(); });
+            uiFile.tick((*app)->projectPath(), (*app)->projectGeneration());
+            if (const int plugin = pluginWindows.service(); plugin >= 0)
+                next = next < 0 ? plugin : std::min(next, plugin);
+        });
+        timed([&] {
+            shell.sync();
+            midiEditor.sync();
+            routing.sync();
+            mixer.sync();
+            history.sync();
+            meterFeed.poll();
+            fxWindow.tick();
+            renderDialog.tick();
+        });
         // --action: after the first tick has read the project's UI state.
         for (const auto& spec : std::exchange(o.actions, {})) {
             const auto space = spec.find(' ');
@@ -937,8 +947,8 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr, "drop: %s\n", r.error().toString().c_str());
                 dropped.clear();
             } else
-                preserveUi([&] {
-                    root.handle(e);
+                timed([&] {
+                    preserveUi([&] { root.handle(e); });
                 });  // the wake event is ignored: it only interrupts the wait
         }
     }

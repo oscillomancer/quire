@@ -8,6 +8,38 @@
 
 namespace supple::gui {
 
+UiPersistence::UiPersistence() : writer_([this](std::stop_token stop) { writerLoop(stop); }) {}
+
+UiPersistence::~UiPersistence() {
+    drain();
+    writer_.request_stop();
+    wake_.notify_all();
+}
+
+void UiPersistence::writerLoop(std::stop_token stop) {
+    std::unique_lock lock(mutex_);
+    for (;;) {
+        wake_.wait(lock, stop, [&] { return pending_.has_value(); });
+        if (!pending_) return;  // stopped
+        auto [file, text] = std::move(*pending_);
+        pending_.reset();
+        writing_ = true;
+        lock.unlock();
+        if (auto w = writeFileAtomic(file, text + "\n"); !w) {
+            std::fprintf(stderr, "ui: %s\n", w.error().message.c_str());
+            writeFailed_ = true;
+        }
+        lock.lock();
+        writing_ = false;
+        wake_.notify_all();
+    }
+}
+
+void UiPersistence::drain() {
+    std::unique_lock lock(mutex_);
+    wake_.wait(lock, [&] { return !pending_ && !writing_; });
+}
+
 void UiPersistence::add(std::string section, Save save, Load load) {
     auto defaults = save();
     sections_.push_back(
@@ -94,10 +126,22 @@ void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t gen
     const auto now = std::chrono::steady_clock::now();
     if (project.empty() || now < nextCheck_) return;
     nextCheck_ = now + std::chrono::seconds(1);
-    (void)flush(project);
+    if (writeFailed_.exchange(false)) written_.clear();  // try again
+    const auto file = fileFor(project);
+    if (file.empty() || protectedFile_) return;
+    std::string text = json::writeCanonical(collect());
+    if (text == written_) return;
+    written_ = text;
+    {
+        std::lock_guard lock(mutex_);
+        pending_.emplace(file, std::move(text));
+    }
+    wake_.notify_all();
 }
 
 Status UiPersistence::flush(const std::filesystem::path& project) {
+    drain();  // a pending background write must not land after this one
+    if (writeFailed_.exchange(false)) written_.clear();
     const auto file = fileFor(project);
     if (file.empty() || (project == current_ && protectedFile_)) return {};
     std::string text = json::writeCanonical(collect());

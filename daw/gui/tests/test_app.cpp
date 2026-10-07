@@ -566,6 +566,38 @@ TEST_CASE("UI state is saved beside the project and restored when it is opened")
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("UI state written in the background never overtakes a later flush") {
+    const auto dir =
+        std::filesystem::temp_directory_path() / ("supple-ui-async-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto project = dir / "song.json";
+    double zoom = 40;
+    {
+        gui::UiPersistence p;
+        p.add(
+            "view",
+            [&] {
+                json::Value v = json::Value::object();
+                v["zoom"] = zoom;
+                return v;
+            },
+            [&](const json::Value& v) { zoom = v.find("zoom")->asDouble(); });
+        p.tick(project);
+        zoom = 80;
+        // The periodic write (at most once a second) goes to the writer thread.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        p.tick(project);
+        zoom = 120;
+        REQUIRE(p.flush(project));  // after the pending write: the newest state wins
+    }
+    auto bytes = readFile(dir / "song.ui.json");
+    REQUIRE(bytes);
+    const auto doc = json::parse(std::string(bytes->begin(), bytes->end()));
+    REQUIRE(doc);
+    CHECK(doc->find("view")->find("zoom")->asDouble() == 120);
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE(
     "file actions: dirty tracking, save as, import (one undo step), confirm before discarding, "
     "open") {

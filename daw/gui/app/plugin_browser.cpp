@@ -144,10 +144,7 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
     footer.layout.height = ui::SizeRule::fixed(28);
     footer.layout.gap = 6;
     footer.emplace<ui::Button>("browser.rescan", "Rescan", [this] {
-        // Paint "Scanning…" now; the scan runs on the next frame (tick), so the
-        // click never blocks inside the event.
-        scanPending_ = true;
-        setStatus("Scanning…");
+        runScan();
         root_.damageAll();
     });
     footer.emplace<ui::Button>("browser.fav", "Favourite", [this] {
@@ -215,7 +212,6 @@ void PluginBrowser::open(std::function<void(const std::string&)> onAdd, std::str
         status_ = nullptr;
         detailLabel_ = nullptr;
         title_ = nullptr;
-        scanPending_ = false;
     });
     if (search_) root_.focus(search_);  // typing searches (not the header's Close)
 }
@@ -228,24 +224,39 @@ void PluginBrowser::setStatus(std::string message) {
     if (status_) status_->setText(std::move(message));
 }
 
+// The scan runs in the background (every module in the supervised scanner);
+// tick() follows its job and shows the new catalogue when it is done.
 void PluginBrowser::tick() {
-    if (scanPending_ && page_) {
-        scanPending_ = false;
-        runScan();
+    if (scanJob_.empty() || !page_) return;
+    json::Value args = json::Value::object();
+    args["job"] = scanJob_;
+    auto state = dispatcher_.execute({"job.status", std::move(args), kUiOrigin});
+    const json::Value* status = state && state->isObject() ? state->find("status") : nullptr;
+    if (status && status->isString() && status->asString() == "running") return;
+    scanJob_.clear();
+    if (status && status->isString() && status->asString() == "done") {
+        refresh();
+        setStatus("Rescan complete");
+        return;
     }
+    const json::Value* error = state && state->isObject() ? state->find("error") : nullptr;
+    const json::Value* message = error && error->isObject() ? error->find("message") : nullptr;
+    setStatus(message && message->isString() ? "Rescan failed: " + message->asString()
+              : state                        ? std::string("Rescan stopped")
+                                             : state.error().message);
 }
 
 void PluginBrowser::runScan() {
-    // plugin.scan probes plugins with main-thread CLAP calls and cannot move to
-    // a worker (the catalogue lives on the model thread); run it synchronously
-    // and repaint the result. Background scanning is engine work (logged).
-    auto result = dispatcher_.execute({"plugin.scan", json::Value::object(), kUiOrigin});
-    if (!result) {
-        setStatus(result.error().message);
+    json::Value args = json::Value::object();
+    args["wait"] = false;
+    auto result = dispatcher_.execute({"plugin.scan", std::move(args), kUiOrigin});
+    const json::Value* job = result && result->isObject() ? result->find("job") : nullptr;
+    if (!job || !job->isString()) {
+        setStatus(result ? std::string("Rescan did not start") : result.error().message);
         return;
     }
-    refresh();
-    setStatus("Rescan complete");
+    scanJob_ = job->asString();
+    setStatus("Scanning…");
 }
 
 void PluginBrowser::refresh() {

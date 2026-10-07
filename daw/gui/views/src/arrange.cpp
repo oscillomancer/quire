@@ -971,6 +971,7 @@ void ArrangeView::show(const model::Session& session, const std::vector<model::C
     const auto before = layout_.session();
     const bool replaced = generation != generation_;
     if (!replaced && before.version == session.version && layout_.rebuilds() != 0) return;
+    peaks_.revalidate();  // a new version may name replaced media files
     if (replaced) {
         changes = nullptr;
         gestures_->clearClipboard();

@@ -256,9 +256,30 @@ PeakService::~PeakService() {
     wake_.notify_all();
 }
 
+std::string PeakService::key(const std::string& hash, const std::filesystem::path& media) const {
+    if (!hash.empty()) return hash;
+    const auto now = std::chrono::steady_clock::now();
+    const std::string path = media.lexically_normal().string();
+    {
+        std::lock_guard lock(mutex_);
+        if (auto it = pathKeys_.find(path);
+            it != pathKeys_.end() && now - it->second.second < std::chrono::seconds(2))
+            return it->second.first;
+    }
+    std::string fresh = keyOf(hash, media);  // stat outside the lock
+    std::lock_guard lock(mutex_);
+    pathKeys_[path] = {fresh, now};
+    return fresh;
+}
+
+void PeakService::revalidate() {
+    std::lock_guard lock(mutex_);
+    pathKeys_.clear();
+}
+
 std::shared_ptr<const Pyramid> PeakService::get(const std::string& hash,
                                                 const std::filesystem::path& media) {
-    const std::string key = keyOf(hash, media);
+    const std::string key = this->key(hash, media);
     std::lock_guard lock(mutex_);
     if (auto it = ready_.find(key); it != ready_.end()) return it->second;
     if (failed_.count(key) || pending_.count(key)) return nullptr;
@@ -270,8 +291,9 @@ std::shared_ptr<const Pyramid> PeakService::get(const std::string& hash,
 
 std::optional<Error> PeakService::failure(const std::string& hash,
                                           const std::filesystem::path& media) const {
+    const std::string k = key(hash, media);
     std::lock_guard lock(mutex_);
-    auto it = failed_.find(keyOf(hash, media));
+    auto it = failed_.find(k);
     return it == failed_.end() ? std::nullopt : std::optional<Error>(it->second);
 }
 

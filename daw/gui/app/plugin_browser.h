@@ -97,7 +97,7 @@ class PluginBrowser {
     ui::Label* title_ = nullptr;
     std::string titleText_ = "Add plugin";
     std::string detail_;
-    bool scanPending_ = false;
+    std::string scanJob_;  // the background scan being followed
 };
 
 }  // namespace supple::gui

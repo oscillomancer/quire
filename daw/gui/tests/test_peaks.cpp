@@ -255,11 +255,16 @@ TEST_CASE("unhashed peaks rebuild replaced files and retry after a missing file 
     drain();
     CHECK(service.failure("", wav).has_value());
     REQUIRE(audio::writeWav(wav, tone(24000)));
+    // Sizes and mtimes are remembered for two seconds; the app revalidates on
+    // every session version (an import, a recording) and the test does here.
+    CHECK(service.failure("", wav).has_value());
+    service.revalidate();
     CHECK_FALSE(service.get("", wav));
     drain();
     REQUIRE(service.get("", wav));
     CHECK(service.get("", wav)->frames() == 24000);
     REQUIRE(audio::writeWav(wav, tone(48000)));
+    service.revalidate();
     CHECK_FALSE(service.get("", wav));
     drain();
     REQUIRE(service.get("", wav));
