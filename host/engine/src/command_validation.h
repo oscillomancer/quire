@@ -1,11 +1,27 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 
 #include "supple/engine/app.h"
 #include "supple/model/numeric.h"
 
 namespace supple::engine {
+// A locked item refuses every change except being unlocked (item.set
+// {locked: false}); its takes and MIDI with it.
+inline Status checkUnlocked(const model::Session& s, model::Id item, std::string path = "/item") {
+    if (const model::Item* it = s.items.find(item); it && it->locked)
+        return Error("item.locked", item.str() + " is locked", std::move(path),
+                     "unlock it with item.set {item: \"" + item.str() + "\", locked: false}");
+    return {};
+}
+inline Status checkUnlockedTake(const model::Session& s, model::Id take, std::string path) {
+    for (const auto& e : s.items)
+        if (std::find(e.value->takes.begin(), e.value->takes.end(), take) != e.value->takes.end())
+            return checkUnlocked(s, e.id, std::move(path));
+    return {};
+}
+
 // Validate derived edit values before the invocation succeeds, so a caught Lua
 // error restores this invocation's savepoint even inside a larger transaction.
 template <class Args, class Output>

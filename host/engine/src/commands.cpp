@@ -1796,6 +1796,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto id = existing<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
+            SUPPLE_TRY(checkUnlocked(s, *id));
             model::EditTxn& t = app.txn();
             for (Id tk : s.items.find(*id)->takes) {
                 const model::Take* take = s.takes.find(tk);
@@ -1848,6 +1849,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto id = existing<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
+            SUPPLE_TRY(checkUnlocked(s, *id));
             std::optional<Id> track;
             if (a.track) {
                 auto tr = existing<model::Track>(s, *a.track, "/track");
@@ -1892,6 +1894,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto id = existing<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
+            SUPPLE_TRY(checkUnlocked(s, *id));
             const model::Item& it = *s.items.find(*id);
             const model::Take* take = it.activeTake ? s.takes.find(*it.activeTake) : nullptr;
             if (!take || !take->source || take->source->kind != model::Kind::Midi)

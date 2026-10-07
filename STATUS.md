@@ -118,8 +118,6 @@ Session and editing:
 - `fx.copy` does not copy envelopes or key routes; take FX cannot be keyed.
 - The history budget's size estimate walks shared payloads per version, and
   squashed steps keep large invocation arguments.
-- `item.set` and `item.split` respect an item's lock; `item.move` and
-  `midi.edit` do not.
 - MIDI queries round positions to four decimal beats, finer than a tick at
   usual tempos but coarser at very high PPQ or playrate.
 - A posted job (`render.add_to_project`) that runs during another batch's

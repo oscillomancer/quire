@@ -1245,8 +1245,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             const auto& original = *s.items.find(*id);
             // A locked item refuses edits; unlocking it is the one exception.
             const bool unlocking = a.locked && !*a.locked;
-            if (original.locked && !unlocking)
-                return Error("item.locked", "item is locked", "/item", "unlock the item first");
+            if (!unlocking) SUPPLE_TRY(checkUnlocked(s, *id));
             if (a.position && a.bar)
                 return Error("item.position", "give position or bar, not both", "/position",
                              "remove one of them");
@@ -1460,8 +1459,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
             const model::Item& old = *s.items.find(*id);
-            if (old.locked)
-                return Error("item.locked", "item is locked", "/item", "unlock it first");
+            SUPPLE_TRY(checkUnlocked(s, *id));
             const auto* tr = s.tracks.find(old.track);
             model::Timebase tb = s.project->timebase;
             if (tr) {
@@ -1542,6 +1540,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             const auto s = app(ctx).view();
             auto item = require<model::Item>(s, a.item, "/item");
             if (!item) return std::move(item).error();
+            SUPPLE_TRY(checkUnlocked(s, *item));
             model::Take copy;
             if (a.from) {
                 auto source = require<model::Take>(s, *a.from, "/from");
@@ -1595,6 +1594,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             const auto s = app(ctx).view();
             auto item = require<model::Item>(s, a.item, "/item");
             if (!item) return std::move(item).error();
+            SUPPLE_TRY(checkUnlocked(s, *item));
             const auto& takes = s.items.find(*item)->takes;
             if (a.take.has_value() == a.index.has_value())
                 return Error("take.choice", "give take or index", "", "take: \"tk_2\" or index: 1");
@@ -1679,6 +1679,7 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.run = [](const TakeSetArgs& a, Context& ctx) -> Result<Empty> {
             auto id = require<model::Take>(app(ctx).view(), a.take, "/take");
             if (!id) return std::move(id).error();
+            SUPPLE_TRY(checkUnlockedTake(app(ctx).view(), *id, "/take"));
             app(ctx).txn().modify<model::Take>(*id, [&](model::Take& tk) {
                 if (a.gainDb) tk.gainDb = *a.gainDb;
                 if (a.pan) tk.pan = *a.pan;

@@ -133,7 +133,11 @@ item's timebase domain), `length`, `timebase` (`track` = inherit), `loop`
 `fade_out` `{length (s), shape: linear|slow|fast|slow_fast|fast_slow|cos|exp, curve %}`,
 `crossfade` implicit when items overlap on a lane (auto-crossfade length from
 the overlap), `takes` [tk id], `active_take`, `snap_offset`, `group`,
-`color`, `notes`.
+`color`, `notes`. A `locked` item refuses every command that would change or
+remove it, its takes or its MIDI (`item.set`, `item.move`, `item.split`,
+`item.remove`, `take.add`, `take.set`, `take.activate`, `midi.edit`,
+`midi.write`) with `item.locked`, until `item.set {locked: false}`; copying
+it is allowed.
 
 **Take** `tk_*`: `name`, `source` (md or mi id, or null = empty take),
 `start_offset` (seconds into the source, or beats for MIDI),

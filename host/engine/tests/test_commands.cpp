@@ -2139,3 +2139,35 @@ TEST_CASE("transport range repairs point to the supplied end domain") {
         CHECK(result.error().hint.find(std::string("end_") + domain) != std::string::npos);
     }
 }
+
+TEST_CASE("a locked item refuses every edit until it is unlocked") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    const std::string take = app->view().items.find(*model::Id::parse("it_1"))->takes[0].str();
+    run(bus, "item.set", R"({"item":"it_1","locked":true})");
+    const auto version = app->versions().headVersion("main");
+    for (const auto& [command, args] : std::vector<std::pair<std::string, std::string>>{
+             {"item.set", R"({"item":"it_1","position":2})"},
+             {"item.move", R"({"item":"it_1","position":2})"},
+             {"item.split", R"({"item":"it_1","at":1})"},
+             {"item.remove", R"({"item":"it_1"})"},
+             {"midi.edit", R"({"item":"it_1","ops":[{"op":"move","notes":[0],"semitones":12}]})"},
+             {"midi.write", R"({"item":"it_1","notation":"1: D4:w"})"},
+             {"take.add", R"({"item":"it_1"})"},
+             {"take.activate", R"({"item":"it_1","index":0})"},
+             {"take.set", R"({"take":")" + take + R"(","gain_db":-3})"}}) {
+        INFO(command);
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "item.locked");
+        CHECK(result.error().hint.find("locked: false") != std::string::npos);
+    }
+    CHECK(app->versions().headVersion("main") == version);  // nothing changed
+    run(bus, "item.set", R"({"item":"it_1","locked":false})");
+    run(bus, "item.move", R"({"item":"it_1","position":2})");
+}

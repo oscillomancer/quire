@@ -518,6 +518,7 @@ void registerMidiCommands(cmd::Registry& registry) {
             const model::Session s = app.view();
             auto t = midiTarget(s, a.item);
             if (!t) return std::move(t).error();
+            SUPPLE_TRY(checkUnlocked(s, t->item));
             midi::Sequence seq = t->midi->sequence;
             std::vector<Working> notes;
             notes.reserve(seq.notes.size());
