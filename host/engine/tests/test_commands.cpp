@@ -2171,3 +2171,24 @@ TEST_CASE("a locked item refuses every edit until it is unlocked") {
     run(bus, "item.set", R"({"item":"it_1","locked":false})");
     run(bus, "item.move", R"({"item":"it_1","position":2})");
 }
+
+TEST_CASE("MIDI query values read back land on the same ticks at a fast playrate") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    run(bus, "take.set", R"({"take":"tk_1","playrate":100})");
+    run(bus, "midi.edit",
+        R"({"item":"it_1","ops":[{"op":"resize","notes":[0],"length":0.00015625}]})");
+    const auto midi = (*app->head().midi.begin()).id;
+    const auto before = app->head().midi.find(midi)->sequence.notes.at(0).length;
+    REQUIRE(before == 15);  // 15 ticks at ppq 960 and playrate 100
+    auto shown = run(bus, "midi.notes", R"({"item":"it_1"})");
+    auto args = j(R"({"item":"it_1","ops":[{"op":"resize","notes":[0],"length":1}]})");
+    args["ops"].asArray()[0]["length"] = *shown["notes"].at(0).find("length");
+    REQUIRE(bus.execute({"midi.edit", std::move(args), kOrigin}));
+    CHECK(app->head().midi.find(midi)->sequence.notes.at(0).length == before);
+}

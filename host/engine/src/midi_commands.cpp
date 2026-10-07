@@ -107,13 +107,17 @@ Result<Target> midiTarget(const model::Session& s, const std::string& text) {
     return t;
 }
 
-double round4(double v) { return std::round(v * 1e4) / 1e4; }
+// Beat values in query results: rounded to 1e-9 beats, so floating noise
+// (0.30000000000000004) does not show while every tick stays exact: a tick
+// is at least 3e-7 beats (ppq <= 32767, playrate <= 100), so rounding moves a
+// value by under 0.002 of a tick and a value read back lands on the same tick.
+double roundBeats(double v) { return std::round(v * 1e9) / 1e9; }
 
 json::Value noteJson(const midi::Note& n, const Frame& f) {
     json::Value v = json::Value::object();
     v["pitch"] = static_cast<std::int64_t>(n.pitch);
-    v["start"] = round4(f.beatOf(n.start));
-    v["length"] = round4(static_cast<double>(n.length) / f.ppq / f.rate);
+    v["start"] = roundBeats(f.beatOf(n.start));
+    v["length"] = roundBeats(static_cast<double>(n.length) / f.ppq / f.rate);
     v["velocity"] = static_cast<std::int64_t>(n.velocity);
     if (n.channel) v["channel"] = static_cast<std::int64_t>(n.channel) + 1;
     return v;
@@ -124,8 +128,8 @@ Result<json::Value> describe(const model::Session& s, const Target& t) {
     json::Value out = json::Value::object();
     out["item"] = t.item.str();
     out["ppq"] = static_cast<std::int64_t>(seq.ppq);
-    out["length"] = round4(model::itemLengthBeats(s, *s.items.find(t.item)));
-    out["position"] = round4(t.frame.itemPosition);
+    out["length"] = roundBeats(model::itemLengthBeats(s, *s.items.find(t.item)));
+    out["position"] = roundBeats(t.frame.itemPosition);
     if (t.midi->pooled) out["pooled"] = true;
     json::Value notes = json::Value::array();
     for (const midi::Note& n : seq.notes) notes.push_back(noteJson(n, t.frame));
@@ -135,7 +139,7 @@ Result<json::Value> describe(const model::Session& s, const Target& t) {
         if (c.kind != midi::ControlKind::CC) continue;
         json::Value v = json::Value::object();
         v["number"] = static_cast<std::int64_t>(c.number);
-        v["beat"] = round4(t.frame.beatOf(c.tick));
+        v["beat"] = roundBeats(t.frame.beatOf(c.tick));
         v["value"] = static_cast<std::int64_t>(c.value);
         if (c.channel) v["channel"] = static_cast<std::int64_t>(c.channel) + 1;
         ccs.push_back(std::move(v));
@@ -242,7 +246,7 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
             if (n.start < 0)
                 return Error("midi.before_source", "the note starts before the item's MIDI",
                              here + "/start",
-                             "start at " + std::to_string(round4(f.beatOf(0))) + " or later");
+                             "start at " + std::to_string(roundBeats(f.beatOf(0))) + " or later");
             SUPPLE_TRY(noteEnd(n, here + "/length"));
             notes.push_back({n, true, true});
             return {};
