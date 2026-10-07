@@ -2192,3 +2192,38 @@ TEST_CASE("MIDI query values read back land on the same ticks at a fast playrate
     REQUIRE(bus.execute({"midi.edit", std::move(args), kOrigin}));
     CHECK(app->head().midi.find(midi)->sequence.notes.at(0).length == before);
 }
+
+TEST_CASE("plugin.scan in the background returns at once and installs the catalogue when done") {
+    namespace fs = std::filesystem;
+    Workdir dir;
+    host::setBridgeExecutable(fs::path(FIXTURE_CLAP_PATH).parent_path() /
+                              (std::string(product::kSlug) + "-bridge"));
+    AppOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto opened = EngineApp::create(options);
+    REQUIRE(opened);
+    auto& app = **opened;
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, app);
+    const auto before = run(bus, "plugin.list", "{}")["plugins"].size();
+    REQUIRE(before > 0);
+    auto started = run(bus, "plugin.scan", R"({"wait": false})");
+    REQUIRE(started.find("job"));
+    const std::string job = started["job"].asString();
+    CHECK(started["plugins"].size() == before);  // the current list, at once
+    auto again = run(bus, "plugin.scan", R"({"wait": false})");
+    std::string status;
+    for (int i = 0; i < 2000 && status != "done" && status != "failed"; ++i) {
+        bus.flushJobEvents();  // the worker posts the catalogue to this thread
+        status = run(bus, "job.status", R"({"job": ")" + job + R"("})")["status"].asString();
+        if (status == "running") std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(status == "done");
+    // A request while the scan ran joined it instead of starting another.
+    CHECK((again["job"].asString() == job ||
+           run(bus, "job.status", R"({"job": ")" + again["job"].asString() + R"("})")["status"] ==
+               "done"));
+    CHECK(run(bus, "plugin.list", "{}")["plugins"].size() == before);
+}

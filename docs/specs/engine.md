@@ -732,3 +732,9 @@ path, hint, details?}, cached}`, `warnings` contains structured reasons, and
 `cached_modules` counts reused module results. EngineApp retains this report
 with its catalogue so unrelated scans cannot overwrite it. Filtering affects
 only available plug-ins; explicit scanning replaces the catalogue/report pair.
+`plugin.scan {wait: false}` returns at once with the current catalogue and a
+`job`: a worker scans every module through the supervised scanner (stock ones
+too, since nothing may load in that thread; without the bridge the job fails
+with `host.scan.unsupervised`), and the model thread installs the new pair
+when the job is done. A background scan still running is returned instead of
+a second one.

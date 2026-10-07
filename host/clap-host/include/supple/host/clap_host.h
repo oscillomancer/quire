@@ -52,6 +52,9 @@ struct ScanOptions {
     std::filesystem::path bridgeExecutable;
     // Test-only: bypass supervision and the cache, like trusted stock modules.
     bool forceInProcess = false;
+    // Supervise every module, stock ones too, and refuse when the scanner is
+    // missing: a scan off the main thread must not load a plug-in in process.
+    bool superviseAll = false;
 };
 struct ScanFailure {
     std::filesystem::path module;

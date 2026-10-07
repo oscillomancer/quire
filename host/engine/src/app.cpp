@@ -102,6 +102,12 @@ Result<std::span<const host::PluginInfo>> EngineApp::plugins(bool rescan) {
     return std::span<const host::PluginInfo>(*catalogue_);
 }
 
+void EngineApp::installPlugins(std::vector<host::PluginInfo> list, host::ScanReport report) {
+    host::orderCatalogue(list);  // the first location on the path wins an id
+    catalogue_ = std::move(list);
+    scanReport_ = std::move(report);
+}
+
 Result<host::PluginInfo> EngineApp::findPlugin(std::string_view idOrName) {
     auto all = plugins();
     if (!all) return std::move(all).error();

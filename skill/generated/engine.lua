@@ -458,9 +458,13 @@ q = nil
 ---@field plugins table[]
 ---@field scan table
 
+---@class Quire.plugin_scan_args
+---@field wait? boolean false: scan in the background (default true)
+
 ---@class Quire.plugin_scan_result
 ---@field plugins table[]
 ---@field scan table
+---@field job? string the background scan (wait: false)
 
 ---@class Quire.project_get_result
 ---@field name string
@@ -1061,7 +1065,7 @@ q = nil
 
 ---@class Quire.plugin
 ---@field list fun(args?: Quire.plugin_list_args): Quire.plugin_list_result List scanned plugins; filter matches id, name, or vendor.
----@field scan fun(): Quire.plugin_scan_result Rescan configured plugin paths and return the available plugins.
+---@field scan fun(args?: Quire.plugin_scan_args): Quire.plugin_scan_result Rescan configured plugin paths and return the available plugins.
 
 ---@class Quire.project
 ---@field get fun(): Quire.project_get_result Show the project: name, rate, tempo, meter, file, version and branch.

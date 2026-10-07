@@ -188,6 +188,10 @@ auto scanReportSchema() {
 struct PluginList {
     std::vector<PluginEntry> plugins;
     ScanReport scan;
+    std::optional<std::string> job;  // plugin.scan {wait: false}: the background scan
+};
+struct ScanArgs {
+    std::optional<bool> wait;
 };
 struct TimeArgs {
     std::optional<double> seconds, beat;
@@ -1120,13 +1124,21 @@ void registerExtraCommands(cmd::Registry& registry) {
         addChecked(registry, std::move(c));
     }
     {
-        Command<cmd::NoArgs, PluginList> c;
+        Command<ScanArgs, PluginList> c;
         c.name = "plugin.scan";
         c.kind = Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Rescan configured plugin paths and return the available plugins.";
+        c.description =
+            "wait: false scans in the background (every module through the supervised "
+            "scanner) and returns at once with the current list and the scan's job; the "
+            "catalogue changes when the job is done. A background scan already running is "
+            "returned instead of a second one.";
         c.tags = {"plugin"};
-        c.args = schema::object<cmd::NoArgs>("no_args").build();
+        c.args = schema::object<ScanArgs>("plugin_scan_args")
+                     .field("wait", &ScanArgs::wait,
+                            schema::boolean().doc("false: scan in the background (default true)"))
+                     .build();
         auto entry =
             schema::object<PluginEntry>("plugin_entry")
                 .field("id", &PluginEntry::id, schema::string())
@@ -1141,13 +1153,52 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.result = schema::object<PluginList>("plugin_list")
                        .field("plugins", &PluginList::plugins, schema::arrayOf(entry))
                        .field("scan", &PluginList::scan, scanReportSchema())
+                       .field("job", &PluginList::job,
+                              schema::string().doc("the background scan (wait: false)"))
                        .build();
         c.examples = {{"Scan", j("{}"), j(R"({"plugins":"<any>","scan":"<any>"})"), "empty"}};
-        c.run = [](const cmd::NoArgs&, Context& ctx) -> Result<PluginList> {
-            auto found = app(ctx).plugins(true);
+        c.run = [](const ScanArgs& a, Context& ctx) -> Result<PluginList> {
+            EngineApp& engine = app(ctx);
+            const bool wait = a.wait.value_or(true);
+            std::optional<std::string> job;
+            if (!wait) {
+                auto& jobs = ctx.service<cmd::JobManager>();
+                std::string& running = engine.pluginScanJob();
+                const auto state =
+                    running.empty() ? Result<json::Value>(json::Value()) : jobs.status(running);
+                if (!state || !state->isObject() || !state->find("status") ||
+                    state->find("status")->asString() != "running") {
+                    running = jobs.create();
+                    auto& dispatcher = ctx.service<cmd::Dispatcher>();
+                    const auto& configured = engine.options().pluginPath;
+                    auto paths = configured.empty() ? host::defaultSearchPath() : configured;
+                    engine.startJob([&engine, &jobs, &dispatcher, id = running,
+                                     paths = std::move(paths)](std::stop_token) {
+                        host::ScanReport report;
+                        host::ScanOptions options;
+                        options.superviseAll = true;  // nothing loads in this thread
+                        auto found = host::scan(paths, options, &report);
+                        if (!found) {
+                            (void)jobs.fail(id, std::move(found).error());
+                            return;
+                        }
+                        dispatcher.post(
+                            "plugin.scan.done",
+                            [&engine, &jobs, id, list = std::move(*found),
+                             report = std::move(report)]() mutable -> Status {
+                                json::Value result = json::Value::object();
+                                result["plugins"] = static_cast<std::int64_t>(list.size());
+                                engine.installPlugins(std::move(list), std::move(report));
+                                return jobs.complete(id, std::move(result));
+                            });
+                    });
+                }
+                job = running;
+            }
+            auto found = engine.plugins(wait);
             if (!found) return std::move(found).error();
             PluginList out;
-            out.scan = scanReport(app(ctx).pluginScanReport());
+            out.scan = scanReport(engine.pluginScanReport());
             for (std::size_t i = 0; i < found->size(); ++i) {
                 const auto& p = (*found)[i];
                 PluginEntry e{p.id,         p.name,     p.vendor,        p.format,
@@ -1155,6 +1206,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (host::shadowed(*found, i)) e.shadowed = true;
                 out.plugins.push_back(std::move(e));
             }
+            out.job = std::move(job);
             return out;
         };
         addChecked(registry, std::move(c));

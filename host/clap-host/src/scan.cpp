@@ -385,6 +385,11 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         !options.forceInProcess &&
         (executable.empty() || !fs::is_regular_file(executable, executableError) ||
          ::access(executable.c_str(), X_OK) != 0);
+    if (bridgeMissing && options.superviseAll)
+        return Error("host.scan.unsupervised", "a background scan needs the plugin bridge",
+                     "/bridge",
+                     "install the bridge beside the application, or scan in the "
+                     "foreground");
     if (bridgeMissing) {
         gReport.warnings.emplace_back("host.scan.unsupervised",
                                       "plugin bridge unavailable; scanning in process", "/bridge",
@@ -396,7 +401,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
     const auto stock = stockPluginDir();
     std::vector<PluginInfo> result;
     for (const auto& module : modules(paths)) {
-        const bool trusted = stock && module.parent_path() == *stock;
+        const bool trusted = !options.superviseAll && stock && module.parent_path() == *stock;
         if (options.forceInProcess || trusted) {
             auto local = scanModuleInProcess(module);
             if (!local)

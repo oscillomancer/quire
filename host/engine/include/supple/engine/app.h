@@ -156,6 +156,9 @@ class EngineApp : public cmd::Host {
     // --- plugins ----------------------------------------------------------------
     const host::ScanReport& pluginScanReport() const { return scanReport_; }
     Result<std::span<const host::PluginInfo>> plugins(bool rescan = false);
+    // A finished background scan (plugin.scan {wait: false}), on the model thread.
+    void installPlugins(std::vector<host::PluginInfo> list, host::ScanReport report);
+    std::string& pluginScanJob() { return pluginScanJob_; }  // the running one, if any
     // By id (exact, then case-insensitive) or display name; hint lists the closest ids.
     Result<host::PluginInfo> findPlugin(std::string_view idOrName);
     InstancePool& instances() { return *pool_; }
@@ -376,6 +379,7 @@ class EngineApp : public cmd::Host {
     std::uint64_t txnId_ = 0;
     std::optional<std::vector<host::PluginInfo>> catalogue_;
     host::ScanReport scanReport_;
+    std::string pluginScanJob_;
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
     std::map<std::string, std::filesystem::path> renders_;

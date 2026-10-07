@@ -4122,7 +4122,7 @@ Result:
 
 Rescan configured plugin paths and return the available plugins.
 
-
+wait: false scans in the background (every module through the supervised scanner) and returns at once with the current list and the scan's job; the catalogue changes when the job is done. A background scan already running is returned instead of a second one.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -4130,6 +4130,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `wait` | boolean |  |  |  | false: scan in the background (default true) |
 
 ### Result
 
@@ -4252,6 +4253,10 @@ Kind: `action`. Exposure: `mcp-tool`.
       },
       "required": ["failures", "warnings", "cached_modules"],
       "additionalProperties": false
+    },
+    "job": {
+      "type": "string",
+      "description": "the background scan (wait: false)"
     }
   },
   "required": ["plugins", "scan"],
