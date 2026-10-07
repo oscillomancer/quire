@@ -256,7 +256,7 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, i
 
 Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                                 std::uint32_t in, std::uint32_t out, std::uint32_t key,
-                                bool keyActive, std::uint32_t auxOut) {
+                                bool keyActive, std::uint32_t auxOut, RemotePorts* settled) {
     if (in > kMaxChannels || out > kMaxChannels || key > kMaxChannels)
         return Error("host.layout", "bridge layout exceeds 16 channels");
     unmap();
@@ -297,6 +297,23 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
         unmap();
         return std::move(reply).error();
     }
+    Reader r(reply->data(), reply->size());
+    RemotePorts ports;
+    ports.inChannels = r.u32();
+    ports.outChannels = r.u32();
+    ports.keyChannels = r.u32();
+    const std::uint32_t auxPorts = r.u32();
+    for (std::uint32_t i = 0; i < auxPorts && i < kMaxAuxPorts && r.ok(); ++i) {
+        AudioPortInfo port;
+        port.name = r.str();
+        port.channels = r.u32();
+        ports.auxOutputs.push_back(std::move(port));
+    }
+    if (!r.ok() || auxPorts > kMaxAuxPorts) {
+        deactivate();
+        return Error("host.bridge", "malformed activation reply from the plugin bridge");
+    }
+    if (settled) *settled = std::move(ports);
     return okStatus();
 }
 

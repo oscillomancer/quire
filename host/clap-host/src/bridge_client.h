@@ -58,10 +58,11 @@ class RemoteInstance {
     ~RemoteInstance();
 
     // main thread
+    // `settled` receives the widths the plug-in settled on at activation.
     Status activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                     std::uint32_t inChannels, std::uint32_t outChannels,
                     std::uint32_t keyChannels = 0, bool keyActive = false,
-                    std::uint32_t auxOutChannels = 0);
+                    std::uint32_t auxOutChannels = 0, RemotePorts* settled = nullptr);
     void deactivate();
     std::vector<ParamInfo> params();
     Result<double> paramValue(std::uint32_t id);

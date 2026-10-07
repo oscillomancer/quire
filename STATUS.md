@@ -103,7 +103,6 @@ Engine and hosting:
 - FX containers are not implemented; parallel FX run in series on pinned
   stages and strips with auxiliary channels, and oversampling is not
   available to plug-ins with auxiliary outputs.
-- An isolated VST3 does not pick up bus widths negotiated at activation.
 - A bridged plug-in's tail is read once when a sandbox render starts, so a
   tail it changes during that render is not followed (in-process plug-ins'
   are).

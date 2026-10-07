@@ -112,7 +112,7 @@ struct ControllerWatch {
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
-    REQUIRE(found->size() == 6);
+    REQUIRE(found->size() == 7);
     CHECK((*found)[0].format == "vst3");
     CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
     CHECK((*found)[0].version == "2.0");
@@ -1344,7 +1344,7 @@ TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bund
     const std::array<fs::path, 3> paths{first.parent_path(), second.parent_path(), first};
     auto found = scan(paths);
     REQUIRE(found);
-    REQUIRE(found->size() == 12);
+    REQUIRE(found->size() == 14);  // two bundles of seven classes
     CHECK(found->front().path == first);
     CHECK(found->back().path == second);
 }
@@ -1588,7 +1588,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 8);
+    CHECK(bridge::kVersion == 9);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {
@@ -1993,4 +1993,39 @@ TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
     const auto after = (*made)->paramValue(1);
     REQUIRE(after);
     CHECK(*after == doctest::Approx(*before));
+}
+
+TEST_CASE("a VST3 that settles on another layout is served it, in process or isolated") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto adapter = std::find_if(found->begin(), found->end(), [](const PluginInfo& p) {
+        return p.name == "Test VST3 Mono Adapter";
+    });
+    REQUIRE(adapter != found->end());
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(*adapter, {}, isolated);
+        REQUIRE(made);
+        Instance& p = **made;
+        CHECK(p.audioOutputChannels() == 2);  // offered stereo
+        auto activated = p.activate(48000, 1, 64);
+        REQUIRE_MESSAGE(activated, (activated ? std::string() : activated.error().toString()));
+        CHECK(p.audioInputChannels() == 1);  // settled on mono
+        CHECK(p.audioOutputChannels() == 1);
+        REQUIRE(p.startProcessing());
+        std::vector<float> in(32, 1.0f), out(32, 0.0f);
+        const float* ins[1] = {in.data()};
+        float* outs[1] = {out.data()};
+        ProcessBlock b;
+        b.inputs = ins;
+        b.inputChannels = 1;
+        b.outputs = outs;
+        b.outputChannels = 1;
+        b.frames = 32;
+        REQUIRE(p.process(b));
+        CHECK(out[31] == doctest::Approx(0.5));
+        p.stopProcessing();
+        p.deactivate();
+    }
 }

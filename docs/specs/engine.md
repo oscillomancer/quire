@@ -358,7 +358,11 @@ instance).
   extension, GUI create/set_parent with the host's X11 XID, timers).
   Data plane: a `memfd` shared-memory region per instance with input/output
   audio buffers, event arenas and a cycle header; wake via eventfd/futex
-  through `rt::wake()`.
+  through `rt::wake()`. The shared memory is laid out for the widths the
+  host asks for; the Activate reply (protocol version 9) returns the widths
+  the plug-in settled on (a VST3 may adapt its buses), and a mismatch
+  re-activates once at those widths, so an isolated plug-in exposes the same
+  layout as an in-process one.
 - The current bridge is synchronous and runs only offline or on rendered-ahead
   nodes. A stage on a device-callback node (including a take FX stage) passes
   through with its compensated delay; the callback calls neither processing nor

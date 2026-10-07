@@ -229,6 +229,16 @@ bool validReply(Op op, Reader r) {
             }
             break;
         }
+        case Op::Activate: {  // the settled widths: in, out, key, auxiliary outputs
+            r.skip(12);
+            const auto ports = r.u32();
+            if (ports > kMaxAuxPorts) return false;
+            for (std::uint32_t i = 0; i < ports && r.ok(); ++i) {
+                r.skipString();
+                r.skip(4);
+            }
+            break;
+        }
         case Op::Params: {
             const auto count = r.u32();
             for (std::uint32_t i = 0; i < count && r.ok(); ++i) {
@@ -285,7 +295,6 @@ bool validReply(Op op, Reader r) {
             }
             break;
         }
-        case Op::Activate:
         case Op::Deactivate:
         case Op::SetParam:
         case Op::SetPatch:

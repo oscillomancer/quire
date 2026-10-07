@@ -282,7 +282,20 @@ struct Bridge {
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
                 audio = std::thread([&slot, first] { slot.audioLoop(first); });
-                return reply(Writer{});
+                // The widths the plug-in settled on (a VST3 may adapt a layout
+                // at activation): the host re-maps when they differ.
+                Writer w;
+                w.u32(instance->audioInputChannels());
+                w.u32(instance->audioOutputChannels());
+                w.u32(instance->sidechainChannels());
+                const auto& aux = instance->auxOutputPorts();
+                const auto ports = std::min<std::size_t>(aux.size(), kMaxAuxPorts);
+                w.u32(static_cast<std::uint32_t>(ports));
+                for (std::size_t i = 0; i < ports; ++i) {
+                    w.str(aux[i].name);
+                    w.u32(aux[i].channels);
+                }
+                return reply(w);
             }
             case Op::Deactivate:
                 stopAudio();

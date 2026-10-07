@@ -786,8 +786,29 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
     }
     if (remote_) {
         if (active_) return okStatus();
-        SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_,
-                                     keyChannels_, keyActive_, auxOutputChannels()));
+        // The bridge's shared memory is laid out for the widths asked for; a
+        // plug-in that settles on others (a VST3 adapting its buses) is
+        // re-activated once at its own widths, which the engine then sees.
+        for (int attempt = 0;; ++attempt) {
+            RemotePorts settled;
+            SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_,
+                                         outChannels_, keyChannels_, keyActive_,
+                                         auxOutputChannels(), &settled));
+            std::uint32_t settledAux = 0;
+            for (const AudioPortInfo& port : settled.auxOutputs) settledAux += port.channels;
+            if (settled.inChannels == inChannels_ && settled.outChannels == outChannels_ &&
+                settled.keyChannels == keyChannels_ && settledAux == auxOutputChannels())
+                break;
+            remote_->deactivate();
+            if (attempt > 0)
+                return Error("host.layout", info_.name + " did not settle on an audio layout", {},
+                             "load it in process, or choose a plug-in with a fixed layout");
+            inChannels_ = settled.inChannels;
+            outChannels_ = settled.outChannels;
+            keyChannels_ = settled.keyChannels;
+            keyActive_ = keyActive_ && keyChannels_ > 0;
+            auxOutPorts_ = std::move(settled.auxOutputs);
+        }
         remote_->refreshLatency();
         active_ = true;
         sampleRate_ = sampleRate;
