@@ -323,9 +323,9 @@ class Factory final
         if (!info || index < 0 || index >= 7) return kInvalidArgument;
         const FUID ids[] = {kGainId,     kSineId,     kDelayId,     kSidechainId,
                             kSeparateId, kMultiOutId, kControllerId};
-        const char* names[] = {"Test VST3 Gain",          "Test VST3 Sine",
-                               "Test VST3 Latency",       "Test VST3 Sidechain Gain",
-                               "Test VST3 Separate Gain", "Test VST3 Multi-Out",
+        const char* names[] = {"Test VST3 Gain",           "Test VST3 Sine",
+                               "Test VST3 Latency",        "Test VST3 Sidechain Gain",
+                               "Test VST3 Separate Gain",  "Test VST3 Multi-Out",
                                "Test VST3 Gain Controller"};
         *info = PClassInfo(ids[index], PClassInfo::kManyInstances,
                            index == 6 ? kVstComponentControllerClass : kVstAudioEffectClass,
@@ -336,15 +336,14 @@ class Factory final
         if (!info || index < 0 || index >= 7) return kInvalidArgument;
         const FUID ids[] = {kGainId,     kSineId,     kDelayId,     kSidechainId,
                             kSeparateId, kMultiOutId, kControllerId};
-        const char* names[] = {"Test VST3 Gain",          "Test VST3 Sine",
-                               "Test VST3 Latency",       "Test VST3 Sidechain Gain",
-                               "Test VST3 Separate Gain", "Test VST3 Multi-Out",
+        const char* names[] = {"Test VST3 Gain",           "Test VST3 Sine",
+                               "Test VST3 Latency",        "Test VST3 Sidechain Gain",
+                               "Test VST3 Separate Gain",  "Test VST3 Multi-Out",
                                "Test VST3 Gain Controller"};
         *info = PClassInfo2(ids[index], PClassInfo::kManyInstances,
                             index == 6 ? kVstComponentControllerClass : kVstAudioEffectClass,
                             names[index], 0, index == 1 || index == 5 ? "Instrument" : "Fx",
-                            "Supple Audio",
-                            "1.0", kVstVersionString);
+                            "Supple Audio", "1.0", kVstVersionString);
         return kResultOk;
     }
     tresult PLUGIN_API createInstance(FIDString cid, FIDString iid, void** obj) override {

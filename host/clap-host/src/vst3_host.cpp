@@ -518,8 +518,8 @@ std::vector<AudioPortInfo> Vst3Instance::auxOutputPorts() const {
     const auto& s = *state_;
     std::vector<AudioPortInfo> out;
     for (std::size_t b = 1; b < s.outBusChannels.size(); ++b)
-        out.push_back({b < s.outBusNames.size() ? s.outBusNames[b] : std::string(),
-                       s.outBusChannels[b]});
+        out.push_back(
+            {b < s.outBusNames.size() ? s.outBusNames[b] : std::string(), s.outBusChannels[b]});
     return out;
 }
 
@@ -591,8 +591,7 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
     s.auxPointers.clear();
     std::size_t auxChannels = 0, auxOutChannels = 0;
     for (std::size_t b = 1; b < s.inBusChannels.size(); ++b) auxChannels += s.inBusChannels[b];
-    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b)
-        auxOutChannels += s.outBusChannels[b];
+    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b) auxOutChannels += s.outBusChannels[b];
     s.auxPointers.reserve(auxChannels);
     s.outAuxPointers.assign(auxOutChannels, nullptr);
     s.outAuxScratch.clear();
@@ -919,9 +918,8 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
     }
     // Auxiliary outputs: the block's, then scratch (ADR-0021).
     for (std::size_t c = 0; c < s.outAuxPointers.size(); ++c)
-        s.outAuxPointers[c] = block.auxOutputs && c < block.auxOutputChannels
-                                  ? block.auxOutputs[c]
-                                  : s.outAuxScratch[c];
+        s.outAuxPointers[c] = block.auxOutputs && c < block.auxOutputChannels ? block.auxOutputs[c]
+                                                                              : s.outAuxScratch[c];
     for (std::size_t b = 1; b < s.inBuses.size(); ++b) {  // silent auxiliary inputs
         s.inBuses[b].channelBuffers32 = s.silentIn[b];
         s.inBuses[b].silenceFlags = ~0ull;

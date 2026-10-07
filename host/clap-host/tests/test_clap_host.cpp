@@ -1609,7 +1609,9 @@ TEST_CASE("restart activation failures are structured notifications") {
     CHECK_FALSE((*made)->takeNotifications().restartError);
 }
 
-TEST_CASE("VST3 editors are sized before attached; run-loop callbacks skip handlers unregistered by an earlier callback") {
+TEST_CASE(
+    "VST3 editors are sized before attached; run-loop callbacks skip handlers unregistered by an "
+    "earlier callback") {
     void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
     REQUIRE(module);
     struct Close {

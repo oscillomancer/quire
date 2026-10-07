@@ -39,8 +39,7 @@ int MatrixModel::sourcePair(const Send& x) {
 }
 
 std::string MatrixModel::pairText(int pair, int width) {
-    return width < 2 ? std::to_string(pair)
-                     : std::to_string(pair) + "/" + std::to_string(pair + 1);
+    return width < 2 ? std::to_string(pair) : std::to_string(pair) + "/" + std::to_string(pair + 1);
 }
 
 std::string MatrixModel::blocked(std::size_t row, std::size_t col) const {
@@ -287,8 +286,7 @@ Status RoutingMatrix::reload() {
         src.depth = static_cast<int>(s.find("depth")->asInt());
         if (const auto* ps = s.find("parent_send")) src.parentSend = ps->asBool();
         if (const auto* rule = s.find("rule")) src.rule = str(*rule, "message");
-        const int channels =
-            s.find("channels") ? static_cast<int>(s.find("channels")->asInt()) : 2;
+        const int channels = s.find("channels") ? static_cast<int>(s.find("channels")->asInt()) : 2;
         const json::Value* names = s.find("channel_names");
         // A row per auxiliary pair under the strip's own (ADR-0021).
         std::vector<MatrixModel::Source> pairs;
@@ -450,17 +448,17 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
             };
             const int a = MatrixModel::sourcePair(x);
             const int width = a + 1 <= channelsOf(x.from) ? 2 : 1;
-            const std::vector<int> from = width == 2 ? std::vector<int>{a, a + 1}
-                                                     : std::vector<int>{a, a};
+            const std::vector<int> from =
+                width == 2 ? std::vector<int>{a, a + 1} : std::vector<int>{a, a};
             if (a == 1) choices.assign(std::begin(kChoices), std::end(kChoices));
             const int to = channelsOf(x.to);
             for (int b = 1; b + 1 <= to; b += 2) {
                 if (a == 1 && b == 1) continue;
-                choices.push_back({MatrixModel::pairText(a, width) + " \u2192 " +
-                                       MatrixModel::pairText(b, 2),
-                                   from,
-                                   {b, b + 1},
-                                   false});
+                choices.push_back(
+                    {MatrixModel::pairText(a, width) + " \u2192 " + MatrixModel::pairText(b, 2),
+                     from,
+                     {b, b + 1},
+                     false});
             }
         }
         std::vector<ui::MenuItem> items;

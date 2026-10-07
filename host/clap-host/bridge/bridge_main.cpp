@@ -265,8 +265,8 @@ struct Bridge {
                 }
                 mapSize = size;
                 hdr = static_cast<Header*>(map);
-                layout = Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels,
-                                hdr->keyChannels, hdr->auxOutChannels);
+                layout = Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels, hdr->keyChannels,
+                                hdr->auxOutChannels);
                 if (hdr->magic != kMagic || hdr->version != kVersion || layout.size > size ||
                     hdr->maxFrames != maxFrames || maxFrames == 0 ||
                     hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels ||
