@@ -165,6 +165,25 @@ TEST_CASE("transport positions") {
     CHECK(u.barStartBeat == doctest::Approx(6.0));
 }
 
+TEST_CASE("render follows a tail that changes while the chain processes") {
+    auto edge = make("com.suppleaudio.test.edge");
+    const std::uint8_t learned[4] = {20, 0xe8, 0x03, 0};  // 1000, then 2000 once processing
+    REQUIRE(edge->loadState(learned).ok());
+    host::Instance* chain[] = {edge.get()};
+    audio::AudioData in;
+    in.sampleRate = 48000;
+    in.channels.assign(2, std::vector<float>(4800, 0.0f));
+    RenderRequest req;
+    req.input = &in;
+    RenderSettings s;
+    for (int pass = 0; pass < 2; ++pass) {  // the same render twice: the same length
+        auto r = render(chain, s, req);
+        REQUIRE(r);
+        CHECK(r->audio.frames() == 4800 + 2000);
+        CHECK_FALSE(r->tailCapped);
+    }
+}
+
 TEST_CASE("render ends when the chain's reported tail elapses") {
     auto edge = make("com.suppleaudio.test.edge");
     const std::uint8_t tail1000[4] = {0, 0xe8, 0x03, 0};

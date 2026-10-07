@@ -105,9 +105,9 @@ Engine and hosting:
   available to plug-ins with auxiliary outputs.
 - VST3: a state load the controller rejects leaves the component changed;
   an isolated VST3 does not pick up bus widths negotiated at activation.
-- The sandbox fixes a render's tail length before queued tempo and
-  parameter changes reach the plugin, so the first render after such a
-  change can be cut short.
+- A bridged plug-in's tail is read once when a sandbox render starts, so a
+  tail it changes during that render is not followed (in-process plug-ins'
+  are).
 
 Session and editing:
 - Take `stretch_markers` are stored but not applied; stretching and

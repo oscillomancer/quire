@@ -45,7 +45,8 @@ struct Job {
     const float* inPtr[2] = {nullptr, nullptr};
     std::vector<float> outL, outR;  // sized to the maximum render length
     std::int64_t length = 0, latency = 0, maxTotal = 0, rendered = 0;
-    std::int64_t tailEnd = -1;  // musical end + the chain's reported tail, or -1 (unknown)
+    std::int64_t tailEnd = -1;   // musical end + the chain's reported tail, or -1 (unknown)
+    bool tailsReported = false;  // every stage reports its tail (clap.tail)
     std::int64_t silenceHold = 0;
     double silenceLinear = 0;
     bool capped = false, error = false, startFailed = false;
@@ -60,8 +61,27 @@ void renderLoop(Job& j) SUPPLE_RT {
     const std::int64_t musicalEnd = j.length + j.latency;
     std::size_t next = 0;
     std::int64_t pos = 0, silentRun = 0;
-    const std::int64_t end = j.tailEnd >= 0 ? std::min(j.maxTotal, j.tailEnd) : j.maxTotal;
-    while (pos < end) {
+    // A plug-in's tail can change as it processes (a delay learns the tempo
+    // from the transport, parameter changes are adopted on the audio thread):
+    // re-read it after every block, so the end follows what it reports now.
+    const auto updateTail = [&] {
+        if (!j.tailsReported) return;
+        std::int64_t tail = 0;
+        for (const auto& st : j.stages) {
+            const std::uint32_t t = st.instance->tail();
+            if (t == UINT32_MAX) {
+                j.tailEnd = -1;
+                return;
+            }
+            tail += t;
+        }
+        j.tailEnd = musicalEnd + tail;
+    };
+    const auto endNow = [&] {
+        return j.tailEnd >= 0 ? std::min(j.maxTotal, j.tailEnd) : j.maxTotal;
+    };
+    while (pos < endNow()) {
+        const std::int64_t end = endNow();
         const auto n = static_cast<std::uint32_t>(std::min<std::int64_t>(s.blockSize, end - pos));
         // Chain input for this block.
         const bool haveInput = input && pos < inputFrames;
@@ -127,6 +147,7 @@ void renderLoop(Job& j) SUPPLE_RT {
         }
         const std::int64_t blockStart = pos;
         pos += n;
+        updateTail();
         if (pos > musicalEnd) {
             // Only the samples past the musical end count toward the silent hold.
             const std::int64_t beyond = pos - std::max(blockStart, musicalEnd);
@@ -230,17 +251,18 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     // When every stage reports its tail (clap.tail), the render may end when
     // the chain's total tail has elapsed; an infinite or unreported tail
     // leaves it to silence detection and the cap.
-    {
+    j.tailsReported = std::all_of(chain.begin(), chain.end(),
+                                  [](host::Instance* in) { return in->reportsTail(); });
+    if (j.tailsReported) {
         std::int64_t tail = 0;
-        bool known = true;
         for (host::Instance* in : chain) {
-            if (!in->reportsTail() || in->tail() == UINT32_MAX) {
-                known = false;
+            if (in->tail() == UINT32_MAX) {
+                tail = -1;
                 break;
             }
             tail += in->tail();
         }
-        if (known) j.tailEnd = j.length + j.latency + tail;
+        if (tail >= 0) j.tailEnd = j.length + j.latency + tail;
     }
     j.silenceHold =
         std::max<std::int64_t>(1, std::llround(settings.silenceHoldSeconds * settings.sampleRate));

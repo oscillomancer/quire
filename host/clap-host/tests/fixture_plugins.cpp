@@ -10,7 +10,8 @@
 //     note off and reports NOTE_END.
 //   com.suppleaudio.test.edge  — stereo pass-through for host edge cases. Its
 //     4-byte state is a configuration: byte 0 = refuse start_processing,
-//     bytes 1..3 = reported tail in samples (little endian). Loading state
+//     bytes 1..3 = reported tail in samples (little endian; mode 20: twice
+//     that once it has processed a block). Loading state
 //     calls request_flush; param 7 ("Flushes") reads back how many times
 //     params.flush has been called.
 #include <clap/clap.h>
@@ -765,8 +766,11 @@ const clap_plugin_params_t kEdgeParams = {edgeParamCount,  edgeParamInfo,   edge
                                           edgeValueToText, edgeTextToValue, edgeFlush};
 uint32_t CLAP_ABI edgeTail(const clap_plugin_t* pl) {
     const auto& c = E(pl)->config;
-    return static_cast<uint32_t>(c[1].load()) | (static_cast<uint32_t>(c[2].load()) << 8) |
-           (static_cast<uint32_t>(c[3].load()) << 16);
+    const auto tail = static_cast<uint32_t>(c[1].load()) |
+                      (static_cast<uint32_t>(c[2].load()) << 8) |
+                      (static_cast<uint32_t>(c[3].load()) << 16);
+    // Mode 20: a tail learned while processing (a delay hearing the tempo).
+    return c[0] == 20 && E(pl)->processCalls > 0 ? 2 * tail : tail;
 }
 const clap_plugin_tail_t kEdgeTail = {edgeTail};
 bool CLAP_ABI edgeStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {

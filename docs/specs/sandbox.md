@@ -124,7 +124,10 @@ resampler), then runs the chain offline:
   param events land at their exact sample offsets within blocks;
 - after the input ends, continue for the tail: until the chain's reported
   tail elapses or output stays below −120 dBFS for 200 ms, capped at the
-  tail limit;
+  tail limit. The reported tail is read again after every block, so a tail
+  that changes while the chain processes (a delay learning the render's
+  tempo, a parameter adopted on the audio thread) moves the end; a bridged
+  plug-in's tail is the one known when the render starts;
 - compensate total chain latency by discarding that many leading samples;
 - write float32 WAV; analyze if requested.
 
