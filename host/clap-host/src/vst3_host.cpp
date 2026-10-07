@@ -1006,13 +1006,17 @@ Result<Instance::EditorSize> Vst3Instance::openEditor(unsigned long x11Parent, d
     s.view->setFrame(s.frame);
     if (FUnknownPtr<Steinberg::IPlugViewContentScaleSupport> scaling(s.view); scaling)
         scaling->setContentScaleFactor(static_cast<float>(scale));
+    // The view's size is asked before it is attached, as VST3 hosts do: some
+    // views (clap-wrapper's) size a resizable editor in attached() from the
+    // last size reported, and would otherwise open at their minimum.
+    Steinberg::ViewRect r;
+    (void)s.view->getSize(&r);
     if (s.view->attached(reinterpret_cast<void*>(x11Parent),
                          Steinberg::kPlatformTypeX11EmbedWindowID) != kResultOk) {
         s.view->setFrame(nullptr);
         s.view = nullptr;
         return Error("host.editor", "the plug-in refused the parent window");
     }
-    Steinberg::ViewRect r;
     Instance::EditorSize size;
     if (s.view->getSize(&r) == kResultOk) {
         size.width = static_cast<std::uint32_t>(std::max(0, r.getWidth()));

@@ -38,6 +38,9 @@ std::atomic<int> gLayoutMode{0};
 
 std::atomic<int> gRunLoopRemovedCalls{0}, gRunLoopTimerCalls{0}, gRunLoopFdCalls{0};
 std::atomic<int> gNoteOffs{0}, gWildcardOffs{0};
+// A view attached before the host asked its size (clap-wrapper's views size a
+// resizable editor in attached() from the last size reported).
+std::atomic<int> gAttachedUnsized{0};
 std::array<std::atomic<int>, 64> gNoteIdOffs{};
 
 class TestHandler final
@@ -71,6 +74,14 @@ class TestView final : public CPluginView {
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
         return std::strcmp(type, kPlatformTypeX11EmbedWindowID) == 0 ? kResultOk : kResultFalse;
     }
+    tresult PLUGIN_API getSize(ViewRect* size) override {
+        sized_ = true;
+        return CPluginView::getSize(size);
+    }
+    tresult PLUGIN_API attached(void* parent, FIDString type) override {
+        if (!sized_) ++gAttachedUnsized;
+        return CPluginView::attached(parent, type);
+    }
     tresult PLUGIN_API setFrame(IPlugFrame* frame) override {
         if (loop_) {
             loop_->unregisterTimer(&first_);
@@ -93,6 +104,7 @@ class TestView final : public CPluginView {
     }
 
   private:
+    bool sized_ = false;
     FUnknownPtr<Linux::IRunLoop> loop_;
     TestHandler first_, second_;
 };
@@ -350,6 +362,7 @@ extern "C" IPluginFactory* GetPluginFactory() { return new Factory; }
 
 extern "C" int fixtureRemovedHandlerCalls() { return gRunLoopRemovedCalls.load(); }
 extern "C" int fixtureTimerCalls() { return gRunLoopTimerCalls.load(); }
+extern "C" int fixtureAttachedUnsized() { return gAttachedUnsized.load(); }
 extern "C" int fixtureFdCalls() { return gRunLoopFdCalls.load(); }
 extern "C" int fixtureNoteOffs(int id) {
     return id == -1 ? gNoteOffs.load() : id == -2 ? gWildcardOffs.load() : gNoteIdOffs[id].load();

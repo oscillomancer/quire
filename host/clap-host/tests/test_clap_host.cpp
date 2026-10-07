@@ -1513,7 +1513,7 @@ TEST_CASE("restart activation failures are structured notifications") {
     CHECK_FALSE((*made)->takeNotifications().restartError);
 }
 
-TEST_CASE("VST3 run-loop callbacks skip handlers unregistered by an earlier callback") {
+TEST_CASE("VST3 editors are sized before attached; run-loop callbacks skip handlers unregistered by an earlier callback") {
     void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
     REQUIRE(module);
     struct Close {
@@ -1526,6 +1526,8 @@ TEST_CASE("VST3 run-loop callbacks skip handlers unregistered by an earlier call
     REQUIRE(removed);
     REQUIRE(timers);
     REQUIRE(fds);
+    auto unsized = reinterpret_cast<int (*)()>(::dlsym(module, "fixtureAttachedUnsized"));
+    REQUIRE(unsized);
     auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(list);
     const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
@@ -1535,7 +1537,13 @@ TEST_CASE("VST3 run-loop callbacks skip handlers unregistered by an earlier call
     auto made = Instance::create(*info, {});
     REQUIRE(made);
     const auto removedBefore = removed(), timerBefore = timers(), fdBefore = fds();
-    REQUIRE((*made)->openEditor(1234, 1));
+    auto size = (*made)->openEditor(1234, 1);
+    REQUIRE(size);
+    // Its size is asked before it is attached, so a view that sizes itself in
+    // attached() opens at its size, not its minimum.
+    CHECK(unsized() == 0);
+    CHECK(size->width == 300);
+    CHECK(size->height == 200);
     (*made)->onFd(123, CLAP_POSIX_FD_READ);
     CHECK(fds() == fdBefore + 1);
     CHECK(removed() == removedBefore);
