@@ -262,8 +262,8 @@ Nate's next list, done by the orchestrator:
 - Strip polarity and mono (ADR-0022, amends ADR-0019 §5): `phase_invert` and
   `mono` on every strip, after the inserts and before the fader (never between
   a Console 9 encode and decode), ramped like mute. "Ø" and "mono" pills on
-  the TCP's level row and in a mixer row above the pan; they follow the
-  selection.
+  the TCP's level row and, in the mixer, in one row with monitoring above the
+  pan (the arm moved up under the plug-ins); they follow the selection.
 - Plug-in editors reopen where they were last and at their last size
   (resizable editors), per effect, kept in the UI file's `plugin_windows`
   section so they survive reopening the project.

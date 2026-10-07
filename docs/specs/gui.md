@@ -270,14 +270,16 @@ their entire ancestor chain is visible, and clear peak hold on reopening.
 
 Small "fx" and "+" buttons sit at each strip's top right (the TCP's: the
 chain window, and the plugin browser alone); a double-click on the name
-renames the strip in place, as in the TCP. Under the chain, an input button
-(channels) and "out" (not on masters: a click opens the routing matrix, a drag
-onto a buss or master makes a send); then, on channels, monitoring and the
-arm, the arm centred; then, on every strip, the polarity ("Ø") and mono pills
-above the pan (ADR-0022). The strip's plug-in chain lists every plug-in,
+renames the strip in place, as in the TCP. Under the chain (and its sends),
+the arm, centred (channels); an input button (channels) and "out" (not on
+masters: a click opens the routing matrix, a drag onto a buss or master makes
+a send); then one row with the small polarity pill ("Ø"), monitoring
+(channels) and the mono pill (ADR-0022), above the pan. Everything under the
+chain has a fixed height and the chain takes what a strip's missing rows
+leave, so every strip's fader sits at the same height. The strip's plug-in chain lists every plug-in,
 scrolling when it is longer than its section, and takes the room a strip's
 unused rows would leave (sends show only when there are some, up to two;
-busses and masters have no arm/monitor row). Alt+click on a plug-in removes it
+busses and masters have no arm row or monitoring). Alt+click on a plug-in removes it
 (`fx.remove`, one undo step); a double-click on the chain's empty part opens
 the plugin browser for that strip. A double-click on the strips' empty space
 (not on a strip) adds a channel; a right-click there offers Channel, Buss or

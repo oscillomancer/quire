@@ -28,7 +28,8 @@ and its decode. Amends ADR-0019 §5, which had moved polarity off the strip
    being dropped with a warning (`width` and `trim` still drop).
 6. **GUI:** "Ø" and "mono" pills in their own colours. The TCP puts them at
    the start of the level row (before the fader and pan, so they show when
-   the row does); the mixer gives them a row above the pan on every strip.
+   the row does); in the mixer they share a row above the pan with
+   monitoring (channels), the arm moving up under the plug-ins.
    They act on the selection like mute (`gui::SelectionEdit`).
 
 ## Consequences

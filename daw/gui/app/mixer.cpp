@@ -22,14 +22,14 @@ namespace {
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 constexpr float kStripW = 92;
 // The strip's chain section is the only one that follows the panel's height;
-// the rest (name, sends, rec, polarity/mono, pan, fader, value, M/S, gaps,
-// padding) is fixed.
+// the rest (name, sends, arm, in/out, polarity/monitor/mono, pan, fader,
+// value, M/S, gaps, padding) is fixed.
 constexpr float kSlotH = 18, kSlotGap = 2;
 constexpr float kGripH = 5, kHeaderH = 30;
 constexpr float kFaderH = 133;  // the fader and meter row
 // The fixed rows of a channel with no sends, their gaps and the padding (each
-// send adds kSendH; busses and masters have no arm/monitor row).
-constexpr float kStripChrome = 171;
+// send adds kSendH; busses and masters have no arm row).
+constexpr float kStripChrome = 173;
 constexpr float kSendH = 14;
 constexpr float kDragThreshold = 4;
 
@@ -818,6 +818,18 @@ void Mixer::rebuild() {
         }
         sends.layout.height = ui::SizeRule::fixed(static_cast<float>(shown) * kSendH);
         sends.visible = shown > 0;
+        // Channels: the arm, centred, under the plug-ins (busses and masters give
+        // the room to the chain, so every strip's fader lines up).
+        if (t.type == model::StripType::Channel) {
+            auto& rec = frame->emplace<ui::Node>("mixer.rec." + tid);
+            rec.layout.dir = ui::Layout::Dir::Row;
+            rec.layout.height = ui::SizeRule::fixed(20);
+            rec.emplace<ui::Node>("mixer.rec.l." + tid).layout.width = ui::SizeRule::fraction();
+            st.arm = &rec.emplace<ui::ArmButton>("mixer.arm." + tid, [this, tid](bool on) {
+                (void)set(tid, "armed", json::Value(on));
+            });
+            rec.emplace<ui::Node>("mixer.rec.r." + tid).layout.width = ui::SizeRule::fraction();
+        }
         // The record input and the output ("out": a click opens the routing
         // matrix, a drag onto a buss or master makes a send), as in the TCP.
         if (t.type != model::StripType::Master) {
@@ -846,15 +858,20 @@ void Mixer::rebuild() {
             out->layout.height = ui::SizeRule::fixed(18);
             st.out = static_cast<ui::Button*>(&io.add(std::move(out)));
         }
-        // Channels: monitoring and arm, the arm centred (busses and masters give
-        // the room to the chain).
-        if (t.type == model::StripType::Channel) {
-            auto& rec = frame->emplace<ui::Node>("mixer.rec." + tid);
-            rec.layout.dir = ui::Layout::Dir::Row;
-            rec.layout.height = ui::SizeRule::fixed(20);
-            rec.layout.gap = 6;
-            rec.emplace<ui::Node>("mixer.rec.l." + tid).layout.width = ui::SizeRule::fraction();
-            st.monitor = &rec.emplace<ui::MonitorButton>("mixer.monitor." + tid, [this, tid] {
+        // Polarity, monitoring (channels) and mono in one row (ADR-0022): after
+        // the chain, before the pan and the fader. Polarity and mono are the
+        // TCP's small pills.
+        auto& util = frame->emplace<ui::Node>("mixer.util." + tid);
+        util.layout.dir = ui::Layout::Dir::Row;
+        util.layout.height = ui::SizeRule::fixed(20);
+        util.layout.gap = 3;
+        util.layout.align = ui::Layout::Align::Center;
+        st.polarity = &util.emplace<ui::Toggle>(
+            "mixer.polarity." + tid, "\u00d8", "polarity",
+            [this, tid](bool on) { (void)set(tid, "phase_invert", json::Value(on)); });
+        st.polarity->layout.width = ui::SizeRule::fixed(18);
+        if (t.type == model::StripType::Channel)
+            st.monitor = &util.emplace<ui::MonitorButton>("mixer.monitor." + tid, [this, tid] {
                 const auto parsed = model::Id::parse(tid);
                 const model::Track* tr = parsed ? app_.head().tracks.find(*parsed) : nullptr;
                 if (!tr) return;
@@ -863,25 +880,11 @@ void Mixer::rebuild() {
                                                                               : "off";
                 (void)set(tid, "monitor", json::Value(std::string(next)));
             });
-            st.arm = &rec.emplace<ui::ArmButton>("mixer.arm." + tid, [this, tid](bool on) {
-                (void)set(tid, "armed", json::Value(on));
-            });
-            rec.emplace<ui::Node>("mixer.rec.balance." + tid).layout.width =
-                ui::SizeRule::fixed(20);  // as wide as the monitor: the arm stays centred
-            rec.emplace<ui::Node>("mixer.rec.r." + tid).layout.width = ui::SizeRule::fraction();
-        }
-        // Polarity and mono (ADR-0022): after the chain, before the pan and the fader.
-        auto& util = frame->emplace<ui::Node>("mixer.util." + tid);
-        util.layout.dir = ui::Layout::Dir::Row;
-        util.layout.height = ui::SizeRule::fixed(18);
-        util.layout.gap = 3;
-        st.polarity = &util.emplace<ui::Toggle>(
-            "mixer.polarity." + tid, "\u00d8", "polarity",
-            [this, tid](bool on) { (void)set(tid, "phase_invert", json::Value(on)); });
         st.mono = &util.emplace<ui::Toggle>(
             "mixer.mono." + tid, "mono", "mono",
             [this, tid](bool on) { (void)set(tid, "mono", json::Value(on)); });
-        st.polarity->layout.width = st.mono->layout.width = ui::SizeRule::fraction();
+        st.mono->layout.width = ui::SizeRule::fraction();
+        st.polarity->layout.height = st.mono->layout.height = ui::SizeRule::fixed(14);
         st.polarity->pill = st.mono->pill = true;
         st.pan = &frame->emplace<ui::PanControl>("mixer.pan." + tid);
         st.pan->onChange = [this, tid](double pan, ui::Gesture g) {

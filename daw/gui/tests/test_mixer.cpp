@@ -253,13 +253,22 @@ TEST_CASE("mixer: the chain takes the room unused sends and arm rows would leave
     const auto bus = f.addTrack("buss", "Bus");
     f.exec("route.add", R"({"from":")" + b + R"(","to":")" + bus + R"("})");
     f.refresh();
-    // No sends: the chain reaches down to the input/output row.
+    // No sends: the chain reaches down to the arm, then the input/output row.
     CHECK_FALSE(f.node("mixer.sends." + a)->visible);
-    CHECK(f.node("mixer.io." + a)->bounds().y - f.strip(a).chain->bounds().bottom() <= 4.5f);
+    CHECK(f.node("mixer.rec." + a)->bounds().y - f.strip(a).chain->bounds().bottom() <= 4.5f);
+    CHECK(f.node("mixer.io." + a)->bounds().y - f.node("mixer.rec." + a)->bounds().bottom() <=
+          4.5f);
+    // Polarity, monitoring and mono share one row, before the pan.
+    CHECK(near(f.node("mixer.monitor." + a)->bounds().y + 10,
+               f.node("mixer.polarity." + a)->bounds().y + 7));
+    CHECK(f.node("mixer.polarity." + a)->bounds().right() <=
+          f.node("mixer.monitor." + a)->bounds().x);
+    CHECK(f.node("mixer.monitor." + a)->bounds().right() <= f.node("mixer.mono." + a)->bounds().x);
+    CHECK(f.node("mixer.mono." + a)->bounds().bottom() <= f.strip(a).pan->bounds().y);
     // A send takes one row out of the chain section.
     CHECK(f.node("mixer.sends." + b)->visible);
     CHECK(near(f.strip(a).chain->bounds().h - f.strip(b).chain->bounds().h, 14 + 4));
-    // A buss has no arm/monitor row (nor an input): its chain takes that room.
+    // A buss has no arm row (nor an input): its chain takes that room.
     CHECK_FALSE(f.root->find("mixer.rec." + bus));
     CHECK_FALSE(f.root->find("mixer.input." + bus));
     CHECK(f.root->find("mixer.out." + bus));
