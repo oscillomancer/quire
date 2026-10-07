@@ -1083,3 +1083,38 @@ TEST_CASE("clipboard keeps a discarded redo version available until replaced") {
     CHECK_FALSE(f.app->versions().version(copiedVersion));
     CHECK(weak.expired());
 }
+
+TEST_CASE("an envelope drag over points another client changed is not applied") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto track = f.view->trackLayout().rows()[0].track;
+    auto r = f.dispatcher->execute(
+        {"env.add",
+         json::parse(
+             R"({"track":")" + track.str() +
+             R"(","param":"volume","points":[{"beat":0,"value":0},{"beat":16,"value":-12}]})")
+             .value(),
+         kUi});
+    REQUIRE(r);
+    const auto env = *model::Id::parse((*r)["env"].asString());
+    f.sync();
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    const auto area = views::Lanes::envArea(f.view->rowRect(*lane));
+    const ui::Point p{f.view->xAt(f.app->head().timeMap->secondsAt(8)), area.y + area.h * .25f};
+    f.pointer(ui::PointerEvent::Type::Down, p);
+    REQUIRE(f.view->gestures().state().envCreated);
+    REQUIRE(f.dispatcher->execute(
+        {"env.points.set",
+         json::parse(
+             R"({"env":")" + env.str() +
+             R"(","points":[{"beat":0,"value":0},{"beat":4,"value":-30},{"beat":16,"value":-12}]})")
+             .value(),
+         kUi}));
+    f.sync();
+    f.pointer(ui::PointerEvent::Type::Up, p);
+    const auto& points = f.app->head().envelopes.find(env)->points;
+    REQUIRE(points.size() == 3);
+    CHECK(points[1].pos == doctest::Approx(4));  // the other client's point stays
+    CHECK(points[1].value == doctest::Approx(-30));
+}

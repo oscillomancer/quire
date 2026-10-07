@@ -1191,14 +1191,14 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
     if (!frame) return true;
     state_.drag = Drag::EnvPoint;
     state_.env = envId;
-    state_.envDraft = env->points;
+    state_.envDraft = state_.envBase = env->points;
     // Inside an automation item the press edits the item's points (as played,
     // in the loop pass under the pointer); elsewhere the envelope's own.
     if (const model::AutomationItem* ai = autoItem ? s.autoItems.find(autoItem->item) : nullptr) {
         state_.autoItem = autoItem->item;
         state_.envOffset = autoItem->passStart;
         frame->offsetBeats += autoItem->passStart;
-        state_.envDraft = ai->points;
+        state_.envDraft = state_.envBase = ai->points;
         for (model::EnvPoint& pt : state_.envDraft) pt.value = Lanes::autoItemValue(*ai, pt.value);
     }
     std::optional<std::size_t> nearest;
@@ -1400,6 +1400,21 @@ void ItemGestures::commitEnv(const std::string& label) {
     const model::AutomationItem* ai =
         state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
     if (state_.autoItem && !ai) return;
+    // The draft replaces every point: if another client changed them since the
+    // press, applying it would undo that change, so the drag is dropped.
+    const auto& now = ai ? ai->points : view_.session().envelopes.find(*state_.env)->points;
+    const bool unchanged =
+        std::equal(now.begin(), now.end(), state_.envBase.begin(), state_.envBase.end(),
+                   [](const model::EnvPoint& a, const model::EnvPoint& b) {
+                       return a.pos == b.pos && a.value == b.value && a.shape == b.shape &&
+                              a.tension == b.tension;
+                   });
+    if (!unchanged) {
+        if (onError)
+            onError(Error("env.changed", "the automation changed while you were dragging", {},
+                          "drag the point again"));
+        return;
+    }
     if (ai)
         args["item"] = state_.autoItem->str();
     else

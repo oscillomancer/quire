@@ -875,7 +875,7 @@ std::unique_ptr<ui::Node> MidiEditor::build() {
         compilePending_ = true;
         lastEdit_ = std::chrono::steady_clock::now();
     };
-    text.onSubmit = [this](const std::string&) { compileText(true); };
+    text.onSubmit = [this](const std::string&) { compileText(true, true); };
     text.onFocusChange = [this](bool focused) {
         if (focused) ++typingSession_;
         if (!focused && textDirty_) compileText(true);
@@ -1076,27 +1076,30 @@ std::function<midi::Meter(int)> meterAtItem(const model::Session& session, doubl
 }
 }  // namespace
 
-void MidiEditor::reloadText() {
-    if (!text_) return;
+std::optional<std::string> MidiEditor::modelText() const {
     const auto itemId = model::Id::parse(state_.item);
     const auto* item = itemId ? app_.head().items.find(*itemId) : nullptr;
     const auto* take =
         item && item->activeTake ? app_.head().takes.find(*item->activeTake) : nullptr;
     const auto* source = take && take->source ? app_.head().midi.find(*take->source) : nullptr;
-    if (!item || !source) {
-        showDiagnostics({}, "notation unavailable: no MIDI source");
-        return;
-    }
+    if (!item || !source) return std::nullopt;
     notation::DecompileOptions options;
     options.meterAt = meterAtItem(app_.head(), model::itemSpan(app_.head(), *item).startBeat);
     auto text = notation::decompile(source->sequence, options);
+    if (!text) return std::nullopt;
+    return std::move(*text);
+}
+
+void MidiEditor::reloadText() {
+    if (!text_) return;
+    auto text = modelText();
     if (!text) {
-        showDiagnostics({}, "notation unavailable: " + text.error().message);
+        showDiagnostics({}, "notation unavailable: the item has no MIDI it can show");
         return;
     }
-    appliedText_ = std::move(*text);
+    appliedText_ = baseText_ = std::move(*text);
     text_->setText(appliedText_);
-    textDirty_ = false;
+    textDirty_ = textConflict_ = false;
     showDiagnostics({}, "");
 }
 
@@ -1107,7 +1110,7 @@ void MidiEditor::showDiagnostics(const std::vector<ui::TextArea::Mark>& marks,
     root_.relayout();
 }
 
-void MidiEditor::compileText(bool write) {
+void MidiEditor::compileText(bool write, bool submit) {
     if (!text_ || state_.item.empty()) return;
     const std::string text = text_->text();
     notation::CompileContext cc;
@@ -1139,6 +1142,17 @@ void MidiEditor::compileText(bool write) {
         textDirty_ = text != appliedText_;
         return;
     }
+    // The draft replaces the whole sequence: if the MIDI changed elsewhere
+    // since it was loaded, only an explicit Enter overwrites that change.
+    if (const auto current = modelText(); current && *current != baseText_ && !submit) {
+        textConflict_ = true;
+        textDirty_ = true;
+        showDiagnostics({},
+                        "the MIDI changed elsewhere while you typed: Ctrl+Enter applies "
+                        "your text over that change");
+        return;
+    }
+    if (textConflict_ && !submit) return;
     json::Value args = json::Value::object();
     args["item"] = state_.item;
     args["notation"] = text;
@@ -1151,7 +1165,8 @@ void MidiEditor::compileText(bool write) {
         return;
     }
     appliedText_ = text;
-    textDirty_ = false;
+    baseText_ = modelText().value_or(std::string());
+    textDirty_ = textConflict_ = false;
     (void)reload();
 }
 

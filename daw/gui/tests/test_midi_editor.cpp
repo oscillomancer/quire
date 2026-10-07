@@ -1410,3 +1410,30 @@ TEST_CASE("audit3: MIDI and event-list snapshots refresh across equal-version pr
     CHECK_FALSE(f.editor->edit(ops, gesture));
     CHECK(f.notes().asArray()[0]["velocity"].asInt() != 37);
 }
+
+TEST_CASE("a notation draft does not overwrite MIDI edited elsewhere unless Ctrl+Enter asks to") {
+    Fixture f;
+    REQUIRE(f.ok);
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    f.root->focus(f.editor->notation());
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("voice v; 1: D4:q E4:q G4:q C5:q");
+    // Another client edits the item while the draft is open.
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"velocity","notes":[0],"velocity":37}]})");
+    f.frame();
+    f.editor->close();  // closing does not push the stale draft over that edit
+    CHECK(f.notes().asArray()[0]["velocity"].asInt() == 37);
+    // With Ctrl+Enter, the draft is applied deliberately.
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    f.root->focus(f.editor->notation());
+    f.root->key(SDLK_A, ui::kCtrl);
+    f.root->text("voice v; 1: D4:q E4:q G4:q C5:q");
+    f.exec("midi.edit",
+           R"({"item":")" + f.item + R"(","ops":[{"op":"velocity","notes":[0],"velocity":38}]})");
+    f.frame();
+    f.root->key(SDLK_RETURN, ui::kCtrl);
+    CHECK(f.notes().asArray()[0]["pitch"].asInt() == 62);  // D4: the draft won, as asked
+}

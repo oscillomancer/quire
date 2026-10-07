@@ -123,7 +123,10 @@ class MidiEditor {
   private:
     Status reload();
     void reloadText();
-    void compileText(bool write);
+    // `submit`: the user pressed Ctrl+Enter, which also overwrites MIDI that
+    // changed elsewhere while the draft was being typed.
+    void compileText(bool write, bool submit = false);
+    std::optional<std::string> modelText() const;  // the item's MIDI, decompiled
     void refreshTitle();
     float maxHeight() const;
     void applyHeight();
@@ -157,6 +160,8 @@ class MidiEditor {
     std::string appliedText_;  // the text last compiled into the item
     std::string titleBase_;
     bool textDirty_ = false, compilePending_ = false;
+    bool textConflict_ = false;        // the MIDI changed under a draft: only Ctrl+Enter writes it
+    std::string baseText_;             // the item's MIDI, decompiled, when the text last matched it
     std::uint64_t typingSession_ = 0;  // one undo step per focus of the notation panel
     std::chrono::steady_clock::time_point lastEdit_{};
 };

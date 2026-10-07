@@ -138,6 +138,7 @@ class ItemGestures {
         // on the lane adds one, a drag moves it, Alt+click deletes one.
         std::optional<model::Id> env;
         std::vector<model::EnvPoint> envDraft;
+        std::vector<model::EnvPoint> envBase;  // the model's points at the press
         std::size_t envIndex = 0;
         double envOrigPos = 0;
         bool envCreated = false;

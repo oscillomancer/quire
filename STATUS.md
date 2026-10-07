@@ -122,8 +122,6 @@ Session and editing:
 GUI:
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
   mixer strips but not onto track-panel rows.
-- A dirty notation draft and an automation drag commit whole-object
-  replacements, overwriting edits made meanwhile by other clients.
 - Key bindings use only the arrange and global contexts; actions that need
   typed arguments run only from the actions list; macros do not pass their
   arguments to steps.

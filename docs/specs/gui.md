@@ -265,7 +265,9 @@ follow modes. On every version change, deleted track and item IDs are
 pruned from transient selection; undo restores objects, not old selection.
 MIDI editor selection clears on external version changes, and a gesture
 cannot commit against a different project generation or version from the
-one where it started.
+one where it started. An automation point drag (on an envelope or an
+automation item) is dropped, with an `env.changed` message, when the points
+changed elsewhere between the press and the release.
 
 Gestures (P0, `reaper-ux.md` 8–13): drop files onto tracks/timeline, move,
 trim edges, split (S), duplicate, slip (Alt-drag), stretch (with the rate
@@ -387,7 +389,10 @@ quantize, transpose), velocity and CC lanes, and a **notation panel**: the
 item's notation text (`libs/notation`) beside the roll, editable with live
 compile diagnostics (the compiler's located errors and hints); edits in
 either side update the other through `midi.edit` (event edits) and
-`midi.write` (notation replacement). This is the
+`midi.write` (notation replacement). A draft that would replace MIDI changed
+elsewhere since it was loaded is not written by the pause, leaving the panel or
+closing the editor: the panel says so, and Ctrl+Enter applies it over the
+change. This is the
 LLM-native differentiator: the same text an agent writes is visible and
 editable by the human. The event list edits notes and CC events;
 double-click editing requires a row hit and edits that row. Roll gesture
