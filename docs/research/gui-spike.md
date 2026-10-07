@@ -39,7 +39,7 @@ build/dev/tools/spikes/gui-shell/gui-shell-spike --idle --seconds 5
 ## CLAP editor embedding, resizing and capture
 
 ```sh
-build/dev/tools/spikes/gui-shell/gui-shell-spike --embed /home/nate/Projects/audio-plugins/template/build-cmake/starter_assets/Starter.clap --seconds 1
+build/dev/tools/spikes/gui-shell/gui-shell-spike --embed <template>/build-cmake/starter_assets/Starter.clap --seconds 1
 magick docs/research/gui-spike/embedded.ppm docs/research/gui-spike/embedded.png
 ```
 

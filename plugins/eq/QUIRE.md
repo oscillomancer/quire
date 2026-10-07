@@ -1,6 +1,6 @@
 # Quire integration deviations
 
-Instantiated Nate's MIT template, without changing its source repository. Identity
+Instantiated from Supple Audio's MIT plugin template. Identity
 renames are Eq / eq / EQ, CLAP `com.suppleaudio.eq`, state magic `QEQ1`, AU subtype
 `QEq_`. The display name is defined once in `cmake/Identity.cmake`; CMake artifacts,
 the descriptor and editor read the engine's display-name compile definition.

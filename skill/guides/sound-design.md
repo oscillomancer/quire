@@ -2,8 +2,8 @@
 
 Orrery is Quire's synthesizer. You program it with a patch: a JSON document
 that says which modules exist, how they connect, and what their settings are.
-The exact fields, units and ranges are in `generated/plugins/orrery.md`; this
-guide is about *how to get to a sound*.
+The exact fields, units and ranges come from `plugin_describe` (sandbox) or
+`fx_describe` (DAW); this guide is about *how to get to a sound*.
 
 ## The division of labour
 

@@ -1,0 +1,101 @@
+# Quire
+
+Quire is a digital audio workstation for Linux in which a language model can
+work as a full operator, beside the person at the keyboard. Every edit,
+human or agent, is a typed command on one bus, recorded in a version history
+that can branch and merge. It comes with a suite of stock plugins whose
+parameters and patches are described in physical units, so an agent can
+program them as reliably as a person can.
+
+The workflow follows REAPER: arrange view, track panel, mixer, FX chains,
+routing matrix, MIDI editor, render dialog, actions list. The architecture
+underneath is Quire's own.
+
+Quire is pre-release (0.1.0). It is used for real work on its author's
+machine, but file formats and commands can still change.
+
+## What it does
+
+- **One command bus.** The GUI, Lua scripts, a JSON-RPC socket and MCP all
+  call the same typed, schema-checked commands. Anything a person can do, an
+  agent can do, and every change carries its origin in the undo history.
+- **Version history with branches.** Each edit is a version. Branch, diff,
+  merge (merges replay commands, with field-level conflicts), and render two
+  branches for an A/B comparison. Agents propose work on a branch and the
+  person accepts or rejects it.
+- **Agents built in.** An MCP server drives the running app (or a headless
+  engine) from Claude Code or any MCP client; an agent panel in the app talks
+  to the Anthropic API or an OpenAI-compatible endpoint, local servers
+  included. A bundled skill (`skill/`) teaches agents the commands, units and
+  MIDI notation.
+- **Measurement instead of listening.** Renders can be analyzed for loudness
+  (BS.1770/R128), spectrum, pitch, envelope and stereo image, and compared
+  against a reference, so an agent can check what it did.
+- **Engine.** Anticipative processing for tracks that are not live, plugin
+  delay compensation, CLAP and VST3 hosting with optional process isolation,
+  sidechains, multi-output instruments (up to 128 channels per track),
+  automation with envelopes, automation items and touch/latch/write,
+  recording with input monitoring, loop and punch, takes and comping, time
+  stretching. Offline renders are deterministic, and the real-time output is
+  bit-identical to them.
+- **Console 9 summing.** Channels and busses use a port of Airwindows'
+  Console 9 encode/decode; it can be switched off per project with levels
+  matched.
+- **Stock plugins.** Orrery (synth), Facet (EQ), Ballast (compressor and
+  limiter), Sluice (gate and expander), Flint (transient shaper), Kiln
+  (saturation), Echelon (delay), Nave (reverb), Plumb (utility) and Gauge
+  (analyzer), as CLAP plugins usable in any host. Each has JSON patches and
+  exposes its parameters in physical units through a CLAP extension.
+- **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI
+  can be written in a compact text notation.
+
+## Building
+
+Requirements: Linux, CMake 3.25+, Ninja, Clang (GCC also builds), Python 3,
+and the development packages for SDL3, OpenGL, libcurl and zlib. All other
+dependencies are vendored under `third_party/`, so builds work offline.
+Audio runs through JACK (PipeWire's JACK works); the GUI is an X11 window and
+runs under XWayland.
+
+```sh
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+build/release/daw/gui/quire              # a new project
+build/release/daw/gui/quire song.json    # open a project
+```
+
+[docs/guides/running.md](docs/guides/running.md) covers plugin paths,
+unsaved projects, connecting Claude Code over MCP and the agent panel.
+
+## Repository
+
+| Path | Contents |
+|---|---|
+| `libs/` | Core libraries: JSON and schemas, semantic parameters, patches, MIDI and notation, analysis, DSP, Console 9, command bus, control protocol, Lua |
+| `host/` | Plugin hosting (`clap-host`, with the bridge process), the plugin sandbox, the engine and session model |
+| `daw/` | The GUI application and the agent panel |
+| `mcp/` | The MCP adapter |
+| `plugins/` | The stock plugins and their shared extension code |
+| `skill/` | The agent skill: hand-written guides and generated command reference |
+| `docs/` | Architecture decisions, specifications, research notes, benchmarks |
+| `tools/` | CI scripts, generators, benchmarks, the evaluation harness, the REAPER check |
+| `tests/` | Integration, fuzz and real-time safety tests |
+| `third_party/` | Vendored dependencies with their licenses |
+
+Start with [ARCHITECTURE.md](ARCHITECTURE.md). Design decisions are in
+[docs/decisions/](docs/decisions/), component contracts in
+[docs/specs/](docs/specs/), and the current state and known limits in
+[STATUS.md](STATUS.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The engineering rules, for people and
+coding agents alike, are in [AGENTS.md](AGENTS.md).
+
+## License
+
+A license for Quire has not been chosen yet; until it is, no license is
+granted to use, copy or distribute it. The stock plugins under `plugins/` are
+MIT licensed (see each plugin's `LICENSE`). Third-party components keep their
+own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).

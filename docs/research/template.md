@@ -1,6 +1,7 @@
 # Plugin template survey (2026-09-26)
 
-Source: `/home/nate/Projects/audio-plugins/template`, read only. Quire has no `ARCHITECTURE.md`, ADRs, specs or `STATUS.md` yet. This is research, not an architecture decision. Paths below are relative to the template. Its `LICENSE` begins “MIT License / Copyright (c) 2026 Supple Audio”. Do not import product code whose licenses differ.
+Source: Supple Audio's plugin template, read before any Quire plugin existed.
+This is research, not an architecture decision. Paths below are relative to the template. Its `LICENSE` begins “MIT License / Copyright (c) 2026 Supple Audio”. Do not import product code whose licenses differ.
 
 ## Structure and build
 
@@ -28,7 +29,7 @@ Pugl 0.5.7 owns the native embedded X11/Win32/Cocoa view and events; NanoVG draw
 
 CTest checks: `core`, `editor-input`, `wrapper-automation`, `wrapper-timer`, `host-smoke`, `host-smoke-mono`; `auv2-bundle` only on macOS. `starter-cli` renders WAV through the same DSP; `starter-gui-preview` draws to PPM only; `starter-clap-probe` exercises CLAP host lifecycle; `starter-linux-host-probe` tests actual X11 embedding. These are separate from format validators and real host testing.
 
-## Quire integration proposals for orchestrator review
+## Quire integration proposals
 
 1. Add `com.suppleaudio.semantic-params` lookup in `starter_clap.cpp:plugGetExtension`. Expose immutable semantic descriptors keyed by the same stable IDs as `kParams`; define extension ABI/version separately. A semantic state writer should reference the existing CLAP state IDs and version, not create a parallel source of defaults. Hosts without the extension continue using `CLAP_EXT_PARAMS` and `CLAP_EXT_STATE`.
 2. Generate `StarterParams.h:kParams` plus semantic descriptor data from one checked-in schema with stable integer IDs, units, curves, tags and groups. Keep linear `toNormalised/fromNormalised` only for linear entries and supply curve-specific inverse mappings. Generate deterministic tables and test every ID, default, text round trip and retired slot. Alternatively extend `ParamDef` in place first, preserving its leading IDs and wrapper/editor consumers. Do not change state wire IDs.

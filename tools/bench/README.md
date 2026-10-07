@@ -1,4 +1,4 @@
-# Phase 4 capacity tooling (B1 / B2)
+# Capacity benchmarks (B1 / B2)
 
 B1 builds the session through the engine command bus. B2 exports that model's
 compiled notation MIDI and the plugins' own CLAP-saved states, then uses public
@@ -96,29 +96,3 @@ hashes. No wall-clock threshold decides a unit test. Markdown rows append to
 `docs/benchmarks/b1.md` or `b2.md`; `--report` redirects dry runs elsewhere.
 `--output-dir` chooses a new artifact directory. Tool failures retain a
 structured error and logs. Reports/license copies under build are not committed.
-
-## Verification on 2026-09-30
-
-Implementation commit: `31bb265`. No physical audio device was opened.
-
-- `cmake --preset dev && cmake --build --preset dev -j6`: passed.
-- `SUPPLE_AUDIO_DEVICE_TEST=0 ctest --test-dir build/dev -R '^(engine\.tests|engine\.bench-tooling)$' -j6 --output-on-failure`:
-  both passed (54.11 s total); session builder/export had 34 assertions.
-- The two unittest commands above: 5 benchmark tests and 11 REAPER-check tests passed.
-- The optimized paced search command above: confirmed N=5 with anticipation
-  on, N=1 off, at 0.2 s per trial; exercised bracketing, bisection and confirmation.
-  Artifacts: `build/bench/20260930-164138-9724cdd8/{True,False}/report.json`.
-  These are dry checks, not acceptance capacities. An earlier debug search
-  correctly recorded no passing N rather than claiming a capacity.
-- The optimized B2 offline command above: REAPER 7.81 loaded/read back all
-  ten CLAP states at N=2, saved the RPP, and rendered 384000 stereo frames
-  at 48 kHz, finite and non-silent. User-config fingerprints were unchanged.
-  Artifacts: `build/bench/20260930-164124-bc02f432/REAPER-default/`.
-- `SUPPLE_AUDIO_DEVICE_TEST=0 build/dev/host/engine/engine-bench --device jack --tracks 1 --seconds .1`:
-  refused with `bench.opt_in` before device start.
-- `env -u SUPPLE_AUDIO_DEVICE_TEST tools/ci/run-all.sh`: run once; dev, GCC,
-  ASan, UBSan, TSan, RTSan, license and format all passed. Logs are retained
-  under `build/ci-*.log`; temporary sanitizer/GCC trees were removed.
-
-Real-device paths and five-minute acceptance measurements are left for the
-orchestrator, as requested, after the Console 9 strips land.

@@ -1,10 +1,7 @@
-# Spec: stock effects (Phase 3, after the synth)
+# Spec: stock effects
 
-**Status:** Draft for review (2026-09-26). Each plugin's section is frozen
-when its implementation starts.
-Implementation of §1, §2, §8 and §9 started 2026-09-29 (plan and
-implementation notes: `docs/specs/effects.md`); those sections are frozen
-except for the decisions recorded there.
+**Status:** Implemented. Each plugin's section records its decisions;
+`docs/specs/effects.md` holds the implementation notes.
 **Common rules:** ADR-0010 (semantic params, value domains), ADR-0011
 (template instantiation), `docs/specs/core-params.md`, `core-patch.md`,
 `semantic-params-extension.md`.
@@ -18,16 +15,15 @@ except for the decisions recorded there.
 - **Patch form:** flat (core-patch `FlatPatchType`): `"params": {"<key>":
   value}` with dotted keys (`band2.freq`). One form for every effect, so an
   agent learns it once. Keys and units are the parameter table.
-- **Names:** working names below are proposals (craft nouns, like Nate's
-  products); code identifiers use the functional id in brackets until Nate
-  confirms (`HUMAN_REVIEW.md` #9). CLAP ids `com.suppleaudio.<id>`.
+- **Names:** craft nouns; code identifiers use the functional id in
+  brackets. CLAP ids `com.suppleaudio.<id>`.
 - **Every effect:** mono/stereo configs (plus sidechain input where
   listed), float/double, sample-accurate automation, block-size invariant
   (null −120 dBFS across 1..4096), denormal-safe, deterministic (seeded where
   random), latency reported exactly (with compensated bypass), `mix`
   (dry/wet, latency-aligned) and `output` (dB) where meaningful, a
   `describe()` sentence, RT-safe under rtsan, CLAP validator clean, loads
-  and automates in REAPER (acceptance, Phase 3 §acceptance).
+  and automates in REAPER (`tools/reaper-check`).
 - **Latency-changing parameters** (lookahead, oversampling, linear phase)
   are stepped, not automatable, and follow the template's restart contract
   (`request_restart`, reactivate with the new latency).
@@ -789,10 +785,7 @@ can read live measurements of any point in the graph. Keys: `window` enum,
   Silence/unavailable values use finite meter floors. Generic-host scalar
   events are no more frequent than 50 ms; GUI frames exist only when visible.
 
-## 10. Order of work and acceptance
+## 10. Acceptance
 
-After Orrery reaches its evaluation milestone: EQ → compressor/limiter →
-utility + analyzer (needed for mixing tasks) → saturation → gate →
-transient → delay → reverb. Each plugin is done when its tests, the CLAP
-validator, the RT sanitizer run, a REAPER load/automation check (Nate or an
-agent via computer-use), and its skill page exist.
+A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
+a REAPER load and automation check, and its skill page exist.

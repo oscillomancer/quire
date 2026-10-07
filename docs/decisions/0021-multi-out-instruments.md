@@ -1,6 +1,6 @@
 # ADR-0021: Multi-output plug-ins
 
-**Status:** Accepted, 2026-10-06. Nate's request: a multi-sampler that plays
+**Status:** Accepted, 2026-10-06. The maintainer's request: a multi-sampler that plays
 each sample on its own output should work, and the routing matrix should show
 every channel of such a track. Builds on ADR-0018 (every declared port gets a
 buffer), ADR-0020 (auxiliary channels, routes to them, pins) and ADR-0013

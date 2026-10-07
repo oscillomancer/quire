@@ -32,9 +32,9 @@ decisions behind it are in `docs/decisions/` (ADRs) and the contracts in
         ┌────────────────────────────────────────────────────────────────────┐
         │ ENGINE (RT)  audio callback → graph executor → worker threads        │
         │ anticipative render-ahead for non-live tracks; PDC; automation      │
-        │ plugins: CLAP (in-process / bridged / dedicated process), VST3 later │
+        │ plugins: CLAP, VST3 (in process / shared bridge / dedicated process) │
         └───────────────┬────────────────────────────────────────────────────┘
-                        │ AudioBackend: JACK (pipewire-jack) · PipeWire · ALSA · dummy · offline
+                        │ AudioBackend: JACK (pipewire-jack) · dummy · offline
                         ▼
                      hardware
 ```
@@ -54,17 +54,19 @@ for free, and guarantees that anything a human can do an agent can do.
 | params | `libs/core-params` | semantic parameter definitions, units, curves, text I/O, normalization | ADR-0010, `specs/core-params.md` |
 | patch | `libs/core-patch` | patch/preset documents: schema, validate, merge, canonical form, prose describe | ADR-0009, `specs/core-patch.md` |
 | music | `libs/midi`, `libs/notation` | MIDI model + SMF I/O; the text notation compiler/decompiler | `specs/notation.md` |
+| time | `libs/timeline` | tempo and meter maps, ramps, bar/beat conversion | `specs/session-model.md` |
 | audio | `libs/audio-file`, `libs/core-dsp` | file I/O, resampling; shared DSP blocks | — |
 | audio | `libs/console9` | Console 9 encode/decode, fader/pan, deterministic dither; reference null test | ADR-0019 |
 | perception | `libs/core-analysis` | loudness (BS.1770/R128), spectral, harmonic, envelope, stereo, comparison, masking; compact reports | `specs/core-analysis.md` |
+| tuning | `libs/optimize` | CMA-ES for the patch optimizer | `specs/optimizer.md` |
 | control | `libs/command-bus`, `libs/control-protocol`, `mcp/` | registry and dispatch; JSON-RPC over Unix socket; MCP adapter | ADR-0007, `specs/command-bus.md` |
 | scripting | `libs/lua-bus` (vendored PUC Lua 5.4) | sandboxed Lua scripts on the bus: generated bindings, `q.batch` transactions, `q.on` subscriptions; `script.run` | ADR-0006 |
-| hosting | `host/clap-host` | CLAP hosting incl. the semantic-params extension | `specs/semantic-params-extension.md` |
-| sandbox | `host/sandbox` | Phase 2 headless plugin sandbox (library + CLI + MCP) | `specs/sandbox.md` |
-| engine | `host/engine`, `host/isolation` | Phase 4 headless DAW engine, plugin bridge processes | ADR-0004, ADR-0008 |
+| hosting | `host/clap-host` | CLAP and VST3 hosting, the semantic-params extension, the bridge process (`bridge/`) | ADR-0013, ADR-0017, `specs/semantic-params-extension.md` |
+| sandbox | `host/sandbox`, `host/analysis-commands` | headless plugin sandbox (library, CLI, MCP); analysis commands shared with the engine | `specs/sandbox.md` |
+| engine | `host/engine` | session model (`model/`), commands, render plans, real-time engine, JACK backend, renders | `specs/session-model.md`, `specs/engine.md` |
 | plugins | `plugins/*` | template-derived stock plugins + shared extension code | ADR-0011 |
-| app | `daw/gui`, `daw/agent-panel` | Phase 5 GUI, agent panel (scripting is `libs/lua-bus`) | ADR-0005, ADR-0006 |
-| agents | `skill/` | bundled LLM skill: generated reference + guides | Phase 6 |
+| app | `daw/gui`, `daw/agent-panel` | the GUI application, the agent panel | ADR-0005, `specs/gui.md` |
+| agents | `skill/` | bundled LLM skill: generated reference + guides | — |
 
 Dependency direction is strictly downward in that table: libs never depend on
 host, daw or plugins; plugins use only header-light libs.
@@ -87,9 +89,11 @@ host, daw or plugins; plugins use only header-light libs.
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns
   plugin GUIs in-process. In the GUI app it is the UI thread; headless it runs
   an event loop for the control socket and timers.
-- **I/O threads** — disk streaming for playback and recording (never drop a
-  sample: large preallocated buffers, crash-safe recording files), peak-file
-  building, media decoding/resampling caches, analysis jobs, renders.
+- **I/O threads** — recording writers (never drop a sample: large
+  preallocated buffers, crash-readable files), peak building, media hashing,
+  analysis jobs, renders. Playback media is decoded and resampled into an
+  in-memory cache when a plan is compiled; a background, disk-backed cache is
+  planned.
 
 Model → audio: immutable `RenderPlan` swapped with an atomic pointer;
 parameter changes and transport commands via bounded SPSC queues. Audio →
@@ -116,7 +120,7 @@ because nothing long runs on it synchronously: edit commands are pure and
 fast; `RenderPlan` compilation, rendering, analysis, file I/O, peak building,
 plugin scanning and Lua scripts run on worker threads and commit results back
 as ordered commands; the target is no synchronous main-thread task over
-2 ms, measured in Phase 4/5 benchmarks.
+2 ms (`docs/benchmarks/gui.md`).
 
 **Event delivery to clients.** Every event carries a per-topic sequence
 number. A subscriber whose queue overflows receives one `event.dropped
@@ -162,31 +166,31 @@ transport/meter/analysis topics) replace polling.
 
 ### Hosting
 
-CLAP first (including `com.suppleaudio.semantic-params`), VST3 second, LV2
-later. Isolation modes per plugin instance, REAPER-style: in-process, shared
-bridge process, dedicated process. Bridged plugins exchange audio and events with the
-engine through shared-memory rings. The engine's RT thread writes block n's
-input, wakes the bridge (`rt::wake`, non-blocking) and never waits
-unboundedly: in the default *pipelined* mode it consumes block n−1's output
-(one block of added, compensated latency); in *synchronous* mode it spins up
-to a deadline (a fraction of the block period) and, on a miss, outputs
-silence for that node and counts a bridge xrun. A control thread watches the
-bridge process; a crash marks the node failed (silence + error event) and the
-session survives.
+CLAP (including `com.suppleaudio.semantic-params`) and VST3; LV2 is not
+supported. Isolation modes per plugin instance, REAPER-style: in-process,
+shared bridge process, dedicated process (ADR-0013). Bridged plugins
+exchange audio and events with the engine through shared memory. The
+caller (the anticipative renderer, or an offline render) writes the block's
+input, wakes the bridge and waits for its output up to a deadline; a bridge
+that dies or misses the deadline fails that plugin alone (silence and an
+error event) and the session survives. Synchronous bridge calls never run in
+the device callback, so a bridged plugin on a live (monitored) node is
+passed through with a warning; a pipelined mode for live nodes is future
+work.
 
 **Runtime latency changes.** CLAP only lets an active plugin change latency
 via `request_restart`. The engine then prepares a new plan on a worker thread
 (the plugin reactivated with its new latency, all delay-compensation lines
 recomputed) while the old plan keeps playing, and swaps at a block boundary
 with a short crossfade (default 10 ms) on affected paths. Offline renders are
-unaffected (plans are fixed per render). Full contract: Phase 4 engine spec. Plugin GUIs are X11 windows embedded into the DAW's X11
-windows (ADR-0005), including from bridge processes (X11 child windows work
-across processes).
+unaffected (plans are fixed per render). Full contract: `specs/engine.md`.
+Plugin GUIs are X11 windows embedded into the DAW's X11 windows (ADR-0005),
+including from bridge processes (X11 child windows work across processes).
 
 ### Stock plugins (ADR-0011)
 
-Copies of Nate's template, renamed per its checklist, built as external
-projects. Each: SDK-free DSP core; a core-params parameter table (physical
+Instances of Supple Audio's plugin template, renamed per its identity
+checklist and built as external projects (`plugins/AGENTS.md`). Each: SDK-free DSP core; a core-params parameter table (physical
 units, curves, tags); a core-patch JSON patch format that is the primary
 interface; the semantic-params extension for hosts that understand it,
 standard CLAP params/state for those that don't; seeded randomness;
@@ -212,8 +216,8 @@ matching one-paragraph text summary. No audio model ever "listens".
 ## 8. Agents
 
 - **MCP**: in-process (sandbox/engine serve stdio) or proxy (`<slug>-mcp`
-  to a running engine's socket). A dozen dedicated tools plus
-  `describe`/`exec`/`query` for the long tail.
+  to a running engine's socket). Most commands are MCP tools of their own;
+  `describe`, `exec` and `query` reach the rest.
 - **Branches first**: the skill teaches agents to propose on a branch and ask
   the human to listen. Every agent action is in the command log and undo
   history with its origin.
@@ -229,12 +233,12 @@ Strict JSON with a `"schema": "supple.<type>/<major>.<minor>"` first member,
 canonical serialization (byte-identical for identical content), ID-keyed
 collections, RFC 7396 merge patches, strict validation with "did you mean"
 hints. The MIDI notation is its own line-oriented format with a canonical
-form. Project files follow the same rules (schema in the Phase 4 spec).
+form. Project files follow the same rules (`specs/session-model.md` §5).
 
 ## 10. GUI (ADR-0005)
 
-An X11 main window (XWayland on Hyprland) so third-party plugin GUIs embed
-as X11 children. A custom retained-mode toolkit drawn with NanoVG on GL3,
+An X11 main window (XWayland on Wayland desktops) so third-party plugin GUIs
+embed as X11 children. A custom retained-mode toolkit drawn with NanoVG on GL3,
 sharing rendering technology with the plugins' editors; REAPER's workflow
 model (arrange, TCP, mixer, FX chains, routing matrix, MIDI editor, render
 dialog, actions list with bindable keys and macros, customizable toolbars
@@ -253,10 +257,4 @@ benchmarks tracked in `docs/benchmarks/`; the license gate on every build.
 Definition of done: code, tests, docs, `STATUS.md`, no license issues, and
 review by someone other than the author. Nothing is "done" that was not run.
 
-## 12. Build order
-
-Phase 0 foundations → Phase 1 core libraries → Phase 2 sandbox + MCP loop →
-Phase 3 stock plugins (synth first, with the optimizer and evaluation suite)
-→ Phase 4 headless engine → Phase 5 GUI → Phase 6 skill and evaluation →
-Phase 7 DSP language and Lua ergonomics → Phase 8 hardening and ports. See
-`STATUS.md` for the live breakdown.
+`STATUS.md` lists what works today, the known limits and what is planned.

@@ -1,6 +1,6 @@
 # ADR-0022: Strip polarity and mono
 
-**Status:** Accepted, 2026-10-06. Nate's request: every track gets a polarity
+**Status:** Accepted, 2026-10-06. The maintainer's request: every track gets a polarity
 flip and a mono button ("a mono toggle is very useful for mixing, especially
 on the master buss"), and no processing may sit between a Console 9 encode
 and its decode. Amends ADR-0019 §5, which had moved polarity off the strip

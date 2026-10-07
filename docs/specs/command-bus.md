@@ -1,6 +1,6 @@
 # Spec: command bus, control protocol and MCP adapter
 
-**Status:** Frozen for Phase 2 implementation (2026-09-26). Changes via ADR.
+**Status:** Implemented. Interface changes go through an ADR.
 **Decision record:** ADR-0007.
 **Libraries:** `libs/command-bus` (`supple::cmd`), `libs/control-protocol`
 (`supple::rpc`), `mcp/` (`supple::mcp`). All run on the model thread only
@@ -74,7 +74,7 @@ struct Origin {
 };
 ```
 
-`Edit` commands mutate host state through services (the Phase 4 engine's
+`Edit` commands mutate host state through services (the engine's
 `SessionService` makes them pure `(Session, Args) → Session` functions under
 the hood; ADR-0008). The bus itself is state-agnostic.
 
@@ -197,10 +197,10 @@ Generators (each a function in the library, deterministic output, committed
 results checked by a drift test):
 
 - `mcpToolList(registry)` — MCP tool definitions (§4.2).
-- `markdownReference(registry)` → `skill/generated/commands.md`: per command,
+- `markdownReference(registry)` → `skill/generated/*-commands.md`: per command,
   heading, summary, description, an args table (field, type, unit, range,
   default, description), result shape, errors with hints, examples as JSON.
-- `luaStubs(registry)` → LuaLS annotations (Phase 4).
+- `luaStubs(registry)` → LuaLS annotations (`skill/generated/*.lua`).
 
 ### 1.7 Command log
 
@@ -279,7 +279,7 @@ transaction-safe inside a batch), `rpc.*` (§3), `mcp.*` (§4).
   version negotiation per the MCP spec: support `2025-06-18` and newer
   revisions that are backward compatible; reply with the client's requested
   version if supported, else the newest supported. Capabilities: `tools`
-  (no `listChanged` in Phase 2). `ping` supported. `logging`/`resources`
+  (no `listChanged`). `ping` supported. `logging`/`resources`
   later.
 - **Deployments:** in-process (`McpServer` wraps a `Dispatcher` directly —
   the sandbox CLI `--mcp` mode) and proxy (`<slug>-mcp` forwarding to a
@@ -317,8 +317,9 @@ per MCP.
 
 A scripted MCP client (C++ test or Python tooling in `tests/integration/`)
 runs initialize → tools/list → a sequence of calls against the sandbox, and
-checks results; its transcript (requests/responses, pretty-printed) is the
-Phase 2 demo committed to `docs/demos/`.
+checks results; its transcript (requests/responses, pretty-printed) is
+committed as `docs/demos/mcp-orrery-session.md` and drift-tested
+(`mcp.demo`).
 
 ## Implementation notes (2026-09-26, Task A)
 
@@ -368,8 +369,7 @@ Phase 2 demo committed to `docs/demos/`.
   handshake with that identity before forwarding calls.
 - Both headless CLIs expose `--mcp`. `tests/integration/mcp_client.py` checks
   initialize, tools/list, a successful tools/call and a structured command
-  error against each binary. `docs/demos/mcp-sandbox.txt` records that
-  exchange against the sandbox.
+  error against each binary.
 
 ## Implementation notes (2026-09-26, Task B round 4)
 

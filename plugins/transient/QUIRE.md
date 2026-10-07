@@ -3,7 +3,6 @@
 Flint uses template identity `Transient/transient/TRANSIENT`, CLAP id
 `com.suppleaudio.transient`, AU subtype `QTrn`, state magic `QTS1`, and
 version 0.1.0. Its display name is defined only in `cmake/Identity.cmake`.
-The template was copied from Nate's template without modifying its source.
 Template-derived code retains MIT per ADR-0011 and the monorepo rules;
 the copied checklist's GPL conversion does not apply.
 

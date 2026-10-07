@@ -1,6 +1,6 @@
 # Quire integration notes (Kiln)
 
-A direct copy of `~/Projects/audio-plugins/template`, renamed
+A direct copy of the plugin template, renamed
 Starter/starter/STARTER → Drive/drive/DRIVE. Identity: `com.suppleaudio.drive`,
 AU `QDrv`/`Supl`/`aufx`, state `QDR1`, version 0.1.0. The working display name
 is defined once in `cmake/Identity.cmake`, passed to the engine as
@@ -42,9 +42,8 @@ Orrery's own minimum-phase decimator is untouched. Curve equations, exact tone
 interpretation, compensation model and measured limits are in stock-effects §5
 and the skill guide. Factory recipes live in the guide and are patch-tested.
 
-Verification is Linux CLAP and X11/OpenGL. VST3/AUv2 and REAPER acceptance remain
-with the orchestrator; the template wrapper code is retained but those platforms
-are not claimed tested here. STATUS.md is orchestrator-owned.
+Verification is Linux CLAP and X11/OpenGL. The template's VST3 and AUv2 wrapper
+code is retained, but those formats are not tested here.
 
 The product-owned host_smoke restart regression waits for reactivation before
 expecting a new latency, and checks pending latency stability and coalescing

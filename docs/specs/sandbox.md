@@ -1,6 +1,6 @@
-# Spec: CLAP host library and the headless plugin sandbox (Phase 2)
+# Spec: CLAP host library and the headless plugin sandbox
 
-**Status:** Frozen for Phase 2 implementation (2026-09-26). Changes via ADR.
+**Status:** Implemented. Interface changes go through an ADR.
 **Libraries/binaries:** `host/clap-host` (`supple::host`), `host/sandbox`
 (`supple::sandbox` library + `<slug>-sandbox` CLI with `--mcp` stdio mode).
 **Depends on:** core-*, midi, notation, audio-file, command-bus,
@@ -190,7 +190,7 @@ flush acknowledged pending edits before writing plug-in state.
 <slug>-sandbox registry [--markdown | --mcp-tools]           # generator output (used by drift tests)
 ```
 
-## 6. Test instrument (P2.3)
+## 6. Test instrument
 
 `plugins/probe-synth` — an internal test instrument instantiated from the
 template per ADR-0011 (not a stock product): one oscillator (saw/square/
@@ -201,17 +201,17 @@ semantic-params extension; deterministic and block-size invariant. It
 exists to exercise the template instantiation, the extension, the sandbox and
 the MCP loop before the flagship synth.
 
-## 7. Acceptance (Phase 2)
+## 7. Acceptance
 
 A scripted end-to-end test drives the sandbox over MCP stdio: list plugins
 → load the probe synth → describe → set params with unit strings → merge a
 patch → render a notation phrase with summary analysis → change the patch →
-render again → compare → save preset. Its transcript is committed to
-`docs/demos/phase2-mcp-loop.md`. A second test runs the same flow with an
+render again → compare → save preset. Its transcript is committed as `docs/demos/mcp-orrery-session.md`
+(the `mcp.demo` test, with Orrery). A second test runs the same flow with an
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
 
-## Implementation notes — `host/clap-host` (2026-09-26, orchestrator)
+## Implementation notes — `host/clap-host` (2026-09-26)
 
 - Output events go to a caller-preallocated `OutputEvents` sink (fixed
   storage + count + dropped), never a growing container, so `process()` is
@@ -260,7 +260,7 @@ paths, locations and hints.
   checked by hand against the template's `Starter.clap` (scan, text I/O,
   flush, processing, state).
 
-## Implementation notes — review round 2 (2026-09-26, orchestrator)
+## Implementation notes — review round 2 (2026-09-26)
 
 - **Lifecycle is enforced:** `startProcessing()` returns false when the plugin
   refuses (then `process()` returns false); `deactivate()` while processing is

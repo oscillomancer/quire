@@ -8,8 +8,7 @@ anything is undeclared, not on the allow-list, missing its license file, or
 not described here. Policy: [ADR-0003](docs/decisions/0003-toolchain-and-dependencies.md).
 
 Allowed for bundled code: MIT, MIT-0, BSD-2/3-Clause, ISC, Zlib, Apache-2.0,
-BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). Forbidden: GPL, AGPL. LGPL/MPL
-need an approved `HUMAN_REVIEW.md` entry. Dynamically linked OS libraries
+BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). Forbidden: GPL, AGPL. LGPL/MPL need the maintainer's explicit approval. Dynamically linked OS libraries
 (libc, ALSA, JACK/PipeWire client libs, X11/Wayland/GL) are acceptable.
 
 | Name | License | Version / commit | Purpose | Linkage |
@@ -32,8 +31,7 @@ System libraries (dynamically linked, not bundled): SDL3 (Zlib), zlib (Zlib; PNG
 from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL.
 
-Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts
-Nate's plugin template already ships) are permitted for bundling; see
+Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts the plugin template already ships) are permitted for bundling; see
 ADR-0003. The DAW GUI bundles Inter (Regular, SemiBold) and IBM Plex Mono (Regular,
 Medium) under `assets/fonts/` with their OFL-1.1 license texts.
 

@@ -15,7 +15,7 @@ linking is unchanged. The engine's `orrery-headless.clap` uses the CLAP map too.
 
 ## Reproduction before the fix
 
-Measured in this worktree on main `e2f9076` before applying the fix. The dev
+Measured on `e2f9076`, before the fix. The dev
 preset uses Clang Debug; all ten stock modules and the in-tree headless module
 were built before these measurements. The original unload probe was compiled
 independently before the export lists or wrapper changes were applied:
@@ -107,7 +107,7 @@ pass the standalone unload probe after the fix.
 The vendored VST3 hosting subset lacks the complete plugin SDK's
 `public.sdk/source/main/pluginfactory.cpp`. The parent forwards an optional
 `VST3_SDK_ROOT` cache path to each isolated plugin build. Verification uses a
-temporary copy of the template's existing MIT SDK cache under this worktree's
+temporary copy of the template's existing MIT SDK cache under
 `build/exports-vst3-sdk`, without modifying the template or downloading code:
 
 ```sh

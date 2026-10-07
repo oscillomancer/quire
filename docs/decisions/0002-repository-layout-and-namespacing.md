@@ -13,7 +13,7 @@ audio files.
 
 ```
 quire/
-  AGENTS.md ARCHITECTURE.md STATUS.md HUMAN_REVIEW.md THIRD_PARTY.md
+  README.md AGENTS.md ARCHITECTURE.md STATUS.md THIRD_PARTY.md
   cmake/            Product.cmake (the name), Defaults.cmake (target helpers)
   docs/             research/ decisions/ specs/ benchmarks/ demos/
   libs/

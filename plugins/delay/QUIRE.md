@@ -1,6 +1,6 @@
 # Delay integration
 
-The template was instantiated on `p3-delay` with functional identity `delay`,
+The template was instantiated with functional identity `delay`,
 CLAP `com.suppleaudio.delay`, state `QDL1`, AU `QDly`, audio-effect/delay/stereo
 features. Display name is defined once in `cmake/Identity.cmake`. MIT stays
 under ADR-0011; upstream licensing instructions do not override this repo.
@@ -37,6 +37,4 @@ VST3's self-handle/unload validation remains optional platform acceptance.
 The obsolete placeholder CLI/DSP and example GUI image are removed.
 
 Useful template seams: engine-owned describe, physical parameter integration,
-transport-aware timing and the CLAP tail contract. STATUS, independent review
-and integration belong to the orchestrator; REAPER/platform acceptance needs
-the separate requested host/device setup.
+transport-aware timing and the CLAP tail contract.

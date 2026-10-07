@@ -1,4 +1,4 @@
-# REAPER CLAP acceptance (P3.10)
+# REAPER CLAP acceptance
 
 On-demand Linux REAPER load, offline render, automation and state checks for
 stock CLAP artifacts, with an optional floating-editor check. Python 3.10+, standard library only. REAPER is a local
@@ -168,9 +168,3 @@ contain REAPER's `<CLAP ...><STATE ...>` opaque payload; the tool does not inven
 or decode that format. This verifies one changed parameter's state round-trip,
 not every parameter or cross-version migration. A saved empty project and a
 deferred File: Quit action close setup without a save prompt.
-
-Current branch verification covered Analyzer/Gauge, Ballast, Facet, Kiln,
-Orrery, Plumb and ProbeSynth. The Kiln binary was retained from the preceding
-worker task. Gate/Sluice, Flint and Echelon entries match the newer main's
-parameter tables and artifact names but were not present in this checkout's
-build; the orchestrator will run those against the merged build.

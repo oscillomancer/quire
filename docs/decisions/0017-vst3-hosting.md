@@ -23,7 +23,7 @@ The VST3 SDK is MIT-licensed from 3.8.0 (ADR-0003, "re-verify at use").
    provider, parameter changes, event list, process data) plus their
    `base/` dependencies, pinned to a 3.8.x tag, under
    `third_party/vst3sdk-<tag>`. The license is re-read at vendoring time;
-   anything not MIT stops the work (HUMAN_REVIEW). No VSTGUI, no samples.
+   anything not MIT stops the work until the maintainer decides. No VSTGUI, no samples.
 2. **A third backing of `host::Instance`**, selected by
    `PluginInfo::format == "vst3"` (a new field; CLAP is the default). The
    class keeps its API; each method forwards to the VST3 backing when set,

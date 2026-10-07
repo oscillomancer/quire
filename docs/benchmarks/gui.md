@@ -1,9 +1,7 @@
 # GUI performance (ADR-0005 §5 gates)
 
 **Result (2026-10-01, release build, offscreen SDL3 driver on EGL, Mesa 26.2.3
-on Intel Arc B580, Core Ultra 5 225F, `powersave` governor, other workers'
-builds running — load average ~12 on 10 cores; P5.5 added the TCP rows and the
-transport bar):**
+on Intel Arc B580, Core Ultra 5 225F, `powersave` governor, other builds running — load average ~12 on 10 cores):**
 
 | Gate | Target | Measured |
 |---|---|---|
@@ -66,8 +64,7 @@ quire --offscreen --no-socket --frames 1 --bench          # cold start
 - Meters fed by a *running* engine end to end (the feed is wired to
   `EngineApp::meters()` and the TCP's rows attach to it on show and detach on
   rebuild; an unattended measurement needs the engine running and a signal on
-  the strips, which is the JACK device-test opt-in), automation lanes, editing
-  drags (P5.6+).
+  the strips, which is the JACK device-test opt-in), automation lanes, editing drags.
 - Playhead follow scrolling while the transport runs end to end (the overlay
   path is covered by `gui-views.tests`; a real-device run needs the JACK test
   opt-in).

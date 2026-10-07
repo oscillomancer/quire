@@ -58,7 +58,7 @@ Item, track and project timebase can be chosen among time, beats and beats with 
 
 The bundled guide locates the searchable Actions list at `?`; users can assign keyboard/MIDI shortcuts and add actions to menus or toolbar buttons. **[verified: Quick Start, p. 3]** Native actions use numeric command IDs (for example the project-exit action `40004` worked in this run). ReaScript/custom actions use generated named identifiers such as `_RS...`; SWS extension actions use `_SWS...` when that optional extension is present. Scripts and custom actions can be composed into macros; cycle actions are an extension/workflow concept rather than demonstrated by this installation. **[verified: command 40004 run; from knowledge for identifier families and cycle actions]**
 
-There is no `reaper-kb.ini` in Nate's current resource directory, so a full exported action-list count is unavailable. `KeyMaps/DK keymap.ReaperKeyMap` has **21** `KEY` lines; the German file has **23**. These are keymap entries, **not** counts of installed actions. Observed line form is `KEY modifier-code key-code command-ID section-ID`; for example `KEY 5 186 40223 0`. The exact modifier bit encoding was not tested. `ACT` custom-action and `SCR` script-registration records, and section IDs for main/MIDI editors, are known format elements but absent in this configuration and not verified locally. **[verified: file counts and lines; from knowledge for `ACT`/`SCR` and section meaning]**
+There is no `reaper-kb.ini` in the studied resource directory, so a full exported action-list count is unavailable. `KeyMaps/DK keymap.ReaperKeyMap` has **21** `KEY` lines; the German file has **23**. These are keymap entries, **not** counts of installed actions. Observed line form is `KEY modifier-code key-code command-ID section-ID`; for example `KEY 5 186 40223 0`. The exact modifier bit encoding was not tested. `ACT` custom-action and `SCR` script-registration records, and section IDs for main/MIDI editors, are known format elements but absent in this configuration and not verified locally. **[verified: file counts and lines; from knowledge for `ACT`/`SCR` and section meaning]**
 
 `reaper-mouse.ini` contains 22 `MM_CTX_*` context defaults, including arrange middle/right mouse, item click/double-click/edge, envelope point/segment, MIDI note/piano roll/CC/ruler and track. Two explicit `mm_*` assignments appear under `MM_CTX_MIDI_NOTE_CLK`. This shows mouse bindings are contextual, with the defaults represented compactly rather than duplicating every gesture. The integers' behavior was not decoded. **[verified: `~/.config/REAPER/reaper-mouse.ini`]**
 
@@ -178,7 +178,7 @@ Priority tags: **P0** for daily editing/routing needed early, **P1** for serious
 6. Inspect anticipative FX preferences in a fresh temporary config and establish key names/defaults and monitored-track behavior.
 7. `ARCHITECTURE.md`, `STATUS.md`, ADRs and component specs were absent at research start; reconcile these recommendations when those documents are available.
 
-## Addendum (2026-09-26, orchestrator): action inventory and a GUI pass
+## Addendum (2026-09-26): action inventory and a GUI pass
 
 **Action inventory** [verified: `reaper.kbd_enumerateActions` over sections
 0/32060/32061/32062/32063 in a temporary-config REAPER 7.80 run]: main
@@ -216,14 +216,14 @@ isolation is not in this menu (it is chosen per plugin in the FX browser's
 Quire takeaways: per-FX and per-chain oversampling, parallel FX within a
 chain, containers, per-FX PDC policy, bypass ≠ offline, and auto-bypass on
 silence are all FX-chain *model* features (commands on `fx.*`), not GUI
-extras — they belong in the Phase 4 session schema.
+extras — they belong in the session schema.
 
 **XWayland note:** on this Hyprland setup REAPER's unfocused floating windows
 and popup menus render translucent (compositor inactive-opacity applied to
 X11 windows). Quire's X11 windows will get the same treatment; worth a
-window-rule recommendation in Phase 5 docs rather than a code workaround.
+window-rule recommendation in the GUI docs rather than a code workaround.
 
-## Addendum 2 (2026-09-26, orchestrator): render, routing matrix, buffering — GUI pass
+## Addendum 2 (2026-09-26): render, routing matrix, buffering — GUI pass
 
 All [verified: REAPER 7.80 GUI on this machine, temporary config, test
 project `reaper/generated.RPP`].
@@ -292,7 +292,7 @@ open. **Anticipative FX processing** on by default with **render-ahead
 editors ("will increase MIDI preview latency"), allow on tracks in
 touch/latch/write automation mode (on by default); separately, *live FX
 multiprocessing on N CPUs* for input-monitored paths (off by default).
-*Quire takeaway (Phase 4 engine):* the same knobs — render-ahead window
+*Quire takeaway (engine):* the same knobs — render-ahead window
 (default 200 ms), eligibility rules (not armed/monitored; editors open;
 automation-writing), and a separate policy for live paths — should be engine
 settings, and "which tracks are anticipative right now" should be queryable

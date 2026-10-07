@@ -1,15 +1,25 @@
 # Architecture decision records
 
-One numbered file per significant decision. An ADR is immutable once
-**Accepted**; change a decision by writing a new ADR that supersedes it (and
-mark the old one **Superseded by ADR-NNNN**). Frozen interfaces (library APIs,
-command schemas, the control protocol, file formats) change only via an ADR.
+One numbered file per significant decision. Once an ADR is **Accepted**,
+its decision changes only through a new ADR that amends or supersedes it;
+the old one gets a dated note pointing to the new one (or is marked
+**Superseded by ADR-NNNN**). Dated *Implementation*, *Clarifications* or
+*Amendments* sections at the end record how a decision was carried out.
+Frozen interfaces (library APIs, command schemas, the control protocol,
+file formats, the bridge protocol) change only via an ADR.
 
 Format: Status · Context · Decision · Consequences · Alternatives considered.
 
+The earlier records refer to the phases of the original build plan and to
+its requirements document (the "build prompt"): Phase 0 foundations, 1 core
+libraries, 2 plugin sandbox and MCP, 3 stock plugins, 4 headless engine,
+5 GUI, 6 skill and evaluation, 7 scripting ergonomics and a DSP language,
+8 hardening and ports. Phases 0 to 5 are complete; `STATUS.md` has the
+current state.
+
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-project-name-and-location.md) | Project name and repository location | Accepted (Nate may veto the name) |
+| [0001](0001-project-name-and-location.md) | Project name and where it is defined | Accepted |
 | [0002](0002-repository-layout-and-namespacing.md) | Repository layout and namespacing | Accepted |
 | [0003](0003-toolchain-and-dependencies.md) | Toolchain, dependency vendoring and license gate | Accepted |
 | [0004](0004-audio-backend.md) | Audio backend strategy | Accepted |

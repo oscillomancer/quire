@@ -4,7 +4,7 @@ Commands were read only except `/tmp/quire-jack-probe.c`, compiled and run for t
 
 ## Kernel and real-time permissions
 
-`uname -a`: `Linux archlinux 7.2.7-zen1-1-zen #1 ZEN SMP PREEMPT_DYNAMIC ... x86_64 GNU/Linux`. This is **not** the brief's assumed CachyOS RT kernel; `PREEMPT_DYNAMIC` does not establish PREEMPT_RT. `id`: `uid=1000(nate) ... groups=1000(nate),65534(nobody)`; no `audio` or `realtime` group. `ulimit -r`: `95`; `ulimit -l`: `unlimited`. `/etc/security/limits.d/99-realtime.conf` contains `@audio - rtprio 95` and `@audio - memlock unlimited`, although this process is not in that group. `pacman -Q rtkit`: `0.14-1`; `ps -eo comm,args` showed `rtkit-daemon`. The active high limit may come from another session mechanism; group policy alone does not explain it.
+`uname -a`: `Linux archlinux 7.2.7-zen1-1-zen #1 ZEN SMP PREEMPT_DYNAMIC ... x86_64 GNU/Linux`. This is **not** a PREEMPT_RT kernel; `PREEMPT_DYNAMIC` does not establish PREEMPT_RT. `id`: `uid=1000(nate) ... groups=1000(nate),65534(nobody)`; no `audio` or `realtime` group. `ulimit -r`: `95`; `ulimit -l`: `unlimited`. `/etc/security/limits.d/99-realtime.conf` contains `@audio - rtprio 95` and `@audio - memlock unlimited`, although this process is not in that group. `pacman -Q rtkit`: `0.14-1`; `ps -eo comm,args` showed `rtkit-daemon`. The active high limit may come from another session mechanism; group policy alone does not explain it.
 
 ## PipeWire, JACK and ALSA
 

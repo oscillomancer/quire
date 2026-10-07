@@ -1,10 +1,9 @@
 # Spec: Orrery — the flagship synth
 
-**Status:** Frozen for P3.2 (2026-09-26; amendments recorded at the end). Nate's review (HUMAN_REVIEW #6, #7) can still change it.
+**Status:** Implemented; amendments are recorded at the end.
 **Plugin:** `plugins/orrery`, CLAP id `com.suppleaudio.orrery`, instrument.
-Built from the template per ADR-0011. The name is a proposal (an orrery is a
-clockwork model of orbiting bodies — modulators orbiting a voice); Nate may
-veto it in `HUMAN_REVIEW.md`.
+Built from the template per ADR-0011. An orrery is a clockwork model of
+orbiting bodies: here, modulators orbiting a voice.
 
 Orrery is the most important plugin in the project. Its patch format is its
 primary interface: an LLM that has read this document once must be able to
@@ -26,7 +25,7 @@ over the same structure.
 3. **Modulation in musical units.** A route's amount is expressed in the
    destination's modulation unit: octaves for frequencies, semitones for
    pitch, dB for levels, % of range for everything else.
-4. **The LLM chooses structure, the optimizer tunes numbers** (P3.3). The
+4. **The LLM chooses structure, the optimizer tunes numbers** (`optimizer.md`). The
    patch makes the continuous parameters of a topology easy to enumerate.
 5. **Deterministic.** All randomness (drift, noise, S&H, random-per-note,
    unison phase) derives from the patch `seed`. Renders are block-size
@@ -389,7 +388,7 @@ fields are not parameters. Macros are the documented automation surface.
 256 frames. Idle voices cost nothing (voice deactivation after release +
 tail). Measured in `docs/benchmarks/`.
 
-## 10. Evaluation (P3.4)
+## 10. Evaluation
 
 - **Descriptive targets** (each with a descriptor profile and a listening
   note): warm evolving pad; plucky bass with a short filter snap; metallic
@@ -400,10 +399,10 @@ tail). Measured in `docs/benchmarks/`.
 - **Reference matching:** a hidden patch renders a phrase; the agent sees only
   the audio and its analysis, proposes a topology, runs the optimizer, and is
   scored by descriptor distance and LTAS RMS difference.
-- Success rates are tracked per plugin and skill revision in
-  `docs/benchmarks/synth-eval.md`; listening checks go to `HUMAN_REVIEW.md`.
+- The evaluation harness (`eval-harness.md`) runs these tasks; its renders
+  are judged by listening.
 
-## Amendments (2026-09-26, implementation of P3.2 core)
+## Amendments (2026-09-26, implementation of the core)
 
 Recorded while building `plugins/orrery/engine` (params table, patch codec,
 real-time engine). The code is the reference; these notes explain the choices.
@@ -477,7 +476,7 @@ real-time engine). The code is the reference; these notes explain the choices.
   patch, so `reset()` re-adopts the newest program on the next block (every
   ramp snaps to it, as after `prepare()`), the FX delay time starts at its value
   instead of gliding in from the previous render's target, and the control-tick
-  bookkeeping and output-gain ramp restart (fix `4a9e8f5`, P3.4a). Guarded by
+  bookkeeping and output-gain ramp restart (fix `4a9e8f5`). Guarded by
   `plugin.orrery.reset`.
 - **Validation:** `drive: {"type": "off"}` takes no other field, and an
   explicit empty step `values` array is an error.

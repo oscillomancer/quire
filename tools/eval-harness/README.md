@@ -34,8 +34,8 @@ stop every live attempt's process group.
 `--tasks` accepts full ids or suffixes, separated by spaces or commas. Suites
 are `synth-descriptive` (10), `synth-reference` (10), and `notation` (5).
 `--dry-run` always forces the scripted runner, including with `--runner hermes`.
-The orchestrator chooses real run counts. No model-quality conclusion should
-be drawn from the smoke run or from the dry runner.
+No model-quality conclusion should be drawn from a smoke run or from the dry
+runner.
 
 Hermes gets an isolated `HERMES_HOME` for every attempt. The harness reads only
 the pinned model/provider identity from
@@ -44,8 +44,8 @@ the pinned model/provider identity from
 sources with `--model-config` and `--credentials`. The model mapping may be
 simple YAML or JSON; no other source-profile settings or MCP servers are
 inherited. The profile name `quire-eval` is recorded; missing profile files fail
-without falling back to `~/.hermes/config.yaml`. The expected pinned identity is
-`meta/muse-spark-1.3-contributor` via `openrouter`. OAuth credential stores are not copied or refreshed by the harness;
+without falling back to `~/.hermes/config.yaml`. The profile chooses the
+model, and the report records it. OAuth credential stores are not copied or refreshed by the harness;
 use environment/API-key credentials for this runner. Process-environment
 `HERMES_*` overrides are removed before the isolated settings are applied.
 
@@ -89,9 +89,11 @@ failure does not restore the first-attempt point. First-attempt compilation insi
 Lua scripts is not observable as a typed render request; notation tasks therefore
 require direct `render` or an explicit `batch`/`exec` containing render.
 
-Real attempts always publish JSON/Markdown under `docs/benchmarks/eval/`, a
-history row, ignored best/worst WAVs, and one active listening queue item per
-suite run in `HUMAN_REVIEW.md` (dry runs publish only the benchmark files). One repeat gives identical best/worst selections.
+Real attempts always publish JSON and Markdown under `docs/benchmarks/eval/`
+(the Markdown lists the best and worst render of each task for listening), a
+history row in `docs/benchmarks/synth-eval.md`, and the WAVs under the
+ignored `docs/benchmarks/eval/audio/`. One repeat gives identical best and
+worst selections.
 Transcripts, usage, prompts, captures, stderr and intermediate renders remain in
 `build/eval/<run>/`. These local files and the listening WAVs must be retained or
 archived together if the report is to remain fully reviewable after build cleanup.

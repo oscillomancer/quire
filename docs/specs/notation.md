@@ -1,8 +1,8 @@
 # Spec: MIDI model and the Quire notation
 
-**Status:** Frozen for Phase 1 implementation (2026-09-26); the notation
-syntax stays revisable until the Phase 6 skill evaluation (agents that have
-read only this document must write it correctly first time). Changes via ADR.
+**Status:** Implemented. The syntax may still be revised where agents that
+have read only this document fail to write it correctly the first time.
+Changes via ADR.
 **Libraries:** `libs/midi` (`supple::midi`), `libs/notation`
 (`supple::notation`). Non-RT.
 
@@ -56,7 +56,7 @@ struct Sequence {
 };
 
 // Standard MIDI File I/O, scoped to *clips*: one Sequence per call. (Full
-// multi-track SMF import into tracks/tempo map is a Phase 4 engine feature
+// multi-track SMF import into tracks/tempo map is an engine feature
 // built on readSmf with `track`.)
 struct SmfInfo {
     int ppq = 960;
@@ -538,7 +538,7 @@ Canonical output, in order:
 
 ---
 
-## Implementation notes (Phase 1)
+## Implementation notes
 
 - A `#` starts a comment at a token boundary. Inside a token it remains part of
   a pitch or chord spelling, as in `F#4` and `{C7#9}`.

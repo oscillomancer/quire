@@ -4,9 +4,8 @@
 
 ## Context
 
-Stock plugins must be created from Nate's template
-(`~/Projects/audio-plugins/template`) the way it is designed to be used,
-never by modifying it in place (build prompt 2.3). They must also expose
+Stock plugins must be created from Supple Audio's plugin template the way it
+is designed to be used, never by modifying it in place. They must also expose
 core-params semantic parameters and core-patch text patches through a custom
 CLAP extension, and build inside the Quire monorepo. The survey found that
 unmodified template copies cannot coexist in one CMake build (global
@@ -50,12 +49,11 @@ and that its parameter table is linear-only.
    and validate fully, then apply; on error nothing changes.
 6. **Template improvements** discovered along the way (e.g. `parseValue`
    accepting trailing junk, non-transactional state load, no size cap on
-   state input, an instrument variant, the semantic-params hook) are proposed
-   to Nate in `HUMAN_REVIEW.md` with patches, not silently forked.
+   state input, an instrument variant, the semantic-params hook) are proposed upstream as template patches, not silently forked.
 7. **Names and licensing.** Stock plugins get their own names (chosen per
    plugin, product-name-independent), CLAP ids `com.suppleaudio.<name>`.
    Template-derived files keep their MIT headers (Supple Audio's own code);
-   Quire's license is Nate's choice (`HUMAN_REVIEW.md`).
+   Quire's own license is the maintainer's choice.
 
 ## Consequences
 
@@ -82,8 +80,8 @@ the template works; complicates per-plugin validation and GUI identity).
   sections for params/state/extensions, `Theme.h`/`Widgets.h`/`Editor.cpp`,
   CMake identity. The semantic-params hook, the JSON state and transactional
   loading are product-owned changes in our copies, each with tests; the
-  generally useful ones are *also* offered to Nate as template patches
-  (`HUMAN_REVIEW.md`). Work does not pause on those proposals.
+  generally useful ones are *also* offered upstream as template patches.
+  Work does not pause on those proposals.
 - **C++20.** The template sets C++17. Our copies set C++20 for their own
   targets (a product build setting); raising the template itself is offered
   as a template patch.

@@ -1,11 +1,11 @@
-# Spec: the headless engine (Phase 4)
+# Spec: the engine
 
-**Status:** Draft for review (2026-09-26). Frozen before P4 implementation.
+**Status:** Implemented; amended with each change (dated sections and ADRs).
 **Decision records:** ADR-0004 (backends), ADR-0008 (model/plan
 separation), ARCHITECTURE §3 (threads, channels, RT rules, main-thread
 budget), §6 (bridging, latency changes).
-**Code:** `host/engine` (`supple::engine`), `host/isolation` (bridge
-process), reusing `host/clap-host` from Phase 2 unchanged.
+**Code:** `host/engine` (`supple::engine`), with plugin hosting and the
+bridge process in `host/clap-host`.
 
 The engine turns immutable session versions into sound: in real time through
 an audio backend, or offline as fast as possible. Its non-negotiables are
@@ -206,7 +206,7 @@ a benchmark failure).
 6. Write hardware outputs; publish meters (lossy rings) and state deltas
    (coalescing slots).
 
-**Meters** (P5.3c). Per strip, the peak and the mean square of the strip's signal
+**Meters**. Per strip, the peak and the mean square of the strip's signal
 **after the fader and after the pan law, before the Console 9 encode**
 (`sum × faderGain × ` the stage's own `panGains` — what a user expects at
 unity: a −6 dBFS item at 0 dB reads its own peak times the Channel pan law)
@@ -310,7 +310,7 @@ preset's engine tests (with the dummy backend).
   misses) and emitted as `engine.xrun` events with context (block size,
   load, which node was slowest).
 
-## 5. Plugin isolation (`host/isolation`)
+## 5. Plugin isolation (`host/clap-host/bridge`)
 
 Modes per instance (session-model §1.7): `in_process`, `shared_bridge` (one
 bridge process for all instances in that mode), `dedicated` (one process per
@@ -340,8 +340,7 @@ instance).
 ## 6. Control surface
 
 The engine registers the session-model §7 command catalogue on the command
-bus and exposes it through the control protocol (Unix socket), Lua (Phase
-4/5 bindings) and MCP (proxy or in-process). Engine-specific commands:
+bus and exposes it through the control protocol (Unix socket), Lua and MCP (proxy or in-process). Engine-specific commands:
 `engine.start {backend, device, rate, block}`, `engine.stop`,
 `engine.status` (q: backend, rate, block, load, xruns, anticipation
 misses, meter drops), `engine.graph` (q: nodes, live/anticipative classification,
@@ -396,7 +395,7 @@ search retains every trial, independently confirms its candidate, and labels
 a passing search cap as a lower bound. REAPER counts observed audio/media
 underrun timestamp changes (multiple events between polls can be undercounted).
 
-## Implementation notes (2026-09-26, orchestrator)
+## Implementation notes (2026-09-26)
 
 - **Code layout:** `host/engine/src/plan.{h,cpp}` is the shared compiled plan
   (compile on the main thread, prepare = activation/latency/buffers/events,
@@ -454,7 +453,7 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   callback), rate changes and server shutdown are atomics read by
   `engine.status` (`restart_needed`); the model thread's service tick (§6)
   restarts the engine after a device change. Tests use a stand-in libjack
-  (`tests/fake_jack.cpp`) that drives the
+  (`host/engine/tests/fake_jack.cpp`) that drives the
   process callback from its own thread and injects period/rate changes,
   xruns, stalls and shutdown; the real server is used only when
   `SUPPLE_AUDIO_DEVICE_TEST` equals exactly `1` (unset, empty, `0`, and
@@ -543,13 +542,9 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   plan compile on the main thread (~0.3 s per source second in a debug
   build); it moves to the background decode with the disk cache.
   `stretch_markers` are not applied yet (the compiler warns).
-- **Not yet:** live multiprocessing,
-  one shared process for `shared_bridge`,
-  MIDI output ports, automation recording
-  (write/touch/latch),
-  crossfades for structural changes (inserting/removing plugins), B1/B2
-  real-device acceptance measurements (tooling: tools/bench/README.md;
-  historical Orrery-only measurements: docs/benchmarks/b1-preliminary.md).
+- **Not yet:** live multiprocessing, MIDI output ports, crossfades for
+  structural changes (inserting or removing plugins). B1/B2 measurements:
+  `docs/benchmarks/b1.md`, `b2.md` (tooling: `tools/bench/README.md`).
 
 ### Recording diagnostics (2026-10-04)
 

@@ -12,7 +12,7 @@ where listed below. `tools/ci/format.sh` leaves those files alone.
   `com.suppleaudio.orrery`, AU subtype `QOry` (manufacturer `Supl`), instrument
   (`aumu`), state magic `QOR1` (in the core).
 - The template's MIT code license is kept under the monorepo licensing rule and
-  ADR-0011; the copied AGENTS.md checklist's GPL conversion does not apply.
+  ADR-0011; the template's GPL conversion step does not apply.
 - There is no product DSP in this copy. The SDK-free engine
   (`plugins/orrery/engine`) and the CLAP core (`plugins/orrery/clap`: params,
   state, note/audio ports, audio-ports config, the semantic extension, the

@@ -1,110 +1,50 @@
-# Delay worker handoff
+# Echelon (delay): verification
 
-Branch `p3-delay` starts at `a9d667c`. The template instantiation is `c7cd2fb`;
-implementation and final verification are subsequent commits on this branch.
+Algorithm choices, ranges, timing, freeze and tail limits are specified in
+`docs/specs/stock-effects.md` §6; `skill/guides/delay.md` describes the
+patches.
 
-## Changed files
+## Measured DSP behaviour
 
-- `plugins/delay/`: isolated template copy, SDK-free params/processor/tests,
-  CLAP semantic/state/transport/tail integration, editor/theme/widget variant,
-  preview scenarios, semantic/editor/tail host tests and CMake/docs.
-- `plugins/CMakeLists.txt`, `tools/ci/format.sh`: delay registration/exclusion.
-- `docs/specs/stock-effects.md` §6: algorithm choices, ranges, timing and
-  freeze/tail limits, including the approved audio-thread tail correction.
-- `skill/guides/delay.md`, `skill/SKILL.md`, `skill/guides/mixing.md`: every
-  parameter, three recipes, honest limits and links.
+The engine tests (`delay-engine.tests`) measure:
 
-No sibling/plugin-common/library/template/dependency source edits. The current
-shared window, bridge, renderers, entry points, fonts, host contract, Linux
-probe and Ring retain template identity after naming (16 infrastructure files
-compared directly; font binaries exact, notices renamed). The generic CLAP
-probe omits a meter lookup because delay uses GUI telemetry only. Product
-Widgets adds centre-origin bipolar arcs. Obsolete gain DSP/CLI/example image
-are removed. Independent review, STATUS and integration are orchestrator work.
+- fractional echo position, by cross-correlation, within one sample at
+  22.05–384 kHz (against the same filtered reference);
+- the 1 kHz repeat component within 0.2 dB of the feedback setting, and the
+  loop magnitude within 0.05 dB at five sample rates;
+- bit-exact output across host partitions of 1, 7, 64 and 4096 frames, with
+  automation;
+- a 375 → 200 ms time glide without clicks; ping-pong spacing; mono and width;
+- feedback at 110 % bounded over 30 s and sustained;
+- freeze RMS within 0.2 dB over 20 s, with new input rejected;
+- 12 dB ducking within 0.5 dB, and its recovery;
+- five seconds of automation over the full parameter domain; canonical
+  restored state and deterministic wow;
+- causal operation at unusual sample rates through 768 kHz (clap-validator
+  once rejected 1234.57 Hz; the low-rate path and edge-rate tests came from
+  that).
 
-## Verification
+Drive crossfades from bypass into its curve over 0–1 dB, exact bypass at 0 and
+the full curve from 1 dB. A regression starts a 0 → 2 dB ramp on a settled
+0.5-amplitude echo peak: the initial change stays below 0.01 dB (it was a
+0.68 dB drop before the crossfade) and successive equal-phase peaks change by
+less than 0.15 dB.
 
-```sh
-cmake --preset dev
-cmake --build --preset dev -j6
-build/dev/plugins/delay/engine/delay-engine.tests
-ctest --test-dir build/dev/plugins/delay --output-on-failure
-tools/validator/run.sh build/dev/plugins/clap/Echelon.clap
-tools/ci/format.sh --check
-git diff --check
-python3 tools/license-check/check.py --root .
-```
+## Plugin and editor checks
 
-Dev build passed without first-party warnings. Engine: 12 cases / 3673
-assertions passed. Plugin: 10/10 tests passed, including physical patch/state
-conformance, concurrent patch replacement, gestures, mono/stereo and
-float/double/in-place host contracts, transport/tail notifications and exports.
-Validator 0.4.1: 36 success / 8 skipped. Format/diff and the license gate (12
-existing dependencies) passed. The first validator run rejected 1234.57 Hz;
-causal low-rate support and edge-rate tests were added before the passing run.
-
-Measured DSP checks: fractional echo cross-correlation within one sample at
-22.05–384 kHz (relative to the same filtered reference); 1 kHz repeat component
-within 0.2 dB of feedback; loop magnitude within 0.05 dB at five sample rates;
-bit-exact host partitions 1/7/64/4096 with automation; 375→200 ms glide without
-clicks; ping-pong spacing; mono/width; 30 s bounded and sustained feedback 110;
-20 s freeze RMS within 0.2 dB with new input rejected; 12 dB duck within 0.5 dB
-and recovery; five seconds of full-domain automation; canonical restored
-state/deterministic wow; causal validator rates through 768 kHz.
-
-Real X11 commands ran outside the sandbox, without an audio device:
+The plugin suite covers physical patch and state conformance, concurrent
+patch replacement, gestures, mono/stereo, float/double/in-place host
+contracts, transport and tail notifications, and exports. clap-validator
+0.4.1 passes (36 passed, 8 skipped).
 
 ```sh
-build/dev/plugins/delay/delay-gui-preview 20 build/dev/delay-default.ppm 1 default
-build/dev/plugins/delay/delay-gui-preview 20 build/dev/delay-pingpong.ppm 1 pingpong
-magick build/dev/delay-default.ppm build/dev/delay-default.png
-magick build/dev/delay-pingpong.ppm build/dev/delay-pingpong.png
-build/dev/plugins/delay/delay-linux-host-probe build/dev/plugins/clap/Echelon.clap build/dev/delay-host.ppm
-magick build/dev/delay-host.ppm build/dev/delay-host.png
+build/dev/plugins/delay/delay-gui-preview 20 default.ppm 1 default
+build/dev/plugins/delay/delay-gui-preview 20 pingpong.ppm 1 pingpong
+build/dev/plugins/delay/delay-linux-host-probe build/dev/plugins/clap/Echelon.clap host.ppm
 ```
 
-Both 900×560 previews were inspected: values below labels, clear of pointers,
-repeat pattern, filters and units readable. The X11 host probe reported zero
-failures across embedding, map, resize, hide/show, three reopen cycles,
-timer cleanup and concurrent synthetic audio.
+The host probe checks embedding, mapping, resize, hide/show, three reopen
+cycles, timer cleanup and concurrent audio.
 
-Full matrix command: `tools/ci/run-all.sh` once, outside the sandbox for socket
-tests. License, format and all six presets passed before the drive follow-up.
-The parent external-plugin helper forwards TSan/RTSan to child plugins;
-ASan/UBSan cover parent engine/shared-library tests, while that helper does
-not forward these flags to the child build. This is existing infrastructure.
-
-## Drive continuity follow-up (`p3-delay-drive`)
-
-Based on main `9b38a31`. Drive now crossfades bypass to the existing curve over
-0–1 dB, retaining exact zero bypass and the full curve at 1 dB and above.
-Processor, engine test, stock-effects §6 and the delay guide changed.
-
-The new 32-/64-bit regression starts the 0→2 dB parameter ramp on a settled
-0.5-amplitude echo peak. Before the fix it failed with a 0.684661 dB initial
-drop. After the fix it passes: initial change <0.01 dB, successive equal-phase
-peak changes <0.15 dB, with actual saturation at the end of the ramp.
-
-```sh
-cmake --preset dev
-cmake --build --preset dev -j6
-build/dev/plugins/delay/engine/delay-engine.tests
-ctest --test-dir build/dev/plugins/delay --output-on-failure
-tools/ci/format.sh --check
-git diff --check
-rm -rf -- build/gcc build/asan build/ubsan build/tsan build/rtsan
-```
-
-Dev configure/build passed (only existing vendored VST3 SDK warnings).
-Engine: 13 cases / 3737 assertions passed. Plugin: 10/10 passed. Format/diff
-checks passed. All five listed build trees were deleted; dev was retained.
-No full CI rerun for this follow-up, as requested. Review and merge remain
-orchestrator work; no open implementation questions.
-
-## Remaining acceptance
-
-REAPER load/automation and optional VST3/macOS/Windows acceptance were not run:
-no installation/device access requested; this is the Linux CLAP checkout.
-Optional VST3 self-handle/unload tests need its format build. No unresolved
-implementation questions. Freeze period quantization, colored repeat
-measurement and the tail estimate's limits are recorded in the spec/guide.
+Known limits (freeze period quantization, coloured-repeat measurement, the
+tail estimate) are recorded in the spec and the guide.

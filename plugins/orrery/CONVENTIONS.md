@@ -216,7 +216,7 @@ identical apart from namespace; a fix to either is made in every product.
 are expected to differ there. What is shared is the contract around it: every
 `Theme.h` defines the token set below and gives it product values, controls
 honour the interaction rules in "GUI architecture", and the lessons recorded in
-each product's AGENTS.md about text, glyph coverage and hit testing apply
+`plugins/AGENTS.md` about text, glyph coverage and hit testing apply
 everywhere.
 
 - `ink`, `panel`, `well`, `edge`, `edgeHi` -- ground, raised surface, recess,

@@ -1,6 +1,6 @@
 # Spec: CLAP extension `com.suppleaudio.semantic-params/1`
 
-**Status:** Frozen for Phase 2 implementation (2026-09-26). The extension ID
+**Status:** Implemented. The extension ID
 carries the major version; incompatible changes get `/2`. Additions within
 `/1` only append members after a version check (see §4).
 **Header:** `plugins/common/include/supple/clap/semantic_params.h` (C ABI,
@@ -167,7 +167,7 @@ during processing (another thread calling process with rtsan active) is
 RT-clean and takes effect within one block; state save/load equals patch
 round trip; `describe` is non-empty and ≤ 600 chars.
 
-## Implementation notes (2026-09-26, orchestrator)
+## Implementation notes (2026-09-26)
 
 - `plugins/common` `ParamStore` delivers whole patches to the audio thread
   with a seqlock: `assign()` (set_patch, state load, reset) is one write;
@@ -182,7 +182,7 @@ round trip; `describe` is non-empty and ≤ 600 chars.
   last patch is in effect; RT cleanliness is checked when the plugin and tool
   run under the rtsan preset.
 
-## Amendments (2026-09-26, orchestrator — structured patches)
+## Amendments (2026-09-26, structured patches)
 
 - **Flat `params` in merge patches.** A plugin whose patch is structured
   (slots, routes — e.g. Orrery) also accepts a top-level `"params"` member in

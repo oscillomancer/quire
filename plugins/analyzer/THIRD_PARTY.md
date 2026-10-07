@@ -32,7 +32,7 @@ review.
 The template itself is MIT licensed (`LICENSE`); every component above is
 compatible with that. `plugin/gui/pugl_metal.{h,m}` are derived in part from
 Pugl and keep its ISC notice. Products built from the template choose their
-own license; see the product identity checklist in `AGENTS.md`.
+own license; this plugin stays MIT (see `QUIRE.md`).
 
 Note that the vendored Objective-C sources (Pugl and nanovg_metal) are compiled
 with their class names prefixed per product -- see `plugin/gui/CMakeLists.txt`.

@@ -1,6 +1,6 @@
 # Spec: core-json and core-schema
 
-**Status:** Frozen for Phase 1 implementation (2026-09-26). Changes via ADR.
+**Status:** Implemented. Interface changes go through an ADR.
 **Libraries:** `libs/core-json` (`supple::json`), `libs/core-schema`
 (`supple::schema`). Both depend only on core-base and the C++ standard
 library. Neither may be used on the audio thread.
@@ -512,7 +512,7 @@ threads. Recursion depth bounded by core-json's parse depth.
 
 ## Implementation notes (not specification changes)
 
-- Canonical output normalizes `-0.0` to `0.0`. Per the orchestrator clarification, negative zero is excluded from the bitwise `identical` round-trip invariant; canonical-output idempotence still applies.
+- Canonical output normalizes `-0.0` to `0.0`. Negative zero is excluded from the bitwise `identical` round-trip invariant; canonical-output idempotence still applies.
 - `DocumentType` migration entry `k - 1` upgrades major version `k` to `k + 1` (major versions start at 1).
 
 - The unit table mentions `dBFS` only for absolute level fields, but the closed `Unit` set has no distinct absolute-level tag. `parseQuantity` rejects `dBFS` until the caller has an explicit way to declare that distinction.

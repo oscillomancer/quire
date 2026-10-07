@@ -42,7 +42,7 @@ mixer, or Track > FX: add plugin….
 agent does lands in the same undo history as your own edits. Register it once:
 
 ```sh
-claude mcp add -s user quire -- ~/Projects/quire/build/release/mcp/quire-mcp
+claude mcp add -s user quire -- "$PWD/build/release/mcp/quire-mcp"   # from the repository root
 ```
 
 Start Quire first, then the Claude Code session (or `/mcp` to reconnect). If
@@ -53,7 +53,7 @@ The bundled skill teaches an agent the commands, units and notation. Link it
 into Claude Code's skills:
 
 ```sh
-ln -s ~/Projects/quire/skill ~/.claude/skills/quire
+ln -s "$PWD/skill" ~/.claude/skills/quire
 ```
 
 Without the GUI, `build/release/host/engine/quire-engine --mcp` is a headless

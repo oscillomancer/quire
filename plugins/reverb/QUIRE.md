@@ -25,10 +25,8 @@ conversion checklist does not apply. No template source was modified.
   apart from namespace/identity. The general CLAP probe queries Output in
   place of the template's removed output meter. NanoVG includes are SYSTEM.
 - Linux CLAP/VST3 targets link their explicit export maps with LINK_DEPENDS;
-  exports-clap checks that only clap_entry is public. The self-handle patch
-  file is carried, but its mandatory presence gate is deferred: the reverse
-  apply probe fails in this base's vendored fsutil.cpp. The orchestrator owns
-  applying that shared patch on the integration branch.
+  exports-clap checks that only clap_entry is public; `wrapper-self-handle`
+  checks the vendored clap-wrapper carries the self-handle patch.
 - All template core/editor tests are adapted to these parameters. Added
   transactional/concurrent semantic and tail-thread tests. The unchanged
   host contract rejects bare ASCII `-inf`; CLAP text retains the canonical

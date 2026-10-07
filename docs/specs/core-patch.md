@@ -1,6 +1,6 @@
 # Spec: core-patch — patch and preset documents
 
-**Status:** Frozen for Phase 1 implementation (2026-09-26). Changes via ADR.
+**Status:** Implemented. Interface changes go through an ADR.
 **Library:** `libs/core-patch` (`supple::patch`). Depends on core-base,
 core-json, core-schema, core-params. Main-thread only (never on the audio
 thread). Format rules: ADR-0009.
@@ -164,7 +164,7 @@ correct paths; `diff` then `merge` reproduces the target; Changed-detail
 output and re-read; state framing round trip and every framing error;
 `describeFlat` golden strings.
 
-## Implementation notes (2026-09-26, orchestrator)
+## Implementation notes (2026-09-26)
 
 - `PatchType` and `FlatPatchType` share a non-template `Codec` that owns the
   document ID, the ADR-0009 version policy, migrations and the envelope. It

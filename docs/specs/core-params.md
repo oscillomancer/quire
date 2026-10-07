@@ -1,6 +1,6 @@
 # Spec: core-params — semantic parameters
 
-**Status:** Frozen for Phase 1 implementation (2026-09-26). Changes via ADR.
+**Status:** Implemented. Interface changes go through an ADR.
 **Library:** `libs/core-params` (`supple::params`). Depends on core-base
 (units, closest match, Error) and core-json. Header-light: plugins include
 it. The conversion functions are RT-safe (no allocation) and may be called on
@@ -183,7 +183,7 @@ round trips and every parse error with its hint; JSON I/O; `describeTable`
 golden output for a fixture table; an rtsan-labelled test exercising the
 RT-safe conversions inside a `SUPPLE_RT` function.
 
-## Implementation notes (2026-09-26, orchestrator, after review round 2)
+## Implementation notes (2026-09-26, after review round 2)
 
 - Range checks in `parse`/`fromJson` allow a relative 1e-9 slack local to each
   boundary (`1e-9 · max(1, |boundary|)`), so a boundary value that went

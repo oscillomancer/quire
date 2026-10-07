@@ -4,7 +4,7 @@ Date: 2026-09-26. Host REAPER: `/usr/lib/REAPER/reaper`, version `7.80/linux-x86
 
 ## Temporary configuration and runs
 
-- Copied `~/.config/REAPER/reaper.ini` to `/tmp/reaper-ux-cfg/reaper.ini`; REAPER made other resource files only inside that temporary config directory. Nate's `~/.config/REAPER` was not written.
+- Copied `~/.config/REAPER/reaper.ini` to `/tmp/reaper-ux-cfg/reaper.ini`; REAPER made other resource files only inside that temporary config directory. The user's `~/.config/REAPER` was not written.
 - `reaper -h` printed `-cfgfile`, `-renderproject`, `-saveas`, `-newinst`, `-nosplash`, `-close`, plus batch-converter `NORMALIZE` modes 1 peak, 2 true peak, 3 LUFS-I, 4 LUFS-S, 5 LUFS-M, 6 RMS and `BRICKWALL` modes peak/true peak.
 - Ran `timeout 15s reaper -newinst -nosplash -cfgfile /tmp/reaper-ux-cfg/reaper.ini -renderproject <hand-authored.RPP absolute path>`: exit 0; generated a 529,890-byte WAV.
 - Ran REAPER with the hand-authored project and `-saveas <normalized.RPP>`: file appeared, but the GUI instance did not exit within eight seconds and was terminated by `timeout` (exit 124). [normalized.RPP](normalized.RPP) records the result. It is a saved normalization example, not a clean process-exit result. It was saved before a later Lua smoke test altered the hand-authored working copy; [hand-authored.RPP](hand-authored.RPP) restores the original source.

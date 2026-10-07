@@ -1,17 +1,12 @@
-# Stock effects, first wave: implementation plan (EQ, compressor/limiter, utility, analyzer)
+# Stock effects: implementation notes
 
-**Status:** Implementation plan, 2026-09-29. **The parameters, names and
-DSP intent are `docs/specs/stock-effects.md`** (sections 1, 2, 8, 9), which
-this plan follows; where this plan decides something that spec left open or
-changes it, the change is written into `stock-effects.md` too. This file
-adds what implementers need beyond it: the shared layout, real-time rules,
+**The parameters, names and DSP intent are in `docs/specs/stock-effects.md`**;
+where a decision here changes that spec, it is written there too. This file
+adds what maintainers need beyond it: the shared layout, real-time rules,
 tests, GUI and skill deliverables, and per-plugin implementation notes.
-Order of work (`stock-effects.md` §10): EQ → compressor/limiter → utility +
-analyzer — the plugins an agent needs for corrective mixing and loudness
-delivery, and the load of the Phase 4 B1 benchmark.
 
-Code identity uses the functional ids until Nate confirms the working names
-(`HUMAN_REVIEW.md` #9); the display name is the working name.
+Code identity uses the functional ids; each display name is defined once,
+in the plugin's `cmake/Identity.cmake`.
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
@@ -69,9 +64,9 @@ Like Orrery (`plugins/orrery`):
 - The template's DSP header (`dsp/include/<id>/Processor.h`) is replaced by
   the engine library, as in Orrery.
 
-Do **not** modify `~/Projects/audio-plugins/template`, `plugins/orrery`,
-`plugins/probe-synth` or another effect's directory. Shared DSP primitives
-that two plugins need go to `libs/core-dsp` only when the brief says so.
+A change to one plugin stays in its directory. DSP primitives that two
+plugins need move to `libs/core-dsp` (the shared oversampler is an
+example), with their tests.
 
 ### 1.2 Parameters and state
 
@@ -120,7 +115,7 @@ Product-owned `Editor.cpp`/`Theme.h`/`Widgets.h` usage (the template's widgets
 and window stay as shipped). Each plugin's layout is in its section below;
 all read names, units and formatted values from the table, and every edit is
 a gesture-bracketed parameter change. `tools/gui_preview` renders at least
-two scenarios per plugin to PNG (the orchestrator reviews them).
+two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
 plugins read as one family.

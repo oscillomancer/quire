@@ -46,7 +46,7 @@ their undo history and can be reviewed.
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
 | Corrective EQ (rumble, masking, harshness) | `guides/eq.md` |
 | Early reflections, room/hall tails, held ambience (Nave/reverb) | `guides/reverb.md` |
-| Designing a synth sound (Orrery) | `guides/sound-design.md`, `generated/plugins/orrery.md` |
+| Designing a synth sound (Orrery) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing, external-key ducking, or limiting master peaks | `guides/comp.md` |
 | Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
@@ -55,7 +55,7 @@ their undo history and can be reviewed.
 | Onset punch, softer attacks, shorter or longer decays (Flint/transient) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
-| A stock plugin's parameters and patch format | `generated/plugins/<plugin>.md` |
+| A stock plugin's parameters and patch format | its guide, and `plugin_describe` (sandbox) or `fx_describe` (DAW) for every field, unit and range |
 | Tempo-synced echoes, ping-pong, freeze and wet ducking (Echelon/delay) | `guides/delay.md` |
 | Live loudness, spectrum and stereo monitoring (Gauge/analyzer) | `guides/analyzer.md` |
 | What the analysis numbers mean | `guides/analysis.md` |

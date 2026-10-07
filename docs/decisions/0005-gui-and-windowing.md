@@ -9,7 +9,7 @@ Third-party plugin GUIs on Linux expect an X11 parent window
 (`CLAP_WINDOW_API_X11`); a native Wayland surface has no XID to give them.
 The machine runs Hyprland 0.56 with XWayland 24.1. Qt and GTK are ruled out by
 the license policy. The DAW needs REAPER-class responsiveness, its own visual
-identity, and ideally shared rendering technology with Nate's plugin editors
+identity, and ideally shared rendering technology with the stock plugins' editors
 (Pugl + NanoVG).
 
 The spike on this machine showed:

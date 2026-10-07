@@ -81,10 +81,9 @@ layout and scheduling changes are left for a separate structural pass.
 
 ## Numerical and deterministic acceptance
 
-The optional `orrery-reference-bench` compiles the unchanged DSP sources from
-a git archive with the **current** capture harness, in this checkout, without
-switching branches or creating another worktree. Its capture was byte-equal
-to the baseline captured before editing the DSP.
+The optional `orrery-reference-bench` compiles the DSP sources from before
+this pass (from a git archive) with the current capture harness. Its capture
+was byte-equal to the baseline captured before the DSP was edited.
 
 `--dump-guide` captures the §9 benchmark patch followed by every JSON block
 in `skill/guides/sound-design.md`: eight seconds each, 48 kHz, 128 frames,
@@ -138,34 +137,3 @@ python3 plugins/orrery/engine/bench/compare_renders.py build/orrery-reference-gu
 
 The comparison script fails for nonfinite/silent/short/oversized captures or a
 residual above -80 dB; it has no Python dependencies.
-
-Focused verification run:
-
-```sh
-cmake --preset dev
-cmake --build --preset dev --target orrery-engine.tests -j6
-ctest --preset dev -R '^orrery-engine.tests$'
-cmake --build --preset release --target orrery-bench orrery-engine.tests -j6
-ctest --preset release -R '^orrery-engine.tests$'
-cmake --preset rtsan
-cmake --build --preset rtsan --target orrery-engine.tests -j6
-ctest --preset rtsan -R '^orrery-engine.tests$'
-tools/ci/format.sh --check
-```
-
-Dev, Release, RTSan, and format check passed. RTSan uses scalar loops because
-its function-call instrumentation prevents vectorization; hints are disabled in
-that preset. The single full-CI run also passed, as recorded below. `STATUS.md` remains owned by the orchestrator; external review
-is pending.
-
-
-Final verification: `tools/ci/run-all.sh` was run **once**, outside the socket-
-restricted sandbox, and exited 0: license (12 dependencies), format, dev, gcc,
-asan, ubsan, tsan, rtsan all **pass**. No CI logs were polled or read; no failed
-stage required investigation. The focused dev/Release/RTSan tests and all
-reference comparisons above passed. No audio device was opened for this task.
-
-After CI passed, removed `build/gcc`, `build/asan`, `build/ubsan`, `build/tsan`,
-`build/rtsan`; retained `build/dev` and Release benchmarks/captures. The 3%
-performance target remains unmet for the structural reasons above. No open
-questions; orchestrator review remains pending.

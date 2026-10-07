@@ -49,6 +49,4 @@ byte-identical after identity renames; the generic probe's meter id is gr.
 The format gate excludes the shared infrastructure.
 
 Useful template proposals: sidechain-aware host-port checks, deferred latency
-restart assertions and a compact engine describe seam. No template edits or
-new dependencies were needed. STATUS and independent review are orchestrator
-work; REAPER/platform acceptance remains separate from these device-free tests.
+restart assertions and a compact engine describe seam.

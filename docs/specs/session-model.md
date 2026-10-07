@@ -1,12 +1,12 @@
-# Spec: session model, time model, versions and the project file (Phase 4)
+# Spec: session model, time model, versions and the project file
 
-**Status:** Draft for review (2026-09-26). Frozen before P4 implementation.
+**Status:** Implemented; amended with each change (dated notes and ADRs).
 **Decision records:** ADR-0007 (bus), ADR-0008 (model, IDs, undo, branches),
 ADR-0009 (formats), ADR-0010 (value domains).
 **Libraries:** `libs/timeline` (`supple::time`: tempo/meter maps and time
 conversion — pure, reusable by notation and the sandbox), `host/engine/model`
 (`supple::model`: session types, edits, versions, branches, diff, project
-file), commands in `host/engine/commands`.
+file), commands in `host/engine/src/*commands.cpp`.
 
 This is the data the whole DAW is made of. Every object here is reachable by a
 stable ID, editable only through commands, versioned, diffable and savable as
@@ -114,7 +114,7 @@ Fields:
 | `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | channels only |
 | `timebase` | enum or `project` | default for its items (channels) |
 | `chain`, `input_chain` | [fx id] | §1.7; `input_chain` on channels only |
-| `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only (Phase 5 UI; model now) |
+| `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only |
 | `locked`, `hidden_tcp`, `hidden_mixer`, `folder_compact` | bool / enum | UI state kept in the model because it is user intent, but tagged `ui: true` so diffs/merges can ignore it |
 
 `volume`, `pan` and `mute` are automatable (§1.9). Width and trim are not
@@ -133,7 +133,7 @@ the overlap), `takes` [tk id], `active_take`, `snap_offset`, `group`,
 **Take** `tk_*`: `name`, `source` (md or mi id, or null = empty take),
 `start_offset` (seconds into the source, or beats for MIDI),
 `playrate` (0.01..100), `preserve_pitch` (bool), `pitch` (st), `pitch_mode`
-(algorithm id; Phase 4 ships a Signalsmith-Stretch-based mode (MIT) and
+(algorithm id: `signalsmith`, a Signalsmith Stretch mode (MIT), or
 `resample`), `gain` dB, `pan` %, `phase_invert`, `channel_mode`
 (`normal|reverse_stereo|mono_mix|left|right|...`), `stretch_markers`
 (array of `[source_pos_s, item_pos_s, slope]`), `take_markers` (array of
@@ -337,8 +337,8 @@ to their defaults are omitted (the schema fills them in on load). Objects keyed 
 
 These arrays are the one place canonical form prints one inner array per
 line (scalar arrays of arrays: each inner array on one line, outer array one
-element per line) — a writer option `compactRows` in core-json. *(Requires a
-small core-json addition; tracked as P4.1.)*
+element per line) — a writer option `compactRows` in core-json. *(Not needed so far: the canonical writer already prints these rows one
+per line.)*
 
 ### 5.2 Compatibility policy
 
@@ -436,7 +436,7 @@ released the old plan.
 
 ---
 
-## 7. Command catalogue (Phase 4 scope)
+## 7. Command catalogue
 
 Schemas are written per command in code (ADR-0007); this is the inventory
 and naming. All `edit` unless marked (q) query or (a) action.

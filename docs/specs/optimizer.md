@@ -1,4 +1,4 @@
-# Spec: the parameter optimizer and long-running jobs (P3.3)
+# Spec: the parameter optimizer and long-running jobs
 
 **Status:** Implemented (2026-09-26); amendments at the end.
 **Code:** `libs/optimize` (`supple::opt`: CMA-ES, bounded, deterministic;
@@ -101,9 +101,9 @@ report, compute:
   contribution. Failed renders (plugin error, non-finite output) get loss
   `+inf` and are counted.
 
-These defaults are a starting point, not truth: the evaluation suite (P3.4)
-tunes them, and every run reports the per-term breakdown so an agent (or
-Nate) can see *why* a candidate won.
+These defaults are a starting point, not truth: the evaluation suite
+(`specs/eval-harness.md`) tunes them, and every run reports the per-term
+breakdown so an agent (or a person) can see *why* a candidate won.
 
 ## 4. Jobs: long-running actions on the bus
 
@@ -218,14 +218,14 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
 - Semantic curve strings are parsed without exceptions. Unknown curves and
   non-finite or non-positive exponents return structured parameter errors.
 
-## Amendments (2026-10-01, first evaluation campaign)
+## Amendments (2026-10-01, from the first evaluation runs)
 
 - Envelope attack, decay20 and release use a **log-time distance**
   `|log2((c + 10 ms) / (r + 10 ms))|` at scale 0.43 instead of
   `|c − r| / max(10 ms, r)` at scale 0.3: the old ratio term was unbounded, so
   a 23 ms attack against a 0 ms reference scored 5877 and swamped every timbre
-  term (≈ 1) in both the optimizer's landscape and the evaluation scorer
-  (`docs/benchmarks/eval/2026-10-01-campaign.md`, issue 2). The 10 ms offset
+  term (≈ 1) in both the optimizer's landscape and the evaluation scorer.
+  The 10 ms offset
   keeps a 0 ms value inside the domain; the new scale is ≈ 0.3 / ln 2, so a
   reference well above 10 ms scores what it did before. A value present on one
   side only keeps its old contribution: distance 1.43 at that scale ≈ 11.1.
@@ -233,30 +233,29 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
   note-off used per side) through the shared `detail::referenceScore`, so an
   agent can see how close a render is without running the optimizer: the test
   is loudness-matched to the reference and both sides are analyzed with
-  `detail::analyzeMatched` (campaign issue 4). The evaluation scorer's
+  `detail::analyzeMatched`. The evaluation scorer's
   `eval-reference` subcommand calls the same function, so the harness number an
   agent can reproduce is the number it is judged by.
 - `job.wait` accepts any nonnegative `timeout_s` and clamps the block to 30 s
-  (reporting `"timeout_clamped_s": 30`) instead of rejecting the call
-  (campaign issue 5).
+  (reporting `"timeout_clamped_s": 30`) instead of rejecting the call.
 
-## Amendments (2026-10-01, reference-search tuning — P3.4c)
+## Amendments (2026-10-01, reference-search tuning)
 
-- **A benchmark measures the search itself** (`tools/optimize-bench/`, reports
-  in `docs/benchmarks/optimizer/`): for every synth-reference task, set the
+- **A benchmark measures the search itself** (`tools/optimize-bench/`; every
+  variant below is a row of `docs/benchmarks/optimizer/2026-10-01-tuning.md`):
+  for every synth-reference task, set the
   task's `starting_patch`, render the hidden patch as the reference, and run
   `optimize.start` with 300 evaluations for three seeds in two modes — `"auto"`,
-  and the changed modules' share of that list. On the merged code
-  (`2026-10-01-baseline.md`) `"auto"` never improved on the start (median best
+  and the changed modules' share of that list. On the code before
+  this tuning (`baseline`) `"auto"` never improved on the start (median best
   21.8, 0 of 21 runs at or below `max_loss`) while the changed modules'
-  parameters found the answer 9 times (median 3.0): the campaign's finding 3,
-  reproduced and quantified. The search is deterministic — the same
+  parameters found the answer 9 times (median 3.0), as the evaluation runs had
+  suggested. The search is deterministic — the same
   configuration and seed are bit-identical across runs — but its trajectory
   depends on the **order** of the requested `params` (the CMA stream is drawn
   per coordinate), so the benchmark records the order with every run.
 - **Initial σ = 0.05 when the target is a reference** (0.2 for profile-only
-  targets, unchanged). A σ sweep (`2026-10-01-sigma-0.1.md`,
-  `2026-10-01-sigma-0.05.md`, `2026-10-01-sigma-0.02.md`): the `"auto"` median
+  targets, unchanged). A σ sweep (`sigma-0.1`, `sigma-0.05`, `sigma-0.02`): the `"auto"` median
   best falls 21.8 → 8.8 → 4.4 → 3.2 and the changed modules' median 3.0 → 2.9
   → 1.1 → 2.2 for σ = 0.2 / 0.1 / 0.05 / 0.02, with passes 0 → 1 → 1 → 3 and
   9 → 9 → 10 → 10 of 21. 0.05 keeps the best median for the well-posed
@@ -266,36 +265,36 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
 - **`"auto"` searches a window around each parameter's current value**
   (`optimize_range.h`): ±2 octaves (×4 / ÷4) for frequency, time and
   pitch-interval quantities — the quantities a musician moves by a factor, and
-  the ones the campaign's failures were about — and ±25 % of the range for
+  the ones the evaluation failures were about — and ±25 % of the range for
   everything else, clamped to the parameter's own range. On its own (σ = 0.2,
-  `2026-10-01-window.md`) it takes the `"auto"` median from 21.8 to 7.3; with
-  the σ change (`2026-10-01-window-sigma-0.05.md`) it reaches 3.3 with 3 of 21
+  `window`) it takes the `"auto"` median from 21.8 to 7.3; with
+  the σ change (`window-sigma-0.05`) it reaches 3.3 with 3 of 21
   runs at or below `max_loss`, where σ alone reached 4.4 with 1 of 21. The
   changed-modules mode is untouched by it (explicit keys keep their range,
   which is also the escape hatch for an answer far outside the window).
-- Tried and **not** kept, each measured (tables in the same directory):
+- Tried and **not** kept, each measured (rows of the same table):
   - *a restart with σ/2 from the best point when a run does not improve on its
     start*: 0 of 42 runs reached the trigger once σ and the window were in
     place, and every loss was identical to the run without it
-    (`2026-10-01-restart.md`). The stagnation it targets is what the two
+    (`restart`). The stagnation it targets is what the two
     changes above already fix; re-adding it is a one-line decision if a future
     target class stagnates.
   - *evaluating every candidate from the start state (re-loading the clone's
     state before each merge)*: all 42 losses were bit-identical to the
     accumulated-merge search and no candidate failed in any run
-    (`2026-10-01-fresh-state.md`). That rules out the hypothesized
+    (`fresh-state`). That rules out the hypothesized
     slot-removal failure mode for these tasks: candidate renders were already
-    order-independent (`resetBeforeRender` plus the P3.4a reset fix).
+    order-independent (`resetBeforeRender`, and plugin renders that depend
+    only on their state after a reset).
   - *rescaling the `trajectory` term (0.1 → 0.2)*: it dominated the residual of
     failing runs (26–40 % of the loss) and rescaling it raised the pass count
     (13 → 16) and lowered the `"auto"` median (3.3 → 1.9,
-    `2026-10-01-trajectory-0.2.md`), but it made the search's *relative*
+    `trajectory-0.2`), but it made the search's *relative*
     progress worse (best/initial: `"auto"` 0.134 → 0.191, changed modules 0.035
     → 0.053, worse on 15 of 21 runs). The apparent win is a re-calibration of
     the score — the tasks' `max_loss = 1.0` is measured in this loss's units —
     not a better search, so the term keeps its scale. Rescaling it (or
-    compressing its large distances) belongs with a re-calibration of the
-    reference suite, which the orchestrator owns.
+    compressing its large distances) belongs with a re-calibration of the reference suite.
 - `optimize.start`'s result also reports `"failed"` (candidates whose set,
   render or analysis failed), so a search that loses candidates is visible
   rather than looking like a badly scoring one.

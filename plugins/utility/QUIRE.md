@@ -33,4 +33,3 @@ Product changes:
   NanoVG includes. Obsolete template core tests and CLI were removed.
 
 Spec decisions are recorded in stock-effects.md §8 and the utility skill guide.
-The orchestrator owns STATUS, independent review, merge and REAPER acceptance.

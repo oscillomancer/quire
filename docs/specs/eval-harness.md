@@ -1,13 +1,15 @@
-# Spec: the LLM usability evaluation harness (P3.4, extended in Phase 6)
+# Spec: the LLM usability evaluation harness
 
-**Status:** Implemented for P3.4 (2026-09-30), orchestrator review pending.
+**Status:** Implemented. In use, listening to the renders said more about
+the agent than the scores did: treat the numbers as a coarse check and the
+renders and transcripts as the result.
 **Code:** `tools/eval-harness/`, Python 3 standard library tooling (ADR-0003).
-**Model decision:** HUMAN_REVIEW #8, resolved: Hermes with the dedicated `quire-eval` profile
-(2026-09-30 steering amendment); the orchestrator chooses run counts. Other model adapters and the Phase 6
-mixing/session suites are deferred.
+**Runner:** Hermes with a dedicated evaluation profile (`quire-eval`). Other
+model adapters and mixing/session suites are not written yet.
 
 The harness measures whether an agent can program plugins and write notation.
-It records numeric outcomes and queues what numbers cannot judge for Nate's ears.
+It records numeric outcomes and lists the renders that numbers cannot judge
+for a listener.
 A smoke run proves integration, not model quality; scripted success proves scorer
 coverage, not usability.
 
@@ -108,9 +110,10 @@ minimal JSON-as-YAML config, only the `sandbox` MCP toolset/server. Read only
 nonsecret model identity from `~/.hermes/profiles/quire-eval/config.yaml`
 (or an explicitly supplied identity file). Default credentials are
 `~/.hermes/profiles/quire-eval/.env`, referenced through a symlink; do not copy tokens,
-Nate's config, sessions, memory, skills, plugins or OAuth state into a run.
-The profile name `quire-eval` is recorded in suite and attempt metadata. The
-expected identity is `meta/muse-spark-1.3-contributor` via `openrouter`. Missing
+the user's own config, sessions, memory, skills, plugins or OAuth state
+into a run.
+The profile name `quire-eval` is recorded in suite and attempt metadata; the
+profile chooses the model, and the report records it. Missing
 profile files fail; there is **no fallback** to `~/.hermes/config.yaml`. Paths
 are formed from the product slug plus `-eval`. Clear inherited `HERMES_*` overrides. Disable memory/compression, ignore private
 rules, and disable lazy installation. No profile-create/use commands, shell,
@@ -195,17 +198,12 @@ transcript path, usage and provenance; Markdown is the short review table.
 
 Best/worst measured render per task (loss ordering, successful renders only)
 goes to ignored `docs/benchmarks/eval/audio/<run>/`; with one repeat they are
-identical. Append one active `HUMAN_REVIEW.md` listening item per published suite,
-with paths and each task's question. This is the authorized exception to the
-original draft's benchmark-only repository-write rule. No other repository data
-is changed by a run. Default dry validation stays in ignored `build/eval/`;
-`--publish` explicitly retains a dry benchmark (no listening item: scripted answers are not model output), labeled as
+identical. The report's Markdown lists them with each task's question for
+listening. No other repository data is changed by a run. Default dry validation stays in ignored `build/eval/`;
+`--publish` explicitly retains a dry benchmark, labeled as
 infrastructure evidence rather than model quality.
 
 Local transcripts, isolated profiles, usage, prompts, capture/audit files and
 intermediate renders live in `build/eval/<run>/`, separate from sanitizer trees.
-Retain/archive them together with listening WAVs when sharing reports. The single
-P3.4 acceptance smoke run uses the pinned `quire-eval` profile; the earlier
-default-profile probe is explicitly marked as superseded. Full-suite inference and repeat
-counts are left to the orchestrator. Phase 6 adds mixing/session tasks after the
-corresponding project-model operations exist.
+Retain or archive them together with the listening WAVs when sharing
+reports.

@@ -21,8 +21,8 @@ Clang 22.1.8 (with `libclang_rt.rtsan`), GCC 16.2.1, CMake 4.4.3, Ninja 1.13.2.
   (RelWithDebInfo, `-fsanitize=realtime`). Workflow presets make one command
   configure+build+test: `cmake --workflow --preset dev` (wrapped by
   `tools/ci/build.sh`). `tools/ci/run-all.sh` is local CI: every preset plus
-  license and format checks. Build jobs are capped at 6 in presets (this is
-  Nate's workstation, 10 cores).
+  license and format checks. Build and test jobs are capped at 6 in presets (development happens on a
+  working audio workstation).
 - **RT enforcement:** audio-path entry points are annotated `SUPPLE_RT`
   (`[[clang::nonblocking]]`). Under the `rtsan` preset, any allocation, lock
   or syscall reached from them aborts the test. `tests/rt-safety/
@@ -44,8 +44,7 @@ Clang 22.1.8 (with `libclang_rt.rtsan`), GCC 16.2.1, CMake 4.4.3, Ninja 1.13.2.
   re-verify at use), libFLAC encoder (BSD-3) for FLAC render.
 - **Fonts** are assets, not code. SIL OFL-1.1 fonts may be bundled (OFL
   permits bundling with software under any license; the fonts just cannot be
-  sold on their own). This covers Inter and IBM Plex, which Nate's template
-  already ships. Every font keeps its license file next to it.
+  sold on their own). This covers Inter and IBM Plex, which the plugin template already ships. Every font keeps its license file next to it.
 - **System libraries** are dynamically linked and listed under
   `system_libraries` in the manifest: SDL3 (Zlib), libjack from pipewire-jack
   (MIT; dlopen'ed), libpipewire (MIT), alsa-lib (LGPL, but an OS library,

@@ -1,8 +1,6 @@
 # optimize-bench: does the optimizer find a reference render?
 
-A measurement tool for `optimize.start` (spec: `docs/specs/optimizer.md`). It
-exists because the first evaluation campaign
-(`docs/benchmarks/eval/2026-10-01-campaign.md`, finding 3) showed agents
+A measurement tool for `optimize.start` (spec: `docs/specs/optimizer.md`). It exists because the first evaluation runs showed agents
 running 291-evaluation searches that never improved on their starting patch,
 while a one-parameter search from a fresh session found the answer.
 
@@ -55,8 +53,7 @@ seeds × ten tasks at 300 evaluations takes roughly 10 minutes at `--jobs 4`;
 A variant is a code change in the product: rebuild only the sandbox
 (`cmake --build --preset dev --target quire-sandbox -j6`) and run with a new
 `--label`, so every table row names the build that produced it. The chosen
-defaults belong in `docs/specs/optimizer.md` (Amendments); `summary.py` writes
-the comparison table the brief asks for.
+defaults belong in `docs/specs/optimizer.md` (Amendments); `summary.py` writes the comparison table.
 
 The tool imports the evaluation harness's helpers (`tools/eval-harness/common.py`)
 rather than duplicating a sandbox client, and it never publishes eval reports:

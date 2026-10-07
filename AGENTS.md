@@ -1,94 +1,166 @@
-# Instructions for agents working in this repository
+# Working on Quire
 
-Quire is an LLM-native DAW plus a suite of LLM-programmable stock plugins,
-built by Supple Audio. Read `ARCHITECTURE.md` and the ADRs in
-`docs/decisions/` before designing anything; read the spec in `docs/specs/`
-for any component you implement. `STATUS.md` says what is in flight.
+This file is for anyone changing or reviewing Quire, coding agents and
+people alike. Quire is an LLM-native DAW for Linux plus a suite of stock
+plugins (see `README.md`). The code is past the build-out stage: most work
+now is maintenance, polish, new features on existing foundations, and
+review. Treat existing behaviour, tests and documents as deliberate unless
+you find evidence otherwise.
 
-The orchestrator (lead engineer) owns architecture, interfaces and integration.
-If a task brief conflicts with an ADR or spec, stop and report the conflict
-rather than picking one silently.
+## Orientation
+
+Read before designing anything:
+
+1. `ARCHITECTURE.md`: the system map, threads and the real-time model.
+2. The spec for the component you touch (`docs/specs/`) and the ADRs it
+   cites (`docs/decisions/`). Specs are the contracts; ADRs say why.
+3. `STATUS.md`: what works, known limits and open items in that area.
+
+When code, a spec and an ADR disagree, do not silently pick one. Find out
+which is right (tests and git history usually tell), fix the others in the
+same change, and say what you found.
 
 ## Hard rules
 
-1. **Licensing.** All code is original. Never copy code from Ardour or any GPL
-   /AGPL project, and do not read GPL source while implementing. Research of
-   GPL source produces prose notes in `docs/research/` only, and a *different*
-   agent implements from those notes. Dependencies must be MIT, BSD-2/3, ISC,
-   Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense (fonts: OFL-1.1), must be listed
-   in `THIRD_PARTY.md`, and live under `third_party/` with their license file.
-   `tools/license-check` fails the build otherwise. LGPL/MPL need an approved
-   entry in `HUMAN_REVIEW.md` first.
-2. **REAPER is proprietary.** Study it only by using it, reading its project/
-   config files and its public scripting docs. Never decompile it, and never
-   copy its themes, icons or assets.
-3. **Never modify the plugin template** at `~/Projects/audio-plugins/template`
-   or Nate's product repos next to it. Copy/instantiate the template into
-   `plugins/` the way its `AGENTS.md` describes.
-4. **No system configuration changes.** No sudo, no package installs outside
-   user space, no PipeWire/WirePlumber/kernel/udev/rtirq edits. Report
+1. **Licensing.** All first-party code is original. Never copy code from
+   Ardour or any other GPL/AGPL project, and do not read GPL source while
+   implementing; notes about GPL software are prose in `docs/research/`,
+   and someone else implements from them. Dependencies must be MIT,
+   BSD-2/3, ISC, Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense
+   (fonts: OFL-1.1), vendored under `third_party/` with their license file,
+   declared in `third_party/manifest.json` and listed in `THIRD_PARTY.md`.
+   `tools/license-check` fails the build otherwise. LGPL and MPL code needs
+   the maintainer's explicit approval first.
+2. **REAPER is proprietary.** Quire follows its workflow, studied only by
+   using it, reading its project and configuration files and its public
+   scripting documentation. Never decompile it or copy its themes, icons or
+   other assets.
+3. **Real-time safety is absolute.** Audio-path code never allocates,
+   frees, locks, blocks, logs synchronously, throws, or touches files or
+   the network. State reaches it through lock-free queues and atomic
+   pointer swaps. Audio-path entry points are marked `SUPPLE_RT` and their
+   tests run under RealtimeSanitizer (the `rtsan` preset).
+4. **The product name lives in one place.** `cmake/Product.cmake` defines
+   it, and C++ reads it from the generated `supple/product.h`
+   (`supple::product::kName`, `kSlug`, …). Never hard-code "Quire" or
+   "quire" in code, binary names, paths, socket names or UI strings. C++
+   lives in namespace `supple::` (the vendor). Docs may say "Quire".
+5. **No system configuration changes.** No sudo, no package installs
+   outside user space, no PipeWire, WirePlumber, kernel, udev or rtirq
+   edits, nothing under the user's own DAW or audio configuration. Report
    environment problems instead.
-5. **Real-time safety is absolute.** Code on the audio path never allocates,
-   frees, locks, blocks, logs synchronously, throws, or touches files or the
-   network. State reaches it through lock-free queues or atomic pointer swaps.
-   Audio-path code is tested under RealtimeSanitizer (`rtsan` preset).
-6. **The product name lives in one place.** `cmake/Product.cmake` defines it;
-   C++ gets it from the generated `supple/product.h` (`supple::product::kName`
-   etc.). Never hard-code "Quire"/"quire" in code, binary names, paths, socket
-   names or UI strings. C++ code lives in namespace `supple::` (the vendor),
-   not a product-named namespace. Docs may say "Quire".
-7. **This machine is Nate's workstation.** Build with at most `-j6`. Do not
-   leave processes running. Do not open the audio device except in tests that
-   need it, and release it afterwards.
+6. **Be gentle with the machine.** Development happens on a working audio
+   workstation: build with at most `-j6` (the presets already cap jobs and
+   tests at 6), leave no processes running, and open the audio device only
+   in tests that need it (`--audio dummy` for the app otherwise).
+7. **Stock plugins keep the template's shared stack.** The stock plugins
+   are instances of Supple Audio's plugin template. Their shared
+   infrastructure (GUI stack, wrapper patches, `host_contract.h`,
+   `Telemetry.h`, probes) stays byte-identical to the template apart from
+   naming; see `plugins/AGENTS.md`.
 
-## Code conventions
+## Making a change
 
-- C++20, CMake + Ninja, builds with both Clang and GCC, warnings clean with
-  `-Wall -Wextra -Wpedantic` on our targets (off for `third_party`).
-- Formatting: `.clang-format` at the repo root. Run `tools/ci/format.sh`.
-- Tests: doctest, one test executable per library at least, registered with
-  CTest. Name tests after the library (`core-json.tests`).
-- Errors that cross the command bus or a file-format boundary are structured
-  (`code`, `message`, `path`, `hint`) and tell the caller how to fix the call.
-- Text formats are deterministic: canonical ordering, a `schema`/`version`
-  field, byte-identical output for identical input.
-- Library layout: `libs/<name>/include/supple/<name-without-core->/...h`,
-  `libs/<name>/src/`, `libs/<name>/tests/`. Public headers are the interface;
-  keep them small and documented.
-- No exceptions across library APIs; use `supple::Result<T>` from core-base.
-  Exceptions may be used internally in non-RT code if they never escape.
+- **Contracts first.** A change to a frozen interface (a library's public
+  header, a command's schema, the control protocol, a file format, the
+  bridge protocol) updates its spec in the same commit. A change of
+  direction gets a new ADR that amends or supersedes the old one; ADR
+  bodies stay as written apart from a dated note pointing to the new ADR.
+- **Commands** are declared once in C++ (`host/engine/src/*commands.cpp`,
+  `host/sandbox/src/`). Summaries are at most 80 characters; examples run
+  as tests; errors carry `code`, `message`, `path` and a `hint` that tells
+  the caller how to fix the call. After changing any command, run
+  `tools/gen/update-generated.sh` and commit `skill/generated/`; a drift
+  test fails otherwise.
+- **Project files and other formats** are canonical JSON with a schema
+  field. When you raise a limit or add a field, change the model's schema,
+  the command's argument schema and the docs together, and add a save and
+  reopen round trip to the test (a limit raised in only one place once
+  produced projects that saved but would not reopen). Old files must keep
+  loading; `host/engine/model/src/migration.cpp` handles older schemas.
+- **Engine.** Offline renders are deterministic and the real-time output
+  must stay bit-identical to them, in both executors (the in-callback one
+  and the anticipative renderer) and through the bridge. Test new engine
+  behaviour against those invariants (`host/engine/tests/test_realtime.cpp`
+  shows how), and run new audio-path tests under the `rtsan` preset.
+  Nothing may sit between a Console 9 encode and its decode (ADR-0019).
+- **GUI.** Check visual changes in a real render:
+  `build/dev/daw/gui/quire --offscreen --no-socket --audio dummy --generate 6
+  --size 1400x900 --frames 5 --snapshot out.png` (add `--action ui.mixer`
+  and similar to open panels). Golden images regenerate with a full run of
+  the suite (`SUPPLE_UPDATE_GOLDEN=1`, no `-tc` filter); look at every
+  changed PNG before committing it. UI behaviour is specified in
+  `docs/specs/gui.md`; update it with the change.
+- **Docs.** Update the spec, and `STATUS.md` when a feature lands, a known
+  limit appears or one is lifted. Keep `STATUS.md` a picture of the present,
+  not a log; history is in git.
 
 ## Build and test
 
 ```sh
-tools/ci/build.sh            # configure + build + test, default dev preset
-cmake --workflow --preset dev
-tools/ci/run-all.sh          # every preset: dev, release, gcc, asan, ubsan, tsan, rtsan + license + format
-tools/validator/build.sh     # pinned clap-validator 0.4.1 in the user-space cache
-tools/validator/run.sh build/dev/plugins/clap/ProbeSynth.clap build/dev/plugins/clap/Orrery.clap
+cmake --workflow --preset dev    # configure, build and test (Clang, Debug)
+tools/ci/format.sh               # clang-format; --check to verify only
+tools/ci/run-all.sh              # full local CI: license, format and every preset
 ```
 
-Phase 3 acceptance in REAPER (on demand; private configuration, build CLAP path
-only, Dummy/closed audio and offline renders):
-`python3 tools/reaper-check/check.py --build-dir build/dev`. Add `--editor` to
-confirm floating editors open and close; use `--plugin <CLAP id>` for a focused
-check. Reports and logs are saved under `build/reaper-check/`; see
-`tools/reaper-check/README.md`. REAPER is not part of CI.
+Presets: `dev`, `release`, `gcc`, `asan`, `ubsan`, `tsan`, `rtsan`. Build
+the whole `gcc` preset when checking GCC, not only test targets: warnings
+such as `-Wshadow` show up in the app sources. `run-all.sh` prints a
+summary table and exits non-zero on any failure; read both. A full run takes
+about half an hour.
 
-The JACK backend's tests use a stand-in libjack; the real server (the audio
-device, 2 s of silence) only when `SUPPLE_AUDIO_DEVICE_TEST` is exactly `1`
-(unset, empty, `0`, or any other value skips the test):
-`SUPPLE_AUDIO_DEVICE_TEST=1 build/dev/host/engine/engine.tests -tc='real JACK*'`.
+Code conventions: C++20, CMake and Ninja, warning-clean with
+`-Wall -Wextra -Wpedantic` on Clang and GCC; `.clang-format` at the root
+(23.1); doctest, at least one test executable per library, named after it
+(`core-json.tests`); `supple::Result<T>` instead of exceptions across
+library APIs; library headers under `libs/<name>/include/supple/<name>/`,
+small and documented. Text formats are canonical: identical content
+serializes to identical bytes.
 
-CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip` (excluded
-from the tsan preset: timing-heavy tests TSan makes impractically slow), `slow`
-(minutes-long end-to-end tests: run in dev, gcc and asan only). A test that
-depends on wall-clock time must not decide pass/fail by it.
+CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip`
+(timing-heavy tests excluded from `tsan`), `slow` (end-to-end tests that
+run in `dev`, `gcc` and `asan` only). A test that depends on wall-clock time
+must not decide pass or fail by it.
+
+Opt-in tests, skipped unless their variable is exactly `1`:
+`SUPPLE_AUDIO_DEVICE_TEST` opens the real JACK device (two seconds of
+silence); `SUPPLE_GUI_DISPLAY_TEST` opens plugin editor windows on the
+X11 display.
+
+Other checks, run on demand: `tools/validator/build.sh` and
+`tools/validator/run.sh <plugin.clap>` (clap-validator 0.4.1, built in the
+user's cache); `python3 tools/reaper-check/check.py --build-dir build/dev`
+loads each stock plugin headless in REAPER with a private configuration
+(`tools/reaper-check/README.md`).
+
+## Reviewing
+
+A review looks for, in this order:
+
+1. Correctness, with a concrete failure scenario for every finding.
+2. Real-time safety on the audio path, and RT/offline equivalence.
+3. Determinism of renders and serialized formats.
+4. A test that fails without the change (for fixes) or covers the new
+   behaviour (for features), at the right layer.
+5. Structured, actionable errors at the command and file boundaries.
+6. The spec, ADRs, generated files and `STATUS.md` updated with the code.
+7. No new license exposure, no hard-coded product name.
+
+Report findings with file and line, what goes wrong, and how to see it.
+Separate findings from suggestions.
+
+## Commits
+
+One topic per commit, staged with explicit paths. Subject line
+`Area: what changed` (for example `Engine: plug-ins run while stopped`),
+with a body that says why when it is not obvious. Keep formatting-only
+changes in their own commit. `main` moves only on a green `run-all.sh`.
 
 ## Definition of done
 
-Code, tests, docs updated, `STATUS.md` updated (by the orchestrator unless the
-brief says otherwise), no new license issues, and reviewed by an agent other
-than the author. Never report something as working that you did not run.
-Report: files changed, exact verification commands and their results, open
+The code, its tests and its docs are updated; the relevant presets pass;
+`STATUS.md` reflects the change; there are no new license issues; and
+someone other than the author has reviewed it. Never report something as
+working that you did not run. When you hand work back, list the files
+changed, the exact commands you ran with their results, and the open
 questions.

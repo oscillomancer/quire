@@ -40,7 +40,8 @@ scheduling is available to the user. The graph quantum defaults to 1024 (min
    of the audio server.
 6. The engine's RT thread is the backend's callback thread. The engine
    never opens the device at build or test time unless a test requires it,
-   and releases it afterwards (the machine is Nate's workstation).
+   and releases it afterwards (development happens on a working
+   workstation).
 
 ## Consequences
 

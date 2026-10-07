@@ -1,18 +1,18 @@
-# Phase 5: the DAW GUI
+# The DAW GUI
 
-Status: **draft** (orchestrator, 2026-10-01). Decisions it builds on:
+This spec describes the GUI as built and is updated with it. Decisions it
+builds on:
 ADR-0005 (SDL3 X11 windows, GL3 + NanoVG, own retained toolkit, performance
 gates), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
 ADR-0019 (typed strips), `ARCHITECTURE.md` §3 (threads, event delivery) and
 §10, and the workflow research in `docs/research/reaper-ux.md` (the top-40
 list in §16 is the priority order for workflow coverage).
 
-Acceptance (build prompt Phase 5): Nate can produce a complete track in the
-DAW without falling back to REAPER for core tasks; workflow gaps are logged
-against `reaper-ux.md` and closed in priority order. Performance (ADR-0005
-§5): p95 frame ≤ 8 ms CPU at 1080p with a 64-track session in the arrange
-view at any zoom; idle CPU ≈ 0; cold start to an interactive window
-< 300 ms on this machine; no UI work can stall audio.
+Goal: a complete track can be produced in Quire without falling back to
+another DAW for core tasks. Performance gates (ADR-0005 §5): p95 frame
+≤ 8 ms CPU at 1080p with a 64-track session in the arrange view at any zoom;
+idle CPU ≈ 0; cold start to an interactive window < 300 ms; no UI work can
+stall audio.
 
 ## 1. Process and threads
 
@@ -39,7 +39,7 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
   measured (§9).
 - **Event-driven loop.** `SDL_WaitEventTimeout` with the timeout set by the
   nearest deadline: CLAP timers, the bus service tick (`ModelLoop::every`,
-  P4.20), animation frames, meter refresh (30 Hz while audio runs, 0 while
+  `engine.md` §6), animation frames, meter refresh (30 Hz while audio runs, 0 while
   stopped and silent). Idle with no timers due = no wake-ups.
 
 ### 1.1 Observing the model
@@ -77,7 +77,7 @@ only what the DAW needs, designed for virtualized, data-heavy views.
 - **Nodes.** A tree of `Node`s (id, role, bounds, children, flags). Roles
   (`button`, `slider`, `list`, `row`, `track`, `item`, `text-field`…) are
   semantic: they drive keyboard behaviour, UI tests and, later, AT-SPI
-  accessibility (Phase 8). Custom-drawn views (arrange, piano roll) are one
+  accessibility. Custom-drawn views (arrange, piano roll) are one
   node each with their own hit testing and internal virtualization.
 - **Layout.** Row/column stacks with fixed / fraction / content sizing, gaps,
   padding, min/max; absolute placement inside timeline-like views. Layout is
@@ -371,7 +371,7 @@ on the UI thread; outstanding dialogs may safely outlive shutdown.
 
 ### 4.8 Render dialog
 
-A front end to `render.*` (P4.15): sources (master, stems, selected
+A front end to `render.*` (`engine.md` §3): sources (master, stems, selected
 items/regions, region matrix), bounds, tail, output pattern (the typed
 variables of the render schema) with a **live dry-run preview** of the
 resolved files, formats (primary + secondary), normalization/limiting,
@@ -462,9 +462,8 @@ attributed.
 
 ## 7. Visual identity
 
-Quire's own character, not a REAPER clone or a generic dark theme. Reviewed by
-Nate on rendered mockups (2026-10-02, HUMAN_REVIEW #17;
-`tools/gui/mockups.py` renders them):
+Quire's own character, not a REAPER clone or a generic dark theme
+(`tools/gui/mockups.py` renders mockups of it):
 
 - **Material:** paper and ink — warm neutral grounds (light: off-white
   paper; dark: deep warm graphite, not blue-black), ink text, fine ruled lines
@@ -489,16 +488,15 @@ Nate on rendered mockups (2026-10-02, HUMAN_REVIEW #17;
   in the TCP and the mixer) or Track > color….
 - **Calm by default:** colour reserved for state (armed, clipping, selected,
   agent-changed), meters and waveforms in ink tones; motion only for
-  feedback. The TCP keeps its boxed toggles (Nate: no quieter variant).
+  feedback. The TCP keeps its boxed toggles.
 
-## 8. Commands the GUI will need (gap list, to verify against the registry)
+## 8. Commands and UI state
 
-`gui.selection` (query, §1.2); peak-pyramid jobs and events (`media.peaks`);
-plugin scan cache browsing (`plugin.list` with categories/favourites);
-transport follow/scroll hints (UI-only, not commands); A/B version
-switching for the agent panel (`transport.audition {version}` or an engine
-setting); envelope point edit commands at the granularity gestures need.
-Each is designed when its view starts, against session-model §7.
+Every GUI action is a command or a UI action in the actions list
+(`app_actions.h`); the GUI never edits the session any other way. State that
+is not the session's (selection, zoom and scroll, panel sizes, screensets,
+plug-in editor placements) lives in the UI sidecar (§1.2); `gui.selection`
+exposes the selection to agents.
 
 ## 9. Performance and benchmarks
 
@@ -520,28 +518,3 @@ on the resulting session (through the bus) — the same commands the agent
 uses, so a UI test can also be an agent workflow test. TSan for the
 worker/UI handoffs. Plugin GUI embedding keeps the template's host probe
 tests (`*-linux-host-probe`).
-
-## 11. Plan
-
-Ordered; each task is a self-contained brief with tests. The orchestrator
-builds P5.1–P5.3 (foundations, architecture-heavy); workers take views.
-
-| ID | Task | Depends |
-|---|---|---|
-| P5.1 | App skeleton: `<slug>` binary, SDL3 X11 window, GL3 context, NanoVG, event loop with deadlines, in-process `EngineApp`, offscreen mode, cold-start benchmark | — |
-| P5.2 | Toolkit core: nodes, layout, input/focus, damage + layers, text, theme tokens, golden-image + scripted-UI test harness | P5.1 |
-| P5.3 | Bulk renderers: peak pyramid (worker builder, disk cache), waveform layer, instanced MIDI notes, meters from telemetry; 64-track perf bench | P5.2 |
-| P5.4 | Arrange view, read-only: ruler, tempo/markers, virtualized rows, items, playhead, zoom/scroll | P5.3 |
-| P5.5 | TCP + strip-type UI + transport bar | P5.4 |
-| P5.6 | Arrange editing gestures (P0 list 8–13) via commands, one undo step per gesture | P5.5 |
-| P5.7 | Mixer | P5.5 |
-| P5.8 | FX chain, plugin browser, X11 plugin GUI embedding, semantic parameter panel | P5.5 |
-| P5.9 | Routing matrix | P5.5 |
-| P5.10 | Actions list, keymaps, macros, toolbars/menus | P5.2 |
-| P5.11 | MIDI editor + notation panel | P5.6 |
-| P5.12 | Render dialog with dry-run preview | P5.5 |
-| P5.13 | Recording UI | P5.5 |
-| P5.14 | Automation lanes and modes | P5.6 |
-| P5.15 | Agent panel (endpoints, branch diff, A/B, accept/reject, listening cards) | P5.10 |
-| P5.16 | Visual identity pass after Nate's mockup review | P5.7 |
-| P5.17 | Performance gates and the workflow-gap log against `reaper-ux.md` | all |

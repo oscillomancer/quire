@@ -78,7 +78,7 @@
   `set_patch` from the main thread while audio processes. The RT preset
   instruments the core libraries, plugin and test host.
 
-Template changes worth offering to Nate: a reusable local-library CMake seam,
+Template changes worth offering upstream: a reusable local-library CMake seam,
 `ParamSpec`/`ParamStore` integration, the semantic extension, canonical JSON
 state with transactional legacy migration, and the patch-during-processing
 regression test. The shared window, renderer, host contract and probes remain
