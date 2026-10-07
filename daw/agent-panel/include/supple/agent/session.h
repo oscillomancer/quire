@@ -72,6 +72,9 @@ class Session {
     bool send(std::string prompt);
     // Model thread. Stops the turn; `idle` follows once the worker is done.
     void cancel();
+    // Model thread. The endpoint the next turn uses (a running turn keeps its
+    // own); the conversation and the proposal branch stay.
+    void setEndpoint(Endpoint endpoint);
     bool busy() const { return busy_; }
     std::vector<Message> history() const;
 
@@ -98,6 +101,7 @@ class Session {
     Status pinned();           // model thread: still on the agent's branch?
 
     Endpoint endpoint_;
+    std::optional<Endpoint> nextEndpoint_;  // set by setEndpoint, taken by the next send
     cmd::Dispatcher& dispatcher_;
     Post post_;
     Options options_;

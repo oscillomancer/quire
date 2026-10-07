@@ -396,8 +396,9 @@ void AgentPanel::openSettings() {
             self->append(std::make_unique<ui::TextBlock>(
                 "agent.err." + std::to_string(self->serial_++), saved.error().message, ui::Font::Ui,
                 "caption", "clip"));
-        if (!self->session_ || !self->session_->busy())
-            self->session_.reset();  // the next send uses the new endpoint
+        // The next turn uses it; a pending proposal and the conversation stay.
+        if (self->session_ && self->config_.active())
+            self->session_->setEndpoint(*self->config_.active());
         self->model_->setText(self->config_.active()->model);
     };
     for (ui::TextField* f : {&name, &url, &model, &key}) f->onSubmit = save;

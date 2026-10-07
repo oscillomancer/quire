@@ -432,7 +432,9 @@ leave the head version unchanged.
 - **Endpoints:** any OpenAI-compatible chat endpoint (including a local
   llama-server) or the Anthropic API; base URL, model and key (key stored
   in the user's keyring or a 0600 file, never in the project). Requests run
-  on a worker thread; the UI streams tokens.
+  on a worker thread; the UI streams tokens. A saved endpoint change applies
+  from the next turn (a running turn finishes on its endpoint); the
+  conversation and a pending proposal stay.
 - **Tools:** the agent gets the same MCP tool surface as external agents
   (generated from the registry) plus the bundled skill as context
   (progressive disclosure: the entry file, then topics on demand). Its

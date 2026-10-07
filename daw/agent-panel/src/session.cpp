@@ -202,8 +202,15 @@ Status Session::ensureBranch() {
     return {};
 }
 
+void Session::setEndpoint(Endpoint endpoint) { nextEndpoint_ = std::move(endpoint); }
+
 bool Session::send(std::string prompt) {
     if (busy_) return false;
+    if (nextEndpoint_) {  // not busy: no worker reads endpoint_ now
+        endpoint_ = std::move(*nextEndpoint_);
+        nextEndpoint_.reset();
+        mcp_->setOrigin({cmd::Origin::Type::Agent, options_.client, endpoint_.model});
+    }
     if (auto b = ensureBranch(); !b) {
         if (events.error) events.error("could not start a branch: " + b.error().message);
         return false;

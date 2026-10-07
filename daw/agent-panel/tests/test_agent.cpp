@@ -767,3 +767,32 @@ TEST_CASE("audit3: proposal review refuses a changed project path") {
     CHECK_FALSE(session.send("Follow up"));
     CHECK(message.find("different project") != std::string::npos);
 }
+
+TEST_CASE("a new endpoint applies to the next turn; the proposal and conversation stay") {
+    Rig rig;
+    FakeServer first, second;
+    first.push(
+        openaiTurn("Done.", {{"exec", R"({"command": "track.add", "args": {"name": "Pad"}})"}}));
+    first.push(openaiTurn("Done.", {}));
+    second.push(openaiTurn("Again.", {}));
+    Session s({Endpoint::Kind::OpenAI, "local", first.url("/v1"), "llama", ""}, rig.registry,
+              *rig.dispatcher, rig.post(), skillOptions(rig.dir / "skill"));
+    bool idle = false;
+    s.events.idle = [&] { idle = true; };
+    s.events.error = [&](const std::string& e) { FAIL(e); };
+    REQUIRE(s.send("Add a pad track."));
+    REQUIRE(rig.pump([&] { return idle; }));
+    const std::string branch = s.branch();
+    REQUIRE_FALSE(branch.empty());
+    s.setEndpoint({Endpoint::Kind::OpenAI, "other", second.url("/v1"), "qwen", ""});
+    idle = false;
+    REQUIRE(s.send("And another."));
+    REQUIRE(rig.pump([&] { return idle; }));
+    CHECK(first.requests().size() == 2);
+    auto reqs = second.requests();
+    REQUIRE(reqs.size() == 1);
+    CHECK(at(reqs[0], "model").asString() == "qwen");
+    CHECK(at(reqs[0], "messages").asArray().size() > 2);  // the conversation came along
+    CHECK(s.branch() == branch);                          // the proposal is still under review
+    CHECK(rig.tracks("Pad") == 1);
+}

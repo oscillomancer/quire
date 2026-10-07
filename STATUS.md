@@ -130,7 +130,6 @@ GUI:
 - Key bindings use only the arrange and global contexts; actions that need
   typed arguments run only from the actions list; macros do not pass their
   arguments to steps.
-- Changing the agent endpoint while a proposal is pending drops the review.
 
 Plugins:
 - Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
