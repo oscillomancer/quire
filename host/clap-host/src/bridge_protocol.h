@@ -32,6 +32,7 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 6 (unreleased): error details, restart failures, complete output event
 // metadata in shared memory, an idle-output drain, process wake and ordered clears.
 // 8: auxiliary output ports (ADR-0021) in Create and the data plane.
+// 9: the Activate reply carries the widths the plug-in settled on.
 inline constexpr std::uint32_t kVersion = 9;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
