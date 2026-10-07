@@ -14,6 +14,8 @@ class Vst3Instance {
     std::uint32_t outputChannels() const;
     bool acceptsNotes() const;
     std::uint32_t sidechainChannels() const;  // the first auxiliary input bus (ADR-0018)
+    // The output buses past the main one (ADR-0021), as negotiated.
+    std::vector<AudioPortInfo> auxOutputPorts() const;
     Status activate(double rate, std::uint32_t maxFrames, bool sidechainActive);
     void deactivate();
     std::uint32_t latency() const;

@@ -724,10 +724,11 @@ const Schema<MidiSource>& schemaOf<MidiSource>() {
 Schema<PinMap> pinMapSchema() {
     const PinMap d;
     auto b = schema::object<PinMap>("pin_map");
-    auto pins = schema::arrayOf(intS().range(1, 8));
+    auto pins = schema::arrayOf(intS().range(1, kMaxTrackChannels));
     b.field("in", &PinMap::in, pins);
     dflt(b, d.in);
-    b.field("out", &PinMap::out, pins);
+    // Past the main pair, 0 leaves an auxiliary output unconnected (ADR-0021).
+    b.field("out", &PinMap::out, schema::arrayOf(intS().range(0, kMaxTrackChannels)));
     dflt(b, d.out);
     b.field("key", &PinMap::key, pins);
     dflt(b, d.key);

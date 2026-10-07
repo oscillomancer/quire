@@ -15,6 +15,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 
 #include "supple/clap/semantic_params.h"
@@ -573,6 +574,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->inChannels_ = ports.inChannels;
         self->outChannels_ = ports.outChannels;
         self->keyChannels_ = ports.keyChannels;
+        self->auxOutPorts_ = ports.auxOutputs;
         self->acceptsNotes_ = ports.acceptsNotes;
         self->remoteEditor_ = ports.editor;
         self->hostState_ = std::make_unique<HostState>();
@@ -589,6 +591,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->inChannels_ = (*backing)->inputChannels();
         self->outChannels_ = (*backing)->outputChannels();
         self->keyChannels_ = (*backing)->sidechainChannels();
+        self->auxOutPorts_ = (*backing)->auxOutputPorts();
         self->acceptsNotes_ = (*backing)->acceptsNotes();
         self->vst3_ = std::move(*backing);
         return self;
@@ -649,17 +652,22 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
     // Port configuration: prefer stereo main in/out (or stereo out for instruments).
     if (auto* cfg = static_cast<const clap_plugin_audio_ports_config_t*>(
             ext(CLAP_EXT_AUDIO_PORTS_CONFIG))) {
+        // Among those, the one with the most output ports: a multi-out
+        // instrument's outputs reach the track (ADR-0021).
         const uint32_t n = cfg->count(self->plugin_);
+        std::optional<clap_id> best;
+        uint32_t bestOutputs = 0;
         for (uint32_t i = 0; i < n; ++i) {
             clap_audio_ports_config_t c{};
             if (!cfg->get(self->plugin_, i, &c)) continue;
             const bool stereoOut = c.has_main_output && c.main_output_channel_count == 2;
             const bool stereoIn = !c.has_main_input || c.main_input_channel_count == 2;
-            if (stereoOut && stereoIn) {
-                cfg->select(self->plugin_, c.id);
-                break;
+            if (stereoOut && stereoIn && (!best || c.output_port_count > bestOutputs)) {
+                best = c.id;
+                bestOutputs = c.output_port_count;
             }
         }
+        if (best) cfg->select(self->plugin_, *best);
     }
     if (auto* ports = static_cast<const clap_plugin_audio_ports_t*>(ext(CLAP_EXT_AUDIO_PORTS))) {
         auto mainChannels = [&](bool input) -> uint32_t {
@@ -682,6 +690,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
             if (n > 16)
                 return Error("host.layout", "CLAP layout exceeds 16 audio ports", {},
                              "select a layout with at most 16 ports per direction");
+            std::vector<std::string> names;
             for (uint32_t i = 0; i < n; ++i) {
                 clap_audio_port_info_t p{};
                 const bool ok = ports->get(self->plugin_, i, input, &p);
@@ -689,10 +698,16 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
                     return Error("host.layout", "CLAP port exceeds 64 channels", {},
                                  "select a layout with at most 64 channels per port");
                 list.push_back(ok ? p.channel_count : 0);
+                names.emplace_back(ok ? std::string(p.name, ::strnlen(p.name, sizeof p.name))
+                                      : std::string());
                 if (ok && main < 0 && (p.flags & CLAP_AUDIO_PORT_IS_MAIN))
                     main = static_cast<int>(i);
             }
             if (main < 0 && !list.empty()) main = 0;
+            if (!input)
+                for (std::size_t i = 0; i < list.size(); ++i)
+                    if (static_cast<int>(i) != main)
+                        self->auxOutPorts_.push_back({names[i], list[i]});
         }
         for (std::size_t i = 0; i < h.inPorts.size(); ++i)
             if (static_cast<int>(i) != h.mainIn && h.inPorts[i] > 0) {
@@ -735,6 +750,12 @@ Instance::~Instance() {
     plugin_ = nullptr;
 }
 
+std::uint32_t Instance::auxOutputChannels() const {
+    std::uint32_t n = 0;
+    for (const AudioPortInfo& port : auxOutPorts_) n += port.channels;
+    return n;
+}
+
 Status Instance::setSidechainActive(bool on) {
     if (active_)
         return Error("host.sidechain", "the key can change only while the plug-in is inactive");
@@ -753,6 +774,7 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
         inChannels_ = vst3_->inputChannels();
         outChannels_ = vst3_->outputChannels();
         keyChannels_ = vst3_->sidechainChannels();
+        auxOutPorts_ = vst3_->auxOutputPorts();
         active_ = true;
         sampleRate_ = sampleRate;
         maxFrames_ = maxFrames;
@@ -761,7 +783,7 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
     if (remote_) {
         if (active_) return okStatus();
         SUPPLE_TRY(remote_->activate(sampleRate, minFrames, maxFrames, inChannels_, outChannels_,
-                                     keyChannels_, keyActive_));
+                                     keyChannels_, keyActive_, auxOutputChannels()));
         remote_->refreshLatency();
         active_ = true;
         sampleRate_ = sampleRate;
@@ -1163,12 +1185,19 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
             h.inBuffers[i].channel_count = h.inPorts[i];
             h.inBuffers[i].constant_mask = constant;
         }
+        std::uint32_t aux = 0;  // the next auxiliary output channel (ADR-0021)
         for (std::size_t i = 0; i < h.outPorts.size(); ++i) {
             const bool main = static_cast<int>(i) == h.mainOut;
             float** ptrs = h.pointers.data() + h.outFirst[i];
-            for (std::uint32_t c = 0; c < h.outPorts[i]; ++c)
-                ptrs[c] =
-                    main && c < b.outputChannels ? b.outputs[c] : h.spare[h.outFirst[i] + c].data();
+            for (std::uint32_t c = 0; c < h.outPorts[i]; ++c) {
+                float* to = nullptr;
+                if (main && c < b.outputChannels)
+                    to = b.outputs[c];
+                else if (!main && b.auxOutputs && aux < b.auxOutputChannels)
+                    to = b.auxOutputs[aux];
+                if (!main) ++aux;
+                ptrs[c] = to ? to : h.spare[h.outFirst[i] + c].data();
+            }
             h.outBuffers[i] = {};
             h.outBuffers[i].data32 = ptrs;
             h.outBuffers[i].channel_count = h.outPorts[i];

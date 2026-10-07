@@ -720,9 +720,17 @@ std::string FxWindow::pinsText(const model::PinMap& pins) {
         for (std::size_t i = 1; i < p.size(); ++i) s += "/" + std::to_string(p[i]);
         return s;
     };
-    std::string text = pins.in.empty() && pins.out.empty()
+    // out: the main pair, then the auxiliary outputs' channels (ADR-0021).
+    const std::vector<int> mainOut(pins.out.begin(),
+                                   pins.out.begin() + static_cast<std::ptrdiff_t>(
+                                                          std::min<std::size_t>(2, pins.out.size())));
+    const bool defaultOut = mainOut.empty() || mainOut == std::vector<int>{1, 2};
+    std::string text = pins.in.empty() && defaultOut
                            ? "pins 1/2"
-                           : pair(pins.in) + " \u2192 " + pair(pins.out);
+                           : pair(pins.in) + " \u2192 " + pair(mainOut);
+    const auto outs = std::count_if(pins.out.begin() + static_cast<std::ptrdiff_t>(mainOut.size()),
+                                    pins.out.end(), [](int c) { return c > 0; });
+    if (outs > 0) text += " \u00b7 +" + std::to_string(outs) + " outs";
     if (!pins.key.empty()) text += " \u00b7 key " + pair(pins.key);
     return text;
 }
@@ -755,15 +763,32 @@ void FxWindow::openPinsMenu(model::Id fx, const ui::Rect& anchor) {
     auto label = [](const char* what, int first) {
         return std::string(what) + " " + std::to_string(first) + "/" + std::to_string(first + 1);
     };
+    // Out sets the main pair; the auxiliary outputs' channels after it stay
+    // (ADR-0021).
+    const std::vector<int> auxOut(
+        now.out.size() > 2 ? now.out.begin() + 2 : now.out.end(), now.out.end());
+    auto mainOf = [](const std::vector<int>& out) {
+        return out.size() >= 2 && out[0] == 1 && out[1] == 2
+                   ? std::vector<int>{}
+                   : std::vector<int>(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(
+                                                                    std::min<std::size_t>(2, out.size())));
+    };
     for (const char* part : {"In", "Out"}) {
+        const bool in = part[0] == 'I';
         for (int first = 1; first + 1 <= channels; first += 2) {
             ui::MenuItem m;
             m.label = label(part, first);
-            const std::vector<int>& cur = part[0] == 'I' ? now.in : now.out;
-            m.checked = cur == pairOf(first);
-            m.run = [set, now, first, pairOf, in = part[0] == 'I'] {
+            m.checked = (in ? now.in : mainOf(now.out)) == pairOf(first);
+            m.run = [set, now, first, pairOf, in, auxOut] {
                 model::PinMap p = now;
-                (in ? p.in : p.out) = pairOf(first);
+                if (in) {
+                    p.in = pairOf(first);
+                } else if (auxOut.empty()) {
+                    p.out = pairOf(first);
+                } else {
+                    p.out = {first, first + 1};
+                    p.out.insert(p.out.end(), auxOut.begin(), auxOut.end());
+                }
                 set(p);
             };
             items.push_back(std::move(m));

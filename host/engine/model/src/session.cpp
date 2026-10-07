@@ -776,8 +776,13 @@ std::optional<Id> trackOfFx(const Session& s, Id fx) {
 }
 
 bool sendsTo(const Session& s, Id from, Id to) {
-    for (const auto& e : s.routes)
-        if (e.value->from.track == from && e.value->to.track == to && !e.value->to.fx) return true;
+    for (const auto& e : s.routes) {
+        const Route& r = *e.value;
+        if (r.from.track != from || r.to.track != to || r.to.fx) continue;
+        if (std::all_of(r.channels.from.begin(), r.channels.from.end(),
+                        [](int c) { return c <= 2; }))
+            return true;
+    }
     return false;
 }
 

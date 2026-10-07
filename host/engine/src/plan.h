@@ -340,6 +340,13 @@ struct Stage {
     bool pinned = false;
     std::vector<MonoDelay> chanDelay;
     Stereo pinBuf;
+    // Auxiliary outputs (ADR-0021): the track channel (0-based; -1: none)
+    // each of the plug-in's auxiliary output channels writes, as far as it
+    // has them; their buffers for one block and the pointers process() gets.
+    std::vector<int> auxOutPin;
+    std::vector<std::vector<float>> auxOut;
+    std::vector<float*> auxOutPtr;
+    bool auxWritten = false;  // the plug-in ran this block: its aux outputs are fresh
     std::vector<host::Event> blockEvents;
     std::vector<HeldVoice> voices, pendingVoices;          // bounded input preflight
     std::vector<NoteSource> noteSources, noteSourceIndex;  // immutable compiled identities

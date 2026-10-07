@@ -1701,7 +1701,7 @@ Result:
 
 Insert a plugin into a track's (or a take's) FX chain and return its id.
 
-plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). take instead of track: the take's own chain (take FX) — the item plays through it before the track's input, cut to the item; an instrument there plays a MIDI take on its own.
+plugin: id or name from plugin.list; patch: an initial (partial) patch for semantic plugins. chain: main (default; the track's effects) or input (the recorded-input chain). take instead of track: the take's own chain (take FX) — the item plays through it before the track's input, cut to the item; an instrument there plays a MIDI take on its own. An instrument with outputs past its main pair (a multi-out sampler's Kick, Snare...) gets that many more channels on the track, and its pins.out sends each output there; route.matrix lists them and route.add {channels: {from: [3, 4]}} sends one to a buss.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2570,7 +2570,7 @@ Result:
 
 Set instance options: bypass, offline, wet (%), label, isolation, pins.
 
-isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). pins: which of the track's channels (1-based; track.set channels adds 3-8) the plugin reads ({in: [l, r]}), writes ({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin with a sidechain input); {} restores 1/2 in and out.
+isolation: in_process, dedicated (the plugin runs in a process of its own: a crash silences only it), shared_bridge (one process for all such plugins), inherit (the project default: in_process). pins: which of the track's channels (1-based; track.set channels adds 3-64) the plugin reads ({in: [l, r]}), writes ({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin with a sidechain input); {} restores 1/2 in and out. out past its first two entries: a track channel for each of the plugin's auxiliary output channels in order (0: unconnected); fx.add sets them for a multi-out instrument.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -6091,7 +6091,7 @@ Result:
 
 What can be routed where: strips, plug-in keys, sends and blocked pairs.
 
-sources: strips in tree order (depth, parent, parent_send). destinations: strips and plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule applies (masters feed only keys), the destination's rule applies (channels take only hardware audio), it is the same strip, or it is listed in cycles (the destination already feeds the source). sends: existing routes per pair. Otherwise route.add accepts the pair.
+sources: strips in tree order (depth, parent, parent_send). destinations: strips and plug-in keys (fx with a sidechain input). A pair is blocked when the source's rule applies (masters feed only keys), the destination's rule applies (channels take only hardware audio), it is the same strip, or it is listed in cycles (the destination already feeds the source). sends: existing routes per pair. Otherwise route.add accepts the pair. A source's channels past 2 are auxiliary (ADR-0020); channel_names names those a multi-out plug-in writes ({"3": "Kick"}), and route.add {channels: {from: [3, 4], to: [1, 2]}} sends that pair.
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -6951,7 +6951,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `name` | string |  |  |  |  |
 | `parent` | string |  |  |  | Parent track id, e.g. "tr_1". |
 | `index` | integer |  | 0.0.. |  |  |
-| `channels` | integer |  | 1.0..8.0 |  |  |
+| `channels` | integer |  | 1.0..64.0 |  |  |
 
 ### Result
 
@@ -7218,7 +7218,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `monitor` | string |  |  |  |  |
 | `parent_send` | boolean |  |  |  | The implicit send to the parent buss/master (off: only explicit sends leave the strip) |
 | `timebase` | string |  |  |  | What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now |
-| `channels` | integer |  | 1.0..8.0 |  | 1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 for routes and plug-in pins (a detector on 3/4), outside the fader, pan and parent send |
+| `channels` | integer |  | 1.0..64.0 |  | 1-2: the strip's main pair; up to 64 adds auxiliary channels 3-64 for routes and plug-in pins (a detector on 3/4, a multi-out instrument's outputs), outside the fader, pan and parent send |
 
 ### Result
 

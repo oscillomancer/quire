@@ -123,6 +123,13 @@ struct Transport {
     double loopStartBeat = 0.0, loopEndBeat = 0.0, loopStartSeconds = 0.0, loopEndSeconds = 0.0;
 };
 
+// An audio port past the main one: a multi-out instrument's "Kick" or
+// "Out 3-4" (ADR-0021).
+struct AudioPortInfo {
+    std::string name;
+    std::uint32_t channels = 0;
+};
+
 struct ProcessBlock {
     const float* const* inputs = nullptr;  // main input channels (may be null for instruments)
     std::uint32_t inputChannels = 0;
@@ -131,6 +138,11 @@ struct ProcessBlock {
     // The key (ADR-0018): the plug-in's sidechain input; null = silence.
     const float* const* sidechain = nullptr;
     std::uint32_t sidechainChannels = 0;
+    // The outputs past the main port (ADR-0021): every auxiliary output
+    // port's channels in declaration order. Null, or fewer channels than the
+    // plug-in has: the rest go to scratch.
+    float* const* auxOutputs = nullptr;
+    std::uint32_t auxOutputChannels = 0;
     std::uint32_t frames = 0;
     std::span<const Event> events;         // sorted by time
     const Transport* transport = nullptr;  // null: no transport info
@@ -215,6 +227,10 @@ class Instance {
     // The sidechain (key) input: a CLAP plug-in's first non-main input port, a
     // VST3's first auxiliary input bus; 0 when it has none (ADR-0018).
     std::uint32_t sidechainChannels() const { return keyChannels_; }
+    // The output ports past the main one (a multi-out instrument's), in
+    // order; their channels are ProcessBlock::auxOutputs (ADR-0021).
+    const std::vector<AudioPortInfo>& auxOutputPorts() const { return auxOutPorts_; }
+    std::uint32_t auxOutputChannels() const;
     // Whether a key is connected. VST3 plug-ins see it as their auxiliary bus
     // being active (some then key from it); set before activate().
     Status setSidechainActive(bool on);
@@ -370,6 +386,7 @@ class Instance {
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;
     std::uint32_t inChannels_ = 0, outChannels_ = 0, keyChannels_ = 0;
+    std::vector<AudioPortInfo> auxOutPorts_;
     bool acceptsNotes_ = false, keyActive_ = false;
     bool active_ = false;
     std::atomic<bool> processing_{false};  // written on the audio thread

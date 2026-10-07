@@ -431,7 +431,7 @@ Result<model::Route> buildRoute(const RouteArgs& a, const model::Session& s, Eng
         // The main pair, plus a strip's auxiliary channels (ADR-0020).
         const int sourceChannels = std::max(2, s.tracks.find(*r.from.track)->channels);
         const int targetChannels = r.to.fx ? 2 : std::max(2, s.tracks.find(*target)->channels);
-        const std::string more = "track.set channels adds channels 3-8";
+        const std::string more = "track.set channels adds channels 3-64";
         for (std::size_t k = 0; k < m.from.size(); ++k) {
             if (m.from[k] > sourceChannels)
                 return Error("route.channels",
@@ -719,7 +719,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             "applies (masters feed only keys), the destination's rule applies (channels take only "
             "hardware audio), it is the same strip, or it is listed in cycles (the destination "
             "already feeds the source). sends: existing routes per pair. Otherwise route.add "
-            "accepts the pair.";
+            "accepts the pair. A source's channels past 2 are auxiliary (ADR-0020); "
+            "channel_names names those a multi-out plug-in writes ({\"3\": \"Kick\"}), and "
+            "route.add {channels: {from: [3, 4], to: [1, 2]}} sends that pair.";
         c.tags = {"route"};
         c.args = schema::object<cmd::NoArgs>("no_args").build();
         c.result = schema::any();
@@ -766,6 +768,26 @@ void registerExtraCommands(cmd::Registry& registry) {
                     src["parent"] = t.parent->str();
                     src["parent_send"] = t.parentSend.enabled;
                 }
+                src["channels"] = t.channels;
+                // The auxiliary channels a multi-out plug-in writes, by its
+                // ports' names (ADR-0021); the first plug-in to name one wins.
+                json::Value names = json::Value::object();
+                for (Id fx : t.chain) {
+                    const model::FxInstance* inst = s.fx.find(fx);
+                    if (!inst || inst->pins.out.size() <= 2) continue;
+                    auto ports = a.fxAuxOutputs(*inst);
+                    if (!ports) continue;
+                    std::size_t k = 2;
+                    for (const host::AudioPortInfo& port : *ports)
+                        for (std::uint32_t ch = 0; ch < port.channels; ++ch, ++k) {
+                            if (k >= inst->pins.out.size()) break;
+                            const int channel = inst->pins.out[k];
+                            if (channel < 3 || channel > t.channels) continue;
+                            const std::string key = std::to_string(channel);
+                            if (!names.find(key) && !port.name.empty()) names[key] = port.name;
+                        }
+                }
+                if (!names.asObject().empty()) src["channel_names"] = std::move(names);
                 if (t.type == model::StripType::Master)
                     src["rule"] = rule(
                         "route.strip_type", "masters are terminal (they may feed plug-in keys)",

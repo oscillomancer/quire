@@ -103,7 +103,7 @@ struct ControllerWatch {
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
-    REQUIRE(found->size() == 5);
+    REQUIRE(found->size() == 6);
     CHECK((*found)[0].format == "vst3");
     CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
     CHECK((*found)[0].version == "2.0");
@@ -165,6 +165,38 @@ TEST_CASE("VST3 plug-ins with a sidechain bus get every bus; kNotImplemented sta
     CHECK(static_cast<double>(buffer.orr[10]) == doctest::Approx(0.5));
     instance.stopProcessing();
     instance.deactivate();
+}
+
+TEST_CASE("a VST3 instrument's auxiliary output buses are active and reach the block") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    auto multi = std::find_if(found->begin(), found->end(),
+                              [](const PluginInfo& p) { return p.name == "Test VST3 Multi-Out"; });
+    REQUIRE(multi != found->end());
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(*multi, {}, isolated);
+        REQUIRE(made);
+        Instance& p = **made;
+        REQUIRE(p.auxOutputPorts().size() == 1);
+        CHECK(p.auxOutputPorts()[0].name == "Kick");
+        CHECK(p.auxOutputChannels() == 2);
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.startProcessing());
+        Buffers buf(32);
+        std::vector<float> kl(32), kr(32);
+        float* aux[2] = {kl.data(), kr.data()};
+        ProcessBlock b = buf.block(32, {}, false);
+        b.auxOutputs = aux;
+        b.auxOutputChannels = 2;
+        REQUIRE(p.process(b));
+        CHECK(buf.ol[0] == 0.125f);
+        CHECK(kl[0] == 0.25f);
+        CHECK(kr[31] == 0.25f);
+        p.stopProcessing();
+        p.deactivate();
+    }
 }
 
 TEST_CASE("VST3 fixture notes, latency, and bridge") {
@@ -307,7 +339,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 12);
+    REQUIRE(list->size() == 13);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -318,6 +350,41 @@ TEST_CASE("scan finds the fixtures with their capabilities") {
     auto bad = Instance::create(PluginInfo{.id = "nope", .path = kFixture}, {});
     REQUIRE_FALSE(bad);
     CHECK(bad.error().code == "host.create");
+}
+
+TEST_CASE("a multi-out instrument's auxiliary outputs reach the block, in process and bridged") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(find("com.suppleaudio.test.multiout"), {}, isolated);
+        REQUIRE(made);
+        Instance& p = **made;
+        CHECK(p.audioInputChannels() == 0);
+        CHECK(p.audioOutputChannels() == 2);
+        REQUIRE(p.auxOutputPorts().size() == 2);
+        CHECK(p.auxOutputPorts()[0].name == "Kick");
+        CHECK(p.auxOutputPorts()[1].name == "Snare");
+        CHECK(p.auxOutputPorts()[1].channels == 2);
+        CHECK(p.auxOutputChannels() == 4);
+        REQUIRE(p.activate(48000, 1, 64));
+        REQUIRE(p.startProcessing());
+        Buffers buf(32);
+        std::vector<std::vector<float>> aux(3, std::vector<float>(32, -1.0f));
+        float* auxOut[3] = {aux[0].data(), aux[1].data(), aux[2].data()};
+        ProcessBlock b = buf.block(32, {}, false);
+        b.auxOutputs = auxOut;
+        b.auxOutputChannels = 3;  // one short: the Snare's right goes to scratch
+        REQUIRE(p.process(b));
+        CHECK(buf.ol[31] == 0.125f);
+        CHECK(aux[0][0] == 0.25f);
+        CHECK(aux[1][31] == 0.25f);
+        CHECK(aux[2][7] == 0.5f);
+        // Without aux buffers the plug-in still gets every port (scratch).
+        REQUIRE(p.process(buf.block(32, {}, false)));
+        CHECK(buf.orr[0] == 0.125f);
+        p.stopProcessing();
+        p.deactivate();
+    }
 }
 
 TEST_CASE("gain: ports, params, sample-accurate automation") {
@@ -1217,7 +1284,7 @@ TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bund
     const std::array<fs::path, 3> paths{first.parent_path(), second.parent_path(), first};
     auto found = scan(paths);
     REQUIRE(found);
-    REQUIRE(found->size() == 10);
+    REQUIRE(found->size() == 12);
     CHECK(found->front().path == first);
     CHECK(found->back().path == second);
 }
@@ -1461,7 +1528,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 7);
+    CHECK(bridge::kVersion == 8);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {

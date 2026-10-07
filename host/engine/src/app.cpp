@@ -151,6 +151,12 @@ Result<std::uint32_t> EngineApp::fxSidechainChannels(const model::FxInstance& fx
     return (*in)->sidechainChannels();
 }
 
+Result<std::vector<host::AudioPortInfo>> EngineApp::fxAuxOutputs(const model::FxInstance& fx) {
+    auto in = scratch(fx);
+    if (!in) return std::move(in).error();
+    return (*in)->auxOutputPorts();
+}
+
 namespace {
 Status restoreFx(host::Instance& instance, const model::FxInstance& fx, const model::Session& s) {
     if (fx.patch)

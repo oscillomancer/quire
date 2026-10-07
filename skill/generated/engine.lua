@@ -826,7 +826,7 @@ q = nil
 ---@field monitor? "off"|"on"|"auto"
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 ---@field timebase? "project"|"time"|"beats"|"beats_position" What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now
----@field channels? integer 1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 for routes and plug-in pins (a detector on 3/4), outside the fader, pan and parent send
+---@field channels? integer 1-2: the strip's main pair; up to 64 adds auxiliary channels 3-64 for routes and plug-in pins (a detector on 3/4, a multi-out instrument's outputs), outside the fader, pan and parent send
 
 ---@class Quire.track_template_list_result
 ---@field templates table[]

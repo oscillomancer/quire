@@ -105,7 +105,7 @@ Fields:
 | `name`, `color`, `notes` | string | |
 | `parent` | track id or null | a buss or master; null exactly for masters (the roots) |
 | `children` | [track id] | order among siblings; empty on channels |
-| `channels` | int | 1-8 (busses and masters ≥ 2): 1/2 are the main pair (fader, pan, Console 9, meters, parent send); 3-8 are auxiliary channels that routes and plug-in pins address, never faded, panned or sent to the parent (ADR-0020). A mono channel is placed by its pan |
+| `channels` | int | 1-64 (busses and masters ≥ 2): 1/2 are the main pair (fader, pan, Console 9, meters, parent send); 3-64 are auxiliary channels that routes and plug-in pins address, never faded, panned or sent to the parent (ADR-0020); a multi-out instrument's outputs land there (ADR-0021). A mono channel is placed by its pan |
 | `volume` | dB (−inf..+12) | the fader: C9 Channel Fader on channels/busses (0 dB = native unity; +12.04 is the native top, clamped to +12), plain gain on masters |
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
@@ -164,7 +164,10 @@ kept), `offline` (unloaded; audio passes through), `wet` % (dry/wet),
 (1, 2, 4, 8), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
 channels (1-based) a track-chain plug-in reads, writes and keys from (a
 detector on 3/4); one entry feeds both pins (in, key) or takes the left output
-(out); empty: 1/2 in and out, the key from key routes only (ADR-0020),
+(out); empty: 1/2 in and out, the key from key routes only (ADR-0020); `out`
+past its first two entries names a track channel per auxiliary output channel
+of a multi-out plug-in, in order (0: unconnected; `fx.add` sets them for an
+instrument, growing the track, ADR-0021),
 `parallel` (bool: run in
 parallel with the previous instance in the chain, outputs summed), `pdc`
 (`compensate|ignore`), `auto_bypass_on_silence` (bool), `container` (for

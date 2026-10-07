@@ -58,9 +58,13 @@ struct BridgeInstance {
         auto* inAudio = reinterpret_cast<float*>(base + layout.inAudio);
         auto* outAudio = reinterpret_cast<float*>(base + layout.outAudio);
         auto* keyAudio = reinterpret_cast<float*>(base + layout.keyAudio);
+        auto* auxOutAudio = reinterpret_cast<float*>(base + layout.auxOutAudio);
         const float* in[kMaxChannels];
         const float* key[kMaxChannels];
         float* out[kMaxChannels];
+        float* auxOut[kMaxAuxChannels];
+        for (std::uint32_t c = 0; c < layout.auxOutChannels; ++c)
+            auxOut[c] = auxOutAudio + static_cast<std::size_t>(c) * layout.maxFrames;
         for (std::uint32_t c = 0; c < layout.keyChannels; ++c)
             key[c] = keyAudio + static_cast<std::size_t>(c) * layout.maxFrames;
         for (std::uint32_t c = 0; c < layout.inChannels; ++c)
@@ -82,6 +86,10 @@ struct BridgeInstance {
                     b.inputChannels = layout.inChannels;
                     b.outputs = out;
                     b.outputChannels = layout.outChannels;
+                    if (layout.auxOutChannels) {
+                        b.auxOutputs = auxOut;
+                        b.auxOutputChannels = layout.auxOutChannels;
+                    }
                     if (hdr->hasKey && layout.keyChannels) {
                         b.sidechain = key;
                         b.sidechainChannels = layout.keyChannels;
@@ -209,6 +217,13 @@ struct Bridge {
             w.u8(slot->instance->info().semantic ? 1 : 0);
             w.u32(slot->instance->sidechainChannels());
             w.u8(slot->instance->hasEditor() ? 1 : 0);
+            const auto& aux = slot->instance->auxOutputPorts();
+            const auto ports = std::min<std::size_t>(aux.size(), kMaxAuxPorts);
+            w.u32(static_cast<std::uint32_t>(ports));
+            for (std::size_t i = 0; i < ports; ++i) {
+                w.str(aux[i].name);
+                w.u32(aux[i].channels);
+            }
             instances.emplace(newId, std::move(slot));
             return reply(w);
         }
@@ -250,12 +265,12 @@ struct Bridge {
                 }
                 mapSize = size;
                 hdr = static_cast<Header*>(map);
-                layout =
-                    Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels, hdr->keyChannels);
+                layout = Layout(hdr->maxFrames, hdr->inChannels, hdr->outChannels,
+                                hdr->keyChannels, hdr->auxOutChannels);
                 if (hdr->magic != kMagic || hdr->version != kVersion || layout.size > size ||
                     hdr->maxFrames != maxFrames || maxFrames == 0 ||
                     hdr->inChannels > kMaxChannels || hdr->outChannels > kMaxChannels ||
-                    hdr->keyChannels > kMaxChannels) {
+                    hdr->keyChannels > kMaxChannels || hdr->auxOutChannels > kMaxAuxChannels) {
                     unmap();
                     return fail(Error("bridge.activate", "shared memory layout mismatch"));
                 }

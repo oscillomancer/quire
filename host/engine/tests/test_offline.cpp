@@ -1038,6 +1038,59 @@ TEST_CASE("auxiliary channels stay in their strip; pins move them to the main pa
     CHECK(peak(narrow.audio.channels[0]) < 1e-9);
 }
 
+TEST_CASE("a multi-out instrument's outputs reach their channels and route on (ADR-0021)") {
+    // A (6 channels, not to its parent) plays the multi-out fixture: Main
+    // 0.125 on 1/2, Kick 0.25 pinned to 3/4, Snare 0.5 to 5/6. A route from
+    // one pair to buss K is what K (and the master) hears; linear console.
+    host::setBridgeExecutable(BRIDGE_PATH);
+    constexpr const char* kMultiOut = "com.suppleaudio.test.multiout";
+    for (auto isolation : {model::Isolation::InProcess, model::Isolation::Dedicated}) {
+        CAPTURE(static_cast<int>(isolation));
+        auto pool = makePool();
+        auto build = [&](std::vector<int> from, std::vector<int> pins, bool bypass = false) {
+            model::EditTxn t(model::Session::create({.console9 = false}), 1);
+            const Id k = addTrack(t, "K", kMaster, model::StripType::Buss);
+            const Id a = addTrack(t, "A");
+            t.modify<model::Track>(a, [](model::Track& x) {
+                x.parentSend.enabled = false;
+                x.channels = 6;
+            });
+            const Id fx = addFx(t, a, kMultiOut);
+            t.modify<model::FxInstance>(fx, [&](model::FxInstance& f) {
+                f.pins.out = pins;
+                f.isolation = isolation;
+                f.bypass = bypass;
+            });
+            model::Route route;
+            route.from.track = a;
+            route.to.track = k;
+            route.channels = {from, {1, 2}};
+            t.create(route);
+            return commit(t);
+        };
+        const std::vector<int> pinned{1, 2, 3, 4, 5, 6};
+        auto level = [&](const OfflineResult& r) {
+            REQUIRE(r.warnings.empty());
+            return peak(r.audio.channels[0], r.audio.frames() / 2);
+        };
+        const double main = level(render(build({1, 2}, pinned), pool, 0.2));
+        const double kick = level(render(build({3, 4}, pinned), pool, 0.2));
+        const double snare = level(render(build({5, 6}, pinned), pool, 0.2));
+        // The main pair's route goes through the pan law; aux links are
+        // linear, so the outputs' levels compare exactly.
+        CHECK(main > 0.01);
+        CHECK(kick > 0.01);
+        CHECK(snare / kick == doctest::Approx(2.0).epsilon(1e-4));
+        // Unpinned or 0, an output is not connected; bypassed, none is.
+        CHECK(level(render(build({3, 4}, {1, 2, 0, 0, 5, 6}), pool, 0.2)) < 1e-9);
+        CHECK(level(render(build({3, 4}, {}), pool, 0.2)) < 1e-9);
+        CHECK(level(render(build({5, 6}, pinned, true), pool, 0.2)) < 1e-9);
+        // Pins past the track's channels are warned about and skipped.
+        const auto beyond = render(build({3, 4}, {1, 2, 3, 4, 9, 10}), pool, 0.2);
+        CHECK(beyond.warnings.size() == 2);
+    }
+}
+
 TEST_CASE("key routes: a plug-in without a sidechain is warned about; cycles are invalid") {
     auto pool = makePool();
     model::EditTxn t(model::Session::create({.console9 = false}), 1);

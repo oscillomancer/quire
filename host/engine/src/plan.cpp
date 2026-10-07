@@ -296,7 +296,7 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             }
             return st;
         };
-        n.auxCount = std::clamp(t.channels - 2, 0, 6);
+        n.auxCount = std::clamp(t.channels - 2, 0, model::kMaxTrackChannels - 2);
         const int channels = 2 + n.auxCount;
         for (Id fxId : t.chain) {
             Stage st = makeStage(fxId);
@@ -317,9 +317,23 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                 st.inPin[0] = pins.in[0] - 1;
                 st.inPin[1] = pins.in[pins.in.size() > 1 ? 1 : 0] - 1;
             }
-            if (valid(pins.out, "output")) {
-                st.outPin[0] = pins.out[0] - 1;
-                st.outPin[1] = pins.out.size() > 1 ? pins.out[1] - 1 : -1;
+            // out: the main pair, then the auxiliary outputs' channels (ADR-0021).
+            const std::vector<int> mainOut(
+                pins.out.begin(),
+                pins.out.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(2, pins.out.size())));
+            if (valid(mainOut, "output")) {
+                st.outPin[0] = mainOut[0] - 1;
+                st.outPin[1] = mainOut.size() > 1 ? mainOut[1] - 1 : -1;
+            }
+            for (std::size_t k = 2; k < pins.out.size(); ++k) {
+                int c = pins.out[k];
+                if (c < 0 || c > channels) {
+                    p.warnings.push_back(fxId.str() + ": output pin " + std::to_string(c) +
+                                         " is beyond the track's " + std::to_string(channels) +
+                                         " channels; ignored");
+                    c = 0;
+                }
+                st.auxOutPin.push_back(c - 1);
             }
             st.pinned =
                 st.inPin[0] != 0 || st.inPin[1] != 1 || st.outPin[0] != 0 || st.outPin[1] != 1;
@@ -696,6 +710,13 @@ Status prepare(Plan& p, const Session& s) {
             SUPPLE_TRY(prepareStage(st));
             if (n.noteTarget < 0 && st.instance && st.instance->acceptsNotes())
                 n.noteTarget = stageIndex;
+            // Auxiliary outputs as far as the plug-in has them (ADR-0021).
+            const std::size_t auxOuts = st.instance ? st.instance->auxOutputChannels() : 0;
+            if (st.auxOutPin.size() > auxOuts) st.auxOutPin.resize(auxOuts);
+            while (!st.auxOutPin.empty() && st.auxOutPin.back() < 0) st.auxOutPin.pop_back();
+            st.auxOut.assign(st.auxOutPin.size(), std::vector<float>(block, 0.0f));
+            st.auxOutPtr.clear();
+            for (auto& buffer : st.auxOut) st.auxOutPtr.push_back(buffer.data());
             st.chanDelay.clear();
             if (st.pinned || n.auxCount > 0) {
                 st.chanDelay.resize(static_cast<std::size_t>(2 + n.auxCount));
@@ -1396,6 +1417,7 @@ void releaseVoices(Stage& st, bool includeLive, bool onlyPending = false,
 bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Transport& transport,
               std::int64_t pos, const void* self) SUPPLE_RT {
     st.outEvents.clear();
+    st.auxWritten = false;
     // A stage whose plugin is not processing (start_processing failed)
     // passes audio through, delay-compensated, like a bypass.
     if (st.callbackBypass || !st.instance || !st.instance->processing() ||
@@ -1445,12 +1467,17 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
         b.sidechain = key;
         b.sidechainChannels = st.keyChannels;
     }
+    if (!st.auxOutPtr.empty()) {
+        b.auxOutputs = st.auxOutPtr.data();
+        b.auxOutputChannels = static_cast<std::uint32_t>(st.auxOutPtr.size());
+    }
     b.frames = n;
     b.events = st.blockEvents;
     b.transport = &transport;
     b.steadyTime = pos;
     if (!st.instance->process(b, &st.outEvents)) return false;
     st.processed = true;
+    st.auxWritten = true;
     st.sleeping = st.autoBypassOnSilence && st.instance->sleeping();
     // Dry signal delayed by the stage's latency: an instrument adds its
     // output to what came in; an effect mixes wet and dry.
@@ -1483,6 +1510,14 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
     return true;
 }
 
+// A multi-out plug-in's auxiliary outputs replace the track channels they
+// are pinned to (ADR-0021), unless it is bypassed or did not run.
+void writeAuxOutputs(Node& node, const Stage& st, std::uint32_t n) SUPPLE_RT {
+    if (!st.auxWritten || st.bypass) return;
+    for (std::size_t k = 0; k < st.auxOutPin.size(); ++k)
+        if (st.auxOutPin[k] >= 0) std::copy_n(st.auxOut[k].data(), n, node.channel(st.auxOutPin[k]));
+}
+
 // A stage of a strip with auxiliary channels, or with pins (ADR-0020): the
 // plug-in reads its input pins and writes its output pins (its dry signal is
 // its input's); the channels it does not write are delayed by its latency. A
@@ -1490,11 +1525,14 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
 bool runPinned(Plan& p, Node& node, Stage& st, std::uint32_t n, const host::Transport& transport,
                std::int64_t pos, const void* self) SUPPLE_RT {
     st.outEvents.clear();
+    st.auxWritten = false;
     const int channels = 2 + node.auxCount;
     if (!st.pinned) {  // the main pair as usual; the aux channels keep time
         for (int c = 2; c < channels; ++c)
             st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
-        return runStage(p, st, node.sum, n, transport, pos, self);
+        if (!runStage(p, st, node.sum, n, transport, pos, self)) return false;
+        writeAuxOutputs(node, st, n);
+        return true;
     }
     if (st.callbackBypass || !st.instance || !st.instance->processing() ||
         (self && st.instance->owner() != self) ||
@@ -1522,6 +1560,7 @@ bool runPinned(Plan& p, Node& node, Stage& st, std::uint32_t n, const host::Tran
             st.chanDelay[static_cast<std::size_t>(c)].process(node.channel(c), n);
     std::copy_n(st.pinBuf.l.begin(), n, node.channel(st.outPin[0]));
     if (st.outPin[1] >= 0) std::copy_n(st.pinBuf.r.begin(), n, node.channel(st.outPin[1]));
+    writeAuxOutputs(node, st, n);
     return true;
 }
 

@@ -221,6 +221,12 @@ bool validReply(Op op, Reader r) {
         case Op::Create: {
             if (!r.u32()) return false;
             r.skip(15);
+            const auto ports = r.u32();  // auxiliary outputs: name, channels
+            if (ports > kMaxAuxPorts) return false;
+            for (std::uint32_t i = 0; i < ports && r.ok(); ++i) {
+                r.skipString();
+                r.skip(4);
+            }
             break;
         }
         case Op::Params: {

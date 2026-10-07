@@ -1028,6 +1028,60 @@ clap_process_status CLAP_ABI keyMixProcess(const clap_plugin_t*, const clap_proc
     return CLAP_PROCESS_CONTINUE;
 }
 
+// --- multi-out (a multi-output instrument, ADR-0021) ---------------------------------------
+// No inputs; outputs: "Main" (stereo), "Kick" (stereo) and "Snare" (stereo),
+// each a constant level (0.125, 0.25, 0.5 on both channels) so where each
+// lands shows in a render. A host that does not give every declared port a
+// buffer gets CLAP_PROCESS_ERROR.
+
+const clap_plugin_descriptor_t* multiOutDescriptor() {
+    static const char* features[] = {CLAP_PLUGIN_FEATURE_INSTRUMENT, nullptr};
+    static const clap_plugin_descriptor_t d = {CLAP_VERSION_INIT,
+                                               "com.suppleaudio.test.multiout",
+                                               "Test Multi-Out",
+                                               "Supple Audio",
+                                               "",
+                                               "",
+                                               "",
+                                               "0.1.0",
+                                               "Three stereo outputs at fixed levels",
+                                               features};
+    return &d;
+}
+struct MultiOut {
+    clap_plugin_t plugin{};
+    const clap_host_t* host = nullptr;
+};
+constexpr float kMultiOutLevels[3] = {0.125f, 0.25f, 0.5f};
+uint32_t CLAP_ABI multiOutPortCount(const clap_plugin_t*, bool input) { return input ? 0 : 3; }
+bool CLAP_ABI multiOutPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
+                              clap_audio_port_info_t* info) {
+    if (isInput || index >= 3) return false;
+    std::memset(info, 0, sizeof(*info));
+    info->id = index;
+    const char* names[3] = {"Main", "Kick", "Snare"};
+    std::snprintf(info->name, sizeof(info->name), "%s", names[index]);
+    info->flags = index == 0 ? CLAP_AUDIO_PORT_IS_MAIN : 0;
+    info->channel_count = 2;
+    info->port_type = CLAP_PORT_STEREO;
+    info->in_place_pair = CLAP_INVALID_ID;
+    return true;
+}
+const clap_plugin_audio_ports_t kMultiOutPorts = {multiOutPortCount, multiOutPortGet};
+const void* CLAP_ABI multiOutExt(const clap_plugin_t*, const char* id) {
+    return !std::strcmp(id, CLAP_EXT_AUDIO_PORTS) ? &kMultiOutPorts : nullptr;
+}
+bool CLAP_ABI multiOutActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
+clap_process_status CLAP_ABI multiOutProcess(const clap_plugin_t*, const clap_process_t* p) {
+    if (p->audio_outputs_count != 3) return CLAP_PROCESS_ERROR;
+    for (uint32_t port = 0; port < 3; ++port) {
+        if (p->audio_outputs[port].channel_count != 2) return CLAP_PROCESS_ERROR;
+        for (uint32_t c = 0; c < 2; ++c)
+            std::fill_n(p->audio_outputs[port].data32[c], p->frames_count, kMultiOutLevels[port]);
+    }
+    return CLAP_PROCESS_CONTINUE;
+}
+
 // --- crash (the isolation fixture) -------------------------------------------------------
 // An effect that passes audio through until its Mode parameter says otherwise:
 // 1 crashes the process in process() (SIGSEGV), 2 hangs it there.
@@ -1145,7 +1199,7 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 12; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 13; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0    ? gainDescriptor()
            : i == 1  ? sineDescriptor()
@@ -1159,6 +1213,7 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
            : i == 9  ? malformedSchemaDescriptor()
            : i == 10 ? oversizedDescriptor(true)
            : i == 11 ? oversizedDescriptor(false)
+           : i == 12 ? multiOutDescriptor()
                      : nullptr;
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
@@ -1216,6 +1271,9 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
         return make<Crash>(host, crashDescriptor(), crashActivate, crashProcess, crashExt);
     if (!std::strcmp(id, keyMixDescriptor()->id))
         return make<KeyMix>(host, keyMixDescriptor(), keyMixActivate, keyMixProcess, keyMixExt);
+    if (!std::strcmp(id, multiOutDescriptor()->id))
+        return make<MultiOut>(host, multiOutDescriptor(), multiOutActivate, multiOutProcess,
+                              multiOutExt);
     return nullptr;
 }
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDesc, factoryCreate};

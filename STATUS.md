@@ -242,6 +242,14 @@ Nate's next list, done by the orchestrator:
   the same instance restarts, the new latency is compensated); VST3
   kLatencyChanged reactivates as the SDK requires. VST3 builds made with
   clap-wrapper only forward the request while their editor is open.
+- VST3 editors: the view's size is asked before it is attached, so
+  clap-wrapper builds open at their CLAP size (they sized from 0x0 to their
+  minimum). A send drag onto a strip the track already sends to adds nothing.
+- Multi-output plug-ins (ADR-0021): a CLAP plug-in's extra output ports and a
+  VST3's auxiliary output buses reach the engine (bridge protocol 8); strips
+  have up to 64 channels; `fx.add` gives an instrument's outputs new channels
+  (`pins.out` past the main pair); the routing matrix has a row per pair
+  ("3/4 Kick") that sends it on. RT ≡ offline, in process and bridged.
 
 ## Team (Hermes workers via Herdr; Codex retired)
 

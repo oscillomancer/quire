@@ -97,8 +97,53 @@ TEST_CASE("auxiliary channels over the bus: channels, routes to 3/4, key pins (A
     // {} restores the default pins.
     run(bus, "fx.set", R"({"fx":"fx_2","pins":{}})");
     CHECK(app->head().fx.find(*model::Id::parse("fx_2"))->pins.empty());
-    // Strips stay within 1-8 channels.
-    CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":9})"), kOrigin}));
+    // Strips stay within 1-64 channels.
+    run(bus, "track.set", R"({"track":"tr_2","channels":9})");
+    CHECK_FALSE(bus.execute({"track.set", j(R"({"track":"tr_2","channels":65})"), kOrigin}));
+}
+
+TEST_CASE("a multi-out instrument grows its track and pins its outputs (ADR-0021)") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto track = [&](const char* id) { return *app->head().tracks.find(*model::Id::parse(id)); };
+    auto fx = [&](const char* id) { return *app->head().fx.find(*model::Id::parse(id)); };
+    run(bus, "track.add", R"({"name":"Drums"})");
+    run(bus, "track.add", R"({"name":"Kit","channels":4})");
+    run(bus, "track.add", R"({"name":"Kick","type":"buss"})");
+    // Main, Kick and Snare: two stereo outputs past the main pair.
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.multiout"})");
+    CHECK(track("tr_1").channels == 6);
+    CHECK(fx("fx_1").pins.out == std::vector<int>{1, 2, 3, 4, 5, 6});
+    // After a track's own auxiliary channels.
+    run(bus, "fx.add", R"({"track":"tr_2","plugin":"com.suppleaudio.test.multiout"})");
+    CHECK(track("tr_2").channels == 8);
+    CHECK(fx("fx_2").pins.out == std::vector<int>{1, 2, 5, 6, 7, 8});
+    // One undo step takes both back.
+    run(bus, "history.undo", "{}");
+    CHECK(track("tr_2").channels == 4);
+    CHECK(track("tr_2").chain.empty());
+    // An effect's extra outputs (the key mix's) stay unconnected; the input
+    // chain stays stereo.
+    run(bus, "fx.add", R"({"track":"tr_3","plugin":"com.suppleaudio.test.keymix"})");
+    CHECK(track("tr_3").channels == 2);
+    run(bus, "fx.add",
+        R"({"track":"tr_2","plugin":"com.suppleaudio.test.multiout","chain":"input"})");
+    CHECK(track("tr_2").channels == 4);
+    // The kick's pair, sent to the buss, is what the buss hears.
+    run(bus, "route.add",
+        R"({"from":"tr_1","to":"tr_3","channels":{"from":[3,4],"to":[1,2]}})");
+    // fx.set: 0 leaves an auxiliary output unconnected, never a main one.
+    run(bus, "fx.set", R"({"fx":"fx_1","pins":{"out":[1,2,0,0,5,6]}})");
+    auto zero = bus.execute({"fx.set", j(R"({"fx":"fx_1","pins":{"out":[0,2]}})"), kOrigin});
+    REQUIRE_FALSE(zero);
+    CHECK(zero.error().code == "fx.pins");
+    auto beyond =
+        bus.execute({"fx.set", j(R"({"fx":"fx_1","pins":{"out":[1,2,3,4,7,8]}})"), kOrigin});
+    REQUIRE_FALSE(beyond);
+    CHECK(beyond.error().path == "/args/pins/out/4");
 }
 
 TEST_CASE("tempo and meter edits see previous steps in the same batch") {

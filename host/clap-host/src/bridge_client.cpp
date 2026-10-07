@@ -126,7 +126,14 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     ports.semantic = r.u8() != 0;
     ports.keyChannels = r.u32();
     ports.editor = r.u8() != 0;
-    if (!r.ok() || !self->instanceId_)
+    const std::uint32_t auxPorts = r.u32();
+    for (std::uint32_t i = 0; i < auxPorts && i < kMaxAuxPorts && r.ok(); ++i) {
+        AudioPortInfo port;
+        port.name = r.str();
+        port.channels = r.u32();
+        ports.auxOutputs.push_back(std::move(port));
+    }
+    if (!r.ok() || !self->instanceId_ || auxPorts > kMaxAuxPorts)
         return Error("host.bridge", "malformed reply from the plugin bridge");
     if (ports.inChannels > kMaxChannels || ports.outChannels > kMaxChannels ||
         ports.keyChannels > kMaxChannels)
@@ -248,11 +255,11 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, i
 
 Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                                 std::uint32_t in, std::uint32_t out, std::uint32_t key,
-                                bool keyActive) {
+                                bool keyActive, std::uint32_t auxOut) {
     if (in > kMaxChannels || out > kMaxChannels || key > kMaxChannels)
         return Error("host.layout", "bridge layout exceeds 16 channels");
     unmap();
-    layout_ = Layout(maxFrames, in, out, key);
+    layout_ = Layout(maxFrames, in, out, key, std::min(auxOut, kMaxAuxChannels));
     if (layout_.size > std::numeric_limits<std::uint32_t>::max())
         return Error("host.activate", "shared memory size exceeds the bridge protocol limit", {},
                      "use a smaller maximum block size");
@@ -275,6 +282,7 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
     hdr_->inChannels = layout_.inChannels;
     hdr_->outChannels = layout_.outChannels;
     hdr_->keyChannels = layout_.keyChannels;
+    hdr_->auxOutChannels = layout_.auxOutChannels;
     hdr_->keyActive = keyActive ? 1 : 0;
     seq_ = 0;
     Writer w;
@@ -571,6 +579,8 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
     auto silence = [&] {
         for (std::uint32_t c = 0; c < b.outputChannels; ++c)
             std::fill_n(b.outputs[c], b.frames, 0.0f);
+        for (std::uint32_t c = 0; b.auxOutputs && c < b.auxOutputChannels; ++c)
+            std::fill_n(b.auxOutputs[c], b.frames, 0.0f);
     };
     if (!hdr_ || process_->failed()) {
         silence();  // a failed node is silent; the session plays on
@@ -614,6 +624,14 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
                         b.outputs[c]);
         else
             std::fill_n(b.outputs[c], b.frames, 0.0f);
+    }
+    auto* auxOutAudio = reinterpret_cast<float*>(base + layout_.auxOutAudio);
+    for (std::uint32_t c = 0; b.auxOutputs && c < b.auxOutputChannels; ++c) {
+        if (c < layout_.auxOutChannels)
+            std::copy_n(auxOutAudio + static_cast<std::size_t>(c) * layout_.maxFrames, frames,
+                        b.auxOutputs[c]);
+        else
+            std::fill_n(b.auxOutputs[c], b.frames, 0.0f);
     }
     if (out) {
         const auto* oe = reinterpret_cast<const OutputEvent*>(base + layout_.outEvents);

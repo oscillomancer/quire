@@ -1,7 +1,10 @@
 // The routing matrix (docs/specs/gui.md §4.6): strips (in hierarchy) ×
-// strips and plug-in keys, from route.matrix. A cell creates a send; a cell
-// with a send selects it for editing (tap, level, pan, mute, remove); cells
-// the routing rules reject are drawn disabled and say why on hover.
+// strips and plug-in keys, from route.matrix. A strip with auxiliary channels
+// (a multi-out instrument's outputs, ADR-0021) has a row per channel pair
+// under its own, named by the outputs. A cell creates a send (from that
+// pair); a cell with a send selects it for editing (tap, level, pan, mute,
+// remove); cells the routing rules reject are drawn disabled and say why on
+// hover.
 #pragma once
 
 #include <map>
@@ -26,6 +29,11 @@ struct MatrixModel {
         int depth = 0;
         bool parentSend = true;
         std::string rule;  // why it cannot feed strips (masters)
+        // The channels the row sends (ADR-0021): 1 is the strip's main pair;
+        // 3, 5... its auxiliary pairs (width 1: a last odd channel), whose
+        // rows follow the strip's with the outputs' names.
+        int pair = 1, width = 2;
+        std::string strip;  // the strip's name, for an auxiliary row
     };
     struct Destination {
         std::string id, name, kind, type, track;  // kind: track | key
@@ -48,6 +56,9 @@ struct MatrixModel {
     // Why from -> to is refused (empty: allowed).
     std::string blocked(std::size_t row, std::size_t col) const;
     std::vector<const Send*> sendsAt(std::size_t row, std::size_t col) const;
+    // The source pair a send leaves from: 1 (the main pair), 3, 5...
+    static int sourcePair(const Send& x);
+    static std::string pairText(int pair, int width);  // "3/4", "5"
 };
 
 class RoutingMatrix {

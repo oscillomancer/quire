@@ -48,7 +48,8 @@ struct Fixture {
     std::string item;
     bool ok = false;
 
-    Fixture() {
+    // `plugins`: the plug-in path (empty: the default).
+    explicit Fixture(std::vector<std::filesystem::path> plugins = {}) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-midi-test-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
@@ -65,6 +66,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        if (!plugins.empty()) options.pluginPath = std::move(plugins);
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
         app = std::move(*a);
@@ -702,6 +704,51 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     CHECK(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
     REQUIRE(f.root->click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
+}
+
+TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send them (ADR-0021)") {
+    Fixture f({FIXTURE_CLAP_PATH});
+    if (!f.ok) return;
+    const std::string drums = f.exec("track.add", R"({"name":"Drums"})")["track"].asString();
+    const std::string kick =
+        f.exec("track.add", R"({"type":"buss","name":"Kick"})")["track"].asString();
+    f.exec("fx.add", R"({"track":")" + drums + R"(","plugin":"com.suppleaudio.test.multiout"})");
+    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    matrix.open();
+    f.root->frame(false);
+    const auto& m = matrix.model();
+    std::size_t main = m.sources.size();
+    for (std::size_t i = 0; i < m.sources.size(); ++i)
+        if (m.sources[i].id == drums && m.sources[i].pair == 1) main = i;
+    REQUIRE(main + 2 < m.sources.size());
+    // Under the strip's own row: its outputs' pairs, by their names.
+    CHECK(m.sources[main + 1].id == drums);
+    CHECK(m.sources[main + 1].pair == 3);
+    CHECK(m.sources[main + 1].name == "3/4  Kick");
+    CHECK(m.sources[main + 2].name == "5/6  Snare");
+    std::size_t col = m.destinations.size();
+    for (std::size_t i = 0; i < m.destinations.size(); ++i)
+        if (m.destinations[i].id == kick) col = i;
+    REQUIRE(col < m.destinations.size());
+    // A click on the Kick row sends 3/4 to the buss's main pair; its cell
+    // alone shows it.
+    REQUIRE(matrix.clickCell(main + 1, col));
+    CHECK(m.sendsAt(main + 1, col).size() == 1);
+    CHECK(m.sendsAt(main, col).empty());
+    CHECK(m.sendsAt(main + 2, col).empty());
+    REQUIRE(f.app->head().routes.size() == 1);
+    const model::Route& route = *f.app->head().routes.begin()->value;
+    CHECK(route.channels.from == std::vector<int>{3, 4});
+    CHECK(route.channels.to == std::vector<int>{1, 2});
+    CHECK(f.root->find("routing.send")->valueText().find("Drums 3/4  Kick") == 0);
+    // An auxiliary pair's send leaves room for the main pair's (and a send drag's).
+    const auto drumsId = *model::Id::parse(drums), kickId = *model::Id::parse(kick);
+    CHECK_FALSE(model::sendsTo(f.app->head(), drumsId, kickId));
+    REQUIRE(matrix.clickCell(main, col));
+    CHECK(m.sendsAt(main, col).size() == 1);
+    CHECK(model::sendsTo(f.app->head(), drumsId, kickId));
+    CHECK(f.app->head().routes.size() == 2);
+    f.snapshot("routing-multiout.png");
 }
 
 TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, Console 9, meters") {

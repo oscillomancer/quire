@@ -31,9 +31,14 @@ namespace supple::host::bridge {
 inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 6 (unreleased): error details, restart failures, complete output event
 // metadata in shared memory, an idle-output drain, process wake and ordered clears.
-inline constexpr std::uint32_t kVersion = 7;
+// 8: auxiliary output ports (ADR-0021) in Create and the data plane.
+inline constexpr std::uint32_t kVersion = 8;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
+// Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
+// to scratch in the bridge.
+inline constexpr std::uint32_t kMaxAuxChannels = 64;
+inline constexpr std::uint32_t kMaxAuxPorts = 16;
 inline constexpr std::uint32_t kMaxEvents = 2048;
 inline constexpr std::uint32_t kMaxOutEvents = 1024;
 inline constexpr std::uint32_t kMaxParamClears = 4096;
@@ -249,6 +254,7 @@ struct Header {
     std::uint32_t magic, version;
     std::uint32_t maxFrames, inChannels, outChannels;
     std::uint32_t keyChannels, keyActive;            // the sidechain input (ADR-0018)
+    std::uint32_t auxOutChannels;                    // auxiliary outputs (ADR-0021)
     alignas(64) std::atomic<std::uint32_t> request;  // bumped by the host (futex word)
     alignas(64) std::atomic<std::uint32_t> done;     // = request when finished (futex word)
     alignas(64) std::uint32_t cmd;
@@ -266,17 +272,23 @@ static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 
 // Offsets of the arenas and buffers in the region.
 struct Layout {
-    std::size_t events, outEvents, inAudio, keyAudio, outAudio, size;
-    std::uint32_t maxFrames, inChannels, outChannels, keyChannels;
-    Layout(std::uint32_t frames, std::uint32_t in, std::uint32_t out, std::uint32_t key = 0)
-        : maxFrames(frames), inChannels(in), outChannels(out), keyChannels(key) {
+    std::size_t events, outEvents, inAudio, keyAudio, outAudio, auxOutAudio, size;
+    std::uint32_t maxFrames, inChannels, outChannels, keyChannels, auxOutChannels;
+    Layout(std::uint32_t frames, std::uint32_t in, std::uint32_t out, std::uint32_t key = 0,
+           std::uint32_t auxOut = 0)
+        : maxFrames(frames),
+          inChannels(in),
+          outChannels(out),
+          keyChannels(key),
+          auxOutChannels(auxOut) {
         auto align = [](std::size_t n) { return (n + 63) & ~std::size_t{63}; };
         events = align(sizeof(Header));
         outEvents = align(events + sizeof(Event) * kMaxEvents);
         inAudio = align(outEvents + sizeof(OutputEvent) * kMaxOutEvents);
         keyAudio = align(inAudio + sizeof(float) * in * frames);
         outAudio = align(keyAudio + sizeof(float) * key * frames);
-        size = align(outAudio + sizeof(float) * out * frames);
+        auxOutAudio = align(outAudio + sizeof(float) * out * frames);
+        size = align(auxOutAudio + sizeof(float) * auxOut * frames);
     }
 };
 

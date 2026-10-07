@@ -219,8 +219,9 @@ Status validateStripRules(const Session& s);
 
 // The track whose FX chain holds `fx` (not input chains or take FX), if any.
 std::optional<Id> trackOfFx(const Session& s, Id fx);
-// Whether `from` already sends to the strip `to` (a route between the two
-// tracks, not to a plug-in's key): the GUI's send drags add at most one.
+// Whether `from` already sends its main pair to the strip `to` (a route
+// between the two tracks from channels 1/2, not to a plug-in's key): the
+// GUI's send drags add at most one. Sends from auxiliary pairs do not count.
 bool sendsTo(const Session& s, Id from, Id to);
 
 // What every view calls a track: its name, or for an unnamed one a numbered

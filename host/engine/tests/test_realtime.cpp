@@ -2388,6 +2388,87 @@ TEST_CASE("auxiliary channels play in real time as offline, rendered ahead or li
         }
 }
 
+TEST_CASE("a multi-out instrument's outputs play in real time as offline (ADR-0021)" *
+          doctest::description("rt")) {
+    // Drums (6 channels, not to its parent) plays the multi-out fixture with
+    // its Kick and Snare on 3/4 and 5/6; the Snare's pair feeds buss K. With
+    // "Mon" (under K) monitored, K plays live and Drums with it.
+    for (const bool monitored : {false, true})
+        for (const EngineOptions& options :
+             {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}}) {
+            INFO("monitored " << monitored << ", anticipative " << options.anticipative
+                              << ", workers " << options.workers);
+            model::EditTxn t(model::Session::create({.seed = 4321}), 2);
+            model::Track drums;
+            drums.name = "Drums";
+            drums.parent = kMaster;
+            drums.channels = 6;
+            drums.parentSend.enabled = false;
+            const Id drumsId = t.create(drums);
+            model::Track bus;
+            bus.type = model::StripType::Buss;
+            bus.parent = kMaster;
+            const Id busId = t.create(bus);
+            t.modify<model::Track>(kMaster, [&](auto& m) {
+                m.children.push_back(drumsId);
+                m.children.push_back(busId);
+            });
+            model::FxInstance fx;
+            fx.plugin.id = "com.suppleaudio.test.multiout";
+            fx.pins.out = {1, 2, 3, 4, 5, 6};
+            const Id f = t.create(fx);
+            t.modify<model::Track>(drumsId, [&](model::Track& x) { x.chain.push_back(f); });
+            model::Track mon;
+            mon.name = "Mon";
+            mon.parent = busId;
+            const Id monId = t.create(mon);
+            t.modify<model::Track>(busId, [&](auto& b) { b.children.push_back(monId); });
+            model::Route snare;
+            snare.from.track = drumsId;
+            snare.to.track = busId;
+            snare.volumeDb = -6;
+            snare.channels = {{5, 6}, {1, 2}};
+            t.create(snare);
+            model::Session s = t.commit().value();
+            if (monitored) s = monitoring(s);  // the last channel: "Mon", under the buss
+            auto pool = makePool();
+            auto offline = renderOffline(s, pool, {.startSeconds = 0, .endSeconds = 1.0}).value();
+            REQUIRE(offline.warnings.empty());
+            auto rtPool = makePool();
+            MediaCache media;
+            DummyBackend backend(
+                {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 + 4096});
+            Engine engine(rtPool, media, options);
+            REQUIRE(
+                engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
+            REQUIRE(engine.load(s).ok());
+            if (options.anticipative) REQUIRE(engine.awaitPlan());
+            engine.play();
+            if (options.anticipative && !monitored)
+                runAhead(engine, backend, (48000 + 4096) / 128, 128);
+            else if (options.anticipative) {
+                engine.awaitTransport();
+                for (int i = 0; i < (48000 + 4096) / 128; i += 16) {
+                    REQUIRE(engine.awaitRendered(4096));
+                    backend.run(16);
+                }
+            } else {
+                backend.run((48000 + 4096) / 128);
+            }
+            engine.stop();
+            CHECK(engine.processErrors() == 0);
+            const std::uint32_t L = engine.outputLatency();
+            const auto& cap = backend.capture();
+            CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 48000) == 0.0);
+            CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 48000) == 0.0);
+            double energy = 0;
+            for (std::size_t i = 0; i < 48000; ++i)
+                energy += static_cast<double>(offline.audio.channels[0][i]) *
+                          static_cast<double>(offline.audio.channels[0][i]);
+            CHECK(energy > 100.0);
+        }
+}
+
 TEST_CASE("multiple masters: real-time main output is independent of later roots" *
           doctest::description("rt")) {
     model::EditTxn t(synthSession(), 2);

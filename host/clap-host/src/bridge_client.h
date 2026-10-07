@@ -18,6 +18,7 @@ namespace supple::host {
 
 struct RemotePorts {
     std::uint32_t inChannels = 0, outChannels = 0, keyChannels = 0;
+    std::vector<AudioPortInfo> auxOutputs;  // ADR-0021
     bool acceptsNotes = false, semantic = false, editor = false;
 };
 
@@ -57,7 +58,8 @@ class RemoteInstance {
     // main thread
     Status activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                     std::uint32_t inChannels, std::uint32_t outChannels,
-                    std::uint32_t keyChannels = 0, bool keyActive = false);
+                    std::uint32_t keyChannels = 0, bool keyActive = false,
+                    std::uint32_t auxOutChannels = 0);
     void deactivate();
     std::vector<ParamInfo> params();
     Result<double> paramValue(std::uint32_t id);

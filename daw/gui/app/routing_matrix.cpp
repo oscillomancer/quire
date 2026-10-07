@@ -32,9 +32,22 @@ void MatrixModel::index() {
         sendIndex[{sends[i].from, sends[i].to}].push_back(i);
 }
 
+int MatrixModel::sourcePair(const Send& x) {
+    if (x.mapFrom.empty()) return 1;
+    const int first = *std::min_element(x.mapFrom.begin(), x.mapFrom.end());
+    return first <= 2 ? 1 : first % 2 == 1 ? first : first - 1;
+}
+
+std::string MatrixModel::pairText(int pair, int width) {
+    return width < 2 ? std::to_string(pair)
+                     : std::to_string(pair) + "/" + std::to_string(pair + 1);
+}
+
 std::string MatrixModel::blocked(std::size_t row, std::size_t col) const {
     const Source& s = sources[row];
     const Destination& d = destinations[col];
+    if (s.pair != 1 && d.kind == "key")
+        return "a key takes a strip's main pair; the plug-in's pins can read others";
     if (d.kind == "track") {
         if (s.id == d.id) return "a strip cannot send to itself";
         if (!s.rule.empty()) return s.rule;
@@ -51,7 +64,8 @@ std::vector<const MatrixModel::Send*> MatrixModel::sendsAt(std::size_t row, std:
     std::vector<const Send*> out;
     if (const auto found = sendIndex.find({sources[row].id, destinations[col].id});
         found != sendIndex.end())
-        for (auto index : found->second) out.push_back(&sends[index]);
+        for (auto index : found->second)
+            if (sourcePair(sends[index]) == sources[row].pair) out.push_back(&sends[index]);
     return out;
 }
 
@@ -134,6 +148,11 @@ class Grid : public ui::Node {
             const float y = gy + static_cast<float>(row) * kCell;
             if (y + kCell < cells.y || y > cells.bottom()) continue;
             const float indent = 8 + static_cast<float>(s.depth) * 12;
+            if (s.pair != 1) {  // an auxiliary pair, under its strip: quieter, no bar
+                c.text({b.x + indent, y, kLabelW - indent - 6, kCell}, s.name, ui::Font::Ui,
+                       t.type("caption"), t.color("ink-quiet"));
+                continue;
+            }
             const float mark = s.type == "master" ? 5.0f : 3.0f;
             c.fillRect({b.x + indent - 3 - mark, y + 4, mark, kCell - 8}, typeColor(s.type));
             c.text({b.x + indent, y, kLabelW - indent - 6, kCell}, s.name.empty() ? s.id : s.name,
@@ -168,7 +187,7 @@ class Grid : public ui::Node {
                         c.strokeRound({r.x + 1, r.y + 1, r.w - 2, r.h - 2}, 3, t.color("focus"), 2);
                 }
                 // The implicit parent send: outlined when on, a faint corner mark when off.
-                if (m_.destinations[col].kind == "track" &&
+                if (m_.destinations[col].kind == "track" && m_.sources[row].pair == 1 &&
                     m_.sources[row].parent == m_.destinations[col].id) {
                     if (m_.sources[row].parentSend)
                         c.strokeRect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, t.color("ink-quiet"));
@@ -268,7 +287,25 @@ Status RoutingMatrix::reload() {
         src.depth = static_cast<int>(s.find("depth")->asInt());
         if (const auto* ps = s.find("parent_send")) src.parentSend = ps->asBool();
         if (const auto* rule = s.find("rule")) src.rule = str(*rule, "message");
+        const int channels =
+            s.find("channels") ? static_cast<int>(s.find("channels")->asInt()) : 2;
+        const json::Value* names = s.find("channel_names");
+        // A row per auxiliary pair under the strip's own (ADR-0021).
+        std::vector<MatrixModel::Source> pairs;
+        for (int c = 3; c <= channels; c += 2) {
+            MatrixModel::Source aux = src;
+            aux.pair = c;
+            aux.width = c + 1 <= channels ? 2 : 1;
+            aux.strip = src.name.empty() ? src.id : src.name;
+            aux.name = MatrixModel::pairText(c, aux.width);
+            if (const json::Value* n = names ? names->find(std::to_string(c)) : nullptr;
+                n && n->isString())
+                aux.name += "  " + n->asString();
+            aux.depth = src.depth + 1;
+            pairs.push_back(std::move(aux));
+        }
         next.sources.push_back(std::move(src));
+        for (auto& aux : pairs) next.sources.push_back(std::move(aux));
     }
     for (const auto& d : m->find("destinations")->asArray()) {
         MatrixModel::Destination dst;
@@ -342,8 +379,9 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
             }
             const auto& s = model_.sources[cell->first];
             const auto& d = model_.destinations[cell->second];
-            const std::string pair =
-                (s.name.empty() ? s.id : s.name) + " → " + (d.name.empty() ? d.id : d.name);
+            const std::string from =
+                s.pair != 1 ? s.strip + " " + s.name : (s.name.empty() ? s.id : s.name);
+            const std::string pair = from + " → " + (d.name.empty() ? d.id : d.name);
             const auto sends = model_.sendsAt(cell->first, cell->second);
             if (!sends.empty())
                 status_->setText(pair + ": " + fmt(sends.front()->volumeDb, 1) + " dB, " +
@@ -352,7 +390,7 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
             else if (const std::string why = model_.blocked(cell->first, cell->second);
                      !why.empty())
                 status_->setText(pair + ": not allowed — " + why);
-            else if (d.kind == "track" && s.parent == d.id)
+            else if (d.kind == "track" && s.pair == 1 && s.parent == d.id)
                 status_->setText(pair + (s.parentSend
                                              ? ": the parent send, on — click to turn it off"
                                              : ": the parent send, off — click to turn it on"));
@@ -399,9 +437,10 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
                                           {"Left only", {1}, {1}, false},
                                           {"Right only", {2}, {2}, false},
                                           {"Mono (sum)", {}, {}, true}};
-        std::vector<Choice> choices(std::begin(kChoices), std::end(kChoices));
-        // Pairs that reach auxiliary channels (ADR-0020), as far as the source
-        // and the destination have them.
+        std::vector<Choice> choices;
+        // The pair the send leaves from stays (its row, ADR-0021): the
+        // stereo choices for the main pair, then the destination's pairs as
+        // far as it has them (its auxiliary channels, ADR-0020).
         for (const auto& x : model_.sends) {
             if (x.id != *selected_) continue;
             auto channelsOf = [&](const std::string& id) {
@@ -409,17 +448,20 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
                 const model::Track* t = tid ? app_.head().tracks.find(*tid) : nullptr;
                 return t ? std::max(2, t->channels) : 2;
             };
-            const int from = channelsOf(x.from), to = channelsOf(x.to);
-            for (int a = 1; a + 1 <= from; a += 2)
-                for (int b = 1; b + 1 <= to; b += 2) {
-                    if (a == 1 && b == 1) continue;
-                    choices.push_back({std::to_string(a) + "/" + std::to_string(a + 1) +
-                                           " \u2192 " + std::to_string(b) + "/" +
-                                           std::to_string(b + 1),
-                                       {a, a + 1},
-                                       {b, b + 1},
-                                       false});
-                }
+            const int a = MatrixModel::sourcePair(x);
+            const int width = a + 1 <= channelsOf(x.from) ? 2 : 1;
+            const std::vector<int> from = width == 2 ? std::vector<int>{a, a + 1}
+                                                     : std::vector<int>{a, a};
+            if (a == 1) choices.assign(std::begin(kChoices), std::end(kChoices));
+            const int to = channelsOf(x.to);
+            for (int b = 1; b + 1 <= to; b += 2) {
+                if (a == 1 && b == 1) continue;
+                choices.push_back({MatrixModel::pairText(a, width) + " \u2192 " +
+                                       MatrixModel::pairText(b, 2),
+                                   from,
+                                   {b, b + 1},
+                                   false});
+            }
         }
         std::vector<ui::MenuItem> items;
         for (const Choice& c : choices) {
@@ -501,6 +543,10 @@ std::string RoutingMatrix::channelsText(const MatrixModel::Send& x) {
         x.mapTo[1] == x.mapTo[0] + 1)  // a pair to a pair (auxiliary channels, ADR-0020)
         return std::to_string(x.mapFrom[0]) + "/" + std::to_string(x.mapFrom[1]) + "\u2192" +
                std::to_string(x.mapTo[0]) + "/" + std::to_string(x.mapTo[1]);
+    if (x.mapFrom.size() == 2 && x.mapTo.size() == 2 && x.mapFrom[0] == x.mapFrom[1] &&
+        x.mapTo[1] == x.mapTo[0] + 1)  // one channel to a pair (a last odd output)
+        return std::to_string(x.mapFrom[0]) + "\u2192" + std::to_string(x.mapTo[0]) + "/" +
+               std::to_string(x.mapTo[1]);
     return "Custom map";
 }
 
@@ -529,7 +575,11 @@ void RoutingMatrix::select(std::optional<std::string> send) {
             if (d.id == id) return d.name.empty() ? id : d.name;
         return id;
     };
-    sendTitle_->setText(nameOf(x->from) + " → " + nameOf(x->to) + (x->mute ? " (muted)" : ""));
+    std::string from = nameOf(x->from);
+    for (const auto& s : model_.sources)  // an auxiliary pair's send: its row's name
+        if (s.id == x->from && s.pair != 1 && s.pair == MatrixModel::sourcePair(*x))
+            from = s.strip + " " + s.name;
+    sendTitle_->setText(from + " → " + nameOf(x->to) + (x->mute ? " (muted)" : ""));
     const char* names[] = {"post_fader", "pre_fader", "pre_fx"};
     const char* labels[] = {"Post", "Pre", "Pre-FX"};
     for (std::size_t i = 0; i < taps_.size(); ++i)
@@ -559,7 +609,7 @@ Status RoutingMatrix::clickCell(std::size_t row, std::size_t col) {
         return {};
     }
     // The parent's cell is the implicit parent send: a click turns it on or off.
-    if (model_.destinations[col].kind == "track" &&
+    if (model_.destinations[col].kind == "track" && model_.sources[row].pair == 1 &&
         model_.sources[row].parent == model_.destinations[col].id) {
         json::Value args = json::Value::object();
         args["track"] = model_.sources[row].id;
@@ -573,9 +623,21 @@ Status RoutingMatrix::clickCell(std::size_t row, std::size_t col) {
         return Error("route.strip_type", why);
     }
     json::Value args = json::Value::object();
-    args["from"] = model_.sources[row].id;
+    const auto& s = model_.sources[row];
+    args["from"] = s.id;
     const auto& d = model_.destinations[col];
     args[d.kind == "key" ? "fx" : "to"] = d.id;
+    if (s.pair != 1) {  // an auxiliary pair to the destination's main pair (ADR-0021)
+        json::Value map = json::Value::object(), from = json::Value::array(),
+                    to = json::Value::array();
+        from.push_back(static_cast<std::int64_t>(s.pair));
+        from.push_back(static_cast<std::int64_t>(s.width == 2 ? s.pair + 1 : s.pair));
+        to.push_back(std::int64_t{1});
+        to.push_back(std::int64_t{2});
+        map["from"] = std::move(from);
+        map["to"] = std::move(to);
+        args["channels"] = std::move(map);
+    }
     auto r = exec("route.add", std::move(args));
     if (!r) return std::move(r).error();
     selected_ = (*r)["id"].asString();

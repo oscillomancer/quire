@@ -75,13 +75,18 @@ inline constexpr std::array<std::string_view, 8> kTrackColors = {
     "red", "orange", "yellow", "green", "teal", "blue", "violet", "grey"};
 bool validTrackColor(std::string_view color);
 
+// A strip's channels at most (ADR-0020, ADR-0021): the main pair and up to
+// 62 auxiliary channels (a multi-out instrument's outputs).
+inline constexpr int kMaxTrackChannels = 64;
+
 struct Track {
     StripType type = StripType::Channel;
     std::string name, color, notes;
     std::optional<Id> parent;  // empty exactly for masters
     std::vector<Id> children;
-    // 1-2: the strip's main pair; 3-8 add auxiliary channels (ADR-0020) that
-    // routes and plug-in pins address, outside the fader, pan and parent send.
+    // 1-2: the strip's main pair; 3..kMaxTrackChannels add auxiliary channels
+    // (ADR-0020) that routes and plug-in pins address, outside the fader, pan
+    // and parent send.
     int channels = 2;
     double volumeDb = 0.0;
     double pan = 0.0;  // % -100..100
@@ -170,7 +175,9 @@ struct PluginRef {
 // Which of its track's channels (1-based, ADR-0020) a plug-in reads and
 // writes: its main input pair, its main output pair, and its sidechain (key)
 // input — a detector fed from, say, channels 3/4. Empty: 1/2 in and out, the
-// key from key routes only.
+// key from key routes only. `out` past its first two entries names a track
+// channel for each of the plug-in's auxiliary output channels in order (a
+// multi-out instrument's "Kick" on 3/4, ADR-0021); 0 leaves one unconnected.
 struct PinMap {
     std::vector<int> in, out, key;
     bool empty() const { return in.empty() && out.empty() && key.empty(); }

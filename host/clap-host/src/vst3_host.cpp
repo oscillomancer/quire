@@ -353,6 +353,10 @@ struct Vst3Instance::State {
     // the track's audio, auxiliary ones (sidechains, extra outputs) silence
     // and scratch space, preallocated in activate().
     std::vector<std::uint32_t> inBusChannels, outBusChannels;
+    std::vector<std::string> outBusNames;
+    // The auxiliary output buses' channel pointers for one block (the block's
+    // aux outputs, else scratch) and their scratch (ADR-0021).
+    std::vector<float*> outAuxPointers, outAuxScratch;
     std::vector<vst::AudioBusBuffers> inBuses, outBuses;
     std::vector<std::vector<float>> auxStorage;
     std::vector<float*> auxPointers;
@@ -474,6 +478,8 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
             if (ok && (bus.channelCount < 0 || bus.channelCount > 64))
                 return Error("host.layout", "VST3 audio bus exceeds 64 channels");
             channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
+            if (dir == vst::kOutput)
+                s.outBusNames.push_back(ok ? vst::StringConvert::convert(bus.name) : std::string());
             if (ok && dir == vst::kInput && b > 0 && bus.busType == vst::kAux && s.keyBus < 0 &&
                 bus.channelCount > 0)
                 s.keyBus = b;
@@ -508,6 +514,15 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
 std::uint32_t Vst3Instance::inputChannels() const { return state_->inputs; }
 std::uint32_t Vst3Instance::outputChannels() const { return state_->outputs; }
 bool Vst3Instance::acceptsNotes() const { return state_->notes; }
+std::vector<AudioPortInfo> Vst3Instance::auxOutputPorts() const {
+    const auto& s = *state_;
+    std::vector<AudioPortInfo> out;
+    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b)
+        out.push_back({b < s.outBusNames.size() ? s.outBusNames[b] : std::string(),
+                       s.outBusChannels[b]});
+    return out;
+}
+
 std::uint32_t Vst3Instance::sidechainChannels() const {
     const auto& s = *state_;
     return s.keyBus < 0 ? 0 : s.inBusChannels[static_cast<std::size_t>(s.keyBus)];
@@ -553,6 +568,12 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
             return Error("host.layout", "negotiated VST3 audio bus exceeds 64 channels");
     if (s.inputs) s.component->activateBus(vst::kAudio, vst::kInput, 0, true);
     if (s.outputs) s.component->activateBus(vst::kAudio, vst::kOutput, 0, true);
+    // Every auxiliary output bus: a multi-out instrument's outputs reach the
+    // track (ADR-0021).
+    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b)
+        if (s.outBusChannels[b])
+            s.component->activateBus(vst::kAudio, vst::kOutput, static_cast<Steinberg::int32>(b),
+                                     true);
     // The main buses are reported (and declared to the plug-in) as the plug-in
     // settled on them, not as they were offered: a plug-in that adapted the
     // layout is served its own width, and the engine's stereo check refuses a
@@ -568,20 +589,29 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
     s.outBuses.assign(s.outBusChannels.size(), {});
     s.auxStorage.clear();
     s.auxPointers.clear();
-    std::size_t auxChannels = 0;
-    for (auto* channels : {&s.inBusChannels, &s.outBusChannels})
-        for (std::size_t b = 1; b < channels->size(); ++b) auxChannels += (*channels)[b];
+    std::size_t auxChannels = 0, auxOutChannels = 0;
+    for (std::size_t b = 1; b < s.inBusChannels.size(); ++b) auxChannels += s.inBusChannels[b];
+    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b)
+        auxOutChannels += s.outBusChannels[b];
     s.auxPointers.reserve(auxChannels);
-    for (auto [channels, buses] :
-         {std::pair{&s.inBusChannels, &s.inBuses}, std::pair{&s.outBusChannels, &s.outBuses}})
-        for (std::size_t b = 1; b < channels->size(); ++b) {
-            (*buses)[b].numChannels = static_cast<Steinberg::int32>((*channels)[b]);
-            (*buses)[b].channelBuffers32 = s.auxPointers.data() + s.auxPointers.size();
-            for (std::uint32_t c = 0; c < (*channels)[b]; ++c) {
-                s.auxStorage.emplace_back(maxFrames, 0.0f);
-                s.auxPointers.push_back(s.auxStorage.back().data());
-            }
+    s.outAuxPointers.assign(auxOutChannels, nullptr);
+    s.outAuxScratch.clear();
+    for (std::size_t b = 1; b < s.inBusChannels.size(); ++b) {
+        s.inBuses[b].numChannels = static_cast<Steinberg::int32>(s.inBusChannels[b]);
+        s.inBuses[b].channelBuffers32 = s.auxPointers.data() + s.auxPointers.size();
+        for (std::uint32_t c = 0; c < s.inBusChannels[b]; ++c) {
+            s.auxStorage.emplace_back(maxFrames, 0.0f);
+            s.auxPointers.push_back(s.auxStorage.back().data());
         }
+    }
+    for (std::size_t b = 1; b < s.outBusChannels.size(); ++b) {
+        s.outBuses[b].numChannels = static_cast<Steinberg::int32>(s.outBusChannels[b]);
+        s.outBuses[b].channelBuffers32 = s.outAuxPointers.data() + s.outAuxScratch.size();
+        for (std::uint32_t c = 0; c < s.outBusChannels[b]; ++c) {
+            s.auxStorage.emplace_back(maxFrames, 0.0f);
+            s.outAuxScratch.push_back(s.auxStorage.back().data());
+        }
+    }
     s.silentIn.assign(s.inBuses.size(), nullptr);
     for (std::size_t b = 1; b < s.inBuses.size(); ++b)
         s.silentIn[b] = s.inBuses[b].channelBuffers32;
@@ -887,6 +917,11 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
         s.outBuses[0].numChannels = static_cast<Steinberg::int32>(s.outputs);
         s.outBuses[0].channelBuffers32 = s.mainOut.data();
     }
+    // Auxiliary outputs: the block's, then scratch (ADR-0021).
+    for (std::size_t c = 0; c < s.outAuxPointers.size(); ++c)
+        s.outAuxPointers[c] = block.auxOutputs && c < block.auxOutputChannels
+                                  ? block.auxOutputs[c]
+                                  : s.outAuxScratch[c];
     for (std::size_t b = 1; b < s.inBuses.size(); ++b) {  // silent auxiliary inputs
         s.inBuses[b].channelBuffers32 = s.silentIn[b];
         s.inBuses[b].silenceFlags = ~0ull;

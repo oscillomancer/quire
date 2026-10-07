@@ -165,6 +165,9 @@ class EngineApp : public cmd::Host {
     // The plugin's CLAP parameters (from a scratch instance).
     Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
     Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input
+    // The plug-in's output ports past the main one (a multi-out instrument's),
+    // ADR-0021.
+    Result<std::vector<host::AudioPortInfo>> fxAuxOutputs(const model::FxInstance& fx);
     // The instance's reported latency in samples (the running one when there is
     // one, else a throwaway activation at the project rate).
     Result<json::Value> setPlainParams(model::Id id, const json::Value& values);

@@ -133,11 +133,19 @@ void TrackMenu::openChannels(const model::Id& track, const ui::Rect& anchor) con
     const model::Track* tr = app.head().tracks.find(track);
     if (!tr) return;
     std::vector<ui::MenuItem> items;
-    for (auto [label, count] : {std::pair{"Mono (1)", 1},
-                                {"Stereo (2)", 2},
-                                {"4: aux 3/4", 4},
-                                {"6: aux 3-6", 6},
-                                {"8: aux 3-8", 8}}) {
+    std::vector<std::pair<std::string, int>> counts = {
+        {"Mono (1)", 1},     {"Stereo (2)", 2},     {"4: aux 3/4", 4},    {"6: aux 3-6", 6},
+        {"8: aux 3-8", 8},   {"16: aux 3-16", 16},  {"32: aux 3-32", 32}, {"64: aux 3-64", 64}};
+    // A count set elsewhere (a multi-out instrument's, ADR-0021) shows too.
+    if (std::none_of(counts.begin(), counts.end(),
+                     [&](const auto& c) { return c.second == tr->channels; })) {
+        counts.emplace_back(std::to_string(tr->channels) + ": aux 3-" +
+                                std::to_string(tr->channels),
+                            tr->channels);
+        std::sort(counts.begin(), counts.end(),
+                  [](const auto& x, const auto& y) { return x.second < y.second; });
+    }
+    for (const auto& [label, count] : counts) {
         ui::MenuItem m;
         m.label = label;
         m.checked = tr->channels == count;

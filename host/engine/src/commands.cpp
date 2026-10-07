@@ -1200,7 +1200,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("name", &TrackAddArgs::name, schema::string())
                      .field("parent", &TrackAddArgs::parent, idArg("tr", "Parent track"))
                      .field("index", &TrackAddArgs::index, schema::integer().min(0))
-                     .field("channels", &TrackAddArgs::channels, schema::integer().range(1, 8))
+                     .field("channels", &TrackAddArgs::channels,
+                            schema::integer().range(1, model::kMaxTrackChannels))
                      .build();
         c.result = schema::object<TrackRef>("track_ref")
                        .field("track", &TrackRef::track, schema::string())
@@ -1226,7 +1227,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                              "add a buss and place the channels under it");
             if (a.type != model::StripType::Channel && a.channels.value_or(2) < 2)
                 return Error("track.channels", "busses and masters require at least two channels",
-                             "/channels", "use 2..8 channels");
+                             "/channels", "use 2..64 channels");
             model::Track tr;
             tr.type = a.type;
             tr.name = a.name.value_or("");
@@ -1379,10 +1380,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                            "that inherit it): project, beats, time or beats_position; they keep "
                            "their place now"))
                 .field("channels", &TrackSetArgs::channels,
-                       schema::integer().range(1, 8).doc(
-                           "1-2: the strip's main pair; up to 8 adds auxiliary channels 3-8 "
-                           "for routes and plug-in pins (a detector on 3/4), outside the "
-                           "fader, pan and parent send"))
+                       schema::integer().range(1, model::kMaxTrackChannels).doc(
+                           "1-2: the strip's main pair; up to 64 adds auxiliary channels 3-64 "
+                           "for routes and plug-in pins (a detector on 3/4, a multi-out "
+                           "instrument's outputs), outside the fader, pan and parent send"))
                 .build();
         c.result = emptySchema();
         c.examples = {
@@ -1903,7 +1904,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             "plugins. chain: main (default; the track's effects) or input (the recorded-input "
             "chain). take instead of track: the take's own chain (take FX) — the item plays "
             "through it before the track's input, cut to the item; an instrument there plays a "
-            "MIDI take on its own.";
+            "MIDI take on its own. An instrument with outputs past its main pair (a multi-out "
+            "sampler's Kick, Snare...) gets that many more channels on the track, and its "
+            "pins.out sends each output there; route.matrix lists them and route.add "
+            "{channels: {from: [3, 4]}} sends one to a buss.";
         c.tags = {"fx"};
         c.args = schema::object<FxAddArgs>("fx_add_args")
                      .field("track", &FxAddArgs::track, idArg("tr", "Track"))
@@ -1967,6 +1971,31 @@ void registerEngineCommands(cmd::Registry& registry) {
                 fx.patch = std::move(*merged);
             }
             const bool input = a.chain && *a.chain == "input";
+            // A multi-out instrument in a track's chain (ADR-0021): its
+            // auxiliary outputs land on new channels after the track's own, as
+            // far as the track can grow; out names them after the main pair.
+            // An effect's extra outputs stay unconnected until pinned.
+            int grownChannels = 0;
+            if (track && !input && info->instrument) {
+                if (auto ports = app.fxAuxOutputs(fx); ports && !ports->empty()) {
+                    int channels = std::max(s.tracks.find(*track)->channels, 2);
+                    std::vector<int> out{1, 2};
+                    bool connected = false;
+                    for (const host::AudioPortInfo& port : *ports)
+                        for (std::uint32_t ch = 0; ch < port.channels; ++ch) {
+                            if (channels < model::kMaxTrackChannels) {
+                                out.push_back(++channels);
+                                connected = true;
+                            } else {
+                                out.push_back(0);
+                            }
+                        }
+                    if (connected) {
+                        fx.pins.out = std::move(out);
+                        grownChannels = channels;
+                    }
+                }
+            }
             model::EditTxn& t = app.txn();
             const Id id = t.create(std::move(fx));
             if (take) {  // take FX keep the caller's order
@@ -1992,6 +2021,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             chain.insert(chain.begin() + static_cast<std::ptrdiff_t>(at), id);
             t.modify<model::Track>(*track, [&](model::Track& modified) {
                 (input ? modified.inputChain : modified.chain) = chain;
+                if (grownChannels) modified.channels = grownChannels;
             });
             FxAddResult r{id.str(), info->name, info->semantic, {}};
             for (Id f : chain) r.chain.push_back(f.str());
@@ -2054,9 +2084,11 @@ void registerEngineCommands(cmd::Registry& registry) {
             "isolation: in_process, dedicated (the plugin runs in a process of its own: a "
             "crash silences only it), shared_bridge (one process for all such plugins), "
             "inherit (the project default: in_process). pins: which of the track's channels "
-            "(1-based; track.set channels adds 3-8) the plugin reads ({in: [l, r]}), writes "
+            "(1-based; track.set channels adds 3-64) the plugin reads ({in: [l, r]}), writes "
             "({out: [l, r]}) and keys from ({key: [3, 4]}: a detector on 3/4, for a plugin "
-            "with a sidechain input); {} restores 1/2 in and out.";
+            "with a sidechain input); {} restores 1/2 in and out. out past its first two "
+            "entries: a track channel for each of the plugin's auxiliary output channels in "
+            "order (0: unconnected); fx.add sets them for a multi-out instrument.";
         c.tags = {"fx"};
         c.args = schema::object<FxSetArgs>("fx_set_args")
                      .field("fx", &FxSetArgs::fx, idArg("fx", "Plugin instance"))
@@ -2091,16 +2123,24 @@ void registerEngineCommands(cmd::Registry& registry) {
                 const int channels = s.tracks.find(*track)->channels;
                 for (auto [list, name] :
                      {std::pair{&a.pins->in, "in"}, {&a.pins->out, "out"}, {&a.pins->key, "key"}}) {
-                    if (list->size() > 2)
+                    // out may go on with the auxiliary outputs' channels (ADR-0021).
+                    const bool out = list == &a.pins->out;
+                    if (out ? list->size() > static_cast<std::size_t>(model::kMaxTrackChannels)
+                            : list->size() > 2)
                         return Error("fx.pins", std::string(name) + " names one or two channels",
                                      std::string("/pins/") + name, "e.g. [3, 4]");
-                    for (std::size_t k = 0; k < list->size(); ++k)
+                    for (std::size_t k = 0; k < list->size(); ++k) {
+                        if ((*list)[k] == 0 && !(out && k >= 2))
+                            return Error("fx.pins", "channels count from 1",
+                                         std::string("/pins/") + name + "/" + std::to_string(k),
+                                         "0 leaves only an auxiliary output unconnected");
                         if ((*list)[k] > std::max(channels, 2))
                             return Error("fx.pins",
                                          "the track has " + std::to_string(std::max(channels, 2)) +
                                              " channels",
                                          std::string("/pins/") + name + "/" + std::to_string(k),
-                                         "track.set channels adds channels 3-8");
+                                         "track.set channels adds channels 3-64");
+                    }
                 }
             }
             app.txn().modify<model::FxInstance>(*id, [&](model::FxInstance& f) {

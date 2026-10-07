@@ -326,7 +326,11 @@ disabled with the rule as their tooltip; record-input assignments appear in
 the same grid. A graph view (nodes and edges, PDC per node) is P1. Strips are listed in the
 views' order (`route.matrix`): each master's tree with a parent's channels
 before its busses, then the masters at the bottom, under the views' labels
-(§4.2). A strip's "out" button opens it (TCP and mixer).
+(§4.2). A strip's "out" button opens it (TCP and mixer). A strip with
+auxiliary channels (a multi-out instrument's outputs, ADR-0021) has a row per
+channel pair under its own, named by the outputs ("3/4 Kick"); a cell there
+sends that pair to the destination's main pair, and its channel menu keeps
+the pair while choosing the destination's.
 Matrix updates clamp scroll to the current endpoint range; paint uses
 endpoint-pair indexes for send and cycle rules.
 Commands: `route.*`, `track.set {record_input}`.

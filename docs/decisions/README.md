@@ -29,3 +29,4 @@ Format: Status · Context · Decision · Consequences · Alternatives considered
 | [0018](0018-sidechain-inputs.md) | Sidechain inputs | Accepted |
 | [0019](0019-console9-strips.md) | Typed strips with Console 9 summing | Accepted |
 | [0020](0020-auxiliary-channels.md) | Auxiliary channels and plug-in pins | Accepted |
+| [0021](0021-multi-out-instruments.md) | Multi-output plug-ins | Accepted |
