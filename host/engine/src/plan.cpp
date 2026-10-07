@@ -2472,11 +2472,11 @@ void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT {
                             st.rampFromWet = os.rampFromWet;
                             st.rampToWet = os.rampToWet;
                             st.wetRampLeft = os.wetRampLeft;
-                            auto carryDelay = [](Delay& to, Delay& from) {
-                                if (to.length != from.length) return false;
-                                std::swap(to.buf[0], from.buf[0]);
-                                std::swap(to.buf[1], from.buf[1]);
-                                to.pos = from.pos;
+                            auto carryDelay = [](Delay& dst, Delay& src) {
+                                if (dst.length != src.length) return false;
+                                std::swap(dst.buf[0], src.buf[0]);
+                                std::swap(dst.buf[1], src.buf[1]);
+                                dst.pos = src.pos;
                                 return true;
                             };
                             if (carryDelay(st.dry, os.dry)) {
