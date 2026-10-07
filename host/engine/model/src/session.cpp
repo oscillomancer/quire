@@ -775,6 +775,12 @@ std::optional<Id> trackOfFx(const Session& s, Id fx) {
     return std::nullopt;
 }
 
+bool sendsTo(const Session& s, Id from, Id to) {
+    for (const auto& e : s.routes)
+        if (e.value->from.track == from && e.value->to.track == to && !e.value->to.fx) return true;
+    return false;
+}
+
 namespace {
 std::string_view labelPrefix(StripType type) {
     switch (type) {

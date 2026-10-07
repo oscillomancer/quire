@@ -142,7 +142,7 @@ struct SendsFixture {
 };
 }  // namespace
 
-TEST_CASE("TCP sends: output drag creates one default send and one undo step") {
+TEST_CASE("TCP sends: output drag creates one default send and one undo step, never a second") {
     SendsFixture f;
     const auto before = f.history();
     CHECK(f.out(f.a).visible);
@@ -155,6 +155,11 @@ TEST_CASE("TCP sends: output drag creates one default send and one undo step") {
     CHECK(routes.asArray()[0].find("to")->asString() == f.b.str());
     CHECK(routes.asArray()[0].find("tap")->asString() == "post_fader");
     CHECK(routes.asArray()[0].find("volume_db")->asDouble() == 0);
+    CHECK(f.history() == before + 1);
+    // A second drag onto a track it already sends to adds nothing.
+    f.drag(f.a, f.target(f.b));
+    f.drag(f.a, f.target(f.b, true));
+    CHECK(f.routes().size() == 1);
     CHECK(f.history() == before + 1);
     CHECK(f.errors.empty());
     f.root->key(SDLK_Z, ui::kCtrl);

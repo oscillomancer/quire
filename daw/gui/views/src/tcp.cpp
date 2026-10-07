@@ -114,7 +114,7 @@ class TcpPanel::SendGhost : public ui::Node {
         const auto& panel = **alive_;
         if (!panel.sendFrom_ || !panel.sendMoved_) return;
         const auto colour = c.theme().color("focus");
-        if (const auto row = panel.sendRowAt(panel.sendPointer_)) {
+        if (const auto row = panel.sendTargetAt(panel.sendPointer_)) {
             const ui::Rect tcp = panel.rowRect(*row).intersect(panel.bounds());
             c.fillRect(tcp, colour.withAlpha(0.2f));
             c.strokeRect(tcp.inset(0.5f), colour, 1);
@@ -656,6 +656,15 @@ std::optional<std::size_t> TcpPanel::sendRowAt(ui::Point p) const {
     return std::nullopt;
 }
 
+// The row a send drag would feed: not its own, nor one it already sends to.
+std::optional<std::size_t> TcpPanel::sendTargetAt(ui::Point p) const {
+    const auto row = sendRowAt(p);
+    if (!row || !sendFrom_) return std::nullopt;
+    const model::Id target = layout_.rows()[*row].track;
+    if (target == *sendFrom_ || model::sendsTo(session_, *sendFrom_, target)) return std::nullopt;
+    return row;
+}
+
 void TcpPanel::cancelSend() {
     sendFrom_.reset();
     sendMoved_ = false;
@@ -685,13 +694,12 @@ bool TcpPanel::sendPointer(const ui::PointerEvent& e, const model::Id& from,
         const model::Id source = *sendFrom_;
         const bool moved = sendMoved_;
         const ui::Rect button = sendAnchor_;
-        const auto row = sendRowAt(e.pos);
+        const auto row = sendTargetAt(e.pos);
         cancelSend();
         if (!moved) {
             if (cb_.routing) cb_.routing(source, button);
         } else if (row && cb_.addSend) {
             const model::Id target = layout_.rows()[*row].track;
-            if (source == target) return true;
             auto result = cb_.addSend(source, target);
             if (!result && cb_.onError) cb_.onError(result.error());
         }

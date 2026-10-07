@@ -984,8 +984,12 @@ void Mixer::dragSend(const std::string& track, DragPhase phase, ui::Point p) {
     d.drop = DragView::Drop::None;
     for (const Strip& st : strips_)
         if (st.track == track && st.out) d.source = st.out->bounds();  // the wire's end
-    // Busses and masters take sends; a channel takes only hardware input.
-    if (const Strip* over = stripAt(p); over && over->track != track && over->type != "channel") {
+    // Busses and masters take sends; a channel takes only hardware input. A
+    // strip the track already sends to takes no second one.
+    const Strip* over = stripAt(p);
+    const auto from = model::Id::parse(track), to = over ? model::Id::parse(over->track) : std::nullopt;
+    if (over && over->track != track && over->type != "channel" && from && to &&
+        !model::sendsTo(app_.head(), *from, *to)) {
         d.drop = DragView::Drop::Copy;
         d.target = over->track;
         d.marker = over->node->bounds().intersect(over->node->parent()->bounds());

@@ -127,6 +127,7 @@ class TcpPanel : public ui::Node {
     bool sendPointer(const ui::PointerEvent& e, const model::Id& from, const ui::Rect& anchor);
     void cancelSend();
     std::optional<std::size_t> sendRowAt(ui::Point p) const;
+    std::optional<std::size_t> sendTargetAt(ui::Point p) const;
     // Dragging a row's empty part reorders it among its same-type siblings.
     struct Reorder {
         model::Id track;

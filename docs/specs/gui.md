@@ -186,7 +186,8 @@ mapping), "fx" (the chain window) with "+" beside it (the plugin browser
 alone, adding last in the chain; no count, to save room), the "out" button
 (a click opens the routing matrix; drag onto another strip to create a
 route; drop rules follow `route.strip_type`, invalid targets show why before
-the drop), meters. The mixer's strips carry the same controls in the same
+the drop; a strip the track already sends to is not a target, since the
+matrix shows one send per pair), meters. The mixer's strips carry the same controls in the same
 looks (§4.4). Every view names a track the same way (`model::trackLabel`):
 its name, which track.add sets to the first free `ch_N`, `buss_N` or
 `mstr_N` (the session's own master is "Master"); an unnamed track from an

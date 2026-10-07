@@ -703,7 +703,7 @@ TEST_CASE("mixer: a double-click on a name renames it in place; a click elsewher
     CHECK(f.track(a).name == "Lead");
 }
 
-TEST_CASE("mixer: \"out\" opens the routing matrix, and a drag onto a buss makes a send") {
+TEST_CASE("mixer: \"out\" opens the routing matrix; a drag onto a buss makes one send") {
     Fixture f;
     if (!f.ok) return;
     int routing = 0;
@@ -729,6 +729,13 @@ TEST_CASE("mixer: \"out\" opens the routing matrix, and a drag onto a buss makes
         sent = sent || (e.value->from.track && e.value->from.track->str() == a &&
                         e.value->to.track && e.value->to.track->str() == bus);
     CHECK(sent);
+    // A second drag onto a strip it already feeds marks nothing and adds nothing.
+    f.drag(f.centre(f.node("mixer.out." + a)), f.centre(f.node("mixer.faderrow." + bus)), false);
+    CHECK(f.mixer->drag().kind == gui::Mixer::DragView::Kind::Send);
+    CHECK(f.mixer->drag().drop == gui::Mixer::DragView::Drop::None);
+    f.pointer(ui::PointerEvent::Type::Up, f.centre(f.node("mixer.faderrow." + bus)));
+    CHECK(f.steps() == before + 1);
+    CHECK(f.app->head().routes.size() == 1);
     CHECK(f.errors.empty());
 }
 
