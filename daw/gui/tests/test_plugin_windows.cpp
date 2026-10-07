@@ -41,7 +41,7 @@ TEST_CASE("editor FD watching reports startup failure and stops without a displa
         ready.notify_one();
     });
     REQUIRE(watcher);
-    (*watcher)->watch({{descriptors[0], CLAP_POSIX_FD_READ}});
+    (*watcher)->watch({{descriptors[0], CLAP_POSIX_FD_READ, 1}});
     REQUIRE(::write(descriptors[1], "x", 1) == 1);
     {
         std::unique_lock lock(mutex);
@@ -49,8 +49,9 @@ TEST_CASE("editor FD watching reports startup failure and stops without a displa
     }
     const auto events = (*watcher)->takeReady();
     REQUIRE(events.size() == 1);
-    CHECK(events.front().first == descriptors[0]);
-    CHECK((events.front().second & CLAP_POSIX_FD_READ) != 0);
+    CHECK(events.front().fd == descriptors[0]);
+    CHECK(events.front().owner == 1);
+    CHECK((events.front().flags & CLAP_POSIX_FD_READ) != 0);
     CHECK_FALSE((*watcher)->error());
     watcher->reset();  // must wake an otherwise idle poll before joining
     ::close(descriptors[0]);
@@ -515,4 +516,54 @@ TEST_CASE("an effect's editor reopens where it was moved and at its size (needs 
     }
     run("engine.stop", json::Value::object());
     std::filesystem::remove_all(options.workdir);
+}
+
+TEST_CASE("editor FD readiness never reaches a later registration of the same descriptor") {
+    int descriptors[2];
+    REQUIRE(::pipe(descriptors) == 0);
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered = false, release = false, polledAgain = false;
+    // The poll that holds the first registration pauses until the editor has
+    // closed and a new one has registered the same descriptor number; then
+    // it reports the descriptor readable.
+    auto watcher = gui::FdWatcher::create(
+        [] {}, {},
+        [&](std::span<pollfd> fds) {
+            const bool watching = std::any_of(
+                fds.begin(), fds.end(), [&](const pollfd& p) { return p.fd == descriptors[0]; });
+            std::unique_lock lock(mutex);
+            if (watching && !entered) {
+                entered = true;
+                changed.notify_all();
+                changed.wait(lock, [&] { return release; });
+                for (pollfd& p : fds)
+                    if (p.fd == descriptors[0]) p.revents = POLLIN;
+                return 1;
+            }
+            if (entered && release) {
+                polledAgain = true;
+                changed.notify_all();
+            }
+            lock.unlock();
+            return ::poll(fds.data(), fds.size(), -1);
+        });
+    REQUIRE(watcher);
+    (*watcher)->watch({{descriptors[0], CLAP_POSIX_FD_READ, 1}});
+    {
+        std::unique_lock lock(mutex);
+        changed.wait(lock, [&] { return entered; });
+    }
+    (*watcher)->watch({});                                         // the editor closes
+    (*watcher)->watch({{descriptors[0], CLAP_POSIX_FD_READ, 2}});  // another reuses the fd
+    {
+        std::unique_lock lock(mutex);
+        release = true;
+        changed.notify_all();
+        changed.wait(lock, [&] { return polledAgain; });
+    }
+    CHECK((*watcher)->takeReady().empty());  // the old poll's result was not delivered
+    watcher->reset();
+    ::close(descriptors[0]);
+    ::close(descriptors[1]);
 }

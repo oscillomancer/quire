@@ -32,6 +32,16 @@ void applyEditorRequests(Window& window, const host::Instance::EditorRequests& r
 // Polls plugin file descriptors on a thread and wakes the UI thread when one
 // is ready; a ready descriptor is not polled again until the UI thread has
 // dispatched it (so a level-triggered fd cannot spin).
+// One descriptor an editor asked to watch, with the registration it belongs
+// to (`owner`: an editor's serial), so readiness found for one registration
+// never reaches a later one that reuses the descriptor number.
+struct FdWatch {
+    int fd = -1;
+    std::uint32_t flags = 0;  // CLAP_POSIX_FD_*; in takeReady(), what was ready
+    std::uint64_t owner = 0;
+    bool operator==(const FdWatch&) const = default;
+};
+
 class FdWatcher {
   public:
     using Pipe = std::function<int(int*)>;
@@ -40,8 +50,8 @@ class FdWatcher {
                                                      Poll poll = {});
     ~FdWatcher();
     std::optional<Error> error();
-    void watch(std::vector<std::pair<int, std::uint32_t>> fds);  // UI thread: the set to poll
-    std::vector<std::pair<int, std::uint32_t>> takeReady();      // UI thread: (fd, CLAP flags)
+    void watch(std::vector<FdWatch> fds);  // UI thread: the set to poll
+    std::vector<FdWatch> takeReady();      // UI thread: what was ready, per registration
 
   private:
     explicit FdWatcher(std::function<void()> wake) : wake_(std::move(wake)) {}
@@ -50,8 +60,9 @@ class FdWatcher {
     Poll poll_;
     std::function<void()> wake_;
     std::mutex mutex_;
-    std::vector<std::pair<int, std::uint32_t>> fds_, ready_;
-    int pipe_[2] = {-1, -1};  // wakes poll() when the set changes or on shutdown
+    std::vector<FdWatch> fds_, ready_;
+    std::uint64_t generation_ = 0;  // bumped when the set changes: older polls are stale
+    int pipe_[2] = {-1, -1};        // wakes poll() when the set changes or on shutdown
     std::jthread thread_;
     std::optional<Error> error_;
 };
@@ -93,6 +104,7 @@ class PluginWindows {
     struct Editor {
         std::optional<model::Id> fx;  // empty: an instance the caller owns
         host::Instance* instance = nullptr;
+        std::uint64_t serial = 0;  // this registration of the instance's descriptors
         std::unique_ptr<Window> window;
         bool resizable = false;
     };
@@ -113,6 +125,7 @@ class PluginWindows {
     const Window* owner_ = nullptr;
     engine::EngineApp& app_;
     std::vector<Editor> editors_;
+    std::uint64_t nextSerial_ = 1;
     std::map<model::Id, Placement> placements_;
     std::unique_ptr<FdWatcher> watcher_;
     std::optional<Error> watcherError_;

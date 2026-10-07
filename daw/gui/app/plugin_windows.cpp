@@ -66,21 +66,30 @@ void FdWatcher::notify() {
     // EAGAIN means a previous wake is already pending.
 }
 
-void FdWatcher::watch(std::vector<std::pair<int, std::uint32_t>> fds) {
+void FdWatcher::watch(std::vector<FdWatch> fds) {
+    auto same = [](const FdWatch& a, const FdWatch& b) {
+        return a.fd == b.fd && a.owner == b.owner;
+    };
     {
         std::lock_guard lock(mutex_);
-        // Ready descriptors stay out until dispatched.
-        std::erase_if(fds, [&](const auto& f) {
+        // Readiness of a registration that is gone is stale; ready
+        // descriptors of current ones stay out until dispatched.
+        std::erase_if(ready_, [&](const FdWatch& r) {
+            return std::none_of(fds.begin(), fds.end(),
+                                [&](const FdWatch& f) { return same(f, r); });
+        });
+        std::erase_if(fds, [&](const FdWatch& f) {
             return std::any_of(ready_.begin(), ready_.end(),
-                               [&](const auto& r) { return r.first == f.first; });
+                               [&](const FdWatch& r) { return same(f, r); });
         });
         if (fds == fds_) return;
         fds_ = std::move(fds);
+        ++generation_;
     }
     notify();
 }
 
-std::vector<std::pair<int, std::uint32_t>> FdWatcher::takeReady() {
+std::vector<FdWatch> FdWatcher::takeReady() {
     std::lock_guard lock(mutex_);
     return std::exchange(ready_, {});
 }
@@ -88,13 +97,17 @@ std::vector<std::pair<int, std::uint32_t>> FdWatcher::takeReady() {
 void FdWatcher::run(std::stop_token stop) {
     while (!stop.stop_requested()) {
         std::vector<pollfd> polled;
+        std::vector<std::uint64_t> owners;
+        std::uint64_t generation = 0;
         {
             std::lock_guard lock(mutex_);
-            for (const auto& [fd, flags] : fds_) {
+            generation = generation_;
+            for (const FdWatch& w : fds_) {
                 short events = 0;
-                if (flags & CLAP_POSIX_FD_READ) events |= POLLIN;
-                if (flags & CLAP_POSIX_FD_WRITE) events |= POLLOUT;
-                polled.push_back({fd, events, 0});
+                if (w.flags & CLAP_POSIX_FD_READ) events |= POLLIN;
+                if (w.flags & CLAP_POSIX_FD_WRITE) events |= POLLOUT;
+                polled.push_back({w.fd, events, 0});
+                owners.push_back(w.owner);
             }
         }
         polled.push_back({pipe_[0], POLLIN, 0});
@@ -117,6 +130,10 @@ void FdWatcher::run(std::stop_token stop) {
         bool any = false;
         {
             std::lock_guard lock(mutex_);
+            // The set changed while polling: these results may belong to
+            // registrations that are gone. Poll the new set (level-triggered,
+            // so what is still ready is found again).
+            if (generation != generation_) continue;
             for (std::size_t i = 0; i + 1 < polled.size(); ++i) {
                 const short r = polled[i].revents;
                 if (!r) continue;
@@ -124,8 +141,10 @@ void FdWatcher::run(std::stop_token stop) {
                 if (r & POLLIN) flags |= CLAP_POSIX_FD_READ;
                 if (r & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
                 if (r & (POLLERR | POLLHUP | POLLNVAL)) flags |= CLAP_POSIX_FD_ERROR;
-                ready_.emplace_back(polled[i].fd, flags);
-                std::erase_if(fds_, [&](const auto& f) { return f.first == polled[i].fd; });
+                ready_.push_back({polled[i].fd, flags, owners[i]});
+                std::erase_if(fds_, [&](const FdWatch& f) {
+                    return f.fd == polled[i].fd && f.owner == owners[i];
+                });
                 any = true;
             }
         }
@@ -223,6 +242,7 @@ void PluginWindows::loadLayout(const json::Value& layout) {
 }
 
 Status PluginWindows::attach(Editor editor, const std::string& title) {
+    editor.serial = nextSerial_++;
     if (watcher_)
         if (auto error = watcher_->error()) watcherError_ = std::move(error);
     if (!editor.instance->hasEditor())
@@ -303,6 +323,7 @@ bool PluginWindows::reattach(Editor& editor) {
         return false;
     }
     editor.instance = instance;
+    editor.serial = nextSerial_++;  // a new registration: old readiness is not its own
     // A resizable editor keeps the window's size; the window keeps its place.
     if (size->resizable && editor.resizable) {
         if (auto kept =
@@ -411,16 +432,17 @@ int PluginWindows::service() {
         applyEditorRequests(*e.window, requests);
     }
     // Ready descriptors go to their plugin, then are watched again.
-    for (const auto& [fd, flags] : watcher_ && !watcherError_
-                                       ? watcher_->takeReady()
-                                       : std::vector<std::pair<int, std::uint32_t>>{})
+    for (const FdWatch& ready :
+         watcher_ && !watcherError_ ? watcher_->takeReady() : std::vector<FdWatch>{})
         for (Editor& e : editors_)
-            for (const auto& [wfd, wflags] : e.instance->watchedFds())
-                if (wfd == fd) e.instance->onFd(fd, flags);
-    std::vector<std::pair<int, std::uint32_t>> fds;
+            if (e.serial == ready.owner)
+                for (const auto& [wfd, wflags] : e.instance->watchedFds())
+                    if (wfd == ready.fd) e.instance->onFd(ready.fd, ready.flags);
+    std::vector<FdWatch> fds;
     int next = -1;
     for (Editor& e : editors_) {
-        for (const auto& f : e.instance->watchedFds()) fds.push_back(f);
+        for (const auto& [fd, flags] : e.instance->watchedFds())
+            fds.push_back({fd, flags, e.serial});
         int due = e.instance->nextTimerMs();
         if (due == 0) {
             e.instance->serviceMainThread();  // runs the due timers

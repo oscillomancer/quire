@@ -348,7 +348,10 @@ human and the agent see the same names and units. Stock plugin editors are
 the template's Pugl editors. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
-cannot remain open. Plugin show/hide requests change the parent window's
+cannot remain open. Each editor registration (an open, or a reopen for a
+replaced instance) watches its descriptors under its own serial: readiness
+reaches only the registration it was found for, and a poll that overlapped a
+change of the watched set is discarded and repeated. Plugin show/hide requests change the parent window's
 visibility while retaining the editor and its timer/FD service. Close takes
 precedence; when show and hide are coalesced together, hide takes precedence.
 Opening an existing hidden editor shows and raises that same window. Each
