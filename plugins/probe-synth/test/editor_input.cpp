@@ -88,6 +88,32 @@ int main() {
     check(keys.values[kFilterSlope] == 1.0 && keys.begins == keys.ends,
           "keyboard toggles discrete controls");
 
+    Host discrete;
+    Editor steps(discrete);
+    steps.onKey(EditorKey::Tab, false);
+    steps.onKey(EditorKey::Home, false);
+    steps.onKey(EditorKey::Right, true);
+    check(discrete.values[kWaveform] == 1, "enum fine arrow moves one physical step");
+    steps.onKey(EditorKey::Left, false);
+    check(discrete.values[kWaveform] == 0, "enum reverse arrow moves one physical step");
+    for (int i = 0; i < 4; ++i) steps.onKey(EditorKey::Tab, false);
+    steps.onKey(EditorKey::Home, false);
+    steps.onKey(EditorKey::Up, true);
+    check(discrete.values[kFilterSlope] == 1, "bool fine arrow toggles on");
+    steps.onKey(EditorKey::Down, false);
+    check(discrete.values[kFilterSlope] == 0, "bool arrow toggles off");
+    for (int i = 0; i < 10; ++i) steps.onKey(EditorKey::Tab, false);
+    steps.onKey(EditorKey::Home, false);
+    const double minimum = discrete.values[kSeed];
+    steps.onKey(EditorKey::Right, false);
+    check(discrete.values[kSeed] == minimum + 1, "integer arrow moves one physical step");
+    steps.onKey(EditorKey::Left, true);
+    check(discrete.values[kSeed] == minimum, "integer fine reverse moves one physical step");
+    steps.onKey(EditorKey::End, false);
+    const double maximum = discrete.values[kSeed];
+    steps.onKey(EditorKey::Up, false);
+    check(discrete.values[kSeed] == maximum && discrete.begins == discrete.ends,
+          "discrete steps clamp at boundaries with balanced gestures");
     std::printf("\n%s\n", failures ? "FAILURES" : "all checks passed");
     return failures ? 1 : 0;
 }

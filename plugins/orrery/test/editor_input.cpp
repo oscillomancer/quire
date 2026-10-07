@@ -248,6 +248,41 @@ int main() {
             m.run(p);
             EXPECT(m.begins == m.ends);
         }
+        // Focus a choice without drawing; arrows take one physical step.
+        ed.layout();
+        click(ed, find(ed, Kind::Choice, static_cast<int>(idx("osc1.wave"))));
+        ed.onKeyCode(orrery::gui::key::kEscape, 0);
+        ed.onKey(orrery::gui::EditorKey::Home, false);
+        ed.onKey(orrery::gui::EditorKey::Right, true);
+        EXPECT(bridge.value(idx("osc1.wave")) == 1);
+        ed.onKey(orrery::gui::EditorKey::Down, false);
+        EXPECT(bridge.value(idx("osc1.wave")) == 0);
+        ed.onKey(orrery::gui::EditorKey::Left, true);
+        EXPECT(bridge.value(idx("osc1.wave")) == 0);
+        ed.onKey(orrery::gui::EditorKey::End, false);
+        const double maximum = bridge.value(idx("osc1.wave"));
+        ed.onKey(orrery::gui::EditorKey::Up, false);
+        EXPECT(bridge.value(idx("osc1.wave")) == maximum);
+        ed.onKey(orrery::gui::EditorKey::Left, true);
+        EXPECT(bridge.value(idx("osc1.wave")) == maximum - 1);
+        click(ed, find(ed, Kind::Tile, so::kVoice));
+        ed.onKey(orrery::gui::EditorKey::Tab, false);  // mode
+        ed.onKey(orrery::gui::EditorKey::Tab, false);  // polyphony
+        ed.onKey(orrery::gui::EditorKey::Home, false);
+        const double minPoly = bridge.value(idx("voice.polyphony"));
+        ed.onKey(orrery::gui::EditorKey::Right, true);
+        EXPECT(bridge.value(idx("voice.polyphony")) == minPoly + 1);
+        ed.onKey(orrery::gui::EditorKey::Left, false);
+        EXPECT(bridge.value(idx("voice.polyphony")) == minPoly);
+        for (int n = 0; n < 7; ++n) ed.onKey(orrery::gui::EditorKey::Tab, false);  // mpe
+        ed.onKey(orrery::gui::EditorKey::Home, false);
+        ed.onKey(orrery::gui::EditorKey::Up, true);
+        EXPECT(bridge.value(idx("voice.mpe")) == 1);
+        ed.onKey(orrery::gui::EditorKey::Down, false);
+        EXPECT(bridge.value(idx("voice.mpe")) == 0);
+        Flush keyEdits;
+        keyEdits.run(p);
+        EXPECT(keyEdits.begins == keyEdits.ends);
         // The bridge closes an outstanding gesture when another begins.
         bridge.beginEdit(idx("osc1.level"));
         bridge.beginEdit(idx("osc1.fine"));

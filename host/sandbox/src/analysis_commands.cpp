@@ -3,6 +3,7 @@
 #include "analysis_commands.h"
 #include "../../analysis-commands/analysis_shared.h"
 #include "optimize_loss.h"
+#include "source_ref.h"
 
 #include "supple/analysis/analysis.h"
 #include "supple/audio/audio_file.h"
@@ -26,7 +27,7 @@ using analysis_commands::Loaded;
 Result<Loaded> load(Session& s, const std::string& ref, std::string_view path) {
     Loaded l;
     std::filesystem::path file = ref;
-    if (ref.rfind("rd_", 0) == 0) {
+    if (isRenderRef(ref)) {
         auto r = s.findRender(ref);
         if (!r) return std::move(r).error().at(std::string(path));
         file = (*r)->path;
@@ -46,7 +47,7 @@ Result<Loaded> load(Session& s, const std::string& ref, std::string_view path) {
 // A session render knows where its input ended (its length minus the rendered
 // tail): by id, or by the path it was written to.
 const RenderRecord* sessionRender(const Session& s, const std::string& source) {
-    if (source.rfind("rd_", 0) == 0) {
+    if (isRenderRef(source)) {
         auto r = s.findRender(source);
         return r ? *r : nullptr;
     }

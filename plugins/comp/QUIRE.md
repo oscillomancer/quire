@@ -12,6 +12,9 @@ Product-owned changes:
   core-params table provides all physical ranges, curves, flags and text.
   Local TPT key filters and a preallocated monotonic limiter deque live
   here; shared core-dsp supplies the 4x interpolator and DenormalGuard.
+  A prepared stereo key delay aligns filtered-key audition with reported latency
+  and stays populated during audition/key-source transitions; process allocates
+  no delay storage.
 - `comp_clap.cpp` retains the template's GUI lifecycle, bounded gesture
   queues, sample-offset event splitting, mono/stereo configuration and
   float/double processing. It forwards params and JSON state to plugin-support,

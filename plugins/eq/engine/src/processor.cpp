@@ -216,6 +216,8 @@ struct Processor::Impl {
         for (std::uint32_t f = 0; f < frames; ++f) {
             double l = static_cast<double>(in[0][f]),
                    r = channels == 2 ? static_cast<double>(in[1][f]) : l;
+            if (!std::isfinite(l)) l = 0;
+            if (!std::isfinite(r)) r = 0;
             tickBands();
             if (phase == 2)
                 linear.sample(l, r);

@@ -602,3 +602,48 @@ TEST_CASE("comp ratio smoothing reaches infinity without an endpoint jump") {
     CHECK(maxStep < .01);
     CHECK(std::abs(previous + 60) < .001);
 }
+
+TEST_CASE("comp key audition shares lookahead latency across sources and transitions") {
+    auto input = sine(48000, .08, .125, 719);
+    auto key = sine(48000, .08, .25, 1139);
+    for (double external : {0., 1.}) {
+        auto v = defaults();
+        v[kRatio] = 1;
+        v[kAutoMakeup] = 0;
+        v[kSidechain] = external;
+        v[kScHighpass] = 10;
+        v[kScLowpass] = 20000;
+        const auto& source = external == 1 ? key : input;
+        for (double ahead : {1., 2.}) {
+            v[kLookahead] = ahead;
+            const auto delay = latencyFor(v, 48000);
+            v[kScListen] = 1;
+            const auto audition = render(input, v, 48000, 37, &key);
+            for (std::size_t i = 0; i < input[0].size(); ++i)
+                REQUIRE(audition[0][i] == (i < delay ? 0 : source[0][i - delay]));
+            v[kScListen] = 0;
+            const std::array<Event, 2> events{{{500, kScListen, 1}, {1700, kScListen, 0}}};
+            const auto transitions = render(input, v, 48000, 37, &key, events);
+            CHECK(transitions == render(input, v, 48000, 1, &key, events));
+            // Switching key sources is delayed with the key's samples, too.
+            v[kScListen] = 1;
+            const std::array<Event, 2> sourceEvents{
+                {{500, kSidechain, 1 - external}, {1700, kSidechain, external}}};
+            const auto switched = render(input, v, 48000, 37, &key, sourceEvents);
+            auto immediateValues = v;
+            immediateValues[kLookahead] = 0;
+            const auto immediate = render(input, immediateValues, 48000, 1, &key, sourceEvents);
+            for (std::size_t i = 0; i < input[0].size(); ++i)
+                REQUIRE(switched[0][i] == (i < delay ? 0 : immediate[0][i - delay]));
+            double mix = 0;
+            for (std::size_t i = 0; i < input[0].size(); ++i) {
+                const double target = i >= 500 && i < 1700 ? 1 : 0;
+                mix += std::clamp(target - mix, -1. / 480., 1. / 480.);
+                const double dry = i < delay ? 0 : static_cast<double>(input[0][i - delay]);
+                const double listened = i < delay ? 0 : static_cast<double>(source[0][i - delay]);
+                REQUIRE(transitions[0][i] ==
+                        doctest::Approx(dry + mix * (listened - dry)).epsilon(1e-6).scale(1));
+            }
+        }
+    }
+}

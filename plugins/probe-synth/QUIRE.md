@@ -10,6 +10,9 @@
   parameter table (15 controls and output meter), core tests, and offline note
   renderer. The plugin is an instrument with zero audio inputs, mono/stereo
   outputs and CLAP/MIDI note input. Note events are applied at sample offsets.
+  The wrapper ignores undersized event payloads and invalid note/MIDI addresses
+  or data. Discrete editor arrows step one physical value even in fine mode;
+  float arrows retain normalized steps.
 - Removed the template editor screenshot and replaced the effect editor's
   controls with the 15 synthesizer parameters.
   The shared window, renderer, widgets, telemetry ring, host contract and

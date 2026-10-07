@@ -24,6 +24,7 @@ Status Processor::prepare(double sr, std::uint32_t maxFrames, int channels) {
         const auto capacity = static_cast<std::size_t>(std::ceil(.005 * sampleRate_)) + 18;
         for (std::size_t c = 0; c < 2; ++c) {
             delay_[c].resize(capacity);
+            keyDelay_[c].resize(capacity);
             average_[c].resize(capacity);
             minimum_[c].queue.resize(2 * capacity + 2);
             interpolators_[c].prepare(4);
@@ -54,6 +55,7 @@ void Processor::reset() SUPPLE_RT {
     meters_ = {};
     for (std::size_t c = 0; c < 2; ++c) {
         std::fill(delay_[c].begin(), delay_[c].end(), 0);
+        std::fill(keyDelay_[c].begin(), keyDelay_[c].end(), 0);
         std::fill(average_[c].begin(), average_[c].end(), 1);
         minimum_[c].reset();
         interpolators_[c].reset();
@@ -166,6 +168,9 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
         const double driven = (1 - v[kScListen]) * x[c] * outGain * ((1 - wet) + wet * wetGain) +
                               v[kScListen] * filtered[c];
         delay_[c][head_] = limiter ? driven : x[c];
+        // Keep key history hot even while audition is off, so switching
+        // audition uses the same source time as the latency-aligned dry path.
+        keyDelay_[c][head_] = filtered[c];
         double peak = std::abs(driven);
         if (limiter && tp) {
             std::array<double, 4> phases{};
@@ -213,7 +218,10 @@ void Processor::tick(const std::array<double, 2>& x, const std::array<double, 2>
             y[c] = outGain * (wet * compressed * wetGain + (1 - wet) * dry);
             meters_.gr = std::min(meters_.gr, reduction_[c]);
         }
-        if (!limiter) y[c] += v[kScListen] * (filtered[c] - y[c]);
+        if (!limiter) {
+            const double listened = keyDelay_[c][(head_ + capacity - delay) % capacity];
+            y[c] += v[kScListen] * (listened - y[c]);
+        }
         // Auditioning a key still respects a limiter's final sample ceiling.
         if (limiter) y[c] = std::clamp(y[c], -ceilingGain_, ceilingGain_);
         peaks_[0] = std::max(peaks_[0], std::abs(x[c]));

@@ -94,6 +94,9 @@ example), with their tests.
   per host block).
 - Any sample rate 22 050–384 000 Hz; frequencies above 0.45·fs are clamped
   internally (the parameter keeps its value).
+- EQ replaces non-finite input samples with zero before recursive/FIR state.
+  Utility sanitizes its working inputs before DC/side-filter state updates,
+  while its exact unity output copy preserves the original sample bits.
 - Denormals: `dsp::DenormalGuard` around processing; recursive states are
   also flushed to zero below 1e-30 when the input has been silent.
 - Parameter changes are smoothed (no zipper noise); a switch that cannot be
@@ -114,8 +117,9 @@ runs, processes and sample-rate-independent block partitions (§1.3).
 Product-owned `Editor.cpp`/`Theme.h`/`Widgets.h` usage (the template's widgets
 and window stay as shipped). Each plugin's layout is in its section below;
 all read names, units and formatted values from the table, and every edit is
-a gesture-bracketed parameter change. `tools/gui_preview` renders at least
-two scenarios per plugin to PNG for review.
+a gesture-bracketed parameter change. Utility's discrete arrow-key edits step
+one physical value, independent of fine mode; floats retain normalized steps.
+`tools/gui_preview` renders at least two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
 plugins read as one family.
@@ -205,7 +209,7 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
   coefficients are recomputed only while a band's smoother moves. Enabling
   a band or changing its type or slope crossfades the band's output with its
   input over 10 ms (a type change fades out, switches and clears state,
-  fades in). A disabled band, or a gain type at 0 dB, passes bit-exactly.
+  fades in). A disabled band, or a gain type at 0 dB, passes finite input bit-exactly.
 - `auto_gain`: output compensation for the static curve (the negative of the
   mean dB gain of the summed response over 20 Hz–20 kHz on a log axis,
   pink-weighted), updated with the smoothed parameters.
@@ -251,8 +255,10 @@ Compressor mode:
   the reduction has been held — document the rule in `stock-effects.md`.
 - `auto_makeup`: compensates the static reduction at −18 dBFS input (so a
   typical level is roughly level-matched); documented.
-- Lookahead delays the audio (and the dry path of `mix`) but not the
-  detector; latency = lookahead samples.
+- Lookahead delays the audio, the dry path of `mix`, and filtered-key audition
+  by the reported latency, but not the detector. A prepared key delay stays
+  populated while audition is off, so audition and key-source transitions
+  retain the same sample alignment; latency = lookahead samples.
 
 Limiter mode (ratio ∞, the compressor's threshold ignored, `ceiling` sets
 the output):

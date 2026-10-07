@@ -84,6 +84,10 @@ typedef struct clap_plugin_supple_semantic_params {
 `params` is exactly the `params` member of `core-params::describeTable`;
 `patch` is `PatchType::jsonSchema()`. Keys, ids and units are the same ones
 the plugin exposes through `clap.params` (the CLAP values follow ADR-0010).
+Curve exponents must be finite and positive and round-trip exactly: use
+shortest round-trip text, retaining the trimmed fixed-three-decimal spelling
+when it already round-trips. Invalid exponent text is rejected by
+`core-params::fromDescription` with `params.description` and a corrective hint.
 
 ### 3.2 Patch documents
 
@@ -153,6 +157,13 @@ typedef struct clap_host_supple_semantic_params {
 Plugins call `changed(PATCH)` when their own GUI changes structure or loads
 a preset (in addition to the standard `clap_host_state.mark_dirty`), so the
 host can capture an undo step (ADR-0008).
+
+Quire validates semantic schemas on the main thread before accepting them.
+Invalid required entry fields or an ID set that differs from `clap.params`
+disable the semantic view for that instance, log a warning, and fall back to
+plain CLAP parameters. The sandbox returns `sandbox.plugin_contract` with a value path
+and a restart/replace hint when a parameter query has no current value in
+either the patch or CLAP, rather than returning an incomplete entry.
 
 ## 7. Conformance tests (both sides)
 

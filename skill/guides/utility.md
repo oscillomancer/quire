@@ -37,6 +37,10 @@ Width 0 produces the average on both sides; 200 doubles S. Swap precedes
 channel selection, then polarity, DC block, width/bass mono, pan, gain, mute.
 Gain, pan, width and crossover move over 20 ms, switches over 10 ms.
 
+Non-finite input samples are treated as zero inside the DC blocker and side
+filter, so one bad sample cannot poison later output; at exact unity the
+output is still a bit copy of the input.
+
 Limits: no limiter, loudness normalization or intentional delay. Bass mono
 uses minimum-phase LR4 on S, has zero latency and does not fully remove
 bass: 50 Hz at a 150 Hz crossover is attenuated about 38.3 dB. DC block

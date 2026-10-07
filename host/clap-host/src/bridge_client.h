@@ -39,7 +39,9 @@ class BridgeProcess {
 
   private:
     friend struct BridgeTestAccess;
+    friend class RemoteInstance;
     static constexpr int kHung = -2;
+    static constexpr int kProtocolViolation = -3;
     BridgeProcess() = default;
     std::atomic<pid_t> pid_{-1};
     int pidfd_ = -1, sock_ = -1;
@@ -108,6 +110,7 @@ class RemoteInstance {
     pid_t bridgePid() const { return process_->pid(); }
 
   private:
+    friend struct BridgeTestAccess;
     RemoteInstance() = default;
     Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w, int fd = -1,
                                            int timeoutMs = 10000);

@@ -328,6 +328,7 @@ struct HostCallbacks {
     }
     static bool CLAP_ABI outTryPush(const clap_output_events_t* list,
                                     const clap_event_header_t* e) {
+        if (!e || e->size < sizeof(clap_event_header_t)) return false;
         auto* s = static_cast<Instance::HostState*>(list->ctx);
         OutputEvents* sink = s->outSink;
         if ((!sink && !s->idleFlush) || e->space_id != CLAP_CORE_EVENT_SPACE_ID) return true;
@@ -336,6 +337,7 @@ struct HostCallbacks {
         out.flags = e->flags;
         switch (e->type) {
             case CLAP_EVENT_PARAM_VALUE: {
+                if (e->size < sizeof(clap_event_param_value_t)) return false;
                 const auto* p = reinterpret_cast<const clap_event_param_value_t*>(e);
                 out.kind = OutputEvent::Kind::ParamValue;
                 out.paramId = p->param_id;
@@ -348,6 +350,7 @@ struct HostCallbacks {
             }
             case CLAP_EVENT_PARAM_GESTURE_BEGIN:
             case CLAP_EVENT_PARAM_GESTURE_END: {
+                if (e->size < sizeof(clap_event_param_gesture_t)) return false;
                 const auto* g = reinterpret_cast<const clap_event_param_gesture_t*>(e);
                 out.kind = e->type == CLAP_EVENT_PARAM_GESTURE_BEGIN
                                ? OutputEvent::Kind::GestureBegin
@@ -356,6 +359,7 @@ struct HostCallbacks {
                 break;
             }
             case CLAP_EVENT_NOTE_END: {
+                if (e->size < sizeof(clap_event_note_t)) return false;
                 const auto* n = reinterpret_cast<const clap_event_note_t*>(e);
                 out.kind = OutputEvent::Kind::NoteEnd;
                 out.noteId = n->note_id;
@@ -1271,7 +1275,9 @@ Result<json::Value> Instance::semanticSchema() {
     if (!extSemantic_->get_schema(plugin_, &sink.stream))
         return Error("host.semantic", "get_schema failed");
     auto schema = json::parse(sink.text);
-    auto valid = [](const json::Value& document) {
+    std::set<std::uint32_t> clapIds;
+    for (const auto& p : params()) clapIds.insert(p.id);
+    auto valid = [&](const json::Value& document) {
         const auto* entries = document.find("params");
         if (!document.isObject() || !entries || !entries->isObject()) return false;
         std::set<std::uint32_t> ids;
@@ -1282,7 +1288,8 @@ Result<json::Value> Instance::semanticSchema() {
             if (key.empty() || !entry.isObject() || !id || !id->isNumber() ||
                 !std::isfinite(id->asDouble()) || id->asDouble() < 0 ||
                 id->asDouble() > UINT32_MAX || std::trunc(id->asDouble()) != id->asDouble() ||
-                !ids.insert(static_cast<std::uint32_t>(id->asDouble())).second || !name ||
+                !ids.insert(static_cast<std::uint32_t>(id->asDouble())).second ||
+                !clapIds.contains(static_cast<std::uint32_t>(id->asDouble())) || !name ||
                 !name->isString() || name->asString().empty() || !type || !type->isString())
                 return false;
             const auto& kind = type->asString();
@@ -1307,7 +1314,7 @@ Result<json::Value> Instance::semanticSchema() {
             } else if (kind != "bool")
                 return false;
         }
-        return true;
+        return ids == clapIds;
     };
     if (schema && valid(*schema)) return schema;
     info_.semantic = false;

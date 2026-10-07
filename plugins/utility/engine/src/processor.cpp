@@ -101,7 +101,9 @@ void Processor::run(const T* const* in, T* const* out, uint32_t frames, bool tel
     started_ = true;
     for (uint32_t i = 0; i < frames; ++i) {
         const T originalL = in[0][i], originalR = channels_ == 2 ? in[1][i] : originalL;
-        const double l = static_cast<double>(originalL), r = static_cast<double>(originalR);
+        double l = static_cast<double>(originalL), r = static_cast<double>(originalR);
+        if (!std::isfinite(l)) l = 0;
+        if (!std::isfinite(r)) r = 0;
         const double a = matrix_[0].next(), b = matrix_[1].next(), lowerLeft = matrix_[2].next(),
                      d = matrix_[3].next();
         double x = a == 1 && b == 0 ? l : a * l + b * r,

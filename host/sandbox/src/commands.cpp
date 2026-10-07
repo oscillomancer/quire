@@ -270,6 +270,12 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
         if (const json::Value* entries = schema.find("params"); entries && entries->isObject()) {
             for (const auto& m : entries->asObject()) {
                 const json::Value* cur = values->find(m.key);
+                if (!cur || !cur->find("value"))
+                    return Error(
+                        "sandbox.plugin_contract",
+                        r.name + " did not provide a current value for '" + m.key + "'",
+                        "/params/" + m.key + "/value",
+                        "Restart or replace the plugin; its parameter query is incomplete.");
                 if (full) {
                     json::Value e = m.value;
                     if (cur) {
@@ -302,6 +308,11 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
     json::Value params = json::Value::object();
     for (const auto& p : in.params()) {
         const auto v = in.paramValue(p.id);
+        if (!v)
+            return Error("sandbox.plugin_contract",
+                         r.name + " did not provide a current value for '" + p.name + "'",
+                         "/params/" + std::to_string(p.id) + "/value",
+                         "Restart or replace the plugin; clap.params.get_value failed.");
         const std::string text = v ? in.paramText(p.id, *v).valueOr("") : "";
         if (full) {
             json::Value e = json::Value::object();

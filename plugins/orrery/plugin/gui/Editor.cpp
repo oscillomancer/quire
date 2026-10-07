@@ -720,8 +720,29 @@ void Editor::onKey(EditorKey k, bool fineOrReverse) {
             return;
     }
     host_.beginEdit(i);
-    setParamNormalized(i, n);
+    if (p.type != params::Type::Float) {
+        const double direction =
+            k == EditorKey::Left || k == EditorKey::Down || k == EditorKey::End ? -1. : 1.;
+        double value = k == EditorKey::Home  ? p.min
+                       : k == EditorKey::End ? p.max
+                                             : std::clamp(host_.value(i) + direction, p.min, p.max);
+        // Wave's permanent table is the union of oscillator types. Skip
+        // inapplicable entries, just as its choice menu does, and stop at
+        // the current type's boundary rather than falling back to its default.
+        const auto loc = so::locate(i);
+        if (so::slotInfo(loc.slot).block == so::Block::Osc &&
+            loc.field == static_cast<std::uint16_t>(so::OscF::wave)) {
+            const auto type = host_.structure().osc[static_cast<std::size_t>(loc.slot - so::kOsc1)];
+            while (type && value >= p.min && value <= p.max &&
+                   !so::waveApplies(*type, static_cast<so::Wave>(static_cast<int>(value))))
+                value += direction;
+            if (value < p.min || value > p.max) value = host_.value(i);
+        }
+        host_.edit(i, value);
+    } else
+        setParamNormalized(i, n);
     host_.endEdit(i);
+    dirty_ = true;
 }
 
 void Editor::onPointerLeave() {

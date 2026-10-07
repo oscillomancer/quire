@@ -26,6 +26,7 @@ over 20 ms on the internal partition grid. A worker exists only while linear
 mode is active and joins on deactivate/destruction. FIR updates are coalesced;
 minimum/natural events apply at their host sample offsets. All storage is sized
 at prepare; no library primitive or shared plugin code was modified.
+Non-finite input samples are zero before entering recursive or FIR history.
 
 The editor owns its response graph, eight band columns, output controls, menus,
 keyboard interaction and Orrery-family palette. Audio only copies stereo pre/post

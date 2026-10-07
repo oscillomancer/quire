@@ -199,6 +199,7 @@ void BridgeProcess::fail(int why) {
 std::string BridgeProcess::failure() const {
     if (!failed()) return {};
     const int s = failSignal_.load();
+    if (s == kProtocolViolation) return "the plugin bridge violated the output-event protocol";
     if (s == kHung) return "the plugin stopped responding and its bridge was killed";
     if (s > 0) return std::string("the plugin bridge died (") + ::strsignal(s) + ")";
     return "the plugin bridge exited";
@@ -618,6 +619,14 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
         silence();
         return true;
     }
+    // The acknowledged arena is untrusted. Snapshot once, before copying any
+    // output, and fail through the same atomic path as a dead bridge.
+    const std::uint32_t outEventCount = hdr_->outEventCount;
+    if (outEventCount > kMaxOutEvents) {
+        process_->fail(BridgeProcess::kProtocolViolation);
+        silence();
+        return true;
+    }
     for (std::uint32_t c = 0; c < b.outputChannels; ++c) {
         if (c < layout_.outChannels)
             std::copy_n(outAudio + static_cast<std::size_t>(c) * layout_.maxFrames, frames,
@@ -635,7 +644,7 @@ bool RemoteInstance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT
     }
     if (out) {
         const auto* oe = reinterpret_cast<const OutputEvent*>(base + layout_.outEvents);
-        for (std::uint32_t i = 0; i < hdr_->outEventCount; ++i) {
+        for (std::uint32_t i = 0; i < outEventCount; ++i) {
             if (out->count < out->storage.size())
                 out->storage[out->count++] = oe[i];
             else

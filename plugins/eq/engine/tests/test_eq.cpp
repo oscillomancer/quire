@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <numbers>
 #include "../bench/accuracy.h"
 #include "eq/processor.h"
@@ -452,4 +453,35 @@ TEST_CASE("EQ natural matched Butterworth passes retain their cutoff across rate
                     CAPTURE(slope);
                     CHECK(std::abs(eq::magnitudeDb(v, f, fs) + 3.0103) < .05);
                 }
+}
+
+TEST_CASE("EQ non-finite input is silence before recursive and FIR history") {
+    for (int phase : {0, 1, 2}) {
+        auto v = flat(phase);
+        v[0] = 1;
+        v[3] = 9;
+        eq::Processor clean, poisoned;
+        configureValues(clean, v);
+        configureValues(poisoned, v);
+        clean.prepare(48000, 4096);
+        poisoned.prepare(48000, 4096);
+        for (double bad :
+             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+              -std::numeric_limits<double>::infinity()}) {
+            std::array<double, 4096> x{}, ref{}, got{}, refR{}, gotR{};
+            const double* in[]{x.data(), x.data()};
+            double *a[]{ref.data(), refR.data()}, *b[]{got.data(), gotR.data()};
+            x[1] = .25;
+            clean.process(in, a, 4096);
+            x[0] = bad;
+            poisoned.process(in, b, 4096);
+            CHECK(bool(got == ref));
+            CHECK(bool(gotR == refR));
+            x[0] = 0;
+            clean.process(in, a, 4096);
+            poisoned.process(in, b, 4096);
+            CHECK(bool(got == ref));
+            CHECK(bool(gotR == refR));
+        }
+    }
 }

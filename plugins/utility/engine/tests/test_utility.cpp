@@ -257,3 +257,40 @@ TEST_CASE("utility five seconds full-range automation is finite and bounded") {
         pos += n;
     }
 }
+
+TEST_CASE("utility unity keeps non-finite bits without poisoning stateful paths") {
+    for (double bad :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+          -std::numeric_limits<double>::infinity()}) {
+        for (auto stateful : {kDcBlock, kMonoBelow}) {
+            for (bool initiallyOn : {false, true}) {
+                Processor clean, poisoned;
+                clean.prepare(48000, 1024);
+                poisoned.prepare(48000, 1024);
+                const double setting = stateful == kDcBlock ? 1 : 150;
+                if (initiallyOn) {
+                    clean.setParam(stateful, setting);
+                    poisoned.setParam(stateful, setting);
+                }
+                Audio a(1024), b(1024);
+                b.l[0] = bad;
+                a.process(clean);
+                b.process(poisoned);
+                if (!initiallyOn)
+                    CHECK(bool(std::memcmp(&b.l[0], &bad, sizeof(bad)) == 0));
+                else {
+                    CHECK(bool(a.l == b.l));
+                    CHECK(bool(a.r == b.r));
+                }
+                clean.setParam(stateful, setting);
+                poisoned.setParam(stateful, setting);
+                a = signal(1024);
+                b = a;
+                a.process(clean);
+                b.process(poisoned);
+                CHECK(bool(a.l == b.l));
+                CHECK(bool(a.r == b.r));
+            }
+        }
+    }
+}

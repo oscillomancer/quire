@@ -26,14 +26,16 @@ struct Event {
     enum class Type : std::uint8_t {
         NoteOn,      // key, channel, noteId, value = velocity 0..1
         NoteOff,     // key, channel, noteId, value = release velocity 0..1
-        Choke,       // key/noteId: stop immediately
+        Choke,       // key, channel, noteId: conjunctive match, -1 wildcards
         Param,       // index = table index, value = physical value
         Controller,  // index = MIDI CC number, value 0..1 (1 modwheel, 2 breath, 11 expression, 74
                      // slide, 64 sustain)
         Pitchbend,   // channel, value -1..1
         Pressure,    // channel aftertouch 0..1 (MPE member channel: per-note pressure)
-        PolyPressure,  // key, value 0..1
+        PolyPressure,  // key, channel, noteId (-1 wildcards), value 0..1
         AllNotesOff,
+        NoteExpression,  // key/channel/noteId (-1 wildcards), index = 11 expression / 74 slide
+                         // value 0..1; separate from global MIDI controllers
     };
     std::uint32_t time = 0;  // sample offset in the block; events are sorted by time
     Type type = Type::NoteOn;

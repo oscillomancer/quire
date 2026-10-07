@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,6 +25,7 @@ int64_t CLAP_ABI writeText(const clap_ostream_t* stream, const void* data, uint6
 }
 struct EventList {
     clap_event_note_t note{};
+    const clap_event_header_t* single = nullptr;
     bool send = true;
     clap_input_events_t iface{
         this,
@@ -31,7 +33,8 @@ struct EventList {
             return static_cast<EventList*>(e->ctx)->send ? 1u : 0u;
         },
         [](const clap_input_events_t* e, uint32_t) -> const clap_event_header_t* {
-            return &static_cast<EventList*>(e->ctx)->note.header;
+            auto* self = static_cast<EventList*>(e->ctx);
+            return self->single ? self->single : &self->note.header;
         }};
 };
 struct Input {
@@ -166,6 +169,107 @@ int main(int argc, char** argv) {
     process.audio_outputs_count = 1;
     process.in_events = &events.iface;
     process.out_events = &outEvents;
+    const auto* params =
+        static_cast<const clap_plugin_params_t*>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    if (!params) return 1;
+    clap_param_info_t info{};
+    if (!params->get_info(plugin, 0, &info)) return 1;
+    double original = 0, after = 0;
+    if (!params->get_value(plugin, info.id, &original)) return 1;
+    clap_event_param_value_t param{};
+    param.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID,
+                    CLAP_EVENT_PARAM_VALUE, 0};
+    param.param_id = info.id;
+    param.value = original == info.max_value ? info.min_value : info.max_value;
+    param.note_id = param.port_index = param.channel = param.key = -1;
+    events.single = &param.header;
+    params->flush(plugin, &events.iface, &outEvents);
+    if (!params->get_value(plugin, info.id, &after) || after != original) return 1;
+    if (plugin->process(plugin, &process) != CLAP_PROCESS_CONTINUE ||
+        !params->get_value(plugin, info.id, &after) || after != original)
+        return 1;
+    param.header.size = sizeof(param);
+    params->flush(plugin, &events.iface, &outEvents);
+    if (!params->get_value(plugin, info.id, &after) || after != param.value) return 1;
+
+    clap_event_midi_t midi{};
+    midi.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0};
+    midi.data[0] = 0x90;
+    midi.data[1] = 60;
+    midi.data[2] = 100;
+    events.note.header.size = sizeof(clap_event_header_t);
+    for (auto* header : {&events.note.header, &midi.header}) {
+        for (int valid = 0; valid < 2; ++valid) {
+            plugin->reset(plugin);
+            events.single = header;
+            events.send = true;
+            double energy = 0;
+            for (int block = 0; block < 16; ++block) {
+                if (plugin->process(plugin, &process) != CLAP_PROCESS_CONTINUE) return 1;
+                events.send = false;
+                for (float value : left) energy += static_cast<double>(value) * value;
+            }
+            if ((valid == 0 && energy != 0) || (valid == 1 && !(energy > 0))) return 1;
+            header->size = header == &events.note.header ? sizeof(events.note) : sizeof(midi);
+        }
+    }
+    for (int invalid = 0; invalid < 7; ++invalid) {
+        plugin->reset(plugin);
+        events.note.velocity = .8;
+        events.note.port_index = 0;
+        events.note.key = 60;
+        events.note.channel = 0;
+        events.note.note_id = 1;
+        switch (invalid) {
+            case 0:
+                events.note.velocity = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 1:
+                events.note.velocity = std::numeric_limits<double>::infinity();
+                break;
+            case 2:
+                events.note.velocity = 1.1;
+                break;
+            case 3:
+                events.note.port_index = 1;
+                break;
+            case 4:
+                events.note.key = -1;
+                break;
+            case 5:
+                events.note.channel = 16;
+                break;
+            case 6:
+                events.note.note_id = -2;
+                break;
+        }
+        events.single = &events.note.header;
+        events.send = true;
+        if (plugin->process(plugin, &process) != CLAP_PROCESS_CONTINUE) return 1;
+        for (float value : left)
+            if (value != 0) return 1;
+    }
+    plugin->reset(plugin);
+    midi.port_index = 1;
+    events.single = &midi.header;
+    if (plugin->process(plugin, &process) != CLAP_PROCESS_CONTINUE) return 1;
+    for (float value : left)
+        if (value != 0) return 1;
+    midi.port_index = 0;
+    for (int byte : {1, 2}) {
+        midi.data[byte] = 128;
+        if (plugin->process(plugin, &process) != CLAP_PROCESS_CONTINUE) return 1;
+        for (float value : left)
+            if (value != 0) return 1;
+        midi.data[byte] = byte == 1 ? 60 : 100;
+    }
+    plugin->reset(plugin);
+    events.note.velocity = .8;
+    events.note.port_index = 0;
+    events.note.key = 60;
+    events.note.channel = 0;
+    events.note.note_id = 1;
+    events.single = nullptr;
     std::atomic<bool> running{true}, bad{false};
     std::atomic<uint32_t> blocks{0};
     std::thread audio([&] {

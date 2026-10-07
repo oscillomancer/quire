@@ -9,7 +9,9 @@ Product changes:
 - The SDK-free engine is `supple::utility-engine`, built in the monorepo
   and the isolated template project with identical sources and sanitizer flags.
   No shared library or template source was modified. The LR4 side filter,
-  finite ramps and DC blocker live in this engine.
+  finite ramps and DC blocker live in this engine. Non-finite working inputs
+  are zero before DC/side-filter state updates; exact unity output preserves
+  the original sample bits without contaminating that state.
 - ParamStore, ClapParams and FlatSemantic own normalized host values,
   transactional canonical JSON state and semantic patches; no legacy states
   exist. Audio adopts a whole physical-value snapshot. Describe forwards to
@@ -23,7 +25,9 @@ Product changes:
 - Compact 520 × 300 editor with gain/pan knobs, width slider, channel selector,
   switches, bass-mono control and telemetry. It reuses the template editor's
   balanced drag, keyboard, wheel and focus-loss gesture handling and Orrery's
-  palette. Values sit below the dials; pan uses a centre-origin bipolar arc.
+  palette. Discrete arrows step one physical value even in fine mode; float
+  arrows retain normalized steps. Values sit below the dials; pan uses a
+  centre-origin bipolar arc.
   Header branding and title have separate lines. Preview scenarios: default,
   wide, pan-left, pan-right.
 - All copied C++ uses the vendor namespace `supple::utility`. The window,

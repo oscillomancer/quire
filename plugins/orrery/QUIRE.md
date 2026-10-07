@@ -19,6 +19,11 @@ where listed below. `tools/ci/format.sh` leaves those files alone.
   editor bridge) are monorepo libraries, built and tested there with the
   monorepo's warnings and sanitizers; `CMakeLists.txt` adds the same sources to
   this isolated build after `supple_plugin_add_monorepo_libraries()`.
+- Note off/choke/poly pressure and supported CLAP expressions use conjunctive
+  wildcard key/channel/id matching. Mono/legato held records retain the full
+  address and velocity. CLAP pressure/brightness/expression override the voice
+  modulation sources; malformed note/parameter/MIDI payloads are ignored.
+  Re-prepare clears performance state while keeping the patch.
 - `plugin/src/orrery_plugin.cpp` replaces the template's `*_clap.cpp`: it only
   adds `clap.gui` and `clap.timer-support` to the core through
   `supple::orrery::ClapExtensions`, plus the factory and entry points.
@@ -27,7 +32,10 @@ where listed below. `tools/ci/format.sh` leaves those files alone.
   and the route list. It reads everything from `EditorBridge` and makes every
   structural change as a semantic merge patch (`orrery/edits.h`), so it cannot
   build a patch the codec rejects. It uses the Window's extended input API
-  (buttons, modifiers, raw keys, cursor). Design size 1120 × 700.
+  (buttons, modifiers, raw keys, cursor). Discrete arrows step one physical
+  value/applicable choice even in fine mode; float arrows use normalized steps.
+  Wave navigation and Home/End follow the current oscillator type.
+  Design size 1120 × 700.
 - `test/editor_input.cpp` drives the editor against the real core (layout
   follows structure, balanced gestures including wheel and pointer-leave,
   menus, type changes, routes). `tools/gui_preview.cpp` renders it over the

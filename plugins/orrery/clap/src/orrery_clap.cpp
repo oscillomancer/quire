@@ -174,7 +174,8 @@ struct Plugin final : EditorBridge {
         const std::uint32_t n = in ? in->size(in) : 0;
         for (std::uint32_t i = 0; i < n; ++i) {
             const clap_event_header_t* h = in->get(in, i);
-            if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
+            if (!h || h->size < sizeof(clap_event_param_value_t) ||
+                h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
                 continue;
             const auto* e = reinterpret_cast<const clap_event_param_value_t*>(h);
             changed = setHostClap(e->param_id, e->value) || changed;
@@ -187,14 +188,25 @@ struct Plugin final : EditorBridge {
         const std::uint32_t n = in ? in->size(in) : 0;
         for (std::uint32_t i = 0; i < n && events.size() < kMaxEvents; ++i) {
             const clap_event_header_t* h = in->get(in, i);
-            if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
+            if (!h || h->size < sizeof(clap_event_header_t) ||
+                h->space_id != CLAP_CORE_EVENT_SPACE_ID)
+                continue;
             Event e;
             e.time = h->time;
             switch (h->type) {
                 case CLAP_EVENT_NOTE_ON:
                 case CLAP_EVENT_NOTE_OFF:
                 case CLAP_EVENT_NOTE_CHOKE: {
+                    if (h->size < sizeof(clap_event_note_t)) break;
                     const auto* ne = reinterpret_cast<const clap_event_note_t*>(h);
+                    const bool on = h->type == CLAP_EVENT_NOTE_ON;
+                    if (ne->note_id < -1 || ne->port_index < (on ? 0 : -1) || ne->port_index > 0 ||
+                        ne->channel < (on ? 0 : -1) || ne->channel > 15 ||
+                        ne->key < (on ? 0 : -1) || ne->key > 127)
+                        break;
+                    if (h->type != CLAP_EVENT_NOTE_CHOKE &&
+                        (!std::isfinite(ne->velocity) || ne->velocity < 0 || ne->velocity > 1))
+                        break;
                     e.type = h->type == CLAP_EVENT_NOTE_ON    ? Event::Type::NoteOn
                              : h->type == CLAP_EVENT_NOTE_OFF ? Event::Type::NoteOff
                                                               : Event::Type::Choke;
@@ -205,7 +217,31 @@ struct Plugin final : EditorBridge {
                     events.push_back(e);
                     break;
                 }
+                case CLAP_EVENT_NOTE_EXPRESSION: {
+                    if (h->size < sizeof(clap_event_note_expression_t)) break;
+                    const auto* ne = reinterpret_cast<const clap_event_note_expression_t*>(h);
+                    if (ne->note_id < -1 || ne->port_index < -1 || ne->port_index > 0 ||
+                        ne->channel < -1 || ne->channel > 15 || ne->key < -1 || ne->key > 127 ||
+                        !std::isfinite(ne->value) || ne->value < 0 || ne->value > 1)
+                        break;
+                    // Forward the expression sources supported by this voice engine.
+                    if (ne->expression_id == CLAP_NOTE_EXPRESSION_PRESSURE)
+                        e.type = Event::Type::PolyPressure;
+                    else if (ne->expression_id == CLAP_NOTE_EXPRESSION_EXPRESSION ||
+                             ne->expression_id == CLAP_NOTE_EXPRESSION_BRIGHTNESS) {
+                        e.type = Event::Type::NoteExpression;
+                        e.index = ne->expression_id == CLAP_NOTE_EXPRESSION_EXPRESSION ? 11 : 74;
+                    } else
+                        break;
+                    e.key = ne->key;
+                    e.channel = ne->channel;
+                    e.noteId = ne->note_id;
+                    e.value = ne->value;
+                    events.push_back(e);
+                    break;
+                }
                 case CLAP_EVENT_PARAM_VALUE: {
+                    if (h->size < sizeof(clap_event_param_value_t)) break;
                     const auto* pe = reinterpret_cast<const clap_event_param_value_t*>(h);
                     if (pe->param_id >= indexOfId.size() || indexOfId[pe->param_id] < 0) break;
                     const auto index = static_cast<std::size_t>(indexOfId[pe->param_id]);
@@ -217,10 +253,13 @@ struct Plugin final : EditorBridge {
                     break;
                 }
                 case CLAP_EVENT_MIDI: {
+                    if (h->size < sizeof(clap_event_midi_t)) break;
                     const auto* me = reinterpret_cast<const clap_event_midi_t*>(h);
+                    if (me->port_index != 0) break;
                     const std::uint8_t status = me->data[0] & 0xF0;
                     e.channel = static_cast<std::int16_t>(me->data[0] & 0x0F);
                     const std::uint8_t d1 = me->data[1], d2 = me->data[2];
+                    if (d1 > 127 || (status != 0xD0 && d2 > 127)) break;
                     switch (status) {
                         case 0x90:
                         case 0x80:

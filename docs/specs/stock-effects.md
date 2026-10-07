@@ -219,8 +219,10 @@ Implementation decisions (2026-09-29):
   to manual makeup, only in compressor mode.
 - A limiter processes the makeup/mix/output-adjusted signal, then enforces
   its ceiling. Compressor threshold, detector, topology and sidechain do not
-  alter limiter gain. `sc_listen` auditions the filtered key; in limiter mode
-  the audition passes through the limiter too. Peak parameters in the GUI
+  alter limiter gain. `sc_listen` auditions the filtered key at the reported
+  latency, for internal/external keys and audition/key-source transitions;
+  its delay storage is prepared before processing. In limiter mode the audition
+  passes through the limiter too. Peak parameters in the GUI
   measure sample peaks; they are labeled dBFS.
 - True-peak limiting adds 16 samples of latency whenever limiter mode and
   `true_peak` are selected, including lookahead `off`. With `off`, only the
@@ -732,6 +734,9 @@ Implementation decisions (2026-09-29):
   R × (1 + min(0, pan/100)); centre leaves both at unity.
 - Channel selection sees the swapped input. `mid` and `side` send
   (L+R)/2 or (L−R)/2 respectively to both outputs.
+- Non-finite working inputs are zero before DC/side-filter state updates.
+  Exact unity output preserves the original bits, including non-finite samples,
+  signed zero and subnormals, without contaminating that state.
 - DC blocking is a 5 Hz one-pole high-pass. Gain, balance, width and the
   crossover use finite 20 ms ramps; routing, polarity, DC enable,
   crossover enable and mute use 10 ms ramps. Restored values snap before

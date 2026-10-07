@@ -469,6 +469,13 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
                 if (!sp) return std::move(sp).error().at("/keys/" + std::to_string(i));
                 item["value"] = params::toJson(sp->spec, physicalFromClap(*sp, *clap));
             }
+            if (!item.find("value"))
+                return Error(
+                    "sandbox.plugin_contract",
+                    label(l.id, l.info) + " did not provide a current value for '" + key + "'",
+                    "/params/" + key + "/value",
+                    "Restart or replace the plugin; its patch and CLAP value are both "
+                    "unavailable.");
             if (clap) {
                 auto t = in.paramText(pid, *clap);
                 if (t) item["text"] = *t;
@@ -478,10 +485,16 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
         return out;
     }
     const auto infos = in.params();
-    auto describeOne = [&](const host::ParamInfo& p) {
+    auto describeOne = [&](const host::ParamInfo& p) -> Result<json::Value> {
         json::Value item = json::Value::object();
         item["name"] = p.name;
         auto v = in.paramValue(p.id);
+        if (!v)
+            return Error(
+                "sandbox.plugin_contract",
+                label(l.id, l.info) + " did not provide a current value for '" + p.name + "'",
+                "/params/" + std::to_string(p.id) + "/value",
+                "Restart or replace the plugin; clap.params.get_value failed.");
         if (v) {
             item["value"] = *v;
             auto t = in.paramText(p.id, *v);
@@ -492,7 +505,11 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
         return item;
     };
     if (keys.empty()) {
-        for (const auto& p : infos) out[std::to_string(p.id)] = describeOne(p);
+        for (const auto& p : infos) {
+            auto item = describeOne(p);
+            if (!item) return std::move(item).error();
+            out[std::to_string(p.id)] = std::move(*item);
+        }
         return out;
     }
     for (std::size_t i = 0; i < keys.size(); ++i) {
@@ -506,7 +523,9 @@ Result<json::Value> Session::paramGet(std::string_view id, std::span<const std::
                          label(l.id, l.info) + " has no parameter '" + keys[i] + "'",
                          "/keys/" + std::to_string(i), closestHint(keys[i], names, "param.get"));
         }
-        out[keys[i]] = describeOne(*found);
+        auto item = describeOne(*found);
+        if (!item) return std::move(item).error();
+        out[keys[i]] = std::move(*item);
     }
     return out;
 }

@@ -6,6 +6,7 @@
 #include <clap/clap.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -78,13 +79,16 @@ struct OutEvents {
 struct InEvents {
     clap_input_events_t in{};
     std::vector<clap_event_note_t> notes;
+    const clap_event_header_t* single = nullptr;
     InEvents() {
         in.ctx = this;
         in.size = [](const clap_input_events_t* i) {
-            return static_cast<std::uint32_t>(static_cast<InEvents*>(i->ctx)->notes.size());
+            auto* self = static_cast<InEvents*>(i->ctx);
+            return self->single ? 1u : static_cast<std::uint32_t>(self->notes.size());
         };
         in.get = [](const clap_input_events_t* i, std::uint32_t k) -> const clap_event_header_t* {
-            return &static_cast<InEvents*>(i->ctx)->notes[k].header;
+            auto* self = static_cast<InEvents*>(i->ctx);
+            return self->single ? self->single : &self->notes[k].header;
         };
     }
     void noteOn(int key) {
@@ -165,6 +169,98 @@ std::size_t indexOf(std::string_view key) {
 }
 
 }  // namespace
+
+TEST_CASE("short CLAP input payloads cannot change parameters or start voices") {
+    Instance instance;
+    InEvents in;
+    OutEvents out;
+    const auto id = table()[indexOf("voice.drift")].id;
+    double before = 0;
+    REQUIRE(instance.params()->get_value(instance.p, id, &before));
+    clap_event_param_value_t param{};
+    param.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID,
+                    CLAP_EVENT_PARAM_VALUE, 0};
+    param.param_id = id;
+    param.value = 1;
+    param.note_id = param.port_index = param.channel = param.key = -1;
+    in.single = &param.header;
+    instance.params()->flush(instance.p, &in.in, &out.out);
+    double after = 0;
+    REQUIRE(instance.params()->get_value(instance.p, id, &after));
+    CHECK(after == before);
+
+    instance.start();
+    instance.block(in, out);
+    REQUIRE(instance.params()->get_value(instance.p, id, &after));
+    CHECK(after == before);
+    param.header.size = sizeof(param);
+    instance.block(in, out);
+    REQUIRE(instance.params()->get_value(instance.p, id, &after));
+    CHECK(after == 1);
+
+    clap_event_note_t note{};
+    note.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON, 0};
+    note.note_id = 1;
+    note.key = 60;
+    note.velocity = .8;
+    clap_event_midi_t midi{};
+    midi.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0};
+    midi.data[0] = 0x90;
+    midi.data[1] = 60;
+    midi.data[2] = 100;
+    for (auto* header : {&note.header, &midi.header}) {
+        instance.p->reset(instance.p);
+        in.single = header;
+        CHECK(instance.block(in, out) == 0);
+        header->size = header == &note.header ? sizeof(note) : sizeof(midi);
+        CHECK(instance.block(in, out) > 0);
+    }
+    for (int invalid = 0; invalid < 7; ++invalid) {
+        instance.p->reset(instance.p);
+        note.velocity = .8;
+        note.port_index = 0;
+        note.key = 60;
+        note.channel = 0;
+        note.note_id = 1;
+        switch (invalid) {
+            case 0:
+                note.velocity = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 1:
+                note.velocity = std::numeric_limits<double>::infinity();
+                break;
+            case 2:
+                note.velocity = 1.1;
+                break;
+            case 3:
+                note.port_index = 1;
+                break;
+            case 4:
+                note.key = -1;
+                break;
+            case 5:
+                note.channel = 16;
+                break;
+            case 6:
+                note.note_id = -2;
+                break;
+        }
+        in.single = &note.header;
+        CHECK(instance.block(in, out) == 0);
+    }
+    instance.p->reset(instance.p);
+    midi.port_index = 1;
+    in.single = &midi.header;
+    CHECK(instance.block(in, out) == 0);
+    midi.port_index = 0;
+    for (int byte : {1, 2}) {
+        midi.data[byte] = 128;
+        CHECK(instance.block(in, out) == 0);
+        midi.data[byte] = byte == 1 ? 60 : 100;
+    }
+    instance.p->stop_processing(instance.p);
+    instance.p->deactivate(instance.p);
+}
 
 TEST_CASE("the extension hook creates, forwards and destroys module data") {
     const int before = destroyed;
@@ -276,4 +372,61 @@ TEST_CASE("structural merges go through the codec; revision and telemetry move")
     CHECK(t.voices >= 1);
     CHECK(t.processing);
     CHECK(in.bridge().telemetry().peakL == 0.0f);  // peaks reset on read
+}
+
+TEST_CASE("CLAP note expressions validate payloads and match conjunctive wildcard addresses") {
+    for (auto expression : {CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_BRIGHTNESS,
+                            CLAP_NOTE_EXPRESSION_EXPRESSION}) {
+        const std::string source = expression == CLAP_NOTE_EXPRESSION_PRESSURE     ? "pressure"
+                                   : expression == CLAP_NOTE_EXPRESSION_BRIGHTNESS ? "slide"
+                                                                                   : "expression";
+        auto run = [&](int key, int channel, int id, std::uint32_t size, double value) {
+            Instance instance;
+            const auto patch = json::parse(std::string(R"({"oscillators":{"osc1":{"type":"va"}},
+                "filters":{"filter1":{"type":"svf","cutoff":200}},"routes":{")") +
+                                           source + R"(>filter1.cutoff":{"amount":"+5 oct"}}})");
+            REQUIRE(patch);
+            REQUIRE(instance.bridge().merge(*patch));
+            instance.start();
+            InEvents input;
+            input.noteOn(60);
+            input.notes[0].channel = 1;
+            input.notes[0].note_id = 12;
+            OutEvents output;
+            instance.block(input, output);
+            clap_event_note_expression_t event{};
+            event.header = {size, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION, 0};
+            event.expression_id = expression;
+            event.port_index = 0;
+            event.key = static_cast<std::int16_t>(key);
+            event.channel = static_cast<std::int16_t>(channel);
+            event.note_id = id;
+            event.value = value;
+            input.single = &event.header;
+            instance.block(input, output);
+            input.single = nullptr;
+            input.notes.clear();
+            std::vector<float> audio;
+            for (int n = 0; n < 8; ++n) {
+                instance.block(input, output);
+                audio.insert(audio.end(), instance.l.begin(), instance.l.end());
+            }
+            instance.p->stop_processing(instance.p);
+            instance.p->deactivate(instance.p);
+            return audio;
+        };
+        const auto size = static_cast<std::uint32_t>(sizeof(clap_event_note_expression_t));
+        const auto dry = run(60, 1, 12, sizeof(clap_event_header_t), 1);
+        const auto wet = run(60, 1, 12, size, 1);
+        CHECK(bool(dry != wet));
+        CHECK(bool(run(-1, -1, -1, size, 1) == wet));
+        CHECK(bool(run(-1, 1, 12, size, 1) == wet));
+        CHECK(bool(run(60, -1, 12, size, 1) == wet));
+        CHECK(bool(run(60, 1, -1, size, 1) == wet));
+        CHECK(bool(run(61, 1, 12, size, 1) == dry));
+        CHECK(bool(run(60, 2, 12, size, 1) == dry));
+        CHECK(bool(run(60, 1, 13, size, 1) == dry));
+        CHECK(bool(run(60, 1, 12, size, std::numeric_limits<double>::quiet_NaN()) == dry));
+        CHECK(bool(run(60, 1, 12, size, 2) == dry));
+    }
 }

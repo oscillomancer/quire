@@ -148,6 +148,15 @@ const clap_plugin_descriptor_t* malformedSchemaDescriptor() {
     return &descriptor;
 }
 
+const clap_plugin_descriptor_t* contractDescriptor(bool missingValue) {
+    static clap_plugin_descriptor_t d[2] = {*gainDescriptor(), *gainDescriptor()};
+    d[0].id = "com.suppleaudio.test.semantic-id-mismatch";
+    d[0].name = "Semantic ID Mismatch";
+    d[1].id = "com.suppleaudio.test.missing-value";
+    d[1].name = "Missing Value";
+    return &d[missingValue ? 1 : 0];
+}
+
 const clap_plugin_descriptor_t* oversizedDescriptor(bool ports) {
     static clap_plugin_descriptor_t descriptors[2] = {*gainDescriptor(), *gainDescriptor()};
     descriptors[0].id = "com.suppleaudio.test.many-ports";
@@ -174,6 +183,7 @@ struct Gain {
     bool enforceThread = false;
     bool rejectPatch = false;
     bool slowPatch = false;
+    bool mismatchedId = false, missingValue = false;
     bool malformedSchema = false;
     bool badCurve = false;
 
@@ -227,6 +237,7 @@ bool CLAP_ABI gainParamInfo(const clap_plugin_t*, uint32_t index, clap_param_inf
 }
 bool CLAP_ABI gainParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
     auto* g = G(pl);
+    if (g->missingValue && id == 0) return false;
     if (id == 0)
         *out = params::toClap(kGainTable[0], g->gainDb);
     else if (id == 1)
@@ -360,12 +371,18 @@ bool CLAP_ABI semSchema(const clap_plugin_t* pl, const clap_ostream_t* out) {
     doc["plugin"]["id"] = pl->desc->id;
     doc["patch_type"] = gainPatchType().schemaId();
     doc["params"] = *params::describeTable(kGainT).find("params");
+    if (G(pl)->mismatchedId) doc["params"]["gain"]["id"] = 42;
     if (G(pl)->malformedSchema) doc["params"]["gain"]["min"] = "bad";
     if (G(pl)->badCurve) doc["params"]["gain"]["curve"] = "pow:invalid";
     doc["patch"] = gainPatchType().jsonSchema();
     return writeString(out, json::writeCompact(doc));
 }
 bool CLAP_ABI semGetPatch(const clap_plugin_t* pl, uint32_t detail, const clap_ostream_t* out) {
+    if (G(pl)->missingValue) {
+        auto doc = json::parse(gainPatchType().serialize(G(pl)->current())).value();
+        doc["params"] = json::Value::object();
+        return writeString(out, json::writeCompact(doc));
+    }
     return writeString(
         out, gainPatchType().serialize(G(pl)->current(), detail == CLAP_SUPPLE_PATCH_DETAIL_CHANGED
                                                              ? patch::Detail::Changed
@@ -937,6 +954,24 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_pro
     param.param_id = 7;
     param.value = 42;
     param.note_id = param.port_index = param.channel = param.key = -1;
+    if (E(pl)->config[0] == 40) {
+        // Payload storage is present, but the declared event ends at its
+        // header. A host must reject it before reading the payload.
+        param.header.size = sizeof(clap_event_header_t);
+        p->out_events->try_push(p->out_events, &param.header);
+        clap_event_param_gesture_t gesture{};
+        gesture.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID,
+                          CLAP_EVENT_PARAM_GESTURE_BEGIN, 0};
+        p->out_events->try_push(p->out_events, &gesture.header);
+        gesture.header.type = CLAP_EVENT_PARAM_GESTURE_END;
+        p->out_events->try_push(p->out_events, &gesture.header);
+        clap_event_note_t end{};
+        end.header = {sizeof(clap_event_header_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_END,
+                      0};
+        p->out_events->try_push(p->out_events, &end.header);
+        param.header.size = sizeof(param);
+        p->out_events->try_push(p->out_events, &param.header);
+    }
     if (E(pl)->config[0] == 11) param.value = calls;
     if (E(pl)->config[0] == 13) {
         param.note_id = 4;
@@ -1227,7 +1262,7 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 14; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 16; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0    ? gainDescriptor()
            : i == 1  ? sineDescriptor()
@@ -1242,6 +1277,8 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
            : i == 10 ? oversizedDescriptor(true)
            : i == 11 ? oversizedDescriptor(false)
            : i == 12 ? multiOutDescriptor()
+           : i == 14 ? contractDescriptor(false)
+           : i == 15 ? contractDescriptor(true)
            : i == 13 ? multiOut48Descriptor()
                      : nullptr;
 }
@@ -1273,6 +1310,14 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
     for (bool ports : {true, false})
         if (!std::strcmp(id, oversizedDescriptor(ports)->id))
             return make<Gain>(host, oversizedDescriptor(ports), gainActivate, gainProcess, gainExt);
+    for (bool missing : {false, true})
+        if (!std::strcmp(id, contractDescriptor(missing)->id)) {
+            const auto* plugin =
+                make<Gain>(host, contractDescriptor(missing), gainActivate, gainProcess, gainExt);
+            G(plugin)->mismatchedId = !missing;
+            G(plugin)->missingValue = missing;
+            return plugin;
+        }
     if (!std::strcmp(id, malformedSchemaDescriptor()->id)) {
         const auto* plugin =
             make<Gain>(host, malformedSchemaDescriptor(), gainActivate, gainProcess, gainExt);

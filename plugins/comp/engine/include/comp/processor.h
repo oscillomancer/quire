@@ -73,7 +73,7 @@ class Processor {
     double sampleRate_ = 48000, smooth_ = 0, switch_ = 0;
     int channels_ = 2;
     bool started_ = false;
-    std::array<std::vector<double>, 2> delay_, average_;
+    std::array<std::vector<double>, 2> delay_, keyDelay_, average_;
     std::array<Minimum, 2> minimum_;
     std::array<dsp::PolyphaseUpsampler, 2> interpolators_;
     std::array<std::array<Filter, 2>, 3> hp_{}, lp_{};

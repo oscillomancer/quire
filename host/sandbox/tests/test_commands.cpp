@@ -39,6 +39,33 @@ const cmd::Origin kTest{cmd::Origin::Type::Test, "unit", ""};
 
 }  // namespace
 
+TEST_CASE("audio filenames beginning with rd_ are not render identifiers") {
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    auto host = makeHost(root.path / "s");
+    cmd::Dispatcher dispatcher(registry, *host);
+    REQUIRE(
+        dispatcher.execute({"plugin.load", j(R"({"plugin":"com.suppleaudio.test.sine"})"), kTest}));
+    auto rendered = dispatcher.execute(
+        {"render", j(R"({"notation":"1: A4:w", "seconds": 1, "tail_s": 0})"), kTest});
+    REQUIRE(rendered);
+    struct File {
+        fs::path path = "rd_reference-" + std::to_string(::getpid()) + ".wav";
+        bool created = false;
+        ~File() {
+            if (created) fs::remove(path);
+        }
+    } file;
+    REQUIRE_FALSE(fs::exists(file.path));
+    file.created = fs::copy_file((*rendered)["path"].asString(), file.path);
+    auto args = json::Value::object();
+    args["source"] = file.path.string();
+    auto analyzed = dispatcher.execute({"analyze", std::move(args), kTest});
+    REQUIRE_MESSAGE(analyzed, (analyzed ? "" : analyzed.error().toString()));
+    CHECK((*analyzed)["report"]["source"]["seconds"].asDouble() == 1);
+}
+
 TEST_CASE("every sandbox command example runs against its fixture" * doctest::description("rt")) {
     Root root;
     cmd::Registry registry;
@@ -331,4 +358,42 @@ TEST_CASE("sandbox plugin list exposes cached failures even for an empty catalog
     REQUIRE(retained);
     CHECK((*retained)["scan"] == (*second)["scan"]);
     CHECK((*retained)["scan"]["warnings"].isArray());
+}
+
+TEST_CASE("plugin queries report missing current values as contract errors") {
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    auto host = makeHost(root.path / "missing");
+    cmd::Dispatcher d(registry, *host);
+    REQUIRE(
+        d.execute({"plugin.load", j(R"({"plugin":"com.suppleaudio.test.missing-value"})"), kTest}));
+    for (const auto command : {"param.get", "plugin.describe"}) {
+        auto result = d.execute({command, j(R"({"instance":"in_1"})"), kTest});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "sandbox.plugin_contract");
+        CHECK_FALSE(result.error().path.empty());
+        CHECK_FALSE(result.error().hint.empty());
+    }
+    auto full = d.execute({"plugin.describe", j(R"({"instance":"in_1","detail":"full"})"), kTest});
+    REQUIRE_FALSE(full);
+    CHECK(full.error().code == "sandbox.plugin_contract");
+    auto selected = d.execute({"param.get", j(R"({"instance":"in_1","keys":["gain"]})"), kTest});
+    REQUIRE_FALSE(selected);
+    CHECK(selected.error().code == "sandbox.plugin_contract");
+}
+TEST_CASE("plugin describe falls back when semantic IDs do not match CLAP") {
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    auto host = makeHost(root.path / "mismatch");
+    cmd::Dispatcher d(registry, *host);
+    auto load = d.execute(
+        {"plugin.load", j(R"({"plugin":"com.suppleaudio.test.semantic-id-mismatch"})"), kTest});
+    REQUIRE(load);
+    auto full = d.execute({"plugin.describe", j(R"({"instance":"in_1","detail":"full"})"), kTest});
+    REQUIRE(full);
+    REQUIRE((*full)["params"].find("0"));
+    CHECK((*full)["params"]["0"]["value"].isNumber());
+    CHECK_FALSE((*full)["params"].find("gain"));
 }

@@ -409,16 +409,27 @@ bool CLAP_ABI paramTextToValue(const clap_plugin_t*, clap_id id, const char* tex
     return supple::clapx::ClapParams::textToValue(kParams, id, text, out);
 }
 void applyEvent(Plug* self, const clap_event_header_t* h) {
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE) return;
+    if (!h || h->size < sizeof(clap_event_param_value_t) ||
+        h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
+        return;
     const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(h);
     self->store.setClap(ev->param_id, ev->value);
 }
 
 void applyNote(Plug* self, const clap_event_header_t* h) {
-    if (h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+    if (!h || h->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
     if (h->type == CLAP_EVENT_NOTE_ON || h->type == CLAP_EVENT_NOTE_OFF ||
         h->type == CLAP_EVENT_NOTE_CHOKE) {
+        if (h->size < sizeof(clap_event_note_t)) return;
         const auto* ev = reinterpret_cast<const clap_event_note_t*>(h);
+        const bool on = h->type == CLAP_EVENT_NOTE_ON;
+        if (ev->note_id < -1 || ev->port_index < (on ? 0 : -1) || ev->port_index > 0 ||
+            ev->channel < (on ? 0 : -1) || ev->channel > 15 || ev->key < (on ? 0 : -1) ||
+            ev->key > 127)
+            return;
+        if (h->type != CLAP_EVENT_NOTE_CHOKE &&
+            (!std::isfinite(ev->velocity) || ev->velocity < 0 || ev->velocity > 1))
+            return;
         if (h->type == CLAP_EVENT_NOTE_ON && ev->velocity > 0)
             self->processor.noteOn(ev->note_id, ev->channel, ev->key, ev->velocity);
         else if (h->type == CLAP_EVENT_NOTE_CHOKE)
@@ -426,9 +437,12 @@ void applyNote(Plug* self, const clap_event_header_t* h) {
         else
             self->processor.noteOff(ev->note_id, ev->channel, ev->key);
     } else if (h->type == CLAP_EVENT_MIDI) {
+        if (h->size < sizeof(clap_event_midi_t)) return;
         const auto* ev = reinterpret_cast<const clap_event_midi_t*>(h);
+        if (ev->port_index != 0) return;
         const int status = ev->data[0] & 0xf0;
         const int channel = ev->data[0] & 0x0f;
+        if (ev->data[1] > 127 || ev->data[2] > 127) return;
         if (status == 0x90 && ev->data[2])
             self->processor.noteOn(-1, channel, ev->data[1], ev->data[2] / 127.0);
         else if (status == 0x80 || status == 0x90)

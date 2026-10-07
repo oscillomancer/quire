@@ -269,7 +269,13 @@ void Editor::onKey(EditorKey key, bool fineOrReverse) {
     else
         return;
     host_.beginEdit(p->id);
-    setFromNormal(p->id, normal);
+    if (p->type != pa::Type::Float && key != EditorKey::Home && key != EditorKey::End)
+        host_.setParam(p->id,
+                       std::clamp(host_.paramValue(p->id) +
+                                      (key == EditorKey::Left || key == EditorKey::Down ? -1. : 1.),
+                                  p->min, p->max));
+    else
+        setFromNormal(p->id, normal);
     host_.endEdit(p->id);
 }
 

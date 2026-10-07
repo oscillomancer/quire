@@ -301,6 +301,33 @@ TEST_CASE("renders do not depend on the block size") {
     }
 }
 
+TEST_CASE("reprepare clears voices and restarts the performance clock") {
+    const auto patch = parse(kPad);
+    Engine reused;
+    reused.prepare(48000.0, 256);
+    reused.setPatch(patch);
+    const auto prior = play(reused, {note(0, 60, 0.8), cc(17, 64, 1), cc(29, 1, 0.7)}, 777, 256);
+    REQUIRE(prior.peak() > 0.01);
+    REQUIRE(reused.activeVoices() > 0);
+
+    reused.prepare(44100.0, 128);
+    CHECK(reused.activeVoices() == 0);
+    Engine fresh;
+    fresh.prepare(44100.0, 128);
+    fresh.setPatch(patch);
+
+    // No explicit reset: activation must be sufficient after deactivation.
+    std::array<float, 128> left{}, right{}, refLeft{}, refRight{};
+    for (int block = 0; block < 32; ++block) {
+        const Event on = note(0, 67, 0.6).event;
+        const auto events = block == 1 ? std::span<const Event>(&on, 1) : std::span<const Event>{};
+        reused.process(events, Transport{}, left.data(), right.data(), 128);
+        fresh.process(events, Transport{}, refLeft.data(), refRight.data(), 128);
+        CHECK(bool(left == refLeft));
+        CHECK(bool(right == refRight));
+    }
+}
+
 TEST_CASE("after reset a render depends only on the patch, not on the previous render") {
     // A render in a reused instance (the sandbox renders this way) must equal
     // a fresh engine's: after reset() parameter ramps snap to the current
@@ -624,5 +651,86 @@ TEST_CASE("review round 3: steal bursts, all-sound-off, quality changes, AM via,
             crossings += (a.l[i - 1] < 0.0f) != (a.l[i] < 0.0f);
         const double hz = static_cast<double>(crossings) / 2.0 / 0.25;
         CHECK(hz == doctest::Approx(440.0 * std::pow(2.0, (56 - 69) / 12.0)).epsilon(0.03));
+    }
+}
+
+TEST_CASE("note stops use conjunctive wildcard addresses in poly mono and legato") {
+    auto addressed = [](std::int64_t t, Event::Type type, int key, int channel, int id) {
+        Timed ev{t, Event{}};
+        ev.event.type = type;
+        ev.event.key = static_cast<std::int16_t>(key);
+        ev.event.channel = static_cast<std::int16_t>(channel);
+        ev.event.noteId = id;
+        ev.event.value = type == Event::Type::NoteOn ? 1 : 0;
+        return ev;
+    };
+    for (const auto mode : {"poly", "mono", "legato"}) {
+        const auto p = parse(std::string(R"("voice":{"mode":")") + mode + R"("},
+            "oscillators":{"osc1":{"type":"va","wave":"saw"}},
+            "envelopes":{"amp":{"attack":"1 ms","release":"1 ms","sustain":"100 %"}})");
+        const auto on = addressed(0, Event::Type::NoteOn, 60, 1, 12);
+        const auto reference = render(p, {on}, 4096, 64);
+        for (auto type : {Event::Type::NoteOff, Event::Type::Choke}) {
+            for (auto mismatch : {addressed(512, type, 60, 2, 12), addressed(512, type, 60, 1, 13),
+                                  addressed(512, type, 61, 1, 12)}) {
+                const auto a = render(p, {on, mismatch}, 4096, 64);
+                CHECK(bool(a.l == reference.l));
+                CHECK(bool(a.r == reference.r));
+            }
+            for (auto match : {addressed(512, type, -1, -1, -1), addressed(512, type, -1, -1, 12),
+                               addressed(512, type, -1, 1, -1), addressed(512, type, 60, -1, -1)}) {
+                const auto a = render(p, {on, match}, 4096, 64);
+                CHECK(bool(a.rms(2048, 4096) == 0));
+                CHECK(bool(a.l == render(p, {on, match}, 4096, 7).l));
+            }
+        }
+        // Same key, distinct channels/IDs: release newest, then the fallback.
+        const auto second = addressed(256, Event::Type::NoteOn, 60, 2, 13);
+        const auto offSecond = addressed(512, Event::Type::NoteOff, 60, 2, 13);
+        const auto offFirst = addressed(1024, Event::Type::NoteOff, 60, 1, 12);
+        const auto a = render(p, {on, second, offSecond, offFirst}, 4096, 64);
+        CHECK(a.rms(700, 950) > .01);
+        CHECK(bool(a.rms(2048, 4096) == 0));
+        // Choking the current note removes it from the held stack as well.
+        const auto choke = addressed(512, Event::Type::Choke, -1, -1, 13);
+        const auto third = addressed(768, Event::Type::NoteOn, 67, 3, 14);
+        const auto offThird = addressed(1024, Event::Type::NoteOff, 67, 3, 14);
+        const auto finalOff = addressed(1536, Event::Type::NoteOff, 60, 1, 12);
+        const auto b = render(p, {on, second, choke, third, offThird, finalOff}, 4096, 64);
+        CHECK(b.rms(1250, 1500) > .01);
+        CHECK(bool(b.rms(2500, 4096) == 0));
+    }
+}
+TEST_CASE("poly pressure uses every address component and wildcard") {
+    const auto p = parse(R"("oscillators":{"osc1":{"type":"va"}},
+        "filters":{"filter1":{"type":"svf","cutoff":200}},
+        "routes":{"pressure>filter1.cutoff":{"amount":"+5 oct"}})");
+    auto on = note(0, 60, 1);
+    on.event.channel = 1;
+    on.event.noteId = 12;
+    auto exact = note(128, 60, 1);
+    exact.event.type = Event::Type::PolyPressure;
+    exact.event.channel = 1;
+    exact.event.noteId = 12;
+    const auto dry = render(p, {on}, 4096, 64);
+    const auto wet = render(p, {on, exact}, 4096, 64);
+    CHECK(bool(dry.l != wet.l));
+    for (int component = 0; component < 3; ++component) {
+        auto wildcard = exact;
+        auto mismatch = exact;
+        if (component == 0) {
+            wildcard.event.key = -1;
+            mismatch.event.key = 61;
+        }
+        if (component == 1) {
+            wildcard.event.channel = -1;
+            mismatch.event.channel = 2;
+        }
+        if (component == 2) {
+            wildcard.event.noteId = -1;
+            mismatch.event.noteId = 13;
+        }
+        CHECK(bool(render(p, {on, wildcard}, 4096, 64).l == wet.l));
+        CHECK(bool(render(p, {on, mismatch}, 4096, 64).l == dry.l));
     }
 }

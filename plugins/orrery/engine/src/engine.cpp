@@ -250,8 +250,9 @@ struct Voice {
     int unison = 0, unisonCount = 1;
     bool gate = false, sustained = false;
     double velocity = 0.0, releaseVelocity = 0.0, random = 0.0;
-    double glideOffset = 0.0, glideStep = 0.0;       // semitones, per base sample
-    double bend = 0.0, pressure = 0.0, slide = 0.0;  // per-note (MPE / poly pressure)
+    double glideOffset = 0.0, glideStep = 0.0;  // semitones, per base sample
+    double bend = 0.0, pressure = -1.0, slide = -1.0, expression = -1.0;
+    // Negative values inherit global controllers; zero is an explicit note expression.
     std::uint32_t tickPos = 0;
     bool fresh = true;
     double fade = 1.0, fadeStep = 0.0;
@@ -351,7 +352,12 @@ struct Engine::Impl {
     std::array<Voice, kVoicePool> voices{};
     std::uint64_t serial = 0;
     double lastPitch = -1.0;
-    std::array<int, kMaxHeld> held{};
+    struct HeldNote {
+        int key = -1, channel = -1;
+        std::int32_t noteId = -1;
+        double velocity = 0;
+    };
+    std::array<HeldNote, kMaxHeld> held{};
     int heldCount = 0;
     std::uint64_t monoSerial = 0;  // the sounding mono/legato note (0 = none)
 
@@ -570,8 +576,9 @@ struct Engine::Impl {
             v.key < 60 ? (v.key - 60) / 60.0 : (v.key - 60) / 67.0;
         src[static_cast<std::size_t>(Source::Random)] = v.random;
         src[static_cast<std::size_t>(Source::Gate)] = v.gate || v.sustained ? 1.0 : 0.0;
-        if (v.pressure > 0.0) src[static_cast<std::size_t>(Source::Pressure)] = v.pressure;
-        if (v.slide > 0.0) src[static_cast<std::size_t>(Source::Slide)] = v.slide;
+        if (v.expression >= 0.0) src[static_cast<std::size_t>(Source::Expression)] = v.expression;
+        if (v.pressure >= 0.0) src[static_cast<std::size_t>(Source::Pressure)] = v.pressure;
+        if (v.slide >= 0.0) src[static_cast<std::size_t>(Source::Slide)] = v.slide;
         // Voice modulation sums.
         for (std::size_t d = 0; d < P.voiceDests.size(); ++d) {
             const CDest& cd = P.voiceDests[d];
@@ -1451,7 +1458,8 @@ struct Engine::Impl {
         v.sustained = false;
         v.tickPos = 0;
         v.fresh = true;
-        v.bend = v.pressure = v.slide = 0.0;
+        v.bend = 0.0;
+        v.pressure = v.slide = v.expression = -1.0;
         v.rng.reseed(dsp::mixSeed(P.seed, noteSerial * 8 + static_cast<std::uint64_t>(u)));
         v.random = v.rng.uniform(-1.0, 1.0);
         const Frame& f = frameAt(t);
@@ -1501,15 +1509,18 @@ struct Engine::Impl {
                 std::int64_t t) SUPPLE_RT {
         const auto mode = static_cast<VoiceMode>(base(index(kVoice, VoiceF::mode), t));
         const bool othersHeld = heldCount > 0;
-        // The held-key stack keeps each key once, newest last.
+        // Keep each complete note address once, newest last. Channel-distinct
+        // notes on the same key must remain independently releasable.
         for (int i = 0; i < heldCount; ++i)
-            if (held[static_cast<std::size_t>(i)] == key) {
+            if (const auto& h = held[static_cast<std::size_t>(i)];
+                h.key == key && h.channel == channel && h.noteId == noteId) {
                 for (int j = i; j + 1 < heldCount; ++j)
                     held[static_cast<std::size_t>(j)] = held[static_cast<std::size_t>(j + 1)];
                 --heldCount;
                 break;
             }
-        if (heldCount < kMaxHeld) held[static_cast<std::size_t>(heldCount++)] = key;
+        if (heldCount < kMaxHeld)
+            held[static_cast<std::size_t>(heldCount++)] = {key, channel, noteId, velocity};
         if (!othersHeld) {
             for (int l = 0; l < kLfoCount; ++l)
                 if (prog->st.lfoRetrigger[static_cast<std::size_t>(l)] == Retrigger::Mono)
@@ -1526,7 +1537,7 @@ struct Engine::Impl {
             for (Voice& v : voices) {
                 if (v.state != Voice::State::Active || v.serial != monoSerial) continue;
                 found = true;
-                retarget(v, key, velocity, othersHeld, mode, glide, t);
+                retarget(v, {key, channel, noteId, velocity}, othersHeld, mode, glide, t);
             }
             if (found) {
                 lastPitch = key;
@@ -1568,10 +1579,18 @@ struct Engine::Impl {
     // A new key for the sounding mono/legato note. `overlap`: another key was
     // held. Legato never restarts envelopes on overlapping keys; mono restarts
     // those whose retrigger is "always".
-    void retarget(Voice& v, int key, double velocity, bool overlap, VoiceMode mode, bool glide,
+    void retarget(Voice& v, const HeldNote& note, bool overlap, VoiceMode mode, bool glide,
                   std::int64_t t) SUPPLE_RT {
+        const int key = note.key;
+        const double velocity = note.velocity;
         const double from = v.key + v.glideOffset;
+        if (v.key != key || v.channel != note.channel || v.noteId != note.noteId) {
+            v.pressure = v.slide = v.expression = -1.0;
+            v.bend = 0.0;
+        }
         v.key = key;
+        v.channel = note.channel;
+        v.noteId = note.noteId;
         v.gate = true;
         v.sustained = false;
         const double glideMs = base(index(kVoice, VoiceF::glide), t);
@@ -1605,35 +1624,42 @@ struct Engine::Impl {
         for (auto& e : v.env) e.release();
     }
 
+    template <class Note>
+    static bool matches(const Note& note, int key, int channel, std::int32_t noteId) SUPPLE_RT {
+        return (key == -1 || key == note.key) && (channel == -1 || channel == note.channel) &&
+               (noteId == -1 || noteId == note.noteId);
+    }
+
+    void removeHeld(int key, int channel, std::int32_t noteId) SUPPLE_RT {
+        int kept = 0;
+        for (int i = 0; i < heldCount; ++i) {
+            const auto note = held[static_cast<std::size_t>(i)];
+            if (!matches(note, key, channel, noteId)) held[static_cast<std::size_t>(kept++)] = note;
+        }
+        heldCount = kept;
+    }
+
     void noteOff(int key, int channel, std::int32_t noteId, double velocity,
                  std::int64_t t) SUPPLE_RT {
-        // Remove from the held stack.
-        for (int i = 0; i < heldCount; ++i)
-            if (held[static_cast<std::size_t>(i)] == key) {
-                for (int j = i; j + 1 < heldCount; ++j)
-                    held[static_cast<std::size_t>(j)] = held[static_cast<std::size_t>(j + 1)];
-                --heldCount;
-                break;
-            }
+        removeHeld(key, channel, noteId);
         const auto mode = static_cast<VoiceMode>(base(index(kVoice, VoiceF::mode), t));
         if (mode != VoiceMode::Poly && monoSerial != 0) {
             for (Voice& v : voices) {
-                if (v.state != Voice::State::Active || v.serial != monoSerial || v.key != key)
+                if (v.state != Voice::State::Active || v.serial != monoSerial ||
+                    !matches(v, key, channel, noteId))
                     continue;
-                if (heldCount > 0)
-                    retarget(v, held[static_cast<std::size_t>(heldCount - 1)], v.velocity, true,
-                             mode, true, t);
-                else
+                if (heldCount > 0) {
+                    const auto& note = held[static_cast<std::size_t>(heldCount - 1)];
+                    retarget(v, note, true, mode, true, t);
+                    lastPitch = note.key;
+                } else
                     releaseVoice(v, velocity);
             }
-            if (heldCount > 0) lastPitch = held[static_cast<std::size_t>(heldCount - 1)];
             return;
         }
         for (Voice& v : voices) {
-            if (v.state != Voice::State::Active || !v.gate || v.key != key) continue;
-            if (noteId >= 0 && v.noteId >= 0 && v.noteId != noteId) continue;
-            if (noteId < 0 && channel >= 0 && v.channel != channel) continue;
-            releaseVoice(v, velocity);
+            if (v.state == Voice::State::Active && v.gate && matches(v, key, channel, noteId))
+                releaseVoice(v, velocity);
         }
     }
 
@@ -1650,9 +1676,9 @@ struct Engine::Impl {
                 noteOff(e.key, e.channel, e.noteId, e.value, t);
                 break;
             case Event::Type::Choke:
+                removeHeld(e.key, e.channel, e.noteId);
                 for (Voice& v : voices)
-                    if (v.state == Voice::State::Active &&
-                        (v.key == e.key || (e.noteId >= 0 && v.noteId == e.noteId)))
+                    if (v.state == Voice::State::Active && matches(v, e.key, e.channel, e.noteId))
                         fadeOut(v);
                 break;
             case Event::Type::Param: {
@@ -1723,7 +1749,8 @@ struct Engine::Impl {
             case Event::Type::Pressure:
                 if (mpe && e.channel != 0) {
                     for (Voice& v : voices)
-                        if (v.state == Voice::State::Active && v.channel == e.channel)
+                        if (v.state == Voice::State::Active &&
+                            matches(v, e.key, e.channel, e.noteId))
                             v.pressure = std::clamp(e.value, 0.0, 1.0);
                 } else {
                     aftertouch.set(std::clamp(e.value, 0.0, 1.0), t, 0.005 * sr);
@@ -1731,9 +1758,15 @@ struct Engine::Impl {
                 break;
             case Event::Type::PolyPressure:
                 for (Voice& v : voices)
-                    if (v.state == Voice::State::Active && v.key == e.key &&
-                        (e.noteId >= 0 ? v.noteId == e.noteId : v.channel == e.channel))
+                    if (v.state == Voice::State::Active && matches(v, e.key, e.channel, e.noteId))
                         v.pressure = std::clamp(e.value, 0.0, 1.0);
+                break;
+            case Event::Type::NoteExpression:
+                for (Voice& v : voices)
+                    if (v.state == Voice::State::Active && matches(v, e.key, e.channel, e.noteId)) {
+                        if (e.index == 11) v.expression = std::clamp(e.value, 0.0, 1.0);
+                        if (e.index == 74) v.slide = std::clamp(e.value, 0.0, 1.0);
+                    }
                 break;
             case Event::Type::AllNotesOff:
                 for (Voice& v : voices)
@@ -1847,9 +1880,10 @@ void Engine::prepare(double sampleRate, std::uint32_t maxBlock) {
     }
     m.decFactor = 0;
     m.fx.prepare(sampleRate);
-    m.now = 0;
-    // Re-adopt the current program on the next block (values snap to it).
-    m.prog = nullptr;
+    // Activation starts a fresh performance, including voices, controller
+    // ramps and the global tick clock. Merely setting now/prog left sounding
+    // voices and lastFrameTick from the previous activation alive.
+    reset();
 }
 
 void Engine::setPatch(const Patch& patch) {

@@ -83,6 +83,26 @@ double normalizedLog(double v, double lo, double hi) {
 
 }  // namespace
 
+TEST_CASE("optimizer boundary errors include paths and repair hints") {
+    Harness h;
+    h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");
+    auto bound = h.d->execute({"optimize.start",
+                               j(R"({"instance":"in_1", "params":[{"key":"osc1.level","min":{}}],
+               "target":{"reference":42}})"),
+                               kTest});
+    REQUIRE_FALSE(bound);
+    CHECK(bound.error().code == "optimize.range");
+    CHECK(bound.error().path == "/args/params/0/min");
+    CHECK(bound.error().hint.find("plugin.describe") != std::string::npos);
+    auto reference = h.d->execute(
+        {"optimize.start",
+         j(R"({"instance":"in_1", "params":["osc1.level"], "target":{"reference":42}})"), kTest});
+    REQUIRE_FALSE(reference);
+    CHECK(reference.error().code == "optimize.target");
+    CHECK(reference.error().path == "/args/target/reference");
+    CHECK(reference.error().hint.find("path string") != std::string::npos);
+}
+
 TEST_CASE("optimize recovers a hidden patch from its render") {
     Harness h;
     h.call("plugin.load", R"({"plugin": ")" + kOrrery.string() + R"("})");

@@ -59,11 +59,11 @@ There is no additional detection margin or reconstruction bound. Below-ceiling
 transparency is verified for -10 and -3 dBFS sines with a -1 dB ceiling;
 true-peak ceiling checks allow 0.1 dB measurement tolerance.
 
-Lookahead delays dry and wet equally. With limiter true-peak detection, add
-16 samples to the selected lookahead. `off` guarantees sample peaks only,
-even if true-peak is selected. Mode, lookahead and true-peak are stepped,
-non-automatable controls; changes wait for host restart, including a mode
-switch with equal latency.
+Lookahead delays dry, wet and filtered-key audition (`sc_listen`) equally.
+With limiter true-peak detection, add 16 samples to the selected lookahead.
+`off` guarantees sample peaks only, even if true-peak is selected. Mode,
+lookahead and true-peak are stepped, non-automatable controls; changes wait
+for host restart, including a mode switch with equal latency.
 Feedback detects the previous compressed wet sample before makeup/mix/output;
 external key overrides feedback. Auto release blends release and five-times
 release coefficients according to reduction held over the last second.

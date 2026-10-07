@@ -104,6 +104,10 @@ A sandbox session holds:
   tempo (default 120 BPM), meter (default 4/4), render tail limit (default
   5 s), output format (float32 WAV).
 
+Audio source references are render IDs only when they are `rd_` followed by
+one or more decimal digits. Other strings name audio files, including names
+such as `rd_reference.wav`.
+
 Work dir: `$XDG_CACHE_HOME/<slug>/sandbox/<session-id>/` (or `--workdir`).
 The command log is `commands.ndjson` in it.
 
@@ -177,9 +181,12 @@ Preset documents accept `supple.preset/1.0` (optional numeric `version: 1`).
 An absent schema is legacy; unknown/newer schemas or explicit versions fail
 with `sandbox.preset_schema` or `sandbox.preset_version` before state changes.
 Semantic schema entries require a numeric id, name, recognized type and the
-range/choices for that type. Invalid schemas warn and fall back to plain CLAP
-parameters. State loads invalidate queued pre-restore edits; inactive saves
-flush acknowledged pending edits before writing plug-in state.
+range/choices for that type; their ID set must match `clap.params`. Invalid
+schemas warn and fall back to plain CLAP parameters. `param.get` and
+`plugin.describe` return `sandbox.plugin_contract` with a value path and a
+restart/replace hint when no current value is available. State loads invalidate
+queued pre-restore edits; inactive saves flush acknowledged pending edits
+before writing plug-in state.
 
 ## 5. CLI
 
@@ -223,6 +230,13 @@ paths, locations and hints.
   Parameter values also retain their target address. VST3 output parameter
   values are normalized, with zero flags and address components of -1.
   Native VST3 note-off outputs are not synthesized as CLAP note-end events.
+  CLAP output events are rejected when their header or supported event body is
+  undersized.
+  After a bridge process acknowledgement, the client snapshots the output-event
+  count once and validates it against the 1024-event arena. An oversized count
+  fails the bridge and silences main/auxiliary output before any output copy;
+  `failed()` and structured failure queries expose the protocol violation.
+  Traversal of a valid response uses the bounded snapshot.
 - `takeIdleOutputs()` drains CLAP `params.flush` output gestures/values on the
   main thread, local or bridged, including active-but-stopped audio-thread
   flushes. The instance retains a FIFO of 1024 events independently of the

@@ -7,6 +7,7 @@
 #include "optimize_range.h"
 
 #include "schema_params.h"
+#include "source_ref.h"
 
 #include <chrono>
 #include <cmath>
@@ -166,9 +167,13 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
         auto bound = [&](const char* name, double def) -> Result<double> {
             const json::Value* v = req.find(name);
             if (!v) return def;
-            auto phys = v->isNumber()   ? Result<double>(v->asDouble())
-                        : v->isString() ? units::parseQuantity(v->asString(), t.spec.unit)
-                                        : Result<double>(Error("optimize.range", "not a number"));
+            auto phys = v->isNumber() ? Result<double>(v->asDouble())
+                        : v->isString()
+                            ? units::parseQuantity(v->asString(), t.spec.unit)
+                            : Result<double>(Error("optimize.range",
+                                                   "bound needs a number or unit string", {},
+                                                   "see plugin.describe for the parameter's "
+                                                   "unit and range"));
             if (!phys) return std::move(phys).error().at(path + "/" + name);
             if (*phys < t.spec.min || *phys > t.spec.max)
                 return Error("optimize.range",
@@ -429,9 +434,10 @@ void registerOptimizeCommands(cmd::Registry& registry) {
         if (ref) {
             if (!ref->isString())
                 return Error("optimize.target", "reference is a render id or a path",
-                             "/target/reference");
+                             "/target/reference",
+                             "use a render id (rd_1) or a WAV/FLAC/MP3 path string");
             referenceFile = ref->asString();
-            if (ref->asString().rfind("rd_", 0) == 0) {
+            if (isRenderRef(ref->asString())) {
                 auto r = s.findRender(ref->asString());
                 if (!r) return std::move(r).error().at("/target/reference");
                 referenceFile = (*r)->path;

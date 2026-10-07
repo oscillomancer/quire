@@ -308,8 +308,8 @@ guarantees it); several sources may modulate one destination (they sum).
 | `key` | voice | −1..1 | MIDI note, −1 at C−1, 0 at C4 (60), +1 at G9 (127); linear in semitones |
 | `random` | voice | −1..1 | seeded, new per note |
 | `gate` | voice | 0/1 | 1 while the key is held |
-| `pressure` | voice | 0..1 | poly/MPE pressure, else channel aftertouch |
-| `slide` | voice | 0..1 | MPE timbre (CC74 per note), else CC74 |
+| `pressure` | voice | 0..1 | CLAP/poly/MPE pressure, else channel aftertouch |
+| `slide` | voice | 0..1 | CLAP brightness or MPE timbre (CC74 per note), else CC74 |
 | `modwheel`, `expression`, `breath` | global | 0..1 | CC1, CC11, CC2 |
 | `pitchbend` | global | −1..1 | |
 | `aftertouch` | global | 0..1 | channel pressure |
@@ -443,6 +443,10 @@ real-time engine). The code is the reference; these notes explain the choices.
   restarts envelopes whose `retrigger` is `always` (the default) — so the
   envelope `retrigger` field only matters in mono mode. Envelopes restart from
   their current level (no click).
+- **Keyboard edits:** arrows step bool/int controls by one physical value and
+  enums by one applicable choice, regardless of fine mode; floats use normalized
+  steps of 0.01, or 0.002 in fine mode. Wave choices and Home/End bounds follow
+  the current oscillator type, as in the choice menu.
 - **Gain staging:** one voice with one oscillator at 0 dB peaks near
   −6 dBFS (fixed internal headroom); unison voices are normalized by
   1/√count. Oscillator and amp pan are constant power with unity at centre.
@@ -463,11 +467,21 @@ real-time engine). The code is the reference; these notes explain the choices.
   fade stolen notes out over 64 samples; stealing prefers the oldest released
   note. When a burst of steals has used every spare, the new note takes over
   the fading voices closest to silence: a note-on never goes missing.
+- **Note addressing:** note off, choke, poly pressure and supported CLAP
+  note expressions match key, channel and note id conjunctively; each incoming
+  `-1` component is a wildcard. All-wildcard off/choke targets every note.
+  Mono/legato retain up to 128 held addresses (key, channel, id and velocity),
+  each once, newest last; release restores the newest remaining address.
+  Choke also removes matching held records.
+- **Note expressions:** CLAP pressure, brightness and expression override the
+  pressure, slide and expression sources for voice modulation, including an
+  explicit zero. Without an override, the global controller source applies.
+  CLAP volume, pan, tuning and vibrato expressions are unsupported. The wrapper
+  ignores undersized event payloads and invalid note/MIDI addresses or data.
 - **MIDI mode messages:** CC 120 (All Sound Off) fades every voice out at once
-  and clears the pedal and held keys; CC 123 (All Notes Off) releases, and
-  sustained notes wait for the pedal. Poly pressure matches note id when the
-  host gives one, else channel and key. Mono/legato remember all 128 keys
-  (each once, newest last). A non-finite transport tempo counts as 120 BPM.
+  and clears the pedal and held notes; CC 123 (All Notes Off) releases, and
+  sustained notes wait for the pedal. A non-finite transport tempo counts as
+  120 BPM.
 - **Quality changes** keep sounding notes: their filters and feedback state
   restart at the new rate, envelopes, gate and pitch continue, and fades keep
   their duration.
@@ -477,7 +491,8 @@ real-time engine). The code is the reference; these notes explain the choices.
   ramp snaps to it, as after `prepare()`), the FX delay time starts at its value
   instead of gliding in from the previous render's target, and the control-tick
   bookkeeping and output-gain ramp restart (fix `4a9e8f5`). Guarded by
-  `plugin.orrery.reset`.
+  `plugin.orrery.reset`. Re-prepare also clears voices, controllers, held notes
+  and the performance clock while keeping the patch.
 - **Validation:** `drive: {"type": "off"}` takes no other field, and an
   explicit empty step `values` array is an error.
 

@@ -33,6 +33,15 @@ using namespace supple::host;
 
 namespace supple::host {
 struct BridgeTestAccess {
+    static std::unique_ptr<RemoteInstance> dataPlane(std::shared_ptr<BridgeProcess> process,
+                                                     void* arena, bridge::Layout layout) {
+        std::unique_ptr<RemoteInstance> instance(new RemoteInstance);
+        instance->process_ = std::move(process);
+        instance->map_ = arena;
+        instance->hdr_ = static_cast<bridge::Header*>(arena);
+        instance->layout_ = layout;
+        return instance;
+    }
     static std::shared_ptr<BridgeProcess> adopt(int socket, pid_t pid) {
         std::shared_ptr<BridgeProcess> process(new BridgeProcess);
         process->sock_ = socket;
@@ -339,7 +348,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 14);
+    REQUIRE(list->size() == 16);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -567,6 +576,28 @@ TEST_CASE("the process path is real-time safe" * doctest::description("rt")) {
     for (int i = 0; i < 50; ++i) ok = ok && rtBlock(**inst, buf.block(256, events, false), out);
     CHECK(ok);
     (*inst)->stopProcessing();
+}
+
+TEST_CASE("undersized CLAP output events are rejected locally and bridged") {
+    setBridgeExecutable(BRIDGE_PATH);
+    for (bool isolated : {false, true}) {
+        auto made = Instance::create(find("com.suppleaudio.test.edge"), {}, isolated);
+        REQUIRE(made);
+        const std::array<std::uint8_t, 4> config{40, 0, 0, 0};
+        REQUIRE((*made)->loadState(config));
+        REQUIRE((*made)->activate(48000, 1, 64));
+        REQUIRE((*made)->startProcessing());
+        Buffers buffer(64);
+        std::array<OutputEvent, 8> storage{};
+        OutputEvents sink{storage};
+        REQUIRE((*made)->process(buffer.block(64), &sink));
+        REQUIRE(sink.count == 1);
+        CHECK(storage[0].kind == OutputEvent::Kind::ParamValue);
+        CHECK(storage[0].paramId == 7);
+        CHECK(storage[0].value == 42);
+        (*made)->stopProcessing();
+        (*made)->deactivate();
+    }
 }
 
 TEST_CASE("process outputs retain flags and anonymous note addresses locally and bridged") {
@@ -1865,5 +1896,71 @@ TEST_CASE("bridge service rejects oversized and truncated clear lists") {
         w.u32(count);
         CHECK_FALSE(bridge::validReply(bridge::Op::Service,
                                        bridge::Reader(w.bytes.data(), w.bytes.size())));
+    }
+}
+
+TEST_CASE("semantic IDs absent from CLAP degrade to plain parameters with a warning") {
+    for (bool isolated : {false, true}) {
+        auto info = find("com.suppleaudio.test.semantic-id-mismatch");
+        CHECK_FALSE(info.semantic);
+        auto made = Instance::create(info, {}, isolated);
+        REQUIRE(made);
+        CHECK_FALSE((*made)->info().semantic);
+        CHECK_FALSE((*made)->semanticSchema());
+        REQUIRE((*made)->paramValue(0));
+        (*made)->serviceMainThread();
+        auto logs = (*made)->takeLog();
+        CHECK(std::any_of(logs.begin(), logs.end(), [](const auto& line) {
+            return line.find("invalid semantic schema") != std::string::npos;
+        }));
+    }
+}
+
+TEST_CASE("oversized acknowledged bridge output count fails silently without arena traversal") {
+    for (int sinkSize : {-1, 1, static_cast<int>(bridge::kMaxOutEvents + 1)}) {
+        bridge::Layout layout(64, 2, 2, 0, 2);
+        void* arena =
+            ::mmap(nullptr, layout.size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        REQUIRE(arena != MAP_FAILED);
+        auto* header = new (arena) bridge::Header{};
+        auto process = BridgeTestAccess::adopt(-1, -1);
+        auto instance = BridgeTestAccess::dataPlane(process, arena, layout);
+        auto* output =
+            reinterpret_cast<float*>(static_cast<std::uint8_t*>(arena) + layout.outAudio);
+        auto* aux =
+            reinterpret_cast<float*>(static_cast<std::uint8_t*>(arena) + layout.auxOutAudio);
+        std::fill_n(output, 128, .5f);
+        std::fill_n(aux, 128, .5f);
+        // A scripted peer acknowledges corrupt output exactly as a bridge would.
+        std::thread peer([&] {
+            while (header->request.load(std::memory_order_acquire) == 0) std::this_thread::yield();
+            header->outEventCount = bridge::kMaxOutEvents + 1;
+            header->result = 1;
+            header->done.store(header->request.load(), std::memory_order_release);
+            bridge::futexWake(header->done);
+        });
+        Buffers buffers(64);
+        auto block = buffers.block(64);
+        std::array<float, 64> auxL{}, auxR{};
+        float* auxOut[]{auxL.data(), auxR.data()};
+        block.auxOutputs = auxOut;
+        block.auxOutputChannels = 2;
+        std::vector<OutputEvent> storage(static_cast<std::size_t>(std::max(0, sinkSize)));
+        OutputEvents events{storage};
+        const auto ok = instance->process(block, sinkSize < 0 ? nullptr : &events);
+        peer.join();
+        CHECK(ok);  // failed plug-in is silenced while its session keeps playing
+        CHECK(instance->failed());
+        CHECK(instance->failure().find("protocol") != std::string::npos);
+        CHECK(events.count == 0);
+        CHECK(events.dropped == 0);
+        CHECK(std::all_of(buffers.ol.begin(), buffers.ol.end(), [](float x) { return x == 0; }));
+        CHECK(std::all_of(auxL.begin(), auxL.end(), [](float x) { return x == 0; }));
+        CHECK(instance->process(block, nullptr));  // permanently silent until re-created
+        const auto query = instance->paramValue(0);
+        REQUIRE_FALSE(query);
+        CHECK(query.error().code == "host.bridge_failed");
+        CHECK(query.error().message.find("protocol") != std::string::npos);
+        CHECK_FALSE(query.error().hint.empty());
     }
 }
