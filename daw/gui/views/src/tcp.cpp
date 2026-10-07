@@ -438,8 +438,9 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     input_->visible = controls && channel_;
     env_->visible = controls;
     out_->visible = controls;
-    // Keep both I/O buttons inside the TCP, even on deeply nested channels.
-    float tx = x + std::min(26 + indent, std::max(6.0f, r.w - 180));
+    // Mute and solo start at the left edge (over polarity and mono); env and
+    // out end at the right edge (under "+"), whatever the strip's depth.
+    float tx = x + 6;
     for (ui::Node* n : {static_cast<ui::Node*>(mute_), static_cast<ui::Node*>(solo_)}) {
         n->arrange(canvas, {tx, ty, 19, 14});
         tx += 21;
@@ -450,21 +451,14 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
         n->arrange(canvas, {tx, ty - 1, 16, 16});
         tx += 18;
     }
+    const float outX = right - 38, envX = outX - 30;
     if (input_->visible) {
-        // The input names the device's ports; the strip has room for a short
-        // one and the picker's menu shows them whole.
-        const float width = std::clamp(right - tx - 70, 12.0f, 58.0f);
-        input_->arrange(canvas, {tx, ty, width, 14});
-        tx += width + 2;
+        // The input names the device's ports; it takes the room up to "env"
+        // and the picker's menu shows them whole.
+        input_->arrange(canvas, {tx, ty, std::max(12.0f, envX - 2 - tx), 14});
     }
-    if (env_->visible) {
-        env_->arrange(canvas, {tx, ty, 28, 14});
-        tx += 30;
-    }
-    if (out_->visible) {
-        out_->arrange(canvas, {tx, ty, 28, 14});
-        tx += 30;
-    }
+    if (env_->visible) env_->arrange(canvas, {envX, ty, 28, 14});
+    if (out_->visible) out_->arrange(canvas, {outX, ty, 28, 14});
     // The level row, in signal order: polarity and mono, the fader, the pan.
     fader_->visible = pan_->visible = polarity_->visible = mono_->visible = big;
     if (big) {

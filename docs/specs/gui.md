@@ -190,7 +190,10 @@ alone, adding last in the chain; no count, to save room), the "out" button
 route; drop rules follow `route.strip_type`, invalid targets show why before
 the drop; a strip the track already sends to is not a target, since the
 matrix shows one send per pair), meters. The mixer's strips carry the same controls in the same
-looks (§4.4). Every view names a track the same way (`model::trackLabel`):
+looks (§4.4). The button row starts at the TCP's left edge with mute and
+solo (over polarity and mono) and ends at its right edge with "env" and
+"out", at any depth; a channel's input button takes the room between.
+Every view names a track the same way (`model::trackLabel`):
 its name, which track.add sets to the first free `ch_N`, `buss_N` or
 `mstr_N` (the session's own master is "Master"); an unnamed track from an
 older session shows that kind of label too.
