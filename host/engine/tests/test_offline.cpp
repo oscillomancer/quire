@@ -1,19 +1,35 @@
 #include <doctest/doctest.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#include <fstream>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
 
+#include <supple/base/files.h>
+#include <supple/base/sha256.h>
 #include <supple/engine/offline.h>
 
 #include "plan.h"
+#include "stretch.h"
 
 using namespace supple;
 using namespace supple::engine;
 using model::Id;
 using model::kMaster;
+
+namespace supple::engine {
+struct MediaCacheTestAccess {
+    static std::weak_ptr<const audio::AudioData> decoded(const MediaCache& cache) {
+        REQUIRE(cache.decoded_.size() == 1);
+        return cache.decoded_.begin()->second;
+    }
+    static std::size_t decodedEntries(const MediaCache& cache) { return cache.decoded_.size(); }
+};
+}  // namespace supple::engine
 
 namespace {
 
@@ -1720,4 +1736,273 @@ TEST_CASE("held musical source identities survive an in-span tempo edit") {
     REQUIRE(detail::processBlock(next, 160000, 128));
     CHECK(node.held[69] == 0);
     for (auto* instance : old.instances) instance->stopProcessing();
+}
+
+TEST_CASE("through-master stems of nested channels use the solo signal path") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+    const Id channel = addTrack(t, "Chosen", bus);
+    const Id sibling = addTrack(t, "Sibling", bus);
+    const Id sendBus = addTrack(t, "Send", kMaster, model::StripType::Buss);
+    const Id unrelated = addTrack(t, "Unrelated");
+    for (Id track : {channel, sibling, unrelated}) addFx(t, track, kSine);
+    addNote(t, channel, 0, 2, 60);
+    addNote(t, sibling, 0, 2, 64);
+    addNote(t, unrelated, 0, 2, 67);
+    t.modify<model::Track>(unrelated, [](auto& tr) { tr.solo = model::Solo::Defeat; });
+    model::Route route;
+    route.from.track = channel;
+    route.to.track = sendBus;
+    t.create(route);
+    const auto session = commit(t);
+    model::EditTxn solo(session, 2);
+    solo.modify<model::Track>(channel, [](auto& tr) { tr.solo = model::Solo::On; });
+    solo.modify<model::Track>(unrelated, [](auto& tr) { tr.solo = model::Solo::Off; });
+    const auto isolated = commit(solo);
+    auto referencePool = makePool();
+    auto stemPool = makePool();
+    const auto reference = render(isolated, referencePool, 1);
+    auto stem = renderOffline(session, stemPool, {.endSeconds = 1, .throughMaster = channel});
+    REQUIRE(stem);
+    CHECK(peak(stem->audio.channels[0]) > 0.01);
+    CHECK(bool(stem->audio.channels == reference.audio.channels));
+    CHECK(session.tracks.find(channel)->solo == model::Solo::Off);
+    CHECK(session.tracks.find(unrelated)->solo == model::Solo::Defeat);
+}
+
+TEST_CASE(
+    "media identities invalidate decoded and stretched audio while old leases stay immutable") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-media-identity-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    const auto file = dir / "source.wav";
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(9600));
+    for (std::size_t i = 0; i < tone.frames(); ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(0.25 * std::sin(2 * 3.141592653589793 * 440 * i / 48000));
+    REQUIRE(audio::writeWav(file, tone));
+    MediaCache cache;
+    auto old = cache.get(file, 48000);
+    auto stretched = cache.get(file, 48000, {.playrate = 0.5});
+    REQUIRE(old);
+    REQUIRE(stretched);
+    const auto oldSamples = (*old)->channels;
+    const auto oldStretch = (*stretched)->channels;
+    for (auto& channel : tone.channels)
+        for (float& sample : channel) sample *= 2;
+    REQUIRE(audio::writeWav(file, tone));
+    auto current = cache.get(file, 48000);
+    auto currentStretch = cache.get(file, 48000, {.playrate = 0.5});
+    MediaCache fresh;
+    auto expected = fresh.get(file, 48000);
+    auto expectedStretch = fresh.get(file, 48000, {.playrate = 0.5});
+    REQUIRE(current);
+    REQUIRE(currentStretch);
+    REQUIRE(expected);
+    REQUIRE(expectedStretch);
+    CHECK(bool((*current)->channels == (*expected)->channels));
+    CHECK(bool((*currentStretch)->channels == (*expectedStretch)->channels));
+    CHECK(bool((*old)->channels == oldSamples));
+    CHECK(bool((*stretched)->channels == oldStretch));
+    CHECK(*old != *current);
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("media identities share hashed content and detect inode and nanosecond changes") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-content-identity-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    const auto file = dir / "source.wav", alias = dir / "copy.wav";
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(9600));
+    for (std::size_t i = 0; i < tone.frames(); ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(0.25 * std::sin(2 * 3.141592653589793 * 440 * i / 48000));
+    REQUIRE(audio::writeWav(file, tone));
+    const auto hashA = "sha256:" + sha256File(file).value();
+    REQUIRE(writeFileAtomic(alias, readFile(file).value()));
+    MediaCache cache;
+    auto old = cache.get(file, 48000, {}, hashA);
+    auto copy = cache.get(alias, 48000, {}, hashA);
+    auto unHashed = cache.get(file, 48000);
+    REQUIRE(old);
+    REQUIRE(copy);
+    REQUIRE(unHashed);
+    CHECK(*old == *copy);
+    const auto original = (*old)->channels;
+    struct stat before{}, after{};
+    REQUIRE(::stat(file.c_str(), &before) == 0);
+    for (auto& channel : tone.channels)
+        for (float& sample : channel) sample *= 2;
+    REQUIRE(audio::writeWav(file, tone));
+    const timespec sameTimes[]{before.st_atim, before.st_mtim};
+    REQUIRE(::utimensat(AT_FDCWD, file.c_str(), sameTimes, 0) == 0);
+    REQUIRE(::stat(file.c_str(), &after) == 0);
+    CHECK(before.st_ino != after.st_ino);
+    CHECK(before.st_size == after.st_size);
+    CHECK(before.st_mtim.tv_sec == after.st_mtim.tv_sec);
+    CHECK(before.st_mtim.tv_nsec == after.st_mtim.tv_nsec);
+    auto replacement = cache.get(file, 48000);
+    REQUIRE(replacement);
+    CHECK(*replacement != *unHashed);
+    CHECK(bool((*replacement)->channels == tone.channels));
+    const auto hashB = "sha256:" + sha256File(file).value();
+    auto hashedReplacement = cache.get(file, 48000, {}, hashB);
+    REQUIRE(hashedReplacement);
+    CHECK(bool((*hashedReplacement)->channels == tone.channels));
+    // A new variant of the old hash must derive from its immutable decoded
+    // content, even though the filename now contains different bytes.
+    auto oldVariant = cache.get(file, 48000, {.playrate = 0.5}, hashA);
+    const auto expectedOld = stretchAudio(**old, 0.5, 0);
+    REQUIRE(oldVariant);
+    REQUIRE(expectedOld);
+    CHECK(bool((*oldVariant)->channels == expectedOld->channels));
+    CHECK(bool((*old)->channels == original));
+    // Rewrite in place, preserving size/inode and the seconds part of mtime.
+    for (auto& channel : tone.channels)
+        for (float& sample : channel) sample *= 0.25f;
+    const auto encoded = audio::encodeWav(tone);
+    REQUIRE(encoded);
+    {
+        std::ofstream output(file, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(encoded->data()),
+                     static_cast<std::streamsize>(encoded->size()));
+        REQUIRE(output.good());
+    }
+    timespec changedTimes[]{after.st_atim, after.st_mtim};
+    changedTimes[1].tv_nsec = (after.st_mtim.tv_nsec + 1) % 1000000000;
+    REQUIRE(::utimensat(AT_FDCWD, file.c_str(), changedTimes, 0) == 0);
+    auto changed = cache.get(file, 48000);
+    REQUIRE(changed);
+    CHECK(*changed != *replacement);
+    CHECK(bool((*changed)->channels == tone.channels));
+    // The compiler must pass MediaSource.hash into that same identity cache.
+    auto session = [&](const std::filesystem::path& path) {
+        model::EditTxn t(model::Session::create({.console9 = false}), 1);
+        const Id track = addTrack(t, "Audio");
+        const Id media = t.create(model::MediaSource{path.string(), hashA, "wav", 48000, 2, 9600});
+        model::Take take;
+        take.source = media;
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = track;
+        item.length = 0.4;
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
+        return commit(t);
+    };
+    auto pool = makePool();
+    auto fromHash = renderOffline(session(file), pool, {.endSeconds = 0.1, .media = &cache});
+    auto freshPool = makePool();
+    auto fromCopy = renderOffline(session(alias), freshPool, {.endSeconds = 0.1});
+    REQUIRE(fromHash);
+    REQUIRE(fromCopy);
+    CHECK(bool(fromHash->audio.channels == fromCopy->audio.channels));
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("through-master stems retain the solo playback sidechain taps") {
+    for (bool console : {false, true}) {
+        model::EditTxn t(model::Session::create({.console9 = console}), 1);
+        const Id bus = addTrack(t, "Bus", kMaster, model::StripType::Buss);
+        const Id chosen = addTrack(t, "Chosen", bus);
+        const Id keySource = addTrack(t, "Key");
+        addFx(t, keySource, kSine);
+        addNote(t, keySource, 0, 2);
+        const Id fx = addFx(t, chosen, "com.suppleaudio.test.keymix");
+        model::Route key;
+        key.from.track = keySource;
+        key.to.fx = fx;
+        key.tap = model::Tap::PostFader;
+        t.create(key);
+        const auto session = commit(t);
+        model::EditTxn solo(session, 2);
+        solo.modify<model::Track>(chosen, [](auto& track) { track.solo = model::Solo::On; });
+        auto refPool = makePool();
+        auto stemPool = makePool();
+        const auto reference = render(commit(solo), refPool, .1);
+        auto stem = renderOffline(session, stemPool, {.endSeconds = .1, .throughMaster = chosen});
+        REQUIRE(stem);
+        CHECK(peak(stem->audio.channels[0]) > .01);
+        CHECK(bool(stem->audio.channels == reference.audio.channels));
+    }
+}
+
+TEST_CASE("media cache releases originals used only to build playback variants") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-decoded-lifetime-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    const auto file = dir / "source.wav", other = dir / "other.wav";
+    audio::AudioData tone;
+    tone.sampleRate = 44100;
+    tone.channels.assign(2, std::vector<float>(8820));
+    for (std::size_t i = 0; i < tone.frames(); ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(.25 * std::sin(2 * 3.141592653589793 * 440 * double(i) / 44100));
+    REQUIRE(audio::writeWav(file, tone));
+    REQUIRE(audio::writeWav(other, tone));
+    for (bool stretch : {false, true})
+        for (double rate : {44100.0, 48000.0}) {
+            if (!stretch && rate == 44100) continue;
+            CAPTURE(stretch);
+            CAPTURE(rate);
+            MediaCache cache;
+            MediaVariant variant;
+            if (stretch) variant.playrate = .5;
+            auto result = cache.get(file, rate, variant);
+            REQUIRE(result);
+            const auto original = MediaCacheTestAccess::decoded(cache);
+            CHECK(original.expired());        // the variant must not own its decoded input
+            CHECK(result->use_count() == 2);  // caller and playback-variant cache
+            // Same-rate playback bypasses the resampler; invoking it anyway
+            // would apply its low-pass filter and change the reference audio.
+            auto resampled = rate == tone.sampleRate ? Result<audio::AudioData>(tone)
+                                                     : audio::resample(tone, rate);
+            REQUIRE(resampled);
+            if (stretch) {
+                auto expected = stretchAudio(*resampled, .5, 0);
+                REQUIRE(expected);
+                CHECK(bool((*result)->channels == expected->channels));
+            } else
+                CHECK(bool((*result)->channels == resampled->channels));
+            auto same = cache.get(file, rate, variant);
+            REQUIRE(same);
+            CHECK(*same == *result);
+            // A different identity on a miss opportunistically prunes the
+            // expired original without touching the still-cached variant.
+            auto passthrough = cache.get(other, 44100);
+            REQUIRE(passthrough);
+            CHECK(MediaCacheTestAccess::decodedEntries(cache) == 1);
+            const auto retained = MediaCacheTestAccess::decoded(cache).lock();
+            REQUIRE(retained);
+            CHECK(retained == *passthrough);
+            CHECK(original.expired());
+            CHECK(bool((*result)->channels == (*same)->channels));
+        }
+    // A passthrough entry owns its original, and a lease survives the cache.
+    std::shared_ptr<const audio::AudioData> lease;
+    std::weak_ptr<const audio::AudioData> original;
+    {
+        MediaCache cache;
+        auto direct = cache.get(file, 44100);
+        REQUIRE(direct);
+        original = MediaCacheTestAccess::decoded(cache);
+        CHECK_FALSE(original.expired());
+        CHECK(direct->use_count() == 2);
+        auto stretched = cache.get(file, 48000, {.playrate = .5});
+        REQUIRE(stretched);
+        CHECK_FALSE(original.expired());
+        CHECK(direct->use_count() == 2);
+        CHECK(bool((*direct)->channels == tone.channels));
+        lease = *direct;
+    }
+    CHECK_FALSE(original.expired());
+    CHECK(bool(lease->channels == tone.channels));
+    lease.reset();
+    CHECK(original.expired());
+    std::filesystem::remove_all(dir);
 }

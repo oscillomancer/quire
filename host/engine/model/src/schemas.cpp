@@ -803,10 +803,12 @@ const Schema<Route>& schemaOf<Route>() {
                 .field("hw_channels", &RouteEnd::hwChannels, schema::arrayOf(intS().range(1, 1024)))
                 .field("midi_device", &RouteEnd::midiDevice, str())
                 .build();
-        auto channels = schema::object<ChannelMap>("channel_map")
-                            .field("from", &ChannelMap::from, schema::arrayOf(intS().range(1, 64)))
-                            .field("to", &ChannelMap::to, schema::arrayOf(intS().range(1, 64)))
-                            .build();
+        auto channels =
+            schema::object<ChannelMap>("channel_map")
+                .field("from", &ChannelMap::from,
+                       schema::arrayOf(intS().range(1, kMaxTrackChannels)))
+                .field("to", &ChannelMap::to, schema::arrayOf(intS().range(1, kMaxTrackChannels)))
+                .build();
         auto midiR = schema::object<MidiRouting>("midi_routing")
                          .field("from_channel", &MidiRouting::fromChannel, intS().range(0, 16))
                          .field("to_channel", &MidiRouting::toChannel, intS().range(0, 16))

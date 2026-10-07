@@ -22,6 +22,7 @@
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "supple/audio/audio_file.h"
@@ -126,9 +127,10 @@ struct MediaVariant {
     double speed() const { return playrate * (preservePitch ? 1.0 : std::pow(2.0, pitch / 12.0)); }
 };
 
-// Decoded audio media, keyed by resolved path and variant (main thread).
-// Reused across renders; the engine's disk-backed, resampling media cache
-// replaces it.
+// Immutable decoded audio and playback variants (model/decode thread only).
+// Sources with a known hash share their content; otherwise every get checks
+// dev/inode/size/nanosecond-mtime before using cached data. Decoded originals
+// are weakly indexed; only a plan or passthrough variant keeps them alive.
 class MediaCache {
   public:
     // Decoded audio at `rate` (resampled once, then kept; 0: the file's own
@@ -137,10 +139,13 @@ class MediaCache {
     // every cache gives the same samples (offline ≡ real time).
     Result<std::shared_ptr<const audio::AudioData>> get(const std::filesystem::path& path,
                                                         double rate = 0,
-                                                        const MediaVariant& variant = {});
+                                                        const MediaVariant& variant = {},
+                                                        std::string_view contentHash = {});
     std::size_t size() const { return entries_.size(); }
 
   private:
+    friend struct MediaCacheTestAccess;
+    std::map<std::string, std::weak_ptr<const audio::AudioData>> decoded_;
     std::map<std::string, std::shared_ptr<const audio::AudioData>> entries_;
 };
 
@@ -159,7 +164,7 @@ struct OfflineSettings {
     unsigned threads = 0;
     // Select one track's output without its sends or master processing.
     std::optional<model::Id> track;
-    // Render this track through the master while silencing other top-level tracks.
+    // Render through the master with this track as the exclusive solo source.
     std::optional<model::Id> throughMaster;
     model::Tap tap = model::Tap::PostFader;
     std::shared_ptr<const std::atomic<bool>> cancelFlag;  // checked between offline blocks

@@ -44,16 +44,24 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
     // enter the model, history or automation.
     if (param == info.end() || (param->flags & CLAP_PARAM_IS_READONLY)) return {};
     auto plain = [&](double value) -> Result<double> {
-        if (!std::isfinite(value)) return Error("fx.output_value", "non-finite plug-in output");
+        if (!std::isfinite(value))
+            return Error("fx.output_value", "non-finite plug-in output", {},
+                         "disable automation recording for this FX and correct or replace the "
+                         "plugin emitting values outside its declared range");
         if (instance->paramsNormalized()) {
             if (value < 0 || value > 1)
-                return Error("fx.output_value", "normalized output outside 0..1");
+                return Error("fx.output_value", "normalized output outside 0..1", {},
+                             "disable automation recording for this FX and correct or replace the "
+                             "plugin emitting values outside its declared range");
             auto converted = instance->plainParam(key.second, value);
             if (!converted) return converted.error();
             value = *converted;
         }
         if (!std::isfinite(value) || value < param->min || value > param->max)
-            return Error("fx.output_value", "plug-in output outside the current parameter range");
+            return Error("fx.output_value", "plug-in output outside the current parameter range",
+                         {},
+                         "disable automation recording for this FX and correct or replace the "
+                         "plugin emitting values outside its declared range");
         return value;
     };
     auto value = plain(gesture.latest->event.value);
@@ -72,7 +80,10 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
                 }
             }
         if (!semantic)
-            return Error("fx.output_param", "output parameter is missing from the semantic schema");
+            return Error("fx.output_param", "output parameter is missing from the semantic schema",
+                         {},
+                         "choose an installed plugin version whose semantic schema describes the "
+                         "output parameter, or remove that parameter's envelope");
     }
     auto next = *fx;
     next.params[key.second] = *value;
@@ -122,14 +133,13 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
         const double physical = semantic ? params::fromClap(semantic->spec, *recorded) : *recorded;
         const double seconds =
             static_cast<double>(output.timelineSample) / engine_->config().sampleRate;
-        const double beat = before.timeMap->beatAt(seconds);
-        if (!std::isfinite(beat) || beat < 0) continue;
+        if (!std::isfinite(seconds) || seconds < 0) continue;
         // Plain envelopes may have been addressed by the plug-in's display name.
         for (const auto& env : before.envelopes)
             if (env.value->target.object == key.first &&
                 (env.value->target.param == paramKey ||
                  (!semantic && env.value->target.param == param->name)))
-                recordAutomationAt(key.first, env.value->target.param, physical, beat);
+                recordAutomationAt(key.first, env.value->target.param, physical, seconds);
     }
     if (gesture.ended)
         for (const auto& env : before.envelopes)
@@ -159,7 +169,7 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
         envelope["points"] = json::Value::array();
         for (const auto& point : env.value->points) {
             auto p = json::Value::object();
-            p["beat"] = point.pos;
+            p[env.value->timebase == model::Timebase::Time ? "seconds" : "beat"] = point.pos;
             p["value"] = point.value;
             p["shape"] = shapes[static_cast<unsigned>(point.shape)];
             p["tension"] = point.tension;

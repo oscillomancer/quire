@@ -3,6 +3,8 @@
 #include "plan.h"
 #include "stretch.h"
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -146,7 +148,9 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
             auto it = session.blobs.find(*fx.state);
             if (it == session.blobs.end())
                 return Error("engine.blob_missing", id.str() + " refers to a missing state blob",
-                             "/fx/" + id.str() + "/state");
+                             "/fx/" + id.str() + "/state",
+                             "load a project/preset containing the missing FX state blob or "
+                             "capture its state again");
             SUPPLE_TRY(e.instance->loadState(it->second->data));
         }
         e.appliedState = desired;
@@ -290,25 +294,56 @@ namespace {
 // One variant's samples can never be heard past the render limit, so refuse
 // to build (and keep) a variant larger than that.
 constexpr std::size_t kMaxVariantFrames = std::size_t{1} << 28;
+
+Result<std::string> mediaIdentity(const std::filesystem::path& path, std::string_view hash) {
+    if (!hash.empty()) return "hash:" + std::string(hash);
+    struct stat info{};
+    if (::stat(path.c_str(), &info) != 0)
+        return Error("engine.media_missing", "cannot inspect media " + path.string(), {},
+                     "restore the source file or import an existing audio_file");
+    return "file:" + std::to_string(info.st_dev) + ":" + std::to_string(info.st_ino) + ":" +
+           std::to_string(info.st_size) + ":" + std::to_string(info.st_mtim.tv_sec) + ":" +
+           std::to_string(info.st_mtim.tv_nsec);
+}
 }  // namespace
 
 Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::filesystem::path& path,
                                                                 double rate,
-                                                                const MediaVariant& variant) {
-    // Keyed by the plan rate, not the rate the variant ends up at: the same
-    // take in the same plan must land on the same entry. The pitch is part of
-    // the key wherever it changes the samples (a stretch's transposition, a
-    // varispeed's speed factor).
+                                                                const MediaVariant& variant,
+                                                                std::string_view contentHash) {
+    // Never called by either executor: un-hashed media is stat'ed at plan
+    // preparation, and immutable buffers are leased by each prepared plan.
+    auto identity = mediaIdentity(path, contentHash);
+    if (!identity) return identity.error();
     const bool stretch = variant.stretch();
     const bool pitched = stretch || !variant.preservePitch;
-    const std::string key = path.lexically_normal().string() + "@" + json::formatDouble(rate) +
-                            (stretch ? "|s" : "|r") + "|" + json::formatDouble(variant.playrate) +
-                            "|" + json::formatDouble(pitched ? variant.pitch : 0.0);
-    auto it = entries_.find(key);
-    if (it != entries_.end()) return it->second;
-    auto data = audio::readAudio(path);
-    if (!data) return std::move(data).error();
-    // A rate of 0 keeps the file's own rate; the variant still applies.
+    const std::string key = *identity + "@" + json::formatDouble(rate) + (stretch ? "|s" : "|r") +
+                            "|" + json::formatDouble(variant.playrate) + "|" +
+                            json::formatDouble(pitched ? variant.pitch : 0.0);
+    if (auto it = entries_.find(key); it != entries_.end()) return it->second;
+    // Reuse originals only while something actually leases them. Prune on
+    // variant misses so cache hits do not scan all live passthrough entries.
+    std::erase_if(decoded_, [](const auto& entry) { return entry.second.expired(); });
+    std::shared_ptr<const audio::AudioData> data;
+    if (auto decoded = decoded_.find(*identity); decoded != decoded_.end())
+        data = decoded->second.lock();
+    if (!data) {
+        auto read = audio::readAudio(path);
+        if (!read) return std::move(read).error();
+        // An external replacement during decode must not label new samples
+        // with the old file identity. Leave cached/leased buffers untouched.
+        if (contentHash.empty()) {
+            auto after = mediaIdentity(path, {});
+            if (!after) return after.error();
+            if (*after != *identity)
+                return Error("engine.media_changed",
+                             "media changed while decoding " + path.string(), {},
+                             "finish editing the source file, then reload the project or reimport "
+                             "audio_file");
+        }
+        data = std::make_shared<const audio::AudioData>(std::move(*read));
+        decoded_.insert_or_assign(*identity, data);
+    }
     const double planRate = rate > 0 ? rate : data->sampleRate;
     const double targetRate = stretch ? planRate : planRate / variant.speed();
     const double frames = static_cast<double>(data->frames()) * (targetRate / data->sampleRate) /
@@ -316,21 +351,19 @@ Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::files
     if (!(frames <= static_cast<double>(kMaxVariantFrames)))
         return Error("engine.media_too_long",
                      "playing this media this slowly would need an unreasonable amount of memory",
-                     {}, "a playrate closer to 1");
+                     {}, "use a playrate closer to 1");
     if (targetRate > 0 && data->sampleRate != targetRate) {
         auto resampled = audio::resample(*data, targetRate);
         if (!resampled) return std::move(resampled).error();
-        data = std::move(*resampled);
+        data = std::make_shared<const audio::AudioData>(std::move(*resampled));
     }
-    // Resampled first, so the stretch runs at the plan's rate.
     if (stretch) {
         auto stretched = stretchAudio(*data, variant.playrate, variant.pitch);
         if (!stretched) return std::move(stretched).error();
-        data = std::move(*stretched);
+        data = std::make_shared<const audio::AudioData>(std::move(*stretched));
     }
-    auto shared = std::make_shared<const audio::AudioData>(std::move(*data));
-    entries_.emplace(key, shared);
-    return shared;
+    entries_.emplace(key, data);
+    return data;
 }
 
 // --- mixing helpers ---------------------------------------------------------------------
@@ -360,15 +393,16 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
     if (opt.throughMaster) {
         if (!s.tracks.contains(*opt.throughMaster) || *opt.throughMaster == model::kMaster)
-            return Error("track.unknown", "through-master stem track does not exist", "/track");
+            return Error("track.unknown", "through-master stem track does not exist", "/track",
+                         "use an existing track id from track.list");
+        // One exclusive solo uses precisely the playback compiler's signal-path
+        // semantics, including nested parents and ordinary sends. Existing
+        // solos/solo-defeat must not add other contributors to this stem.
         model::IdMap<model::Track>::Builder tracks(s.tracks);
         for (const auto& entry : s.tracks) {
-            if (entry.id == model::kMaster || entry.id == *opt.throughMaster) continue;
-            if (entry.value->parent == model::kMaster) {
-                auto muted = std::make_shared<model::Track>(*entry.value);
-                muted->mute = true;
-                tracks.put(entry.id, entry.rev, std::move(muted));
-            }
+            auto soloed = std::make_shared<model::Track>(*entry.value);
+            soloed->solo = entry.id == *opt.throughMaster ? model::Solo::On : model::Solo::Off;
+            tracks.put(entry.id, entry.rev, std::move(soloed));
         }
         selectedSession.tracks = tracks.build();
     }
@@ -389,13 +423,12 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         auto it = std::find_if(p.nodes.begin(), p.nodes.end(),
                                [&](const Node& node) { return node.id == *opt.track; });
         if (it == p.nodes.end())
-            return Error("track.unknown", "track is absent from the render plan", "/track");
+            return Error("track.unknown", "track is absent from the render plan", "/track",
+                         "use an existing track id from track.list");
         selected = &*it;
         // An analysis tap is isolated from the session's current solo state.
         for (Node& node : p.nodes) node.soloSilenced = false;
     }
-    if (opt.throughMaster)
-        for (Node& node : p.nodes) node.soloSilenced = false;
     const auto outputLatency =
         opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
                   : selected->latIn + selected->latChain;
@@ -403,7 +436,9 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                 time::samplesAt(opt.startSeconds, p.rate) +
                                 time::samplesAt(opt.tailSeconds, p.rate);
     const std::int64_t total = length + outputLatency;
-    if (total > (std::int64_t(1) << 28)) return Error("engine.too_long", "render too long");
+    if (total > (std::int64_t(1) << 28))
+        return Error("engine.too_long", "render too long", {},
+                     "shorten the render range or use a lower sample rate");
     std::vector<float> outL(static_cast<std::size_t>(total)), outR(static_cast<std::size_t>(total));
     const bool decodeStem = opt.track && opt.tap == model::Tap::PostFader && !selected->master;
     ConsoleStage<console9::Buss> stemDecoder;
@@ -461,9 +496,17 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     for (host::Instance* in : instances) {
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
-    if (startFailed) return Error("engine.start_failed", "a plugin refused to start processing");
-    if (cancelled) return Error("job.cancelled", "offline render cancelled");
-    if (failed) return Error("engine.process_error", "a plugin reported a processing error");
+    if (startFailed)
+        return Error("engine.start_failed", "a plugin refused to start processing", {},
+                     "restart or replace the FX that refused processing with a plugin supporting "
+                     "the render sample rate and block size");
+    if (cancelled)
+        return Error("job.cancelled", "offline render cancelled", {},
+                     "submit a new render job if its output is still wanted; the cancelled job "
+                     "cannot resume");
+    if (failed)
+        return Error("engine.process_error", "a plugin reported a processing error", {},
+                     "bypass or replace the failing FX and render the range again");
     for (const Node& n : p.nodes) {
         std::string line = n.id.str() + " in=[";
         for (std::size_t k = 0; k < n.in.size(); ++k) {

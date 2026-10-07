@@ -213,10 +213,18 @@ void registerEngineAnalysisCommands(cmd::Registry& registry) {
         c.run = [](const MaskingArgs& args, Context& ctx) -> Result<json::Value> {
             auto masker = trackAudio(app(ctx), args.maskerTrack, args.startBeat, args.endBeat,
                                      model::Tap::PostFader);
-            if (!masker) return std::move(masker).error();
+            if (!masker) {
+                auto error = std::move(masker).error();
+                if (error.path == "/track") error.path = "/masker_track";
+                return error;
+            }
             auto maskee = trackAudio(app(ctx), args.maskeeTrack, args.startBeat, args.endBeat,
                                      model::Tap::PostFader);
-            if (!maskee) return std::move(maskee).error();
+            if (!maskee) {
+                auto error = std::move(maskee).error();
+                if (error.path == "/track") error.path = "/maskee_track";
+                return error;
+            }
             auto report = analysis::masking(masker->signal(), maskee->signal());
             if (!report) return std::move(report).error();
             return analysis::toJson(*report);

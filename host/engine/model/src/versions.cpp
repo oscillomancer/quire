@@ -491,7 +491,8 @@ void VersionStore::enforceBudget() {
         protectedIds.insert(b.redo.begin(), b.redo.end());
     }
     for (const auto& [id, v] : versions_) {
-        if (v.session.use_count() > 1 || v.parents.size() != 1) protectedIds.insert(id);
+        if (v.session.use_count() > 1 || metadataLeases_.contains(id) || v.parents.size() != 1)
+            protectedIds.insert(id);
         for (auto parent : v.parents) children[parent].push_back(id);
     }
     // Oldest first, independently across branch lineages. Forks, merge nodes,
@@ -503,7 +504,8 @@ void VersionStore::enforceBudget() {
         auto next = std::next(it);
         if (!protectedIds.contains(id) && children[id].size() == 1) {
             auto& child = versions_.at(children[id].front());
-            if (child.parents.size() == 1 && child.session.use_count() == 1) {
+            if (child.parents.size() == 1 && child.session.use_count() == 1 &&
+                !metadataLeases_.contains(child.id)) {
                 size.drop(child.id);
                 size.drop(id);
                 auto remember = [&](const Version& step) {

@@ -292,8 +292,9 @@ auto tapSchema() {
 schema::Schema<model::ChannelMap> channelMapSchema() {
     return schema::object<model::ChannelMap>("channel_map")
         .field("from", &model::ChannelMap::from,
-               schema::arrayOf(schema::integerOf<int>().range(1, 64)))
-        .field("to", &model::ChannelMap::to, schema::arrayOf(schema::integerOf<int>().range(1, 64)))
+               schema::arrayOf(schema::integerOf<int>().range(1, model::kMaxTrackChannels)))
+        .field("to", &model::ChannelMap::to,
+               schema::arrayOf(schema::integerOf<int>().range(1, model::kMaxTrackChannels)))
         .build();
 }
 
@@ -968,7 +969,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                     o.start = *a.start;
                     o.end = *a.end;
                 } else {
-                    if (!a.pos) return Error("marker.pos", "marker position is required", "/pos");
+                    if (!a.pos)
+                        return Error("marker.pos", "marker position is required", "/pos",
+                                     "provide pos as a nonnegative position in beats");
                     o.pos = *a.pos;
                 }
                 if (a.name) o.name = *a.name;
@@ -998,7 +1001,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                     if (a.start) o.start = *a.start;
                     if (a.end) o.end = *a.end;
                     if (!(o.end > o.start))
-                        return Error("region.range", "end must follow start", "/end");
+                        return Error("region.range", "end must follow start", "/end",
+                                     "set end later than start in beats");
                 } else {
                     if (a.pos) o.pos = *a.pos;
                 }
@@ -1274,7 +1278,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             if (a.fadeOutShape) it.fadeOut.shape = *a.fadeOutShape;
             if (a.color) it.color = *a.color;
             if (a.name && !it.activeTake)
-                return Error("item.no_take", "item has no active take to name", "/name");
+                return Error("item.no_take", "item has no active take to name", "/name",
+                             "select an existing take with take.activate before setting name, or "
+                             "add a take to the item");
             auto& t = app(ctx).txn();
             if (a.name)
                 t.modify<model::Take>(*it.activeTake, [&](model::Take& tk) { tk.name = *a.name; });
@@ -1400,14 +1406,20 @@ void registerExtraCommands(cmd::Registry& registry) {
                         auto it = restored.find(*tk.source);
                         if (it == restored.end()) {
                             const model::MediaSource* md = s.media.find(*tk.source);
-                            if (!md) return Error("item.source", "the copied audio is gone", at);
+                            if (!md)
+                                return Error("item.source", "the copied audio is gone", at,
+                                             "recopy from a version containing the audio source, "
+                                             "or reimport its audio_file");
                             it = restored.emplace(*tk.source, txn.create(*md)).first;
                         }
                         tk.source = it->second;
                     } else if (tk.source && tk.source->kind == model::Kind::Midi &&
                                !now.midi.find(*tk.source)) {
                         const model::MidiSource* mi = s.midi.find(*tk.source);
-                        if (!mi) return Error("item.source", "the copied MIDI is gone", at);
+                        if (!mi)
+                            return Error("item.source", "the copied MIDI is gone", at,
+                                         "recopy from a version containing the MIDI source, or "
+                                         "recreate the item with notation");
                         model::MidiSource fresh = *mi;
                         fresh.pooled = false;
                         tk.source = txn.create(std::move(fresh));
@@ -1536,8 +1548,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (!source) return std::move(source).error();
                 const auto& takes = s.items.find(*item)->takes;
                 if (std::find(takes.begin(), takes.end(), *source) == takes.end())
-                    return Error("take.not_in_item", *a.from + " does not belong to " + a.item,
-                                 "/from");
+                    return Error(
+                        "take.not_in_item", *a.from + " does not belong to " + a.item, "/from",
+                        "choose a from take in the destination item; take.list lists its takes");
                 auto takeSource = dangling<model::Take>(s, *source, "/from");
                 if (!takeSource) return std::move(takeSource).error();
                 copy = **takeSource;
@@ -1783,7 +1796,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                                                        [&](model::Take& tk) { tk.chain = chain; });
                     return Empty{};
                 }
-                return Error("fx.chain", "this plugin is in no chain", "/fx", "fx.list");
+                return Error("fx.chain", "this plugin is in no chain", "/fx",
+                             "use an fx id returned by fx.add, fx.copy or fx.chain.load");
             }
             Id target = *source;
             if (a.track) {

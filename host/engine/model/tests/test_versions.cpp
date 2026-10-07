@@ -545,3 +545,41 @@ TEST_CASE("media hash completion preserves snapshots, revisions, caches and open
     CHECK(imported.updateMediaHash(source, media, hash, "main"));
     CHECK(imported.version(recordVersion)->session->media.find(source)->hash == hash);
 }
+
+TEST_CASE("history budget preserves leases of snapshots replaced by media hash completion") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    EditTxn recording(*vs.head(), vs.nextVersion());
+    Track track;
+    track.parent = kMaster;
+    const Id channel = recording.create(track);
+    recording.modify<Track>(kMaster, [&](Track& master) { master.children.push_back(channel); });
+    const MediaSource media{"rec/take.wav", "", "wav", 48000, 1, 48000};
+    const Id source = recording.create(media);
+    Take take;
+    take.source = source;
+    const Id takeId = recording.create(take);
+    Item item;
+    item.track = channel;
+    item.takes = {takeId};
+    item.activeTake = takeId;
+    item.length = 1;
+    recording.create(item);
+    auto session = recording.commit();
+    REQUIRE(session);
+    const auto recorded = vs.commit(std::move(*session), {"record", "test", {}, {}},
+                                    recording.changes(), recording.created());
+    REQUIRE(recorded);
+    auto lease = vs.pin(*recorded);
+    REQUIRE(vs.updateMediaHash(source, media, "sha256:" + std::string(64, 'a'), "main"));
+    run(vs, {inv("track.set", R"({"track":"tr_1","name":"renamed"})")});
+    REQUIRE(vs.version(*recorded));
+    CHECK(lease->media.find(source)->hash.empty());
+    REQUIRE(vs.undo());
+    CHECK(vs.headVersion("main") == *recorded);
+    REQUIRE(vs.redo());
+    lease.reset();
+    vs.enforceBudget();
+    CHECK_FALSE(vs.version(*recorded));
+}

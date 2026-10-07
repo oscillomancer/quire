@@ -66,7 +66,10 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
         return Error("engine.workdir", "no work directory given", {}, "pass a writable directory");
     std::error_code ec;
     fs::create_directories(options.workdir / "renders", ec);
-    if (ec) return Error("engine.workdir", "cannot create " + options.workdir.string());
+    if (ec)
+        return Error(
+            "engine.workdir", "cannot create " + options.workdir.string(), {},
+            "pass a writable workdir and ensure its parent directory exists and has space");
     auto app = std::unique_ptr<EngineApp>(new EngineApp(std::move(options)));
     EngineApp* self = app.get();
     app->pool_ = std::make_unique<InstancePool>(
@@ -164,7 +167,9 @@ Status restoreFx(host::Instance& instance, const model::FxInstance& fx, const mo
     else if (fx.state) {
         const auto blob = s.blobs.find(*fx.state);
         if (blob == s.blobs.end())
-            return Error("fx.state", "the state blob is missing", "/fx/state");
+            return Error("fx.state", "the state blob is missing", "/fx/state",
+                         "load a project or preset containing this state blob, or capture the FX "
+                         "state again");
         SUPPLE_TRY(instance.loadState(blob->second->data));
     }
     for (const auto& [id, value] : fx.params) SUPPLE_TRY(instance.setParam(id, value));
@@ -178,7 +183,9 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
                      "map parameter names or ids to numbers or plugin text");
     const auto s = view();
     const auto* fx = s.fx.find(id);
-    if (!fx) return Error("fx.unknown", "the plugin instance is missing", "/fx");
+    if (!fx)
+        return Error("fx.unknown", "the plugin instance is missing", "/fx",
+                     "use an fx id returned by fx.add, fx.copy or fx.chain.load");
     auto info = findPlugin(fx->plugin.id);
     if (!info) return info.error();
     auto made = host::Instance::create(*info, options_.identity);
@@ -218,7 +225,9 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
             if (!parsedText) return std::move(parsedText).error().at(path);
             value = *parsedText;
         } else
-            return Error("fx.param_value", "value must be a number or plugin text", path);
+            return Error("fx.param_value", "value must be a number or plugin text", path,
+                         "provide a number or parameter text such as \"-6 dB\", using the unit in "
+                         "fx.describe");
         if (!std::isfinite(value) || value < found->min || value > found->max)
             return Error("fx.param_range", "parameter value is outside its declared range", path,
                          "use " + std::to_string(found->min) + ".." + std::to_string(found->max));
@@ -233,7 +242,10 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
     // VST3 controllers enqueue processor changes: consume them on this private
     // instance before saving the component state. No device is opened.
     SUPPLE_TRY(instance.activate(s.project->sampleRate, 1, 1));
-    if (!instance.startProcessing()) return Error("fx.process", "plugin refused the state probe");
+    if (!instance.startProcessing())
+        return Error("fx.process", "plugin refused the state probe", {},
+                     "use fx.restart for the affected FX, or replace it with a plugin that accepts "
+                     "the saved state and sample rate");
     float left = 0, right = 0;
     const float* inputs[]{&left, &right};
     float* outputs[]{&left, &right};
@@ -244,7 +256,10 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
                                              .frames = 1});
     instance.stopProcessing();
     instance.deactivate();
-    if (!processed) return Error("fx.process", "plugin failed the state probe");
+    if (!processed)
+        return Error("fx.process", "plugin failed the state probe", {},
+                     "use fx.restart for the affected FX, or replace it with a plugin that accepts "
+                     "the saved state and sample rate");
     auto state = instance.saveState();
     if (!state) return state.error();
     const auto hash = "sha256:" + sha256Hex(*state);
@@ -271,7 +286,9 @@ Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxI
     SUPPLE_TRY(probe.activate(head().project->sampleRate, 1, kProbeBlock));
     if (probe.paramsNormalized() && !fx.params.empty()) {
         if (!probe.startProcessing())
-            return Error("fx.process", "plugin refused the latency probe");
+            return Error("fx.process", "plugin refused the latency probe", {},
+                         "use fx.restart for the affected FX, or replace it with a plugin that "
+                         "accepts the saved state and sample rate");
         float l = 0, r = 0;
         const float* inputs[]{&l, &r};
         float* outputs[]{&l, &r};
@@ -281,7 +298,10 @@ Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxI
                                               .outputChannels = 2,
                                               .frames = 1});
         probe.stopProcessing();
-        if (!processed) return Error("fx.process", "plugin failed the latency probe");
+        if (!processed)
+            return Error("fx.process", "plugin failed the latency probe", {},
+                         "use fx.restart for the affected FX, or replace it with a plugin that "
+                         "accepts the saved state and sample rate");
     }
     const std::uint32_t latency = probe.latency();
     probe.deactivate();
@@ -329,10 +349,16 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
     std::map<model::Id, model::Id> ids;
     copy.chain.clear();
     const auto* old = source.takes.find(original);
-    if (!old) return Error("item.take", "the copied take is missing", "/take");
+    if (!old)
+        return Error(
+            "item.take", "the copied take is missing", "/take",
+            "use a current take id from take.list; recopy the item after undoing its deletion");
     for (model::Id id : old->chain) {
         const auto* fx = source.fx.find(id);
-        if (!fx) return Error("item.fx", "the copied take FX is missing", "/take");
+        if (!fx)
+            return Error("item.fx", "the copied take FX is missing", "/take",
+                         "recopy the item from a version that still contains its take FX, or undo "
+                         "their removal");
         const auto fresh = txn.create(*fx);
         ids[id] = fresh;
         copy.chain.push_back(fresh);
@@ -491,7 +517,9 @@ Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const m
         const cmd::CommandInfo* info = registry.find(inv.command);
         if (!info) {
             restore();
-            return Error("history.replay", "unknown command " + inv.command + " in history");
+            return Error("history.replay", "unknown command " + inv.command + " in history", {},
+                         "use history undo or a branch predating the unsupported command, or open "
+                         "this history with an engine that provides that command");
         }
         cmd::Context ctx = makeContext({cmd::Origin::Type::Internal, "replay", ""});
         ctx.provide<const cmd::Registry>(registry);
@@ -640,7 +668,9 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
 
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
                               const EngineOptions& options) {
-    if (engine_) return Error("engine.running", "the engine is already running");
+    if (engine_)
+        return Error("engine.running", "the engine is already running", {},
+                     "use engine.stop before changing the backend or starting another engine");
     engine_ = std::make_unique<Engine>(*pool_, media_, options);
     auto st = engine_->start(backend, config);
     if (!st) {
@@ -810,7 +840,8 @@ void EngineApp::retryRestart() {
     else if (restartBackend_)
         st = startEngine(*restartBackend_, restartConfig_, restartOptions_);
     else
-        st = Error("engine.restart", "there is no backend to restart");
+        st = Error("engine.restart", "there is no backend to restart", {},
+                   "start a backend with engine.start before requesting a restart");
     if (st) {
         restarting_ = false;
         if (engine_) {
@@ -1029,10 +1060,10 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         startPlaying(metronome_.countInBars);
     } else if (action == "play") {
         playStart_ = engine_->transport().seconds;
-        beginAutomationPass(view().timeMap->beatAt(playStart_));
+        beginAutomationPass(playStart_);
         startPlaying(metronome_.countInPlayback ? metronome_.countInBars : 0);
     } else if (action == "pause" || action == "stop") {
-        const double stopBeat = view().timeMap->beatAt(engine_->transport().seconds);
+        const double stopSeconds = engine_->transport().seconds;
         const bool wasPlaying = engine_->transport().playing;
         engine_->pause();
         if (action == "stop") engine_->seek(playStart_);
@@ -1044,7 +1075,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
             if (!committed) return std::move(committed).error();
             recorded = std::move(*committed);
         }
-        if (wasPlaying) SUPPLE_TRY(finishAutomationPass(stopBeat));
+        if (wasPlaying) SUPPLE_TRY(finishAutomationPass(stopSeconds));
     } else if (action == "seek") {
         engine_->seek(seconds.value_or(0.0));
         if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
@@ -1068,30 +1099,35 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
 
 namespace {
 
+double envelopePosition(const model::Session& s, const model::Envelope& env, double seconds) {
+    return env.timebase == model::Timebase::Time ? seconds : s.timeMap->beatAt(seconds);
+}
+
 bool writingMode(model::EnvMode m) {
     return m == model::EnvMode::Touch || m == model::EnvMode::Latch ||
            m == model::EnvMode::LatchPreview || m == model::EnvMode::Write;
 }
 
-// The envelope's value at a beat with the engine's segment shapes.
-double envelopeAt(const std::vector<model::EnvPoint>& pts, double beat, double fallback) {
+// All point arithmetic uses the envelope's own coordinate domain.
+double envelopeAt(const std::vector<model::EnvPoint>& pts, double position, double fallback) {
     if (pts.empty()) return fallback;
-    if (beat <= pts.front().pos) return pts.front().value;
-    if (beat >= pts.back().pos) return pts.back().value;
-    const auto next = std::upper_bound(
-        pts.begin(), pts.end(), beat, [](double b, const model::EnvPoint& p) { return b < p.pos; });
+    if (position <= pts.front().pos) return pts.front().value;
+    if (position >= pts.back().pos) return pts.back().value;
+    const auto next =
+        std::upper_bound(pts.begin(), pts.end(), position,
+                         [](double b, const model::EnvPoint& p) { return b < p.pos; });
     const model::EnvPoint& b = *next;
     const model::EnvPoint& a = *(next - 1);
     if (b.pos <= a.pos) return b.value;
-    return a.value + (b.value - a.value) *
-                         model::shapeCurve(a.shape, a.tension, (beat - a.pos) / (b.pos - a.pos));
+    return a.value + (b.value - a.value) * model::shapeCurve(a.shape, a.tension,
+                                                             (position - a.pos) / (b.pos - a.pos));
 }
 
-void insertPoint(std::vector<model::EnvPoint>& pts, double beat, double value) {
+void insertPoint(std::vector<model::EnvPoint>& pts, double position, double value) {
     model::EnvPoint p;
-    p.pos = beat;
+    p.pos = position;
     p.value = value;
-    const auto at = std::upper_bound(pts.begin(), pts.end(), beat,
+    const auto at = std::upper_bound(pts.begin(), pts.end(), position,
                                      [](double b, const model::EnvPoint& q) { return b < q.pos; });
     pts.insert(at, p);
 }
@@ -1112,14 +1148,14 @@ double staticValue(const model::Session& s, const model::EnvTarget& t) {
 
 }  // namespace
 
-void EngineApp::beginAutomationPass(double beat) {
+void EngineApp::beginAutomationPass(double seconds) {
     autoWrite_.clear();
     const model::Session s = view();
     for (const auto& e : s.envelopes)
         if (e.value->active && e.value->mode == model::EnvMode::Write &&
             e.value->target.object.kind != model::Kind::Fx) {
             AutoWrite w;
-            w.startBeat = w.lastBeat = beat;
+            w.startSeconds = w.lastSeconds = seconds;
             w.lastValue = staticValue(s, e.value->target);
             autoWrite_[e.id] = w;
         }
@@ -1137,11 +1173,11 @@ bool EngineApp::writesAutomation(model::Id object, const std::string& param) con
 
 void EngineApp::recordAutomation(model::Id object, const std::string& param, double value) {
     if (!engine_ || !txn_ || !engine_->transport().playing) return;
-    recordAutomationAt(object, param, value, view().timeMap->beatAt(engine_->transport().seconds));
+    recordAutomationAt(object, param, value, engine_->transport().seconds);
 }
 
 void EngineApp::recordAutomationAt(model::Id object, const std::string& param, double value,
-                                   double beat) {
+                                   double seconds) {
     const model::Session s = view();
     std::optional<model::Id> envId;
     for (const auto& e : s.envelopes)
@@ -1151,34 +1187,42 @@ void EngineApp::recordAutomationAt(model::Id object, const std::string& param, d
     if (!envId) return;
     auto it = autoWrite_.find(*envId);
     const bool first = it == autoWrite_.end() || !it->second.touched;
-    // A loop pass wraps: the erase window restarts at the write itself.
-    const double from = !first && it->second.lastBeat < beat ? it->second.lastBeat : beat;
-    const double startBeat = it == autoWrite_.end() ? beat : it->second.startBeat;
+    // Keep capture times in seconds, even if the tempo changes during a pass.
+    // A loop wrap restarts the erase window at the current write.
+    const double fromSeconds =
+        !first && it->second.lastSeconds < seconds ? it->second.lastSeconds : seconds;
+    const double startSeconds = it == autoWrite_.end() ? seconds : it->second.startSeconds;
     txn().modify<model::Envelope>(*envId, [&](model::Envelope& env) {
-        const double before = envelopeAt(env.points, beat, staticValue(s, env.target));
+        const double pos = envelopePosition(s, env, seconds);
+        const double from = envelopePosition(s, env, fromSeconds);
+        const double before = envelopeAt(env.points, pos, staticValue(s, env.target));
         std::erase_if(env.points, [&](const model::EnvPoint& p) {
-            return first ? std::abs(p.pos - beat) < 1e-9 : p.pos > from && p.pos <= beat + 1e-9;
+            return first ? std::abs(p.pos - pos) < 1e-9 : p.pos > from && p.pos <= pos + 1e-9;
         });
-        // Touching in: the envelope holds its value up to here, then jumps.
-        if (first && beat > 1e-3) insertPoint(env.points, beat - 1e-3, before);
-        insertPoint(env.points, beat, value);
+        // Preserve the existing 0.001-beat entry guard, converted into the
+        // envelope's domain just like the write position and erase window.
+        const double beat = s.timeMap->beatAt(seconds);
+        if (first && beat > 1e-3)
+            insertPoint(env.points, envelopePosition(s, env, s.timeMap->secondsAt(beat - 1e-3)),
+                        before);
+        insertPoint(env.points, pos, value);
     });
     AutoWrite w;
-    w.startBeat = startBeat;
-    w.lastBeat = beat;
+    w.startSeconds = startSeconds;
+    w.lastSeconds = seconds;
     w.lastValue = value;
     w.touched = true;
     autoWrite_[*envId] = w;
 }
 
-Status EngineApp::finishAutomationPass(double stopBeat) {
+Status EngineApp::finishAutomationPass(double stopSeconds) {
     std::map<model::Id, AutoWrite> pass;
     pass.swap(autoWrite_);
     const model::Session s = head();
     std::vector<std::pair<model::Id, AutoWrite>> work;
     for (const auto& [id, w] : pass) {
         const model::Envelope* env = s.envelopes.find(id);
-        if (!env || stopBeat <= w.lastBeat) continue;
+        if (!env || stopSeconds <= w.lastSeconds) continue;
         const bool holds = env->mode == model::EnvMode::Latch ||
                            env->mode == model::EnvMode::LatchPreview ||
                            env->mode == model::EnvMode::Write;
@@ -1190,12 +1234,14 @@ Status EngineApp::finishAutomationPass(double stopBeat) {
     if (!txnId) return std::move(txnId).error();
     for (const auto& [id, w] : work)
         txn().modify<model::Envelope>(id, [&](model::Envelope& env) {
-            const double from = w.touched ? w.lastBeat : w.startBeat - 1e-9;
+            const double start = envelopePosition(s, env, w.startSeconds);
+            const double stop = envelopePosition(s, env, stopSeconds);
+            const double from = w.touched ? envelopePosition(s, env, w.lastSeconds) : start - 1e-9;
             std::erase_if(env.points, [&](const model::EnvPoint& p) {
-                return p.pos > from && p.pos <= stopBeat + 1e-9;
+                return p.pos > from && p.pos <= stop + 1e-9;
             });
-            if (!w.touched) insertPoint(env.points, w.startBeat, w.lastValue);
-            insertPoint(env.points, stopBeat, w.lastValue);
+            if (!w.touched) insertPoint(env.points, start, w.lastValue);
+            insertPoint(env.points, stop, w.lastValue);
         });
     return commitTransaction(*txnId);
 }
@@ -1687,7 +1733,9 @@ void EngineApp::finalizeRecordingHash(Id source, model::MediaSource expected, Re
             finalized =
                 fs::is_regular_file(path, ec)
                     ? detail::writeSidecar(path, side)
-                    : Status{Error("file.open", "recording moved or disappeared", path.string())};
+                    : Status{Error("file.open", "recording moved or disappeared", path.string(),
+                                   "restore the recording WAV at the reported path before "
+                                   "finalizing its hash or recovering it")};
         }
         if (stop.stop_requested()) return;
         dispatcher->post(
@@ -1756,7 +1804,10 @@ Status EngineApp::moveScratchMedia(const fs::path& dest, const std::function<Sta
     const fs::path from = options_.scratchDir / head().project->mediaDir;
     std::error_code ec;
     if (!fs::exists(from, ec))
-        return ec ? Status{Error("project.media_move", ec.message())} : publish();
+        return ec ? Status{Error("project.media_move", ec.message(), {},
+                                 "save to a writable project directory with sufficient space and "
+                                 "keep all scratch media readable during the save")}
+                  : publish();
     if (fs::equivalent(from, dest, ec)) return publish();
     ec.clear();
     std::vector<fs::path> files;
@@ -1766,29 +1817,42 @@ Status EngineApp::moveScratchMedia(const fs::path& dest, const std::function<Sta
         if (ec) break;
         if (fs::is_symlink(status))
             return Error("project.media_move", "scratch media contains a symlink",
-                         it->path().string());
+                         it->path().string(),
+                         "replace the scratch-media symlink with its actual media file, or save "
+                         "into another project directory");
         if (fs::is_regular_file(status)) files.push_back(it->path().lexically_relative(from));
     }
-    if (ec) return Error("project.media_move", ec.message(), from.string());
+    if (ec)
+        return Error("project.media_move", ec.message(), from.string(),
+                     "save to a writable project directory with sufficient space and keep all "
+                     "scratch media readable during the save");
     std::sort(files.begin(), files.end());
     for (const auto& rel : files) {
         const auto status = fs::symlink_status(dest / rel, ec);
         if (ec && ec != std::errc::no_such_file_or_directory)
-            return Error("project.media_move", ec.message());
+            return Error("project.media_move", ec.message(), {},
+                         "save to a writable project directory with sufficient space and keep all "
+                         "scratch media readable during the save");
         if (fs::exists(status))
             return Error("project.media_exists", (dest / rel).string() + " already exists", {},
                          "save into another folder; scratch media is unchanged");
         ec.clear();
     }
     fs::create_directories(dest, ec);
-    if (ec) return Error("project.media_move", ec.message(), dest.string());
+    if (ec)
+        return Error("project.media_move", ec.message(), dest.string(),
+                     "save to a writable project directory with sufficient space and keep all "
+                     "scratch media readable during the save");
     static std::atomic<std::uint64_t> nextStage{0};
     fs::path stage;
     for (;;) {
         stage = dest / (".save-stage-" + std::to_string(clockMs()) + "-" +
                         std::to_string(nextStage.fetch_add(1)));
         if (fs::create_directory(stage, ec)) break;
-        if (ec) return Error("project.media_move", ec.message(), stage.string());
+        if (ec)
+            return Error("project.media_move", ec.message(), stage.string(),
+                         "save to a writable project directory with sufficient space and keep all "
+                         "scratch media readable during the save");
     }
     std::vector<fs::path> placed;
     bool published = false;
@@ -1807,16 +1871,24 @@ Status EngineApp::moveScratchMedia(const fs::path& dest, const std::function<Sta
         const auto staged = stage / rel;
         fs::create_directories(staged.parent_path(), ec);
         if (!ec) fs::copy_file(from / rel, staged, fs::copy_options::none, ec);
-        if (ec) return Error("project.media_move", ec.message(), (from / rel).string());
+        if (ec)
+            return Error("project.media_move", ec.message(), (from / rel).string(),
+                         "save to a writable project directory with sufficient space and keep all "
+                         "scratch media readable during the save");
         auto original = sha256File(from / rel), copied = sha256File(staged);
         if (!original || !copied || *original != *copied)
-            return Error("project.media_move", "staged media verification failed", rel.string());
+            return Error("project.media_move", "staged media verification failed", rel.string(),
+                         "keep source media unchanged during the save and save into a directory "
+                         "with reliable writable storage");
     }
     for (const auto& rel : files) {
         const auto target = dest / rel;
         fs::create_directories(target.parent_path(), ec);
         if (!ec) fs::create_hard_link(stage / rel, target, ec);
-        if (ec) return Error("project.media_move", ec.message(), target.string());
+        if (ec)
+            return Error("project.media_move", ec.message(), target.string(),
+                         "save to a writable project directory with sufficient space and keep all "
+                         "scratch media readable during the save");
         placed.push_back(target);
     }
     SUPPLE_TRY(publish());
@@ -1946,7 +2018,9 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
     if (files.empty()) {
         for (const RecoverableInfo& r : all) chosen.push_back(&r);
         if (chosen.empty() && skipped.empty())
-            return Error("recover.nothing", "there are no recordings to recover");
+            return Error(
+                "recover.nothing", "there are no recordings to recover", {},
+                "use project.recoverable to list recordings before calling project.recover");
     }
     for (std::size_t i = 0; i < files.size(); ++i) {
         const fs::path want = fs::path(files[i]).lexically_normal();
@@ -1961,7 +2035,9 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
                          "/files/" + std::to_string(i), "project.recoverable lists them");
         if (std::find(chosen.begin(), chosen.end(), &*it) != chosen.end())
             return Error("recover.duplicate_file", files[i] + " is listed twice",
-                         "/files/" + std::to_string(i));
+                         "/files/" + std::to_string(i),
+                         "remove the duplicate entry from files; include each project.recoverable "
+                         "path only once");
         chosen.push_back(&*it);
     }
     const model::Session& s = head();
@@ -2002,8 +2078,8 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
     for (auto it = takes.begin(); it != takes.end();) {
         RecordedTake& t = *it;
         if (!inRecordDir(t.file))  // replaced since it was listed
-            return Error("recover.unknown_file",
-                         t.file.string() + " is not a recording to recover");
+            return Error("recover.unknown_file", t.file.string() + " is not a recording to recover",
+                         {}, "choose a file listed by project.recoverable for the current project");
         auto frames = audio::repairWavStream(t.file);
         if (!frames) {
             warn(frames.error(), t.file.lexically_relative(mediaDir()), t.track.str());
@@ -2048,7 +2124,10 @@ cmd::Context EngineApp::makeContext(const cmd::Origin& origin) {
 
 Result<std::uint64_t> EngineApp::beginTransaction(const cmd::Origin& origin,
                                                   std::string_view label) {
-    if (txn_) return Error("history.nested", "a transaction is already open");
+    if (txn_)
+        return Error(
+            "history.nested", "a transaction is already open", {},
+            "commit or roll back the open transaction before beginning another transaction");
     txn_ = std::make_unique<model::EditTxn>(head(), versions_->nextVersion());
     record_ = model::TxnRecord{std::string(label), originText(origin), {}, {}};
     // Scoped by origin, so two clients' gestures never merge into one step.
@@ -2057,7 +2136,10 @@ Result<std::uint64_t> EngineApp::beginTransaction(const cmd::Origin& origin,
 }
 
 Status EngineApp::commitTransaction(std::uint64_t id) {
-    if (!txn_ || id != txnId_) return Error("history.transaction", "no such open transaction");
+    if (!txn_ || id != txnId_)
+        return Error(
+            "history.transaction", "no such open transaction", {},
+            "use the id returned by beginTransaction while that transaction is still open");
     std::unique_ptr<model::EditTxn> t = std::move(txn_);
     auto changes = t->changes();
     if (changes.empty() && !t->projectChanged() && t->created().empty())

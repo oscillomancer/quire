@@ -123,10 +123,13 @@ Result<Document> readDocument(const fs::path& path) {
         auto fx = model::schemaOf<model::FxInstance>().decode(decoded->effects[i]);
         const std::string at = "/effects/" + std::to_string(i);
         if (!fx) return std::move(fx).error().at(at);
-        if ((fx->oversampling & (fx->oversampling - 1)) != 0 ||
-            fx->patch.has_value() == fx->state.has_value())
-            return Error("chain.invalid", "effect needs one state and valid oversampling", at,
-                         "use a semantic patch or base64 state; oversampling is 1, 2, 4 or 8");
+        if ((fx->oversampling & (fx->oversampling - 1)) != 0)
+            return Error("chain.invalid", "oversampling must be 1, 2, 4 or 8", at + "/oversampling",
+                         "set oversampling to one of 1, 2, 4 or 8");
+        if (fx->patch.has_value() == fx->state.has_value())
+            return Error("chain.invalid", "effect needs exactly one patch or state", at + "/state",
+                         "provide patch for a semantic plugin or base64 state for a plain plugin; "
+                         "omit the other field");
     }
     return decoded;
 }
@@ -219,8 +222,8 @@ Result<std::vector<Prepared>> prepareEffects(EngineApp& app,
         auto fx = model::schemaOf<model::FxInstance>().decode(entries[i]);
         if (!fx) return std::move(fx).error().at(at);
         if ((fx->oversampling & (fx->oversampling - 1)) != 0)
-            return Error("chain.invalid", "oversampling must be 1, 2, 4 or 8",
-                         at + "/oversampling");
+            return Error("chain.invalid", "oversampling must be 1, 2, 4 or 8", at + "/oversampling",
+                         "set oversampling to one of 1, 2, 4 or 8");
         auto info = app.findPlugin(fx->plugin.id);
         if (!info || info->id != fx->plugin.id || info->format != fx->plugin.format)
             return Error("chain.plugin_missing",
@@ -230,13 +233,17 @@ Result<std::vector<Prepared>> prepareEffects(EngineApp& app,
         Prepared p{*fx, {}};
         if (info->semantic) {
             if (!fx->patch || fx->state)
-                return Error("chain.invalid", "a semantic effect needs a patch", at + "/patch");
+                return Error("chain.invalid", "a semantic effect needs a patch", at + "/patch",
+                             "provide patch containing this semantic plugin's patch document and "
+                             "omit state");
             auto patch = app.mergedPatch(*fx, *fx->patch, true);
             if (!patch) return std::move(patch).error().at(at + "/patch");
             p.fx.patch = std::move(*patch);
         } else {
             if (!fx->state || fx->patch)
-                return Error("chain.invalid", "a plain effect needs base64 state", at + "/state");
+                return Error(
+                    "chain.invalid", "a plain effect needs base64 state", at + "/state",
+                    "provide base64 state from a saved instance of this plugin and omit patch");
             auto bytes = base64Decode(*fx->state);
             if (!bytes) return std::move(bytes).error().at(at + "/state");
             auto probe = host::Instance::create(*info, app.options().identity);
@@ -389,6 +396,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
             doc.name = a.name;
             doc.track["type"] = strip.type == model::StripType::Channel ? "channel" : "buss";
             doc.track["name"] = strip.name;
+            doc.track["channels"] = strip.channels;
             doc.track["color"] = strip.color;
             doc.track["notes"] = strip.notes;
             doc.track["volume_db"] = strip.volumeDb;
@@ -459,6 +467,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
             add["type"] = type && type->isString() ? type->asString() : std::string("channel");
             if (const json::Value* name = field("name"); name && name->isString())
                 add["name"] = name->asString();
+            if (const json::Value* channels = field("channels")) add["channels"] = *channels;
             if (a.parent) add["parent"] = *a.parent;
             auto added = invoke("track.add", std::move(add), ctx);
             if (!added) return std::move(added).error();
@@ -745,7 +754,8 @@ void registerChainCommands(cmd::Registry& registry) {
                        .field("chain", &CopyResult::chain, schema::arrayOf(schema::string()))
                        .build();
         c.errors = {
-            {"fx.unknown", "no such plugin instance", "use an id from fx.list"},
+            {"fx.unknown", "no such plugin instance",
+             "use an fx id returned by fx.add, fx.copy or fx.chain.load"},
             {"fx.index", "index is past the end of the chain", "use 0 to the chain's size"}};
         c.examples = {{"Duplicate a plugin at the end of its own chain",
                        j(R"({"fx":"fx_1","track":"tr_1"})"),
@@ -758,7 +768,7 @@ void registerChainCommands(cmd::Registry& registry) {
                 source && source->kind == model::Kind::Fx ? s.fx.find(*source) : nullptr;
             if (!original)
                 return Error("fx.unknown", "no plugin instance " + a.fx, "/fx",
-                             "use a live id from fx.list");
+                             "use an fx id returned by fx.add, fx.copy or fx.chain.load");
             auto target = trackOf(s, a.track);
             if (!target) return std::move(target).error();
             const model::Track* strip = s.tracks.find(*target);

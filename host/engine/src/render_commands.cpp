@@ -10,6 +10,7 @@
 #include <ctime>
 #include <iomanip>
 #include <limits>
+#include <set>
 #include <span>
 #include <sstream>
 
@@ -121,22 +122,40 @@ Result<std::string> token(std::string_view name, const PatternData& d) {
     return Error("render.pattern", "unknown or invalid token {" + std::string(name) + "}",
                  "/pattern", "use the closed token set in session-model §7.3");
 }
+// Pattern arguments are literal quoted strings. Delimiters inside them do
+// not end a token or start another filter; the language has no quote escapes.
+std::size_t unquotedDelimiter(std::string_view text, char delimiter, std::size_t from = 0) {
+    bool quoted = false;
+    for (std::size_t i = from; i < text.size(); ++i) {
+        if (text[i] == '\"')
+            quoted = !quoted;
+        else if (!quoted && text[i] == delimiter)
+            return i;
+    }
+    return std::string_view::npos;
+}
+
 Result<std::string> expand(std::string_view pattern, const PatternData& d) {
     std::string out;
     for (std::size_t i = 0; i < pattern.size();) {
         if (pattern[i] != '{') {
-            if (pattern[i] == '}') return Error("render.pattern", "unmatched }", "/pattern");
+            if (pattern[i] == '}')
+                return Error("render.pattern", "unmatched }", "/pattern",
+                             "remove the unmatched } from pattern or include it inside a quoted "
+                             "replace argument");
             out += pattern[i++];
             continue;
         }
-        auto end = pattern.find('}', i + 1);
-        if (end == std::string_view::npos) return Error("render.pattern", "unclosed {", "/pattern");
+        auto end = unquotedDelimiter(pattern, '}', i + 1);
+        if (end == std::string_view::npos)
+            return Error("render.pattern", "unclosed {", "/pattern",
+                         "close each token with } and each replace argument with a double quote");
         std::string inside(pattern.substr(i + 1, end - i - 1));
-        auto pipe = inside.find('|');
+        auto pipe = unquotedDelimiter(inside, '|');
         auto value = token(std::string_view(inside).substr(0, pipe), d);
         if (!value) return std::move(value).error();
         while (pipe != std::string::npos) {
-            auto next = inside.find('|', pipe + 1);
+            auto next = unquotedDelimiter(inside, '|', pipe + 1);
             std::string filter =
                 inside.substr(pipe + 1, next == std::string::npos ? next : next - pipe - 1);
             if (filter == "lower")
@@ -150,21 +169,29 @@ Result<std::string> expand(std::string_view pattern, const PatternData& d) {
                 std::size_t maximum = 0;
                 const auto parsed = std::from_chars(n.data(), n.data() + n.size(), maximum);
                 if (n.empty() || parsed.ec != std::errc{} || parsed.ptr != n.data() + n.size())
-                    return Error("render.pattern", "invalid max filter", "/pattern");
+                    return Error("render.pattern", "invalid max filter", "/pattern",
+                                 "use max with a nonnegative integer, for example {track|max(8)}");
                 value->resize(std::min(value->size(), maximum));
             } else if (filter.starts_with("replace(\"") && filter.ends_with("\")")) {
-                const auto mid = filter.find("\",\"");
-                if (mid == std::string::npos)
-                    return Error("render.pattern", "invalid replace filter", "/pattern");
+                const auto mid = filter.find('"', 9);
+                if (mid == std::string::npos || filter.substr(mid, 3) != "\",\"" ||
+                    filter.find('"', mid + 3) != filter.size() - 2)
+                    return Error(
+                        "render.pattern", "invalid replace filter", "/pattern",
+                        "use replace(\"from\",\"to\") with two balanced literal quoted strings");
                 const std::string from = filter.substr(9, mid - 9),
                                   to = filter.substr(mid + 3, filter.size() - mid - 5);
                 if (from.empty())
-                    return Error("render.pattern", "empty replace source", "/pattern");
+                    return Error("render.pattern", "empty replace source", "/pattern",
+                                 "provide a nonempty first argument to replace, for example "
+                                 "replace(\" \",\"_\")");
                 for (std::size_t at = 0; (at = value->find(from, at)) != std::string::npos;
                      at += to.size())
                     value->replace(at, from.size(), to);
             } else
-                return Error("render.pattern", "unknown filter " + filter, "/pattern");
+                return Error("render.pattern", "unknown filter " + filter, "/pattern",
+                             "use balanced token braces and literal quoted replace arguments with "
+                             "the filters lower, upper, max or replace");
             pipe = next;
         }
         bool removedSeparator = false;
@@ -179,6 +206,9 @@ Result<std::string> expand(std::string_view pattern, const PatternData& d) {
             std::string("-_. ").find(pattern[i]) != std::string::npos)
             ++i;
     }
+    if (out.find('\0') != std::string::npos)
+        return Error("render.path", "render name contains a NUL byte", "/pattern",
+                     "remove NUL bytes from the pattern and its token values");
     if (out.empty() || out == "." || out == ".." || fs::path(out).is_absolute() ||
         out.find("..") != std::string::npos || out.find('\\') != std::string::npos)
         return Error("render.path", "render name escapes the renders directory", "/pattern",
@@ -189,7 +219,9 @@ Result<std::string> expand(std::string_view pattern, const PatternData& d) {
 Result<model::Session> sessionFor(EngineApp& app, const std::optional<std::string>& branch,
                                   std::optional<std::int64_t> version = std::nullopt) {
     if (version) {
-        if (branch) return Error("render.source", "give branch or version, not both", "/version");
+        if (branch)
+            return Error("render.source", "give branch or version, not both", "/version",
+                         "choose either branch or version and omit the other selector");
         const model::Version* v = app.versions().version(static_cast<std::uint64_t>(*version));
         if (!v || !v->session)
             return Error("history.version", "no version " + std::to_string(*version), "/version",
@@ -238,8 +270,9 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         return Error("render.mode", "unknown stem mode", "/mode", "use isolated or through_master");
     std::string tap = a.tap.value_or("post_fader");
     if (tap != "post_fader" && tap != "pre_fader" && tap != "pre_fx")
-        return Error("render.tap", "unknown tap", "/tap");
+        return Error("render.tap", "unknown tap", "/tap", "use pre_fx, pre_fader or post_fader");
     std::vector<RenderTask> tasks;
+    std::set<fs::path> destinations;
     auto add = [&](std::optional<model::Id> track, std::optional<model::Id> region, int tn,
                    int rn) -> Status {
         const auto* range = region ? s.regions.find(*region) : nullptr;
@@ -266,7 +299,8 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
                                  : 0.0);
         SUPPLE_TRY(checkRenderRange(s, task.settings, a.sampleRate));
         if (task.settings.tailSeconds < 0 || task.settings.tailSeconds > 600)
-            return Error("render.tail", "invalid tail", "/tail_s");
+            return Error("render.tail", "invalid tail", "/tail_s",
+                         "provide tail_s as a finite number of seconds from 0 to 600");
         if (!track && a.master) {
             auto id = trackId(s, *a.master);
             if (!id) return std::move(id).error();
@@ -348,11 +382,16 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         if (!name) return std::move(name).error();
         fs::path rel = fs::path(*name + encoding->extension()).lexically_normal();
         if (rel.is_absolute() || rel.empty() || *rel.begin() == "..")
-            return Error("render.path", "render name escapes directory", "/pattern");
+            return Error("render.path", "render name escapes directory", "/pattern",
+                         "use a relative pattern beneath a readable and writable renders "
+                         "directory; remove traversal components or symlinks that escape it");
         task.path = app.rendersDir() / rel;
         std::error_code ec;
         const auto root = fs::weakly_canonical(app.rendersDir(), ec);
-        if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
+        if (ec)
+            return Error("render.path", "cannot resolve renders directory", "/pattern",
+                         "use a relative pattern beneath a readable and writable renders "
+                         "directory; remove traversal components or symlinks that escape it");
         // The final path, not only its parent: an entry that already exists at
         // this name (a symlink pointing out of the renders directory) resolves
         // to its target here, so the check cannot be walked out of. The write
@@ -360,21 +399,31 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         // writeFileAtomic), which replaces such an entry rather than following
         // it, and a temp name is never a directory.
         const auto resolved = fs::weakly_canonical(task.path, ec);
-        if (ec) return Error("render.path", "cannot resolve the render path", "/pattern");
+        if (ec)
+            return Error("render.path", "cannot resolve the render path", "/pattern",
+                         "use a relative pattern beneath a readable and writable renders "
+                         "directory; remove traversal components or symlinks that escape it");
         const auto relative = resolved.lexically_relative(root);
         if (relative.empty() || *relative.begin() == ".." || relative.is_absolute())
-            return Error("render.path", "render name escapes the renders directory", "/pattern");
+            return Error("render.path", "render name escapes the renders directory", "/pattern",
+                         "use a relative pattern beneath a readable and writable renders "
+                         "directory; remove traversal components or symlinks that escape it");
         task.label = *name;
         const auto second =
             *secondary ? secondaryPath(task.path, *encoding, **secondary) : fs::path{};
-        for (const auto& prior : tasks) {
-            const auto priorSecond =
-                *secondary ? secondaryPath(prior.path, *encoding, **secondary) : fs::path{};
-            if (prior.path == task.path ||
-                (!second.empty() &&
-                 (prior.path == second || priorSecond == task.path || priorSecond == second)))
-                return Error("render.path", "render files collide", "/pattern",
-                             "include {track}, {region}, or {counter}");
+        // Atomic writes replace the final entry; only parent-directory
+        // symlinks change their destination. Compare that parent identity plus
+        // the final name, for both encodings, without following a final symlink.
+        for (const auto& path : {task.path, second}) {
+            if (path.empty()) continue;
+            const auto parent = fs::weakly_canonical(path.parent_path(), ec);
+            if (ec)
+                return Error("render.path", "cannot resolve the render parent", "/pattern",
+                             "choose a pattern under a readable renders directory");
+            if (!destinations.insert(parent / path.filename()).second)
+                return Error("render.path", "two renders have the same destination", "/pattern",
+                             "include track, region or counter in a pattern that gives each file a "
+                             "unique destination");
         }
         tasks.push_back(std::move(task));
         return {};
@@ -392,7 +441,10 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         else
             for (const auto& e : s.tracks)
                 if (e.value->parent == model::kMaster) ids.push_back(e.id);
-        if (ids.empty()) return Error("render.empty", "no stem tracks", "/tracks");
+        if (ids.empty())
+            return Error(
+                "render.empty", "no stem tracks", "/tracks",
+                "add a channel or select existing track ids with tracks before rendering stems");
         int n = 0;
         for (auto id : ids) SUPPLE_TRY(add(id, {}, ++n, 0));
     } else {
@@ -409,12 +461,15 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
         const json::Value* projectRow =
             matrix && matrix->isObject() ? matrix->find("project") : nullptr;
         if (regions.empty() && !projectRow && command == "render.regions")
-            return Error("render.empty", "no regions", "/regions");
+            return Error("render.empty", "no regions", "/regions",
+                         "add a region with region.add or select existing ids from region.list");
         if (projectRow && projectRow->isArray() && !a.regions) {
             for (const auto& cell : projectRow->asArray()) {
                 if (!cell.isString())
                     return Error("render.matrix", "matrix entries must be track or master ids",
-                                 "/matrix");
+                                 "/matrix",
+                                 "provide matrix as an object whose region/project rows are arrays "
+                                 "of existing track or master ids from track.list");
                 {
                     auto tr = trackId(s, cell.asString());
                     if (!tr) return std::move(tr).error();
@@ -431,7 +486,9 @@ Result<std::vector<RenderTask>> plan(EngineApp& app, std::string_view command, c
                 for (const auto& cell : row->asArray()) {
                     if (!cell.isString())
                         return Error("render.matrix", "matrix entries must be track or master ids",
-                                     "/matrix");
+                                     "/matrix",
+                                     "provide matrix as an object whose region/project rows are "
+                                     "arrays of existing track or master ids from track.list");
                     {
                         auto tr = trackId(s, cell.asString());
                         if (!tr) return std::move(tr).error();
@@ -467,7 +524,10 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
                              std::stop_token stop = {}) {
     json::Value files = json::Value::array();
     for (std::size_t i = 0; i < tasks.size(); ++i) {
-        if (jobs && jobs->cancelled(job)) return Error("job.cancelled", "render cancelled");
+        if (jobs && jobs->cancelled(job))
+            return Error("job.cancelled", "render cancelled", {},
+                         "submit a new render job if its output is still wanted; the cancelled job "
+                         "cannot resume");
         const auto& task = tasks[i];
         OfflineSettings settings = task.settings;
         if (jobs) {
@@ -486,7 +546,10 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
                                 args.bitDepth, args.sampleRate, args.channels, args.secondary};
         auto encoded = finishRenderAudio(audio, *task.session.project, output);
         if (!encoded) return std::move(encoded).error();
-        if (jobs && jobs->cancelled(job)) return Error("job.cancelled", "render cancelled");
+        if (jobs && jobs->cancelled(job))
+            return Error("job.cancelled", "render cancelled", {},
+                         "submit a new render job if its output is still wanted; the cancelled job "
+                         "cannot resume");
         SUPPLE_TRY(writeRender(task.path, audio, encoded->primary));
         json::Value entry = json::Value::object();
         entry["path"] = task.path.string();
@@ -587,7 +650,8 @@ Status checkRenderRange(const model::Session& s, const OfflineSettings& settings
                                  static_cast<long double>(settings.startSeconds) +
                                  static_cast<long double>(settings.tailSeconds);
     if (!(settings.endSeconds > settings.startSeconds) || !(duration > 0))
-        return Error("render.empty", "the end must come after the start", "/end_beat");
+        return Error("render.empty", "the end must come after the start", "/end_beat",
+                     "set end_beat later than start_beat");
     // Match the engine's existing in-memory output/variant capacity, including resampling.
     const long double frames =
         std::ceil(duration * static_cast<long double>(std::max(rate, s.project->sampleRate)));
@@ -605,7 +669,9 @@ Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSetti
         [&catalogue](const model::PluginRef& ref) -> Result<host::PluginInfo> {
             for (const auto& plugin : catalogue)
                 if (plugin.id == ref.id) return plugin;
-            return Error("plugin.unknown", "plugin unavailable in the render snapshot: " + ref.id);
+            return Error(
+                "plugin.unknown", "plugin unavailable in the render snapshot: " + ref.id, {},
+                "select an installed plugin from plugin.list before queuing the render snapshot");
         },
         identity);
     return renderOffline(session, pool, settings);
@@ -614,6 +680,12 @@ Result<OfflineResult> renderSnapshot(const model::Session& session, OfflineSetti
 Status normalizeRenderAudio(audio::AudioData& data, std::string_view mode, double target,
                             std::optional<double> limitTruePeakDb) {
     if (mode == "none") return okStatus();
+    for (const auto& channel : data.channels)
+        for (float sample : channel)
+            if (!std::isfinite(sample))
+                return Error(
+                    "render.normalize", "source audio contains non-finite samples", "/normalize",
+                    "bypass or replace the FX producing non-finite audio before normalizing");
     auto measure = [&]() -> Result<analysis::Report> {
         auto pointers = data.pointers();
         const auto layout =
@@ -649,9 +721,26 @@ Status normalizeRenderAudio(audio::AudioData& data, std::string_view mode, doubl
         measured = sum > 0 ? 10.0 * std::log10(sum / (data.frames() * data.channelCount()))
                            : -std::numeric_limits<double>::infinity();
     } else
-        return Error("render.normalize", "unsupported normalization mode", "/normalize");
+        return Error("render.normalize", "unsupported normalization mode", "/normalize",
+                     "use none, lufs_i, lufs_s, lufs_m, peak, true_peak or rms as normalize.mode");
     if (std::isfinite(measured)) {
         const double gain = std::pow(10.0, (target - measured) / 20.0);
+        if (!std::isfinite(gain))
+            return Error("render.normalize", "normalization gain is not finite",
+                         "/normalize/target", "reduce the target so its gain is finite");
+        // Check the complete result before mutating any channel. A finite
+        // double gain can still overflow the float buffers used by encoders.
+        for (const auto& channel : data.channels)
+            for (float sample : channel) {
+                const double scaled = static_cast<double>(sample) * gain;
+                if (!std::isfinite(scaled) ||
+                    std::abs(scaled) > static_cast<double>(std::numeric_limits<float>::max()))
+                    return Error("render.normalize",
+                                 "normalization would produce non-finite samples",
+                                 "/normalize/target",
+                                 "reduce the target to keep samples finite; bypass any FX "
+                                 "producing non-finite audio");
+            }
         for (auto& channel : data.channels)
             for (float& sample : channel)
                 sample = static_cast<float>(static_cast<double>(sample) * gain);
@@ -660,7 +749,9 @@ Status normalizeRenderAudio(audio::AudioData& data, std::string_view mode, doubl
         const double ceiling = std::pow(10.0, *limitTruePeakDb / 20.0);
         if (!(ceiling > 0 && ceiling <= 1))
             return Error("render.normalize", "true peak limit must be at or below 0 dBTP",
-                         "/normalize/limit_true_peak_db");
+                         "/normalize/limit_true_peak_db",
+                         "provide a finite limit_true_peak_db at or below 0 whose linear ceiling "
+                         "remains greater than zero");
         const std::size_t frames = data.frames();
         std::vector<double> peaks(frames, 0.0);
         const int factor = data.sampleRate <= 48000 ? 4 : data.sampleRate <= 96000 ? 2 : 1;
@@ -719,7 +810,8 @@ Result<RenderOutput> finishRenderAudio(audio::AudioData& audio, const model::Pro
                               : sampleRate && sampleRate->isNumber() ? sampleRate->asDouble()
                                                                      : audio.sampleRate;
     if (!(targetRate >= 8000 && targetRate <= 384000))
-        return Error("render.sample_rate", "sample rate out of range", "/sample_rate");
+        return Error("render.sample_rate", "sample rate out of range", "/sample_rate",
+                     "provide sample_rate as a finite value from 8000 to 384000 Hz");
     if (targetRate != audio.sampleRate) {
         auto converted = audio::resample(audio, targetRate);
         if (!converted) return std::move(converted).error();
@@ -729,7 +821,8 @@ Result<RenderOutput> finishRenderAudio(audio::AudioData& audio, const model::Pro
     const int channels = static_cast<int>(a.channels.value_or(
         channelDefault && channelDefault->isNumber() ? channelDefault->asInt() : 2));
     if (channels != 1 && channels != 2)
-        return Error("render.channels", "channels must be 1 or 2", "/channels");
+        return Error("render.channels", "channels must be 1 or 2", "/channels",
+                     "set channels to 1 for mono or 2 for stereo");
     if (channels == 1 && audio.channelCount() == 2) {
         for (std::size_t n = 0; n < audio.frames(); ++n)
             audio.channels[0][n] =
@@ -747,24 +840,39 @@ Result<RenderOutput> finishRenderAudio(audio::AudioData& audio, const model::Pro
         else if (norm->isObject()) {
             const auto* mode = norm->find("mode");
             if (!mode || !mode->isString())
-                return Error("render.normalize", "normalize needs a mode", "/normalize/mode");
+                return Error(
+                    "render.normalize", "normalize needs a mode", "/normalize/mode",
+                    "provide normalize.mode, for example {\"mode\":\"peak\",\"target\":-1}");
             normMode = mode->asString();
             if (const auto* target = norm->find("target")) {
                 if (!target->isNumber())
-                    return Error("render.normalize", "target must be a number",
-                                 "/normalize/target");
+                    return Error("render.normalize", "target must be a number", "/normalize/target",
+                                 "provide a numeric target in dB or LUFS");
                 normTarget = target->asDouble();
             }
             if (const auto* peak = norm->find("limit_true_peak_db")) {
                 if (!peak->isNumber())
-                    return Error("render.normalize", "peak limit must be a number",
-                                 "/normalize/limit_true_peak_db");
+                    return Error(
+                        "render.normalize", "peak limit must be a number",
+                        "/normalize/limit_true_peak_db",
+                        "provide limit_true_peak_db as a numeric ceiling at or below 0 dBTP");
                 limit = peak->asDouble();
             }
         } else
-            return Error("render.normalize", "normalize must be a mode or object", "/normalize");
+            return Error("render.normalize", "normalize must be a mode or object", "/normalize",
+                         "provide normalize as a supported mode string or {mode, target, "
+                         "limit_true_peak_db}");
     }
-    SUPPLE_TRY(normalizeRenderAudio(audio, normMode, normTarget, limit));
+    if (auto normalized = normalizeRenderAudio(audio, normMode, normTarget, limit); !normalized) {
+        auto error = normalized.error();
+        if (error.path == "/normalize/target" && a.target &&
+            (!norm || !norm->isObject() || !norm->find("target")))
+            error.path = "/target";
+        if (error.path == "/normalize/limit_true_peak_db" && a.limitTruePeakDb &&
+            (!norm || !norm->isObject() || !norm->find("limit_true_peak_db")))
+            error.path = "/limit_true_peak_db";
+        return error;
+    }
     RenderOutput out;
     auto primary = renderEncoding(project, a.format, a.bitDepth);
     if (!primary) return std::move(primary).error();
@@ -794,7 +902,8 @@ Result<RenderEncoding> encodingOf(const std::string& container, std::int64_t dep
         return Error("render.format", "FLAC is 16 or 24 bit", at + "/bit_depth",
                      "use 16 or 24 (32-bit float is WAV only)");
     if (depth != 16 && depth != 24 && depth != 32)
-        return Error("render.format", "bit_depth must be 16, 24, or 32", at + "/bit_depth");
+        return Error("render.format", "bit_depth must be 16, 24, or 32", at + "/bit_depth",
+                     "provide bit_depth 16 or 24 for WAV/FLAC, or 32 for float WAV");
     RenderEncoding e;
     e.container = container;
     e.wav.format = depth == 16   ? audio::SampleFormat::Pcm16
@@ -847,7 +956,8 @@ Result<std::optional<RenderEncoding>> secondaryEncoding(
                      "wav or flac");
     const auto* d = spec->find("bit_depth");
     if (d && !d->isNumber())
-        return Error("render.secondary", "bit_depth must be a number", "/secondary/bit_depth");
+        return Error("render.secondary", "bit_depth must be a number", "/secondary/bit_depth",
+                     "provide secondary.bit_depth as an integer: 16 or 24, or 32 for WAV only");
     const std::int64_t depth = d ? d->asInt() : f->asString() == "flac" ? 24 : 32;
     auto e = encodingOf(f->asString(), depth, nullptr, project.seed, "/secondary");
     if (!e) return std::move(e).error();

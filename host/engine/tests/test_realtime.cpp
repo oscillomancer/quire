@@ -3346,3 +3346,100 @@ TEST_CASE("pause resets DSP and its owned voice tracker together") {
     }
     engine.stop();
 }
+
+TEST_CASE("anticipative Auto monitoring keeps callback state off renderer nodes") {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    model::Track offline;
+    offline.parent = kMaster;
+    offline.record.monitor = model::Monitor::Auto;
+    const Id a = t.create(offline);
+    model::Track live;
+    live.parent = kMaster;
+    live.record.armed = true;
+    live.record.monitor = model::Monitor::On;
+    const Id b = t.create(live);
+    model::Route input;
+    input.from.hwChannels = std::vector<int>{1, 2};
+    input.to.track = b;
+    const Id route = t.create(input);
+    t.modify<model::Track>(b, [&](auto& tr) { tr.record.input = route; });
+    t.modify<model::Track>(kMaster, [&](auto& tr) { tr.children = {a, b}; });
+    const auto session = t.commit();
+    REQUIRE(session);
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4096});
+    Engine engine(pool, media, {.renderBlock = 64, .renderAheadMs = 10, .workers = 0});
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 2}));
+    REQUIRE(engine.load(*session));
+    REQUIRE(engine.awaitPlan());
+    engine.play();
+    backend.run(20000);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    for (const auto& channel : backend.capture().channels)
+        CHECK(
+            std::all_of(channel.begin(), channel.end(), [](float sample) { return sample == 0; }));
+}
+
+TEST_CASE("replaced media plans null against fresh offline in both executors" *
+          doctest::description("rt")) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-rt-media-identity-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(9600));
+    for (std::size_t i = 0; i < tone.frames(); ++i)
+        tone.channels[0][i] = tone.channels[1][i] =
+            static_cast<float>(.25 * std::sin(2 * 3.141592653589793 * 440 * double(i) / 48000));
+    const auto file = dir / "media" / "tone.wav";
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    model::Track strip;
+    strip.parent = kMaster;
+    const Id track = t.create(strip);
+    t.modify<model::Track>(kMaster, [&](auto& master) { master.children.push_back(track); });
+    const Id source = t.create(model::MediaSource{"tone.wav", "", "wav", 48000, 2, 9600});
+    model::Take take;
+    take.source = source;
+    take.playrate = .5;
+    const Id takeId = t.create(take);
+    model::Item item;
+    item.track = track;
+    item.length = .8;
+    item.takes = {takeId};
+    item.activeTake = takeId;
+    t.create(item);
+    const auto session = t.commit().value();
+    for (const auto& options : {kInCallback, EngineOptions{.workers = 0}}) {
+        CAPTURE(options.anticipative);
+        REQUIRE(audio::writeWav(file, tone));
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 19200});
+        Engine engine(pool, media, options);
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(session, dir));  // leases the original stretch variant
+        REQUIRE(engine.awaitPlan());
+        auto replaced = tone;
+        for (auto& channel : replaced.channels)
+            for (float& sample : channel) sample *= 2;
+        REQUIRE(audio::writeWav(file, replaced));
+        REQUIRE(engine.load(session, dir));  // replacement is detected at prepare
+        REQUIRE(engine.awaitPlan());
+        auto offlinePool = makePool();
+        auto offline = renderOffline(session, offlinePool, {.endSeconds = .4, .projectDir = dir});
+        REQUIRE(offline);
+        engine.seek(0);
+        engine.play();
+        if (options.anticipative)
+            runAhead(engine, backend, 150, 128);
+        else
+            backend.run(150);
+        engine.stop();
+        CHECK(engine.processErrors() == 0);
+        CHECK(maxDiff(backend.capture().channels[0], 0, offline->audio.channels[0], 19200) == 0);
+        CHECK(maxDiff(backend.capture().channels[1], 0, offline->audio.channels[1], 19200) == 0);
+    }
+    std::filesystem::remove_all(dir);
+}

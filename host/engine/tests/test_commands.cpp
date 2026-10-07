@@ -4,12 +4,16 @@
 #include <unistd.h>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
 #include <supple/base/sha256.h>
 #include <supple/engine/app.h>
 #include <supple/model/schemas.h>
+
+#include "midi_ticks.h"
+#include "render_commands.h"
 
 using namespace supple;
 using namespace supple::engine;
@@ -59,6 +63,63 @@ double peak(const fs::path& path) {
     return max;
 }
 }  // namespace
+
+TEST_CASE("render patterns reject embedded NUL bytes before planning files") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    for (const char* command : {"render.mix", "render.stems", "render.dry-run"}) {
+        if (std::string_view(command) == "render.stems") run(bus, "track.add", "{}");
+        auto result =
+            bus.execute({command, j(R"({"pattern":"name\u0000suffix","end_beat":1})"), kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "render.path");
+        CHECK(result.error().path == "/args/pattern");
+        CHECK_FALSE(result.error().hint.empty());
+        CHECK_FALSE(fs::exists(app->rendersDir() / "name"));
+    }
+    RenderPatternContext context;
+    context.track = std::string("part\0hidden", 11);
+    CHECK_FALSE(expandRenderPattern("{track}", context));
+}
+
+TEST_CASE("unknown MIDI items and copied FX suggest existing commands") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto item = bus.execute({"midi.notes", j(R"({"item":"it_999"})"), kOrigin});
+    REQUIRE_FALSE(item);
+    CHECK(item.error().hint.find("track.list") != std::string::npos);
+    CHECK(item.error().hint.find("item.list") == std::string::npos);
+    auto fx = bus.execute({"fx.copy", j(R"({"fx":"fx_999","track":"tr_0"})"), kOrigin});
+    REQUIRE_FALSE(fx);
+    CHECK(fx.error().hint.find("fx.add") != std::string::npos);
+    CHECK(fx.error().hint.find("fx.list") == std::string::npos);
+    CHECK(registry.find("track.list"));
+    CHECK(registry.find("fx.add"));
+}
+
+TEST_CASE("invalid project, tempo, marker and normalization calls explain how to fix them") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    for (const auto& [command, args] : std::vector<std::pair<std::string, std::string>>{
+             {"project.open", "{}"},
+             {"tempo.set", R"({"points":[{"beat":1,"bpm":120}]})"},
+             {"marker.add", "{}"},
+             {"render.mix", R"({"end_beat":1,"normalize":{"mode":"peak","target":"bad"}})"}}) {
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_FALSE(result);
+        INFO(command, result.error().toString());
+        CHECK_FALSE(result.error().hint.empty());
+    }
+}
 
 TEST_CASE("auxiliary channels over the bus: channels, routes to 3/4, key pins (ADR-0020)") {
     Workdir dir;
@@ -752,7 +813,7 @@ TEST_CASE("FX chain presets round-trip ordered patches, blobs and options in one
     auto saved = f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
     CHECK(saved["effects"].asInt() == 2);
     CHECK(f.history() == beforeSave);
-    auto text = readTextFile(saved["path"].asString());
+    auto text = readTextFile(saved.find("path")->asString());
     REQUIRE(text);
     auto doc = f.document();
     CHECK(doc["schema"].asString() == "supple.fx-chain/1.0");
@@ -797,7 +858,7 @@ TEST_CASE("FX chain presets round-trip ordered patches, blobs and options in one
     auto copy = f.document("Copy");
     CHECK(copy["effects"] == doc["effects"]);
     f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone","replace":true})");
-    CHECK(readTextFile(saved["path"].asString()).value() == *text);
+    CHECK(readTextFile(saved.find("path")->asString()).value() == *text);
 }
 
 TEST_CASE("fx.copy puts a copy of a plugin and its settings last in another track's chain") {
@@ -1751,4 +1812,330 @@ TEST_CASE(
     auto retained = run(bus, "plugin.list", R"({"filter":"nothing"})");
     CHECK(retained["scan"] == second["scan"]);
     CHECK(retained["scan"]["warnings"].isArray());
+}
+
+TEST_CASE("MIDI selections apply each original note once") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    run(bus, "midi.edit",
+        R"({"item":"it_1","ops":[{"op":"move","notes":[0,0],"beats":1,"semitones":1},{"op":"resize","notes":[0,0],"length_delta":1},{"op":"velocity","notes":[0,0],"velocity_delta":-1}]})");
+    const auto notes = run(bus, "midi.notes", R"({"item":"it_1"})");
+    const auto* source = app->head().midi.find(*app->head().takes.begin()->value->source);
+    REQUIRE(source);
+    CHECK(source->sequence.notes[0].start == 960);
+    CHECK(source->sequence.notes[0].pitch == 61);
+    CHECK(source->sequence.notes[0].length == 5 * 960);
+    CHECK(source->sequence.notes[0].velocity == 95);
+    CHECK(notes.find("notes")->size() == 1);
+}
+
+TEST_CASE("normalization rejects nonfinite derived gain and samples before mutation") {
+    for (double target : {1e308, 800.0}) {
+        audio::AudioData data;
+        data.sampleRate = 48000;
+        data.channels.assign(2, std::vector<float>(4800, 0.25f));
+        const auto before = data.channels;
+        auto status = normalizeRenderAudio(data, "peak", target);
+        CHECK_FALSE(status);
+        if (!status) {
+            CHECK(status.error().code == "render.normalize");
+            CHECK_FALSE(status.error().hint.empty());
+        }
+        CHECK(bool(data.channels == before));
+    }
+    for (float sample :
+         {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+        audio::AudioData data;
+        data.sampleRate = 48000;
+        data.channels.assign(2, std::vector<float>(4800, 0.25f));
+        data.channels[1][100] = sample;
+        auto status = normalizeRenderAudio(data, "peak", -1);
+        REQUIRE_FALSE(status);
+        CHECK(status.error().code == "render.normalize");
+        CHECK(status.error().path == "/normalize");
+        CHECK_FALSE(status.error().hint.empty());
+        CHECK(data.channels[0][0] == 0.25f);
+        CHECK(data.channels[1][0] == 0.25f);
+    }
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"Test Sine"})");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    auto result = bus.execute(
+        {"render.mix",
+         j(R"({"name":"overflow","end_beat":1,"normalize":{"mode":"peak","target":1e308}})"),
+         kOrigin});
+    CHECK_FALSE(result);
+    if (!result) {
+        CHECK(result.error().code == "render.normalize");
+        CHECK(result.error().path == "/args/normalize/target");
+        CHECK_FALSE(result.error().hint.empty());
+    }
+    CHECK_FALSE(fs::exists(app->rendersDir() / "overflow.wav"));
+}
+
+TEST_CASE("render aliases collide by parent identity and filename") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    fs::create_directories(app->rendersDir() / "real");
+    fs::create_directory_symlink("real", app->rendersDir() / "alias");
+    run(bus, "track.add", R"({"name":"real/same"})");
+    run(bus, "track.add", R"({"name":"alias/same"})");
+    auto result = bus.execute(
+        {"render.dry-run",
+         j(R"({"operation":"stems","end_beat":1,"pattern":"{track}","secondary":{"format":"flac","bit_depth":16}})"),
+         kOrigin});
+    CHECK_FALSE(result);
+    if (!result) {
+        CHECK(result.error().code == "render.path");
+        CHECK(result.error().path == "/args/pattern");
+        CHECK_FALSE(result.error().hint.empty());
+    }
+    // Replacing distinct final symlinks is safe: their shared target is not
+    // the write destination of an atomic rename.
+    fs::create_symlink("shared.wav", app->rendersDir() / "real/same.wav");
+    fs::create_symlink("shared.wav", app->rendersDir() / "real/other.wav");
+    run(bus, "track.set", R"({"track":"tr_2","name":"real/other"})");
+    auto distinct =
+        bus.execute({"render.dry-run",
+                     j(R"({"operation":"stems","end_beat":1,"pattern":"{track}"})"), kOrigin});
+    CHECK(distinct);
+}
+
+TEST_CASE("routes map channel 128 and survive saving and reopening") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"channels":128})");
+    run(bus, "track.add", R"({"type":"buss","channels":128})");
+    auto result = bus.execute(
+        {"route.add",
+         j(R"({"from":"tr_1","to":"tr_2","channels":{"from":[65,128],"to":[128,65]}})"), kOrigin});
+    REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+    const auto project = dir.path / "mapped.json";
+    auto args = json::Value::object();
+    args["path"] = project.string();
+    REQUIRE(bus.execute({"project.save", args, kOrigin}));
+    const auto canonical = model::serializeProject(app->head());
+    run(bus, "project.new", "{}");
+    REQUIRE(bus.execute({"project.open", args, kOrigin}));
+    const auto* route = app->head().routes.find(*model::Id::parse("sd_1"));
+    REQUIRE(route);
+    CHECK(route->channels.from == std::vector<int>{65, 128});
+    CHECK(route->channels.to == std::vector<int>{128, 65});
+    CHECK(model::serializeProject(app->head()) == canonical);
+    auto tooWide = bus.execute(
+        {"route.add", j(R"({"from":"tr_1","to":"tr_2","channels":{"from":[129],"to":[1]}})"),
+         kOrigin});
+    CHECK_FALSE(tooWide);
+}
+
+TEST_CASE("track templates preserve channel count and accept legacy stereo templates") {
+    Workdir dir;
+    AppOptions options;
+    options.workdir = dir.path;
+    options.templateDir = dir.path / "templates";
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto created = EngineApp::create(options, {.console9 = false});
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"channels":4})");
+    run(bus, "fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain"})");
+    run(bus, "fx.set", R"({"fx":"fx_1","pins":{"in":[3,4]}})");
+    const auto saved = run(bus, "track.template.save", R"({"track":"tr_1","name":"Wide"})");
+    const auto restored = run(bus, "track.template.load", R"({"name":"Wide"})");
+    const auto* strip =
+        app->head().tracks.find(*model::Id::parse(restored.find("track")->asString()));
+    REQUIRE(strip);
+    CHECK(strip->channels == 4);
+    REQUIRE(strip->chain.size() == 1);
+    CHECK(app->head().fx.find(strip->chain[0])->pins.in == std::vector<int>{3, 4});
+    const auto reopened = model::parseProject(model::serializeProject(app->head()));
+    REQUIRE(reopened);
+    CHECK(reopened->tracks.find(*model::Id::parse(restored.find("track")->asString()))->channels ==
+          4);
+    auto doc = json::parse(readTextFile(saved.find("path")->asString()).value()).value();
+    doc["track"].asObject().erase("channels");
+    doc["chain"] = json::Value::array();
+    const auto legacy = dir.path / "legacy-template.json";
+    REQUIRE(writeFileAtomic(legacy, json::writeCanonical(doc)));
+    auto args = json::Value::object();
+    args["path"] = legacy.string();
+    const auto old = bus.execute({"track.template.load", args, kOrigin});
+    REQUIRE(old);
+    CHECK(app->head().tracks.find(*model::Id::parse(old->find("track")->asString()))->channels ==
+          2);
+}
+
+TEST_CASE("render filters respect pipes and braces inside quoted replacements") {
+    RenderPatternContext context;
+    context.track = "A|{B},C";
+    const auto result = expandRenderPattern(
+        R"({track|replace("|","-")|replace("{","[")|replace("}","]")|lower})", context);
+    REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+    CHECK(*result == "a-[b],c");
+    context.track = "a,b";
+    CHECK(expandRenderPattern(R"({track|replace(",","|")})", context).value() == "a|b");
+    auto malformed = expandRenderPattern(R"({track|replace("|,"-")})", context);
+    CHECK_FALSE(malformed);
+    if (!malformed) CHECK_FALSE(malformed.error().hint.empty());
+}
+
+TEST_CASE("masking errors identify the selector that needs repair") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    for (const char* field : {"masker_track", "maskee_track"}) {
+        auto args = j(R"({"masker_track":"tr_0","maskee_track":"tr_0","end_beat":1})");
+        args[field] = "tr_999";
+        auto result = bus.execute({"analyze.masking", std::move(args), kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "track.unknown");
+        CHECK(result.error().path == std::string("/args/") + field);
+        CHECK_FALSE(result.error().hint.empty());
+    }
+}
+
+TEST_CASE("command repairs name the invalid fields and valid alternatives") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    for (const auto& [command, args] : std::vector<std::pair<std::string, std::string>>{
+             {"midi.edit", R"({"item":"it_1","ops":[{"op":"move","notes":[0],"beats":-1}]})"},
+             {"midi.edit", R"({"item":"it_1","ops":[{"op":"move","notes":[0],"semitones":127}]})"},
+             {"midi.edit", R"({"item":"it_1","ops":[{"op":"cc.clear"}]})"},
+             {"tempo.set",
+              R"({"points":[{"beat":0,"bpm":120},{"beat":2,"bpm":120},{"beat":1,"bpm":120}]})"},
+             {"render.mix", R"({"end_beat":1,"normalize":{}})"},
+             {"render.mix",
+              R"({"end_beat":1,"normalize":{"mode":"peak","limit_true_peak_db":"bad"}})"}}) {
+        auto result = bus.execute({command, j(args), kOrigin});
+        REQUIRE_FALSE(result);
+        INFO(command, result.error().toString());
+        CHECK_FALSE(result.error().path.empty());
+        CHECK_FALSE(result.error().hint.empty());
+    }
+}
+
+TEST_CASE("fx.copy declares the same usable ID hint it returns") {
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    const auto* command = registry.find("fx.copy");
+    REQUIRE(command);
+    bool found = false;
+    for (const auto& error : command->errors)
+        if (error.code == "fx.unknown") {
+            found = true;
+            CHECK(error.hint == "use an fx id returned by fx.add, fx.copy or fx.chain.load");
+        }
+    CHECK(found);
+}
+
+TEST_CASE("MIDI tick arithmetic reports overflow at the operation field") {
+    constexpr auto max = std::numeric_limits<std::int64_t>::max();
+    constexpr auto min = std::numeric_limits<std::int64_t>::min();
+    for (auto [a, b] : {std::pair{max, std::int64_t{1}},
+                        {min, std::int64_t{-1}},
+                        {std::int64_t{1}, max},
+                        {std::int64_t{-1}, min}}) {
+        auto result = detail::addMidiTicks(a, b, "/ops/0/length_delta");
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "midi.range");
+        CHECK(result.error().path == "/ops/0/length_delta");
+        CHECK_FALSE(result.error().hint.empty());
+    }
+    CHECK(detail::addMidiTicks(max - 1, 1, "/ops").value() == max);
+    CHECK(detail::addMidiTicks(min + 1, -1, "/ops").value() == min);
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", "{}");
+    run(bus, "item.add", R"({"track":"tr_1","notation":"1: C4:w"})");
+    const auto before = model::serializeProject(app->head());
+    auto bad = bus.execute(
+        {"midi.edit",
+         j(R"({"item":"it_1","ops":[{"op":"move","notes":[0],"beats":1},{"op":"resize","notes":[0],"length_delta":1e308}]})"),
+         kOrigin});
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().code == "midi.range");
+    CHECK(bad.error().path == "/args/ops/1/length_delta");
+    CHECK_FALSE(bad.error().hint.empty());
+    CHECK(model::serializeProject(app->head()) == before);
+}
+
+TEST_CASE("chain repairs name missing patch state and valid oversampling") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
+    const auto original = f.document();
+    const auto before = model::serializeProject(f.app->head());
+    for (const auto& [index, field] : {std::pair{0, "patch"}, {1, "state"}, {0, "oversampling"}}) {
+        auto bad = original;
+        auto& effect = bad["effects"].asArray()[static_cast<std::size_t>(index)];
+        if (std::string_view(field) == "oversampling")
+            effect[field] = 3;
+        else {
+            effect.asObject().erase(field);
+            // Keep exactly one serialized state representation so readDocument
+            // accepts the shape; prepareEffects then diagnoses the plugin's
+            // specific patch/state requirement.
+            if (std::string_view(field) == "patch")
+                effect["state"] = "";
+            else
+                effect["patch"] = json::Value::object();
+        }
+        f.write(bad);
+        auto result = f.bus->execute(
+            {"fx.chain.load", j(R"({"track":"tr_1","name":"Tone","mode":"replace"})"), kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "chain.invalid");
+        CHECK(result.error().path == "/args/effects/" + std::to_string(index) + "/" + field);
+        CHECK(result.error().hint.find(field) != std::string::npos);
+        CHECK(model::serializeProject(f.app->head()) == before);
+    }
+}
+
+TEST_CASE("transport range repairs point to the supplied end domain") {
+    Workdir dir;
+    auto app = makeApp(dir.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    for (const char* domain : {"seconds", "beat", "bar"}) {
+        auto args = json::Value::object();
+        args[std::string("start_") + domain] = 2;
+        args[std::string("end_") + domain] = 1;
+        auto result = bus.execute({"transport.loop", args, kOrigin});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "transport.range");
+        CHECK(result.error().path == std::string("/args/end_") + domain);
+        CHECK(result.error().hint.find(std::string("end_") + domain) != std::string::npos);
+    }
 }

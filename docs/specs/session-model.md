@@ -120,6 +120,11 @@ Fields:
 `volume`, `pan` and `mute` are automatable (§1.9). Width and trim are not
 strip fields: insert a utility (Plumb) for them.
 
+Track templates (`supple.track-template/1.0`) persist the strip's `channels`
+in their `track` object and pass it to `track.add` when loaded. The optional
+field defaults to stereo (2) for older templates. Its strip-type bounds match
+`track.add`; FX pins retain their saved channel assignments.
+
 ### 1.5 Items and takes
 
 **Item** `it_*`: `track`, `lane` (null = main lane), `position` (in the
@@ -192,7 +197,7 @@ rendered).
 | `to` | `{track: id}`, `{fx: id}` (a plug-in's key, ADR-0018) or `{hw_output: {channels: [..]}}` |
 | `tap` | `post_fader` (default), `pre_fader` (post-FX), `pre_fx` |
 | `volume` dB, `pan` % or `follow` (default: the strip's pan), `mute`, `phase_invert`, `mono` | into a buss/master: realized by the send's own C9 Channel (ADR-0019 §3) |
-| `channels` | `{from: [..], to: [..]}` channel mapping, 1-based up to each strip's channels (e.g. [1,2] → [3,4] for a detector on 3/4). Main pairs map the encoded send; pairs touching auxiliary channels are linear links at the route's level, mute and polarity (ADR-0020) |
+| `channels` | `{from: [..], to: [..]}` channel mapping, 1-based in 1..128 and up to each strip's channels (e.g. [1,2] → [3,4] for a detector on 3/4). Main pairs map the encoded send; pairs touching auxiliary channels are linear links at the route's level, mute and polarity (ADR-0020) |
 | `midi` | `{from_channel: all|1..16, to_channel: original|1..16}` or null (audio only) |
 
 Folder/master sends are the tracks' `parent_send`, not routes. Record inputs
@@ -211,7 +216,7 @@ routes from any tap of any strip.
 edited through `tempo.*`, not envelopes); `mode`
 (`trim|read|touch|latch|latch_preview|write`); `active`, `armed`,
 `visible`; `points`: array of `[pos, value, shape, tension]` in the
-envelope's time domain, sorted, with `shape` `linear|square|slow|fast_start|fast_end|bezier`;
+envelope's time domain (`time`: seconds; beat timebases: beats), sorted, with `shape` `linear|square|slow|fast_start|fast_end|bezier`;
 `items`: [ai id], derived at serialization from the authoritative
 `automation_items` map in numeric ID order. It is not a model field. On load,
 stale or mismatched lists are ignored with a `project.derived_items` warning.
@@ -459,7 +464,11 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `midi.get {item, format: notation|events}` (q), `midi.edit {item, ops:
   [{select: {pitch, range, channel}, set|shift|transpose|quantize|velocity}]}`,
   `midi.quantize`, `midi.humanize {seed}`, `midi.import {file, track}`,
-  `midi.export` (a).
+  `midi.export` (a). `midi.edit` note indices are a set per operation: repeated
+  indices edit each original note once. Tick conversions and all resulting
+  starts, ends, lengths and sequence lengths are checked before publication;
+  out-of-range arithmetic returns structured `midi.range` with a repair hint,
+  leaving the session unchanged.
 - **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
   `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
@@ -508,7 +517,12 @@ REAPER's `$`-mini-language: `{project}`, `{track}`, `{track_number:02}`,
 `{sample_rate}`, `{bit_depth}`, `{date:YYYY-MM-DD}`, `{time:HH-mm-ss}`,
 `{counter:03}`. Filters: `|lower`, `|upper`, `|replace(" ","_")`,
 `|max(8)`. `render.dry-run` returns the resolved list. Empty tokens drop an
-adjacent separator (`-`, `_`, `.`, space), as REAPER does.
+adjacent separator (`-`, `_`, `.`, space), as REAPER does. Replacement arguments
+are double-quoted literals: pipes, braces and commas inside them are not
+pattern delimiters (for example `{track|replace("|","}")|lower}`). Quote
+escapes are not supported. Collision checks across primary and secondary
+outputs compare the resolved parent directory and final filename; directory
+symlink aliases cannot produce duplicate destinations.
 
 ---
 
@@ -546,7 +560,7 @@ eviction; blob dedup.
   `render.stale_target` in the job result; no items are imported.
   A job cancelled during project replacement keeps its cancelled status and
   receives the stale result when its queued completion is serviced.
-- `track.add` and `track.set` accept 1..8 channels; busses/masters require at least 2.
+- `track.add` and `track.set` accept 1..128 channels; busses/masters require at least 2.
   `fx.param.set` keeps semantic parameter units and also supports plain CLAP/VST3
   parameter names/IDs, declared ranges, writable flags and plugin text conversion.
   Plain parameter edits save processor state after applying queued values on a

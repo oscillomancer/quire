@@ -112,7 +112,11 @@ at compile time). Per block, each automated target evaluates its segments:
   domain (normalized for stock plugins, ADR-0010);
 - write/touch/latch modes record from GUI/control input into the model on
   the main thread (reliable coalescing channel, ARCHITECTURE §3), creating
-  one version per gesture.
+  one version per gesture. Capture timestamps are seconds; evaluation, entry
+  guards, erase windows and stop holds convert them into each envelope's
+  stored domain (seconds for `time`, tempo-map beats otherwise). Plugin-output
+  recording follows the same conversion, and replay carries time-envelope
+  points as explicit seconds through `env.points.set`.
 
 ### 1.5 Transport and time
 
@@ -247,22 +251,32 @@ preset's engine tests (with the dummy backend).
   −120 dBFS (acceptance test). Third-party plugins that are not block-size
   invariant are documented exceptions.
 - Render jobs (`render.*`): mix, stems (per track post-fader through the
-  master-less path, or through master with others muted — option), regions,
+  master-less path, or through master using an exclusive solo — option), regions,
   the render matrix, selected items; tail handling (`tail_ms` or until
   silence); normalization (loudness via core-analysis, then gain, then
   optional true-peak limiter — deterministic, two-pass); dither (seeded
-  TPDF); formats WAV (PCM/float, RF64 beyond 4 GiB) and FLAC (libFLAC,
-  BSD-3, vendored when needed — not yet: `render.*` writes WAV only); file
+  TPDF); formats WAV (PCM/float, RF64 beyond 4 GiB) and FLAC (the original
+  audio-file encoder); file
   naming per session-model §7.3; a job
   queue; results reported as files + analysis summaries.
+- Through-master stems use playback's solo signal-path rules: retain the
+  selected strip, its upstream contributors and its path through parents and
+  ordinary sends to the master. Ignore other pre-existing solos and solo-defeat;
+  preserve explicit mutes. Sidechain keys retain playback's dedicated taps:
+  key sources continue driving FX even when their audible output is solo-
+  silenced; post-fader keys still follow the source fader, pan and mute.
+- Normalization rejects non-finite source samples, derived gains, or resulting
+  float samples with `render.normalize` and a repair hint before applying gain.
+  This is a representability check, with no additional dB target range policy.
 
 ## 4. Media, recording, device handling
 
 - **Media cache**: decoded and resampled audio (Signalsmith-quality
-  resampler or the audio-file polyphase resampler), keyed by `(content hash,
-  engine rate)`, disk-backed under `$XDG_CACHE_HOME/<slug>/media/`. Disk
-  streaming readers prefetch on I/O threads into per-item rings (default
-  1200 ms like REAPER's media buffer).
+  resampler or the audio-file polyphase resampler), in memory and keyed by
+  media identity, engine rate and playback variant (implementation notes below).
+  Disk backing under `$XDG_CACHE_HOME/<slug>/media/` and streaming readers
+  prefetching on I/O threads into per-item rings (default 1200 ms like REAPER's
+  media buffer) remain planned.
 - **Peaks**: min/max pyramids built on I/O threads, cached by content hash,
   never in project diffs.
 - **Content hash**: `MediaSource.hash` is `"sha256:<hex>"` of a file's bytes —
@@ -509,7 +523,8 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   the stage; seeks reset them and resend. Real-time output equals the
   offline render. Commands: `env.add`, `env.points.set`, `env.set`,
   `env.remove`, `env.list` (values in the parameter's unit; text like
-  "800 Hz" for plugins). Write/touch/latch recording is not implemented.
+  "800 Hz" for plugins). Write/touch/latch recording uses the envelope's own
+  timebase, including points received from plugin output events (§1.4).
 - **Recording and input monitoring** (ADR-0014): see the ADR's
   implementation notes (recording; the live region with two executors;
   crash recovery).
@@ -527,15 +542,25 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   run before compensation delays and frontier rings. Channel/buss post-fader
   stems get a neutral decoder. Structural changes (a plugin inserted or
   removed, a route added) still switch at the swap.
-- **Media resampling:** `MediaCache::get(path, rate)` decodes and resamples
-  once per (file, rate) with the audio-file polyphase resampler (Kaiser
+- **Media resampling:** `MediaCache::get(path, rate, variant, contentHash)`
+  decodes and resamples once per (media identity, rate, variant) with the
+  audio-file polyphase resampler (Kaiser
   windowed sinc; deterministic, so offline ≡ real time); plans ask for their
   own rate. The real-time engine compiles at the device's rate, so a project
   at another rate plays (previously refused). The cache is in memory and the
-  resampling is synchronous at plan compile — the disk-backed, content-hashed
-  cache and background decode above are still to come.
+  resampling is synchronous at plan compile. A supplied `MediaSource.hash`
+  identifies both decoded audio and its variants, independent of pathname.
+  Without a hash, identity is device, inode, size and nanosecond mtime,
+  inspected on the model/decode thread at preparation (and checked again
+  after decode). A changed identity gets new immutable buffers; old plans
+  keep their leased buffers. Decoded originals are weakly indexed: they live
+  only while a plan or passthrough variant leases them; expired entries are
+  pruned on variant misses. Additional variants may decode the original again
+  after its last lease ends. Resampling and stretching read immutable input
+  directly, without a preliminary full-buffer copy. Disk backing and background
+  decode remain planned.
 - **Take playrate and pitch:** a take's playback variant is built once per
-  (file, plan rate, variant) in the same cache: varispeed resamples to
+  (media identity, plan rate, variant) in the same cache: varispeed resamples to
   `rate / speed` (`pitch_mode: "resample"` or `preserve_pitch: false`), the
   default `"signalsmith"` mode stretches with Signalsmith Stretch (MIT,
   seeded, so deterministic) and transposes by `pitch`. The stretch runs at

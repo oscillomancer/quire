@@ -4455,7 +4455,7 @@
               "items": {
                 "type": "integer",
                 "minimum": 1.0,
-                "maximum": 64.0
+                "maximum": 128.0
               }
             },
             "to": {
@@ -4463,7 +4463,7 @@
               "items": {
                 "type": "integer",
                 "minimum": 1.0,
-                "maximum": 64.0
+                "maximum": 128.0
               }
             }
           },
@@ -4571,7 +4571,7 @@
                     "items": {
                       "type": "integer",
                       "minimum": 1.0,
-                      "maximum": 64.0
+                      "maximum": 128.0
                     }
                   },
                   "to": {
@@ -4579,7 +4579,7 @@
                     "items": {
                       "type": "integer",
                       "minimum": 1.0,
-                      "maximum": 64.0
+                      "maximum": 128.0
                     }
                   }
                 },
@@ -4745,7 +4745,7 @@
               "items": {
                 "type": "integer",
                 "minimum": 1.0,
-                "maximum": 64.0
+                "maximum": 128.0
               }
             },
             "to": {
@@ -4753,7 +4753,7 @@
               "items": {
                 "type": "integer",
                 "minimum": 1.0,
-                "maximum": 64.0
+                "maximum": 128.0
               }
             }
           },

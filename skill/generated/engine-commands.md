@@ -2057,7 +2057,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 ### Errors
 
-- `fx.unknown`: no such plugin instance Hint: use an id from fx.list
+- `fx.unknown`: no such plugin instance Hint: use an fx id returned by fx.add, fx.copy or fx.chain.load
 - `fx.index`: index is past the end of the chain Hint: use 0 to the chain's size
 
 ### Examples
@@ -6030,7 +6030,7 @@ Kind: `query`. Exposure: `mcp-tool`.
                 "items": {
                   "type": "integer",
                   "minimum": 1.0,
-                  "maximum": 64.0
+                  "maximum": 128.0
                 }
               },
               "to": {
@@ -6038,7 +6038,7 @@ Kind: `query`. Exposure: `mcp-tool`.
                 "items": {
                   "type": "integer",
                   "minimum": 1.0,
-                  "maximum": 64.0
+                  "maximum": 128.0
                 }
               }
             },

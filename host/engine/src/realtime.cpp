@@ -67,7 +67,9 @@ DummyBackend::DummyBackend(Options options) : options_(options) {}
 DummyBackend::~DummyBackend() { stop(); }
 
 Status DummyBackend::start(const BackendConfig& config, Callback callback) {
-    if (running_) return Error("backend.running", "the backend is already running");
+    if (running_)
+        return Error("backend.running", "the backend is already running", {},
+                     "stop this backend before starting it again or changing its configuration");
     config_ = config;
     callback_ = std::move(callback);
     outL_.assign(config.blockSize, 0.0f);
@@ -158,9 +160,12 @@ Engine::Engine(InstancePool& plugins, MediaCache& media, EngineOptions options)
 Engine::~Engine() { stop(); }
 
 Status Engine::start(Backend& backend, const BackendConfig& config) {
-    if (backend_) return Error("engine.running", "the engine is already running");
+    if (backend_)
+        return Error("engine.running", "the engine is already running", {},
+                     "use engine.stop before changing the backend or starting another engine");
     if (config.outputs < 2 || config.blockSize == 0)
-        return Error("engine.config", "the engine needs a block size and two outputs");
+        return Error("engine.config", "the engine needs a block size and two outputs", {},
+                     "provide a positive block_size and at least two output channels");
     shutDown_ = false;
     shutdownRequested_ = false;
     // Before the backend starts: its callbacks push meter entries at once.
@@ -255,7 +260,9 @@ void Engine::stop() {
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
     if (!notificationReload_)
         for (const auto& fx : session.fx) plugins_.resetAutomation(fx.id);
-    if (!backend_) return Error("engine.stopped", "start the engine first");
+    if (!backend_)
+        return Error("engine.stopped", "start the engine first", {},
+                     "call engine.start with a valid backend before loading or recording");
     // Instances the compile replaces may still play in plans up to this one.
     plugins_.setGeneration(publishedGen_ + 1);
     // ADR-0014: a strip that leaves the live region (monitoring off, or auto
@@ -335,8 +342,11 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             if (n.midiIn) n.midiIn->ports = midiPortMask(ports, n.midiIn->device);
     }
     if (plan->instances.size() > kMaxInstances)
-        return Error("engine.too_many_plugins",
-                     "more than " + std::to_string(kMaxInstances) + " plugin instances");
+        return Error(
+            "engine.too_many_plugins",
+            "more than " + std::to_string(kMaxInstances) + " plugin instances", {},
+            "remove unused FX or render tracks and remove their FX to reduce the number of "
+            "live plugin instances");
     if (options_.anticipative && plan->anyLive) {
         // The renderer hands its frontier taps to the callback (ADR-0014).
         plan->split = true;
@@ -1080,11 +1090,16 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
 // --- recording (ADR-0014) --------------------------------------------------------------------
 
 Status Engine::startRecording(std::vector<RecordTarget> targets) {
-    if (!backend_) return Error("engine.stopped", "start the engine first");
-    if (recorderOwned_) return Error("record.running", "already recording");
+    if (!backend_)
+        return Error("engine.stopped", "start the engine first", {},
+                     "call engine.start with a valid backend before loading or recording");
+    if (recorderOwned_)
+        return Error("record.running", "already recording", {},
+                     "stop the current recording with transport.stop before starting another");
     if (targets.empty())
         return Error("record.nothing_armed", "no track is armed with an input", {},
-                     "track.set {armed: true, record_input: [1, 2]}");
+                     "use track.list for a channel id, then track.set {track, armed: true, "
+                     "record_input: [1, 2]}");
     const BackendStatus b = backend_->status();
     const std::int64_t latency =
         static_cast<std::int64_t>(outputLatency_) + b.outputLatency + b.inputLatency;
@@ -1096,7 +1111,10 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
 }
 
 Result<std::vector<RecordedTake>> Engine::stopRecording() {
-    if (!recorderOwned_) return Error("record.stopped", "not recording");
+    if (!recorderOwned_)
+        return Error(
+            "record.stopped", "not recording", {},
+            "start recording with transport.record after arming a track and assigning its input");
     recorder_.store(nullptr);
     // A callback that entered before the store may still hold the recorder;
     // one that enters after it sees null. (seq_cst on both sides.)

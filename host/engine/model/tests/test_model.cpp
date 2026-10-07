@@ -424,6 +424,36 @@ TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     CHECK(warnings[0].path == "/tracks/tr_0/future");
 }
 
+TEST_CASE("project 1.x migration drops automation items with their removed envelopes") {
+    auto doc = projectToJson(Session::create());
+    doc["schema"] = "supple.project/1.7";
+    doc["project"]["next_ids"]["en"] = 3;
+    doc["project"]["next_ids"]["ai"] = 3;
+    Envelope removed;
+    removed.target = {kMaster, "width"};
+    doc["envelopes"]["en_1"] = toJson(removed);
+    Envelope retained;
+    retained.target = {kMaster, "volume"};
+    doc["envelopes"]["en_2"] = toJson(retained);
+    AutomationItem item;
+    item.envelope = Id{Kind::Envelope, 1};
+    item.length = item.sourceLength = 1;
+    doc["automation_items"]["ai_1"] = toJson(item);
+    item.envelope = Id{Kind::Envelope, 2};
+    doc["automation_items"]["ai_2"] = toJson(item);
+    std::vector<schema::Warning> warnings;
+    auto migrated = projectFromJson(doc, &warnings);
+    REQUIRE_MESSAGE(migrated, (migrated ? std::string() : migrated.error().toString()));
+    CHECK_FALSE(migrated->autoItems.contains(Id{Kind::AutoItem, 1}));
+    CHECK(migrated->autoItems.contains(Id{Kind::AutoItem, 2}));
+    CHECK(std::any_of(warnings.begin(), warnings.end(),
+                      [](const schema::Warning& w) { return w.path == "/automation_items/ai_1"; }));
+    const auto saved = serializeProject(*migrated);
+    auto reopened = parseProject(saved);
+    REQUIRE(reopened);
+    CHECK(serializeProject(*reopened) == saved);
+}
+
 TEST_CASE("automation items replace the envelope under them: loop, scale, overlap, file") {
     model::EditTxn t(model::Session::create(), 1);
     model::Envelope env;

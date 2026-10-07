@@ -1,4 +1,5 @@
 #include "command_validation.h"
+#include "midi_ticks.h"
 // Note-level MIDI editing (the piano roll's commands, and an agent's when
 // notation is the wrong tool): midi.notes reads an item's notes and CCs in
 // beats from the item's start, midi.edit applies ordered operations to them.
@@ -62,8 +63,19 @@ struct Frame {  // item beats <-> source ticks
     double beatOf(std::int64_t tick) const {
         return (static_cast<double>(tick) / ppq - offset) / rate;
     }
-    std::int64_t tickOf(double beat) const { return std::llround((beat * rate + offset) * ppq); }
-    std::int64_t ticksOf(double beats) const { return std::llround(beats * rate * ppq); }
+    Result<std::int64_t> convert(double beats, bool absolute, const std::string& path) const {
+        const double ticks = (beats * rate + (absolute ? offset : 0)) * ppq;
+        if (!std::isfinite(ticks) || std::abs(ticks) > static_cast<double>(std::int64_t{1} << 56))
+            return Error("midi.range", "position exceeds the finite MIDI tick range", path,
+                         "reduce the beat position or delta, take playrate or start_offset");
+        return std::llround(ticks);
+    }
+    Result<std::int64_t> tickOf(double beat, const std::string& path) const {
+        return convert(beat, true, path);
+    }
+    Result<std::int64_t> ticksOf(double beats, const std::string& path) const {
+        return convert(beats, false, path);
+    }
 };
 
 struct Target {
@@ -75,14 +87,18 @@ struct Target {
 Result<Target> midiTarget(const model::Session& s, const std::string& text) {
     auto id = Id::parse(text);
     const model::Item* it = id && id->kind == model::Kind::Item ? s.items.find(*id) : nullptr;
-    if (!it) return Error("it.unknown", "no " + text, "/item", "use a live id from item.list");
+    if (!it)
+        return Error("it.unknown", "no " + text, "/item",
+                     "use an item id from track.list or item.add");
     const model::Take* take = it->activeTake ? s.takes.find(*it->activeTake) : nullptr;
     if (!take || !take->source || take->source->kind != model::Kind::Midi)
         return Error("midi.not_midi", text + " has no MIDI take", "/item",
                      "use item.add with notation to create a MIDI item");
     const model::MidiSource* midi = s.midi.find(*take->source);
     if (!midi)
-        return Error("mi.unknown", take->source->str() + " is missing from the model", "/item");
+        return Error("mi.unknown", take->source->str() + " is missing from the model", "/item",
+                     "load a project containing the item's MIDI source, or recreate the item with "
+                     "item.add notation");
     Target t{*id, *it->activeTake, *take->source, midi, {}};
     t.frame.ppq = midi->sequence.ppq;
     t.frame.offset = take->startOffset;
@@ -134,6 +150,16 @@ struct Working {
     bool alive = true, touched = false;
 };
 
+Result<std::int64_t> noteEnd(const midi::Note& note, const std::string& path) {
+    auto end = detail::addMidiTicks(note.start, note.length, path);
+    if (!end) return end.error();
+    // Match the model/file boundary, before canonicalization or publication.
+    if (note.start < 0 || note.length < 0 || *end > std::numeric_limits<std::int64_t>::max() / 4)
+        return Error("midi.range", "resulting note exceeds the model's MIDI tick range", path,
+                     "shorten the note length or reduce its start position or delta");
+    return *end;
+}
+
 Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, std::size_t original,
                midi::Sequence& seq, const Frame& f) {
     const std::string here = "/ops/" + std::to_string(at);
@@ -153,7 +179,9 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
         {"to", op.to},
         {"strength", op.strength}};
     for (const auto& [name, value] : numbers)
-        if (value && !validBeat(*value, true))
+        if (value && !validBeat(*value, std::string_view(name) == "start" ||
+                                            std::string_view(name) == "from" ||
+                                            std::string_view(name) == "to"))
             return Error("midi.range", "number exceeds the finite MIDI tick range",
                          here + "/" + name, "use a smaller finite number");
     if (op.grid && *op.grid < 1e-9)
@@ -171,7 +199,9 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
         for (const auto& point : *op.points)
             if (!validBeat(point.beat, true))
                 return Error("midi.range", "CC beat exceeds the finite MIDI tick range",
-                             here + "/points");
+                             here + "/points",
+                             "reduce the beat position, delta or grid so resulting source ticks "
+                             "fit the finite MIDI range");
     auto selection = [&](bool allWhenAbsent) -> Result<std::vector<std::size_t>> {
         std::vector<std::size_t> out;
         if (!op.notes) {
@@ -182,13 +212,14 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
                 if (notes[i].alive) out.push_back(i);
             return out;
         }
+        std::set<std::size_t> selected;
         for (std::int64_t i : *op.notes) {
             if (i < 0 || static_cast<std::size_t>(i) >= original)
                 return Error("midi.note_index", "no note " + std::to_string(i), here + "/notes",
                              "indices are positions in midi.notes' list, 0 to " +
                                  std::to_string(original == 0 ? 0 : original - 1));
-            if (notes[static_cast<std::size_t>(i)].alive)
-                out.push_back(static_cast<std::size_t>(i));
+            const auto index = static_cast<std::size_t>(i);
+            if (notes[index].alive && selected.insert(index).second) out.push_back(index);
         }
         return out;
     };
@@ -200,14 +231,19 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
                              R"({"op":"add","pitch":60,"start":0,"length":1})");
             midi::Note n;
             n.pitch = static_cast<std::uint8_t>(*op.pitch);
-            n.start = f.tickOf(*op.start);
-            n.length = std::max(minLength, f.ticksOf(*op.length));
+            auto start = f.tickOf(*op.start, here + "/start");
+            if (!start) return start.error();
+            auto length = f.ticksOf(*op.length, here + "/length");
+            if (!length) return length.error();
+            n.start = *start;
+            n.length = std::max(minLength, *length);
             n.velocity = static_cast<std::uint8_t>(op.velocity.value_or(96));
             n.channel = static_cast<std::uint8_t>(op.channel.value_or(1) - 1);
             if (n.start < 0)
                 return Error("midi.before_source", "the note starts before the item's MIDI",
                              here + "/start",
                              "start at " + std::to_string(round4(f.beatOf(0))) + " or later");
+            SUPPLE_TRY(noteEnd(n, here + "/length"));
             notes.push_back({n, true, true});
             return {};
         }
@@ -220,17 +256,23 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
         case OpKind::Move: {
             auto sel = selection(false);
             if (!sel) return std::move(sel).error();
-            const std::int64_t dt = f.ticksOf(op.beats.value_or(0));
+            auto dt = f.ticksOf(op.beats.value_or(0), here + "/beats");
+            if (!dt) return dt.error();
             const std::int64_t dp = op.semitones.value_or(0);
             for (std::size_t i : *sel) {
                 midi::Note& n = notes[i].note;
-                if (n.start + dt < 0)
+                auto start = detail::addMidiTicks(n.start, *dt, here + "/beats");
+                if (!start) return start.error();
+                if (*start < 0)
                     return Error("midi.before_source", "a note would start before the item's MIDI",
-                                 here + "/beats");
+                                 here + "/beats",
+                                 "use a smaller negative beats delta or move the note later");
                 if (n.pitch + dp < 0 || n.pitch + dp > 127)
                     return Error("midi.pitch_range", "a note would leave the MIDI range 0-127",
-                                 here + "/semitones");
-                n.start += dt;
+                                 here + "/semitones",
+                                 "reduce semitones so every selected pitch remains 0..127");
+                n.start = *start;
+                SUPPLE_TRY(noteEnd(n, here + "/beats"));
                 n.pitch = static_cast<std::uint8_t>(n.pitch + dp);
                 notes[i].touched = true;
             }
@@ -242,14 +284,33 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
             for (std::size_t i : *sel) {
                 midi::Note& n = notes[i].note;
                 if (op.startDelta) {
-                    const std::int64_t end = n.start + n.length;
-                    n.start = std::clamp<std::int64_t>(n.start + f.ticksOf(*op.startDelta), 0,
-                                                       std::max<std::int64_t>(0, end - minLength));
-                    n.length = end - n.start;
+                    auto end = noteEnd(n, here + "/start_delta");
+                    if (!end) return end.error();
+                    auto delta = f.ticksOf(*op.startDelta, here + "/start_delta");
+                    if (!delta) return delta.error();
+                    auto start = detail::addMidiTicks(n.start, *delta, here + "/start_delta");
+                    if (!start) return start.error();
+                    auto latest = detail::addMidiTicks(*end, -minLength, here + "/start_delta");
+                    if (!latest) return latest.error();
+                    n.start =
+                        std::clamp<std::int64_t>(*start, 0, std::max<std::int64_t>(0, *latest));
+                    auto length = detail::addMidiTicks(*end, -n.start, here + "/start_delta");
+                    if (!length) return length.error();
+                    n.length = *length;
                 }
-                if (op.lengthDelta)
-                    n.length = std::max(minLength, n.length + f.ticksOf(*op.lengthDelta));
-                if (op.length) n.length = std::max(minLength, f.ticksOf(*op.length));
+                if (op.lengthDelta) {
+                    auto delta = f.ticksOf(*op.lengthDelta, here + "/length_delta");
+                    if (!delta) return delta.error();
+                    auto length = detail::addMidiTicks(n.length, *delta, here + "/length_delta");
+                    if (!length) return length.error();
+                    n.length = std::max(minLength, *length);
+                }
+                if (op.length) {
+                    auto length = f.ticksOf(*op.length, here + "/length");
+                    if (!length) return length.error();
+                    n.length = std::max(minLength, *length);
+                }
+                SUPPLE_TRY(noteEnd(n, here + "/length"));
                 notes[i].touched = true;
             }
             return {};
@@ -281,18 +342,32 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
             };
             for (std::size_t i : *sel) {
                 midi::Note& n = notes[i].note;
+                auto oldEnd = noteEnd(n, here + "/grid");
+                if (!oldEnd) return oldEnd.error();
                 const double start = f.beatOf(n.start);
-                const double end = f.beatOf(n.start + n.length);
-                if (!validBeat(snap(start), true) || !validBeat(snap(end), true))
-                    return Error("midi.range", "quantized notes exceed the finite MIDI tick range",
-                                 here + "/grid");
-                const std::int64_t newStart = std::max<std::int64_t>(0, f.tickOf(snap(start)));
-                std::int64_t newEnd =
-                    op.ends.value_or(false) ? f.tickOf(snap(end)) : newStart + n.length;
-                if (newEnd - newStart < minLength)
-                    newEnd = newStart + std::max(minLength, f.ticksOf(*op.grid));
+                const double end = f.beatOf(*oldEnd);
+                auto snappedStart = f.tickOf(snap(start), here + "/grid");
+                if (!snappedStart) return snappedStart.error();
+                // Validate the end even when quantizing only the start, as before.
+                auto snappedEnd = f.tickOf(snap(end), here + "/grid");
+                if (!snappedEnd) return snappedEnd.error();
+                const auto newStart = std::max<std::int64_t>(0, *snappedStart);
+                auto newEnd = op.ends.value_or(false)
+                                  ? snappedEnd
+                                  : detail::addMidiTicks(newStart, n.length, here + "/grid");
+                if (!newEnd) return newEnd.error();
+                auto length = detail::addMidiTicks(*newEnd, -newStart, here + "/grid");
+                if (!length) return length.error();
+                if (*length < minLength) {
+                    auto grid = f.ticksOf(*op.grid, here + "/grid");
+                    if (!grid) return grid.error();
+                    length = std::max(minLength, *grid);
+                    newEnd = detail::addMidiTicks(newStart, *length, here + "/grid");
+                    if (!newEnd) return newEnd.error();
+                }
                 n.start = newStart;
-                n.length = newEnd - newStart;
+                n.length = *length;
+                SUPPLE_TRY(noteEnd(n, here + "/grid"));
                 notes[i].touched = true;
             }
             return {};
@@ -305,12 +380,16 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
             for (const CcPoint& p : *op.points) {
                 midi::Control c;
                 c.kind = midi::ControlKind::CC;
-                c.tick = f.tickOf(p.beat);
+                auto tick = f.tickOf(p.beat, here + "/points");
+                if (!tick) return tick.error();
+                c.tick = *tick;
                 c.channel = channel;
                 c.number = static_cast<std::uint8_t>(*op.number);
                 c.value = static_cast<std::int32_t>(std::clamp<std::int64_t>(p.value, 0, 127));
                 if (c.tick < 0)
-                    return Error("midi.before_source", "a point is before the item's MIDI", here);
+                    return Error("midi.before_source", "a point is before the item's MIDI", here,
+                                 "use a later beat position or smaller negative delta so the note "
+                                 "or CC point is at or after the take start_offset");
                 std::erase_if(seq.controls, [&](const midi::Control& x) {
                     return x.kind == c.kind && x.channel == c.channel && x.number == c.number &&
                            x.tick == c.tick;
@@ -320,14 +399,18 @@ Status applyOp(const MidiOp& op, std::size_t at, std::vector<Working>& notes, st
             return {};
         }
         case OpKind::CcClear: {
-            if (!op.number) return Error("midi.cc_args", "cc.clear needs number", here + "/number");
-            const std::int64_t from =
-                op.from ? f.tickOf(*op.from) : std::numeric_limits<std::int64_t>::min();
-            const std::int64_t to =
-                op.to ? f.tickOf(*op.to) : std::numeric_limits<std::int64_t>::max();
+            if (!op.number)
+                return Error("midi.cc_args", "cc.clear needs number", here + "/number",
+                             "provide number as the MIDI CC number from 0 to 127");
+            auto from = op.from ? f.tickOf(*op.from, here + "/from")
+                                : Result<std::int64_t>{std::numeric_limits<std::int64_t>::min()};
+            if (!from) return from.error();
+            auto to = op.to ? f.tickOf(*op.to, here + "/to")
+                            : Result<std::int64_t>{std::numeric_limits<std::int64_t>::max()};
+            if (!to) return to.error();
             std::erase_if(seq.controls, [&](const midi::Control& x) {
                 return x.kind == midi::ControlKind::CC && x.number == *op.number &&
-                       x.tick >= from && x.tick < to &&
+                       x.tick >= *from && x.tick < *to &&
                        (!op.channel || x.channel == *op.channel - 1);
             });
             return {};
@@ -448,7 +531,9 @@ void registerMidiCommands(cmd::Registry& registry) {
                 if (w.alive) {
                     seq.notes.push_back(w.note);
                     if (w.touched) touched.push_back(w.note);
-                    seq.length = std::max(seq.length, w.note.start + w.note.length);
+                    auto end = noteEnd(w.note, "/ops");
+                    if (!end) return end.error();
+                    seq.length = std::max(seq.length, *end);
                 }
             seq.canonicalize();
             json::Value selected = json::Value::array();

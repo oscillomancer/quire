@@ -399,7 +399,7 @@ class EngineApp : public cmd::Host {
     double playStart_ = 0.0;  // transport.stop returns here
     // Automation written during this pass, per envelope (transient).
     struct AutoWrite {
-        double startBeat = 0, lastBeat = 0, lastValue = 0;
+        double startSeconds = 0, lastSeconds = 0, lastValue = 0;
         bool touched = false;
     };
     std::map<model::Id, AutoWrite> autoWrite_;
@@ -422,9 +422,10 @@ class EngineApp : public cmd::Host {
     bool captureFxState(model::Id fx);
     void captureFxStates(const std::vector<model::Id>& fx);
     Status commitOutputGesture(const OutputKey& key, const OutputGesture& gesture);
-    void recordAutomationAt(model::Id object, const std::string& param, double value, double beat);
-    void beginAutomationPass(double beat);
-    Status finishAutomationPass(double stopBeat);
+    void recordAutomationAt(model::Id object, const std::string& param, double value,
+                            double seconds);
+    void beginAutomationPass(double seconds);
+    Status finishAutomationPass(double stopSeconds);
     TransportRange loop_, punch_;  // kept across engine restarts (not in the session)
     MetronomeSettings metronome_;
     std::vector<std::filesystem::path> recordingFiles_;  // while recording

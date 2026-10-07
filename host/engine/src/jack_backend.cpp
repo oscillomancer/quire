@@ -107,7 +107,9 @@ Result<const Api*> loadApi(const std::string& library) {
     bind(h, "jack_midi_event_get", api.midiEventGet, optional);
     if (!missing.empty()) {
         ::dlclose(h);
-        return Error("backend.unavailable", library + " lacks JACK symbols: " + missing);
+        return Error("backend.unavailable", library + " lacks JACK symbols: " + missing, {},
+                     "provide a JACK library exporting the required JACK API, or choose backend "
+                     "dummy for engine.start");
     }
     return &loaded.emplace(library, api).first->second;
 }
@@ -260,7 +262,9 @@ Result<std::vector<std::string>> JackBackend::captureNames(const Options& option
         api->clientOpen((options.clientName + "-probe").c_str(), kNoStartServer, &status);
     if (!client)
         return Error("backend.open",
-                     "could not connect to the JACK server (" + statusText(status) + ")");
+                     "could not connect to the JACK server (" + statusText(status) + ")", {},
+                     "use backend dummy if JACK is unavailable; for JACK, use a running server and "
+                     "a client/port configuration it can accept");
     std::vector<std::string> names;
     if (const char** ports =
             api->getPorts(client, nullptr, kAudioType, kPortIsPhysical | kPortIsOutput)) {
@@ -279,15 +283,20 @@ Status JackBackend::available(const std::string& library) {
 }
 
 Status JackBackend::start(const BackendConfig& config, Callback callback) {
-    if (impl_) return Error("backend.running", "the backend is already running");
+    if (impl_)
+        return Error("backend.running", "the backend is already running", {},
+                     "stop this backend before starting it again or changing its configuration");
     if (!std::isfinite(config.sampleRate) || config.sampleRate < 1 || config.sampleRate > 768000)
         return Error("backend.config", "invalid requested sample rate", "/sample_rate",
                      "use a finite rate from 1 to 768000 Hz");
     if (config.blockSize == 0 || config.outputs == 0 || config.outputs > Impl::kMaxPorts ||
         config.inputs > Impl::kMaxPorts)
-        return Error("backend.config", "the JACK backend needs a block size, 1 to " +
-                                           std::to_string(Impl::kMaxPorts) +
-                                           " outputs and at most as many inputs");
+        return Error("backend.config",
+                     "the JACK backend needs a block size, 1 to " +
+                         std::to_string(Impl::kMaxPorts) + " outputs and at most as many inputs",
+                     {},
+                     "provide a positive block_size and an output/input channel count within the "
+                     "backend port limit");
     auto loadedApi = loadApi(options_.library);
     if (!loadedApi) return std::move(loadedApi).error();
     const Api* api = *loadedApi;
@@ -316,7 +325,9 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
 
     auto fail = [&](std::string what) -> Status {
         impl->close();
-        return Error("backend.open", "JACK: " + what);
+        return Error("backend.open", "JACK: " + what, {},
+                     "use backend dummy if JACK is unavailable; for JACK, use a running server and "
+                     "a client/port configuration it can accept");
     };
     for (std::uint32_t c = 0; c < config.outputs; ++c) {
         const std::string port = "out_" + std::to_string(c + 1);

@@ -172,7 +172,10 @@ Result<std::vector<Id>> topoOrder(const Session& s) {
         for (Id t : feeds[id])
             if (--indeg[t] == 0) ready.insert(t);
     }
-    if (order.size() != s.tracks.size()) return Error("engine.cycle", "routing cycle");
+    if (order.size() != s.tracks.size())
+        return Error("engine.cycle", "routing cycle", {},
+                     "remove a route that feeds back to its source, or change its destination to "
+                     "break the cycle");
     return order;
 }
 
@@ -220,11 +223,15 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
             auto d = params::fromDescription(param, *entry);
             if (!d) return std::move(d).error();
             if ((*d)->spec.flags & params::kReadonly)
-                return Error("engine.automation", param + " is read-only");
+                return Error("engine.automation", param + " is read-only", {},
+                             "choose a writable parameter from fx.describe or remove the obsolete "
+                             "envelope with env.remove");
             if (std::none_of(list.begin(), list.end(),
                              [&](const auto& info) { return info.id == (*d)->spec.id; }))
                 return Error("engine.automation",
-                             param + " is absent from the current parameter list");
+                             param + " is absent from the current parameter list", {},
+                             "choose a writable parameter from fx.describe or remove the obsolete "
+                             "envelope with env.remove");
             r.lane.clapId = (*d)->spec.id;
             r.lane.spec = std::shared_ptr<const params::DescribedParam>(std::move(*d));
             return r;
@@ -236,13 +243,17 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
         const bool match = numeric ? std::to_string(pi.id) == param : pi.name == param;
         if (!match) continue;
         if (pi.flags & CLAP_PARAM_IS_READONLY)
-            return Error("engine.automation", param + " is read-only");
+            return Error("engine.automation", param + " is read-only", {},
+                         "choose a writable parameter from fx.describe or remove the obsolete "
+                         "envelope with env.remove");
         r.lane.clapId = pi.id;
         r.lo = pi.min;
         r.hi = pi.max;
         return r;
     }
-    return Error("engine.automation", in.info().name + " has no parameter \"" + param + "\"");
+    return Error("engine.automation", in.info().name + " has no parameter \"" + param + "\"", {},
+                 "choose a writable parameter from fx.describe or remove the obsolete envelope "
+                 "with env.remove");
 }
 
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
@@ -677,7 +688,9 @@ Status prepare(Plan& p, const Session& s) {
             if (in.active()) p.pool->rememberLatency(st.fx, st.latency);
             st.instrument = in.audioInputChannels() == 0;
             if (in.audioOutputChannels() != 2)
-                return Error("engine.layout", in.info().name + " does not have a stereo output");
+                return Error(
+                    "engine.layout", in.info().name + " does not have a stereo output", {},
+                    "choose a plugin output layout with a stereo main pair, or replace the plugin");
         }
         if (const auto* failure = p.pool->failure(st.fx))
             p.warnings.push_back(st.fx.str() + ": " + failure->code + ": " + failure->message +
@@ -896,7 +909,7 @@ Status prepare(Plan& p, const Session& s) {
             variant.pitch = take->pitch;
             variant.preservePitch = take->preservePitch;
             variant.pitchMode = take->pitchMode;
-            auto data = p.media->get(path, p.rate, variant);
+            auto data = p.media->get(path, p.rate, variant, src->hash);
             if (!data) {
                 p.warnings.push_back(e.id.str() + ": " + data.error().message + " (media " +
                                      take->source->str() + ")");
@@ -1127,30 +1140,46 @@ Status checkStrips(const Plan& p) {
         const Node& n = p.nodes[i];
         if (n.decodeInput != (n.type != model::StripType::Channel) ||
             n.master != (n.type == model::StripType::Master))
-            return Error("engine.strip_order", "implicit strip stages disagree with its type");
+            return Error("engine.strip_order", "implicit strip stages disagree with its type", {},
+                         "report this strip-type compiler inconsistency with the project and "
+                         "session.describe; a valid strip should not fail this check");
         for (std::size_t ei : n.in) {
-            if (ei >= p.edges.size()) return Error("engine.strip_edge", "missing input edge");
+            if (ei >= p.edges.size())
+                return Error("engine.strip_edge", "missing input edge", {},
+                             "report this routing compiler inconsistency with the project and "
+                             "session.describe, including the affected routes from route.list");
             const Edge& e = p.edges[ei];
             if (e.from >= i)
-                return Error("engine.strip_edge", "input is not topologically ordered");
+                return Error("engine.strip_edge", "input is not topologically ordered", {},
+                             "report this routing compiler inconsistency with the project and "
+                             "session.describe, including the affected routes from route.list");
             if (e.stage >= 0) {
                 if (static_cast<std::size_t>(e.stage) >= n.chain.size() || e.encode)
-                    return Error("engine.strip_edge", "key routes must bypass send encoders");
+                    return Error("engine.strip_edge", "key routes must bypass send encoders", {},
+                                 "report this routing compiler inconsistency with the project and "
+                                 "session.describe, including the affected routes from route.list");
                 continue;
             }
             if (e.auxOnly) {  // linear links into auxiliary channels (ADR-0020)
-                if (e.encode) return Error("engine.strip_edge", "aux-only routes are not encoded");
+                if (e.encode)
+                    return Error("engine.strip_edge", "aux-only routes are not encoded", {},
+                                 "report this routing compiler inconsistency with the project and "
+                                 "session.describe, including the affected routes from route.list");
                 continue;
             }
             if (e.encode &&
                 std::count(p.nodes[e.from].out.begin(), p.nodes[e.from].out.end(), ei) != 1)
-                return Error("engine.strip_edge", "send encoder is not owned by its source");
+                return Error("engine.strip_edge", "send encoder is not owned by its source", {},
+                             "report this routing compiler inconsistency with the project and "
+                             "session.describe, including the affected routes from route.list");
             if (!n.decodeInput || p.nodes[e.from].master ||
                 (!e.encode && (e.tap != model::Tap::PostFader || e.volumeDb != 0 || !e.followPan ||
                                e.mono || e.invert || e.mapped || e.muted || e.autoVolume.active() ||
                                e.autoPan.active() || e.autoMute.active())))
                 return Error("engine.strip_edge",
-                             "summing inputs require an unmodified Channel output");
+                             "summing inputs require an unmodified Channel output", {},
+                             "report this routing compiler inconsistency with the project and "
+                             "session.describe, including the affected routes from route.list");
         }
     }
     return okStatus();
@@ -1661,7 +1690,10 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             addEdge(p, p.edges[ei], -3.0, node.sum, pos, n);
     // Monitored device input enters with the inputs (spec §1.1); auto
     // monitoring plays the timeline instead while playing without recording.
-    const bool hearInput = !node.tapeAuto || !transport.playing || p.deviceRecording;
+    // Device state belongs to the callback; renderer-only nodes have no
+    // monitored inputs and must not read it concurrently with liveRender().
+    const bool hearInput = (!node.monitorInputs.empty() || node.midiIn.has_value()) &&
+                           (!node.tapeAuto || !transport.playing || p.deviceRecording);
     if (hearInput && !node.monitorInputs.empty() && p.deviceIn) {
         const auto channel = [&](std::size_t k) -> const float* {
             const int c = node.monitorInputs[std::min(k, node.monitorInputs.size() - 1)];

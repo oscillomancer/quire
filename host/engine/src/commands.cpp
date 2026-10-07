@@ -356,7 +356,9 @@ Result<EnvDomain> envDomain(EngineApp& app, const model::Session& s, const model
             auto spec = params::fromDescription(t.param, *entry);
             if (!spec) return std::move(spec).error();
             if ((*spec)->spec.flags & params::kReadonly)
-                return Error("env.param", t.param + " is read-only", path);
+                return Error("env.param", t.param + " is read-only", path,
+                             "choose a writable parameter from fx.describe instead of automating a "
+                             "read-only output");
             d.semantic = std::move(*spec);
             return d;
         }
@@ -388,16 +390,22 @@ Result<double> envValue(const EnvDomain& d, const json::Value& v, const std::str
         if (v.isNumber()) return v.asDouble();
         if (v.isString() && *d.mixer != units::Unit::none)
             return located(units::parseQuantity(v.asString(), *d.mixer));
-        return Error("env.value", "a number (or text with a unit)", path);
+        return Error(
+            "env.value", "a number (or text with a unit)", path,
+            "provide a number in the parameter's physical unit, or unit text such as \"-6 dB\"");
     }
-    if (!v.isNumber()) return Error("env.value", "a CLAP value (number)", path);
+    if (!v.isNumber())
+        return Error(
+            "env.value", "a CLAP value (number)", path,
+            "provide a numeric CLAP value within the parameter range shown by fx.describe");
     return std::clamp(v.asDouble(), d.clapRange->first, d.clapRange->second);
 }
 
 // `itemRelative`: a take's envelope, positions in beats from its item's start.
 Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const EnvDomain& d,
                                                const std::vector<EnvPointArg>& in,
-                                               const std::string& path, bool itemRelative = false) {
+                                               const std::string& path, bool itemRelative = false,
+                                               model::Timebase timebase = model::Timebase::Beats) {
     std::vector<model::EnvPoint> out;
     for (std::size_t i = 0; i < in.size(); ++i) {
         const EnvPointArg& a = in[i];
@@ -406,7 +414,9 @@ Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const En
             return Error("env.position", "a take's envelope takes beats from the item's start", at,
                          "e.g. {\"beat\": 0, \"value\": -6} at the item's start");
         const int given = a.beat.has_value() + a.bar.has_value() + a.seconds.has_value();
-        if (given != 1) return Error("env.position", "give one of beat, bar or seconds", at);
+        if (given != 1)
+            return Error("env.position", "give one of beat, bar or seconds", at,
+                         "provide exactly one of beat, bar or seconds for each point");
         model::EnvPoint pt;
         pt.pos = a.seconds
                      ? s.timeMap->beatAt(*a.seconds)
@@ -416,6 +426,8 @@ Result<std::vector<model::EnvPoint>> envPoints(const model::Session& s, const En
                                       at + (a.seconds ? "/seconds"
                                             : a.bar   ? "/bar"
                                                       : "/beat")));
+        if (timebase == model::Timebase::Time)
+            pt.pos = a.seconds.value_or(s.timeMap->secondsAt(pt.pos));
         auto v = envValue(d, a.value, at + "/value");
         if (!v) return std::move(v).error();
         pt.value = *v;
@@ -646,15 +658,23 @@ Result<fs::path> mixPath(const EngineApp& app, const model::Session& session,
     const fs::path path = app.rendersDir() / (*expanded + encoding->extension());
     std::error_code ec;
     const auto root = fs::weakly_canonical(app.rendersDir(), ec);
-    if (ec) return Error("render.path", "cannot resolve renders directory", "/pattern");
+    if (ec)
+        return Error("render.path", "cannot resolve renders directory", "/pattern",
+                     "use a relative pattern beneath a readable and writable renders directory; "
+                     "remove traversal components or symlinks that escape it");
     // The final path, not only its parent (see render_commands.cpp): an entry
     // that already exists at this name resolves to its target, so a symlink
     // out of the renders directory is refused rather than written through.
     const auto resolved = fs::weakly_canonical(path, ec);
-    if (ec) return Error("render.path", "cannot resolve the render path", "/pattern");
+    if (ec)
+        return Error("render.path", "cannot resolve the render path", "/pattern",
+                     "use a relative pattern beneath a readable and writable renders directory; "
+                     "remove traversal components or symlinks that escape it");
     const auto relative = resolved.lexically_relative(root);
     if (relative.empty() || relative.is_absolute() || *relative.begin() == "..")
-        return Error("render.path", "render name escapes the renders directory", "/pattern");
+        return Error("render.path", "render name escapes the renders directory", "/pattern",
+                     "use a relative pattern beneath a readable and writable renders directory; "
+                     "remove traversal components or symlinks that escape it");
     return path;
 }
 struct HistoryResult {
@@ -813,10 +833,14 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (a.historyBudgetBytes) p.historyBudgetBytes = *a.historyBudgetBytes;
             if (a.render) {
                 if (!a.render->isObject())
-                    return Error("render.settings", "render settings must be an object", "/render");
+                    return Error(
+                        "render.settings", "render settings must be an object", "/render",
+                        "provide render as an object, for example {\"normalize\":\"none\"}");
                 if (const auto* matrix = a.render->find("matrix")) {
                     if (!matrix->isObject())
-                        return Error("render.matrix", "matrix must be an object", "/render/matrix");
+                        return Error("render.matrix", "matrix must be an object", "/render/matrix",
+                                     "provide matrix as an object mapping region ids or project to "
+                                     "arrays of track ids");
                     for (const auto& [key, row] : matrix->asObject()) {
                         if (key != "project") {
                             auto id = model::Id::parse(key);
@@ -826,12 +850,16 @@ void registerEngineCommands(cmd::Registry& registry) {
                         }
                         if (!row.isArray())
                             return Error("render.matrix", "matrix row must be an array",
-                                         "/render/matrix");
+                                         "/render/matrix",
+                                         "replace this matrix row with an array of track/master "
+                                         "ids from track.list");
                         for (const auto& cell : row.asArray()) {
                             if (!cell.isString())
                                 return Error("render.matrix",
                                              "matrix cell must be a track or master id",
-                                             "/render/matrix");
+                                             "/render/matrix",
+                                             "replace this cell with an existing track or master "
+                                             "id from track.list");
                             {
                                 auto id = model::Id::parse(cell.asString());
                                 if (!id || !A(ctx).view().tracks.contains(*id))
@@ -915,7 +943,9 @@ void registerEngineCommands(cmd::Registry& registry) {
              "saved"}};
         c.run = [](const PathArgs& a, Context& ctx) -> Result<ProjectInfo> {
             EngineApp& app = A(ctx);
-            if (!a.path) return Error("project.no_path", "give the project file to open", "/path");
+            if (!a.path)
+                return Error("project.no_path", "give the project file to open", "/path",
+                             "provide path naming an existing project JSON file");
             std::vector<schema::Warning> warnings;
             SUPPLE_TRY(app.open(*a.path, &warnings));
             for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
@@ -1104,11 +1134,13 @@ void registerEngineCommands(cmd::Registry& registry) {
             model::EditTxn& t = A(ctx).txn();
             if (a.points.empty() || a.points.front().beat != 0.0)
                 return Error("tempo.first", "the first tempo point must be at beat 0",
-                             "/points/0/beat");
+                             "/points/0/beat", "set the first point beat to 0");
             for (std::size_t i = 1; i < a.points.size(); ++i)
                 if (!(a.points[i].beat > a.points[i - 1].beat))
-                    return Error("tempo.order", "tempo points must increase in beat",
-                                 "/points/" + std::to_string(i) + "/beat");
+                    return Error(
+                        "tempo.order", "tempo points must increase in beat",
+                        "/points/" + std::to_string(i) + "/beat",
+                        "sort points by increasing beat and remove duplicate beat positions");
             std::vector<Id> old;
             const auto current = A(ctx).view();
             for (const auto& e : current.tempo) old.push_back(e.id);
@@ -1424,8 +1456,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 return Error("track.strip_type", "only channels record or monitor", "/track",
                              "record or monitor on a child channel instead");
             if (a.recordInput && a.recordMidi)
-                return Error("track.record_input", "record audio or MIDI, not both",
-                             "/record_midi");
+                return Error("track.record_input", "record audio or MIDI, not both", "/record_midi",
+                             "provide either record_input for audio or record_midi for MIDI, and "
+                             "clear the other input");
             if (a.parentSend && !s.tracks.find(*id)->parent)
                 return Error("track.parent_send", "a master has no parent", "/parent_send",
                              "masters feed hardware outputs and renders");
@@ -1481,7 +1514,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                 const model::Route* old = input ? s.routes.find(*input) : nullptr;
                 if (!a.recordMidi && !(old && old->from.midiDevice))
                     return Error("track.record_midi", "give record_midi (the device) first",
-                                 "/midi_channel");
+                                 "/midi_channel",
+                                 "set record_midi to a device from engine.inputs before setting "
+                                 "midi_channel");
                 auto setMidi = [&](model::Route& r) {
                     r.from.hwChannels.reset();
                     if (a.recordMidi) r.from.midiDevice = *a.recordMidi;
@@ -1666,7 +1701,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 return Error("track.strip_type", "only channels hold items", "/track",
                              "put items on a child channel instead");
             if ((a.notation ? 1 : 0) + (a.audioFile ? 1 : 0) > 1)
-                return Error("item.source", "give notation or audio_file, not both");
+                return Error("item.source", "give notation or audio_file, not both", {},
+                             "provide exactly one of notation or audio_file for the item");
             const double pos = beatsOf(
                 s, a.position, a.bar ? std::optional<int>(static_cast<int>(*a.bar)) : std::nullopt);
             SUPPLE_TRY(model::checkedBeat(s, pos, a.bar ? "/bar" : "/position"));
@@ -1896,7 +1932,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             const model::Item& it = *s.items.find(*id);
             const model::Take* take = it.activeTake ? s.takes.find(*it.activeTake) : nullptr;
             if (!take || !take->source || take->source->kind != model::Kind::Midi)
-                return Error("midi.not_midi", a.item + " has no MIDI take", "/item");
+                return Error("midi.not_midi", a.item + " has no MIDI take", "/item",
+                             "choose an item with a MIDI take from track.list or create one with "
+                             "item.add notation");
             notation::DecompileOptions options;
             options.meterAt = meterContext(s, model::itemSpan(s, it).startBeat);
             auto text = notation::decompile(s.midi.find(*take->source)->sequence, options);
@@ -3006,11 +3044,17 @@ void registerEngineCommands(cmd::Registry& registry) {
             auto domain = envDomain(app, s, env.target, "/env");
             if (!domain) return std::move(domain).error();
             auto pts = envPoints(s, *domain, a.points, "/points",
-                                 env.target.object.kind == model::Kind::Take);
+                                 env.target.object.kind == model::Kind::Take, env.timebase);
             if (!pts) return std::move(pts).error();
             std::vector<model::EnvPoint> next;
             if (a.fromBeat || a.toBeat) {
-                const double lo = a.fromBeat.value_or(0.0), hi = a.toBeat.value_or(1e300);
+                const auto position = [&](double beat) {
+                    return env.timebase == model::Timebase::Time ? s.timeMap->secondsAt(beat)
+                                                                 : beat;
+                };
+                const double lo = a.fromBeat ? position(*a.fromBeat) : 0.0;
+                const double hi =
+                    a.toBeat ? position(*a.toBeat) : std::numeric_limits<double>::infinity();
                 for (const auto& pt : env.points)
                     if (pt.pos < lo || pt.pos >= hi) next.push_back(pt);
             }
@@ -3269,7 +3313,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                                  "plugin envelopes",
                                  "/env", "edit the take envelope's points");
                 if (a.position && a.bar)
-                    return Error("autoitem.position", "give position or bar", "/position");
+                    return Error("autoitem.position", "give position or bar", "/position",
+                                 "provide either position in beats or bar, not both");
                 model::AutomationItem ai;
                 ai.envelope = *en;
                 ai.position = a.bar ? s.timeMap->beatOfBar(static_cast<int>(*a.bar))
@@ -3778,7 +3823,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                 a.endSeconds.has_value() + a.endBeat.has_value() + a.endBar.has_value();
             if (starts > 1 || ends > 1 || starts != ends)
                 return Error("transport.range", "give one start and one end (or neither)", "",
-                             "start_seconds|start_beat|start_bar and end_…");
+                             "provide exactly one start_seconds/start_beat/start_bar and one "
+                             "end_seconds/end_beat/end_bar, or omit all six");
             if (starts == 1) {
                 const model::Session s = app.view();
                 auto at = [&](std::optional<double> sec, std::optional<double> beat,
@@ -3804,14 +3850,20 @@ void registerEngineCommands(cmd::Registry& registry) {
                                  : "/end_beat",
                     app.engine() ? app.engine()->config().sampleRate : s.project->sampleRate));
                 if (!(end > start))
-                    return Error("transport.range", "the end must come after the start", "/end");
+                    return Error("transport.range", "the end must come after the start",
+                                 a.endSeconds ? "/end_seconds"
+                                 : a.endBar   ? "/end_bar"
+                                              : "/end_beat",
+                                 "set the supplied end_seconds/end_beat/end_bar later than the "
+                                 "supplied start_seconds/start_beat/start_bar");
                 r.start = start;
                 r.end = end;
                 r.enabled = a.enabled.value_or(true);
             } else if (a.enabled) {
                 if (*a.enabled && !(r.end > r.start))
                     return Error("transport.range", "there is no range to turn on", "",
-                                 "give start and end");
+                                 "provide one start_seconds/start_beat/start_bar and one "
+                                 "end_seconds/end_beat/end_bar with end later than start");
                 r.enabled = *a.enabled;
             }
             if (loop)

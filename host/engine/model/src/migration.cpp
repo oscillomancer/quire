@@ -160,6 +160,7 @@ Result<json::Value> migrateProject1(json::Value doc, std::vector<schema::Warning
             }
         }
     }
+    std::set<std::string> droppedEnvelopes;
     if (envelopes.isObject()) {
         std::vector<std::string> ids;
         for (const auto& e : envelopes.asObject()) ids.push_back(e.key);
@@ -173,8 +174,19 @@ Result<json::Value> migrateProject1(json::Value doc, std::vector<schema::Warning
                 (object.starts_with("tr_") &&
                  (param == "trim" || param == "width" || param == "phase_invert"))) {
                 erase(envelopes, id);
+                droppedEnvelopes.insert(id);
                 warn("dropped envelope on a removed strip parameter or route", "/envelopes/" + id);
             }
+        }
+    }
+    if (auto* automation = doc.asObject().find("automation_items");
+        automation && automation->isObject()) {
+        std::vector<std::string> ids;
+        for (const auto& e : automation->asObject())
+            if (droppedEnvelopes.contains(text(e.value.find("envelope")))) ids.push_back(e.key);
+        for (const auto& id : ids) {
+            erase(*automation, id);
+            warn("dropped automation item on a removed envelope", "/automation_items/" + id);
         }
     }
     for (const char* key : {"pan_law", "pan_law_db"}) {

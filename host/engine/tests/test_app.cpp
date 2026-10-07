@@ -2838,3 +2838,115 @@ TEST_CASE("a plug-in's state change beyond its parameters reaches the project, a
     CHECK(reopened->blobs.at(*saved)->data == std::vector<std::uint8_t>{0, 0, 0, 9});
     app->stopEngine();
 }
+
+TEST_CASE("automation timebases govern evaluation erasure guards and stop holds") {
+    for (auto timebase : {model::Timebase::Beats, model::Timebase::Time})
+        for (auto mode : {model::EnvMode::Touch, model::EnvMode::Latch, model::EnvMode::Write}) {
+            Root root;
+            auto app = makeApp(root.path);
+            cmd::Registry registry;
+            registerEngineCommands(registry);
+            cmd::Dispatcher bus(registry, *app);
+            auto call = [&](const char* command, const char* args) {
+                auto result = bus.execute({command, j(args), kTest});
+                REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+            };
+            call("track.add", "{}");
+            call("env.add", R"({"track":"tr_1","param":"volume"})");
+            const model::Id env{model::Kind::Envelope, 1};
+            const double domain = timebase == model::Timebase::Time ? 1 : 2;
+            auto setup = app->beginTransaction(kTest, "Envelope clock");
+            REQUIRE(setup);
+            app->txn().modify<model::Envelope>(env, [&](auto& e) {
+                e.timebase = timebase;
+                e.mode = mode;
+                e.points = {
+                    {0, -6}, {1.25 * domain, -16}, {1.75 * domain, -18}, {2.75 * domain, -21}};
+            });
+            REQUIRE(app->commitTransaction(*setup));
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+            REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 480},
+                                     {.anticipative = false}));
+            call("transport.play", "{}");
+            backend.run(100);
+            if (mode != model::EnvMode::Write) {
+                call("track.set", R"({"track":"tr_1","volume_db":-12})");
+                const auto& points = app->head().envelopes.find(env)->points;
+                const auto hold = std::find_if(points.begin(), points.end(), [&](const auto& p) {
+                    return p.pos > .99 * domain && p.pos < domain;
+                });
+                CHECK(hold != points.end());
+                if (hold != points.end()) CHECK(hold->value == doctest::Approx(-14));
+            }
+            backend.run(50);
+            if (mode != model::EnvMode::Write)
+                call("track.set", R"({"track":"tr_1","volume_db":-20})");
+            backend.run(50);
+            call("transport.stop", "{}");
+            const auto& points = app->head().envelopes.find(env)->points;
+            auto has = [&](double pos, double value) {
+                return std::any_of(points.begin(), points.end(), [&](const auto& p) {
+                    return std::abs(p.pos - pos) < 1e-9 && p.value == value;
+                });
+            };
+            CHECK(has(2.75 * domain, -21));
+            CHECK_FALSE(has(1.25 * domain, -16));
+            if (mode == model::EnvMode::Touch) {
+                CHECK(has(1.5 * domain, -20));
+                CHECK_FALSE(has(2 * domain, -20));
+                CHECK(has(1.75 * domain, -18));
+            } else {
+                CHECK_FALSE(has(1.75 * domain, -18));
+                CHECK(has(2 * domain, mode == model::EnvMode::Write ? 0 : -20));
+            }
+            app->stopEngine();
+        }
+}
+
+TEST_CASE("automation timebases preserve plugin output positions through branch replay") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    auto call = [&](const char* command, const char* args) {
+        auto result = bus.execute({command, j(args), kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+    };
+    call("track.add", "{}");
+    call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.edge"})");
+    call("env.add", R"({"fx":"fx_1","param":"7","points":[{"beat":0,"value":0}]})");
+    const model::Id fx{model::Kind::Fx, 1}, env{model::Kind::Envelope, 1};
+    auto setup = app->beginTransaction(kTest, "Timed editor output");
+    REQUIRE(setup);
+    std::vector<std::uint8_t> state{35, 0, 0, 0};
+    const auto hash = "sha256:" + sha256Hex(state);
+    app->txn().putBlob(hash, std::make_shared<const model::Blob>(model::Blob{state}));
+    app->txn().modify<model::FxInstance>(fx, [&](auto& f) { f.state = hash; });
+    app->txn().modify<model::Envelope>(env, [](auto& e) {
+        e.timebase = model::Timebase::Time;
+        e.mode = model::EnvMode::Touch;
+    });
+    REQUIRE(app->commitTransaction(*setup));
+    call("branch.create", R"({"name":"timed"})");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    REQUIRE(app->transport("play"));
+    backend.run(1);
+    app->tick();
+    auto* instance = app->instanceOf(fx);
+    REQUIRE(instance);
+    REQUIRE(instance->openEditor(1234, 1));
+    backend.run(1);
+    app->tick();
+    backend.run(1);
+    app->tick();
+    CHECK(app->head().envelopes.find(env)->points.back().pos == doctest::Approx(128.0 / 48000));
+    instance->closeEditor();
+    app->stopEngine();
+    call("branch.switch", R"({"name":"main"})");
+    call("track.set", R"({"track":"tr_1","name":"Unrelated"})");
+    call("branch.merge", R"({"from":"timed"})");
+    CHECK(app->head().envelopes.find(env)->points.back().pos == doctest::Approx(128.0 / 48000));
+}
