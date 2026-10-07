@@ -39,7 +39,9 @@ class Editor {
 
     // Basic input (the preview tool and simple hosts).
     bool onMouseDown(float x, float y) { return onPointerDown(x, y, 0, 0); }
-    void onMouseMove(float x, float y, bool fine) { onPointerMove(x, y, fine ? kModShift : 0); }
+    void onMouseMove(float x, float y, bool fine) {
+        onPointerMove(x, y, fine ? uint32_t{kModShift} : 0u);
+    }
     void onMouseUp() { onPointerUp(0, 0, 0, 0); }
     void onDoubleClick(float x, float y) { onPointerDouble(x, y, 0, 0); }
     bool onScroll(float x, float y, float dy) { return onWheel(x, y, 0, dy, 0); }
