@@ -158,6 +158,13 @@ Registered by the library, `Kind::Edit`, `McpTool`.
 }
 ```
 
+- The batch object permits only `label` (optional string) and `steps`
+  (required array). Each step permits only `command` (required string),
+  `args` (optional object) and `as` (optional string). Structural validation
+  aggregates errors across the batch and its steps before any transaction
+  begins: `command.invalid_args` carries individual schema errors in
+  `details`, with `/args`-prefixed JSON Pointer paths and closest-member
+  hints for misspelled keys.
 - Steps run in order inside **one transaction** (one undo step in the
   engine). If any step fails, the transaction rolls back and the error is
   `batch.step_failed` with `path` `/steps/<i>` (and the step's own error in
@@ -247,6 +254,7 @@ transaction-safe inside a batch), `rpc.*` (§3), `mcp.*` (§4).
 
 - **Transport:** Unix domain stream socket at
   `$XDG_RUNTIME_DIR/<slug>/<instance>.sock` (directory 0700, socket 0600).
+  Accepted connection descriptors are nonblocking and close-on-exec.
   Framing: one JSON value per line (UTF-8, `\n`-terminated, compact JSON; no
   embedded newlines), max 16 MiB per message.
 - **JSON-RPC 2.0.** Request `{"jsonrpc":"2.0","id":…,"method":"<command>","params":{…}}`;
@@ -281,6 +289,11 @@ transaction-safe inside a batch), `rpc.*` (§3), `mcp.*` (§4).
   version if supported, else the newest supported. Capabilities: `tools`
   (no `listChanged`). `ping` supported. `logging`/`resources`
   later.
+- **Envelopes:** validate JSON-RPC fields before suppressing replies to valid
+  notifications. Malformed objects without `id` receive Invalid Request
+  (`-32600`) with `id: null`; `params`, when present, must be an object or
+  array. Array params in requests to this adapter return Invalid params
+  (`-32602`).
 - **Deployments:** in-process (`McpServer` wraps a `Dispatcher` directly —
   the sandbox CLI `--mcp` mode) and proxy (`<slug>-mcp` forwarding to a
   control-protocol socket).
@@ -306,7 +319,9 @@ and `idempotentHint` where true).
 ### 4.3 Calls and results
 
 `tools/call` → dispatcher `execute` with `Origin{Mcp, client name from
-initialize, agent}`. Success: `structuredContent` = result JSON and
+initialize, agent}`. Every valid `initialize` replaces the client and agent
+identity; an absent `_meta.agent` clears the agent. The proxy forwards that
+identity in its RPC handshake. Success: `structuredContent` = result JSON and
 `content: [{"type":"text","text": <compact JSON of the result>}]`. Failure:
 `isError: true`, `content: [{"type":"text","text": <error rendered as
 "code at path: message\nHint: hint" plus details>}]`, `structuredContent` =

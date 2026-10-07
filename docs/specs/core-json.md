@@ -347,6 +347,8 @@ template <class T> class Schema {
 - `Int` JSON values decode into `double` fields (always). `Double` JSON values
   decode into integer fields only if integral and `coerceIntegralDoubles`.
 - Numbers must be finite. Integer fields check the target type's range.
+  Minimum, maximum and exclusive bounds compare integers exactly against
+  their double-valued bounds, without rounding the integer to double.
 - For fields with a unit and `acceptUnitStrings`, a JSON string such as
   `"1.2 kHz"`, `"-3dB"`, `"250 ms"`, `"0.25 s"` is parsed (B.3), converted to
   the field's canonical unit, then range-checked. Incompatible units are an

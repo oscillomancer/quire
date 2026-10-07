@@ -123,6 +123,29 @@ TEST_CASE("streamed WAV validates rates and rejects overflowing append sizes") {
     fs::remove(path);
 }
 
+TEST_CASE("inspect rejects malformed FLAC STREAMINFO") {
+    const auto path = fs::temp_directory_path() /
+                      ("supple-inspect-flac-invalid-" + std::to_string(::getpid()) + ".flac");
+    auto encoded = encodeFlac(tone(32, 48000, 1));
+    REQUIRE(encoded);
+    REQUIRE(supple::writeFileAtomic(path, *encoded));
+    REQUIRE(inspect(path));
+    for (const unsigned size : {0u, 33u, 35u}) {
+        auto malformed = *encoded;
+        malformed[7] = static_cast<std::uint8_t>(size);
+        REQUIRE(supple::writeFileAtomic(path, malformed));
+        auto result = inspect(path);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "audio.format");
+    }
+    auto zeroRate = *encoded;
+    zeroRate[18] = zeroRate[19] = 0;
+    zeroRate[20] &= 0x0f;
+    REQUIRE(supple::writeFileAtomic(path, zeroRate));
+    CHECK_FALSE(inspect(path));
+    fs::remove(path);
+}
+
 TEST_CASE("PCM WAV round trips within quantization + dither, deterministic by seed") {
     auto d = tone(4800, 44100, 1);
     for (auto fmt : {SampleFormat::Pcm16, SampleFormat::Pcm24}) {
@@ -456,4 +479,69 @@ TEST_CASE("FLAC encoding decodes to exactly what the same WAV holds (16 and 24 b
     CHECK((*minimumBlock)[8] == 0);
     CHECK((*minimumBlock)[9] == 16);  // STREAMINFO minimum block size clamps to 16, not 65535
     CHECK(readAudio(*minimumBlock)->frames() == tiny.frames());
+}
+
+TEST_CASE("R6 inspect rejects inconsistent PCM and float block alignment") {
+    const auto path =
+        fs::temp_directory_path() / ("supple-align-" + std::to_string(::getpid()) + ".wav");
+    const std::uint8_t formats[][2] = {{1, 8}, {1, 16}, {1, 24}, {1, 32}, {3, 32}, {3, 64}};
+    for (const auto& format : formats) {
+        for (unsigned channels : {1u, 2u}) {
+            for (bool extensible : {false, true}) {
+                auto bytes = wavHeader(4, channels, 48000, SampleFormat::Float32);
+                REQUIRE(bytes);
+                const auto tag = format[0];
+                const auto align = channels * (format[1] / 8);
+                (*bytes)[20] = tag;
+                (*bytes)[32] = static_cast<std::uint8_t>(align);
+                (*bytes)[34] = format[1];
+                (*bytes)[40] = static_cast<std::uint8_t>(4 * align);
+                bytes->resize(44 + 4 * align);
+                const auto byteRate = 48000u * align;
+                for (unsigned i = 0; i < 4; ++i)
+                    (*bytes)[28 + i] = static_cast<std::uint8_t>(byteRate >> (8 * i));
+                if (extensible) {
+                    bytes->insert(bytes->begin() + 36, 24, 0);
+                    (*bytes)[16] = 40;
+                    (*bytes)[20] = 0xfe;
+                    (*bytes)[21] = 0xff;
+                    (*bytes)[36] = 22;
+                    (*bytes)[38] = (*bytes)[34];
+                    (*bytes)[44] = tag;
+                    // Standard PCM/IEEE-float subformat GUID tail.
+                    (*bytes)[50] = 0x10;
+                    (*bytes)[52] = 0x80;
+                    (*bytes)[55] = 0xaa;
+                    (*bytes)[57] = 0x38;
+                    (*bytes)[58] = 0x9b;
+                    (*bytes)[59] = 0x71;
+                    const auto size = static_cast<std::uint32_t>(bytes->size() - 8);
+                    for (unsigned i = 0; i < 4; ++i)
+                        (*bytes)[4 + i] = static_cast<std::uint8_t>(size >> (8 * i));
+                }
+                const auto riffSize = static_cast<std::uint32_t>(bytes->size() - 8);
+                for (unsigned i = 0; i < 4; ++i)
+                    (*bytes)[4 + i] = static_cast<std::uint8_t>(riffSize >> (8 * i));
+                REQUIRE(supple::writeFileAtomic(path, *bytes));
+                auto good = inspect(path);
+                REQUIRE(good);
+                CHECK(good->frames == 4);
+                for (auto badAlign : {0u, 1u, align + 1}) {
+                    if (badAlign == align) continue;
+                    (*bytes)[32] = static_cast<std::uint8_t>(badAlign);
+                    REQUIRE(supple::writeFileAtomic(path, *bytes));
+                    auto bad = inspect(path);
+                    REQUIRE_FALSE(bad);
+                    CHECK(bad.error().code == "audio.format");
+                }
+            }
+        }
+    }
+    auto other = encodeWav(tone(4, 48000, 1));
+    REQUIRE(other);
+    (*other)[20] = 6;
+    (*other)[32] = 1;  // Other format tags retain their existing handling.
+    REQUIRE(supple::writeFileAtomic(path, *other));
+    REQUIRE(inspect(path));
+    fs::remove(path);
 }

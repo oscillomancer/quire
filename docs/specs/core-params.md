@@ -77,7 +77,7 @@ Status validateTable(Table);
 ```
 
 Checks: ids unique; keys unique and well-formed; `min < max` (Float/Int);
-`def` within range; Log with `min > 0`; Pow/Bipolar `k > 0`; Int ranges
+`def` within range; Log with `min > 0`; Pow/Bipolar finite `k > 0`; Int ranges
 integral; Enum has ≥ 2 choices with unique well-formed keys and integral
 `def`; Bool range exactly 0..1; unit is the canonical unit of its dimension
 (core-base rule); tags from the vocabulary or `stage:`/`macro`; readonly
@@ -172,8 +172,15 @@ std::string describeParam(const ParamSpec&, double physical); // "Cutoff 1.20 kH
 }
 ```
 
-`curve` is `"linear"`, `"log"`, `"pow:3"`, `"bipolar:2"`. Readonly params
-appear with `"flags": ["readonly"]` and no default.
+`curve` is `"linear"`, `"log"`, `"pow:<k>"`, or `"bipolar:<k>"`, with finite
+`k > 0`. Exponents use shortest round-trip text, except that the trimmed
+fixed-three-decimal spelling is retained when it already round-trips exactly
+(e.g. `"pow:3"`, `"bipolar:2"`). Readonly params appear with
+`"flags": ["readonly"]` and no default.
+
+`fromDescription` requires string elements in `choices` and `flags`.
+Invalid elements or malformed, nonpositive or non-finite curve exponents
+return `params.description` with a JSON Pointer path and a corrective hint.
 
 ## 7. Tests required
 

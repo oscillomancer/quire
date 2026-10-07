@@ -956,7 +956,10 @@ std::string summarize(const Report& r) {
         if (std::isfinite(r.loudness->lra)) o << " (LRA " << r.loudness->lra << " LU)";
         o << ", true peak " << r.loudness->truePeak << " dBTP. ";
     } else if (r.loudness) {
-        o << "Silent. ";
+        if (r.seconds < 0.4 && std::isfinite(r.loudness->samplePeak))
+            o << "Too short to measure loudness. ";
+        else
+            o << "Silent. ";
     }
     if (r.harmonic) {
         if (r.harmonic->pitched) {

@@ -82,7 +82,11 @@ keep their relative order (it is meaningful: last wins); sysex by tick, then
 original order. `readSmf` pairs note-on/note-off FIFO per (channel, pitch);
 note-on velocity 0 is a note-off with offVelocity 0; unterminated notes end at
 the last event tick; meta events other than tempo/meter/track name are counted
-in `skippedEvents`.
+in `skippedEvents` (end-of-track is not counted). Zero-tempo metas and
+malformed or unsupported time signatures are skipped without incrementing
+that count. Time signatures require at least four payload bytes, numerator
+1..64 and a power-of-two denominator 1..64. Valid meters are preserved
+without normalization (e.g. 6/8 stays 6/8).
 
 ---
 
@@ -227,7 +231,8 @@ number directly. Out-of-range pitches are errors.
   two below N: `e3` = triplet eighth (×2/3, 320 ticks), `q3` (640),
   `s5` = quintuplet sixteenth (×4/5, 192), `s6` (×4/6), `s7` (×4/7),
   `e9` (×8/9). Dots and tuplets do not combine.
-- Sums: `h+e`, `q.+s` (one event lasting the total).
+- Sums: `h+e`, `q.+s` (one event lasting the total). Every `+` must be
+  followed by a duration term; a trailing `+` is `notation.bad_duration`.
 - Exact ticks: `700t`. (The decompiler uses this when nothing symbolic is
   exact; people and agents rarely need it.) `0t` is valid for notes
   (zero-length notes occur in real MIDI) but not for rests.

@@ -546,3 +546,16 @@ TEST_CASE("profile weighted means stay finite with very large valid weights") {
     REQUIRE(result);
     CHECK(result->loss == doctest::Approx(2.5));
 }
+
+TEST_CASE("R20 short audible buffers are not summarized as silence") {
+    Audio audible = sine(440, 0.5, 0.1);
+    auto report = run(audible);
+    REQUIRE(report.loudness);
+    CHECK_FALSE(std::isfinite(report.loudness->integrated));
+    CHECK(summarize(report).find("Too short to measure loudness") != std::string::npos);
+    CHECK(summarize(report).find("Silent") == std::string::npos);
+    for (double seconds : {0.1, 1.0}) {
+        Audio silent = sine(440, 0, seconds);
+        CHECK(summarize(run(silent)).find("Silent") != std::string::npos);
+    }
+}

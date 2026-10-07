@@ -126,6 +126,59 @@ Status validateFields(const json::Value& args, std::initializer_list<std::string
     error.details = std::move(errors);
     return error;
 }
+Status validateBatch(const json::Value& args) {
+    std::vector<Error> errors;
+    auto closed = [&](const json::Value& object, const std::string& path,
+                      std::initializer_list<std::string_view> allowed) {
+        if (!object.isObject()) {
+            errors.emplace_back("schema.type", "expected object", path, "use an object");
+            return false;
+        }
+        for (const auto& member : object.asObject()) {
+            if (std::find(allowed.begin(), allowed.end(), member.key) != allowed.end()) continue;
+            const auto closest = closestMatch(member.key, {allowed.begin(), allowed.size()});
+            errors.emplace_back(
+                "schema.unknown_member", "unknown member", json::pointerJoin(path, member.key),
+                closest.empty() ? "remove this member" : "did you mean \"" + closest + "\"?");
+        }
+        return true;
+    };
+    auto field = [&](const json::Value& object, const std::string& path, std::string_view key,
+                     bool required, std::string_view type) {
+        const auto* value = object.find(key);
+        const auto memberPath = json::pointerJoin(path, key);
+        if (!value) {
+            if (required)
+                errors.emplace_back("schema.missing", "missing required field", memberPath,
+                                    "provide \"" + std::string(key) + "\"");
+        } else if ((type == "string" && !value->isString()) ||
+                   (type == "array" && !value->isArray()) ||
+                   (type == "object" && !value->isObject())) {
+            errors.emplace_back("schema.type", "expected " + std::string(type), memberPath,
+                                "use " + std::string(type));
+        }
+    };
+    if (closed(args, "", {"label", "steps"})) {
+        field(args, "", "label", false, "string");
+        field(args, "", "steps", true, "array");
+        const auto* steps = args.find("steps");
+        if (steps && steps->isArray()) {
+            for (std::size_t i = 0; i < steps->size(); ++i) {
+                const auto path = json::pointerJoin("/steps", std::to_string(i));
+                const auto& step = steps->at(i);
+                if (!closed(step, path, {"command", "args", "as"})) continue;
+                field(step, path, "command", true, "string");
+                field(step, path, "args", false, "object");
+                field(step, path, "as", false, "string");
+            }
+        }
+    }
+    if (errors.empty()) return {};
+    if (errors.size() == 1) return errors.front();
+    Error error("schema.invalid", "invalid arguments");
+    error.details = std::move(errors);
+    return error;
+}
 std::string pointerPrefix(std::string_view prefix, std::string_view path) {
     // Only JSON pointers nest; a text position ("1:43", notation) stays as it is.
     if (!path.empty() && path.front() != '/') return std::string(path);
@@ -331,24 +384,13 @@ Registry::Registry() {
     auto stepsSchema = typeSchema("array");
     stepsSchema["items"] = std::move(stepSchema);
     stepsSchema["maxItems"] = 256;
-    addMeta(
-        "batch", Kind::Edit, Exposure::McpTool, "Run commands atomically.",
-        objectSchema({{"label", string}, {"steps", stepsSchema}}, {"steps"}), anyObject,
-        [](const json::Value& args) -> Status {
-            if (!args.isObject())
-                return Error("schema.type", "expected object", "", "use an object");
-            auto* steps = args.find("steps");
-            if (!steps) return requiredField("steps");
-            if (!steps->isArray())
-                return Error("schema.type", "expected array", "/steps", "use an array of steps");
-            if (auto* label = args.find("label"); label && !label->isString())
-                return Error("schema.type", "expected string", "/label");
-            return {};
-        },
-        [](const json::Value&, Context&) -> Result<json::Value> {
-            return Error("command.internal", "batch must run through Dispatcher");
-        },
-        {"Empty batch", json::Value::object(), json::Value::object(), "empty"});
+    addMeta("batch", Kind::Edit, Exposure::McpTool, "Run commands atomically.",
+            objectSchema({{"label", string}, {"steps", stepsSchema}}, {"steps"}), anyObject,
+            validateBatch,
+            [](const json::Value&, Context&) -> Result<json::Value> {
+                return Error("command.internal", "batch must run through Dispatcher");
+            },
+            {"Empty batch", json::Value::object(), json::Value::object(), "empty"});
     addMeta(
         "job.status", Kind::Query, Exposure::McpExec, "Get a job's status.",
         objectSchema({{"job", string}}, {"job"}), anyObject,
@@ -721,9 +763,6 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
     for (std::size_t i = 0; i < steps.size(); ++i) {
         const auto& step = steps.at(i);
         auto path = json::pointerJoin("/steps", std::to_string(i));
-        if (!step.isObject() || !step.find("command") || !step.find("command")->isString())
-            return Error("command.invalid_args", "step needs a command string", path + "/command",
-                         "set command to a registered command name");
         auto parsed = parseCommand(step.find("command")->asString());
         if (!parsed) {
             auto error = parsed.error();
@@ -743,10 +782,6 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
             (info->kind == Kind::Action && !host_.actionTransactional(info->name)))
             return Error("batch.not_transactional", "step cannot run inside a transaction", path,
                          "remove this action or make it transaction-safe in the host");
-        if (auto* as = step.find("as"); as && !as->isString())
-            return Error("command.invalid_args", "step alias must be a string", path + "/as");
-        if (auto* stepArgs = step.find("args"); stepArgs && !stepArgs->isObject())
-            return Error("command.invalid_args", "step args must be an object", path + "/args");
     }
     auto label = stringField(args, "label");
     return transact(label, origin, [&]() -> Result<json::Value> {

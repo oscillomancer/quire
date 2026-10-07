@@ -462,3 +462,35 @@ TEST_CASE("savepoint capture refuses handlers and restore failure poisons caught
     REQUIRE(bus.execute({"toy.add", obj(R"({"value":1})"), testOrigin}));
     CHECK(host.toy.count == 1);  // poison is scoped to the failed transaction
 }
+
+TEST_CASE("R13 batch aggregates closed-object structural errors before execution") {
+    auto registry = makeRegistry();
+    FakeHost host;
+    Dispatcher dispatcher(registry, host);
+    auto result = call(dispatcher, "batch", obj(R"({"lable":3,"label":false,"steps":[
+        {"command":"toy.add","args":{"value":1},"arg":{},"as":7},
+        {"commmand":"toy.add","args":false},42]})"));
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "command.invalid_args");
+    REQUIRE(result.error().details.size() == 8);
+    bool labelHint = false, commandHint = false, argsHint = false;
+    for (const auto& error : result.error().details) {
+        CHECK_FALSE(error.hint.empty());
+        CHECK(error.path.starts_with("/args/"));
+        if (error.path == "/args/lable") labelHint = error.hint.find("label") != std::string::npos;
+        if (error.path == "/args/steps/1/commmand")
+            commandHint = error.hint.find("command") != std::string::npos;
+        if (error.path == "/args/steps/0/arg")
+            argsHint = error.hint.find("args") != std::string::npos;
+    }
+    CHECK(labelHint);
+    CHECK(commandHint);
+    CHECK(argsHint);
+    CHECK(host.begins == 0);
+    CHECK(host.toy.count == 0);
+    for (const auto input : {R"({"steps":[],"extra":1})",
+                             R"({"steps":[{"command":"toy.add","args":{"value":1},"extra":1}]})"}) {
+        CHECK_FALSE(call(dispatcher, "batch", obj(input)));
+    }
+    CHECK(host.toy.count == 0);
+}

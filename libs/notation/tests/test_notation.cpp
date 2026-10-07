@@ -69,6 +69,19 @@ TEST_CASE("notation decompiler validates event ranges and every used meter") {
     }
 }
 
+TEST_CASE("notation duration sums require a term after every plus") {
+    for (const auto duration : {"q+", "q+e+", "700t+"}) {
+        auto result = compile(std::string("voice a; 1: C4:") + duration + " r:*");
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "notation.bad_duration");
+        CHECK_FALSE(result.error().hint.empty());
+    }
+    auto valid = compile("voice a; 1: C4:q+e r:*");
+    REQUIRE(valid);
+    REQUIRE(valid->sequence.notes.size() == 1);
+    CHECK(valid->sequence.notes.front().length == 1440);
+}
+
 TEST_CASE("notation round trips the final supported bar boundary") {
     supple::midi::Sequence sequence;
     sequence.length = 100000LL * 3840;

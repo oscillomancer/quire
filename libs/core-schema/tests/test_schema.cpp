@@ -342,3 +342,31 @@ TEST_CASE("default type hint and quantity pattern") {
     CHECK(std::regex_match(std::string("1.2 kHz"), pattern));
     CHECK_FALSE(std::regex_match(std::string("2 ms"), pattern));
 }
+
+TEST_CASE("R3 integer constraints compare exactly with floating bounds") {
+    constexpr std::int64_t b = 9007199254740992LL;
+    const auto s = integer();
+    CHECK_FALSE(s.max(double(b)).decode(json::Value(static_cast<long long>(b + 1))));
+    CHECK_FALSE(s.min(double(-b)).decode(json::Value(static_cast<long long>(-b - 1))));
+    CHECK(s.exclusiveMin(double(b)).decode(json::Value(static_cast<long long>(b + 1))));
+    CHECK(s.exclusiveMax(double(-b)).decode(json::Value(static_cast<long long>(-b - 1))));
+    CHECK_FALSE(s.exclusiveMin(double(b)).decode(json::Value(static_cast<long long>(b))));
+    CHECK_FALSE(s.exclusiveMax(double(-b)).decode(json::Value(static_cast<long long>(-b))));
+    const auto hi = json::Value(static_cast<long long>(std::numeric_limits<std::int64_t>::max()));
+    const auto lo = json::Value(static_cast<long long>(std::numeric_limits<std::int64_t>::min()));
+    CHECK(s.exclusiveMax(std::ldexp(1.0, 63)).decode(hi));
+    CHECK_FALSE(s.min(std::ldexp(1.0, 63)).decode(hi));
+    CHECK(s.min(-std::ldexp(1.0, 63)).decode(lo));
+    CHECK_FALSE(s.exclusiveMin(-std::ldexp(1.0, 63)).decode(lo));
+    for (double bound : {-1.5, -0.5, 0.5, 1.5}) {
+        for (int n = -2; n <= 2; ++n) {
+            CHECK(bool(s.min(bound).decode(json::Value(n))) == (n >= bound));
+            CHECK(bool(s.max(bound).decode(json::Value(n))) == (n <= bound));
+            CHECK(bool(s.exclusiveMin(bound).decode(json::Value(n))) == (n > bound));
+            CHECK(bool(s.exclusiveMax(bound).decode(json::Value(n))) == (n < bound));
+        }
+    }
+    CHECK(integerOf<unsigned>().max(-0.5).decode(json::Value(0)).ok() == false);
+    CHECK(s.range(-1e100, 1e100).decode(hi));
+    CHECK(s.range(-1e100, 1e100).decode(lo));
+}

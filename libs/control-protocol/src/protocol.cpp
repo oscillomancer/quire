@@ -42,10 +42,6 @@ json::Value rpcError(const json::Value& id, int code, std::string message, Error
     return out;
 }
 bool validId(const json::Value& id) { return id.isString() || id.isInt() || id.isNull(); }
-bool setNonblocking(int fd) {
-    int flags = ::fcntl(fd, F_GETFL, 0);
-    return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-}
 std::string line(const json::Value& value) { return json::writeCompact(value) + "\n"; }
 }  // namespace
 
@@ -401,12 +397,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
             if (ready < 0 && errno == EINTR) continue;
             if (ready <= 0) continue;
             if (!(pfd.revents & POLLIN)) continue;
-            int fd = ::accept(listener, nullptr, nullptr);
+            int fd = ::accept4(listener, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (fd < 0) continue;
-            if (!setNonblocking(fd)) {
-                ::close(fd);
-                continue;
-            }
             std::vector<std::shared_ptr<Peer>> retired;
             {
                 std::lock_guard lock(peersMutex);

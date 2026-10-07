@@ -135,3 +135,38 @@ TEST_CASE("stopping: evaluations, cancellation, stagnation") {
     CHECK(mirror01(-0.25) == doctest::Approx(0.25));
     CHECK(mirror01(2.5) == doctest::Approx(0.5));
 }
+
+TEST_CASE("nonfinite losses stagnate without counting as improvements") {
+    Options o;
+    o.maxEvaluations = 10000;
+    o.maxSeconds = std::numeric_limits<double>::infinity();
+    const Outcome result = minimize(
+        [](const std::vector<Vec>& xs) {
+            return std::vector<double>(xs.size(), std::numeric_limits<double>::infinity());
+        },
+        Vec(3, 0.5), o);
+    CHECK(result.stopped == Stop::Stagnation);
+    CHECK(result.evaluations < o.maxEvaluations);
+    CHECK(std::isinf(result.bestLoss));
+}
+
+TEST_CASE("R15 singleton population is clamped to two deterministically") {
+    Options one = unbounded(40, -1);
+    one.lambda = 1;
+    one.seed = 123;
+    Options two = one;
+    two.lambda = 2;
+    Cmaes a({1.0, 2.0}, one), b({1.0, 2.0}, two);
+    REQUIRE(a.lambda() == 2);
+    for (int generation = 0; generation < 10; ++generation) {
+        const auto xs = a.ask();
+        CHECK(xs == b.ask());
+        std::vector<double> losses;
+        for (const auto& x : xs) losses.push_back(sphere(x));
+        a.tell(losses);
+        b.tell(losses);
+        CHECK(std::isfinite(a.sigma()));
+        CHECK(a.sigma() == b.sigma());
+        CHECK(a.mean() == b.mean());
+    }
+}

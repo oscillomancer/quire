@@ -24,7 +24,7 @@ std::string_view stopName(Stop s);
 
 struct Options {
     double sigma = 0.2;  // initial step size (normalized domain)
-    int lambda = 0;      // population; 0 = 4 + ⌊3 ln n⌋
+    int lambda = 0;      // population; 0 = 4 + ⌊3 ln n⌋; positive values clamp to at least 2
     std::uint64_t seed = 0;
     bool bounded = true;  // mirror candidates into [0, 1]
     int maxEvaluations = 300;

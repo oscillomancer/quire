@@ -538,7 +538,13 @@ std::string curveName(const Curve& c, Type type) {
         std::string s = fixed(c.k, 3);
         while (s.size() > 1 && s.back() == '0') s.pop_back();
         if (!s.empty() && s.back() == '.') s.pop_back();
-        return s;
+        double parsed = 0;
+        const auto old = std::from_chars(s.data(), s.data() + s.size(), parsed);
+        if (old.ec == std::errc{} && old.ptr == s.data() + s.size() && parsed == c.k) return s;
+        // General format without a precision emits the shortest round-trip text.
+        std::array<char, 64> text{};
+        const auto result = std::to_chars(text.data(), text.data() + text.size(), c.k);
+        return std::string(text.data(), result.ptr);
     };
     switch (c.kind) {
         case CurveKind::Linear:
@@ -653,7 +659,14 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
         if (!known) return Error("params.description", "unknown unit " + unit, "/" + out->key);
     }
     if (const json::Value* c = e.find("choices"); c && c->isArray()) {
-        for (std::size_t i = 0; i < c->size(); ++i) out->choiceKeys.push_back(c->at(i).asString());
+        for (std::size_t i = 0; i < c->size(); ++i) {
+            if (!c->at(i).isString())
+                return Error("params.description", "choice must be a string",
+                             json::pointerJoin(json::pointerJoin("", out->key), "choices") + "/" +
+                                 std::to_string(i),
+                             "use a string choice key");
+            out->choiceKeys.push_back(c->at(i).asString());
+        }
         for (const std::string& k : out->choiceKeys) out->choices.push_back({k, k});
         p.choices = out->choices;
         p.min = 0;
@@ -669,12 +682,21 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
         // "linear", "log", "pow:<k>", "bipolar:<k>"
         const auto colon = curve.find(':');
         const std::string kind = curve.substr(0, colon);
-        const double k = colon == std::string::npos ? 1.0 : std::atof(curve.c_str() + colon + 1);
+        double k = 1.0;
+        if (colon != std::string::npos) {
+            const char* begin = curve.data() + colon + 1;
+            const char* end = curve.data() + curve.size();
+            const auto parsed = std::from_chars(begin, end, k);
+            if (parsed.ec != std::errc{} || parsed.ptr != end || !std::isfinite(k) || k <= 0)
+                return Error("params.description", "curve exponent must be positive and finite",
+                             json::pointerJoin(json::pointerJoin("", out->key), "curve"),
+                             "use pow:<k> or bipolar:<k> with a positive finite exponent");
+        }
         p.curve.kind = kind == "log"       ? CurveKind::Log
                        : kind == "pow"     ? CurveKind::Pow
                        : kind == "bipolar" ? CurveKind::Bipolar
                                            : CurveKind::Linear;
-        p.curve.k = k > 0 ? k : 1.0;
+        p.curve.k = k;
     }
     p.key = out->key;
     p.name = out->name;
@@ -682,6 +704,11 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
     p.flags = 0;
     if (const json::Value* f = e.find("flags"); f && f->isArray())
         for (std::size_t i = 0; i < f->size(); ++i) {
+            if (!f->at(i).isString())
+                return Error("params.description", "flag must be a string",
+                             json::pointerJoin(json::pointerJoin("", out->key), "flags") + "/" +
+                                 std::to_string(i),
+                             "use a string flag name");
             const std::string flag = f->at(i).asString();
             p.flags |= flag == "automatable"   ? kAutomatable
                        : flag == "modulatable" ? kModulatable

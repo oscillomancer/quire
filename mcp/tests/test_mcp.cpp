@@ -197,6 +197,26 @@ TEST_CASE("proxy MCP forwards calls over the Unix control socket") {
     CHECK_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("a new MCP initialization replaces the previous agent identity") {
+    auto commands = registry();
+    Host host;
+    cmd::Dispatcher dispatcher(commands, host);
+    mcp::Server server(commands, dispatcher);
+    request(
+        server,
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"first"},"_meta":{"agent":"agent-1"}}})");
+    const char* add =
+        R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"counter_add","arguments":{"value":1}}})";
+    request(server, add);
+    CHECK(host.last.agent == "agent-1");
+    request(
+        server,
+        R"({"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"second"}}})");
+    request(server, add);
+    CHECK(host.last.client == "second");
+    CHECK(host.last.agent.empty());
+}
+
 TEST_CASE("the proxy reconnects after the app restarts") {
     auto commands = registry();
     Host host;
@@ -279,4 +299,21 @@ TEST_CASE("the stdio loop runs the service tick while it waits for a request") {
     CHECK(text.find("\"protocolVersion\"") != std::string::npos);
     CHECK(text.find("\"id\":1") != std::string::npos);
     ::close(fds[0]);
+}
+
+TEST_CASE("R16 malformed envelopes without ids return Invalid Request") {
+    auto commands = registry();
+    Host host;
+    cmd::Dispatcher dispatcher(commands, host);
+    mcp::Server server(commands, dispatcher);
+    for (const auto input :
+         {R"({})", R"({"method":"ping"})", R"({"jsonrpc":"1.0","method":"ping"})",
+          R"({"jsonrpc":"2.0","method":3})",
+          R"({"jsonrpc":"2.0","method":"ping","params":false})"}) {
+        auto reply = server.handle(parse(input));
+        REQUIRE(reply);
+        CHECK(reply->find("id")->isNull());
+        CHECK(reply->find("error")->find("code")->asInt() == -32600);
+    }
+    CHECK_FALSE(server.handle(parse(R"({"jsonrpc":"2.0","method":"notifications/initialized"})")));
 }

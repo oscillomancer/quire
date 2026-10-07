@@ -112,3 +112,34 @@ TEST_CASE("SMF writing enforces the encoded byte budget for payloads") {
     REQUIRE_FALSE(encoded);
     CHECK(encoded.error().code == "midi.smf_too_large");
 }
+
+TEST_CASE("R14 malformed time signatures are skipped and valid meters remain exact") {
+    for (const std::vector<std::uint8_t>& payload : {std::vector<std::uint8_t>{},
+                                                     {3},
+                                                     {3, 2},
+                                                     {3, 2, 24},
+                                                     {0, 2, 24, 8},
+                                                     {4, 7, 24, 8},
+                                                     {4, 31, 24, 8},
+                                                     {4, 255, 24, 8},
+                                                     {65, 2, 24, 8},
+                                                     {6, 3, 24, 8},
+                                                     {1, 0, 24, 8},
+                                                     {64, 6, 24, 8}}) {
+        std::vector<std::uint8_t> smf{'M',  'T', 'h', 'd', 0,   0, 0, 6, 0, 0, 0,    1,   3,
+                                      0xc0, 'M', 'T', 'r', 'k', 0, 0, 0, 0, 0, 0xff, 0x58};
+        smf.push_back(static_cast<std::uint8_t>(payload.size()));
+        smf.insert(smf.end(), payload.begin(), payload.end());
+        smf.insert(smf.end(), {0, 0xff, 0x2f, 0});
+        smf[21] = static_cast<std::uint8_t>(smf.size() - 22);
+        SmfInfo info;
+        auto result = readSmf(smf, &info);
+        REQUIRE(result);
+        if (payload.size() >= 4 && payload[0] >= 1 && payload[0] <= 64 && payload[1] <= 6) {
+            REQUIRE(info.meters.size() == 1);
+            CHECK(info.meters[0].second == Meter{payload[0], 1 << payload[1]});
+            CHECK(writeSmf(*result, info.meters, info.tempos));
+        } else
+            CHECK(info.meters.empty());
+    }
+}

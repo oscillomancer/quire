@@ -210,6 +210,7 @@ inline std::optional<std::int64_t> duration(std::string_view token, int ppq, boo
         total += numerator / denominator;
         if (split == std::string_view::npos) break;
         token.remove_prefix(split + 1);
+        if (token.empty()) return std::nullopt;
     }
     return total;
 }

@@ -19,7 +19,7 @@ def invocations(name, args):
     if name == "batch":
         return [entry for step in args.get("steps", [])
                 for entry in invocations(step.get("command", ""), step.get("args", {}))]
-    return [(name.replace("_", "."), args)]
+    return [(name.split("@", 1)[0].replace("_", "."), args)]
 
 
 class Recorder:

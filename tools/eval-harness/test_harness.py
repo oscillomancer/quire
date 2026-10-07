@@ -98,6 +98,17 @@ class Scoring(unittest.TestCase):
         self.assertFalse(result["notation_attempts"][-1]["compiled"])
         self.assertEqual(invocations("exec", {"command": "param.set", "args": {}}), [("param.set", {})])
 
+    def test_explicit_command_versions_count_as_notation_attempts(self):
+        entries = [{"name": "exec", "arguments": {"command": "render@1", "args": {"notation": "good"}},
+                    "response": {"result": {"structuredContent": {"render": "rd_1"}}}},
+                   {"name": "batch", "arguments": {"steps": [
+                       {"command": "render@1", "args": {"notation": "bad"}}]},
+                    "response": {"result": {"isError": True, "structuredContent": {"code": "notation.bar"}}}}]
+        attempts = transcript_metrics(entries)["notation_attempts"]
+        self.assertEqual([a["notation"] for a in attempts], ["good", "bad"])
+        self.assertTrue(attempts[0]["compiled"])
+        self.assertFalse(attempts[1]["compiled"])
+
 
 class Isolation(unittest.TestCase):
     def test_dedicated_profile_without_default_fallback(self):

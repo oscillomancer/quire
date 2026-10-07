@@ -123,8 +123,8 @@ as ordered commands; the target is no synchronous main-thread task over
 2 ms (`docs/benchmarks/gui.md`).
 
 **Event delivery to clients.** Every event carries a per-topic sequence
-number. A subscriber whose queue overflows receives one `event.dropped
-{topic, from_seq, to_seq}` and re-synchronises with a snapshot query — the
+number. A subscriber whose queue overflows receives one `event.dropped`
+notification with a count and re-synchronises with a snapshot query — the
 only case where a client reads state instead of receiving it.
 
 ## 4. Session model, undo and branches (ADR-0008)

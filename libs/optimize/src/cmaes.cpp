@@ -89,7 +89,8 @@ Cmaes::Cmaes(Vec mean, Options options)
     : n_(static_cast<int>(mean.size())), opt_(options), rng_(options.seed), mean_(std::move(mean)) {
     assert(n_ >= 1);
     const double n = n_;
-    lambda_ = opt_.lambda > 0 ? opt_.lambda : 4 + static_cast<int>(std::floor(3.0 * std::log(n)));
+    lambda_ = opt_.lambda > 0 ? std::max(2, opt_.lambda)
+                              : 4 + static_cast<int>(std::floor(3.0 * std::log(n)));
     mu_ = lambda_ / 2;
     weights_.resize(static_cast<std::size_t>(mu_));
     for (int i = 0; i < mu_; ++i)
@@ -203,8 +204,9 @@ void Cmaes::tell(std::span<const double> losses) {
     // Convergence bookkeeping.
     const double best = key(order[0]);
     // (The first finite loss always counts: tolerance × ∞ would be NaN.)
-    if (!std::isfinite(bestSeen_) ||
-        best < bestSeen_ - opt_.stagnationTolerance * std::max(1e-12, std::fabs(bestSeen_))) {
+    if (std::isfinite(best) &&
+        (!std::isfinite(bestSeen_) ||
+         best < bestSeen_ - opt_.stagnationTolerance * std::max(1e-12, std::fabs(bestSeen_)))) {
         bestSeen_ = best;
         sinceImprovement_ = 0;
     } else {

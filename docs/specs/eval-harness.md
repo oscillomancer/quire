@@ -96,7 +96,10 @@ meet their own constraints. The final answer is the **last submitted notation**,
 not prose or the last successful submission. First-attempt failure remains a
 failed dimension after repair. Requests hidden inside arbitrary Lua cannot be
 counted reliably, so notation submission must use `render` or an explicit
-`batch`/`exec` containing render. Unknown compilation status is not a success.
+`batch`/`exec` containing render. Explicitly versioned calls such as
+`render@1` count as render attempts and submissions in the same order as
+unversioned calls, including failures. Unknown compilation status is not a
+success.
 
 ## 2. Runners and isolation
 

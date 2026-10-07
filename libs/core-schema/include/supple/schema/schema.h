@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <any>
 #include <cmath>
+#include <compare>
 #include <functional>
 #include <limits>
 #include <map>
@@ -352,17 +353,38 @@ class Schema {
     std::optional<std::string> pattern_, patternLabel_, keyPattern_, keyLabel_;
     std::vector<std::function<void(const T&, CheckCtx&)>> checks_;
 
+    // Compare integral values without rounding them to double. The power-of-two
+    // limits guard the cast, including the unrepresentable positive int64 limit.
+    static std::partial_ordering compareBound(T value, double bound) {
+        if constexpr (std::is_integral_v<T>) {
+            if (std::isnan(bound)) return std::partial_ordering::unordered;
+            const double upper = std::ldexp(1.0, std::numeric_limits<T>::digits);
+            const double lower = std::is_signed_v<T> ? -upper : 0.0;
+            if (bound >= upper) return std::partial_ordering::less;
+            if (bound < lower) return std::partial_ordering::greater;
+            const T whole = static_cast<T>(bound);
+            if (value < whole) return std::partial_ordering::less;
+            if (value > whole) return std::partial_ordering::greater;
+            return std::trunc(bound) <=> bound;
+        } else {
+            using Common = std::common_type_t<T, double>;
+            return static_cast<Common>(value) <=> static_cast<Common>(bound);
+        }
+    }
+
   public:
     bool constraints(const json::Value& v, T& out, DecodeCtx& c, const std::string& path) const {
         if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
-            double n = static_cast<double>(out);
-            if (!std::isfinite(n)) {
-                c.error("schema.not_finite", "number must be finite", path);
-                return false;
+            if constexpr (std::is_floating_point_v<T>) {
+                if (!std::isfinite(out)) {
+                    c.error("schema.not_finite", "number must be finite", path);
+                    return false;
+                }
             }
-            if ((minimum_ && n < *minimum_) || (maximum_ && n > *maximum_) ||
-                (exclusiveMinimum_ && n <= *exclusiveMinimum_) ||
-                (exclusiveMaximum_ && n >= *exclusiveMaximum_)) {
+            if ((minimum_ && compareBound(out, *minimum_) < 0) ||
+                (maximum_ && compareBound(out, *maximum_) > 0) ||
+                (exclusiveMinimum_ && compareBound(out, *exclusiveMinimum_) <= 0) ||
+                (exclusiveMaximum_ && compareBound(out, *exclusiveMaximum_) >= 0)) {
                 std::string hint = "valid range: " +
                                    (minimum_            ? std::to_string(*minimum_)
                                     : exclusiveMinimum_ ? std::to_string(*exclusiveMinimum_)

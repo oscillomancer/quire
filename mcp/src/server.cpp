@@ -200,11 +200,12 @@ std::optional<json::Value> Server::handle(const json::Value& request) {
     auto* id = request.find("id");
     auto* version = request.find("jsonrpc");
     auto* method = request.find("method");
-    if (!id) return std::nullopt;
-    if (!version || !version->isString() || version->asString() != "2.0" || !method ||
-        !method->isString() || !(id->isString() || id->isInt() || id->isNull()))
-        return error(*id, -32600, "Invalid Request");
     auto* params = request.find("params");
+    if (!version || !version->isString() || version->asString() != "2.0" || !method ||
+        !method->isString() || (id && !(id->isString() || id->isInt() || id->isNull())) ||
+        (params && !(params->isObject() || params->isArray())))
+        return error(id ? *id : json::Value(nullptr), -32600, "Invalid Request");
+    if (!id) return std::nullopt;
     if (params && !params->isObject()) return error(*id, -32602, "Invalid params");
     auto args = params ? *params : json::Value::object();
     auto name = method->asString();
@@ -214,7 +215,8 @@ std::optional<json::Value> Server::handle(const json::Value& request) {
             return error(*id, -32602, "Missing protocolVersion");
         auto* clientInfo = args.find("clientInfo");
         origin_.client = clientInfo ? stringField(*clientInfo, "name") : std::string{};
-        if (auto* meta = args.find("_meta")) origin_.agent = stringField(*meta, "agent");
+        auto* meta = args.find("_meta");
+        origin_.agent = meta ? stringField(*meta, "agent") : std::string{};
         auto versionName = requested->asString();
         if (versionName != "2025-06-18" && versionName != "2025-11-25") versionName = "2025-11-25";
         if (proxyClient_) {

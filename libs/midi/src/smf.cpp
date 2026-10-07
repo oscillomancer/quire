@@ -170,8 +170,11 @@ Result<Sequence> readSmf(std::span<const std::uint8_t> bytes, SmfInfo* info,
                     const std::uint32_t micros = (std::uint32_t(payload[0]) << 16) |
                                                  (std::uint32_t(payload[1]) << 8) | payload[2];
                     if (micros != 0) metadata.tempos.emplace_back(tick, 60000000.0 / micros);
-                } else if (type == 0x58 && n >= 2 && payload[1] < 31) {
-                    metadata.meters.emplace_back(tick, Meter{payload[0], 1 << payload[1]});
+                } else if (type == 0x58) {
+                    // Tolerate malformed or unsupported metadata, as for zero tempo.
+                    // Keep valid meters verbatim: 6/8 must not become 3/4.
+                    if (n >= 4 && payload[0] >= 1 && payload[0] <= 64 && payload[1] <= 6)
+                        metadata.meters.emplace_back(tick, Meter{payload[0], 1 << payload[1]});
                 } else if (type == 0x03) {
                     metadata.trackNames.emplace_back(reinterpret_cast<const char*>(payload.data()),
                                                      payload.size());

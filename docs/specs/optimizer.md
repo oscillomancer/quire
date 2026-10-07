@@ -21,7 +21,8 @@ loss is good at exactly that.
   cumulation and damping constants as in the tutorial's Table 1), with
   active covariance update off by default (option), and eigen decomposition
   of C via a small Jacobi solver (n ≤ 64 here) every ⌈λ / (c1 + cμ) / n / 10⌉
-  generations.
+  generations. In `Options`, nonpositive `lambda` selects the default;
+  positive values are clamped to a minimum population of 2.
 - **Search space**: every parameter is mapped to its **normalized** domain
   [0, 1] (core-params curves, ADR-0010), so a log-frequency and a linear
   percentage are equally easy to search. Initial mean = current values;
@@ -38,7 +39,8 @@ loss is good at exactly that.
 - **Stopping**: evaluation budget (default 300), wall-clock budget (default
   60 s), target loss reached, stagnation (no improvement > 1e-4 relative in
   best loss over 10 + ⌈30 n / λ⌉ generations), σ collapse (σ·max(√diag C) <
-  1e-4), cancellation.
+  1e-4), cancellation. Non-finite losses rank last and do not reset the
+  stagnation counter; the first finite best loss counts as an improvement.
 - API: `class Cmaes { Cmaes(n, mean, sigma, seed, options); std::vector<Vec>
   ask(); void tell(std::span<const double> losses); bool done() const;
   Result best() const; }` plus a driver `minimize(f, x0, options, onProgress)`

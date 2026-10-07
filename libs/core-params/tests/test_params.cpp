@@ -467,3 +467,48 @@ TEST_CASE("parameter curve exponents must be finite") {
     REQUIRE_FALSE(result);
     CHECK(result.error().code == "params.table.curve_k");
 }
+
+TEST_CASE("parameter descriptions reject non-string choices and flags") {
+    for (const auto& [text, path] :
+         {std::pair{R"({"id":1,"type":"enum","choices":[1,2]})", "/x/choices/0"},
+          {R"({"id":1,"flags":[false]})", "/x/flags/0"}}) {
+        auto value = json::parse(text);
+        REQUIRE(value);
+        auto result = fromDescription("x", *value);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "params.description");
+        CHECK(result.error().path == path);
+        CHECK_FALSE(result.error().hint.empty());
+    }
+}
+
+TEST_CASE("R4 curve descriptions retain exact exponents") {
+    for (auto kind : {CurveKind::Pow, CurveKind::Bipolar}) {
+        for (double k :
+             {0.0001, 1.2345678901234567, 3.0, 1e-100, 1e100,
+              std::numeric_limits<double>::denorm_min(), std::numeric_limits<double>::max()}) {
+            ParamSpec p = P("env.attack");
+            p.curve = {kind, k};
+            const auto description = describeParamJson(p);
+            const auto back = fromDescription(p.key, description);
+            REQUIRE(back);
+            CHECK((*back)->spec.curve.k == k);
+            CHECK(toNormalized((*back)->spec, p.min + (p.max - p.min) * 0.5) ==
+                  toNormalized(p, p.min + (p.max - p.min) * 0.5));
+        }
+    }
+    CHECK(describeParamJson(P("env.attack")).find("curve")->asString() == "pow:3");
+    CHECK(describeParamJson(P("osc.fine")).find("curve")->asString() == "bipolar:2");
+}
+TEST_CASE("R4 curve descriptions reject invalid exponents") {
+    for (const auto text :
+         {"pow:0", "pow:-2", "pow:nan", "bipolar:inf", "pow:1e999", "pow:", "pow:2x"}) {
+        auto description = describeParamJson(P("env.attack"));
+        description["curve"] = text;
+        auto back = fromDescription("env/attack", description);
+        REQUIRE_FALSE(back);
+        CHECK(back.error().code == "params.description");
+        CHECK(back.error().path == "/env~1attack/curve");
+        CHECK_FALSE(back.error().hint.empty());
+    }
+}

@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <supple/product.h>
@@ -301,6 +302,20 @@ TEST_CASE("socket JSON-RPC handshake, dispatch, errors, events and permissions")
     CHECK((info.st_mode & 0777) == 0600);
     rpc::Client client;
     REQUIRE(client.connect(path, "test-client", "agent-1"));
+    // Both the listener and the accepted connection must close on exec:
+    // plugin bridge/scanner children must not keep the control socket alive.
+    int serverSockets = 0;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+        const int descriptor = std::stoi(entry.path().filename().string());
+        sockaddr_un address{};
+        socklen_t size = sizeof(address);
+        if (::getsockname(descriptor, reinterpret_cast<sockaddr*>(&address), &size) == 0 &&
+            address.sun_family == AF_UNIX && address.sun_path == path.string()) {
+            ++serverSockets;
+            CHECK((::fcntl(descriptor, F_GETFD) & FD_CLOEXEC) != 0);
+        }
+    }
+    CHECK(serverSockets == 2);
     auto added = client.call("counter.add", parse(R"({"value":3})"));
     REQUIRE(added);
     CHECK(added->find("count")->asInt() == 3);

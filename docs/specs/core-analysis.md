@@ -272,6 +272,10 @@ Full adds time series (M/S at 10 Hz, descriptor frames decimated to ≤ 200
 points, onset times, f0 track). A Summary report of a typical 4 s stereo
 render must be ≤ 400 tokens (≈ 1600 characters of compact JSON) — test it.
 
+When integrated loudness is unavailable, `summarize` says "Too short to
+measure loudness" for buffers shorter than 400 ms with a finite sample peak.
+Silent buffers still say "Silent".
+
 ## 8. Rounding
 
 Report values are rounded for readability and exact reproducibility: LUFS,
@@ -286,14 +290,21 @@ values.
 **core-dsp** (initial scope; it grew with the plugins): `Biquad` (TDF-II,
 double, with RBJ-cookbook designs and bilinear-from-analog helpers),
 `PolyphaseUpsampler` (for true peak and oversampling), windows (Hann,
-Blackman-Harris, Kaiser), an `Fft` wrapper over pocketfft (real forward,
-cached plans), denormal guard (FTZ/DAZ scope), `OnePole` smoother. All
-RT-safe after construction/prepare.
+Blackman-Harris, Kaiser), `Fft`, denormal guard (FTZ/DAZ scope), `OnePole`
+smoother. Filter, upsampler and smoother processing and the denormal guard
+are RT-safe after setup. `Fft::forward` and `inverse` use pocketfft and
+allocate scratch; they and arbitrary-rate `resample` are offline APIs.
+`Fft::forwardRt` is allocation-free for power-of-two sizes after `prepare`.
 
 **audio-file:** `Result<AudioData> readAudio(path)` (WAV all PCM/float
 formats via dr_wav, FLAC via dr_flac, MP3 via dr_mp3) → planar float +
 sample rate + channel count; `Status writeWav(path, data, format)` (16/24-bit
 PCM with TPDF dither — seeded — or 32-bit float). Round-trip tests.
+`inspect(path)` reads container metadata without decoding PCM. PCM and
+IEEE-float WAV headers, including those EXTENSIBLE subformats, must have
+`blockAlign` equal to channels times bytes per sample (bit depth rounded up
+to whole bytes). FLAC inspection requires a complete, exactly 34-byte
+STREAMINFO with a positive sample rate. Violations return `audio.format`.
 
 ## 10. Tests and docs
 
@@ -324,9 +335,10 @@ simple synthesis code) committed to `docs/specs/examples/analysis/`.
   the measured peak ripple over 100 Hz–8 kHz is 0.0061 dB and the 18 kHz
   output is −123.3 dB. At 192 → 24 kHz, the 8 kHz amplitude error is
   +0.0001 dB and the 40 kHz output is −132.3 dB. Tests exclude 100 edge samples.
-- `Fft::forward` delegates to pocketfft for arbitrary sizes and is for offline
-  use because pocketfft allocates transform scratch per call. `Fft::forwardRt`
-  uses a prepared radix-2 plan and preallocated scratch for RT processing;
+- `Fft::forward` and `inverse` delegate to pocketfft for arbitrary sizes and
+  are offline APIs because pocketfft allocates transform scratch per call.
+  `Fft::forwardRt` uses a prepared radix-2 plan and preallocated scratch for
+  RT processing;
   spectral analysis uses power-of-two sizes.
 
 ## Implementation notes (2026-09-26, descriptors and reports)

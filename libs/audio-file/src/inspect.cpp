@@ -103,6 +103,11 @@ Result<FileInfo> inspectWav(std::ifstream& in, std::span<const std::uint8_t> hea
         if (riff.need != 0) return Error("audio.format", "the WAV header is unexpectedly large");
     }
     if (!riff.haveFmt) return Error("audio.format", "the WAV file has no fmt chunk");
+    if (riff.formatTag == 1 || riff.formatTag == 3) {
+        const auto expected = std::uint32_t(riff.channels) * ((riff.bitsPerSample + 7) / 8);
+        if (riff.blockAlign != expected)
+            return Error("audio.format", "WAV block alignment does not match its sample format");
+    }
     const std::uint32_t align = riff.blockAlign != 0
                                     ? riff.blockAlign
                                     : std::uint32_t(riff.channels) * ((riff.bitsPerSample + 7) / 8);
@@ -138,12 +143,15 @@ Result<FileInfo> inspectFlac(std::span<const std::uint8_t> head) {
                                    (std::uint32_t(head[at + 2]) << 8) | std::uint32_t(head[at + 3]);
         at += 4;
         if (type == 0) {  // STREAMINFO: 20-bit rate, 3-bit channels, 36-bit frames
-            if (at + 34 > head.size()) return Error("audio.format", "the STREAMINFO is short");
+            if (size != 34 || at + size > head.size())
+                return Error("audio.format", "the STREAMINFO must contain exactly 34 bytes");
             const std::uint8_t* p = head.data() + at;
             FileInfo info;
             info.container = Container::Flac;
             info.sampleRate = double((std::uint32_t(p[10]) << 12) | (std::uint32_t(p[11]) << 4) |
                                      (std::uint32_t(p[12]) >> 4));
+            if (info.sampleRate == 0)
+                return Error("audio.format", "the FLAC sample rate must be positive");
             info.channels = static_cast<int>((p[12] >> 1) & 0x07) + 1;
             info.frames = static_cast<std::int64_t>(
                 (std::uint64_t(p[13] & 0x0f) << 32) | (std::uint64_t(p[14]) << 24) |
