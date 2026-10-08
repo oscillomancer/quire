@@ -96,6 +96,10 @@ Three facts about the target workstation shaped the choice:
   warning when the callback itself is real-time.
 - An offline render that runs while the engine plays shares bridge
   processes' policy; its bridge threads still run only while it waits.
+- A bridge audio thread that cannot take the policy stays at normal priority
+  silently (known limit): there is no reporting path back to the host. The
+  bridge inherits the host's limits, so it needs an outside change to the
+  bridge process to happen; a header read-back could report it later.
 
 ## Alternatives considered
 

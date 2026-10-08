@@ -110,8 +110,13 @@ Engine and hosting:
 - Real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
   the renderer and pool run at normal priority (with a warning) and compete
-  with desktop load. A bridge audio thread that cannot take the policy stays
-  normal silently.
+  with desktop load.
+- A bridged plug-in's audio thread that cannot take the engine's background
+  policy stays at normal priority with no warning or status: nothing reports
+  it to the host. The bridge inherits the host's limits, so this needs a
+  limit or policy change made to the bridge process from outside; such a
+  thread's plug-in can then fall behind under load like an unelevated
+  renderer.
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.
