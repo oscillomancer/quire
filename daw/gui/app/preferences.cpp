@@ -140,8 +140,8 @@ void PreferencesDialog::open() {
     if (root_.popupOpen()) root_.closePopups();
     auto form = std::make_unique<ui::Node>("prefs");
     form->layout.dir = ui::Layout::Dir::Column;
-    form->layout.width = ui::SizeRule::fixed(800);
-    form->layout.height = ui::SizeRule::fixed(570);
+    form->layout.width = ui::SizeRule::fixed(640);
+    form->layout.height = ui::SizeRule::content();
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 6;
     auto& header = form->emplace<ui::Node>("prefs.header");
@@ -213,18 +213,15 @@ void PreferencesDialog::open() {
                              "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
 
-    auto& memory = form->emplace<ui::Node>("prefs.memory");
-    memory.layout.dir = ui::Layout::Dir::Row;
-    memory.layout.height = ui::SizeRule::fixed(26);
-    memory.emplace<ui::Label>("prefs.memory.label", "Lock process memory (mlockall)").layout.width =
-        ui::SizeRule::fraction();
+    auto& memory = row(*form, "prefs.memory", "Lock process memory (mlockall)");
     memory_ = &memory.emplace<ui::Button>("prefs.memory.set", "Off", [this] {
         if (auto result = setMemoryLock(!prefs_.lockMemory); !result && onError)
             onError("preferences: " + result.error().toString());
     });
-    for (const auto& text :
-         {"Uses RAM; large sample libraries or stack growth can fail.",
-          "Host process only; disabling or stopping also unlocks plug-in locks."}) {
+    memory_->layout.width = ui::SizeRule::fraction();
+    memory_->layout.height = ui::SizeRule::fixed(26);
+    for (const auto& text : {"Uses RAM; large sample libraries or stack growth can fail.",
+                             "Host process only; turning it off also unlocks plug-in locks."}) {
         auto& label = form->emplace<ui::Label>(
             "prefs.memory.caution." + std::to_string(form->children().size()), text, ui::Font::Ui,
             "small", "ink-quiet");
@@ -238,21 +235,17 @@ void PreferencesDialog::open() {
         memoryNote_[i] = &label;
     }
 
-    auto& latency = form->emplace<ui::Node>("prefs.latency");
-    latency.layout.dir = ui::Layout::Dir::Row;
-    latency.layout.height = ui::SizeRule::fixed(26);
-    latency
-        .emplace<ui::Label>("prefs.latency.label",
-                            "Keep CPUs out of deep idle while the engine runs")
-        .layout.width = ui::SizeRule::fraction();
+    auto& latency = row(*form, "prefs.latency", "Keep CPUs out of deep idle");
     latency_ = &latency.emplace<ui::Button>("prefs.latency.set", "Off", [this] {
         if (auto result = setPreventDeepIdle(!prefs_.preventDeepIdle); !result && onError)
             onError("preferences: " + result.error().toString());
     });
+    latency_->layout.width = ui::SizeRule::fraction();
+    latency_->layout.height = ui::SizeRule::fixed(26);
     form->emplace<ui::Label>(
             "prefs.latency.caution",
-            "Affects system idle while held; may increase power, heat and fan noise.", ui::Font::Ui,
-            "small", "ink-quiet")
+            "While the engine runs, affects system idle; may increase power, heat and fan noise.",
+            ui::Font::Ui, "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
     for (std::size_t i = 0; i < latencyNote_.size(); ++i) {
         auto& label = form->emplace<ui::Label>("prefs.latency.note." + std::to_string(i), "",
@@ -284,14 +277,19 @@ void protectionNote(const std::array<ui::Label*, 4>& labels,
     if (!labels[0]) return;
     std::string text = state.error       ? state.error->message + "; " + state.error->hint
                        : state.active    ? activeText
-                       : state.requested ? "Applies when engine starts"
-                                         : "Off";
+                       : state.requested ? "Applies when the engine starts"
+                                         : "";
     // Labels are single-line; split the short diagnostic into readable lines.
     for (auto* label : labels) {
         std::size_t end = text.size();
-        if (end > 100) {
-            end = text.rfind(' ', 100);
-            if (end == std::string::npos || end == 0) end = 100;
+        if (end > 80) {
+            end = text.rfind(' ', 80);
+            if (end == std::string::npos || end == 0) end = 80;
+        }
+        const bool visible = !text.empty();
+        if (label->visible != visible) {
+            label->visible = visible;
+            label->relayout();
         }
         label->setText(text.substr(0, end));
         text.erase(0, end);
@@ -304,7 +302,7 @@ void PreferencesDialog::refresh() {
     if (latency_) latency_->setText(prefs_.preventDeepIdle ? "On" : "Off");
     protectionNote(latencyNote_, app_.cpuIdleLatencyStatus(), "Requested: 20 µs");
     if (memory_) memory_->setText(prefs_.lockMemory ? "On" : "Off");
-    protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked (host process only)");
+    protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked");
     if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
     if (monitor_) monitor_->setText(monitorLabel(prefs_.defaultMonitor));
     if (zoom_) zoom_->setText(zoomLabel(map_.behaviour("wheel.zoom", 0)));

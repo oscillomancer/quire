@@ -537,20 +537,26 @@ leave the head version unchanged.
   immediately when toggled while running. A failed save preserves the previous
   choice, following the existing audio-thread setter. A failed OS application
   keeps the saved/requested choice On with a failed effective note and errno
-  plus a corrective hint. The note distinguishes Off, pending and Locked
-  (host process only), refreshed on opening/toggling and the existing GUI
-  model-service tick. Cautions explain RAM pressure, sample-library/stack
-  failure, bridge exclusion and that disabling/stopping also drops plug-in
-  locks (engine.md, Optional host-process controls). Canonical 1.2 saves
+  plus a corrective hint. The row uses the same small grey left-column label
+  and wide right-column On/Off button as the other preferences. Its two short
+  caution lines explain RAM pressure, sample-library/stack failure, host-only
+  scope and that turning it off also drops plug-in locks (engine.md, Optional
+  host-process controls). The status note appears only for pending intent
+  ("Applies when the engine starts"), effective locking ("Locked") or failure;
+  Off has no duplicate note or reserved space. Notes refresh on opening/toggling
+  and the existing GUI model-service tick; the dialog height follows visible
+  content. Canonical 1.2 saves
   preserve existing monitoring/thread values; no project format changes.
-  **Keep CPUs out of deep idle while the engine runs** is separately off by
+  **Keep CPUs out of deep idle** is separately off by
   default, persisted as boolean `prevent_deep_idle` in the same canonical
   1.2 file. Missing fields (including in 1.0/1.1 files) mean false; invalid
   types report `preferences.prevent_deep_idle` at `/prevent_deep_idle` with
   "use true or false". It uses the same save/intent/effective-state pattern
   as memory locking. The active note says "Requested: 20 µs"; failures show
-  errno and a corrective hint. A caution says the request affects system
-  idle while held and may increase power, heat and fan noise. Disable or
+  errno and a corrective hint; Off has no status note. This row uses the same
+  label/button columns as the others. Its single small caution line says the
+  request affects system idle while the engine runs and may increase power,
+  heat and fan noise. Disable or
   engine stop releases only the owned request; transport stop retains it.
   Notes refresh through the existing GUI service flow. No preference test
   opens the actual latency device for writing.
