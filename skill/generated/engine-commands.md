@@ -1028,6 +1028,82 @@ Kind: `action`. Exposure: `mcp-tool`.
     "live_helpers": {
       "type": "integer"
     },
+    "scheduling": {
+      "type": "object",
+      "title": "engine_scheduling",
+      "properties": {
+        "callback": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "live": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "renderer": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "background": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["callback", "live", "renderer", "background"],
+      "additionalProperties": false
+    },
     "warnings": {
       "type": "array",
       "items": {
@@ -1151,6 +1227,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "anticipative",
     "anticipation_misses",
     "live_helpers",
+    "scheduling",
     "warnings",
     "memory_lock",
     "cpu_idle_latency",
@@ -1201,6 +1278,18 @@ Result:
   "anticipative": true,
   "anticipation_misses": 0,
   "live_helpers": "<any>",
+  "scheduling": {
+    "callback": {
+      "policy": "normal",
+      "priority": 0
+    },
+    "live": "<any>",
+    "renderer": {
+      "policy": "normal",
+      "priority": 0
+    },
+    "background": "<any>"
+  },
   "warnings": [],
   "memory_lock": {
     "requested": false,
@@ -1226,7 +1315,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity; warnings includes scheduling fallback and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -1284,6 +1373,82 @@ Kind: `query`. Exposure: `mcp-tool`.
     "live_helpers": {
       "type": "integer"
     },
+    "scheduling": {
+      "type": "object",
+      "title": "engine_scheduling",
+      "properties": {
+        "callback": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "live": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "renderer": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        },
+        "background": {
+          "type": "object",
+          "title": "thread_class",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["none", "normal", "fifo", "rr"]
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 99.0
+            }
+          },
+          "required": ["policy", "priority"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["callback", "live", "renderer", "background"],
+      "additionalProperties": false
+    },
     "warnings": {
       "type": "array",
       "items": {
@@ -1407,6 +1572,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "anticipative",
     "anticipation_misses",
     "live_helpers",
+    "scheduling",
     "warnings",
     "memory_lock",
     "cpu_idle_latency",
@@ -1448,6 +1614,24 @@ Result:
   "anticipative": false,
   "anticipation_misses": 0,
   "live_helpers": 0,
+  "scheduling": {
+    "callback": {
+      "policy": "none",
+      "priority": 0
+    },
+    "live": {
+      "policy": "none",
+      "priority": 0
+    },
+    "renderer": {
+      "policy": "none",
+      "priority": 0
+    },
+    "background": {
+      "policy": "none",
+      "priority": 0
+    }
+  },
   "warnings": [],
   "memory_lock": {
     "requested": false,

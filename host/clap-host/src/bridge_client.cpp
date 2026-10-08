@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <limits>
 #include <mutex>
@@ -31,7 +32,22 @@ std::filesystem::path gBridgeExecutable;
 
 constexpr int kCreateTimeoutMs = 20000;
 
+// ThreadPolicy as kind << 8 | priority, read on audio threads.
+std::atomic<std::uint32_t> gBridgeAudioPolicy{static_cast<std::uint32_t>(ThreadPolicy::Kind::Normal)
+                                              << 8};
+
 }  // namespace
+
+void setBridgeAudioPolicy(ThreadPolicy policy) {
+    gBridgeAudioPolicy.store(static_cast<std::uint32_t>(policy.kind) << 8 |
+                                 static_cast<std::uint32_t>(std::clamp(policy.priority, 0, 99)),
+                             std::memory_order_relaxed);
+}
+
+ThreadPolicy bridgeAudioPolicy() SUPPLE_RT {
+    const std::uint32_t packed = gBridgeAudioPolicy.load(std::memory_order_relaxed);
+    return {static_cast<ThreadPolicy::Kind>(packed >> 8), static_cast<int>(packed & 0xff)};
+}
 
 void setBridgeExecutable(std::filesystem::path path) {
     std::lock_guard lock(gBridgeMutex);
@@ -584,6 +600,11 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
 }
 
 bool RemoteInstance::startProcessing() SUPPLE_RT {
+    if (hdr_) {  // published with the command's request
+        const ThreadPolicy policy = bridgeAudioPolicy();
+        hdr_->audioPolicy = static_cast<std::uint32_t>(policy.kind);
+        hdr_->audioPriority = static_cast<std::uint32_t>(policy.priority);
+    }
     if (!command(Cmd::StartProcessing)) return false;
     return hdr_->processing != 0;
 }

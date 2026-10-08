@@ -1046,6 +1046,10 @@ EngineStatus EngineApp::engineStatus() {
     st.restartNeeded = b.restartNeeded;
     st.anticipative = engine_->options().anticipative;
     st.liveHelpers = engine_->liveHelpers();
+    const auto threadClass = [](ThreadPolicy p) { return ThreadClass{p.kind, p.priority}; };
+    const Engine::Scheduling& sched = engine_->scheduling();
+    st.scheduling = {threadClass(sched.callback), threadClass(sched.live),
+                     threadClass(sched.renderer), threadClass(sched.background)};
     const auto warnings = engine_->warnings();
     st.warnings.insert(st.warnings.end(), warnings.begin(), warnings.end());
     st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());

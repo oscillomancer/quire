@@ -29,6 +29,7 @@ class LiveWorkers {
     // Main thread, before publication: CPU capacity and backend RT scheduling.
     static unsigned maxHelpers();
     Status configure(Backend& backend);
+    ThreadPolicy policy();  // main thread: the first helper's (None without helpers)
     // One callback at a time. No helper can access this job after return.
     void run(TaskGraph& graph, Fn fn, void* context) SUPPLE_RT;
 

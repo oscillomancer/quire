@@ -19,6 +19,8 @@
 #endif
 
 #include <fcntl.h>
+#include <sched.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <supple/audio/audio_file.h>
@@ -4139,4 +4141,186 @@ TEST_CASE("the engine's threads carry their role names") {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     CHECK(named());
     engine.stop();
+}
+
+// --- background scheduling (ADR-0026) -----------------------------------------------------
+
+namespace {
+using Kind = ThreadPolicy::Kind;
+constexpr ThreadPolicy kNormal{Kind::Normal, 0};
+
+// A paced dummy device whose callback reports `reported`; its own thread stays
+// normal (the engine only reads the callback's policy).
+struct ReportingBackend : DummyBackend {
+    explicit ReportingBackend(ThreadPolicy policy)
+        : DummyBackend({.mode = Mode::Thread, .paced = true}), reported(policy) {}
+    ThreadPolicy callbackPolicy() override { return reported; }
+    ThreadPolicy reported;
+};
+
+rlim_t softLimit(int resource) {
+    rlimit limit{};
+    REQUIRE(::getrlimit(resource, &limit) == 0);
+    return limit.rlim_cur;
+}
+// Lowers a soft limit for the scope (process-local; restorable up to the hard limit).
+struct LimitScope {
+    int resource;
+    rlimit saved{};
+    LimitScope(int r, rlim_t value) : resource(r) {
+        REQUIRE(::getrlimit(resource, &saved) == 0);
+        rlimit lowered = saved;
+        lowered.rlim_cur = std::min(value, saved.rlim_max);
+        REQUIRE(::setrlimit(resource, &lowered) == 0);
+    }
+    ~LimitScope() { ::setrlimit(resource, &saved); }
+};
+int allowedCpus() {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    REQUIRE(::sched_getaffinity(0, sizeof(set), &set) == 0);
+    return CPU_COUNT(&set);
+}
+// Whether this process may run `threads` background threads real-time at `priority`.
+bool mayElevate(int threads, int priority) {
+    return softLimit(RLIMIT_RTTIME) == RLIM_INFINITY &&
+           softLimit(RLIMIT_RTPRIO) >= static_cast<rlim_t>(priority) &&
+           threads + 2 <= allowedCpus();
+}
+bool warnsNormal(const Engine& engine, std::string_view because) {
+    for (const auto& w : engine.warnings())
+        if (w.find("background audio threads run at normal priority") != std::string::npos &&
+            w.find(because) != std::string::npos)
+            return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("background threads run real-time below a real-time callback (ADR-0026)") {
+    auto pool = makePool();
+    MediaCache media;
+    struct Case {
+        ThreadPolicy callback;
+        int expected;  // the background priority
+    };
+    const std::array<Case, 3> cases = {Case{{Kind::Fifo, 83}, Engine::kBackgroundPriority},
+                                       Case{{Kind::RoundRobin, 40}, Engine::kBackgroundPriority},
+                                       Case{{Kind::Fifo, 5}, 4}};
+    for (const Case& c : cases) {
+        CAPTURE(c.callback.priority);
+        ReportingBackend backend(c.callback);
+        Engine engine(pool, media, {.workers = 2});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        const Engine::Scheduling& s = engine.scheduling();
+        CHECK(s.callback == c.callback);
+        if (engine.liveHelpers() > 0) CHECK(s.live == kNormal);  // a dummy's stay normal
+        if (mayElevate(3, c.expected)) {
+            const ThreadPolicy fifo{Kind::Fifo, c.expected};
+            CHECK(s.renderer == fifo);
+            CHECK(s.background == fifo);
+            CHECK(host::bridgeAudioPolicy() == fifo);
+            CHECK(engine.warnings().empty());
+        } else {
+            MESSAGE("no real-time scheduling permission: the fallback is checked instead");
+            CHECK(s.renderer == kNormal);
+            CHECK(s.background == kNormal);
+            CHECK(engine.warnings().size() == 1);
+        }
+        REQUIRE(engine.load(parallelLive(2)));  // start warnings stay with plan warnings
+        CHECK(engine.warnings().size() == (mayElevate(3, c.expected) ? 0u : 1u));
+        engine.stop();
+        CHECK(engine.scheduling().renderer == ThreadPolicy{});
+        CHECK(engine.scheduling().callback == ThreadPolicy{});
+        CHECK(host::bridgeAudioPolicy() == kNormal);
+    }
+}
+
+TEST_CASE("background threads stay normal under a normal callback or when forced normal") {
+    auto pool = makePool();
+    MediaCache media;
+    {
+        DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
+        Engine engine(pool, media, {.workers = 2});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().callback == kNormal);
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.scheduling().background == kNormal);
+        CHECK(engine.warnings().empty());
+        engine.stop();
+    }
+    {
+        ReportingBackend backend({Kind::Fifo, 83});
+        Engine engine(pool, media, {.workers = 2, .background = EngineOptions::Background::Normal});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.scheduling().background == kNormal);
+        CHECK(engine.warnings().empty());
+        engine.stop();
+    }
+    {
+        // Not anticipative: no renderer or background pool to schedule.
+        ReportingBackend backend({Kind::Fifo, 83});
+        Engine engine(pool, media, {.anticipative = false, .workers = 2});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().renderer == ThreadPolicy{});
+        CHECK(engine.scheduling().background == ThreadPolicy{});
+        CHECK(host::bridgeAudioPolicy() == kNormal);
+        engine.stop();
+    }
+}
+
+TEST_CASE("forced background policies apply for benchmarks, within the same checks") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
+    Engine engine(pool, media,
+                  {.workers = 2,
+                   .background = EngineOptions::Background::RoundRobin,
+                   .backgroundPriority = 3});
+    REQUIRE(engine.start(backend, {.blockSize = 128}));
+    if (mayElevate(3, 3)) {
+        CHECK(engine.scheduling().renderer == ThreadPolicy{Kind::RoundRobin, 3});
+        CHECK(engine.scheduling().background == ThreadPolicy{Kind::RoundRobin, 3});
+    } else {
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.warnings().size() == 1);
+    }
+    engine.stop();
+}
+
+TEST_CASE("background elevation refusals keep every background thread normal and warn") {
+    auto pool = makePool();
+    MediaCache media;
+    const ThreadPolicy callback{Kind::Fifo, 83};
+    SUBCASE("the pool would leave fewer than two CPUs to the system") {
+        ReportingBackend backend(callback);
+        Engine engine(pool, media, {.workers = allowedCpus()});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.scheduling().background == kNormal);
+        CHECK(warnsNormal(engine, "allowed CPUs"));
+        engine.stop();
+    }
+    SUBCASE("no real-time priority within RLIMIT_RTPRIO") {
+        LimitScope rtprio(RLIMIT_RTPRIO, 0);
+        ReportingBackend backend(callback);
+        Engine engine(pool, media, {.workers = 2});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.scheduling().background == kNormal);
+        CHECK(warnsNormal(engine, "RLIMIT_RTPRIO"));
+        CHECK(host::bridgeAudioPolicy() == kNormal);
+        engine.stop();
+    }
+    SUBCASE("a finite real-time CPU time limit") {
+        LimitScope rttime(RLIMIT_RTTIME, 200000);
+        ReportingBackend backend(callback);
+        Engine engine(pool, media, {.workers = 2});
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        CHECK(engine.scheduling().renderer == kNormal);
+        CHECK(engine.scheduling().background == kNormal);
+        if (softLimit(RLIMIT_RTPRIO) >= 1 && allowedCpus() >= 5)
+            CHECK(warnsNormal(engine, "RLIMIT_RTTIME"));
+        engine.stop();
+    }
 }

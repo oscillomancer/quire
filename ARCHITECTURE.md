@@ -89,7 +89,10 @@ host, daw or plugins; plugins use only header-light libs.
   executor runs each node, plug-ins included, with FTZ and DAZ set and the
   thread's MXCSR restored afterwards, so a node computes alike on any thread,
   in real time and offline; owned audio threads prefault their stacks before
-  their first job (ADR-0025).
+  their first job (ADR-0025). Under a real-time callback the live helpers
+  share its priority, while the renderer, the background helpers and bridge
+  audio threads run SCHED_FIFO 10, below the kernel's interrupt threads
+  (ADR-0026). Offline work stays normal.
 - **Model thread** — the only writer of the session. Runs the command bus,
   compiles versions into `RenderPlan`s, reclaims retired plans, services
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns

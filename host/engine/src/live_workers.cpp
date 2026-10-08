@@ -52,6 +52,10 @@ Status LiveWorkers::configure(Backend& backend) {
     return okStatus();
 }
 
+ThreadPolicy LiveWorkers::policy() {
+    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
+}
+
 void LiveWorkers::help(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {
     while (g.remaining.load(std::memory_order_acquire) != 0) {
         std::uint32_t task = 0;

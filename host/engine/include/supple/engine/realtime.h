@@ -28,6 +28,7 @@
 #include "supple/audio/audio_file.h"
 #include "supple/base/handoff.h"
 #include "supple/base/spsc.h"
+#include "supple/base/thread.h"
 #include "supple/engine/offline.h"
 
 namespace supple::engine {
@@ -166,6 +167,10 @@ class Backend {
         return Error("engine.live_threads", "backend does not support live helper scheduling", {},
                      "use Audio processing threads Limit 1 or a backend supporting live helpers");
     }
+    // Main thread after start(): the device callback thread's scheduling, from
+    // which the engine derives its background threads' (engine.md §2.2). None
+    // when the backend cannot tell (a manual driver's callback is its caller).
+    virtual ThreadPolicy callbackPolicy() { return {}; }
     virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false, {}}; }
     // MIDI (ADR-0016). Inside the callback only: this cycle's device events,
     // sorted by frame (at most kMaxMidiInputEvents; more are dropped).
@@ -208,6 +213,7 @@ class DummyBackend : public Backend {
     std::string name() const override { return "dummy"; }
     bool ownsThread() const override { return options_.mode == Mode::Thread; }
     Status prepareLiveThread(std::thread::native_handle_type) override { return okStatus(); }
+    ThreadPolicy callbackPolicy() override;  // Thread mode: its thread's
     std::span<const MidiInputEvent> midiInput() const override { return midi_; }
     std::vector<std::string> midiPorts() const override { return options_.midiPorts; }
 
@@ -266,6 +272,13 @@ struct EngineOptions {
     double renderAheadMs = 200.0;      // how far ahead of the playhead
     int workers = -1;                  // helpers per pool; -1: every core but three
     BenchProbe* benchProbe = nullptr;  // benchmark only; preallocated, outlives stop()
+    // The renderer's and background pool's scheduling (engine.md §2.2,
+    // ADR-0026). Auto: real-time below a real-time callback, else normal. The
+    // others force it for benchmarks and tests (still below a real-time
+    // callback, within the same checks).
+    enum class Background { Auto, Normal, Fifo, RoundRobin };
+    Background background = Background::Auto;
+    int backgroundPriority = 0;  // Fifo/RoundRobin; 0: Engine::kBackgroundPriority
 };
 
 // Output values remain in the host event domain (VST3 normalized). Main-thread
@@ -350,6 +363,17 @@ class Engine {
     bool awaitRendererHeld(double timeoutSeconds = 10.0);
     const EngineOptions& options() const { return options_; }
     unsigned liveHelpers() const;  // main thread: enabled capacity, 0 when serial
+    // The background threads' real-time priority (ADR-0026): below the
+    // kernel's threaded interrupts (50) and the audio threads rtkit grants
+    // other applications (up to 20). Any real-time level outruns normal
+    // desktop load, and 200 ms of render-ahead needs no more.
+    static constexpr int kBackgroundPriority = 10;
+    // What each thread class runs with, recorded (and verified) at start; None
+    // for a class without threads, and for all while stopped. Main thread.
+    struct Scheduling {
+        ThreadPolicy callback, live, renderer, background;
+    };
+    const Scheduling& scheduling() const { return scheduling_; }
 
     // Main thread, regularly: frees retired plans; once the newest plan is
     // live, destroys instances whose fx left the session.
@@ -452,6 +476,7 @@ class Engine {
     static constexpr int kAudioTransportTries = 4;
     static constexpr int kRendererTransportTries = 64;
     void rendererLoop(std::uint64_t firstEpoch);
+    void scheduleBackground();  // main thread, start(): renderer and pool policy
     std::uint64_t relocate(std::uint64_t previous);  // returns the epoch it relocated for
     std::int64_t playedPosition(std::uint64_t epoch, std::int64_t epochStart) const;
     // Frames the callback has played in `epoch` (0 before its first).
@@ -550,7 +575,8 @@ class Engine {
     std::unique_ptr<detail::Workers> workers_;
     std::unique_ptr<detail::LiveWorkers> liveWorkers_;
     std::atomic<detail::LiveWorkers*> liveWorkersReady_{nullptr};
-    std::string liveWorkerWarning_;
+    std::vector<std::string> startWarnings_;  // scheduling fallbacks, kept with plan warnings
+    Scheduling scheduling_;
     std::thread renderer_;
     std::atomic<bool> rendererQuit_{false}, hold_{false}, holdSeen_{false};
     std::int64_t aheadFrames_ = 0;                 // render-ahead target

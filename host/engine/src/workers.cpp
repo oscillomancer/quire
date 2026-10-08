@@ -113,6 +113,15 @@ Workers::~Workers() {
     for (auto& t : threads_) t.join();
 }
 
+Status Workers::setPolicy(ThreadPolicy policy) {
+    for (auto& thread : threads_) SUPPLE_TRY(setThreadPolicy(thread.native_handle(), policy));
+    return okStatus();
+}
+
+ThreadPolicy Workers::policy() {
+    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
+}
+
 unsigned Workers::defaultHelpers() {
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     return cores > 3 ? cores - 3 : 0;  // cores - 2 workers, the caller being one

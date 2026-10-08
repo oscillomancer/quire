@@ -3,6 +3,9 @@
 **Status:** Accepted, 2026-10-07. Amends ADR-0012 §6 for background/offline
 scheduling. Spec: `docs/specs/engine.md` §2.2.
 
+**Amendment, 2026-10-08:** [ADR-0026](0026-background-thread-scheduling.md)
+changes the pool's priority, which this decision left unchanged.
+
 ## Context
 
 The pool woke every helper for every block. Once its ready queue emptied,

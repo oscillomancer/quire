@@ -501,6 +501,12 @@ unsigned JackBackend::liveThreadCapacity() const {
     return count > 1 ? static_cast<unsigned>(count - 1) : 0;
 }
 
+ThreadPolicy JackBackend::callbackPolicy() {
+    if (!impl_ || !impl_->api->clientThreadId) return {};
+    const auto thread = impl_->api->clientThreadId(impl_->client);
+    return thread ? threadPolicy(thread) : ThreadPolicy{};
+}
+
 Status JackBackend::prepareLiveThread(std::thread::native_handle_type thread) {
     auto fail = [](int error) -> Status {
         return Error("engine.live_threads",

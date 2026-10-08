@@ -6,6 +6,10 @@
 **Amendment, 2026-10-07:** [ADR-0024](0024-live-multiprocessing.md) defines
 live callback fork-join, helper scheduling and the nonblocking wake exception.
 
+**Amendment, 2026-10-08:** [ADR-0026](0026-background-thread-scheduling.md)
+gives a bridge's audio thread the engine's background scheduling (protocol
+version 10).
+
 ## Context
 
 Phase 4 acceptance: a crashing test plugin in an isolation mode does not take

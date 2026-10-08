@@ -34,6 +34,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   a separate default-off 20 µs CPU idle-latency request with close-based
   cleanup and permission diagnostics (real-device validation is user-only);
   audio threads named by role (`audio-render`, `audio-bg-N` and others);
+  the renderer, background helpers and bridge audio threads at SCHED_FIFO 10
+  below a real-time callback when permitted, with a warning and normal
+  scheduling otherwise, reported per thread class in `engine.status`
+  (ADR-0026);
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
@@ -103,6 +107,11 @@ Engine and hosting:
   there is no adaptive cost threshold.
 - The FTZ/DAZ policy exists on x86-64 (SSE2) only; plug-in lifecycle calls
   run in the thread's own floating-point environment.
+- Real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
+  `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
+  the renderer and pool run at normal priority (with a warning) and compete
+  with desktop load. A bridge audio thread that cannot take the policy stays
+  normal silently.
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.

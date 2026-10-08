@@ -24,6 +24,7 @@
 #include "supple/base/result.h"
 #include "supple/base/rt.h"
 #include "supple/base/spsc.h"
+#include "supple/base/thread.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/json/value.h"
 
@@ -190,6 +191,12 @@ void setBridgeExecutable(std::filesystem::path path);
 // sets it. False when there is none.
 bool locateBridgeExecutable(std::string_view name);
 Result<std::shared_ptr<BridgeProcess>> createBridgeProcess();
+// The scheduling a bridged instance's audio thread takes when its processing
+// starts (process-wide; Normal by default). The engine sets its background
+// policy here while it runs, so a renderer that waits for a bridged plug-in
+// does not wait behind a lower-priority thread (ADR-0026).
+void setBridgeAudioPolicy(ThreadPolicy policy);
+ThreadPolicy bridgeAudioPolicy() SUPPLE_RT;
 bool bridgeProcessFailed(const std::shared_ptr<BridgeProcess>& process);
 
 class Instance {

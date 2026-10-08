@@ -134,6 +134,7 @@ q = nil
 ---@field anticipative boolean
 ---@field anticipation_misses integer
 ---@field live_helpers integer
+---@field scheduling table
 ---@field warnings string[]
 ---@field memory_lock table
 ---@field cpu_idle_latency table
@@ -158,6 +159,7 @@ q = nil
 ---@field anticipative boolean
 ---@field anticipation_misses integer
 ---@field live_helpers integer
+---@field scheduling table
 ---@field warnings string[]
 ---@field memory_lock table
 ---@field cpu_idle_latency table
