@@ -92,7 +92,12 @@ host, daw or plugins; plugins use only header-light libs.
   their first job (ADR-0025). Under a real-time callback the live helpers
   share its priority, while the renderer, the background helpers and bridge
   audio threads run SCHED_FIFO 10, below the kernel's interrupt threads
-  (ADR-0026). Offline work stays normal.
+  (ADR-0026). The renderer waits until the next stopped block is due or
+  the callback has consumed enough buffered audio for another block.
+  Early plug-in requests wait at least 1 ms after the last stopped block.
+  Plan/transport changes and ownership releases also wake it. Safety waits
+  are half the effective render-ahead span while filling playback buffers,
+  otherwise 1 s (ADR-0028). Offline work stays normal.
 - **Model thread** — the only writer of the session. Runs the command bus,
   compiles versions into `RenderPlan`s, reclaims retired plans, services
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns
@@ -123,14 +128,15 @@ child with a futex, spin briefly, then wait with a bounded failure deadline,
 inside `supple::rt::ScopedSanctionedSyscall`. This exception does not authorize
 waits or synchronous bridge calls in the device callback. ADR-0024 additionally
 sanctions `supple::rt::wake()`, a nonblocking private futex wake for live
-helpers. The callback executes ready nodes and joins using atomics only;
-helpers park between segments, and every helper that claimed the job must depart
-before plan state is reused. Unclaimed late helpers cannot access retired jobs
-and need not be awaited. A late in-flight node makes the cycle late; no output
-is discarded. The background pool currently uses atomic
-wait/notify between jobs and when no task is ready. Participation is bounded
-by graph dependencies and departure is joined explicitly (ADR-0023); this pool
-does not participate in live callback execution.
+helpers. ADR-0028 extends that same nonblocking wake to the renderer;
+no callback waits are allowed. The callback executes ready nodes and joins
+using atomics only; helpers park between segments, and every helper that
+claimed the job must depart before plan state is reused. Unclaimed late
+helpers cannot access retired jobs and need not be awaited. A late in-flight
+node makes the cycle late; no output is discarded. The background pool
+currently uses atomic wait/notify between jobs and when no task is ready.
+Participation is bounded by graph dependencies and departure is joined
+explicitly (ADR-0023); this pool does not participate in live callback execution.
 
 **Main-thread budget.** The main thread is the UI thread, the model writer
 and CLAP's plugin main thread (plugin GUIs require it). It stays responsive

@@ -46,3 +46,4 @@ current state.
 | [0025](0025-floating-point-environment.md) | Engine floating-point environment and first touch | Accepted |
 | [0026](0026-background-thread-scheduling.md) | Background audio thread scheduling | Accepted |
 | [0027](0027-midi-learn.md) | MIDI learn: controllers drive parameters and actions | Accepted |
+| [0028](0028-renderer-wakeups.md) | Renderer deadlines and event-driven wakes | Accepted |

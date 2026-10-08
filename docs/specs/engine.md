@@ -187,6 +187,26 @@ editor/automation eligibility preferences remain planned (ADR-0014).
   buffers at device block size. Parameter edits can take effect at that
   horizon. A seek/structural edit establishes a new epoch and prerolls;
   starvation after priming counts as an anticipation miss.
+  **Renderer waits (ADR-0028):** while stopped, its share processes at the
+  next render-block deadline. A process/flush request or queued parameter edit
+  can bring that deadline forward, to at least 1 ms after the previous stopped
+  block finishes. A notification by itself does not cause an extra block.
+  While playing, the callback wakes it once enough audio has been consumed
+  for another block. A full master/frontier ring must first release a chunk.
+  Missed-wake insurance is half the effective render-ahead span during
+  playback (normally 100 ms). It is 1 s while stopped, held, planless or all
+  live. Plan and transport changes, hold/release, shutdown, callback epoch
+  acknowledgement and instance ownership release also wake the renderer.
+  Bridged requests arrive through existing main-thread service.
+
+  `rt::waitUntil(word, seen, deadline)` waits off the callback until the
+  sequence changes or its steady-clock deadline expires. It rechecks after
+  interruptions and returns true on change, false on expiry.
+  `Instance::setAudioWake(word*)` subscribes on main; null detaches and waits
+  for outstanding notifications before the word can be freed. Plan retirement
+  and engine stop detach subscriptions. `processRequested()` also reports
+  queued active VST3/bridged `setParam` edits; `takeProcessRequest()` consumes
+  them together with any CLAP request.
 - **Live nodes** run on the callback and its separate bounded live pool
   (ADR-0024). With anticipation disabled this executor runs the entire graph.
   Limit 1 processes it serially. Synchronous
@@ -743,10 +763,11 @@ harness. See the tooling README for schemas, limits and invocation details.
   silent at once, a seek never plays stale audio); the renderer relocates —
   after a pause to the position the callback reports once it has seen the
   new epoch. New plans are adopted at the render position (edits are heard
-  after the audio already rendered, no gap). The renderer paces itself by
-  the frames rendered ahead of the played position and naps otherwise; the
-  callback never wakes that renderer. Misses (no chunk while playing, after the
-  pre-roll) are counted (`engine.status.anticipation_misses`). `stop()`
+  after the audio already rendered, no gap). Renderer parking follows
+  ADR-0028: stopped block deadlines and event-driven buffer-space wakes
+  from the callback, with a safety bound of half the playback buffer span
+  (1 s while stopped, held or all live). Misses (no chunk while playing, after
+  the pre-roll) are counted (`engine.status.anticipation_misses`). `stop()`
   joins the renderer first; it stops every plugin as it ends. With
   `anticipative = false` the old in-callback renderer runs (the reference,
   and the base for live nodes).
@@ -861,8 +882,9 @@ only after `CLAP_PROCESS_SLEEP`, with exactly silent main/key inputs and no
 input events or pending flush. Notes, automation, nonzero input, queued main
 parameter changes and `request_process` resume it. A stopped transport keeps
 running every plugin without advancing its position (ADR-0014): the callback's
-plan each cycle, the renderer's share at the device's pace (a request runs at
-once); play re-locates the non-live nodes and resets their plugins.
+plan each cycle, the renderer's share at render-block pace (a request can
+run early, at least 1 ms after the previous stopped block finishes); play
+re-locates the non-live nodes and resets their plugins.
 A plain plugin's state reaches the model when it calls `clap.state
 mark_dirty` (a coalesced "Plug-in state" step per plugin) and, for every
 running plugin, before each save: a sampler's loaded files are saved even

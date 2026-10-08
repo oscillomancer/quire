@@ -18,6 +18,23 @@ using supple::Rng;
 using supple::RtHandoff;
 using supple::SpscRing;
 
+TEST_CASE("futex deadline wait checks publication before waiting and handles expired deadlines") {
+    std::atomic<std::uint32_t> event{0};
+    const std::chrono::steady_clock::time_point expired{};
+    CHECK_FALSE(supple::rt::waitUntil(event, 0, expired));
+    event.fetch_add(1, std::memory_order_release);
+    supple::rt::wake(event);  // publication/wake before the waiter enters
+    CHECK(supple::rt::waitUntil(event, 0, expired));
+    CHECK_FALSE(supple::rt::waitUntil(event, 1, expired));
+    // Another producer's publication before wait needs no elapsed-time assertion.
+    std::thread producer([&] {
+        event.fetch_add(1, std::memory_order_release);
+        supple::rt::wake(event);
+    });
+    producer.join();
+    CHECK(supple::rt::waitUntil(event, 1, expired));
+}
+
 TEST_CASE("SpscRing: full ring drops the newest item, peek/consume retries") {
     SpscRing<int, 4> ring;
     CHECK(ring.empty());

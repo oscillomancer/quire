@@ -191,7 +191,10 @@ struct HostCallbacks {
     // clap_host
     static const void* CLAP_ABI getExtension(const clap_host_t*, const char* id);
     static void CLAP_ABI requestRestart(const clap_host_t* h) { S(h)->restartRequested = true; }
-    static void CLAP_ABI requestProcess(const clap_host_t* h) { S(h)->processRequested = true; }
+    static void CLAP_ABI requestProcess(const clap_host_t* h) {
+        S(h)->processRequested.store(true, std::memory_order_release);
+        S(h)->owner->notifyAudio();
+    }
     static void CLAP_ABI requestCallback(const clap_host_t* h) { S(h)->callbackRequested = true; }
 
     // clap.log
@@ -234,7 +237,10 @@ struct HostCallbacks {
                                      clap_param_clear_flags flags) {
         S(h)->paramsClear.push_back({id, flags});
     }
-    static void CLAP_ABI paramsRequestFlush(const clap_host_t* h) { S(h)->flushRequested = true; }
+    static void CLAP_ABI paramsRequestFlush(const clap_host_t* h) {
+        S(h)->flushRequested.store(true, std::memory_order_release);
+        S(h)->owner->notifyAudio();
+    }
 
     // clap.state
     static void CLAP_ABI stateMarkDirty(const clap_host_t* h) { S(h)->stateDirty = true; }
@@ -733,6 +739,7 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
 }
 
 Instance::~Instance() {
+    setAudioWake(nullptr);
     if (vst3_) {
         if (processing_) stopProcessing();
         if (active_) deactivate();
@@ -985,8 +992,14 @@ void flushInactiveEdits(Instance::HostState& h, const clap_plugin_t* plugin,
 }  // namespace
 
 Status Instance::setParam(std::uint32_t id, double clapValue) {
-    if (vst3_) return vst3_->setParam(id, clapValue);
-    if (remote_) return remote_->setParam(id, clapValue);
+    if (vst3_ || remote_) {
+        auto result = vst3_ ? vst3_->setParam(id, clapValue) : remote_->setParam(id, clapValue);
+        if (result) {
+            if (active_) paramProcessRequested_.store(true, std::memory_order_release);
+            notifyAudio();
+        }
+        return result;
+    }
     if (!extParams_) return Error("host.param", "the plugin has no parameters");
     if (!active_) {
         // Inactive: flush on the main thread.
@@ -1011,6 +1024,7 @@ Status Instance::setParam(std::uint32_t id, double clapValue) {
         return Error("host.param_queue", "too many queued parameter changes", {},
                      "render or flush first");
     hostState_->processRequested.store(true, std::memory_order_release);
+    notifyAudio();
     return okStatus();
 }
 
@@ -1435,7 +1449,11 @@ bool Instance::serviceMainThread() {
         }
         return did;
     }
-    if (remote_) return remote_->service(remoteNotes_, remoteLog_);
+    if (remote_) {
+        const bool did = remote_->service(remoteNotes_, remoteLog_);
+        if (remote_->processRequested() || remote_->needsAudioFlush()) notifyAudio();
+        return did;
+    }
     HostState& h = *hostState_;
     bool did = false;
     if (h.callbackRequested.exchange(false)) {
@@ -1627,13 +1645,40 @@ int Instance::nextTimerMs() const {
 }
 
 bool Instance::processRequested() const SUPPLE_RT {
+    if (paramProcessRequested_.load(std::memory_order_acquire)) return true;
     if (remote_) return remote_->processRequested();
     return hostState_ && hostState_->processRequested.load(std::memory_order_acquire);
 }
 
+void Instance::setAudioWake(std::atomic<std::uint32_t>* word) {
+    if (audioWake_.load() == word) return;
+    audioWake_.store(nullptr);
+    // Seq-cst store/load handshake with notifyAudio: either we see its claim
+    // or it sees null. Notifications never wait; only main joins readers.
+    while (audioWakeReaders_.load() != 0) std::this_thread::yield();
+    audioWake_.store(word);
+}
+
+void Instance::notifyAudio() SUPPLE_RT {
+    audioWakeReaders_.fetch_add(1);
+    if (auto* word = audioWake_.load()) {
+        word->fetch_add(1, std::memory_order_release);
+        rt::wake(*word);
+    }
+    audioWakeReaders_.fetch_sub(1, std::memory_order_release);
+}
+
+void Instance::setOwner(const void* owner) SUPPLE_RT {
+    owner_.store(owner, std::memory_order_release);
+    if (!owner) notifyAudio();
+}
+
 bool Instance::takeProcessRequest() SUPPLE_RT {
-    if (remote_) return remote_->takeProcessRequest();
-    return hostState_ && hostState_->processRequested.exchange(false, std::memory_order_acq_rel);
+    const bool params = paramProcessRequested_.exchange(false, std::memory_order_acq_rel);
+    const bool requested = remote_ ? remote_->takeProcessRequest()
+                                   : hostState_ && hostState_->processRequested.exchange(
+                                                       false, std::memory_order_acq_rel);
+    return params || requested;
 }
 
 bool Instance::sleeping() const SUPPLE_RT {

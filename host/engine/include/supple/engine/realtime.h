@@ -12,6 +12,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <climits>
 #include <cstdint>
 #include <filesystem>
@@ -377,6 +378,7 @@ class Engine {
     void holdRenderer(bool hold) {
         holdSeen_.store(false, std::memory_order_release);
         hold_.store(hold, std::memory_order_release);
+        wakeRenderer();
     }
     bool awaitRendererHeld(double timeoutSeconds = 10.0);
     const EngineOptions& options() const { return options_; }
@@ -600,6 +602,20 @@ class Engine {
     std::vector<std::string> startWarnings_;  // scheduling fallbacks, kept with plan warnings
     Scheduling scheduling_;
     std::thread renderer_;
+    void wakeRenderer() SUPPLE_RT;
+    void wakeRendererConsumed() SUPPLE_RT;
+    std::int64_t rendererSpaceTarget(std::uint64_t epoch) const;
+    bool rendererHasRoom(std::uint64_t epoch) const;
+    std::chrono::steady_clock::duration rendererSafetyTimeout() const;
+    static std::chrono::steady_clock::time_point stoppedRenderDeadline(
+        std::chrono::steady_clock::time_point next, std::chrono::steady_clock::time_point last,
+        bool requested);
+    static std::chrono::steady_clock::time_point rendererDeadline(
+        std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point idleNext,
+        bool idleWork, std::chrono::steady_clock::duration safetyTimeout);
+    std::atomic<std::uint32_t> rendererEvent_{0};
+    // One-shot stream threshold, or INT64_MAX while not waiting for space.
+    std::atomic<std::int64_t> rendererWakeAt_{INT64_MAX};
     std::atomic<bool> rendererQuit_{false}, hold_{false}, holdSeen_{false};
     std::int64_t aheadFrames_ = 0;                 // render-ahead target
     std::atomic<std::uint64_t> epoch_{0};          // main thread: seek, pause, setLoop

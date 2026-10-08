@@ -3,10 +3,11 @@
 // SUPPLE_RT marks a function as real-time: RealtimeSanitizer (the `rtsan`
 // preset, -fsanitize=realtime) aborts if anything it calls allocates, locks,
 // blocks or performs a system call. Mark every audio-thread entry point.
-// Reviewed syscall exceptions: background bridge IPC and live helper wake.
+// Reviewed syscall exceptions: background bridge IPC and private futex wake.
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 #if defined(__clang__) && defined(__has_cpp_attribute)
@@ -38,7 +39,7 @@ struct ScopedRtsanDisabler {
 
 // RAII: the sanctioned system calls of an audio thread -- the futex wake and
 // bounded wait of a background bridged plugin (ADR-0013), and the private
-// futex wake inside rt::wake (ADR-0024). No callback waits are sanctioned.
+// futex wake inside rt::wake (ADRs 0024, 0028). No callback waits are sanctioned.
 struct ScopedSanctionedSyscall {
     ScopedSanctionedSyscall() {
 #ifdef SUPPLE_RTSAN_ENABLED
@@ -59,6 +60,9 @@ struct ScopedSanctionedSyscall {
 void wake(std::atomic<std::uint32_t>& word) SUPPLE_RT;
 // Idle helpers only: blocks until the word differs, including spurious wakes.
 void wait(std::atomic<std::uint32_t>& word, std::uint32_t seen);
+// Non-RT only: rechecks after spurious wakes/EINTR, returns false at deadline.
+bool waitUntil(std::atomic<std::uint32_t>& word, std::uint32_t seen,
+               std::chrono::steady_clock::time_point deadline);
 // Owned audio threads, once before their first job (ADR-0025): commits the
 // 128 KiB of stack below the caller, so DSP does not first-touch it while
 // timed. Does nothing when less than 512 KiB of stack remains. Not real-time.

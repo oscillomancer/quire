@@ -12,6 +12,10 @@ the live helpers' scheduling here is unchanged.
 claims, replacing pre-enrollment of every notified helper. A helper that has
 not entered must not extend the cycle merely to observe that it has ended.
 
+**Amendment, 2026-10-08:** [ADR-0028](0028-renderer-wakeups.md) replaces
+renderer polling with block deadlines and event-driven wakes, extending the
+nonblocking callback futex-wake exception to buffer-space notifications.
+
 ## Context
 
 Four independent live Ferric instances exhaust one callback core at 64 and

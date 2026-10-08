@@ -268,6 +268,11 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     REQUIRE((*bridged)->setParam(1, 0.2).ok());
     REQUIRE((*bridged)->activate(48000, 1, 64).ok());
     REQUIRE((*bridged)->startProcessing());
+    CHECK_FALSE((*bridged)->processRequested());
+    REQUIRE((*bridged)->setParam(1, 0.2));
+    CHECK((*bridged)->processRequested());  // queued edit, before any service reply
+    CHECK((*bridged)->takeProcessRequest());
+    CHECK_FALSE((*bridged)->processRequested());
     std::fill(buf.l.begin(), buf.l.end(), 1.0f);
     std::fill(buf.r.begin(), buf.r.end(), 1.0f);
     REQUIRE((*bridged)->process(buf.block(64)));
@@ -302,6 +307,10 @@ TEST_CASE("a VST3's edit controller is reached from the main thread only") {
     std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
     std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
     REQUIRE(instance.setParam(1, 0.25).ok());  // converted here, not on the audio thread
+    CHECK(instance.processRequested());
+    CHECK(instance.takeProcessRequest());
+    CHECK_FALSE(instance.processRequested());
+    CHECK_FALSE(instance.takeProcessRequest());
     Event automation{.kind = Event::Kind::Param, .time = 10, .paramId = 1, .value = 0.75};
     REQUIRE(instance.process(buffer.block(64, std::span<const Event>(&automation, 1))));
     CHECK(static_cast<double>(buffer.ol[9]) == doctest::Approx(0.25));   // queued first

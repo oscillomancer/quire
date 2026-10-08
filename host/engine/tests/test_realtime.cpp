@@ -66,6 +66,37 @@ struct EngineTestAccess {
     static std::uint64_t rendererEpoch(const Engine& e) { return e.epochDone_.load(); }
     static LoopRange rendererLoop(const Engine& e) { return e.loopR_; }  // after rendererEpoch
     static const detail::Plan& latestPlan(const Engine& e) { return *e.latestPlan_.load(); }
+    static auto deadline(std::chrono::steady_clock::time_point now,
+                         std::chrono::steady_clock::time_point next, bool idleWork,
+                         std::chrono::steady_clock::duration safety = std::chrono::seconds(1)) {
+        return Engine::rendererDeadline(now, next, idleWork, safety);
+    }
+    static auto stoppedDeadline(std::chrono::steady_clock::time_point next,
+                                std::chrono::steady_clock::time_point last, bool requested) {
+        return Engine::stoppedRenderDeadline(next, last, requested);
+    }
+    static auto safety(const Engine& e) { return e.rendererSafetyTimeout(); }
+    static void playing(Engine& e, bool playing) { e.playing_ = playing; }
+    static void rendererState(Engine& e, detail::Plan& plan, std::int64_t stream,
+                              std::int64_t ahead) {
+        e.plan_ = &plan;
+        e.playing_ = true;
+        e.streamLocal_ = stream;
+        e.aheadFrames_ = ahead;
+        e.ring_ = std::make_unique<detail::ChunkRing>(4, 64);
+    }
+    static detail::ChunkRing& ring(Engine& e) { return *e.ring_; }
+    static std::int64_t target(const Engine& e, std::uint64_t epoch = 0) {
+        return e.rendererSpaceTarget(epoch);
+    }
+    static bool room(const Engine& e, std::uint64_t epoch = 0) { return e.rendererHasRoom(epoch); }
+    static void arm(Engine& e, std::int64_t target) { e.rendererWakeAt_.store(target); }
+    static void consume(Engine& e, std::int64_t stream) SUPPLE_RT {
+        e.rtStream_.store(stream);
+        e.rtPosEpoch_.store(0);
+        e.wakeRendererConsumed();
+    }
+    static auto event(const Engine& e) { return e.rendererEvent_.load(); }
 };
 }  // namespace supple::engine
 using model::Id;
@@ -3070,6 +3101,157 @@ TEST_CASE("recording recovery requires a complete valid sidecar") {
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("renderer waits for stopped block deadlines with bounded safety waits") {
+    using Access = EngineTestAccess;
+    using namespace std::chrono;
+    const steady_clock::time_point now{};
+    // 1024 frames / 48 kHz: the actual stopped processing deadline, not 1 ms.
+    const auto next = now + duration_cast<steady_clock::duration>(duration<double>(1024.0 / 48000));
+    CHECK(Access::deadline(now, next, true) == next);
+    CHECK(Access::deadline(now, now - milliseconds(5), true) == now - milliseconds(5));
+    CHECK(Access::deadline(now, now + seconds(5), true) == now + seconds(1));
+    CHECK(Access::deadline(now, next, false) == now + seconds(1));
+}
+
+TEST_CASE("stopped processing requests wait for minimum spacing without a poll") {
+    using Access = EngineTestAccess;
+    using namespace std::chrono;
+    const steady_clock::time_point completed{};
+    const auto next = completed + milliseconds(21);
+    CHECK(Access::stoppedDeadline(next, completed, true) == completed + milliseconds(1));
+    CHECK(Access::stoppedDeadline(next, completed, false) == next);
+    // A sequence notification without a pending audio request changes no due date.
+    CHECK(Access::deadline(completed + microseconds(500),
+                           Access::stoppedDeadline(next, completed, false), true) == next);
+    // A plug-in requests again from each process(): each completion defers
+    // the next requested block by 1 ms, rather than triggering immediate work.
+    auto finished = completed;
+    for (int block = 0; block < 8; ++block) {
+        const auto due = Access::stoppedDeadline(finished + milliseconds(21), finished, true);
+        CHECK(due == finished + milliseconds(1));
+        CHECK(Access::deadline(finished, due, true) == due);
+        finished = due + microseconds(20);
+    }
+    // Normal blocks may have a shorter period than the early-request spacing.
+    CHECK(Access::stoppedDeadline(completed + microseconds(333), completed, true) ==
+          completed + microseconds(333));
+}
+
+TEST_CASE("playback safety wait is half the effective render-ahead span") {
+    auto pool = makePool();
+    MediaCache media;
+    Engine engine(pool, media, {.workers = 0});
+    detail::Plan plan;
+    using Access = EngineTestAccess;
+    using namespace std::chrono;
+    const steady_clock::time_point now{};
+    Access::rendererState(engine, plan, 9600, 9600);  // 200 ms at 48 kHz
+    REQUIRE(Access::safety(engine) == milliseconds(100));
+    CHECK(Access::deadline(now, now, false, Access::safety(engine)) == now + milliseconds(100));
+    Access::rendererState(engine, plan, 480, 480);  // 10 ms at 48 kHz
+    CHECK(Access::safety(engine) == milliseconds(5));
+    Access::playing(engine, false);
+    CHECK(Access::safety(engine) == seconds(1));
+    Access::playing(engine, true);
+    engine.holdRenderer(true);
+    CHECK(Access::safety(engine) == seconds(1));
+    engine.holdRenderer(false);
+    plan.split = true;  // all live: no playback buffer to replenish
+    CHECK(Access::safety(engine) == seconds(1));
+    Engine planless(pool, media, {.workers = 0});
+    Access::playing(planless, true);
+    CHECK(Access::safety(planless) == seconds(1));
+}
+
+TEST_CASE("callback wakes renderer once at the consumption threshold") {
+    auto pool = makePool();
+    MediaCache media;
+    Engine engine(pool, media, {.workers = 0});
+    detail::Plan plan;
+    using Access = EngineTestAccess;
+    Access::rendererState(engine, plan, 320, 256);
+    REQUIRE(Access::target(engine) == 65);
+    CHECK_FALSE(Access::room(engine));
+    Access::arm(engine, Access::target(engine));
+    const auto before = Access::event(engine);
+    Access::consume(engine, 64);
+    CHECK(Access::event(engine) == before);
+    CHECK_FALSE(Access::room(engine));
+    Access::consume(engine, 65);
+    CHECK(Access::event(engine) == before + 1);
+    CHECK(Access::room(engine));
+    Access::consume(engine, 128);
+    CHECK(Access::event(engine) == before + 1);
+    // Consumption preceding the arm is found by the renderer's second check.
+    Access::arm(engine, 65);
+    CHECK(Access::room(engine));
+    // All-live graphs and held renderers have no consumption deadline.
+    plan.split = true;
+    CHECK(Access::target(engine) == INT64_MAX);
+    CHECK_FALSE(Access::room(engine));
+}
+
+TEST_CASE("renderer waits for full master and frontier rings to release a chunk") {
+    auto pool = makePool();
+    MediaCache media;
+    Engine engine(pool, media, {.workers = 0});
+    detail::Plan plan;
+    using Access = EngineTestAccess;
+    Access::rendererState(engine, plan, 256, 512);
+    const auto fill = [](detail::ChunkRing& ring, std::uint32_t frames) {
+        for (int i = 0; i < 4; ++i) {
+            auto* chunk = ring.slot();
+            REQUIRE(chunk);
+            chunk->epoch = 0;
+            chunk->stream = i * frames;
+            chunk->frames = frames;
+            ring.publish();
+        }
+    };
+    fill(Access::ring(engine), 64);
+    REQUIRE(Access::target(engine) == 64);
+    CHECK_FALSE(Access::room(engine));
+    Access::arm(engine, Access::target(engine));
+    const auto before = Access::event(engine);
+    Access::consume(engine, 32);
+    CHECK(Access::event(engine) == before);
+    Access::ring(engine).pop();
+    Access::consume(engine, 64);
+    CHECK(Access::event(engine) == before + 1);
+    CHECK(Access::room(engine));
+
+    plan.split = true;
+    plan.frontier = {0, 1};
+    for (std::uint32_t frames : {64u, 128u}) {
+        plan.frontierRings.push_back(std::make_unique<detail::ChunkRing>(4, frames));
+        fill(*plan.frontierRings.back(), frames);
+    }
+    REQUIRE(Access::target(engine) == 128);
+    Access::arm(engine, Access::target(engine));
+    plan.frontierRings[0]->pop();
+    Access::consume(engine, 64);
+    CHECK(Access::event(engine) == before + 1);
+    CHECK_FALSE(Access::room(engine));
+    plan.frontierRings[1]->pop();
+    Access::consume(engine, 128);
+    CHECK(Access::event(engine) == before + 2);
+    CHECK(Access::room(engine));
+    // A seek may flush old chunks without consuming any new-epoch frames.
+    plan.split = false;
+    Access::rendererState(engine, plan, 0, 512);
+    fill(Access::ring(engine), 64);  // epoch 0, while the renderer is now in 1
+    REQUIRE(Access::target(engine, 1) == 0);
+    Access::arm(engine, Access::target(engine, 1));
+    const auto flushed = Access::event(engine);
+    Access::ring(engine).pop();
+    Access::consume(engine, 0);
+    CHECK(Access::event(engine) == flushed + 1);
+    CHECK(Access::room(engine, 1));
+    // Flushing before the arm is found by the room recheck as well.
+    Access::arm(engine, 0);
+    CHECK(Access::room(engine, 1));
+}
+
 namespace {
 struct EngineEdgeControl {
     void (*requestProcess)(const clap_plugin_t*);
@@ -3111,6 +3293,86 @@ model::Session edgeSession(std::uint8_t mode, bool automaticBypass = false, bool
     return edit.commit().value();
 }
 }  // namespace
+
+TEST_CASE("renderer notifications publish transport holds and plug-in requests") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false, .workers = 0});
+    REQUIRE(engine.start(backend, {.blockSize = 64}));
+    const auto session = edgeSession(0);
+    REQUIRE(engine.load(session));
+    backend.run(1);
+    auto* instance = pool.find(session.fx.begin()->id);
+    REQUIRE(instance);
+    std::atomic<std::uint32_t> event{0};
+    instance->setAudioWake(&event);
+    const auto& control = engineEdgeControl(*instance);
+    control.requestProcess(instance->raw());
+    CHECK(event.load() == 1);
+    CHECK(instance->processRequested());
+    REQUIRE(instance->setParam(7, 5));
+    CHECK(event.load() == 2);
+    // Loading fixture state calls host.params.request_flush.
+    const std::array<std::uint8_t, 4> state{};
+    REQUIRE(instance->loadState(state));
+    CHECK(instance->needsAudioFlush());
+    CHECK(event.load() == 3);
+    instance->setOwner(nullptr);
+    CHECK(event.load() == 4);
+    instance->setAudioWake(nullptr);
+    control.requestProcess(instance->raw());
+    CHECK(event.load() == 4);
+    engine.stop();
+
+    Engine ahead(pool, media, {.workers = 0});  // no thread needed to inspect publication
+    using Access = EngineTestAccess;
+    const auto before = Access::event(ahead);
+    ahead.play();
+    CHECK(Access::event(ahead) == before + 1);
+    ahead.pause();
+    CHECK(Access::event(ahead) == before + 2);
+    ahead.seek(1);
+    CHECK(Access::event(ahead) == before + 3);
+    ahead.setLoop(0, 1, true);
+    CHECK(Access::event(ahead) == before + 4);
+    ahead.holdRenderer(true);
+    ahead.holdRenderer(false);
+    CHECK(Access::event(ahead) == before + 6);
+    CHECK(rt::waitUntil(event, 3, std::chrono::steady_clock::time_point{}));
+}
+
+TEST_CASE("plug-in wake detachment permits word destruction during concurrent requests") {
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, {.anticipative = false, .workers = 0});
+    REQUIRE(engine.start(backend, {.blockSize = 64}));
+    const auto session = edgeSession(0);
+    REQUIRE(engine.load(session));
+    auto* instance = pool.find(session.fx.begin()->id);
+    REQUIRE(instance);
+    const auto& control = engineEdgeControl(*instance);
+    std::binary_semaphore start{0}, finished{0};
+    std::thread producer([&] {
+        for (int round = 0; round < 128; ++round) {
+            start.acquire();
+            for (int request = 0; request < 64; ++request) control.requestProcess(instance->raw());
+            finished.release();
+        }
+    });
+    for (int round = 0; round < 128; ++round) {
+        auto word = std::make_unique<std::atomic<std::uint32_t>>(0);
+        instance->setAudioWake(word.get());
+        start.release();
+        instance->setAudioWake(nullptr);
+        word.reset();  // ASan/TSan can observe any notifier outliving detach.
+        finished.acquire();
+    }
+    producer.join();
+    CHECK(instance->processRequested());
+    engine.stop();
+}
 
 TEST_CASE("plugin outputs retain FX epoch timeline flags addresses and counted overflow") {
     auto pool = makePool();

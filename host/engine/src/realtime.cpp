@@ -264,6 +264,7 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         loopR_ = t.loop;
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
+        rendererWakeAt_.store(INT64_MAX);
         renderer_ = std::thread([this, first] {
             nameThread("audio-render");
             rt::prefaultStack();  // ADR-0025
@@ -336,6 +337,7 @@ void Engine::stop() {
     stoppedOnAudioThread_ = false;
     if (renderer_.joinable()) {  // the renderer stops every plugin as it ends
         rendererQuit_.store(true, std::memory_order_release);
+        wakeRenderer();
         renderer_.join();
     }
     recorder_.store(nullptr, std::memory_order_release);
@@ -359,6 +361,8 @@ void Engine::stop() {
     livePlan_ = nullptr;
     handPlan_.store(nullptr);
     latestPlan_.store(nullptr);
+    for (const auto& plan : plans_)
+        for (auto* instance : plan->instances) instance->setAudioWake(nullptr);
     plans_.clear();  // nothing runs a plan now
     callbackGen_.store(0);
     workers_.reset();
@@ -493,7 +497,10 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     latest_ = std::make_shared<const model::Session>(session);
     prunePending_ = true;
     plan->generation = ++publishedGen_;
+    if (options_.anticipative)
+        for (auto* instance : plan->instances) instance->setAudioWake(&rendererEvent_);
     latestPlan_.store(plan.get(), std::memory_order_release);
+    wakeRenderer();
     plans_.push_back(std::move(plan));
     collectPlans();
     plugins_.setGeneration(publishedGen_ + 1);  // later replacements: after this plan
@@ -508,9 +515,13 @@ void Engine::writeTransport(F&& change) {
     change();
     epoch_.fetch_add(1, std::memory_order_release);  // anticipative: drop what is rendered
     xportSeq_.store(seq + 2, std::memory_order_release);
+    wakeRenderer();
 }
 
-void Engine::play() { wantPlaying_.store(true, std::memory_order_release); }
+void Engine::play() {
+    wantPlaying_.store(true, std::memory_order_release);
+    wakeRenderer();
+}
 void Engine::pause() {
     wantPlaying_.store(false, std::memory_order_release);
     writeTransport([] {});
@@ -563,7 +574,8 @@ std::int64_t Engine::playedPosition(std::uint64_t epoch, std::int64_t epochStart
 }
 
 std::int64_t Engine::playedStream(std::uint64_t epoch) const {
-    return rtPosEpoch_.load(std::memory_order_acquire) == epoch ? rtStream_.load() : 0;
+    const auto stream = rtStream_.load();  // consumption/renderer-arm handshake
+    return rtPosEpoch_.load(std::memory_order_acquire) == epoch ? stream : 0;
 }
 
 TransportState Engine::transport() const {
@@ -660,9 +672,20 @@ void Engine::collectPlans() {
         options_.anticipative ? std::min(rendered, callbackGen_.load(std::memory_order_acquire))
                               : rendered;
     // The newest plan always stays (an executor may be about to adopt it).
-    std::erase_if(plans_, [&](const std::unique_ptr<detail::Plan>& p) {
+    const auto retired = [&](const auto& p) {
         return p->generation < oldest && p.get() != plans_.back().get();
-    });
+    };
+    for (const auto& p : plans_) {
+        if (retired(p) && options_.anticipative)
+            for (auto* instance : p->instances) {
+                const bool retained = std::any_of(plans_.begin(), plans_.end(), [&](const auto& q) {
+                    return (q->generation >= oldest || q.get() == plans_.back().get()) &&
+                           std::binary_search(q->instances.begin(), q->instances.end(), instance);
+                });
+                if (!retained) instance->setAudioWake(nullptr);
+            }
+    }
+    std::erase_if(plans_, retired);
 }
 
 std::vector<model::Id> Engine::takeDirtyStates() { return std::exchange(dirtyStates_, {}); }
@@ -942,6 +965,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
                        std::uint32_t midiBase) SUPPLE_RT {
     if (ring_) {  // anticipative: the renderer has done most of the work
         anticipativeCycle(in, out, frames, midiBase);
+        wakeRendererConsumed();
         cycles_.fetch_add(1, std::memory_order_release);
         return;
     }
@@ -1206,13 +1230,17 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
         std::copy_n(c->r.begin() + rtOffset_, take, out[1] + done);
         done += take;
         rtOffset_ += take;
-        rtPos_.store(c->start + rtOffset_, std::memory_order_relaxed);
-        rtStream_.store(c->stream + rtOffset_, std::memory_order_relaxed);
-        rtPosEpoch_.store(e, std::memory_order_release);
+        const auto pos = c->start + rtOffset_;
+        const auto stream = c->stream + rtOffset_;
         if (rtOffset_ == c->frames) {
             ring.pop();
             rtOffset_ = 0;
         }
+        // Publish freed slots before consumption, for the renderer arm/recheck
+        // handshake. The chunk may be reused as soon as pop returns.
+        rtPos_.store(pos, std::memory_order_relaxed);
+        rtStream_.store(stream);
+        rtPosEpoch_.store(e);
     }
     if (done < frames) {
         std::fill_n(out[0] + done, frames - done, 0.0f);
@@ -1276,7 +1304,7 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
     // renderer is its plugins' audio thread, so it never waits for the main
     // thread to finish a write. A write in progress leaves this pass without
     // relocating (the epoch still differs from `seen`, so the loop tries again
-    // after its nap).
+    // after publication wakes it).
     TransportSnapshot t;
     if (!readTransport(t, kRendererTransportTries)) return previous;
     const std::uint64_t epoch = t.epoch;
@@ -1296,10 +1324,16 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
         // changes, the fallback (epochStartLocal_, the renderer's epoch start)
         // would jump playback back by up to the render-ahead span.
         if (backend_->ownsThread()) {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-            while (rtEpochSeen_.load(std::memory_order_acquire) < epoch && !rendererQuit_.load() &&
-                   std::chrono::steady_clock::now() < deadline)
-                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            const auto safety = wantPlaying_.load(std::memory_order_acquire)
+                                    ? rendererSafetyTimeout()
+                                    : std::chrono::seconds(1);
+            const auto deadline = std::chrono::steady_clock::now() + safety;
+            for (;;) {
+                const auto event = rendererEvent_.load(std::memory_order_acquire);
+                if (rtEpochSeen_.load(std::memory_order_acquire) >= epoch || rendererQuit_.load())
+                    break;
+                if (!rt::waitUntil(rendererEvent_, event, deadline)) break;
+            }
         }
         pos_ = playedPosition(previous, epochStartLocal_);
     }
@@ -1316,14 +1350,95 @@ std::uint64_t Engine::relocate(std::uint64_t previous) {
     return epoch;
 }
 
+void Engine::wakeRenderer() SUPPLE_RT {
+    if (!options_.anticipative) return;
+    rendererEvent_.fetch_add(1, std::memory_order_release);
+    rt::wake(rendererEvent_);
+}
+
+void Engine::wakeRendererConsumed() SUPPLE_RT {
+    // Publish even unchanged consumption: this callback may have freed only
+    // obsolete chunks while stopped or prerolling. Those slots must participate
+    // in the same seq-cst store/load handshake as played frames.
+    rtStream_.store(rtStream_.load(std::memory_order_relaxed));
+    const auto target = rendererWakeAt_.load();
+    if (target == INT64_MAX || playedStream(rtEpoch_) < target) return;
+    auto expected = target;
+    if (rendererWakeAt_.compare_exchange_strong(expected, INT64_MAX)) wakeRenderer();
+}
+
+std::chrono::steady_clock::time_point Engine::rendererDeadline(
+    std::chrono::steady_clock::time_point now, std::chrono::steady_clock::time_point idleNext,
+    bool idleWork, std::chrono::steady_clock::duration safetyTimeout) {
+    const auto safety = now + safetyTimeout;
+    return idleWork ? std::min(idleNext, safety) : safety;
+}
+
+std::chrono::steady_clock::time_point Engine::stoppedRenderDeadline(
+    std::chrono::steady_clock::time_point next, std::chrono::steady_clock::time_point last,
+    bool requested) {
+    return requested ? std::min(next, last + std::chrono::milliseconds(1)) : next;
+}
+
+std::chrono::steady_clock::duration Engine::rendererSafetyTimeout() const {
+    if (playing_ && plan_ && !hold_.load(std::memory_order_acquire) &&
+        (!plan_->split || !plan_->frontier.empty()))
+        return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(0.5 * static_cast<double>(aheadFrames_) /
+                                          config_.sampleRate));
+    return std::chrono::seconds(1);
+}
+
+std::int64_t Engine::rendererSpaceTarget(std::uint64_t epoch) const {
+    if (!playing_ || !plan_ || hold_.load(std::memory_order_acquire) ||
+        (plan_->split && plan_->frontier.empty()))
+        return INT64_MAX;
+    // The horizon allows another whole render block once ahead < aheadFrames_.
+    auto target = streamLocal_ - aheadFrames_ + 1;
+    const auto requireSlot = [&](const detail::ChunkRing& ring) {
+        const auto w = ring.write.load(std::memory_order_relaxed);
+        const auto r = ring.read.load(std::memory_order_acquire);
+        if (w - r <= ring.mask) return;
+        const auto& front = ring.chunks[r & ring.mask];
+        // Old epochs are dropped by the next callback, even without playback.
+        target = std::max(target, front.epoch == epoch ? front.stream + front.frames : 0);
+    };
+    if (plan_->split) {
+        for (const auto& ring : plan_->frontierRings) requireSlot(*ring);
+    } else {
+        requireSlot(*ring_);
+    }
+    return target;
+}
+
+bool Engine::rendererHasRoom(std::uint64_t epoch) const {
+    // Read consumption first, including after arming a callback wake.
+    const auto played = playedStream(epoch);
+    if (!playing_ || !plan_ || hold_.load(std::memory_order_acquire) ||
+        streamLocal_ - played >= aheadFrames_)
+        return false;
+    if (plan_->split) {
+        if (plan_->frontier.empty()) return false;
+        for (const auto& ring : plan_->frontierRings)
+            if (!ring->slot()) return false;
+        return true;
+    }
+    return ring_->slot() != nullptr;
+}
+
 void Engine::rendererLoop(std::uint64_t seen) {
     const std::uint32_t block = options_.renderBlock;
-    const auto nap = std::chrono::duration<double>(0.25 * block / config_.sampleRate);
     const auto blockTime = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(static_cast<double>(block) / config_.sampleRate));
     auto idleNext = std::chrono::steady_clock::now();  // the next stopped block
+    auto idleLast = idleNext - std::chrono::milliseconds(1);
     const void* self = &processing_;
-    while (!rendererQuit_.load(std::memory_order_acquire)) {
+    for (;;) {
+        // Observe the notification before every predicate. A publication during
+        // this pass changes the word, so FUTEX_WAIT cannot miss its wake.
+        const auto event = rendererEvent_.load(std::memory_order_acquire);
+        if (rendererQuit_.load(std::memory_order_acquire)) break;
+        rendererWakeAt_.store(INT64_MAX);
         if (playing_ && plan_ && plan_->split && plan_->frontier.empty()) {
             // Everything is live: nothing to render. Stay one render-ahead
             // span past what the callback played, so that a plan giving the
@@ -1369,35 +1484,44 @@ void Engine::rendererLoop(std::uint64_t seen) {
             }
             reportedPlaying_.store(playing_);
         }
-        const std::int64_t ahead = streamLocal_ - playedStream(seen);
         const bool held = hold_.load(std::memory_order_acquire);
         if (held) holdSeen_.store(true, std::memory_order_release);
         // Stopped: the renderer's plugins keep running at the device's pace
         // (nothing plays): they load files, answer their editors and ring out
-        // as hosts run them; one that asks to be processed runs at once.
-        bool wake = false;
-        if (!playing_ && plan_)
-            for (auto* instance : plan_->rendererInstances)
-                wake |= instance->processRequested() || instance->needsAudioFlush();
-        if (!playing_ && plan_ && !held) {
+        // as hosts run them. Early requested blocks are at least 1 ms apart,
+        // even when a plug-in requests the next block from inside process().
+        const bool idleWork = !playing_ && plan_ && !held && !plan_->rendererNodes.empty();
+        const auto requested = [&] {
+            if (idleWork)
+                for (auto* instance : plan_->rendererInstances)
+                    if (instance->processRequested() || instance->needsAudioFlush()) return true;
+            return false;
+        };
+        if (idleWork) {
             const auto now = std::chrono::steady_clock::now();
-            if (wake || now >= idleNext) {
+            if (now >= stoppedRenderDeadline(idleNext, idleLast, requested())) {
                 const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block,
                                                              self, &loopR_, false);
                 if (!ok) processErrors_.fetch_add(1);
                 publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
-                idleNext = std::max(idleNext, now - 4 * blockTime) + blockTime;
+                // An early block replaces the next regular block; repeated
+                // requests must not push its deadline ever farther ahead.
+                idleNext = now < idleNext ? now + blockTime
+                                          : std::max(idleNext, now - 4 * blockTime) + blockTime;
+                idleLast = std::chrono::steady_clock::now();
             }
         }
-        bool room = playing_ && plan_ && !held && ahead < aheadFrames_;
-        if (room && plan_->split) {
-            room = !plan_->frontier.empty();  // nothing to hand over: all is live
-            for (const auto& r : plan_->frontierRings) room = room && r->slot() != nullptr;
-        } else if (room) {
-            room = ring_->slot() != nullptr;
-        }
-        if (!room) {
-            std::this_thread::sleep_for(playing_ ? nap : std::chrono::duration<double>(0.001));
+        if (!rendererHasRoom(seen)) {
+            const auto target = rendererSpaceTarget(seen);
+            rendererWakeAt_.store(target);
+            // Seq-cst arm/stream handshake: either this observes consumption
+            // before arming, or the callback observes the arm after publishing
+            // consumption (and ring slots). No callback wakes below threshold.
+            if (rendererHasRoom(seen)) continue;
+            const auto idleDue = stoppedRenderDeadline(idleNext, idleLast, requested());
+            rt::waitUntil(rendererEvent_, event,
+                          rendererDeadline(std::chrono::steady_clock::now(), idleDue, idleWork,
+                                           rendererSafetyTimeout()));
             continue;
         }
         const std::uint32_t n = loopR_.until(pos_, block);  // no chunk crosses a loop wrap
@@ -1489,6 +1613,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
         liveReady_ = false;
         loopC_ = xport.loop;  // the renderer takes the loop with the epoch too
         rtEpochSeen_.store(rtEpoch_, std::memory_order_release);
+        wakeRenderer();
     }
     const std::uint64_t e = rtEpoch_;
     const bool playing = wantNow();
@@ -1611,8 +1736,8 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
         livePos_ = next;
         liveStream_ += k;
         rtPos_.store(livePos_, std::memory_order_relaxed);
-        rtStream_.store(liveStream_, std::memory_order_relaxed);
-        rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
+        rtStream_.store(liveStream_);
+        rtPosEpoch_.store(rtEpoch_);
     }
     return k;
 }

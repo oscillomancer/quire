@@ -24,6 +24,19 @@ void wait(std::atomic<std::uint32_t>& word, std::uint32_t seen) {
         ::syscall(SYS_futex, &word, FUTEX_WAIT_PRIVATE, seen, nullptr, nullptr, 0);
 }
 
+bool waitUntil(std::atomic<std::uint32_t>& word, std::uint32_t seen,
+               std::chrono::steady_clock::time_point deadline) {
+    while (word.load(std::memory_order_acquire) == seen) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) return false;
+        const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now);
+        const timespec timeout{static_cast<time_t>(left.count() / 1'000'000'000),
+                               static_cast<long>(left.count() % 1'000'000'000)};
+        ::syscall(SYS_futex, &word, FUTEX_WAIT_PRIVATE, seen, &timeout, nullptr, 0);
+    }
+    return true;
+}
+
 namespace {
 constexpr std::size_t kPrefaultBytes = 128 * 1024;
 

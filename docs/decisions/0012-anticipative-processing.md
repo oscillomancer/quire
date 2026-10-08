@@ -12,6 +12,10 @@ live callback fork-join, helper scheduling and the nonblocking wake exception.
 **Amendment, 2026-10-08:** [ADR-0026](0026-background-thread-scheduling.md)
 runs the renderer and the pool's helpers real-time, below a real-time callback.
 
+**Amendment, 2026-10-08:** [ADR-0028](0028-renderer-wakeups.md) replaces
+renderer polling with block deadlines and event-driven wakes, extending the
+nonblocking callback futex-wake exception to buffer-space notifications.
+
 ## Context
 
 The engine runs every node inside the audio callback, on one core. Phase 4

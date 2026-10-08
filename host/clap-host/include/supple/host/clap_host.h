@@ -288,7 +288,7 @@ class Instance {
     // The host's executor that currently processes this instance (an opaque
     // token, null for none): a host with several audio threads uses it so
     // that exactly one of them calls the audio-thread API at a time.
-    void setOwner(const void* owner) SUPPLE_RT { owner_.store(owner, std::memory_order_release); }
+    void setOwner(const void* owner) SUPPLE_RT;
     const void* owner() const SUPPLE_RT { return owner_.load(std::memory_order_acquire); }
     // Returns false on CLAP_PROCESS_ERROR, or when not processing. Output
     // events are appended to `out` (may be null). Queued setParam() changes
@@ -325,11 +325,16 @@ class Instance {
         std::uint32_t droppedEvents = 0;  // input events that did not fit a block's arena
     };
     Notifications takeNotifications();
-    // CLAP request_process (local or bridged): main may inspect it to activate an inactive
-    // instance; its audio owner consumes it to wake a sleeping stage.
+    // CLAP request_process and queued setParam edits (local, VST3 or bridged):
+    // main may inspect it to activate an inactive instance; its audio owner
+    // consumes it to wake a sleeping stage.
     bool processRequested() const SUPPLE_RT;
     bool takeProcessRequest() SUPPLE_RT;
     bool sleeping() const SUPPLE_RT;
+    // Main thread: subscribe an executor's futex sequence to process/flush
+    // requests, queued parameter edits, and ownership release. Null detaches
+    // and joins in-flight notifications before the word may be destroyed.
+    void setAudioWake(std::atomic<std::uint32_t>* word);
 
     struct IdleOutputs {
         static constexpr std::size_t kCapacity = 1024;
@@ -405,6 +410,10 @@ class Instance {
     std::unique_ptr<RemoteInstance> remote_;
     std::unique_ptr<Vst3Instance> vst3_;
     std::atomic<const void*> owner_{nullptr};
+    std::atomic<bool> paramProcessRequested_{false};
+    void notifyAudio() SUPPLE_RT;
+    std::atomic<std::atomic<std::uint32_t>*> audioWake_{nullptr};
+    std::atomic<std::uint32_t> audioWakeReaders_{0};
     Notifications remoteNotes_;
     std::optional<Error> vst3RestartError_;  // a failed VST3 reactivation, until read
     std::vector<std::string> remoteLog_;
