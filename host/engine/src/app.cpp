@@ -1,4 +1,5 @@
 #include "supple/engine/app.h"
+#include "runtime_protection.h"
 #include "supple/model/numeric.h"
 
 #include <algorithm>
@@ -53,6 +54,7 @@ EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {
     // later, when the dispatcher does); a script that only computes runs either
     // way, and the registry's examples exercise exactly that.
     scripts_ = std::make_unique<lua::Runtime>();
+    protections_ = std::make_unique<detail::RuntimeProtection>(options_.runtimeProtectionOps);
 }
 
 EngineApp::~EngineApp() {
@@ -437,6 +439,7 @@ Status EngineApp::replaceProject(model::Session session, fs::path path) {
     if (engine_) {
         engine_->stop();
         engine_.reset();
+        protections_->stop();
         backend_ = nullptr;
     }
     if (versions_ && projectPath_.empty()) clearScratch();
@@ -678,6 +681,14 @@ Status EngineApp::setAudioThreadLimit(unsigned limit) {
     return {};
 }
 
+Status EngineApp::setMemoryLock(bool requested) {
+    return protections_->setMemoryLock(requested, engine_ && backend_);
+}
+
+const RuntimeProtectionStatus& EngineApp::memoryLockStatus() const {
+    return protections_->memoryLock();
+}
+
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
     return startEngine(backend, config, EngineOptions{});
 }
@@ -727,6 +738,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
         return loaded;
     }
     loadedHead_ = versions_->head();
+    protections_->start();
     return {};
 }
 
@@ -777,6 +789,7 @@ void EngineApp::haltEngine() {
         engine_.reset();
         pool_->prune(head());  // nothing processes now: replaced instances can go
     }
+    protections_->stop();
     backend_ = nullptr;
     ownedBackend_.reset();
     outputGestures_.clear();
@@ -993,6 +1006,9 @@ void EngineApp::restartFx(model::Id fx) {
 EngineStatus EngineApp::engineStatus() {
     checkFailures();
     EngineStatus st;
+    st.memoryLock = protections_->memoryLock();
+    if (st.memoryLock.error)
+        st.warnings.push_back(st.memoryLock.error->message + "; " + st.memoryLock.error->hint);
     st.dropped = static_cast<std::int64_t>(outputDrops_ + consumerDrops_);
     st.voiceDropped = static_cast<std::int64_t>(voiceDrops_);
     for (const auto& [id, error] : pool_->failedErrors()) {
@@ -1018,7 +1034,8 @@ EngineStatus EngineApp::engineStatus() {
     st.restartNeeded = b.restartNeeded;
     st.anticipative = engine_->options().anticipative;
     st.liveHelpers = engine_->liveHelpers();
-    st.warnings = engine_->warnings();
+    const auto warnings = engine_->warnings();
+    st.warnings.insert(st.warnings.end(), warnings.begin(), warnings.end());
     st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());
     if (const std::shared_ptr<MeterBank> bank = engine_->meterBank()) {
         st.meterDrops.renderer = static_cast<std::int64_t>(bank->droppedRenderer());

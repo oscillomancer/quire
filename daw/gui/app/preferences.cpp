@@ -11,7 +11,7 @@
 namespace supple::gui {
 namespace {
 
-constexpr const char* kSchema = "supple.preferences/1.1";
+constexpr const char* kSchema = "supple.preferences/1.2";
 
 Error threadLimitError() {
     return Error("preferences.audio_threads", "audio processing thread limit is out of range",
@@ -73,7 +73,8 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
     if (!doc) return std::move(doc).error();
     const json::Value* schema = doc->isObject() ? doc->find("schema") : nullptr;
     if (!schema || !schema->isString() ||
-        (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0"))
+        (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0" &&
+         schema->asString() != "supple.preferences/1.1"))
         return Error("preferences.schema", file.string() + " is not a " + kSchema + " document",
                      "/schema");
     if (const json::Value* m = doc->find("default_monitor")) {
@@ -92,6 +93,12 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
         if (!v->isInt() || v->asInt() < 0 || v->asInt() > 64) return threadLimitError();
         out.audioThreads = static_cast<unsigned>(v->asInt());
     }
+    if (const auto* v = doc->find("lock_memory")) {
+        if (!v->isBool())
+            return Error("preferences.lock_memory", "lock_memory must be a boolean", "/lock_memory",
+                         "use true or false");
+        out.lockMemory = v->asBool();
+    }
     return out;
 }
 
@@ -100,6 +107,7 @@ Status Preferences::save(const std::filesystem::path& file) const {
     json::Value doc = json::Value::object();
     doc["schema"] = kSchema;
     doc["default_monitor"] = monitorName(defaultMonitor);
+    doc["lock_memory"] = lockMemory;
     doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -115,6 +123,7 @@ PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, Mou
     // still cannot pass an invalid engine setting.
     if (!app_.setAudioThreadLimit(prefs_.audioThreads))
         prefs_.audioThreads = app_.audioThreadLimit();
+    (void)app_.setMemoryLock(prefs_.lockMemory);
 }
 
 bool PreferencesDialog::isOpen() const { return root_.find("prefs") != nullptr; }
@@ -123,8 +132,8 @@ void PreferencesDialog::open() {
     if (root_.popupOpen()) root_.closePopups();
     auto form = std::make_unique<ui::Node>("prefs");
     form->layout.dir = ui::Layout::Dir::Column;
-    form->layout.width = ui::SizeRule::fixed(540);
-    form->layout.height = ui::SizeRule::fixed(208);
+    form->layout.width = ui::SizeRule::fixed(800);
+    form->layout.height = ui::SizeRule::fixed(410);
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 6;
     auto& header = form->emplace<ui::Node>("prefs.header");
@@ -196,6 +205,31 @@ void PreferencesDialog::open() {
                              "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
 
+    auto& memory = form->emplace<ui::Node>("prefs.memory");
+    memory.layout.dir = ui::Layout::Dir::Row;
+    memory.layout.height = ui::SizeRule::fixed(26);
+    memory.emplace<ui::Label>("prefs.memory.label", "Lock process memory (mlockall)").layout.width =
+        ui::SizeRule::fraction();
+    memory_ = &memory.emplace<ui::Button>("prefs.memory.set", "Off", [this] {
+        if (auto result = setMemoryLock(!prefs_.lockMemory); !result && onError)
+            onError("preferences: " + result.error().toString());
+    });
+    for (const auto& text :
+         {"Uses RAM; large sample libraries or stack growth can fail.",
+          "Host process only; disabling or stopping also unlocks plug-in locks."}) {
+        auto& label = form->emplace<ui::Label>(
+            "prefs.memory.caution." + std::to_string(form->children().size()), text, ui::Font::Ui,
+            "small", "ink-quiet");
+        label.layout.height = ui::SizeRule::fixed(20);
+    }
+    for (std::size_t i = 0; i < memoryNote_.size(); ++i) {
+        auto& label = form->emplace<ui::Label>("prefs.memory.note." + std::to_string(i), "",
+                                               ui::Font::Ui, "small", "ink-quiet");
+        label.layout.width = ui::SizeRule::fraction();
+        label.layout.height = ui::SizeRule::fixed(18);
+        memoryNote_[i] = &label;
+    }
+
     auto& mouse = row(*form, "prefs.mouse", "Mouse modifiers");
     mouse
         .emplace<ui::Button>("prefs.mouse.open", "Edit mouse modifiers…", [this] { mouse_.open(); })
@@ -204,11 +238,37 @@ void PreferencesDialog::open() {
         monitor_ = nullptr;
         zoom_ = nullptr;
         threads_ = nullptr;
+        memory_ = nullptr;
+        memoryNote_.fill(nullptr);
     });
     refresh();
 }
 
+namespace {
+void protectionNote(const std::array<ui::Label*, 4>& labels,
+                    const engine::RuntimeProtectionStatus& state, const char* activeText) {
+    if (!labels[0]) return;
+    std::string text = state.error       ? state.error->message + "; " + state.error->hint
+                       : state.active    ? activeText
+                       : state.requested ? "Applies when engine starts"
+                                         : "Off";
+    // Labels are single-line; split the short diagnostic into readable lines.
+    for (auto* label : labels) {
+        std::size_t end = text.size();
+        if (end > 100) {
+            end = text.rfind(' ', 100);
+            if (end == std::string::npos || end == 0) end = 100;
+        }
+        label->setText(text.substr(0, end));
+        text.erase(0, end);
+        if (!text.empty() && text.front() == ' ') text.erase(0, 1);
+    }
+}
+}  // namespace
+
 void PreferencesDialog::refresh() {
+    if (memory_) memory_->setText(prefs_.lockMemory ? "On" : "Off");
+    protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked (host process only)");
     if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
     if (monitor_) monitor_->setText(monitorLabel(prefs_.defaultMonitor));
     if (zoom_) zoom_->setText(zoomLabel(map_.behaviour("wheel.zoom", 0)));
@@ -233,6 +293,16 @@ Status PreferencesDialog::setAudioThreads(unsigned limit) {
     prefs_ = next;
     refresh();
     return {};
+}
+
+Status PreferencesDialog::setMemoryLock(bool requested) {
+    auto next = prefs_;
+    next.lockMemory = requested;
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    prefs_ = next;
+    auto applied = app_.setMemoryLock(requested);
+    refresh();
+    return applied;
 }
 
 void PreferencesDialog::setZoomAnchor(const std::string& behaviour) {

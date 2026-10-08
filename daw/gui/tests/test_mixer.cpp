@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <filesystem>
 #include <string>
@@ -51,7 +52,7 @@ struct Fixture {
     std::vector<std::string> editors, errors;  // ui.fx.editor calls; reported errors
     bool ok = false;
 
-    Fixture() {
+    Fixture(std::shared_ptr<engine::RuntimeProtectionOps> operations = {}) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-mixer-test-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
@@ -68,6 +69,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.runtimeProtectionOps = std::move(operations);
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
@@ -915,7 +917,7 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded->audioThreads == limit);
         auto before = readFile(file);
         REQUIRE(before);
-        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.1") !=
+        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.2") !=
               std::string::npos);
         REQUIRE(loaded->save(file));
         CHECK(readFile(file).value() == *before);
@@ -942,4 +944,90 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded.error().path == "/audio_threads");
         CHECK_FALSE(loaded.error().hint.empty());
     }
+}
+
+TEST_CASE(
+    "preferences: memory policy defaults, migration, boolean types and canonical round trip") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    for (const char* version : {"1.0", "1.1", "1.2"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK_FALSE(loaded->lockMemory);
+    }
+    for (bool requested : {false, true}) {
+        gui::Preferences values;
+        values.lockMemory = requested;
+        values.audioThreads = 3;
+        REQUIRE(values.save(file));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK(loaded->lockMemory == requested);
+        CHECK(loaded->audioThreads == 3);
+        const auto bytes = readFile(file).value();
+        REQUIRE(loaded->save(file));
+        CHECK(readFile(file).value() == bytes);
+    }
+    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string(R"({"schema":"supple.preferences/1.2","lock_memory":)") + bad + "}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == "/lock_memory");
+        CHECK(loaded.error().hint == "use true or false");
+    }
+}
+
+TEST_CASE(
+    "preferences: memory toggle shows intent and effective failure, and follows save-error "
+    "pattern") {
+    auto ops = std::make_shared<engine::RuntimeProtectionOps>();
+    int lockError = EPERM, locks = 0, unlocks = 0;
+    ops->lockMemory = [&](int) {
+        ++locks;
+        errno = lockError;
+        return lockError ? -1 : 0;
+    };
+    ops->unlockMemory = [&] {
+        ++unlocks;
+        return 0;
+    };
+    ops->memoryLimit = [](rlimit* limit) {
+        limit->rlim_cur = 0;
+        return 0;
+    };
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    Fixture f(ops);
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    prefs.open();
+    f.root->frame(false);
+    REQUIRE(f.root->click("prefs.memory.set"));
+    CHECK(prefs.preferences().lockMemory);
+    CHECK(f.node("prefs.memory.set")->valueText() == "On");
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Applies when engine starts");
+    CHECK(locks == 0);
+    REQUIRE(f.app->startEngine(backend, {}, {.anticipative = false, .workers = 0}));
+    prefs.refresh();
+    CHECK(f.node("prefs.memory.note.0")->valueText().find("errno") != std::string::npos);
+    CHECK(gui::Preferences::load(file)->lockMemory);
+    REQUIRE(prefs.setMemoryLock(false));
+    lockError = 0;
+    REQUIRE(prefs.setMemoryLock(true));
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Locked (host process only)");
+    f.app->stopEngine();
+    prefs.refresh();
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Applies when engine starts");
+    CHECK(unlocks == 1);
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setMemoryLock(false));
+    CHECK(prefs.preferences().lockMemory);
+    CHECK(f.app->memoryLockStatus().requested);
 }

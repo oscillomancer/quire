@@ -967,7 +967,7 @@ Result:
 
 Start real-time playback on the audio device (jack) or without one (dummy).
 
-backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency.
+backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. A protection failure does not prevent audio startup.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1034,6 +1034,43 @@ Kind: `action`. Exposure: `mcp-tool`.
         "type": "string"
       }
     },
+    "memory_lock": {
+      "type": "object",
+      "title": "runtime_protection_status",
+      "properties": {
+        "requested": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "object",
+          "title": "runtime_protection_error",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "hint": {
+              "type": "string"
+            },
+            "errno": {
+              "type": "integer"
+            }
+          },
+          "required": ["code", "message", "path", "hint", "errno"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["requested", "active"],
+      "additionalProperties": false
+    },
     "meter_drops": {
       "type": "object",
       "title": "meter_drops",
@@ -1078,6 +1115,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "anticipation_misses",
     "live_helpers",
     "warnings",
+    "memory_lock",
     "meter_drops",
     "failed_fx",
     "dropped",
@@ -1126,6 +1164,10 @@ Result:
   "anticipation_misses": 0,
   "live_helpers": "<any>",
   "warnings": [],
+  "memory_lock": {
+    "requested": false,
+    "active": false
+  },
   "meter_drops": {
     "renderer": 0,
     "callback": 0
@@ -1142,7 +1184,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. live_helpers is the enabled live helper capacity; warnings includes scheduling fallback and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. live_helpers is the enabled live helper capacity; warnings includes scheduling fallback and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -1206,6 +1248,43 @@ Kind: `query`. Exposure: `mcp-tool`.
         "type": "string"
       }
     },
+    "memory_lock": {
+      "type": "object",
+      "title": "runtime_protection_status",
+      "properties": {
+        "requested": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "object",
+          "title": "runtime_protection_error",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "hint": {
+              "type": "string"
+            },
+            "errno": {
+              "type": "integer"
+            }
+          },
+          "required": ["code", "message", "path", "hint", "errno"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["requested", "active"],
+      "additionalProperties": false
+    },
     "meter_drops": {
       "type": "object",
       "title": "meter_drops",
@@ -1250,6 +1329,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "anticipation_misses",
     "live_helpers",
     "warnings",
+    "memory_lock",
     "meter_drops",
     "failed_fx",
     "dropped",
@@ -1289,6 +1369,10 @@ Result:
   "anticipation_misses": 0,
   "live_helpers": 0,
   "warnings": [],
+  "memory_lock": {
+    "requested": false,
+    "active": false
+  },
   "meter_drops": {
     "renderer": 0,
     "callback": 0

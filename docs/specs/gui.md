@@ -515,7 +515,7 @@ leave the head version unchanged.
   (`project_cursor`, the default, or `mouse_pointer`).
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
-  auto; `preferences.json`, supple.preferences/1.1, sets
+  auto; `preferences.json`, supple.preferences/1.2, sets
   `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
   wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
   modifiers. **Audio processing threads** is an advanced live/background
@@ -527,9 +527,23 @@ leave the head version unchanged.
   on the next engine start; changing it never restarts playback immediately.
   The limit applies independently to each pool, not total process threads;
   offline export keeps its separate thread setting. Version 1.0 files remain readable; missing `audio_threads`
-  means 0, and saves write canonical 1.1. Invalid types/ranges return
+  means 0, and saves write canonical 1.2. Invalid types/ranges return
   `preferences.audio_threads` at `/audio_threads` with a corrective hint;
   a failed save leaves the effective and displayed thread setting unchanged.
+  **Lock process memory (mlockall)** is off by default, saved as the boolean
+  `lock_memory`. Both 1.0 and 1.1 files remain readable; an absent field means
+  false. Other types return `preferences.lock_memory`, `/lock_memory`, and
+  "use true or false". The option applies on successful engine start or
+  immediately when toggled while running. A failed save preserves the previous
+  choice, following the existing audio-thread setter. A failed OS application
+  keeps the saved/requested choice On with a failed effective note and errno
+  plus a corrective hint. The note distinguishes Off, pending and Locked
+  (host process only), refreshed on opening/toggling and the existing GUI
+  model-service tick. Cautions explain RAM pressure, sample-library/stack
+  failure, bridge exclusion and that disabling/stopping also drops plug-in
+  locks (engine.md, Optional host-process controls). Canonical 1.2 saves
+  preserve existing monitoring/thread values; no project format changes.
+
 
 ## 7. Visual identity
 

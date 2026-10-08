@@ -28,10 +28,15 @@
 #include "supple/cmd/bus.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
+#include "supple/engine/runtime_protection.h"
 #include "supple/lua/runtime.h"
 #include "supple/model/versions.h"
 
 namespace supple::engine {
+
+namespace detail {
+class RuntimeProtection;
+}
 
 struct AppOptions {
     std::vector<std::filesystem::path> pluginPath;  // empty = host::defaultSearchPath()
@@ -44,9 +49,10 @@ struct AppOptions {
     // them beside the project file; clearScratch() deletes it when the
     // unsaved project is discarded. Empty: <workdir>/media, never deleted.
     std::filesystem::path scratchDir;
-    std::string jackLibrary = "libjack.so.0";  // tests use a stand-in
-    std::function<void()> jobStartedHook;      // worker-entry barrier for deterministic tests
-    std::function<void()> jobFinishedHook;     // worker completion notification for tests
+    std::string jackLibrary = "libjack.so.0";                    // tests use a stand-in
+    std::shared_ptr<RuntimeProtectionOps> runtimeProtectionOps;  // null: Linux operations
+    std::function<void()> jobStartedHook;   // worker-entry barrier for deterministic tests
+    std::function<void()> jobFinishedHook;  // worker completion notification for tests
 };
 
 // Meter entries a full ring dropped (P5.3c): the renderer's ring and the audio
@@ -69,6 +75,7 @@ struct EngineStatus {
     std::int64_t anticipationMisses = 0;
     std::int64_t liveHelpers = 0;
     std::vector<std::string> warnings;
+    RuntimeProtectionStatus memoryLock;
     MeterDrops meterDrops;                       // meter entries dropped by a full ring
     std::vector<std::string> failedFx;           // isolated instances whose bridge crashed or hung
     std::int64_t dropped = 0, voiceDropped = 0;  // plug-in output/voice transport
@@ -240,6 +247,9 @@ class EngineApp : public cmd::Host {
     // when EngineOptions::workers is -1; explicit helper counts take precedence.
     unsigned audioThreadLimit() const { return audioThreadLimit_; }
     Status setAudioThreadLimit(unsigned limit);
+    // Saved intent; applies now if running, otherwise on successful start.
+    Status setMemoryLock(bool requested);
+    const RuntimeProtectionStatus& memoryLockStatus() const;
     void stopEngine();
     Engine* engine() { return engine_.get(); }
     const Backend* backend() const { return backend_; }  // null while stopped
@@ -358,6 +368,7 @@ class EngineApp : public cmd::Host {
   private:
     model::Monitor defaultMonitor_ = model::Monitor::On;
     unsigned audioThreadLimit_ = 0;
+    std::unique_ptr<detail::RuntimeProtection> protections_;
     void finalizeRecordingHash(model::Id source, model::MediaSource expected, RecordedTake take,
                                std::string hash, std::string branch, std::uint64_t generation);
     void startPlaying(int countInBars);  // engine play(), after a count-in when > 0
