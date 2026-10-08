@@ -109,3 +109,49 @@ Three facts about the target workstation shaped the choice:
 - Restricting threads to the faster cores: the pool is larger than that set,
   and the RT scheduler already places FIFO threads on the least loaded CPUs.
 - A Preferences override: no demonstrated need.
+
+## Measurements (2026-10-08)
+
+**Setup**
+- Release build of this decision on Intel Core Ultra 5 225F (10 CPUs).
+- A paced 48 kHz, 128-frame device whose callback runs SCHED_FIFO 83, as
+  PipeWire runs JACK's.
+- 1024-frame render blocks, 200 ms ahead, 12 measured seconds per run, two
+  runs per cell alternating policies (A–B–B–A).
+- Load: one busy loop per CPU, either in the benchmark's cgroup (L1) or in a
+  separate transient user scope (L2).
+- A miss is a 2.67 ms callback that found no rendered audio, so 4500 in one
+  run means the whole run was silent.
+
+| Session | Load | Normal: misses, job p99, ring low-water | FIFO 10: misses, job p99, ring low-water |
+|---|---|---|---|
+| 24 stock tracks | none | 0, 10.2 ms, 8960 | 0, 9.6 ms, 8960 |
+| 24 stock tracks | L1 | 9002, 45.9 ms, 0 | 0, 9.2 ms, 8960 |
+| 24 stock tracks | L2 | 811, 35.5 ms, 0 | 0, 9.1 ms, 8960 |
+| 32 stock tracks | L1 | 9005, 57.3 ms, 0 | 0, 12.2 ms, 8832 |
+| 32 stock tracks | L2 | 9004, 39.0 ms, 0 | 0, 12.0 ms, 8832 |
+| 4 Ferric, shared bridge | L1 | 0, 22.5 ms, 7680 | 0, 6.6 ms, 9088 |
+
+**Real JACK** (PipeWire granted 48 kHz/128; 24 stock tracks under L1):
+- Normal background: every callback of the run missed (4500), with zero JACK
+  xruns, because the callback itself kept time.
+- FIFO 10: no misses, job p99 9.5 ms.
+
+**Desktop cost** (a normal-priority 1 ms sleep probe, p99 / worst):
+
+| Desktop | Normal background | FIFO background |
+|---|---|---|
+| Idle, Firefox open | 0.17 / 1.9 ms | 0.58 / 8.8 ms (0.2% of wakes later than 5 ms) |
+| Every CPU busy (L1) | 0.39 / 7.5 ms | 6.0 / 8.6 ms |
+
+A probe at SCHED_RR 1, the compositor's class, stayed within 1.3 ms in every
+cell. While every CPU is busy, someone waits: with normal threads it was the
+audio, with FIFO 10 it is ordinary tasks, for up to about one render job.
+
+**Other checks**
+- SCHED_RR 10 matched FIFO: job p99 9.24 against 9.20 ms, no misses.
+- Restricting the same four-thread pool to the six fastest CPUs changed job
+  p99 by 2% (14.3 against 14.6 ms), with equal headroom. Affinity stays as
+  inherited.
+- Restricting the whole default pool to six CPUs tripped the CPU cap: the
+  engine warned, stayed at normal priority, and missed as normal does.
