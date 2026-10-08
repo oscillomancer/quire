@@ -559,8 +559,11 @@ Delete.
   a bound control after the keys. A press (note on, CC above 0, program
   change, an encoder step) runs the action once; the "(MIDI CC)" actions
   follow the value instead — the selected tracks' volume (the fader's
-  travel) and pan (an encoder step is 1 %), the master's volume, and a beat
-  jog of the play cursor — one undo step per movement. A control drives one
+  travel) and pan (an encoder step is 1 %), the master's volume, a beat
+  jog of the play cursor, and the **last touched parameter** (the plug-in
+  parameter edited last in the FX window or a plug-in's own editor; a knob
+  takes over softly, an encoder at once; the FX window's tab row names it)
+  — one undo step per movement. A control drives one
   action (learning it for another moves it); the bindings are user settings
   in `controls.json` (`supple.controls/1.0`: `{bindings: [{action, midi,
   mode}]}`, beside the keymap). Its keys work with the focus on the search

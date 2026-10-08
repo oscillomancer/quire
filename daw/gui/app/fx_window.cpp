@@ -318,6 +318,11 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     });
     status_ = &tabsRow_->emplace<ui::Label>("fx.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
+    // What "FX: last touched parameter (MIDI CC)" moves (ADR-0027).
+    touched_ =
+        &tabsRow_->emplace<ui::Label>("fx.touched", "", ui::Font::Ui, "caption", "ink-quiet");
+    touched_->layout.width = ui::SizeRule::content();
+    touchedSerial_ = ~std::uint64_t{0};
 
     auto& scroll = page->emplace<ui::ScrollView>("fx.body");
     scroll.layout.width = ui::SizeRule::fraction();
@@ -532,6 +537,18 @@ void FxWindow::checkFailures() {
 void FxWindow::tick() {
     browser_->tick();
     checkFailures();
+    if (page_ && touched_) {
+        const auto t = app_.lastTouched();
+        const std::uint64_t serial = t ? t->serial : 0;
+        if (serial != touchedSerial_) {
+            touchedSerial_ = serial;
+            touched_->setText(t ? "Last touched: " + nameOf(t->fx) + " · " +
+                                      app_.paramName(t->fx, t->param)
+                                : std::string());
+            root_.relayout();
+            root_.damageAll();
+        }
+    }
     if (app_.projectGeneration() != projectGeneration_) {
         latency_.clear();
         failed_.clear();

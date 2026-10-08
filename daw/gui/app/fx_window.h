@@ -156,6 +156,8 @@ class FxWindow {
     ui::Node* tabsRow_ = nullptr;
     ui::Label* title_ = nullptr;
     ui::Label* status_ = nullptr;
+    ui::Label* touched_ = nullptr;  // the last touched parameter
+    std::uint64_t touchedSerial_ = 0;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};
     std::uint64_t projectGeneration_ = ~std::uint64_t{0};
 };

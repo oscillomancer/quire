@@ -574,7 +574,10 @@ plain one on the running instance at once and into the project when the
 control has rested for 300 ms (as an edit in the plug-in's own editor).
 Nothing moves while `setLearning(true)` (a learn dialog listens); bindings
 with `when_*` conditions ask `learnGate` and wait without one. The window app
-also polls every 10 ms while anything is bound.
+also polls every 10 ms while anything is bound. `lastTouched()` is the
+parameter edited last from the window or a plug-in's editor (not by agents or
+controls); `moveParam` moves any parameter the way a binding does, for the
+"last touched parameter" action.
 
 ## 7. Benchmarks (acceptance, `docs/benchmarks/`)
 

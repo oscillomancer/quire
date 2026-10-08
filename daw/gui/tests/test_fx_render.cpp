@@ -688,6 +688,70 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
     CHECK(f.app->head().fx.find(fx)->learn.empty());
 }
 
+TEST_CASE("a knob bound to the last touched parameter follows the panel's last edit") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
+    const model::Id track = f.addTrack("Keys");
+    auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    REQUIRE(made);
+    const model::Id fx = *model::Id::parse((*made)["fx"].asString());
+    f.actions->controls().bind(
+        {"control.fx.last", {model::ControlKind::Cc, 1, 16, ""}, model::ControlMode::Relative2});
+    f.actions->controls().bind(
+        {"control.fx.last", {model::ControlKind::Cc, 1, 17, ""}, model::ControlMode::Absolute});
+    auto cc = [&](std::uint8_t number, std::uint8_t value) {
+        engine::EngineApp::ControlEvent e;
+        e.midi.bytes[0] = 0xb0;
+        e.midi.bytes[1] = number;
+        e.midi.bytes[2] = value;
+        f.actions->control({e});
+    };
+    // Nothing touched yet: the action says so.
+    std::string error;
+    f.actions->onError = [&](const std::string& message) { error = message; };
+    cc(16, 65);
+    CHECK(error.find("no plug-in parameter was touched") != std::string::npos);
+    // An edit in the parameter panel (a typed value) makes it the target.
+    REQUIRE(f.fx->open(track));
+    f.fx->select(fx);
+    f.fx->showParamsTab();
+    f.frame();
+    auto* field = dynamic_cast<ui::TextField*>(f.root->find("fx.param.text.gain"));
+    REQUIRE(field);
+    f.root->focus(field);
+    field->setText("-6");
+    REQUIRE(field->onSubmit);
+    field->onSubmit("-6");
+    f.fx->tick();
+    f.frame();
+    CHECK(f.root->find("fx.touched")->valueText() == "Last touched: Plumb · Gain");
+    f.snapshot("fx-last-touched.png");
+    auto gain = [&] {
+        const model::FxInstance& inst = *f.app->head().fx.find(fx);
+        return inst.patch->find("params")->find("gain")->asDouble();
+    };
+    CHECK(gain() == doctest::Approx(-6.0));
+    // An encoder nudges it up.
+    cc(16, 65);
+    const double nudged = gain();
+    CHECK(nudged > -6.0);
+    // A knob far from the value waits (soft takeover), then follows once it
+    // passes the value.
+    cc(17, 127);
+    CHECK(gain() == doctest::Approx(nudged));
+    cc(17, 0);  // crossed it on the way down
+    CHECK(gain() < nudged);
+    cc(17, 127);  // and now it holds it: straight back up
+    CHECK(gain() > nudged);
+}
+
 TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {
     Fixture f;
     if (!f.ok) return;

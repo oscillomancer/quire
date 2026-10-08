@@ -155,10 +155,8 @@ void EngineApp::pollControl() {
 
 void EngineApp::applyLearn(const std::vector<ControlEvent>& events) {
     const model::Session s = head();
-    const std::uint64_t now = clockMs();
     for (const auto& entry : s.fx) {
-        const model::FxInstance& fx = *entry.value;
-        for (const model::ParamLearn& learn : fx.learn) {
+        for (const model::ParamLearn& learn : entry.value->learn) {
             const bool heard = std::any_of(events.begin(), events.end(), [&](const auto& e) {
                 return matches(learn.control, e.midi, e.device);
             });
@@ -166,100 +164,142 @@ void EngineApp::applyLearn(const std::vector<ControlEvent>& events) {
             if ((learn.whenSelected || learn.whenFocused || learn.whenVisible) &&
                 !(learnGate && learnGate(entry.id, learn)))
                 continue;
-            // Where the parameter stands now.
-            Target target;
-            host::Instance* live = pool_ ? pool_->find(entry.id) : nullptr;
-            if (live && live->failed()) live = nullptr;
-            auto schema = fxSchema(fx);
-            if (!schema) continue;
-            if (schema->isObject()) {
-                const json::Value* ps = schema->find("params");
-                const json::Value* d = ps && ps->isObject() ? ps->find(learn.param) : nullptr;
-                if (!d) continue;
-                auto described = params::fromDescription(learn.param, *d);
-                if (!described) continue;
-                target.semantic = std::move(*described);
-                const params::ParamSpec& spec = target.semantic->spec;
-                double physical = spec.def;
-                if (fx.patch)
-                    if (const json::Value* p = fx.patch->find("params"); p && p->isObject())
-                        if (const json::Value* v = p->find(learn.param))
-                            if (auto parsed = params::fromJson(spec, *v)) physical = *parsed;
-                target.current = params::toNormalized(spec, physical);
-                target.step = semanticStep(spec);
-                target.stepped = spec.type != params::Type::Float;
-            } else {
-                const auto id = numericId(learn.param);
-                if (!id) continue;
-                auto list =
-                    live ? Result<std::vector<host::ParamInfo>>(live->params()) : fxParams(fx);
-                if (!list) continue;
-                const auto info = std::find_if(list->begin(), list->end(),
-                                               [&](const auto& p) { return p.id == *id; });
-                if (info == list->end() || info->max <= info->min) continue;
-                target.id = *id;
-                target.min = info->min;
-                target.max = info->max;
-                target.stepped = (info->flags & CLAP_PARAM_IS_STEPPED) != 0;
-                if (target.stepped) target.step = 1.0 / std::max(1.0, info->max - info->min);
-                double value = info->def;
-                if (auto pending = learnCommits_.find({entry.id, *id});
-                    pending != learnCommits_.end())
-                    value = pending->second.value;
-                else if (live) {
-                    if (auto v = live->paramValue(*id)) value = *v;
-                } else if (auto v = fx.params.find(*id); v != fx.params.end())
-                    value = v->second;
-                target.current =
-                    std::clamp((value - info->min) / (info->max - info->min), 0.0, 1.0);
-            }
             // Every message for it, in order: relative steps add up, the last
             // absolute position wins.
-            LearnState& state = learnState_[{entry.id, learn.param}];
-            double current = target.current;
-            std::optional<double> next;
-            for (const ControlEvent& e : events) {
-                if (!matches(learn.control, e.midi, e.device)) continue;
-                const ControlReading r = read(e.midi, learn.mode);
-                if (auto v = nextValue(current, r, learn.mode, learn.softTakeover, target.step,
-                                       state.takeover)) {
-                    current = target.quantize(*v);
-                    state.takeover.set = current;
-                    next = current;
+            Takeover& takeover = learnState_[{entry.id, learn.param}].takeover;
+            const auto set = moveParam(entry.id, learn.param, [&](double current, double step) {
+                std::optional<double> next;
+                for (const ControlEvent& e : events) {
+                    if (!matches(learn.control, e.midi, e.device)) continue;
+                    const ControlReading r = read(e.midi, learn.mode);
+                    if (auto v =
+                            nextValue(current, r, learn.mode, learn.softTakeover, step, takeover)) {
+                        current = *v;
+                        takeover.set = current;
+                        next = current;
+                    }
                 }
-            }
-            if (!next || std::abs(*next - target.current) < 1e-12) continue;
-            if (now > state.lastMs + kGestureMs) ++state.serial;
-            state.lastMs = now;
-            if (target.semantic) {
-                const params::ParamSpec& spec = target.semantic->spec;
-                const double physical =
-                    params::clampPhysical(spec, params::fromNormalized(spec, *next));
-                json::Value values = json::Value::object();
-                values[learn.param] = params::toJson(spec, physical);
-                json::Value args = json::Value::object();
-                args["fx"] = entry.id.str();
-                args["values"] = std::move(values);
-                const cmd::Origin origin{cmd::Origin::Type::Internal, "midi", "",
-                                         "midi:" + entry.id.str() + ":" + learn.param + ":" +
-                                             std::to_string(state.serial)};
-                if (commands_) {
-                    auto set = commands_->execute({"fx.param.set", std::move(args), origin});
-                    if (!set) emit("engine.error", pluginErrorJson(set.error()));
-                }
-                continue;
-            }
-            double value = target.min + *next * (target.max - target.min);
-            if (target.stepped) value = std::round(value);
-            LearnCommit& commit = learnCommits_[{entry.id, target.id}];
-            commit.value = value;
-            commit.lastMs = now;
-            commit.live = live != nullptr;
-            if (live)
-                if (auto set = live->setParam(target.id, value); !set)
-                    emit("engine.error", pluginErrorJson(set.error()));
+                return next;
+            });
+            if (set) takeover.set = *set;
         }
     }
+}
+
+std::optional<double> EngineApp::moveParam(
+    model::Id id, const std::string& param,
+    const std::function<std::optional<double>(double current, double step)>& next) {
+    const model::FxInstance* found = head().fx.find(id);
+    if (!found) return std::nullopt;
+    const model::FxInstance fx = *found;
+    // Where the parameter stands now.
+    Target target;
+    host::Instance* live = pool_ ? pool_->find(id) : nullptr;
+    if (live && live->failed()) live = nullptr;
+    auto schema = fxSchema(fx);
+    if (!schema) return std::nullopt;
+    if (schema->isObject()) {
+        const json::Value* ps = schema->find("params");
+        const json::Value* d = ps && ps->isObject() ? ps->find(param) : nullptr;
+        if (!d) return std::nullopt;
+        auto described = params::fromDescription(param, *d);
+        if (!described) return std::nullopt;
+        target.semantic = std::move(*described);
+        const params::ParamSpec& spec = target.semantic->spec;
+        double physical = spec.def;
+        if (fx.patch)
+            if (const json::Value* p = fx.patch->find("params"); p && p->isObject())
+                if (const json::Value* v = p->find(param))
+                    if (auto parsed = params::fromJson(spec, *v)) physical = *parsed;
+        target.current = params::toNormalized(spec, physical);
+        target.step = semanticStep(spec);
+        target.stepped = spec.type != params::Type::Float;
+    } else {
+        const auto pid = numericId(param);
+        if (!pid) return std::nullopt;
+        auto list = live ? Result<std::vector<host::ParamInfo>>(live->params()) : fxParams(fx);
+        if (!list) return std::nullopt;
+        const auto info =
+            std::find_if(list->begin(), list->end(), [&](const auto& p) { return p.id == *pid; });
+        if (info == list->end() || info->max <= info->min || (info->flags & CLAP_PARAM_IS_READONLY))
+            return std::nullopt;
+        target.id = *pid;
+        target.min = info->min;
+        target.max = info->max;
+        target.stepped = (info->flags & CLAP_PARAM_IS_STEPPED) != 0;
+        if (target.stepped) target.step = 1.0 / std::max(1.0, info->max - info->min);
+        double value = info->def;
+        if (auto pending = learnCommits_.find({id, *pid}); pending != learnCommits_.end())
+            value = pending->second.value;
+        else if (live) {
+            if (auto v = live->paramValue(*pid)) value = *v;
+        } else if (auto v = fx.params.find(*pid); v != fx.params.end())
+            value = v->second;
+        target.current = std::clamp((value - info->min) / (info->max - info->min), 0.0, 1.0);
+    }
+    auto moved = next(target.current, target.step);
+    if (!moved) return std::nullopt;
+    const double to = target.quantize(std::clamp(*moved, 0.0, 1.0));
+    if (std::abs(to - target.current) < 1e-12) return std::nullopt;
+    const std::uint64_t now = clockMs();
+    LearnState& state = learnState_[{id, param}];
+    if (now > state.lastMs + kGestureMs) ++state.serial;
+    state.lastMs = now;
+    if (target.semantic) {
+        const params::ParamSpec& spec = target.semantic->spec;
+        const double physical = params::clampPhysical(spec, params::fromNormalized(spec, to));
+        json::Value values = json::Value::object();
+        values[param] = params::toJson(spec, physical);
+        json::Value args = json::Value::object();
+        args["fx"] = id.str();
+        args["values"] = std::move(values);
+        const cmd::Origin origin{
+            cmd::Origin::Type::Internal, "midi", "",
+            "midi:" + id.str() + ":" + param + ":" + std::to_string(state.serial)};
+        if (!commands_) return std::nullopt;
+        if (auto set = commands_->execute({"fx.param.set", std::move(args), origin}); !set) {
+            emit("engine.error", pluginErrorJson(set.error()));
+            return std::nullopt;
+        }
+        return to;
+    }
+    double value = target.min + to * (target.max - target.min);
+    if (target.stepped) value = std::round(value);
+    LearnCommit& commit = learnCommits_[{id, target.id}];
+    commit.value = value;
+    commit.lastMs = now;
+    commit.live = live != nullptr;
+    if (live)
+        if (auto set = live->setParam(target.id, value); !set) {
+            emit("engine.error", pluginErrorJson(set.error()));
+            return std::nullopt;
+        }
+    return to;
+}
+
+std::optional<EngineApp::TouchedParam> EngineApp::lastTouched() const {
+    if (touched_ && head().fx.contains(touched_->fx)) return touched_;
+    return std::nullopt;
+}
+
+void EngineApp::touchParam(model::Id fx, std::string param) {
+    touched_ = TouchedParam{fx, std::move(param), ++touchSerial_};
+}
+
+std::string EngineApp::paramName(model::Id id, const std::string& param) {
+    const model::FxInstance* fx = head().fx.find(id);
+    if (!fx) return param;
+    if (auto schema = fxSchema(*fx); schema && schema->isObject()) {
+        const json::Value* ps = schema->find("params");
+        const json::Value* d = ps && ps->isObject() ? ps->find(param) : nullptr;
+        const json::Value* name = d ? d->find("name") : nullptr;
+        return name && name->isString() ? name->asString() : param;
+    }
+    if (const auto pid = numericId(param))
+        if (auto list = fxParams(*fx))
+            for (const host::ParamInfo& p : *list)
+                if (p.id == *pid) return p.name;
+    return param;
 }
 
 void EngineApp::commitLearned(bool all) {
@@ -290,8 +330,10 @@ void EngineApp::commitLearned(bool all) {
             OutputGesture gesture;
             gesture.latest = output;
             gesture.ended = true;
-            if (auto st = commitOutputGesture(key, gesture); !st)
-                emit("engine.error", pluginErrorJson(st.error()));
+            committingLearn_ = true;
+            auto st = commitOutputGesture(key, gesture);
+            committingLearn_ = false;
+            if (!st) emit("engine.error", pluginErrorJson(st.error()));
             continue;
         }
         if (!commands_) continue;

@@ -434,6 +434,7 @@ Status EngineApp::replaceProject(model::Session session, fs::path path,
     // A control still moving belongs to the old project's effects.
     learnCommits_.clear();
     learnState_.clear();
+    touched_.reset();
     if (commands_) {
         const auto jobs = commands_->jobs().list();
         for (const auto& job : jobs.find("jobs")->asArray())

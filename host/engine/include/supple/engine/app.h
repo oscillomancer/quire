@@ -375,6 +375,27 @@ class EngineApp : public cmd::Host {
     void setLearning(bool on) { learning_ = on; }
     bool learning() const { return learning_; }
     bool hasLearn() const;  // any effect of the head has a learned parameter
+    // Moves a parameter as a learned control does: `next` gets its current
+    // normalized value and one encoder step, and returns the new value (none:
+    // leave it). Returns the value set (rounded for a stepped parameter), or
+    // none when it stayed, or when there is no such parameter.
+    std::optional<double> moveParam(
+        model::Id fx, const std::string& param,
+        const std::function<std::optional<double>(double current, double step)>& next);
+
+    // The parameter edited last in the window (the FX window's panel, a
+    // plug-in's own editor), for "FX: last touched parameter (MIDI CC)". Not
+    // agents' edits, nor what learned controls move. `serial` grows with
+    // every touch.
+    struct TouchedParam {
+        model::Id fx;
+        std::string param;  // as fx learn names it: a semantic key or a plain id
+        std::uint64_t serial = 0;
+    };
+    std::optional<TouchedParam> lastTouched() const;
+    void touchParam(model::Id fx, std::string param);
+    // A parameter's name for people: the semantic name, or the plug-in's.
+    std::string paramName(model::Id fx, const std::string& param);
 
     // Where autosaves go, next to the project file (<file>-data); empty when
     // the project has no file yet.
@@ -521,6 +542,9 @@ class EngineApp : public cmd::Host {
     std::map<OutputKey, LearnCommit> learnCommits_;
     std::vector<ControlMidiEvent> controlTaken_;
     bool learning_ = false;
+    bool committingLearn_ = false;  // a learned value's commit is not a touch
+    std::optional<TouchedParam> touched_;
+    std::uint64_t touchSerial_ = 0;
     void applyLearn(const std::vector<ControlEvent>& events);
     // Commits the plain parameters that rested (all of them: `all`).
     void commitLearned(bool all);

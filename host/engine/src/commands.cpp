@@ -2345,15 +2345,31 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return id.error();
             auto schema = A(ctx).fxSchema(*A(ctx).view().fx.find(*id));
             if (!schema) return schema.error();
+            // The window's edits are the "last touched parameter" (ADR-0027).
+            const bool touches = ctx.origin().type == cmd::Origin::Type::Ui;
             if (schema->isNull()) {
                 auto changed = A(ctx).setPlainParams(*id, a.values);
                 if (!changed) return changed.error();
+                if (touches && changed->isObject())
+                    if (auto list = A(ctx).fxParams(*A(ctx).view().fx.find(*id)))
+                        for (const auto& m : changed->asObject())
+                            for (const host::ParamInfo& p : *list)
+                                if (std::to_string(p.id) == m.key ||
+                                    std::ranges::equal(p.name, m.key, [](char x, char y) {
+                                        return std::tolower(static_cast<unsigned char>(x)) ==
+                                               std::tolower(static_cast<unsigned char>(y));
+                                    })) {
+                                    A(ctx).touchParam(*id, std::to_string(p.id));
+                                    break;
+                                }
                 return MergeResult{std::move(*changed), "Plugin parameters updated"};
             }
             json::Value patch = json::Value::object();
             patch["params"] = a.values;
             auto merged = mergeRun(A(ctx), a.fx, patch, "/values");
             if (!merged || !a.values.isObject()) return merged;
+            if (touches)
+                for (const auto& m : a.values.asObject()) A(ctx).touchParam(*id, m.key);
             // Touch/latch/write envelopes of these parameters record the change
             // while the transport plays (values in the parameter's unit).
             const auto fx = model::Id::parse(a.fx);

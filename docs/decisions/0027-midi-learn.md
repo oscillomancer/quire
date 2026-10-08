@@ -67,8 +67,7 @@ only through commands on the model thread.
 - A semantic parameter answers within a poll plus a model version; a plain
   one within a poll, its project state following at rest.
 - Not done: OSC; "arm envelope for the parameter"; learn on track faders
-  directly (the "(MIDI CC)" actions cover the selected tracks); a "last
-  touched parameter" action.
+  directly (the "(MIDI CC)" actions cover the selected tracks).
 
 ## Alternatives considered
 
@@ -78,3 +77,17 @@ would not see the moves); bindings in the per-project UI file (not undoable,
 lost with FX chain presets, invisible to agents); a "control" flag per device
 (PipeWire port names change with the USB port; matching by substring and an
 "any input" default needs no setup).
+
+## Amendment (2026-10-08): the last touched parameter
+
+`EngineApp` remembers the parameter edited last in the window — an
+`fx.param.set` from the window (`Origin::Ui`; a plain parameter named by
+name is remembered by its id), a gesture begun in a plug-in's own editor,
+or an editor edit committed from its outputs — but not agents' edits nor
+what learned controls move. "FX: last touched parameter (MIDI CC)" moves it
+through `EngineApp::moveParam`, the same step learned bindings use (one undo
+step per movement, a plain parameter live at once and committed at rest).
+An absolute knob takes over softly, per parameter, so switching targets
+never jumps the new one; an encoder moves it at once. The FX window's tab
+row names it ("Last touched: Plumb · Gain"). A plug-in editor that reports
+no gestures or outputs is not noticed.

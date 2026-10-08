@@ -88,7 +88,8 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   takeover, and "only when selected / focused / visible" for parameters.
   Parameter bindings are saved with the project and chain presets; action
   bindings in `controls.json`. "(MIDI CC)" actions drive the selected tracks'
-  volume and pan, the master's volume and a beat jog.
+  volume and pan, the master's volume, a beat jog and the last touched
+  plug-in parameter.
 - **Agents**: the MCP server for the running app or a headless engine; the
   agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
   included) working on `agent/...` branches with diff, A/B and
@@ -139,9 +140,10 @@ Engine and hosting:
   in-process to hear it while monitoring.
 - Audio backends: JACK and a dummy backend. No direct PipeWire or ALSA
   backend; no MIDI outputs.
-- MIDI learn has no OSC, no "arm envelope" option, no "last touched
-  parameter" action, and no learn directly on track faders (the "(MIDI CC)"
-  actions cover the selected tracks). Every MIDI input is heard as a control;
+- MIDI learn has no OSC, no "arm envelope" option, and no learn directly on
+  track faders (the "(MIDI CC)" actions cover the selected tracks). The last
+  touched parameter misses edits in plug-in editors that report no gestures
+  or outputs. Every MIDI input is heard as a control;
   there is no per-device "control only" setting.
 - Plugins that change state without notifying the host (LSP, for one) have
   that state captured only when the project is saved: no undo step and no

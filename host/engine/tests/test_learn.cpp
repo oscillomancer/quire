@@ -338,3 +338,56 @@ TEST_CASE("MIDI learn: a plain parameter moves the running plug-in, then the pro
     REQUIRE((*probe)->loadState(rig.app->head().blobs.at(*after.state)->data));
     CHECK((*probe)->paramValue(1).value() == doctest::Approx(32.0 / 127).epsilon(0.001));
 }
+
+TEST_CASE("MIDI learn: the last touched parameter is the window's last edit") {
+    Rig rig;
+    rig.call("track.add", "{}");
+    rig.call("fx.add", R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain"})");
+    rig.call("fx.add", R"({"track":"tr_1","plugin":"Test VST3 Gain"})");
+    CHECK_FALSE(rig.app->lastTouched());
+    // Agents' and tests' edits do not count; the window's do.
+    rig.call("fx.param.set", R"({"fx":"fx_1","values":{"gain":-6}})");
+    CHECK_FALSE(rig.app->lastTouched());
+    const cmd::Origin window{cmd::Origin::Type::Ui, "gui", ""};
+    REQUIRE(rig.bus->execute({"fx.param.set", j(R"({"fx":"fx_1","values":{"gain":-3}})"), window}));
+    auto t = rig.app->lastTouched();
+    REQUIRE(t);
+    CHECK(t->fx.str() == "fx_1");
+    CHECK(t->param == "gain");
+    CHECK(rig.app->paramName(t->fx, t->param) == "Gain");
+    const std::uint64_t serial = t->serial;
+    // A plain parameter by name is touched by its id.
+    REQUIRE(
+        rig.bus->execute({"fx.param.set", j(R"({"fx":"fx_2","values":{"gain":0.5}})"), window}));
+    t = rig.app->lastTouched();
+    REQUIRE(t);
+    CHECK(t->fx.str() == "fx_2");
+    CHECK(t->param == "1");
+    CHECK(t->serial > serial);
+    CHECK(rig.app->paramName(t->fx, t->param) == "Gain");
+
+    // moveParam moves it as a control would, without touching anything.
+    rig.start();
+    const std::uint64_t before = rig.app->lastTouched()->serial;
+    auto set = rig.app->moveParam(*model::Id::parse("fx_1"), "gain",
+                                  [](double, double) { return std::optional<double>(1.0); });
+    REQUIRE(set);
+    CHECK(*set == doctest::Approx(1.0));
+    CHECK(rig.gain("fx_1") == doctest::Approx(12.0));
+    // A plain one: live at once, committed at rest; the commit is no touch.
+    set = rig.app->moveParam(*model::Id::parse("fx_2"), "1", [](double current, double step) {
+        return std::optional<double>(current - 10 * step);
+    });
+    REQUIRE(set);
+    rig.backend->run(2);
+    rig.app->setFixedClock(1'000'500);
+    rig.app->pollControl();
+    CHECK(rig.app->head().fx.find(*model::Id::parse("fx_2"))->params.at(1) ==
+          doctest::Approx(0.5 - 10.0 / 128).epsilon(0.001));
+    CHECK(rig.app->lastTouched()->serial == before);
+    // Unknown parameters and effects are left alone.
+    CHECK_FALSE(rig.app->moveParam(*model::Id::parse("fx_1"), "nope",
+                                   [](double, double) { return std::optional<double>(0.5); }));
+    rig.call("fx.remove", R"({"fx":"fx_2"})");
+    CHECK_FALSE(rig.app->lastTouched());  // gone with its effect
+}

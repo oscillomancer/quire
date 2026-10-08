@@ -99,6 +99,7 @@ class AppActions {
         std::uint64_t lastMs = 0, serial = 0;
     };
     std::map<std::string, ControlState, std::less<>> controlState_;
+    std::map<std::string, engine::Takeover> touchedTakeover_;  // per fx:param
     // Track volume / pan of the selection (or the master) by a controller.
     Result<json::Value> controlTracks(const actions::ControlValue& v, bool pan, bool master);
     cmd::Dispatcher& dispatcher_;

@@ -232,6 +232,32 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                    return {};
                });
 
+    addControl(
+        "control.fx.last", "FX: last touched parameter (MIDI CC)",
+        "Moves the plug-in parameter edited last, in the FX window or a plug-in's own "
+        "editor. A knob takes over once it reaches the parameter's value; an encoder "
+        "moves it at once.",
+        [this](const actions::ControlValue& v) -> Status {
+            const auto t = app_.lastTouched();
+            if (!t)
+                return Error("fx.untouched", "no plug-in parameter was touched yet", {},
+                             "move a parameter in the FX window or a plug-in's editor");
+            // Soft takeover per parameter: a knob does not jump the new one.
+            engine::Takeover& takeover = touchedTakeover_[t->fx.str() + ":" + t->param];
+            const auto set = app_.moveParam(t->fx, t->param, [&](double current, double step) {
+                if (v.relative)
+                    return v.steps == 0 ? std::optional<double>()
+                                        : std::optional<double>(current + v.steps * step);
+                engine::ControlReading r;
+                r.value = v.value;
+                r.press = v.value > 0;
+                return engine::nextValue(current, r, model::ControlMode::Absolute, true, step,
+                                         takeover);
+            });
+            if (set && !v.relative) takeover.set = *set;  // the knob holds it now
+            return {};
+        });
+
     if (auto loadedControls = ControlMap::load(controlsFile_); loadedControls)
         controls_ = std::move(*loadedControls);
     else

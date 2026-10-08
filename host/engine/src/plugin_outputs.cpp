@@ -111,6 +111,7 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
         });
     // A repeated processor output is not another user edit.
     if (!changed && (!records || gesture.recording.empty())) return {};
+    if (!committingLearn_) touchParam(key.first, paramKey);
     std::optional<std::vector<std::uint8_t>> state;
     if (!semantic) {
         auto saved = instance->saveState();
@@ -280,6 +281,24 @@ void EngineApp::consumePluginOutputs() {
             continue;
         auto found = outputGestures_.find(key);
         if (event.kind == Kind::GestureBegin) {
+            // A knob grabbed in the plug-in's editor is touched now, not at release.
+            if (auto* instance = pool_->find(output.fx)) {
+                const auto info = instance->params();
+                const auto param = std::find_if(
+                    info.begin(), info.end(), [&](const auto& p) { return p.id == event.paramId; });
+                if (param != info.end() && !(param->flags & CLAP_PARAM_IS_READONLY)) {
+                    std::string name = std::to_string(event.paramId);
+                    if (instance->info().semantic)
+                        if (auto schema = instance->semanticSchema())
+                            if (const json::Value* ps = schema->find("params");
+                                ps && ps->isObject())
+                                for (const auto& entry : ps->asObject())
+                                    if (const json::Value* id = entry.value.find("id");
+                                        id && id->isNumber() && id->asDouble() == event.paramId)
+                                        name = entry.key;
+                    touchParam(output.fx, std::move(name));
+                }
+            }
             if (found != outputGestures_.end()) {
                 commit(key, found->second);
                 outputGestures_.erase(found);
