@@ -12,7 +12,9 @@ namespace detail {
 class LiveWorkers {
   public:
     using Fn = Workers::Fn;
-    enum class Event { Join, Leave, Idle, JoinWait };
+    // Test seams: Join precedes the claim; Claimed precedes the open check;
+    // Entered/Leave surround job access. Published/JoinWait run on the caller.
+    enum class Event { Join, Claimed, Entered, Leave, Missed, Idle, Published, JoinWait };
     struct Hooks {
         void (*event)(void*, Event) = nullptr;
         void* context = nullptr;
@@ -27,7 +29,7 @@ class LiveWorkers {
     // Main thread, before publication: CPU capacity and backend RT scheduling.
     static unsigned maxHelpers();
     Status configure(Backend& backend);
-    // One callback at a time. Every helper has departed when this returns.
+    // One callback at a time. No helper can access this job after return.
     void run(TaskGraph& graph, Fn fn, void* context) SUPPLE_RT;
 
   private:
@@ -44,6 +46,7 @@ class LiveWorkers {
     std::vector<std::thread> threads_;
     Hooks hooks_;
     std::atomic<unsigned> active_{0};
+    std::atomic<bool> open_{false};
     std::atomic<bool> quit_{false};
     TaskGraph* job_ = nullptr;
     Fn fn_ = nullptr;

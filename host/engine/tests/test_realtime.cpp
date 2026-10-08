@@ -3744,18 +3744,22 @@ TEST_CASE("live multiprocessing: delayed departure protects plans during transpo
             DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 128 * 12});
             Engine engine(pool, media, {.anticipative = ahead, .workers = 3});
             REQUIRE(engine.start(backend, {.blockSize = 128, .inputs = 2}));
-            EngineTestAccess::liveHooks(engine,
-                                        {[](void* p, detail::LiveWorkers::Event event) {
-                                             auto& g = *static_cast<Gate*>(p);
-                                             if (event == detail::LiveWorkers::Event::Leave &&
-                                                 g.enabled.load() && !g.claimed.exchange(true)) {
-                                                 g.entered.release();
-                                                 g.resume.acquire();
-                                             }
-                                             if (event == detail::LiveWorkers::Event::JoinWait)
-                                                 g.joining = true;
-                                         },
-                                         &gate});
+            EngineTestAccess::liveHooks(
+                engine, {[](void* p, detail::LiveWorkers::Event event) {
+                             auto& g = *static_cast<Gate*>(p);
+                             // Ensure this tiny job has a helper
+                             // inside it before the caller can
+                             // close it. No scheduling deadline.
+                             if (event == detail::LiveWorkers::Event::Published && g.enabled.load())
+                                 while (!g.claimed.load()) rt::relax();
+                             if (event == detail::LiveWorkers::Event::Leave && g.enabled.load() &&
+                                 !g.claimed.exchange(true)) {
+                                 g.entered.release();
+                                 g.resume.acquire();
+                             }
+                             if (event == detail::LiveWorkers::Event::JoinWait) g.joining = true;
+                         },
+                         &gate});
             auto session = parallelLive(8);
             REQUIRE(engine.load(session));
             engine.play();

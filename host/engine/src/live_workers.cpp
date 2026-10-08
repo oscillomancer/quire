@@ -73,14 +73,20 @@ void LiveWorkers::run(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {
     job_ = &g;
     fn_ = fn;
     context_ = context;
-    // Account for even a helper preempted before it reads its notification.
-    active_.store(selected, std::memory_order_relaxed);
+    // The preceding close/join excludes readers of the old job. A late claim
+    // either sees closed and reads no fields, or acquires this publication.
+    open_.store(true, std::memory_order_seq_cst);
     for (unsigned i = 0; i < selected; ++i) {
         slots_[i].sequence.fetch_add(1, std::memory_order_release);
         rt::wake(slots_[i].sequence);
     }
+    event(Event::Published);
     help(g, fn, context);
-    while (active_.load(std::memory_order_acquire) != 0) {
+    // This store/load and the helper's increment/open check form a Dekker
+    // handshake: either we see its claim, or it sees closed. Acquire/release
+    // alone would let both sides miss each other and retire a job still read.
+    open_.store(false, std::memory_order_seq_cst);
+    while (active_.load(std::memory_order_seq_cst) != 0) {
         event(Event::JoinWait);
         rt::relax();
     }
@@ -95,11 +101,20 @@ void LiveWorkers::loop(unsigned index) {
         seen = sequence.load(std::memory_order_acquire);
         if (quit_.load(std::memory_order_acquire)) return;
         event(Event::Join);
-        help(*job_, fn_, context_);
-        event(Event::Leave);
+        active_.fetch_add(1, std::memory_order_seq_cst);
+        event(Event::Claimed);
+        if (open_.load(std::memory_order_seq_cst)) {
+            event(Event::Entered);
+            help(*job_, fn_, context_);
+            event(Event::Leave);
+        } else {
+            // The graph and context may already be gone. An old notification
+            // is only a chance to claim an open job, not ownership of a job.
+            event(Event::Missed);
+        }
         // No job/graph/context access after acknowledgement; the callback can
         // already be publishing a new job or reclaiming the old plan.
-        active_.fetch_sub(1, std::memory_order_acq_rel);
+        active_.fetch_sub(1, std::memory_order_release);
     }
 }
 

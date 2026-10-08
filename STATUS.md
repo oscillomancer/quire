@@ -27,7 +27,8 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   non-live tracks (ADR-0012) and a live region for monitored tracks
   (ADR-0014); a DAG worker pool with graph-bounded participation and idle
   parking (ADR-0023), a separate live callback fork-join pool (ADR-0024)
-  with FIFO JACK helpers and an Automatic/limit audio-thread preference;
+  with FIFO JACK helpers, a claim-based lifetime join that does not wait for
+  unclaimed helpers, and an Automatic/limit audio-thread preference;
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
@@ -90,7 +91,9 @@ Engine and hosting:
   the harness now exposes callback tails for further profiling.
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
-  A serial plug-in chain cannot benefit, and a stalled helper stalls its cycle.
+  A serial plug-in chain cannot benefit, and a stalled helper that has claimed
+  a job stalls its cycle. Wake/scheduling overhead remains on light graphs;
+  there is no adaptive cost threshold.
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.

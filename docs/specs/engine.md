@@ -226,29 +226,38 @@ with a failure deadline on background threads, never in the device callback.
 
 **Live pool (ADR-0024).** `LiveWorkers` shares the graph/ready-queue
 representation, but never calls the blocking background executor. Each segment
-publishes its immutable transport, device inputs and frontier buffers, enrolls
-all selected helpers, then advances their private 32-bit sequences and calls
+publishes its immutable transport, device inputs and frontier buffers, opens
+the job, then advances selected helpers' private 32-bit sequences and calls
 `rt::wake`. This core-base API issues only `FUTEX_WAKE_PRIVATE` under the scoped
 RTSan exception; its blocking `rt::wait` companion belongs only to idle helpers
 and rechecks the acquire-loaded word after spurious wakes/EINTR. Both require a
 live, naturally aligned lock-free 32-bit atomic and one waiter per word. C++
-release/acquire operations publish the job; futex calls convey no memory order.
+atomics publish the job; futex calls convey no memory order.
+
+The plain job pointer/function/context are published while closed, after the
+previous join has excluded all readers. Opening is a seq_cst store. Each waking
+helper increments active (seq_cst), then reads open (seq_cst): only if open may
+it read job fields and help; otherwise it touches no job state. It decrements
+active with release after all accesses. When all nodes finish, the callback
+closes open (seq_cst) and spins on active (seq_cst) until zero. This store-load
+handshake needs seq_cst on both sides: either the callback observes the claim
+or the helper observes closed. A helper preempted before claiming does not
+retain the job; an old wake may harmlessly claim the next open job.
 
 The callback helps execute ready nodes and spins on atomics (CPU relax only)
-while work or enrolled departures remain. Helpers spin only within that job and
+while work or claimed departures remain. Helpers spin only within that job and
 park between segments, with no post-cycle spin. Participation uses the chain
 cover, configured capacity and usable CPUs minus one; a chain runs directly
-without queue/wake traffic. The callback joins even a helper preempted before
-reading its notification or after completing DSP. No helper touches the job
-after its departure acknowledgement. Only after join may the callback publish
+without queue/wake traffic. The callback joins a helper preempted after claiming,
+including after completing DSP. No helper touches the job after its departure
+acknowledgement. Only after join may the callback publish
 meters/plug-in outputs, capture recording, reset/relocate, adopt a plan, or
 acknowledge a newer generation. This extends existing plan reclamation and
 ownership tokens to every helper. There is no late-output discard, timeout or
-rerun: a late helper makes its cycle late. A processing error still joins all
-work before silencing/counting the failed segment; it never cancels in-flight
-plug-in state. Summation order and numeric policy
-remain identical to offline processing. Synchronous bridge stages still pass
-through, including on helpers.
+rerun: a late in-flight node makes its cycle late. A processing error still joins
+all work before silencing/counting the failed segment; it never cancels in-flight
+plug-in state. Summation order and numeric policy remain identical to offline
+processing. Synchronous bridge stages still pass through, including on helpers.
 
 `Backend::liveThreadCapacity()` and `prepareLiveThread(native_handle)` run on
 main after backend start, before publishing the pool to callbacks. Unknown

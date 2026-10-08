@@ -4,6 +4,10 @@
 Amends [ADR-0012](0012-anticipative-processing.md) §8 and clarifies the
 syscall exception in [ADR-0013](0013-plugin-isolation.md).
 
+**Review correction, 2026-10-08:** the lifetime protocol below joins actual
+claims, replacing pre-enrollment of every notified helper. A helper that has
+not entered must not extend the cycle merely to observe that it has ended.
+
 ## Context
 
 Four independent live Ferric instances exhaust one callback core at 64 and
@@ -20,12 +24,20 @@ for render-ahead work but cannot be called by a device callback.
    once, and publish successors through atomic dependency counters. The
    callback helps throughout. While a dependency or helper departure is
    outstanding it spins on atomics, with a CPU relax instruction: no wait,
-   yield, sleep or other join syscall. A late helper makes the cycle late;
+   yield, sleep or other join syscall. A late in-flight node makes the cycle late;
    there is no discard, timeout, rerun or attempt to undo plug-in state.
-2. **Explicit lifetime.** Enroll all selected helpers before publishing any
-   job notification. Return only after every enrolled helper acknowledges
-   departure, including one preempted before seeing the job. No helper may
-   access the job after acknowledging. Only then may the callback collect
+2. **Explicit lifetime.** With the job closed and previous readers joined,
+   publish its plain pointer/function/context fields, then open it with a
+   sequentially consistent store before notifying selected helpers. A helper
+   increments the active count (seq_cst), then checks open (seq_cst). Only an
+   open job permits reading those fields; otherwise it skips them. After all
+   accesses it decrements active with release. Once all nodes finish, the
+   callback closes open (seq_cst) and spins on active (seq_cst) until zero.
+   This store-load handshake requires seq_cst on both sides: either the
+   callback sees the claim or the helper sees closed. Return need not wait
+   for a helper preempted before claiming. A late wake can harmlessly enter
+   the next open job. No helper may access a job after acknowledging its
+   departure. Only after close/join may the callback collect
    outputs/meters, record inputs, relocate, reset, adopt a plan or acknowledge
    a newer generation. Existing main-thread plan reclamation therefore also
    covers helper accesses. Plugin lifecycle remains with the owning executor;
@@ -36,15 +48,17 @@ for render-ahead work but cannot be called by a device callback.
    configured capacity, capped by available CPUs minus one. Width-one jobs
    run directly on the callback, without wakes or queue traffic. Helpers
    park on individual native 32-bit futex words between jobs; they spin only
-   while their enrolled job is in flight. No post-cycle spinning is planned.
+   while their claimed job is in flight. No post-cycle spinning is planned.
 4. **Narrow wake primitive.** `supple::rt::wake` issues only a nonblocking
    private futex wake on an already published 32-bit atomic. The scoped
    RTSan exception surrounds only that syscall, not job setup, dependency
    handling or DSP. Its companion wait is for idle helpers only and must
-   recheck the sequence after EINTR/spurious wakes. Publication uses release
-   and acquisition uses acquire; the futex itself conveys no C++ ordering.
-   Each helper must depart before its sequence can be reused, preventing a
-   missed full wrap. The callback does not notify the background renderer.
+   recheck the sequence after EINTR/spurious wakes. Slot sequence updates use
+   release and observations use acquire; job ownership uses the stronger
+   handshake in point 2. The futex itself conveys no C++ ordering.
+   Notifications may coalesce while a helper is delayed; the open/active
+   handshake, not a notification, grants access to job state. The callback
+   does not notify the background renderer.
 5. **Process-local scheduling.** Before enabling the pool, JACK helpers get
    SCHED_FIFO at the callback priority, preferring JACK's documented
    `jack_acquire_real_time_scheduling` API, then pthread scheduling within
@@ -78,12 +92,15 @@ for render-ahead work but cannot be called by a device callback.
 
 Test exact output with serial, two and many execution threads, including
 live/frontier graphs, sidechains, recording and transport/plan transitions.
-Force helper delays before execution and before departure without timing
-thresholds, and prove job replacement/reclamation waits for acknowledgement.
+Force helper delays before claiming, before execution and before departure
+without timing thresholds. Prove replacement/reclamation waits for actual
+claims, permits a delayed unclaimed helper, and excludes retired job access
+after a late wake. Also exercise an old wake entering a new open job.
 Run callback tests under RTSan and scheduling tests under TSan. Measure four
 and eight independent live Ferrics plus a serial chain at 64/128, before and
-after, and one short JACK four-live-Ferric run at 128. Repeated wins are the
-gate for Automatic; inconclusive evidence goes back to review.
+after, and one short JACK four-live-Ferric run at 128. Compare a light live
+stock graph with serial execution at both blocks to expose wake/join overhead.
+Repeated wins are the gate for Automatic; inconclusive evidence goes back to review.
 
 Fork-join adds wake and synchronization overhead to short parallel graphs.
 A stalled plug-in/helper can stall its cycle indefinitely, as a stalled

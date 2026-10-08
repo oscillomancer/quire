@@ -117,8 +117,10 @@ inside `supple::rt::ScopedSanctionedSyscall`. This exception does not authorize
 waits or synchronous bridge calls in the device callback. ADR-0024 additionally
 sanctions `supple::rt::wake()`, a nonblocking private futex wake for live
 helpers. The callback executes ready nodes and joins using atomics only;
-helpers park between segments, and every helper must depart before plan
-state is reused. A late helper makes the cycle late; no output is discarded. The background pool currently uses atomic
+helpers park between segments, and every helper that claimed the job must depart
+before plan state is reused. Unclaimed late helpers cannot access retired jobs
+and need not be awaited. A late in-flight node makes the cycle late; no output
+is discarded. The background pool currently uses atomic
 wait/notify between jobs and when no task is ready. Participation is bounded
 by graph dependencies and departure is joined explicitly (ADR-0023); this pool
 does not participate in live callback execution.

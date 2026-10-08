@@ -1,9 +1,7 @@
-// The worker pool (ADR-0012): every task runs once, after its dependencies,
-// whatever the thread count.
+// The live pool (ADR-0024): exact-once dependencies and claim/close lifetime.
 #include <doctest/doctest.h>
 
 #include <atomic>
-#include <latch>
 #include <random>
 #include <semaphore>
 #include <vector>
@@ -71,19 +69,24 @@ TEST_CASE("live pool: an empty graph and a chain") {
     for (int i = 0; i < 5; ++i) CHECK(r.done[i].load() == 1);
 }
 
-TEST_CASE("live pool: preempted enrollment and departure retain graph and context") {
-    for (auto pause : {LiveWorkers::Event::Join, LiveWorkers::Event::Leave}) {
+TEST_CASE("live pool: preempted claim and departure retain graph and context") {
+    for (auto pause : {LiveWorkers::Event::Claimed, LiveWorkers::Event::Leave}) {
         struct Gate {
             LiveWorkers::Event pause;
-            std::atomic<bool> claimed{false}, joining{false};
+            std::atomic<bool> claimed{false}, held{false}, joining{false};
             std::binary_semaphore entered{0}, resume{0};
         } gate{pause};
         LiveWorkers pool(7, {[](void* p, LiveWorkers::Event e) {
                                  auto& x = *static_cast<Gate*>(p);
                                  if (e == x.pause && !x.claimed.exchange(true)) {
+                                     x.held = true;
                                      x.entered.release();
                                      x.resume.acquire();
                                  }
+                                 // Force an actual claim before the caller can
+                                 // complete this otherwise tiny graph.
+                                 if (e == LiveWorkers::Event::Published)
+                                     while (!x.held.load()) supple::rt::relax();
                                  if (e == LiveWorkers::Event::JoinWait) x.joining.store(true);
                              },
                              &gate});
@@ -117,11 +120,89 @@ TEST_CASE("live pool: preempted enrollment and departure retain graph and contex
     }
 }
 
+TEST_CASE("live pool: a helper delayed before claiming cannot retain a closed job") {
+    struct Gate {
+        std::atomic<bool> first{true};
+        std::atomic<unsigned> enteredJobs{0}, missedJobs{0};
+        std::binary_semaphore entered{0}, resume{0}, parked{0};
+    } gate;
+    LiveWorkers pool(1, {[](void* p, LiveWorkers::Event e) {
+                             auto& x = *static_cast<Gate*>(p);
+                             if (e == LiveWorkers::Event::Join && x.first.exchange(false)) {
+                                 x.entered.release();
+                                 x.resume.acquire();
+                             }
+                             if (e == LiveWorkers::Event::Entered) ++x.enteredJobs;
+                             if (e == LiveWorkers::Event::Missed) ++x.missedJobs;
+                             if (e == LiveWorkers::Event::Idle && !x.first.load())
+                                 x.parked.release();
+                         },
+                         &gate});
+    auto r = std::make_unique<Run>();
+    r->deps = {{}, {}, {0, 1}};
+    r->done = std::make_unique<std::atomic<int>[]>(3);
+    auto graph = std::make_unique<TaskGraph>();
+    graph->build(r->deps);
+    std::thread submit([&] { pool.run(*graph, task, r.get()); });
+    gate.entered.acquire();
+    // No clock threshold: joining the caller before releasing the helper
+    // proves it can return while that helper is preempted before its claim.
+    submit.join();
+    for (unsigned i = 0; i < 3; ++i) CHECK(r->done[i] == 1);
+    graph.reset();
+    r.reset();
+    gate.resume.release();
+    gate.parked.acquire();  // late claim/check/decrement has finished
+    CHECK(gate.enteredJobs == 0);
+    CHECK(gate.missedJobs == 1);
+}
+
+TEST_CASE("live pool: an old wake may claim the next open job") {
+    struct Gate {
+        std::atomic<bool> first{true}, nextPublished{false}, nextEntered{false};
+        unsigned publications = 0;  // caller only
+        std::binary_semaphore entered{0}, resume{0};
+    } gate;
+    LiveWorkers pool(1, {[](void* p, LiveWorkers::Event e) {
+                             auto& x = *static_cast<Gate*>(p);
+                             if (e == LiveWorkers::Event::Join && x.first.exchange(false)) {
+                                 x.entered.release();
+                                 x.resume.acquire();
+                             }
+                             if (e == LiveWorkers::Event::Entered) x.nextEntered = true;
+                             if (e == LiveWorkers::Event::Published && ++x.publications == 2) {
+                                 x.nextPublished = true;
+                                 while (!x.nextEntered.load()) supple::rt::relax();
+                             }
+                         },
+                         &gate});
+    {
+        TaskGraph graph;
+        graph.build({{}, {}});
+        pool.run(graph, [](void*, std::uint32_t) {}, nullptr);
+        gate.entered.acquire();
+    }  // retire the first graph before permitting its wake to claim anything
+    Run next;
+    next.deps = {{}, {}, {0, 1}};
+    next.done = std::make_unique<std::atomic<int>[]>(3);
+    TaskGraph replacement;
+    replacement.build(next.deps);
+    std::thread submit([&] { pool.run(replacement, task, &next); });
+    // Wait for publication, not elapsed time, before releasing the old wake.
+    // The callback's Published hook waits for the helper to enter this job.
+    while (!gate.nextPublished.load()) std::this_thread::yield();
+    gate.resume.release();
+    submit.join();
+    CHECK(gate.nextEntered.load());
+    CHECK(next.violations == 0);
+    for (unsigned i = 0; i < 3; ++i) CHECK(next.done[i] == 1);
+}
+
 TEST_CASE("live pool: publication before parking is not lost; chains wake nobody") {
     struct Gate {
         std::atomic<bool> first{true};
         std::atomic<unsigned> joins{0}, calls{0};
-        std::binary_semaphore entered{0}, resume{0};
+        std::binary_semaphore entered{0}, resume{0}, parked{0};
     } gate;
     LiveWorkers pool(1, {[](void* p, LiveWorkers::Event e) {
                              auto& x = *static_cast<Gate*>(p);
@@ -130,6 +211,8 @@ TEST_CASE("live pool: publication before parking is not lost; chains wake nobody
                                  x.resume.acquire();
                              }
                              if (e == LiveWorkers::Event::Join) ++x.joins;
+                             if (e == LiveWorkers::Event::Idle && x.joins.load() != 0)
+                                 x.parked.release();
                          },
                          &gate});
     gate.entered.acquire();
@@ -142,10 +225,10 @@ TEST_CASE("live pool: publication before parking is not lost; chains wake nobody
     TaskGraph parallel;
     parallel.build({{}, {}});
     std::thread submit([&] { pool.run(parallel, count, &gate); });
-    while (gate.calls != 5) std::this_thread::yield();
+    submit.join();
     // Publication already happened; the helper hasn't entered futex wait yet.
     gate.resume.release();
-    submit.join();
+    gate.parked.acquire();
     CHECK(gate.joins == 1);
     CHECK(gate.calls == 5);
 }
@@ -157,7 +240,7 @@ TEST_CASE("live pool: a delayed node publishes state once before its dependent")
         std::atomic<unsigned> roots{0};
     } state;
     LiveWorkers pool(1, {[](void* p, LiveWorkers::Event e) {
-                             if (e == LiveWorkers::Event::Join)
+                             if (e == LiveWorkers::Event::Entered)
                                  static_cast<State*>(p)->helperJoined = true;
                          },
                          &state});
