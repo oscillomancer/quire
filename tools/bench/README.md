@@ -83,7 +83,7 @@ Stock session export/B2 remains the original MIDI fixture.
 
 Scheduling and isolation (B1 only, engine.md §2.2, ADR-0026):
 
-- `--background auto|normal|fifo|rr` and `--background-priority N` choose the
+- `--background auto|normal|fifo` and `--background-priority N` choose the
   renderer's and background pool's policy (`EngineOptions::background`).
   Auto follows the callback.
 - `--callback-priority P` (paced only) runs the paced callback thread, and the

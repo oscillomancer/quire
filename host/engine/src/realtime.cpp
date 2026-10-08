@@ -310,8 +310,7 @@ void Engine::scheduleBackground() {
                       " allowed CPUs to the rest of the system; lower Audio processing threads "
                       "and restart the engine";
         else
-            want = {options_.background == Background::RoundRobin ? Kind::RoundRobin : Kind::Fifo,
-                    priority};
+            want = {Kind::Fifo, priority};
     }
     if (want.realtime()) {
         Status applied = workers_->setPolicy(want);

@@ -276,9 +276,9 @@ struct EngineOptions {
     // ADR-0026). Auto: real-time below a real-time callback, else normal. The
     // others force it for benchmarks and tests (still below a real-time
     // callback, within the same checks).
-    enum class Background { Auto, Normal, Fifo, RoundRobin };
+    enum class Background { Auto, Normal, Fifo };
     Background background = Background::Auto;
-    int backgroundPriority = 0;  // Fifo/RoundRobin; 0: Engine::kBackgroundPriority
+    int backgroundPriority = 0;  // Fifo; 0: Engine::kBackgroundPriority
 };
 
 // Output values remain in the host event domain (VST3 normalized). Main-thread

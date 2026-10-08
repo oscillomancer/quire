@@ -149,7 +149,8 @@ cell. While every CPU is busy, someone waits: with normal threads it was the
 audio, with FIFO 10 it is ordinary tasks, for up to about one render job.
 
 **Other checks**
-- SCHED_RR 10 matched FIFO: job p99 9.24 against 9.20 ms, no misses.
+- SCHED_RR 10 matched FIFO: job p99 9.24 against 9.20 ms, no misses. The
+  engine and bench option that forced it was removed afterwards.
 - Restricting the same four-thread pool to the six fastest CPUs changed job
   p99 by 2% (14.3 against 14.6 ms), with equal headroom. Affinity stays as
   inherited.

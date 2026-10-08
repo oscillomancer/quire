@@ -354,7 +354,7 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=-1)
     parser.add_argument("--metrics", choices=("on", "off"), default="on")
     parser.add_argument("--sample-capacity", type=int, default=500000)
-    parser.add_argument("--background", choices=("auto", "normal", "fifo", "rr"), default="auto",
+    parser.add_argument("--background", choices=("auto", "normal", "fifo"), default="auto",
                         help="B1 only: renderer and background pool scheduling")
     parser.add_argument("--background-priority", type=int, default=0)
     parser.add_argument("--callback-priority", type=int, default=0,

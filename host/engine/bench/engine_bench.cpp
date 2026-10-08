@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
                     "[--anticipative on|off] [--plugins DIR] [--output JSON] "
                     "[--block 64|128] [--workers -1] [--metrics on|off] "
                     "[--sample-capacity 500000] [--plugin-file PATH --plugin-id ID --input WAV "
-                    "--live on|off --fx-per-track N] [--background auto|normal|fifo|rr] "
+                    "--live on|off --fx-per-track N] [--background auto|normal|fifo] "
                     "[--background-priority 0] [--callback-priority 0] "
                     "[--isolation in_process|shared_bridge|dedicated] "
                     "[--export-session JSON] [--search --max-tracks 256 --report "
@@ -260,7 +260,7 @@ int main(int argc, char** argv) {
             else if (arg == "--input")
                 input = value;
             else if (arg == "--background" &&
-                     (value == "auto" || value == "normal" || value == "fifo" || value == "rr"))
+                     (value == "auto" || value == "normal" || value == "fifo"))
                 background = value;
             else if (arg == "--isolation" &&
                      (value == "in_process" || value == "shared_bridge" || value == "dedicated"))
@@ -360,7 +360,6 @@ int main(int argc, char** argv) {
          .benchProbe = metrics ? &probe : nullptr,
          .background = background == "normal" ? Background::Normal
                        : background == "fifo" ? Background::Fifo
-                       : background == "rr"   ? Background::RoundRobin
                                               : Background::Auto,
          .backgroundPriority = backgroundPriority});
     if (!started) {

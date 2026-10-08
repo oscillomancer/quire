@@ -241,8 +241,8 @@ classes from it, all process-local:
 - **When the background classes are real-time.** Only when the callback is
   FIFO/RR (`Backend::callbackPolicy()`; JACK reads its client thread). A
   normal callback (the dummy backend, a non-RT JACK server) leaves them
-  normal. `EngineOptions::background` forces `Normal`, `Fifo` or
-  `RoundRobin` (`backgroundPriority`) for benchmarks and tests.
+  normal. `EngineOptions::background` forces `Normal` or `Fifo`
+  (`backgroundPriority`) for benchmarks and tests.
 - **How it is applied.** On the main thread after backend start, through
   `pthread_setschedparam`, verified by reading the policy back
   (`setThreadPolicy`, core-base `supple/base/thread.h`). JACK's and rtkit's

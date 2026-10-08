@@ -4273,14 +4273,13 @@ TEST_CASE("forced background policies apply for benchmarks, within the same chec
     auto pool = makePool();
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
-    Engine engine(pool, media,
-                  {.workers = 2,
-                   .background = EngineOptions::Background::RoundRobin,
-                   .backgroundPriority = 3});
+    Engine engine(
+        pool, media,
+        {.workers = 2, .background = EngineOptions::Background::Fifo, .backgroundPriority = 3});
     REQUIRE(engine.start(backend, {.blockSize = 128}));
-    if (mayElevate(3, 3)) {
-        CHECK(engine.scheduling().renderer == ThreadPolicy{Kind::RoundRobin, 3});
-        CHECK(engine.scheduling().background == ThreadPolicy{Kind::RoundRobin, 3});
+    if (mayElevate(3, 3)) {  // forced even under a normal callback
+        CHECK(engine.scheduling().renderer == ThreadPolicy{Kind::Fifo, 3});
+        CHECK(engine.scheduling().background == ThreadPolicy{Kind::Fifo, 3});
     } else {
         CHECK(engine.scheduling().renderer == kNormal);
         CHECK(engine.warnings().size() == 1);
