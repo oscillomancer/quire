@@ -379,7 +379,16 @@ geometry). For plugins without a GUI — and always as a second tab — a
 **semantic parameter panel** generated from the plugin's semantic schema
 (units, ranges, enums, groups): the same description an agent reads, so the
 human and the agent see the same names and units. Stock plugin editors are
-the template's Pugl editors. Latency badges refresh after effect model edits,
+the template's Pugl editors. Every writable parameter row of the panel
+(semantic, and a plain plug-in's listed parameters) has a **MIDI** button
+that names its learned control ("CC 21") or opens MIDI learn (ADR-0027): the
+learn dialog says "Move the MIDI controller you wish to assign", shows the
+control moved last (kind, number, channel, input), offers the CC mode
+(absolute, relative 1/2/3, toggle), any input or only that one, enable only
+when the effect's track (or a take FX's item) is selected, when its FX window
+or editor has the focus, or when one of them shows, and soft takeover; OK
+binds through `fx.learn.set`, Remove (when bound) through `fx.learn.remove`.
+While the dialog is open nothing learned moves. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
 cannot remain open. Each editor registration (an open, or a reopen for a
@@ -545,7 +554,16 @@ Delete.
   tracks") at invocation.
 - **Actions list** (`?`): fuzzy search over names, descriptions and
   commands; shows bound keys; runs, binds (Ctrl+B, then the chord), adds to
-  toolbar/menu (Ctrl+T, Ctrl+M). Its keys work with the focus on the search
+  toolbar/menu (Ctrl+T, Ctrl+M), and learns a MIDI control for it (Ctrl+L:
+  the learn dialog of §4.5 with the CC mode and input choice). The list shows
+  a bound control after the keys. A press (note on, CC above 0, program
+  change, an encoder step) runs the action once; the "(MIDI CC)" actions
+  follow the value instead — the selected tracks' volume (the fader's
+  travel) and pan (an encoder step is 1 %), the master's volume, and a beat
+  jog of the play cursor — one undo step per movement. A control drives one
+  action (learning it for another moves it); the bindings are user settings
+  in `controls.json` (`supple.controls/1.0`: `{bindings: [{action, midi,
+  mode}]}`, beside the keymap). Its keys work with the focus on the search
   field or on the list (after a click on a row), where typing goes on
   searching. A new binding goes to `global`; an `arrange` binding on the same
   keys gives way (the arrange view looks there first), and the hint names

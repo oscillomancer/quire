@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
 #include "supple/schema/schema.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/node.h"
 
 namespace supple::gui {
@@ -91,8 +93,10 @@ void registerGuiCommands(cmd::Registry& registry, const UiState& ui) {
 }
 
 AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatcher,
-                       engine::EngineApp& app, UiState& ui, std::filesystem::path keymapFile)
+                       engine::EngineApp& app, UiState& ui, std::filesystem::path keymapFile,
+                       std::filesystem::path controlsFile)
     : keymapFile_(std::move(keymapFile)),
+      controlsFile_(std::move(controlsFile)),
       dispatcher_(dispatcher),
       app_(app),
       ui_(ui),
@@ -197,6 +201,43 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
         registry_.add(bound(std::string("project.timebase:") + name, label, "project.set",
                             obj({{"timebase", name}})));
 
+    // Followed by a MIDI controller (ADR-0027).
+    addControl("control.track.volume", "Track: volume of selected tracks (MIDI CC)",
+               "A knob or fader sets the selected tracks' volume along the fader's travel; an "
+               "encoder moves it.",
+               [this](const actions::ControlValue& v) -> Status {
+                   SUPPLE_TRY(controlTracks(v, false, false));
+                   return {};
+               });
+    addControl("control.track.pan", "Track: pan of selected tracks (MIDI CC)",
+               "A knob sets the selected tracks' pan, left to right; an encoder moves it.",
+               [this](const actions::ControlValue& v) -> Status {
+                   SUPPLE_TRY(controlTracks(v, true, false));
+                   return {};
+               });
+    addControl("control.master.volume", "Master: volume (MIDI CC)",
+               "A knob or fader sets the main master's volume along the fader's travel.",
+               [this](const actions::ControlValue& v) -> Status {
+                   SUPPLE_TRY(controlTracks(v, false, true));
+                   return {};
+               });
+    addControl("control.transport.jog", "Transport: move the play cursor by beats (MIDI CC)",
+               "An encoder (a relative mode) moves the play cursor a beat per step.",
+               [this](const actions::ControlValue& v) -> Status {
+                   if (!v.relative || v.steps == 0) return {};
+                   const actions::Context c = context();
+                   SUPPLE_TRY(dispatcher_.execute(
+                       {"transport.seek", obj({{"beat", std::max(0.0, c.playheadBeats + v.steps)}}),
+                        kOrigin}));
+                   return {};
+               });
+
+    if (auto loadedControls = ControlMap::load(controlsFile_); loadedControls)
+        controls_ = std::move(*loadedControls);
+    else
+        std::fprintf(stderr, "controls: %s (none bound)\n",
+                     loadedControls.error().toString().c_str());
+
     auto loaded = actions::Keymap::load(keymapFile_);
     if (loaded) {
         keymap_ = std::move(*loaded);
@@ -292,6 +333,111 @@ Status AppActions::resetKeymap() {
     keymap_ = actions::Keymap::defaults();
     keymap_.clearPending();
     return keymapFile_.empty() ? Status{} : keymap_.save(keymapFile_);
+}
+
+void AppActions::addControl(std::string id, std::string name, std::string description,
+                            std::function<Status(const actions::ControlValue&)> run) {
+    actions::Action a;
+    a.id = std::move(id);
+    a.name = std::move(name);
+    a.description = std::move(description);
+    a.builtin = [name = a.name](const actions::Context&) -> Result<json::Value> {
+        return Error("action.control", name + " follows a MIDI controller", {},
+                     "bind a controller to it: Ctrl+L in the actions list");
+    };
+    a.control = [run = std::move(run)](const actions::ControlValue& v,
+                                       const actions::Context&) -> Result<json::Value> {
+        SUPPLE_TRY(run(v));
+        return json::Value::object();
+    };
+    registry_.add(std::move(a));
+}
+
+Result<json::Value> AppActions::controlTracks(const actions::ControlValue& v, bool pan,
+                                              bool master) {
+    const model::Session s = app_.head();
+    std::vector<model::Id> tracks;
+    if (master)
+        tracks.push_back(model::kMaster);
+    else
+        for (const std::string& text : ui_.selectedTracks)
+            if (auto id = model::Id::parse(text); id && s.tracks.find(*id)) tracks.push_back(*id);
+    if (tracks.empty()) return json::Value::object();
+    const cmd::Origin origin{cmd::Origin::Type::Ui, "midi", {}, v.gesture};
+    return dispatcher_.transact(
+        pan ? "Track pan" : "Track volume", origin, [&]() -> Result<json::Value> {
+            for (const model::Id& id : tracks) {
+                const model::Track& t = *s.tracks.find(id);
+                json::Value args = json::Value::object();
+                args["track"] = id.str();
+                if (pan) {  // an encoder step is 1 %; a knob spans hard left to hard right
+                    const double to =
+                        v.relative ? t.pan + v.steps : std::round(v.value * 200.0 - 100.0);
+                    args["pan"] = std::clamp(to, -100.0, 100.0);
+                } else {
+                    double p = ui::faderPosition(t.volumeDb);
+                    p = std::clamp(v.relative ? p + v.steps / 128.0 : v.value, 0.0, 1.0);
+                    args["volume_db"] = std::clamp(ui::faderDb(p), model::kSilenceDb, 12.0);
+                }
+                SUPPLE_TRY(dispatcher_.execute({"track.set", std::move(args), origin}));
+            }
+            return json::Value::object();
+        });
+}
+
+Status AppActions::saveControls() const {
+    if (controlsFile_.empty()) return {};
+    return controls_.save(controlsFile_);
+}
+
+std::string AppActions::controlsFor(std::string_view action) const {
+    const auto bound = controls_.bindingsFor(action);
+    return bound.empty() ? std::string() : engine::describe(bound.front().control);
+}
+
+void AppActions::control(const std::vector<engine::EngineApp::ControlEvent>& events) {
+    if (learnSink) {
+        auto sink = learnSink;  // the dialog may close on what it hears
+        sink(events);
+        return;
+    }
+    if (controls_.empty()) return;
+    const std::uint64_t now = app_.clockMs();
+    const std::vector<ActionControl> bindings = controls_.bindings();  // actions may rebind
+    for (const ActionControl& b : bindings) {
+        const actions::Action* a = registry_.find(b.action);
+        if (!a) continue;
+        bool heard = false;
+        int presses = 0;
+        actions::ControlValue value;
+        for (const auto& e : events) {
+            if (!engine::matches(b.control, e.midi, e.device)) continue;
+            heard = true;
+            const engine::ControlReading r = engine::read(e.midi, b.mode);
+            if (r.relative) {
+                value.relative = true;
+                value.steps += r.steps;
+                if (r.steps != 0) ++presses;
+            } else {
+                value.value =
+                    b.mode == model::ControlMode::Toggle ? (r.press ? 1.0 : 0.0) : r.value;
+                if (r.press) ++presses;
+            }
+        }
+        if (!heard) continue;
+        if (a->control) {
+            ControlState& st = controlState_[b.action];
+            if (now > st.lastMs + 1000) ++st.serial;
+            st.lastMs = now;
+            value.gesture = "midi:" + b.action + ":" + std::to_string(st.serial);
+            const actions::Action copy = *a;
+            if (auto r = copy.control(value, context()); !r && onError)
+                onError(copy.name + ": " + r.error().message);
+            continue;
+        }
+        const actions::Action copy = *a;  // a run may replace the registry's entry
+        for (int i = 0; i < presses; ++i) invoke(copy);
+    }
 }
 
 std::string AppActions::keysFor(std::string_view action) const {

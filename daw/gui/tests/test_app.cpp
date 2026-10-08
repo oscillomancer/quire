@@ -27,6 +27,7 @@
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/peaks/peaks.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
@@ -803,6 +804,130 @@ TEST_CASE("actions list: keys after a click on a row, overriding defaults, and a
     REQUIRE(saved);
     CHECK(saved->bindings() == actions::Keymap::defaults().bindings());
     CHECK(a.root->find("actions"));  // the list stays open
+}
+
+namespace {
+engine::EngineApp::ControlEvent controlEvent(std::uint8_t status, std::uint8_t a, std::uint8_t b,
+                                             std::string device = "nanoKONTROL2") {
+    engine::EngineApp::ControlEvent e;
+    e.midi.bytes[0] = status;
+    e.midi.bytes[1] = a;
+    e.midi.bytes[2] = b;
+    e.device = std::move(device);
+    return e;
+}
+}  // namespace
+
+TEST_CASE("MIDI learn: the actions list binds a controller to an action, saved; a press runs it") {
+    App a;
+    if (!a.ok) return;
+    const auto controlsFile = a.dir / "config" / "controls.json";
+    a.actions = std::make_unique<gui::AppActions>(a.registry, *a.dispatcher, *a.app, a.ui,
+                                                  actions::Keymap::defaultFile(gui::test::slug()),
+                                                  controlsFile);
+    gui::openActionsList(*a.root, *a.actions);
+    a.type("add master");
+    a.key("Ctrl+L");
+    REQUIRE(a.root->find("learn"));
+    CHECK(a.app->learning());
+    a.root->frame(false);
+    CHECK_FALSE(a.root->click("learn.ok"));  // nothing heard yet: OK is off
+    REQUIRE(a.root->find("learn"));
+    // The control moved last is the one shown.
+    a.actions->control({controlEvent(0xb0, 40, 127), controlEvent(0xb0, 41, 127)});
+    a.root->frame(false);
+    CHECK(a.root->find("learn.control.value")->valueText() == "CC 41 · ch 1 · nanoKONTROL2");
+    CHECK(a.root->find("learn.device.set")->valueText() == "Any MIDI input");
+    REQUIRE(a.root->click("learn.device.set"));
+    CHECK(a.root->find("learn.device.set")->valueText() == "Only nanoKONTROL2");
+    a.snapshot("actions-midi-learn-dialog.png");
+    REQUIRE(a.root->click("learn.ok"));
+    CHECK_FALSE(a.root->find("learn"));
+    CHECK_FALSE(a.app->learning());
+    CHECK_FALSE(a.actions->learnSink);
+    CHECK(a.actions->controlsFor("track.add:master") == "CC 41 · ch 1");
+    a.snapshot("actions-midi-learn.png");
+    auto saved = gui::ControlMap::load(controlsFile);
+    REQUIRE(saved);
+    REQUIRE(saved->bindings().size() == 1);
+    CHECK(saved->bindings()[0].action == "track.add:master");
+    CHECK(saved->bindings()[0].control.device == "nanoKONTROL2");
+    a.root->closePopups();
+
+    // A press runs it once; the release, another input or another CC do not.
+    const std::size_t masters = a.tracks("master");
+    a.actions->control({controlEvent(0xb0, 41, 127)});
+    CHECK(a.tracks("master") == masters + 1);
+    a.actions->control({controlEvent(0xb0, 41, 0)});
+    a.actions->control({controlEvent(0xb0, 41, 127, "USB Keyboard")});
+    a.actions->control({controlEvent(0xb0, 42, 127)});
+    CHECK(a.tracks("master") == masters + 1);
+
+    // Learning the same control for another action moves it there.
+    gui::openActionsList(*a.root, *a.actions);
+    a.type("add buss");
+    a.key("Ctrl+L");
+    a.actions->control({controlEvent(0xb0, 41, 127)});
+    a.root->frame(false);
+    REQUIRE(a.root->click("learn.device.set"));
+    REQUIRE(a.root->click("learn.ok"));
+    CHECK(a.actions->controlsFor("track.add:master").empty());
+    CHECK(a.actions->controlsFor("track.add:buss") == "CC 41 · ch 1");
+    // Remove takes it off again.
+    a.key("Ctrl+L");
+    a.root->frame(false);
+    CHECK(a.root->find("learn.control.value")->valueText() == "CC 41 · ch 1 · nanoKONTROL2");
+    REQUIRE(a.root->click("learn.remove"));
+    CHECK(a.actions->controlsFor("track.add:buss").empty());
+    saved = gui::ControlMap::load(controlsFile);
+    REQUIRE(saved);
+    CHECK(saved->empty());
+    // Cancel leaves everything as it was, and stops listening.
+    a.key("Ctrl+L");
+    a.actions->control({controlEvent(0xb0, 50, 127)});
+    a.root->frame(false);
+    REQUIRE(a.root->click("learn.cancel"));
+    CHECK(a.actions->controlsFor("track.add:buss").empty());
+    CHECK_FALSE(a.actions->learnSink);
+}
+
+TEST_CASE("MIDI learn: knobs drive the selected tracks' volume and pan, a step per movement") {
+    App a;
+    if (!a.ok) return;
+    a.app->setFixedClock(1'000'000);
+    for (const char* name : {"A", "B"})
+        REQUIRE(a.dispatcher->execute({"track.add",
+                                       *json::parse(std::string(R"({"name":")") + name + R"("})"),
+                                       cmd::Origin{cmd::Origin::Type::Test, "t", {}}}));
+    a.ui.selectedTracks = {"tr_1", "tr_2"};
+    a.actions->controls().bind(
+        {"control.track.volume", {model::ControlKind::Cc, 1, 7, ""}, model::ControlMode::Absolute});
+    a.actions->controls().bind(
+        {"control.track.pan", {model::ControlKind::Cc, 1, 10, ""}, model::ControlMode::Relative2});
+    auto track = [&](const char* id) { return *a.app->head().tracks.find(*model::Id::parse(id)); };
+    const std::size_t before = a.app->versions().history(1000).size();
+    a.actions->control({controlEvent(0xb0, 7, 127)});
+    CHECK(track("tr_1").volumeDb == doctest::Approx(12.0));
+    CHECK(track("tr_2").volumeDb == doctest::Approx(12.0));
+    a.actions->control({controlEvent(0xb0, 7, 0)});
+    CHECK(track("tr_1").volumeDb <= model::kSilenceDb);
+    a.actions->control({controlEvent(0xb0, 7, 90)});
+    CHECK(track("tr_2").volumeDb == doctest::Approx(ui::faderDb(90.0 / 127)).epsilon(0.001));
+    CHECK(a.app->versions().history(1000).size() == before + 1);  // one movement, one step
+    // An encoder nudges the pan.
+    a.actions->control({controlEvent(0xb0, 10, 65), controlEvent(0xb0, 10, 65)});
+    CHECK(track("tr_1").pan == doctest::Approx(2.0));
+    a.actions->control({controlEvent(0xb0, 10, 63)});
+    CHECK(track("tr_1").pan == doctest::Approx(1.0));
+    // A pause starts a new undo step.
+    a.app->setFixedClock(1'010'000);
+    a.actions->control({controlEvent(0xb0, 7, 127)});
+    CHECK(a.app->versions().history(1000).size() == before + 3);
+    // Run from the list, it says what it needs.
+    std::string error;
+    a.actions->onError = [&](const std::string& message) { error = message; };
+    (void)a.actions->run("control.track.volume");
+    CHECK(error.find("follows a MIDI controller") != std::string::npos);
 }
 
 TEST_CASE("an action binds the selected tracks ($selection.track)") {

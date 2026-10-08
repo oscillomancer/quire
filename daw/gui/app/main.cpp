@@ -35,6 +35,7 @@
 #include "fx_window.h"
 #include "generate.h"
 #include "history_panel.h"
+#include "learn_dialog.h"
 #include "meter_feed.h"
 #include "midi_editor.h"
 #include "mixer.h"
@@ -81,6 +82,27 @@ struct Options {
     // optionally followed by a space and a JSON object of its prompted inputs.
     std::vector<std::string> actions;
 };
+
+// MIDI learn's "enable only when selected": the effect's track is selected
+// (its chain or input chain), or, for take FX, the take's item or its track.
+bool fxSelected(const model::Session& s, const gui::UiState& ui, model::Id fx) {
+    auto owner = model::trackOfFx(s, fx);
+    if (!owner)
+        for (const auto& t : s.tracks)
+            if (std::find(t.value->inputChain.begin(), t.value->inputChain.end(), fx) !=
+                t.value->inputChain.end())
+                owner = t.id;
+    if (owner) return gui::trackSelected(ui, owner->str());
+    for (const auto& item : s.items)
+        for (const model::Id& take : item.value->takes) {
+            const model::Take* t = s.takes.find(take);
+            if (!t || std::find(t->chain.begin(), t->chain.end(), fx) == t->chain.end()) continue;
+            return gui::trackSelected(ui, item.value->track.str()) ||
+                   std::find(ui.selectedItems.begin(), ui.selectedItems.end(), item.id.str()) !=
+                       ui.selectedItems.end();
+        }
+    return false;
+}
 
 int usage() {
     std::fprintf(stderr,
@@ -344,10 +366,12 @@ int main(int argc, char** argv) {
         }
         status = "agents: " + path.string();
     }
+    std::function<void()> controlPollUpdate;  // MIDI learn's fast poll (set below)
     auto tick = loop.every(std::chrono::milliseconds(100), [&] {
         (*app)->tick();
         dispatcher.flushJobEvents();  // job events and follow-ups from workers
         publish();
+        if (controlPollUpdate) controlPollUpdate();
     });
 
     // The plugin bridge for isolated fx (and their editors, gap log #39).
@@ -385,7 +409,8 @@ int main(int argc, char** argv) {
     std::vector<std::filesystem::path> dropped;  // files of a drop in progress
     ui::Point dropAt{};
     gui::AppActions appActions(registry, dispatcher, **app, uiState,
-                               actions::Keymap::defaultFile(product::kSlug));
+                               actions::Keymap::defaultFile(product::kSlug),
+                               gui::ControlMap::defaultFile(product::kSlug));
     appActions.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
@@ -452,8 +477,44 @@ int main(int argc, char** argv) {
         **app, dispatcher, root,
         gui::FxWindow::Hooks{
             [&](model::Id id) { return pluginWindows.toggle(id); },
-            [](const std::string& message) { std::fprintf(stderr, "%s\n", message.c_str()); }},
+            [](const std::string& message) { std::fprintf(stderr, "%s\n", message.c_str()); },
+            [&](gui::LearnRequest request) {
+                gui::openLearnDialog(root, appActions, **app, std::move(request));
+            }},
         gui::Favourites::defaultFile(product::kSlug));
+    // MIDI learn (ADR-0027): the devices' messages reach the actions bound to
+    // them, or a learn dialog that listens. "Enable only when" asks the
+    // selection and the windows. Controllers answer within a frame while
+    // anything is bound or a dialog listens; the service tick polls otherwise.
+    (*app)->onControl = [&](const std::vector<engine::EngineApp::ControlEvent>& events) {
+        appActions.control(events);
+    };
+    (*app)->learnGate = [&](model::Id fx, const model::ParamLearn& learn) {
+        if (learn.whenSelected && !fxSelected((*app)->head(), uiState, fx)) return false;
+        if (learn.whenVisible && !fxWindow.shows(fx) && !pluginWindows.isOpen(fx)) return false;
+        if (learn.whenFocused && !(fxWindow.shows(fx) && fxWindow.hasFocus()) &&
+            !pluginWindows.hasFocus(fx))
+            return false;
+        return true;
+    };
+    std::shared_ptr<void> releaseControl(nullptr, [&](void*) {
+        (*app)->onControl = nullptr;
+        (*app)->learnGate = nullptr;
+        controlPollUpdate = nullptr;
+    });
+    rpc::Timer controlPoll;
+    controlPollUpdate = [&] {
+        const bool want =
+            (*app)->engine() &&
+            (appActions.learnSink || !appActions.controls().empty() || (*app)->hasLearn());
+        if (want && !controlPoll.active())
+            controlPoll = loop.every(std::chrono::milliseconds(10), [&] {
+                (*app)->pollControl();
+                publish();
+            });
+        else if (!want && controlPoll.active())
+            controlPoll.cancel();
+    };
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
     appActions.addUi("ui.track.color", "Track: color…", "track",

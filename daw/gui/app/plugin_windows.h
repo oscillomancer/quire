@@ -86,6 +86,7 @@ class PluginWindows {
     void setOwner(const Window* owner) { owner_ = owner; }
     std::size_t count() const { return editors_.size(); }
     bool isOpen(model::Id fx) const;
+    bool hasFocus(model::Id fx) const;  // its editor's window has the input focus
     std::function<void(const Error&)> onError;
 
     // Where each effect's editor was last: its position and, when the editor

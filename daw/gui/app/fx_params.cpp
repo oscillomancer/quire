@@ -4,7 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
+#include "supple/model/schemas.h"
 #include "supple/params/params.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/root.h"
@@ -45,6 +47,31 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
     parent.emplace<ui::Label>("fx.params.title", name.empty() ? "Parameters" : name,
                               ui::Font::UiBold, "body");
     const json::Value* paramsJson = described->find("params");
+    // The parameters' MIDI learn (fx.learn.list).
+    learned_.clear();
+    json::Value learnArgs = json::Value::object();
+    learnArgs["fx"] = idText(fx);
+    if (auto listed = query("fx.learn.list", std::move(learnArgs)); listed)
+        for (const json::Value& b : (*listed)["learn"].asArray()) {
+            const json::Value* param = b.find("param");
+            const json::Value* midi = b.find("midi");
+            if (!param || !param->isString() || !midi) continue;
+            auto control = model::midiControlSchema().decode(*midi);
+            if (!control) continue;
+            LearnChoice choice;
+            choice.control = *control;
+            if (const json::Value* mode = b.find("mode"))
+                if (auto m = model::controlModeSchema().decode(*mode)) choice.mode = *m;
+            auto flag = [&](const char* key) {
+                const json::Value* v = b.find(key);
+                return v && v->isBool() && v->asBool();
+            };
+            choice.softTakeover = flag("soft_takeover");
+            choice.whenSelected = flag("when_selected");
+            choice.whenFocused = flag("when_focused");
+            choice.whenVisible = flag("when_visible");
+            learned_[param->asString()] = choice;
+        }
 
     if (!paramsJson || !paramsJson->isObject()) {
         parent.emplace<ui::Label>("fx.params.note",
@@ -70,6 +97,11 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
                                        ui::Font::Ui, "small", "ink-quiet");
                 row.emplace<ui::Label>("fx.plain.value." + std::to_string(shown), value,
                                        ui::Font::Mono, "caption", "ink");
+                const json::Value* id = p.find("id");
+                const json::Value* readOnly = p.find("read_only");
+                if (id && id->isNumber() && !(readOnly && readOnly->isBool() && readOnly->asBool()))
+                    learnButton(row, "fx.plain.learn." + std::to_string(shown),
+                                std::to_string(static_cast<std::uint32_t>(id->asDouble())), pname);
                 ++shown;
             }
         return shown;
@@ -207,11 +239,15 @@ Result<std::size_t> ParamPanel::build(ui::Node& parent, model::Id fx) {
         field.onSubmit = [this, key, spec_keep](const std::string& text) {
             setValue(key, json::Value(text), false);
         };
+        if (writable) learnButton(row, "fx.param.learn." + d.key, d.key, d.name);
         if (writable && spec.type != params::Type::Enum) {
             auto& lane =
                 row.emplace<ui::Button>("fx.param.automate." + d.key, "env",
                                         [this, key, physical] { (void)automate(key, physical); });
             lane.layout.width = ui::SizeRule::fixed(34);
+        } else if (writable && openLearn) {  // keep the MIDI buttons in one column
+            row.emplace<ui::Node>("fx.param.nolane." + d.key).layout.width =
+                ui::SizeRule::fixed(34);
         }
         ++shown;
     }
@@ -244,6 +280,47 @@ Status ParamPanel::automate(const std::string& key, double physical) {
     auto added = dispatcher_.execute({"env.add", std::move(args), kUiOrigin});
     if (!added) return std::move(added).error();
     return {};
+}
+
+void ParamPanel::learnButton(ui::Node& row, const std::string& id, const std::string& param,
+                             const std::string& title) {
+    if (!openLearn) return;
+    std::string text = "MIDI";
+    if (auto it = learned_.find(param); it != learned_.end()) {
+        text = engine::describe(it->second.control);
+        text = text.substr(0, text.find(" · "));  // "CC 21": the channel is in the dialog
+    }
+    auto& button = row.emplace<ui::Button>(id, text, [this, param, title] { learn(param, title); });
+    button.layout.width = ui::SizeRule::fixed(76);
+}
+
+void ParamPanel::learn(const std::string& param, const std::string& title) {
+    LearnRequest request;
+    request.title = title;
+    request.param = true;
+    if (auto it = learned_.find(param); it != learned_.end()) request.current = it->second;
+    const std::string fx = idText(fx_);
+    request.onOk = [this, fx, param](const LearnChoice& choice) {
+        json::Value args = json::Value::object();
+        args["fx"] = fx;
+        args["param"] = param;
+        args["midi"] = model::midiControlSchema().encode(choice.control);
+        args["mode"] = model::controlModeSchema().encode(choice.mode);
+        args["soft_takeover"] = choice.softTakeover;
+        args["when_selected"] = choice.whenSelected;
+        args["when_focused"] = choice.whenFocused;
+        args["when_visible"] = choice.whenVisible;
+        auto set = dispatcher_.execute({"fx.learn.set", std::move(args), kUiOrigin});
+        if (!set && onError) onError(set.error().message);
+    };
+    request.onRemove = [this, fx, param] {
+        json::Value args = json::Value::object();
+        args["fx"] = fx;
+        args["param"] = param;
+        auto removed = dispatcher_.execute({"fx.learn.remove", std::move(args), kUiOrigin});
+        if (!removed && onError) onError(removed.error().message);
+    };
+    if (openLearn) openLearn(std::move(request));
 }
 
 void ParamPanel::setValue(const std::string& key, json::Value value, bool gesture) {

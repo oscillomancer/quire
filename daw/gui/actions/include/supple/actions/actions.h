@@ -28,6 +28,15 @@ struct Context {
     json::Value prompted = json::Value::object();  // a built-in's prompted arguments
 };
 
+// A controller's message for an action that follows it (MIDI learn,
+// ADR-0027): its position 0..1, or signed encoder steps.
+struct ControlValue {
+    double value = 0;
+    int steps = 0;
+    bool relative = false;
+    std::string gesture;  // one undo step per movement: the origin's gesture
+};
+
 struct Action {
     std::string id;    // "history.undo", "track.add:buss", "macro:…", "ui.actions"
     std::string name;  // "Track: add buss"
@@ -40,6 +49,9 @@ struct Action {
     std::vector<std::string> prompts;  // arguments asked for when run
     std::vector<std::string> steps;    // a macro's action ids
     std::function<Result<json::Value>(const Context&)> builtin;
+    // Set: the action follows a controller's value ("(MIDI CC)" actions:
+    // a volume, a pan, a scroll) instead of running once per press.
+    std::function<Result<json::Value>(const ControlValue&, const Context&)> control;
     bool fromRegistry = false;
 };
 

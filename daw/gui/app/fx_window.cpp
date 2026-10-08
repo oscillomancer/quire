@@ -248,6 +248,20 @@ FxWindow::FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root
       browser_(std::make_unique<PluginBrowser>(app, dispatcher, root, std::move(favouritesFile))),
       params_(dispatcher, root) {
     params_.onError = [this](const std::string& message) { setStatus(message); };
+    params_.openLearn = hooks_.openLearn;
+}
+
+bool FxWindow::shows(model::Id fx) const {
+    if (!page_) return false;
+    for (const auto& list : {chain(), take_ ? std::vector<model::Id>{} : inputChain()})
+        if (std::find(list.begin(), list.end(), fx) != list.end()) return true;
+    return false;
+}
+
+bool FxWindow::hasFocus() const {
+    for (const ui::Node* n = root_.focused(); n; n = n->parent())
+        if (n == page_) return true;
+    return false;
 }
 
 FxWindow::~FxWindow() = default;

@@ -79,6 +79,16 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   saved, loaded and deleted in the app. Takes: show all takes in lanes,
   explode onto tracks or along the track, delete one, Ctrl-drag one out, and
   render an item through its FX (MIDI to audio) in place or as a new take.
+  The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
+  or remove together; a double click opens an effect's editor.
+- **MIDI learn** (ADR-0027): any plug-in parameter (the FX window's MIDI
+  button, or `fx.learn.set` for agents) and any action (Ctrl+L in the
+  actions list) learns a controller by moving it: CC, note, pitch bend or
+  program change, absolute, three relative encoder modes or toggle, soft
+  takeover, and "only when selected / focused / visible" for parameters.
+  Parameter bindings are saved with the project and chain presets; action
+  bindings in `controls.json`. "(MIDI CC)" actions drive the selected tracks'
+  volume and pan, the master's volume and a beat jog.
 - **Agents**: the MCP server for the running app or a headless engine; the
   agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
   included) working on `agent/...` branches with diff, A/B and
@@ -129,6 +139,10 @@ Engine and hosting:
   in-process to hear it while monitoring.
 - Audio backends: JACK and a dummy backend. No direct PipeWire or ALSA
   backend; no MIDI outputs.
+- MIDI learn has no OSC, no "arm envelope" option, no "last touched
+  parameter" action, and no learn directly on track faders (the "(MIDI CC)"
+  actions cover the selected tracks). Every MIDI input is heard as a control;
+  there is no per-device "control only" setting.
 - Plugins that change state without notifying the host (LSP, for one) have
   that state captured only when the project is saved: no undo step and no
   dirty mark.

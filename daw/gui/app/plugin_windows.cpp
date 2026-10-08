@@ -171,6 +171,14 @@ bool PluginWindows::isOpen(model::Id fx) const {
                        [&](const Editor& e) { return e.fx == fx; });
 }
 
+bool PluginWindows::hasFocus(model::Id fx) const {
+    for (const Editor& e : editors_)
+        if (e.fx == fx && e.window && e.window->sdl() &&
+            (SDL_GetWindowFlags(e.window->sdl()) & SDL_WINDOW_INPUT_FOCUS) != 0)
+            return true;
+    return false;
+}
+
 std::optional<PluginWindows::Placement> PluginWindows::placementOf(const Editor& editor) {
     if (!editor.fx || !editor.window) return std::nullopt;
     Placement p;

@@ -3,8 +3,10 @@
 // (selection, playhead) comes from UiState.
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "control_map.h"
 #include "supple/actions/actions.h"
 #include "supple/engine/app.h"
 
@@ -37,13 +40,15 @@ void registerGuiCommands(cmd::Registry& registry, const UiState& ui);
 class AppActions {
   public:
     AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatcher, engine::EngineApp& app,
-               UiState& ui, std::filesystem::path keymapFile);
+               UiState& ui, std::filesystem::path keymapFile,
+               std::filesystem::path controlsFile = {});
 
     actions::ActionRegistry& registry() { return registry_; }
     actions::Keymap& keymap() { return keymap_; }
     // Every binding back to the defaults; the keymap file then holds no changes.
     Status resetKeymap();
     UiState& ui() { return ui_; }
+    engine::EngineApp& app() { return app_; }
     const std::filesystem::path& keymapFile() const { return keymapFile_; }
     actions::Context context(std::vector<std::string> sections = {"arrange", "global"}) const;
     Result<json::Value> run(const actions::Action& action,
@@ -69,10 +74,33 @@ class AppActions {
     std::function<void(const std::string&)> onError;
     std::string keysFor(std::string_view action) const;  // "Ctrl+Z", or ""
 
+    // MIDI learn for actions (ADR-0027): the controls bound to them, saved
+    // in controlsFile() (nothing is saved without one).
+    ControlMap& controls() { return controls_; }
+    const std::filesystem::path& controlsFile() const { return controlsFile_; }
+    Status saveControls() const;
+    std::string controlsFor(std::string_view action) const;  // "CC 21 · ch 1", or ""
+    // The devices' messages: a press runs its action once (a note on, a CC
+    // above 0, an encoder step); a "(MIDI CC)" action follows the value.
+    void control(const std::vector<engine::EngineApp::ControlEvent>& events);
+    // Set while a learn dialog listens: it gets the messages instead.
+    std::function<void(const std::vector<engine::EngineApp::ControlEvent>&)> learnSink;
+    // A built-in that follows a controller (listed as "… (MIDI CC)").
+    void addControl(std::string id, std::string name, std::string description,
+                    std::function<Status(const actions::ControlValue&)> run);
+
   private:
     actions::ActionRegistry registry_;
     actions::Keymap keymap_;
     std::filesystem::path keymapFile_;
+    ControlMap controls_;
+    std::filesystem::path controlsFile_;
+    struct ControlState {
+        std::uint64_t lastMs = 0, serial = 0;
+    };
+    std::map<std::string, ControlState, std::less<>> controlState_;
+    // Track volume / pan of the selection (or the master) by a controller.
+    Result<json::Value> controlTracks(const actions::ControlValue& v, bool pan, bool master);
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     UiState& ui_;

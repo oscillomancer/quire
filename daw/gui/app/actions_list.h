@@ -1,7 +1,8 @@
 // The actions list (gui.md §6, "?"): fuzzy search over every action, shows
-// bound keys, runs (asking for prompted arguments), binds keys; with the
-// chrome, puts an action on the toolbar (Ctrl+T) or in a menu (Ctrl+M);
-// Reset keys… restores the default bindings.
+// bound keys and MIDI controls, runs (asking for prompted arguments), binds
+// keys (Ctrl+B) and learns a MIDI control (Ctrl+L); with the chrome, puts an
+// action on the toolbar (Ctrl+T) or in a menu (Ctrl+M); Reset keys…
+// restores the default bindings.
 #pragma once
 
 #include <functional>
@@ -13,7 +14,7 @@ namespace supple::gui {
 
 class Chrome;
 
-// Ctrl+B, Ctrl+T and Ctrl+M work with the focus on the search field or the
+// Ctrl+B, Ctrl+L, Ctrl+T and Ctrl+M work with the focus on the search field or the
 // list; a new binding replaces an arrange-view default on the same keys.
 void openActionsList(ui::Root& root, AppActions& actions, Chrome* chrome = nullptr);
 // Asks first, then puts every key binding back to the defaults (saved);

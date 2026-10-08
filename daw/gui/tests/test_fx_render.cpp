@@ -14,11 +14,13 @@
 #include "app_actions.h"
 #include "fx_window.h"
 #include "generate.h"
+#include "learn_dialog.h"
 #include "plugin_browser.h"
 #include "render_dialog.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/host/clap_host.h"
+#include "supple/json/write.h"
 #include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
@@ -606,6 +608,84 @@ TEST_CASE(
     press(fx4, 0, 2);
     CHECK(opened == std::vector<model::Id>{fx4});
     CHECK(f.fx->selection() == std::vector<model::Id>{fx4});
+}
+
+TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.learn.set)") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
+    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root,
+                                           gui::FxWindow::Hooks{{},
+                                                                {},
+                                                                [&](gui::LearnRequest request) {
+                                                                    gui::openLearnDialog(
+                                                                        *f.root, *f.actions, *f.app,
+                                                                        std::move(request));
+                                                                }},
+                                           gui::Favourites::defaultFile(gui::test::slug()));
+    const model::Id track = f.addTrack("Keys");
+    auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    REQUIRE(made);
+    const model::Id fx = *model::Id::parse((*made)["fx"].asString());
+    // A writable parameter of the plug-in.
+    auto described = f.run("fx.describe", f.args({{"fx", fx.str()}, {"full", true}}));
+    REQUIRE(described);
+    std::string key;
+    for (const auto& m : (*described)["params"].asObject()) {
+        const json::Value* flags = m.value.find("flags");
+        const std::string text = flags ? json::writeCompact(*flags) : "";
+        if (text.find("readonly") == std::string::npos &&
+            text.find("hidden") == std::string::npos) {
+            key = m.key;
+            break;
+        }
+    }
+    REQUIRE_FALSE(key.empty());
+    REQUIRE(f.fx->open(track));
+    f.fx->select(fx);
+    f.fx->showParamsTab();
+    f.frame();
+    REQUIRE(f.root->find("fx.param.learn." + key));
+    CHECK(f.root->find("fx.param.learn." + key)->valueText() == "MIDI");
+    REQUIRE(f.click("fx.param.learn." + key));
+    REQUIRE(f.root->find("learn"));
+    CHECK(f.root->find("learn.soft"));  // a parameter's options
+    CHECK(f.app->learning());
+    engine::EngineApp::ControlEvent e;
+    e.midi.bytes[0] = 0xb1;
+    e.midi.bytes[1] = 21;
+    e.midi.bytes[2] = 64;
+    e.device = "nanoKONTROL2";
+    f.actions->control({e});
+    f.frame();
+    CHECK(f.root->find("learn.control.value")->valueText() == "CC 21 · ch 2 · nanoKONTROL2");
+    f.snapshot("fx-midi-learn.png");
+    REQUIRE(f.click("learn.mode.set"));
+    REQUIRE(f.root->find("learn.mode.menu"));
+    f.root->closePopup();
+    REQUIRE(f.click("learn.soft.set"));
+    CHECK(f.root->find("learn.soft.set")->valueText() == "On");
+    REQUIRE(f.click("learn.ok"));
+    CHECK_FALSE(f.app->learning());
+    const model::FxInstance& bound = *f.app->head().fx.find(fx);
+    REQUIRE(bound.learn.size() == 1);
+    CHECK(bound.learn[0].param == key);
+    CHECK(bound.learn[0].control == model::MidiControl{model::ControlKind::Cc, 2, 21, ""});
+    CHECK(bound.learn[0].softTakeover);
+    f.fx->tick();
+    f.frame();
+    CHECK(f.root->find("fx.param.learn." + key)->valueText() == "CC 21");
+    f.snapshot("fx-midi-learn-params.png");
+    // Remove from the same button.
+    REQUIRE(f.click("fx.param.learn." + key));
+    REQUIRE(f.click("learn.remove"));
+    CHECK(f.app->head().fx.find(fx)->learn.empty());
 }
 
 TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {

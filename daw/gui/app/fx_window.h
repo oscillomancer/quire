@@ -39,6 +39,8 @@ class FxWindow {
         std::function<Status(model::Id)> openEditor;
         // A failure with no window open to show it (the browser's add).
         std::function<void(const std::string&)> onError = {};
+        // The MIDI learn dialog, for the parameter panel's "MIDI" buttons.
+        std::function<void(LearnRequest)> openLearn = {};
     };
 
     FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root, Hooks hooks,
@@ -61,6 +63,11 @@ class FxWindow {
     void tick();
     void refresh();
     void setStatus(std::string message);
+
+    // MIDI learn's "enable only when" (ADR-0027): the window shows `fx` (its
+    // track's or take's chain), and has the keyboard focus.
+    bool shows(model::Id fx) const;
+    bool hasFocus() const;
 
     // State the tests read back.
     model::Id track() const { return track_; }

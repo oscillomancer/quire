@@ -5,6 +5,8 @@
 #include <memory>
 
 #include "chrome.h"
+#include "learn_dialog.h"
+#include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
 #include "supple/ui/list.h"
 #include "supple/ui/popup.h"
@@ -85,9 +87,14 @@ class ActionsPanel : public ui::Node {
         list_->paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
             const ui::Theme& t = c.theme();
             const actions::Action& a = *matches_[i];
+            // Keys in the mono face; a MIDI control (its "·" needs the UI face) after them.
             const std::string keys = actions_.keysFor(a.id);
+            const std::string midi = actions_.controlsFor(a.id);
+            const float midiW =
+                midi.empty() ? 0 : c.textWidth(midi, ui::Font::Ui, t.type("caption")) + 12;
             const float keysW =
-                keys.empty() ? 0 : c.textWidth(keys, ui::Font::Mono, t.type("caption")) + 16;
+                (keys.empty() ? 0 : c.textWidth(keys, ui::Font::Mono, t.type("caption")) + 16) +
+                midiW;
             const float nameW = c.textWidth(a.name, ui::Font::Ui, t.type("small"));
             c.text({r.x + 10, r.y, r.w - 20 - keysW, r.h}, a.name, ui::Font::Ui, t.type("small"),
                    t.color("ink"));
@@ -95,8 +102,11 @@ class ActionsPanel : public ui::Node {
                 c.text({r.x + 22 + nameW, r.y, std::max(0.0f, r.w - 34 - nameW - keysW), r.h}, a.id,
                        ui::Font::Mono, t.type("caption"), t.color("ink-faint"));
             if (!keys.empty())
-                c.text({r.x, r.y, r.w - 10, r.h}, keys, ui::Font::Mono, t.type("caption"),
+                c.text({r.x, r.y, r.w - 10 - midiW, r.h}, keys, ui::Font::Mono, t.type("caption"),
                        t.color("ink-quiet"), ui::kRight | ui::kMiddle);
+            if (!midi.empty())
+                c.text({r.x, r.y, r.w - 10, r.h}, midi, ui::Font::Ui, t.type("caption"),
+                       t.color("accent"), ui::kRight | ui::kMiddle);
         };
         filter("");
     }
@@ -117,6 +127,10 @@ class ActionsPanel : public ui::Node {
             startCapture();
             return true;
         }
+        if (e.key == SDLK_L) {
+            learn();
+            return true;
+        }
         if (e.key == SDLK_T && chrome_) {
             toggleToolbar();
             return true;
@@ -128,9 +142,42 @@ class ActionsPanel : public ui::Node {
         return false;
     }
 
-    static constexpr const char* kHint = "Enter run · Ctrl+B bind a key · Esc close";
+    static constexpr const char* kHint =
+        "Enter run · Ctrl+B bind a key · Ctrl+L MIDI learn · Esc close";
     static constexpr const char* kChromeHint =
-        "Enter run · Ctrl+B bind a key · Ctrl+T toolbar · Ctrl+M menu · Esc close";
+        "Enter run · Ctrl+B key · Ctrl+L MIDI learn · Ctrl+T toolbar · Ctrl+M menu · Esc close";
+
+    // MIDI learn for the selected action: a controller runs it (a press) or,
+    // for a "(MIDI CC)" action, drives it.
+    void learn() {
+        const actions::Action* a = current();
+        if (!a) return;
+        const std::string id = a->id;
+        LearnRequest request;
+        request.title = a->name;
+        if (const auto bound = actions_.controls().bindingsFor(id); !bound.empty())
+            request.current = LearnChoice{bound.front().control, bound.front().mode};
+        request.onOk = [this, id](const LearnChoice& choice) {
+            const std::string had = actions_.controls().bind({id, choice.control, choice.mode});
+            std::string note = engine::describe(choice.control) + " → " + id;
+            if (!had.empty()) note += " (was " + had + ")";
+            if (auto saved = actions_.saveControls(); !saved)
+                note += " (not saved: " + saved.error().message + ")";
+            hint_->setText(note);
+            list_->invalidate();
+            root_.focus(search_);
+        };
+        request.onRemove = [this, id] {
+            actions_.controls().unbindAction(id);
+            std::string note = "No MIDI control for " + id;
+            if (auto saved = actions_.saveControls(); !saved)
+                note += " (not saved: " + saved.error().message + ")";
+            hint_->setText(note);
+            list_->invalidate();
+            root_.focus(search_);
+        };
+        openLearnDialog(root_, actions_, actions_.app(), std::move(request));
+    }
 
     void toggleToolbar() {
         const actions::Action* a = current();
