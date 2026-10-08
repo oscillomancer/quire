@@ -354,6 +354,13 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=-1)
     parser.add_argument("--metrics", choices=("on", "off"), default="on")
     parser.add_argument("--sample-capacity", type=int, default=500000)
+    parser.add_argument("--background", choices=("auto", "normal", "fifo"), default="auto",
+                        help="B1 only: renderer and background pool scheduling")
+    parser.add_argument("--background-priority", type=int, default=0)
+    parser.add_argument("--callback-priority", type=int, default=0,
+                        help="B1 paced only: SCHED_FIFO priority of the paced callback")
+    parser.add_argument("--isolation", choices=("in_process", "shared_bridge", "dedicated"),
+                        default="in_process", help="B1 only: every FX's isolation mode")
     parser.add_argument("--recipe", type=Path, default=ROOT / "host/engine/bench/session.json")
     parser.add_argument("--device", choices=("paced", "offline", "jack"))
     parser.add_argument("--anticipative", choices=("on", "off", "both"), default="both")
@@ -423,7 +430,11 @@ def main(argv=None):
                                "--tracks", str(n), "--seconds", str(args.seconds), "--anticipative", "on" if mode else "off",
                                "--output", str(output), "--recipe", str(args.recipe), "--block", str(args.block),
                                "--workers", str(args.workers), "--metrics", args.metrics,
-                               "--sample-capacity", str(args.sample_capacity), *effect_args]
+                               "--sample-capacity", str(args.sample_capacity),
+                               "--background", args.background,
+                               "--background-priority", str(args.background_priority),
+                               "--callback-priority", str(args.callback_priority),
+                               "--isolation", args.isolation, *effect_args]
                     with (run_dir / "console.log").open("w") as log:
                         completed = subprocess.run(command, check=False, timeout=args.seconds + args.timeout,
                                                    stdout=log, stderr=subprocess.STDOUT)

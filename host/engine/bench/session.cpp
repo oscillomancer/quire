@@ -118,6 +118,22 @@ Status buildEffectSession(EngineApp& app, const std::string& plugin,
     return {};
 }
 
+Status isolateAll(EngineApp& app, const std::string& isolation) {
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, app);
+    std::vector<model::Id> ids;
+    for (const auto& entry : app.head().fx) ids.push_back(entry.id);
+    for (const model::Id id : ids) {
+        auto args = json::Value::object();
+        args["fx"] = id.str();
+        args["isolation"] = isolation;
+        SUPPLE_TRY(bus.execute(
+            {"fx.set", std::move(args), {cmd::Origin::Type::Internal, "capacity-bench", ""}}));
+    }
+    return {};
+}
+
 bool serviceTick(EngineApp& app, const Engine* expected) {
     app.tick();
     if (app.engine() != expected) return false;

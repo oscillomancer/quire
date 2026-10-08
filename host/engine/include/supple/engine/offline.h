@@ -159,7 +159,7 @@ struct OfflineSettings {
     // (or <projectDir> itself when the file is found there).
     std::filesystem::path projectDir;
     MediaCache* media = nullptr;  // null: a cache for this render only
-    // Threads rendering the graph; 0: every core but two. The output is
+    // Threads rendering the graph; 0: every allowed CPU but two. The output is
     // identical for any count.
     unsigned threads = 0;
     // Select one track's output without its sends or master processing.

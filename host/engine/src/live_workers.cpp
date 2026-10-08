@@ -2,6 +2,9 @@
 
 #include <sched.h>
 #include <algorithm>
+#include <string>
+
+#include "supple/base/thread.h"
 
 #include "supple/engine/realtime.h"
 
@@ -14,6 +17,7 @@ LiveWorkers::LiveWorkers(unsigned helpers, Hooks hooks)
     try {
         for (unsigned i = 0; i < helpers; ++i)
             threads_.emplace_back([this, i] {
+                nameThread("audio-live-" + std::to_string(i + 1));
                 rt::prefaultStack();  // ADR-0025
                 loop(i);
             });
@@ -46,6 +50,10 @@ unsigned LiveWorkers::maxHelpers() {
 Status LiveWorkers::configure(Backend& backend) {
     for (auto& thread : threads_) SUPPLE_TRY(backend.prepareLiveThread(thread.native_handle()));
     return okStatus();
+}
+
+ThreadPolicy LiveWorkers::policy() {
+    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
 }
 
 void LiveWorkers::help(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {

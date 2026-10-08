@@ -194,8 +194,9 @@ editor/automation eligibility preferences remain planned (ADR-0014).
 
 ### 2.2 Worker pool
 
-The background/offline pool has `max(0, cores − 3)` helper threads by default;
-its submitting thread also executes tasks. `EngineOptions::workers` can
+The background/offline pool has `max(0, cpus − 3)` helper threads by default,
+where `cpus` counts the CPUs in the calling thread's affinity mask (taskset,
+cpusets), not every online core; its submitting thread also executes tasks. `EngineOptions::workers` can
 override the helper count. A bounded MPMC ready queue and atomic dependency
 counters distribute nodes; input summation stays in fixed graph order.
 ADR-0023 bounds each run to the smaller of the configured capacity and a
@@ -216,13 +217,66 @@ start, including project replacement and device recovery, maps a nonzero limit t
 options request automatic workers; explicit `EngineOptions::workers` takes
 precedence. Both live and background pools use this capacity independently; it is not a
 total process thread limit. Already running pools and offline export's
-`threads` option are unchanged. Automatic retains the hardware-derived capacity and graph-aware
+`threads` option are unchanged. Automatic retains the CPU-mask-derived capacity and graph-aware
 participation; an explicit limit is also graph-bounded.
 
-The engine sets no explicit priority or affinity on the renderer or these
-helpers. The backend supplies the device callback's scheduling. DSP tasks
-are RT-safe; ADR-0013 separately permits synchronous bridge futex wake/wait
-with a failure deadline on background threads, never in the device callback.
+DSP tasks are RT-safe; ADR-0013 separately permits synchronous bridge futex
+wake/wait with a failure deadline on background threads, never in the device
+callback.
+
+**Scheduling (ADR-0026).** The backend supplies the device callback's
+scheduling, and the engine never changes it. The engine derives the other
+classes from it, all process-local:
+
+| Class | Policy | PipeWire default | Rule |
+|---|---|---|---|
+| Device callback | the backend's | FIFO 83 | never changed |
+| Live helpers | FIFO | 83 | the callback's priority (ADR-0024) |
+| Renderer, background helpers, bridge audio threads | FIFO | 10 | `Engine::kBackgroundPriority`, lowered to the callback's − 1 and to `RLIMIT_RTPRIO` |
+| Offline renders, recording writer, main/GUI, jobs | normal | – | unchanged |
+
+- **Why 10.** It is below the kernel's threaded interrupts and display
+  workers (FIFO 50) and the audio threads rtkit grants other applications
+  (up to 20). Any real-time level outruns normal desktop load, and the
+  200 ms render-ahead needs no more than that.
+- **When the background classes are real-time.** Only when the callback is
+  FIFO/RR (`Backend::callbackPolicy()`; JACK reads its client thread). A
+  normal callback (the dummy backend, a non-RT JACK server) leaves them
+  normal. `EngineOptions::background` forces `Normal` or `Fifo`
+  (`backgroundPriority`) for benchmarks and tests.
+- **How it is applied.** On the main thread after backend start, through
+  `pthread_setschedparam`, verified by reading the policy back
+  (`setThreadPolicy`, core-base `supple/base/thread.h`). JACK's and rtkit's
+  thread APIs are not used here. It is all or nothing: the renderer and every
+  helper stay normal, with a `warnings` entry naming the cause and the fix, when
+  - no priority ≥ 1 remains;
+  - `RLIMIT_RTTIME` is finite (a renderer catching up runs without blocking
+    and would be killed);
+  - the renderer plus its helpers would leave fewer than two of the process's
+    allowed CPUs to the rest of the system;
+  - or any thread refuses.
+- **Lifetime.** Threads end at `stop()`, so nothing is restored. CPU affinity
+  is never changed: threads keep the inherited mask.
+- **Bridges.** `host::setBridgeAudioPolicy` carries the applied background
+  policy to bridged instances while the engine runs (normal otherwise): each
+  bridge audio thread takes it when its processing starts (§5).
+- **Reporting.** `Engine::scheduling()` records each class's applied policy
+  at start (None for a class without threads, and for all while stopped).
+  `engine.start` and `engine.status` report it as `scheduling`: `callback`,
+  `live`, `renderer` and `background` objects, each with `policy` (`none`,
+  `normal`, `fifo`, `rr`) and `priority` (0..99).
+
+**Thread names.** Every audio thread the host creates names itself when it
+starts (`nameThread`, core-base `supple/base/thread.h`; Linux keeps 15 bytes),
+so `ps -L`, `top -H`, debuggers and profilers tell them apart. The names carry
+the role, never the product: `audio-render` (renderer), `audio-bg-N`
+(background/offline pool helper N, from 1), `audio-live-N` (live helper N),
+`audio-bridge` (a bridge process's per-instance audio thread), `audio-dummy`
+(the dummy backend's thread), `audio-recorder` (recording writer),
+`audio-offline` (offline render thread, engine and sandbox) and `audio-paced`
+(the benchmark's paced device). The JACK callback thread belongs to the JACK
+library (PipeWire's `data-loop.N`) and keeps its name. `pw-top` lists graph
+nodes, not threads; it shows the JACK client name.
 
 **Live pool (ADR-0024).** `LiveWorkers` shares the graph/ready-queue
 representation, but never calls the blocking background executor. Each segment
@@ -463,6 +517,13 @@ instance).
 - The bridge's audio thread sets FTZ and DAZ around each `process()` and
   restores its MXCSR afterwards (§2.4), so a bridged plug-in computes as an
   in-process one does.
+- Each instance's audio thread is named `audio-bridge`. On `StartProcessing`
+  it takes the scheduling the host writes into the shared-memory header
+  (`audioPolicy`, `audioPriority`; protocol version 10), which is the engine's
+  background policy while an engine runs and normal otherwise (§2.2,
+  ADR-0026). A renderer waiting for a bridged plug-in therefore never waits
+  behind a lower-priority thread. Applying it is best effort: a refusal leaves
+  the thread as it was.
 - The current bridge is synchronous and runs only offline or on rendered-ahead
   nodes. A stage on a device-callback node (including a take FX stage) passes
   through with its compensated delay; the callback calls neither processing nor
@@ -673,7 +734,7 @@ harness. See the tooling README for schemas, limits and invocation details.
   joins the renderer first; it stops every plugin as it ends. With
   `anticipative = false` the old in-callback renderer runs (the reference,
   and the base for live nodes).
-- **Worker pool** (`workers.{h,cpp}`): helper threads (every core but three,
+- **Worker pool** (`workers.{h,cpp}`): helper threads (every allowed CPU but three,
   plus the submitting thread) run one render block as a DAG over the plan's
   nodes: per-node atomic counts of unfinished sources, a bounded Vyukov MPMC
   ready queue, the submitter helps; graph-bounded participation and idle

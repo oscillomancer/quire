@@ -9,6 +9,9 @@ ownership and the app thread-limit preference.
 **Amendment, 2026-10-07:** [ADR-0024](0024-live-multiprocessing.md) defines
 live callback fork-join, helper scheduling and the nonblocking wake exception.
 
+**Amendment, 2026-10-08:** [ADR-0026](0026-background-thread-scheduling.md)
+runs the renderer and the pool's helpers real-time, below a real-time callback.
+
 ## Context
 
 The engine runs every node inside the audio callback, on one core. Phase 4

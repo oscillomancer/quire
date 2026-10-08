@@ -4,8 +4,10 @@
 #include <dlfcn.h>
 
 #include <fcntl.h>
+#include <sched.h>
 #include <spawn.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -16,6 +18,8 @@
 #include <cmath>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -1057,6 +1061,81 @@ TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     r.deactivate();
 }
 
+namespace {
+// The threads of process `pid` with name `name` (by /proc/<pid>/task/<tid>/comm).
+std::vector<pid_t> tasksNamed(int pid, std::string_view name) {
+    std::vector<pid_t> tasks;
+    std::error_code ec;
+    const auto dir = std::filesystem::path("/proc") / std::to_string(pid) / "task";
+    for (const auto& task : std::filesystem::directory_iterator(dir, ec)) {
+        std::ifstream comm(task.path() / "comm");
+        std::string text;
+        if (std::getline(comm, text) && text == name)
+            tasks.push_back(static_cast<pid_t>(std::stol(task.path().filename().string())));
+    }
+    return tasks;
+}
+template <class Predicate>
+bool eventually(Predicate predicate) {  // the deadline only bounds a failure
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!predicate() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return predicate();
+}
+}  // namespace
+
+TEST_CASE("a bridged instance's audio thread is named audio-bridge") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
+    Instance& r = **remote;
+    REQUIRE(r.activate(48000, 1, 256).ok());
+    CHECK(eventually([&] { return tasksNamed(r.bridgePid(), "audio-bridge").size() == 1; }));
+    r.deactivate();
+}
+
+TEST_CASE("a bridged audio thread takes the bridge audio policy when processing starts") {
+    using Kind = ThreadPolicy::Kind;
+    const ThreadPolicy normal{Kind::Normal, 0};
+    auto policyOf = [](pid_t tid) {
+        sched_param params{};
+        const int policy = ::sched_getscheduler(tid);
+        if (policy < 0 || ::sched_getparam(tid, &params) != 0) return ThreadPolicy{};
+        switch (policy & ~SCHED_RESET_ON_FORK) {
+            case SCHED_FIFO:
+                return ThreadPolicy{Kind::Fifo, params.sched_priority};
+            case SCHED_RR:
+                return ThreadPolicy{Kind::RoundRobin, params.sched_priority};
+            default:
+                return ThreadPolicy{Kind::Normal, 0};
+        }
+    };
+    rlimit rtprio{}, rttime{};
+    const bool realtime = ::getrlimit(RLIMIT_RTPRIO, &rtprio) == 0 && rtprio.rlim_cur >= 1 &&
+                          ::getrlimit(RLIMIT_RTTIME, &rttime) == 0 &&
+                          rttime.rlim_cur == RLIM_INFINITY;
+    setBridgeExecutable(BRIDGE_PATH);
+    auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
+    Instance& r = **remote;
+    REQUIRE(r.activate(48000, 1, 256).ok());
+    REQUIRE(eventually([&] { return tasksNamed(r.bridgePid(), "audio-bridge").size() == 1; }));
+    const pid_t audio = tasksNamed(r.bridgePid(), "audio-bridge").front();
+    CHECK(policyOf(audio) == normal);
+    const ThreadPolicy fifo{Kind::Fifo, 1};
+    setBridgeAudioPolicy(realtime ? fifo : normal);
+    REQUIRE(r.startProcessing());  // applied on the audio thread before it replies
+    CHECK(policyOf(audio) == (realtime ? fifo : normal));
+    r.stopProcessing();
+    setBridgeAudioPolicy(normal);
+    REQUIRE(r.startProcessing());
+    CHECK(policyOf(audio) == normal);
+    r.stopProcessing();
+    CHECK_FALSE(r.failed());
+    r.deactivate();
+    if (!realtime) MESSAGE("no real-time scheduling permission: only the normal policy checked");
+}
+
 TEST_CASE("shared bridge routes two instances through one process and fails both on a crash") {
     setBridgeExecutable(BRIDGE_PATH);
     auto process = createBridgeProcess();
@@ -1588,7 +1667,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 9);
+    CHECK(bridge::kVersion == 10);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {

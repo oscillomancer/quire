@@ -5,11 +5,13 @@
 // that instance's audio thread. Exits when the host closes the control socket.
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -24,6 +26,7 @@
 #include "../src/bridge_protocol.h"
 #include "../src/scan.h"
 #include "supple/base/rt.h"
+#include "supple/base/thread.h"
 #include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -73,6 +76,8 @@ struct BridgeInstance {
             in[c] = inAudio + static_cast<std::size_t>(c) * layout.maxFrames;
         for (std::uint32_t c = 0; c < layout.outChannels; ++c)
             out[c] = outAudio + static_cast<std::size_t>(c) * layout.maxFrames;
+        // Created by the bridge's main thread: normal until told otherwise.
+        ThreadPolicy policy{ThreadPolicy::Kind::Normal, 0};
         while (!quit.load()) {
             const std::uint32_t req = hdr->request.load(std::memory_order_acquire);
             if (req == last) {
@@ -112,6 +117,18 @@ struct BridgeInstance {
                     break;
                 }
                 case Cmd::StartProcessing: {
+                    // The host's background policy (ADR-0026), best effort: a
+                    // refusal leaves the thread as it was.
+                    const auto kind = hdr->audioPolicy;  // an unknown kind is ignored
+                    const ThreadPolicy want{
+                        kind <= static_cast<std::uint32_t>(ThreadPolicy::Kind::RoundRobin)
+                            ? static_cast<ThreadPolicy::Kind>(kind)
+                            : ThreadPolicy::Kind::None,
+                        static_cast<int>(std::min(hdr->audioPriority, 99u))};
+                    if (want.kind != ThreadPolicy::Kind::None && want != policy) {
+                        (void)setThreadPolicy(::pthread_self(), want);
+                        policy = threadPolicy(::pthread_self());
+                    }
                     std::lock_guard lock(lifecycle);
                     result = instance->startProcessing() ? 1 : 0;
                     break;
@@ -288,6 +305,7 @@ struct Bridge {
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
                 audio = std::thread([&slot, first] {
+                    nameThread("audio-bridge");
                     rt::prefaultStack();  // ADR-0025
                     slot.audioLoop(first);
                 });

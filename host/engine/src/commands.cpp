@@ -189,6 +189,26 @@ schema::Schema<RuntimeProtectionStatus> runtimeProtectionSchema() {
         .build();
 }
 
+schema::Schema<ThreadClass> threadClassSchema() {
+    return schema::object<ThreadClass>("thread_class")
+        .field("policy", &ThreadClass::policy,
+               schema::enumeration<ThreadPolicy::Kind>({{ThreadPolicy::Kind::None, "none"},
+                                                        {ThreadPolicy::Kind::Normal, "normal"},
+                                                        {ThreadPolicy::Kind::Fifo, "fifo"},
+                                                        {ThreadPolicy::Kind::RoundRobin, "rr"}}))
+        .field("priority", &ThreadClass::priority, schema::integer().range(0, 99))
+        .build();
+}
+
+schema::Schema<EngineScheduling> engineSchedulingSchema() {
+    return schema::object<EngineScheduling>("engine_scheduling")
+        .field("callback", &EngineScheduling::callback, threadClassSchema())
+        .field("live", &EngineScheduling::live, threadClassSchema())
+        .field("renderer", &EngineScheduling::renderer, threadClassSchema())
+        .field("background", &EngineScheduling::background, threadClassSchema())
+        .build();
+}
+
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
         .field("running", &EngineStatus::running, schema::boolean())
@@ -205,6 +225,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("anticipative", &EngineStatus::anticipative, schema::boolean())
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
         .field("live_helpers", &EngineStatus::liveHelpers, schema::integer())
+        .field("scheduling", &EngineStatus::scheduling, engineSchedulingSchema())
         .field("warnings", &EngineStatus::warnings, schema::arrayOf(schema::string()))
         .field("memory_lock", &EngineStatus::memoryLock, runtimeProtectionSchema())
         .field("cpu_idle_latency", &EngineStatus::cpuIdleLatency, runtimeProtectionSchema())
@@ -3552,7 +3573,12 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
-                     "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>", "warnings": [],
+                     "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>",
+                     "scheduling": {"callback": {"policy": "normal", "priority": 0},
+                                    "live": "<any>",
+                                    "renderer": {"policy": "normal", "priority": 0},
+                                    "background": "<any>"},
+                     "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
                      "cpu_idle_latency": {"requested": false, "active": false},
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
@@ -3642,9 +3668,11 @@ void registerEngineCommands(cmd::Registry& registry) {
             "corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency "
             "reports the owned 20 microsecond request with the same status/error fields; it "
             "affects system idle while held and leaves CPU frequency policy unchanged. "
-            "live_helpers is the enabled live helper capacity; warnings includes scheduling "
-            "fallback "
-            "and plan warnings with corrective actions. failed_errors adds structured code, "
+            "live_helpers is the enabled live helper capacity. scheduling: each thread class's "
+            "policy (none, normal, fifo, rr) and priority as applied at start: the device "
+            "callback, live helpers, renderer and background helpers (real-time below a "
+            "real-time callback when permitted). warnings includes scheduling fallbacks and "
+            "plan warnings with corrective actions. failed_errors adds structured code, "
             "message, path and hint to each failure. "
             "failed_fx: isolated plugins whose "
             "process crashed or hung (silent now; fx.restart re-creates them).";
@@ -3655,7 +3683,12 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
-                     "anticipative": false, "anticipation_misses": 0, "live_helpers": 0, "warnings": [],
+                     "anticipative": false, "anticipation_misses": 0, "live_helpers": 0,
+                     "scheduling": {"callback": {"policy": "none", "priority": 0},
+                                    "live": {"policy": "none", "priority": 0},
+                                    "renderer": {"policy": "none", "priority": 0},
+                                    "background": {"policy": "none", "priority": 0}},
+                     "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
                      "cpu_idle_latency": {"requested": false, "active": false},
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],

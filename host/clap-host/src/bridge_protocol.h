@@ -33,7 +33,8 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // metadata in shared memory, an idle-output drain, process wake and ordered clears.
 // 8: auxiliary output ports (ADR-0021) in Create and the data plane.
 // 9: the Activate reply carries the widths the plug-in settled on.
-inline constexpr std::uint32_t kVersion = 9;
+// 10: the Header carries the audio thread's scheduling (ADR-0026).
+inline constexpr std::uint32_t kVersion = 10;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 // Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
@@ -268,6 +269,9 @@ struct Header {
     std::uint32_t eventCount;
     std::uint32_t outEventCount, outEventsDropped;
     std::uint32_t processing;  // the plugin's processing state after the command
+    // StartProcessing: the scheduling the audio thread takes (ThreadPolicy's
+    // kind and priority; kind 0, None, keeps the current one).
+    std::uint32_t audioPolicy, audioPriority;
 };
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 

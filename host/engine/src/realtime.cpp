@@ -1,6 +1,9 @@
 #include "supple/engine/realtime.h"
 #include "supple/engine/bench_probe.h"
 
+#include <sched.h>
+#include <sys/resource.h>
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -10,6 +13,9 @@
 #include <numbers>
 #include <set>
 #include <system_error>
+
+#include "supple/base/thread.h"
+#include "supple/host/clap_host.h"
 
 #include "live_workers.h"
 #include "meters.h"
@@ -91,6 +97,7 @@ Status DummyBackend::start(const BackendConfig& config, Callback callback) {
     running_ = true;
     if (options_.mode == Mode::Thread) {
         thread_ = std::thread([this] {
+            nameThread("audio-dummy");
             const auto period =
                 std::chrono::duration<double>(config_.blockSize / config_.sampleRate);
             auto next = std::chrono::steady_clock::now();
@@ -116,6 +123,10 @@ void DummyBackend::stop() {
         float* out[2] = {outL_.data(), outR_.data()};
         callback_(nullptr, out, 0);  // Manual: the caller is the audio thread
     }
+}
+
+ThreadPolicy DummyBackend::callbackPolicy() {
+    return thread_.joinable() ? threadPolicy(thread_.native_handle()) : ThreadPolicy{};
 }
 
 void DummyBackend::run(std::int64_t n) {
@@ -202,7 +213,8 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     }
     config_ = backend.config();  // what the device granted (e.g. its rate)
     backend_ = &backend;
-    liveWorkerWarning_.clear();
+    startWarnings_.clear();
+    scheduling_ = {};
     const unsigned requested = options_.workers < 0
                                    ? detail::Workers::defaultHelpers()
                                    : static_cast<unsigned>(std::min(options_.workers, 64));
@@ -212,23 +224,26 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         try {
             liveWorkers_ = std::make_unique<detail::LiveWorkers>(helpers);
         } catch (const std::system_error& error) {
-            liveWorkerWarning_ =
+            startWarnings_.push_back(
                 "live helper creation failed: " + std::string(error.what()) +
-                "; using serial processing; lower Audio processing threads and restart the engine";
+                "; using serial processing; lower Audio processing threads and restart the engine");
         }
         if (liveWorkers_)
             if (auto configured = liveWorkers_->configure(backend); !configured) {
-                liveWorkerWarning_ = configured.error().message + "; " + configured.error().hint;
+                startWarnings_.push_back(configured.error().message + "; " +
+                                         configured.error().hint);
                 liveWorkers_.reset();
             }
     } else if (requested > 0) {
-        liveWorkerWarning_ =
+        startWarnings_.push_back(
             "live multiprocessing unavailable: fewer than two usable CPUs or "
             "backend scheduling information unavailable; using serial processing; "
-            "check the backend and process CPU allowance, then restart the engine";
+            "check the backend and process CPU allowance, then restart the engine");
     }
     // Callbacks already exist, but cannot see a partially configured pool.
     liveWorkersReady_.store(liveWorkers_.get(), std::memory_order_release);
+    scheduling_.callback = backend.callbackPolicy();
+    if (liveWorkers_) scheduling_.live = liveWorkers_->policy();
     if (options_.anticipative) {
         aheadFrames_ = std::max<std::int64_t>(
             2 * options_.renderBlock,
@@ -250,11 +265,67 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
         renderer_ = std::thread([this, first] {
+            nameThread("audio-render");
             rt::prefaultStack();  // ADR-0025
             rendererLoop(first);
         });
+        // No plan exists before start() returns, so no bridged instance has
+        // started processing with an older policy.
+        scheduleBackground();
     }
+    warnings_ = startWarnings_;
     return okStatus();
+}
+
+void Engine::scheduleBackground() {
+    using Kind = ThreadPolicy::Kind;
+    using Background = EngineOptions::Background;
+    const ThreadPolicy callback = scheduling_.callback;
+    const ThreadPolicy normal{Kind::Normal, 0};
+    ThreadPolicy want = normal;
+    std::string refused;  // why a real-time policy was not applied
+    if (options_.background == Background::Auto ? callback.realtime()
+                                                : options_.background != Background::Normal) {
+        int priority = options_.background != Background::Auto && options_.backgroundPriority > 0
+                           ? options_.backgroundPriority
+                           : kBackgroundPriority;
+        if (callback.realtime()) priority = std::min(priority, callback.priority - 1);
+        rlimit limit{};
+        if (::getrlimit(RLIMIT_RTPRIO, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY)
+            priority =
+                static_cast<int>(std::min<rlim_t>(static_cast<rlim_t>(priority), limit.rlim_cur));
+        cpu_set_t allowed;
+        CPU_ZERO(&allowed);
+        const int cpus =
+            ::sched_getaffinity(0, sizeof(allowed), &allowed) == 0 ? CPU_COUNT(&allowed) : 0;
+        const int threads = static_cast<int>(workers_->helpers()) + 1;
+        if (priority < 1)
+            refused =
+                "no real-time priority is available below the callback's and within "
+                "RLIMIT_RTPRIO; grant real-time scheduling (the audio or realtime "
+                "group's limits) and restart the engine";
+        else if (threads + 2 > cpus)
+            refused = "the renderer and its " + std::to_string(threads - 1) +
+                      " helpers would leave fewer than two of the " + std::to_string(cpus) +
+                      " allowed CPUs to the rest of the system; lower Audio processing threads "
+                      "and restart the engine";
+        else
+            want = {Kind::Fifo, priority};
+    }
+    if (want.realtime()) {
+        Status applied = workers_->setPolicy(want);
+        if (applied) applied = setThreadPolicy(renderer_.native_handle(), want);
+        if (!applied) {  // all or nothing: a slower straggler would delay every job
+            (void)workers_->setPolicy(normal);
+            (void)setThreadPolicy(renderer_.native_handle(), normal);
+            refused = applied.error().message + "; " + applied.error().hint;
+        }
+    }
+    if (!refused.empty())
+        startWarnings_.push_back("background audio threads run at normal priority: " + refused);
+    scheduling_.renderer = threadPolicy(renderer_.native_handle());
+    scheduling_.background = workers_->policy();
+    host::setBridgeAudioPolicy(scheduling_.renderer);
 }
 
 void Engine::stop() {
@@ -292,6 +363,8 @@ void Engine::stop() {
     callbackGen_.store(0);
     workers_.reset();
     ring_.reset();  // no callbacks after backend_->stop()
+    scheduling_ = {};
+    host::setBridgeAudioPolicy({ThreadPolicy::Kind::Normal, 0});
 }
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
@@ -395,7 +468,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     }
     outputLatency_ = static_cast<std::uint32_t>(plan->outputLatency);
     warnings_ = plan->warnings;
-    if (!liveWorkerWarning_.empty()) warnings_.push_back(liveWorkerWarning_);
+    warnings_.insert(warnings_.end(), startWarnings_.begin(), startWarnings_.end());
     // Metering (P5.3c): every strip of this plan gets its bank slot here, on
     // the main thread — never while an audio side reads it — and the lists the
     // executors iterate are built from the slots.

@@ -20,6 +20,7 @@
 #include "plan.h"
 #include "supple/base/environment.h"
 #include "supple/base/files.h"
+#include "supple/base/thread.h"
 #include "supple/engine/jack.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
@@ -28,10 +29,13 @@ using namespace supple;
 using namespace supple::engine;
 namespace {
 // Supplies silent monitored inputs and silences the physical outputs after DSP.
-// JACK owns whole-period timing; the paced thread owns synthetic timing.
+// JACK owns whole-period timing; the paced thread owns synthetic timing. With
+// a callback priority the paced thread and live helpers run SCHED_FIFO at it,
+// as JACK's would.
 class BenchBackend final : public Backend {
   public:
-    BenchBackend(bool real, BenchProbe* probe) : probe_(probe) {
+    BenchBackend(bool real, BenchProbe* probe, int callbackPriority)
+        : probe_(probe), callbackPriority_(callbackPriority) {
         if (real)
             jack_ = std::make_unique<JackBackend>(
                 JackOptions{.clientName = "supple-capacity-bench", .benchProbe = probe});
@@ -52,6 +56,7 @@ class BenchBackend final : public Backend {
         }
         running_ = true;
         thread_ = std::thread([this] {
+            nameThread("audio-paced");
             const auto period = std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(config_.blockSize / config_.sampleRate));
             auto next = Clock::now();
@@ -79,6 +84,11 @@ class BenchBackend final : public Backend {
             }
             call(out, 0);
         });
+        if (callbackPriority_ > 0)
+            if (auto st = setThreadPolicy(thread_.native_handle(), fifo()); !st) {
+                stop();
+                return st;
+            }
         return {};
     }
     void call(float* const* out, std::uint32_t n) SUPPLE_RT {
@@ -103,7 +113,12 @@ class BenchBackend final : public Backend {
         return jack_ ? jack_->liveThreadCapacity() : Backend::liveThreadCapacity();
     }
     Status prepareLiveThread(std::thread::native_handle_type thread) override {
-        return jack_ ? jack_->prepareLiveThread(thread) : okStatus();
+        if (jack_) return jack_->prepareLiveThread(thread);
+        return callbackPriority_ > 0 ? setThreadPolicy(thread, fifo()) : okStatus();
+    }
+    ThreadPolicy callbackPolicy() override {
+        if (jack_) return jack_->callbackPolicy();
+        return thread_.joinable() ? threadPolicy(thread_.native_handle()) : ThreadPolicy{};
     }
     BackendStatus status() const override {
         return jack_ ? jack_->status() : BackendStatus{.period = config_.blockSize};
@@ -116,7 +131,9 @@ class BenchBackend final : public Backend {
 
   private:
     using Clock = std::chrono::steady_clock;
+    ThreadPolicy fifo() const { return {ThreadPolicy::Kind::Fifo, callbackPriority_}; }
     BenchProbe* probe_;
+    int callbackPriority_;
     std::unique_ptr<JackBackend> jack_;
     BackendConfig config_;
     Callback callback_;
@@ -207,7 +224,9 @@ int main(int argc, char** argv) {
     }
     std::string device = "paced", pluginDir = BENCH_PLUGINS, recipePath = BENCH_RECIPE;
     std::string output, exportPath, pluginFile, pluginId, input;
+    std::string background = "auto", isolation = "in_process";
     int block = 64, workers = -1, fxPerTrack = 1, capacity = 500000;
+    int backgroundPriority = 0, callbackPriority = 0;
     bool live = false, metrics = true;
     int tracks = 2;
     double seconds = 300;
@@ -221,7 +240,9 @@ int main(int argc, char** argv) {
                     "[--anticipative on|off] [--plugins DIR] [--output JSON] "
                     "[--block 64|128] [--workers -1] [--metrics on|off] "
                     "[--sample-capacity 500000] [--plugin-file PATH --plugin-id ID --input WAV "
-                    "--live on|off --fx-per-track N] "
+                    "--live on|off --fx-per-track N] [--background auto|normal|fifo] "
+                    "[--background-priority 0] [--callback-priority 0] "
+                    "[--isolation in_process|shared_bridge|dedicated] "
                     "[--export-session JSON] [--search --max-tracks 256 --report "
                     "docs/benchmarks/b1.md]");
                 return 0;
@@ -238,8 +259,15 @@ int main(int argc, char** argv) {
                 pluginId = value;
             else if (arg == "--input")
                 input = value;
+            else if (arg == "--background" &&
+                     (value == "auto" || value == "normal" || value == "fifo"))
+                background = value;
+            else if (arg == "--isolation" &&
+                     (value == "in_process" || value == "shared_bridge" || value == "dedicated"))
+                isolation = value;
             else if (arg == "--block" || arg == "--workers" || arg == "--fx-per-track" ||
-                     arg == "--sample-capacity") {
+                     arg == "--sample-capacity" || arg == "--background-priority" ||
+                     arg == "--callback-priority") {
                 std::size_t used;
                 const int number = std::stoi(value, &used);
                 if (used != value.size()) throw std::invalid_argument("invalid integer");
@@ -249,6 +277,10 @@ int main(int argc, char** argv) {
                     workers = number;
                 else if (arg == "--fx-per-track")
                     fxPerTrack = number;
+                else if (arg == "--background-priority")
+                    backgroundPriority = number;
+                else if (arg == "--callback-priority")
+                    callbackPriority = number;
                 else
                     capacity = number;
             } else if ((arg == "--live" || arg == "--metrics") &&
@@ -284,7 +316,9 @@ int main(int argc, char** argv) {
         !std::isfinite(seconds) || seconds <= 0 || (block != 64 && block != 128) || workers < -1 ||
         workers > 64 || fxPerTrack < 1 || fxPerTrack > 64 || capacity < 1 || capacity > 4000000 ||
         (pluginFile.empty() && (!pluginId.empty() || !input.empty() || live || fxPerTrack != 1)) ||
-        (!pluginFile.empty() && (pluginId.empty() || input.empty() || !exportPath.empty()))) {
+        (!pluginFile.empty() && (pluginId.empty() || input.empty() || !exportPath.empty())) ||
+        backgroundPriority < 0 || backgroundPriority > 99 || callbackPriority < 0 ||
+        callbackPriority > 99 || (device == "jack" && callbackPriority != 0)) {
         std::fprintf(stderr, "invalid device, track count or duration\n");
         return 2;
     }
@@ -302,6 +336,9 @@ int main(int argc, char** argv) {
                      ? bench::buildSession(**app, *recipe, tracks)
                      : bench::buildEffectSession(**app, pluginId, input, tracks, live, fxPerTrack);
     if (!built) return fail(built.error());
+    if (isolation != "in_process")
+        if (auto isolated = bench::isolateAll(**app, isolation); !isolated)
+            return fail(isolated.error());
     if (!exportPath.empty()) {
         auto exported = bench::exportSession(**app);
         if (!exported) return fail(exported.error());
@@ -314,12 +351,17 @@ int main(int argc, char** argv) {
         return fail(Error("bench.forced_graph", "forced PipeWire quantum/rate in environment", "",
                           "unset PIPEWIRE_QUANTUM and PIPEWIRE_RATE before benchmarking"));
     BenchProbe probe(metrics ? static_cast<std::size_t>(capacity) : 0);
-    BenchBackend backend(device == "jack", metrics ? &probe : nullptr);
+    BenchBackend backend(device == "jack", metrics ? &probe : nullptr, callbackPriority);
+    using Background = EngineOptions::Background;
     auto started = (*app)->startEngine(
         backend, {.sampleRate = 48000, .blockSize = static_cast<std::uint32_t>(block), .inputs = 2},
         {.anticipative = anticipative,
          .workers = workers,
-         .benchProbe = metrics ? &probe : nullptr});
+         .benchProbe = metrics ? &probe : nullptr,
+         .background = background == "normal" ? Background::Normal
+                       : background == "fifo" ? Background::Fifo
+                                              : Background::Auto,
+         .backgroundPriority = backgroundPriority});
     if (!started) {
         (*app)->stopEngine();
         return fail(started.error());
@@ -364,7 +406,7 @@ int main(int argc, char** argv) {
     const auto after = backend.status();
     const double rate = backend.config().sampleRate;
     auto result = json::Value::object();
-    result["schema"] = "supple.capacity-run/2.1";
+    result["schema"] = "supple.capacity-run/2.2";
     result["tracks"] = tracks;
     result["workload"] = pluginFile.empty() ? "stock" : "effect";
     result["plugin_file"] = pluginFile;
@@ -375,6 +417,21 @@ int main(int argc, char** argv) {
     result["fx_count"] = (*app)->head().fx.size();
     result["workers"] = workers;
     result["live_helpers"] = engine->liveHelpers();
+    result["isolation"] = isolation;
+    result["background"] = background;
+    result["background_priority"] = backgroundPriority;
+    result["callback_priority"] = callbackPriority;
+    auto scheduling = json::Value::object();
+    const Engine::Scheduling& applied = engine->scheduling();
+    for (const auto& [name, policy] :
+         {std::pair{"callback", applied.callback}, std::pair{"live", applied.live},
+          std::pair{"renderer", applied.renderer}, std::pair{"background", applied.background}}) {
+        auto entry = json::Value::object();
+        entry["policy"] = std::string(policyName(policy.kind));
+        entry["priority"] = policy.priority;
+        scheduling[name] = std::move(entry);
+    }
+    result["scheduling"] = std::move(scheduling);
     result["device"] = device;
     result["anticipative"] = anticipative;
     result["seconds"] = measured;

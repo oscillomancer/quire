@@ -13,6 +13,7 @@
 #include <set>
 #include <thread>
 
+#include "supple/base/thread.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/dsp/dsp.h"
 #include "supple/time/timeline.h"
@@ -452,6 +453,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     detail::Workers workers(opt.threads == 0 ? detail::Workers::defaultHelpers()
                                              : std::min(opt.threads, 64u) - 1);
     std::thread audio([&] {
+        nameThread("audio-offline");
         for (host::Instance* in : instances) {
             in->reset();
             in->flushParams();

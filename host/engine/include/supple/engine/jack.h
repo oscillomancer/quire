@@ -63,6 +63,7 @@ class JackBackend : public Backend {
     bool ownsThread() const override { return true; }
     unsigned liveThreadCapacity() const override;
     Status prepareLiveThread(std::thread::native_handle_type thread) override;
+    ThreadPolicy callbackPolicy() override;  // the client thread's (jack_client_thread_id)
     Stats stats() const;
     BackendStatus status() const override;
     std::span<const MidiInputEvent> midiInput() const override;

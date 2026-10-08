@@ -62,6 +62,15 @@ struct MeterDrops {
     std::int64_t renderer = 0, callback = 0;
 };
 
+// One thread class's scheduling as engine.status reports it (ADR-0026).
+struct ThreadClass {
+    ThreadPolicy::Kind policy = ThreadPolicy::Kind::None;
+    std::int64_t priority = 0;
+};
+struct EngineScheduling {
+    ThreadClass callback, live, renderer, background;
+};
+
 // The real-time engine as engine.status reports it.
 struct EngineStatus {
     bool running = false;
@@ -74,6 +83,7 @@ struct EngineStatus {
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;
     std::int64_t liveHelpers = 0;
+    EngineScheduling scheduling;  // recorded at start; "none" while stopped
     std::vector<std::string> warnings;
     RuntimeProtectionStatus memoryLock;
     RuntimeProtectionStatus cpuIdleLatency;

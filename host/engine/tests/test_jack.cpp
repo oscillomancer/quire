@@ -410,3 +410,16 @@ TEST_CASE("JACK live helper setup needs a started backend and accepts non-RT tes
     CHECK(after.sched_priority == before.sched_priority);
     backend.stop();
 }
+
+TEST_CASE("JACK reports its callback thread's scheduling once started") {
+    FakeJack& fake = fakeJack();
+    fake.reset();
+    JackBackend backend(fakeOptions());
+    CHECK(backend.callbackPolicy() == ThreadPolicy{});  // no client yet
+    Recorder rec;
+    REQUIRE(backend.start(BackendConfig{}, rec.callback()));
+    // The fake library's process thread is an ordinary thread.
+    CHECK(backend.callbackPolicy() == ThreadPolicy{ThreadPolicy::Kind::Normal, 0});
+    backend.stop();
+    CHECK(backend.callbackPolicy() == ThreadPolicy{});
+}

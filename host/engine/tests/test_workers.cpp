@@ -2,6 +2,8 @@
 // whatever the thread count.
 #include <doctest/doctest.h>
 
+#include <sched.h>
+
 #include <atomic>
 #include <latch>
 #include <random>
@@ -222,4 +224,32 @@ TEST_CASE("a fan-out after a serial prefix wakes every parked participant") {
         },
         &fanout);
     CHECK(fanout.calls == 10);
+}
+
+TEST_CASE("the default helper count follows the calling thread's allowed CPUs") {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    REQUIRE(::sched_getaffinity(0, sizeof(all), &all) == 0);
+    std::vector<int> cpus;
+    for (int c = 0; c < CPU_SETSIZE; ++c)
+        if (CPU_ISSET(c, &all)) cpus.push_back(c);
+    // On a scratch thread restricted to the first `n` allowed CPUs (its mask
+    // only; the test thread's is unchanged).
+    auto helpersOn = [&](std::size_t n) {
+        unsigned helpers = 999;
+        bool restricted = false;
+        std::thread([&] {
+            cpu_set_t some;
+            CPU_ZERO(&some);
+            for (std::size_t i = 0; i < n; ++i) CPU_SET(cpus[i], &some);
+            restricted = ::sched_setaffinity(0, sizeof(some), &some) == 0;
+            helpers = Workers::defaultHelpers();
+        }).join();
+        REQUIRE(restricted);
+        return helpers;
+    };
+    CHECK(helpersOn(1) == 0);
+    if (cpus.size() >= 3) CHECK(helpersOn(3) == 0);
+    if (cpus.size() >= 5) CHECK(helpersOn(5) == 2);
+    CHECK(helpersOn(cpus.size()) == (cpus.size() > 3 ? cpus.size() - 3 : 0));
 }

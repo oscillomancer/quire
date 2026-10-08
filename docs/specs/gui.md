@@ -522,7 +522,8 @@ leave the head version unchanged.
   override: Automatic (default) or a limit per pool including its submitting
   thread; Limit 1 is serial. The menu
   offers 1, 2, 4, 8, 16, 32 and 64; `audio_threads` accepts any integer 1..64,
-  with 0 meaning Automatic. Automatic uses the hardware-derived capacity and
+  with 0 meaning Automatic. Automatic uses the capacity derived from the CPUs
+  the process may run on and
   graph-aware participation (engine.md §2.2, ADR-0023/0024). A note says it applies
   on the next engine start; changing it never restarts playback immediately.
   The limit applies independently to each pool, not total process threads;

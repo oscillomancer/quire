@@ -81,8 +81,27 @@ use additionally requires `--input WAV` (four seconds, stereo, 48 kHz).
 No third-party binary is copied into or distributed with the repository.
 Stock session export/B2 remains the original MIDI fixture.
 
-B1 run schema **`supple.capacity-run/2.1`** retains the 2.0 timings and adds
-`live_helpers` (enabled capacity after scheduling setup). The timing fields are
+Scheduling and isolation (B1 only, engine.md §2.2, ADR-0026):
+
+- `--background auto|normal|fifo` and `--background-priority N` choose the
+  renderer's and background pool's policy (`EngineOptions::background`).
+  Auto follows the callback.
+- `--callback-priority P` (paced only) runs the paced callback thread, and the
+  live helpers, at SCHED_FIFO P, as a PipeWire JACK callback runs at 83.
+  Without it, a loaded machine would starve the paced callback itself and
+  confound renderer measurements. P must be within the process's
+  `RLIMIT_RTPRIO`.
+- `--isolation in_process|shared_bridge|dedicated` sets every FX's isolation
+  before the engine starts.
+
+A background scheduling fallback is a warning, so it invalidates the run.
+
+B1 run schema **`supple.capacity-run/2.2`** retains the 2.1 fields and adds
+`isolation`, the requested `background`, `background_priority` and
+`callback_priority`, and `scheduling`: the engine's applied policy per thread
+class (`callback`, `live`, `renderer`, `background`, each `policy` and
+`priority`). Schema 2.1 added `live_helpers` (enabled capacity after scheduling
+setup). The timing fields are
 `callback` and `render_job` objects (samples, dropped, frames, p50/p99/p999/max/mean in microseconds,
 load_percent and over_budget), `ring_low_water_frames`, `ring_observations`,
 output_peak and process CPU/fault deltas. p999 means p99.9; quantiles use nearest

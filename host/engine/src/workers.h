@@ -12,7 +12,9 @@
 #include <thread>
 #include <vector>
 
+#include "supple/base/result.h"
 #include "supple/base/rt.h"
+#include "supple/base/thread.h"
 
 namespace supple::engine::detail {
 
@@ -71,8 +73,13 @@ class Workers {
     Workers& operator=(const Workers&) = delete;
 
     unsigned helpers() const { return static_cast<unsigned>(threads_.size()); }
-    // The default helper count: every core but two, less the caller.
+    // The default helper count: every CPU the calling thread may use but two,
+    // less the caller.
     static unsigned defaultHelpers();
+    // Main thread: every helper's scheduling (ADR-0026), stopping at the first
+    // failure; the first helper's (None without helpers).
+    Status setPolicy(ThreadPolicy policy);
+    ThreadPolicy policy();
 
     // Runs every task of `g` (fn(ctx, task) on any of the threads) and
     // returns when all selected helpers have left. One run at a time.

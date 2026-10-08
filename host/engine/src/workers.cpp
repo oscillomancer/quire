@@ -1,7 +1,12 @@
 #include "workers.h"
 
+#include <sched.h>
+
 #include <algorithm>
 #include <bit>
+#include <string>
+
+#include "supple/base/thread.h"
 
 namespace supple::engine::detail {
 
@@ -95,6 +100,7 @@ Workers::Workers(unsigned helpers, Hooks hooks)
     threads_.reserve(helpers);
     for (unsigned i = 0; i < helpers; ++i)
         threads_.emplace_back([this, i] {
+            nameThread("audio-bg-" + std::to_string(i + 1));
             rt::prefaultStack();  // ADR-0025
             loop(i);
         });
@@ -109,9 +115,25 @@ Workers::~Workers() {
     for (auto& t : threads_) t.join();
 }
 
+Status Workers::setPolicy(ThreadPolicy policy) {
+    for (auto& thread : threads_) SUPPLE_TRY(setThreadPolicy(thread.native_handle(), policy));
+    return okStatus();
+}
+
+ThreadPolicy Workers::policy() {
+    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
+}
+
 unsigned Workers::defaultHelpers() {
-    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-    return cores > 3 ? cores - 3 : 0;  // cores - 2 workers, the caller being one
+    // The CPUs the calling thread may run on (taskset, cpusets), not every
+    // online core: a larger pool would only contend and fail the real-time
+    // CPU cap (ADR-0026).
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    const unsigned cpus = ::sched_getaffinity(0, sizeof(allowed), &allowed) == 0
+                              ? static_cast<unsigned>(CPU_COUNT(&allowed))
+                              : std::max(1u, std::thread::hardware_concurrency());
+    return cpus > 3 ? cpus - 3 : 0;  // cpus - 2 workers, the caller being one
 }
 
 void Workers::help(TaskGraph& g, Fn fn, void* ctx) {
