@@ -765,10 +765,12 @@ struct ChainFixture {
     std::unique_ptr<EngineApp> app;
     cmd::Registry registry;
     std::unique_ptr<cmd::Dispatcher> bus;
-    ChainFixture() {
+    // scratch: the GUI's layout, an unsaved project with a folder of its own.
+    explicit ChainFixture(bool scratch = false) {
         fs::remove_all(dir);
         AppOptions options;
         options.workdir = dir;
+        if (scratch) options.scratchDir = dir / "scratch";
         options.chainDir = dir / "chains";
         options.templateDir = dir / "track-templates";
         options.projectTemplateDir = dir / "templates";
@@ -1020,6 +1022,17 @@ TEST_CASE("fx.chain.delete removes only the named preset file") {
     CHECK(fs::exists(f.dir / "chains" / "Keep.json"));
 }
 
+namespace {
+// A second of a constant tone, as a WAV file.
+void writeTone(const fs::path& file, float level) {
+    audio::AudioData tone;
+    tone.sampleRate = 48000;
+    tone.channels.assign(2, std::vector<float>(48000, level));
+    REQUIRE(audio::writeWav(file, tone));
+}
+std::string mediaPath(EngineApp& app) { return app.head().media.begin()->value->path; }
+}  // namespace
+
 TEST_CASE("project templates save the whole project and start new unsaved projects from it") {
     ChainFixture f;
     f.run("project.set", R"({"name":"Band"})");
@@ -1027,16 +1040,21 @@ TEST_CASE("project templates save the whole project and start new unsaved projec
     f.run("track.add", R"({"name":"Bass"})");
     f.run("fx.add", R"({"track":"tr_2","plugin":"Test Gain","patch":{"params":{"gain":-6}}})");
     auto saved = f.run("project.template.save", R"({"name":"Band setup"})");
-    const fs::path file = f.dir / "templates" / "Band setup.json";
-    CHECK(saved["path"].asString() == file.string());
+    const fs::path folder = f.dir / "templates" / "Band setup";
+    CHECK(saved["path"].asString() == folder.string());
+    CHECK(fs::exists(folder / "project.json"));
     CHECK(f.app->projectPath().empty());  // the project keeps (no) file of its own
     auto exists = f.bus->execute({"project.template.save", j(R"({"name":"Band setup"})"), kOrigin});
     REQUIRE_FALSE(exists);
-    CHECK(exists.error().code == "chain.exists");
+    CHECK(exists.error().code == "template.exists");
     f.run("project.template.save", R"({"name":"Band setup","replace":true})");
+    CHECK_FALSE(fs::exists(f.dir / "templates" / ".staging"));
     auto listed = f.run("project.template.list");
     REQUIRE(listed["templates"].size() == 1);
     CHECK(listed["templates"].asArray()[0]["name"].asString() == "Band setup");
+    auto dotted = f.bus->execute({"project.template.save", j(R"({"name":".hidden"})"), kOrigin});
+    REQUIRE_FALSE(dotted);
+    CHECK(dotted.error().code == "chain.name");
 
     REQUIRE(f.app->save(f.dir / "song.json"));
     f.run("track.add", R"({"name":"Extra"})");
@@ -1049,33 +1067,142 @@ TEST_CASE("project templates save the whole project and start new unsaved projec
     REQUIRE_FALSE(missing);
     CHECK(missing.error().code == "template.unknown");
 
+    // An older single-file template still lists, loads and deletes.
+    REQUIRE(fs::copy_file(folder / "project.json", f.dir / "templates" / "Old.json"));
+    CHECK(f.run("project.template.list")["templates"].size() == 2);
+    CHECK(f.run("project.template.load", R"({"name":"Old"})")["name"].asString() == "Band");
+    f.run("project.template.delete", R"({"name":"Old"})");
+    CHECK_FALSE(fs::exists(f.dir / "templates" / "Old.json"));
+
     f.run("project.template.delete", R"({"name":"Band setup"})");
-    CHECK_FALSE(fs::exists(file));
+    CHECK_FALSE(fs::exists(folder));
     CHECK(f.run("project.template.list")["templates"].size() == 0);
     auto gone = f.bus->execute({"project.template.delete", j(R"({"name":"Band setup"})"), kOrigin});
     REQUIRE_FALSE(gone);
     CHECK(gone.error().code == "template.unknown");
 }
 
-TEST_CASE("project templates name a saved project's recordings absolutely") {
+TEST_CASE("project templates carry copies of their audio, and a new project gets its own") {
+    for (bool scratch : {false, true}) {
+        CAPTURE(scratch);
+        ChainFixture f(scratch);
+        f.app->setCopyImportedMedia(true);
+        const fs::path original = f.dir / "loop.wav";
+        writeTone(original, 0.25f);
+        f.run("track.add", R"({"name":"Loop"})");
+        json::Value add = json::Value::object();
+        add["track"] = "tr_1";
+        add["position"] = 0.0;
+        add["audio_file"] = original.string();
+        f.run("item.add", json::write(add).value());
+        f.run("project.template.save", R"({"name":"Loops"})");
+        const fs::path folder = f.dir / "templates" / "Loops";
+        CHECK(fs::exists(folder / "media" / "loop.wav"));
+        auto doc = json::parse(*readTextFile(folder / "project.json"));
+        REQUIRE(doc);
+        CHECK(json::write(*doc).value().find(f.dir.string()) == std::string::npos);  // no paths out
+
+        fs::remove(original);  // the template no longer needs it
+        f.run("project.template.load", R"({"name":"Loops"})");
+        const fs::path media = scratch ? f.dir / "scratch" / "media" : f.dir / "media";
+        CHECK(fs::exists(media / "loop.wav"));
+        const fs::path named = mediaPath(*f.app);
+        CHECK((named.is_absolute() ? named : media / named) == media / "loop.wav");
+        // The new project's audio is its own: deleting the template keeps it.
+        f.run("project.template.delete", R"({"name":"Loops"})");
+        CHECK(fs::exists(media / "loop.wav"));
+        if (scratch) {  // the first save moves it beside the project
+            fs::create_directories(f.dir / "song");
+            REQUIRE(f.app->save(f.dir / "song" / "song.json"));
+            CHECK(fs::exists(f.dir / "song" / "media" / "loop.wav"));
+        }
+    }
+}
+
+TEST_CASE("a template refuses to save when an audio file it uses is gone") {
     ChainFixture f;
-    f.app->setupFixture(*f.bus, "song_with_audio");  // media/tone.wav, imported absolutely
-    REQUIRE(f.app->save(f.dir / "song.json"));
-    // A recording is named relative to the project's media folder.
-    auto text = readTextFile(f.dir / "song.json");
-    REQUIRE(text);
-    const std::string absolute = (f.dir / "media" / "tone.wav").string();
-    const auto at = text->find(absolute);
-    REQUIRE(at != std::string::npos);
-    text->replace(at, absolute.size(), "tone.wav");
-    REQUIRE(writeFileAtomic(f.dir / "song.json", *text));
-    REQUIRE(f.app->open(f.dir / "song.json"));
-    f.run("project.template.save", R"({"name":"With audio"})");
-    auto saved = readTextFile(f.dir / "templates" / "With audio.json");
-    REQUIRE(saved);
-    CHECK(saved->find(absolute) != std::string::npos);
-    f.run("project.template.load", R"({"name":"With audio"})");
-    CHECK(f.app->head().media.begin()->value->path == absolute);
+    const fs::path original = f.dir / "gone.wav";
+    writeTone(original, 0.25f);
+    f.run("track.add", R"({"name":"Loop"})");
+    json::Value add = json::Value::object();
+    add["track"] = "tr_1";
+    add["position"] = 0.0;
+    add["audio_file"] = original.string();
+    f.run("item.add", json::write(add).value());  // copying off: the project names the original
+    fs::remove(original);
+    auto saved = f.bus->execute({"project.template.save", j(R"({"name":"Broken"})"), kOrigin});
+    REQUIRE_FALSE(saved);
+    CHECK(saved.error().code == "media.missing");
+    CHECK(saved.error().message.find(original.string()) != std::string::npos);
+    CHECK_FALSE(fs::exists(f.dir / "templates" / "Broken"));
+    CHECK(f.run("project.template.list")["templates"].size() == 0);
+}
+
+TEST_CASE("imported audio is copied into the project's media folder when the setting is on") {
+    ChainFixture f(true);
+    f.app->setCopyImportedMedia(true);
+    const fs::path original = f.dir / "in" / "kick.wav";
+    fs::create_directories(original.parent_path());
+    writeTone(original, 0.5f);
+    f.run("track.add", R"({"name":"Kick"})");
+    json::Value add = json::Value::object();
+    add["track"] = "tr_1";
+    add["position"] = 0.0;
+    add["audio_file"] = original.string();
+    auto first = f.run("item.add", json::write(add).value());
+    const fs::path media = f.dir / "scratch" / "media";
+    CHECK(mediaPath(*f.app) == "kick.wav");
+    CHECK(fs::exists(media / "kick.wav"));
+    // The same bytes again: the same source, no second copy.
+    add["position"] = 8.0;
+    CHECK(f.run("item.add", json::write(add).value())["source"] == first["source"]);
+    CHECK_FALSE(fs::exists(media / "kick-2.wav"));
+    // Other bytes under the same name: a copy of its own.
+    const fs::path other = f.dir / "other" / "kick.wav";
+    fs::create_directories(other.parent_path());
+    writeTone(other, 0.125f);
+    add["audio_file"] = other.string();
+    f.run("item.add", json::write(add).value());
+    CHECK(fs::exists(media / "kick-2.wav"));
+    fs::remove_all(f.dir / "in");
+    fs::remove_all(f.dir / "other");
+    REQUIRE(f.app->save(f.dir / "song" / "song.json"));
+    CHECK(fs::exists(f.dir / "song" / "media" / "kick.wav"));
+    CHECK(fs::exists(f.dir / "song" / "media" / "kick-2.wav"));
+    // Off: the project names the file where it is.
+    f.app->setCopyImportedMedia(false);
+    const fs::path outside = f.dir / "snare.wav";
+    writeTone(outside, 0.75f);
+    add["audio_file"] = outside.string();
+    auto named = f.run("item.add", json::write(add).value());
+    const auto* source = f.app->head().media.find(*model::Id::parse(named["source"].asString()));
+    REQUIRE(source);
+    CHECK(source->path == outside.string());
+}
+
+TEST_CASE("save as into another folder copies the project's media there") {
+    ChainFixture f(true);
+    f.app->setCopyImportedMedia(true);
+    writeTone(f.dir / "pad.wav", 0.5f);
+    f.run("track.add", R"({"name":"Pad"})");
+    json::Value add = json::Value::object();
+    add["track"] = "tr_1";
+    add["position"] = 0.0;
+    add["audio_file"] = (f.dir / "pad.wav").string();
+    f.run("item.add", json::write(add).value());
+    REQUIRE(f.app->save(f.dir / "a" / "a.json"));
+    REQUIRE(f.app->save(f.dir / "b" / "b.json"));
+    CHECK(fs::exists(f.dir / "a" / "media" / "pad.wav"));  // the first project keeps its own
+    CHECK(fs::exists(f.dir / "b" / "media" / "pad.wav"));
+    REQUIRE(f.app->save(f.dir / "b" / "b.json"));  // in place: nothing to copy
+    // A folder whose media holds another file of that name is refused.
+    fs::create_directories(f.dir / "c" / "media");
+    writeTone(f.dir / "c" / "media" / "pad.wav", 0.125f);
+    auto clash = f.app->save(f.dir / "c" / "c.json");
+    REQUIRE_FALSE(clash);
+    CHECK(clash.error().code == "media.conflict");
+    CHECK_FALSE(fs::exists(f.dir / "c" / "c.json"));
+    CHECK(f.app->projectPath() == f.dir / "b" / "b.json");
 }
 
 TEST_CASE("FX chain opaque states have content hashes across SHA-256 block boundaries") {

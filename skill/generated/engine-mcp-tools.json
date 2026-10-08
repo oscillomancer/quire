@@ -2467,7 +2467,7 @@
   {
     "name": "item_add",
     "title": "Add an item on a track: MIDI written in notation, or an audio file.",
-    "description": "Add an item on a track: MIDI written in notation, or an audio file. position in beats (quarter notes from the start) or bar (1-based). notation: e.g. \"voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h\" — every bar must add up; the item is as long as the written bars unless length (beats) is given. audio_file: a path at the project's sample rate. See describe for errors and examples.",
+    "description": "Add an item on a track: MIDI written in notation, or an audio file. position in beats (quarter notes from the start) or bar (1-based). notation: e.g. \"voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h\" — every bar must add up; the item is as long as the written bars unless length (beats) is given. audio_file: a path at the project's sample rate; with the app's copy-imports setting on, the project keeps its own copy in its media folder. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "item_add_args",
@@ -4093,7 +4093,7 @@
   {
     "name": "project_template_load",
     "title": "Start a new, unsaved project from a project template.",
-    "description": "Start a new, unsaved project from a project template. Replaces the current project and its history, like project.new: unsaved changes are lost, so save first. The new project has no file until project.save {path}; the template itself is never changed. See describe for errors and examples.",
+    "description": "Start a new, unsaved project from a project template. Replaces the current project and its history, like project.new: unsaved changes are lost, so save first. The new project has no file until project.save {path} and gets its own copy of the template's audio; the template itself is never changed. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "project_template_load_args",
@@ -4126,7 +4126,7 @@
   {
     "name": "project_template_save",
     "title": "Save the whole project as a named project template.",
-    "description": "Save the whole project as a named project template. Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to the user's templates directory. The project keeps its own file. Recordings are referenced by absolute path, not copied, so an unsaved project with recordings must be saved first. replace: true overwrites a name. See describe for errors and examples.",
+    "description": "Save the whole project as a named project template. Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to a folder of its own in the user's templates directory, with a copy of every audio file it uses. The project keeps its own file. replace: true replaces a template of that name. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "project_template_save_args",

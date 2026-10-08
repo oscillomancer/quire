@@ -3265,7 +3265,7 @@ Result:
 
 Add an item on a track: MIDI written in notation, or an audio file.
 
-position in beats (quarter notes from the start) or bar (1-based). notation: e.g. "voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h" — every bar must add up; the item is as long as the written bars unless length (beats) is given. audio_file: a path at the project's sample rate.
+position in beats (quarter notes from the start) or bar (1-based). notation: e.g. "voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h" — every bar must add up; the item is as long as the written bars unless length (beats) is given. audio_file: a path at the project's sample rate; with the app's copy-imports setting on, the project keeps its own copy in its media folder.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -5578,7 +5578,7 @@ Result:
 
 Start a new, unsaved project from a project template.
 
-Replaces the current project and its history, like project.new: unsaved changes are lost, so save first. The new project has no file until project.save {path}; the template itself is never changed.
+Replaces the current project and its history, like project.new: unsaved changes are lost, so save first. The new project has no file until project.save {path} and gets its own copy of the template's audio; the template itself is never changed.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -5629,7 +5629,7 @@ Result:
 
 Save the whole project as a named project template.
 
-Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to the user's templates directory. The project keeps its own file. Recordings are referenced by absolute path, not copied, so an unsaved project with recordings must be saved first. replace: true overwrites a name.
+Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to a folder of its own in the user's templates directory, with a copy of every audio file it uses. The project keeps its own file. replace: true replaces a template of that name.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -5659,8 +5659,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Errors
 
-- `chain.exists`: the name already exists Hint: choose another name or set replace: true
-- `template.media`: an unsaved project has recordings Hint: save the project first
+- `template.exists`: the name already exists Hint: choose another name or set replace: true
+- `media.missing`: an audio file the project uses is gone Hint: restore it, or remove the items that use it
 
 ### Examples
 

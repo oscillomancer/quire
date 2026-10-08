@@ -11,6 +11,7 @@
 #include <set>
 
 #include "analysis_commands.h"
+#include "media_files.h"
 #include "render_commands.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/sha256.h"
@@ -1698,8 +1699,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             "position in beats (quarter notes from the start) or bar (1-based). notation: e.g. "
             "\"voice bass; 1: C2:q r:q C2:q r:q | F2:h G2:h\" — every bar must add up; the item "
             "is as long as the written bars unless length (beats) is given. audio_file: a path at "
-            "the "
-            "project's sample rate.";
+            "the project's sample rate; with the app's copy-imports setting on, the project "
+            "keeps its own copy in its media folder.";
         c.tags = {"item", "midi"};
         c.args =
             schema::object<ItemAddArgs>("item_add_args")
@@ -1793,6 +1794,14 @@ void registerEngineCommands(cmd::Registry& registry) {
                 } else {
                     model::MediaSource md;
                     md.path = fs::absolute(*a.audioFile).string();
+                    if (app.copyImportedMedia() && !app.projectDir().empty()) {
+                        // The project's own copy, so it never depends on the
+                        // original staying where it is (a replay finds the
+                        // same bytes under the same name and reuses them).
+                        auto name = detail::copyIntoFolder(*a.audioFile, app.mediaDir());
+                        if (!name) return std::move(name).error().at("/audio_file");
+                        md.path = *name;
+                    }
                     md.hash = *hash;
                     md.format = formatName(info->container);
                     md.sampleRate = info->sampleRate;

@@ -130,10 +130,15 @@ field defaults to stereo (2) for older templates. Its strip-type bounds match
 Presets and templates live in the user's configuration folder: FX chain
 presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, track templates
 in `track-templates`, and project templates in `templates`. A project
-template is an ordinary project file (§5) of the head, without history,
-whose media sources are absolute paths; project.template.load opens it as a
-new project with no file. fx.chain.delete and project.template.delete remove
-a file by name; none of these file actions changes the history.
+template is a folder, `templates/<name>/`, holding `project.json` (an
+ordinary project file, §5, of the head without history) and `media/` with a
+copy of every audio file the head uses, named relative to it; a missing file
+refuses the save (`media.missing`). project.template.load opens it as a new
+project with no file and copies the template's media into that project's
+own media folder, so neither depends on the other afterwards. An older
+single-file template (`templates/<name>.json`, absolute media paths) still
+loads. fx.chain.delete and project.template.delete remove a preset or
+template by name; none of these file actions changes the history.
 
 ### 1.5 Items and takes
 
@@ -382,6 +387,17 @@ UI state lives separately in `<name>.ui.json` (gui.md §1.2), never in the
 project document. Saves are atomic (write temp, fsync, rename). Autosave every 60 s to
 `<name>.<slug>-data/autosave-<n>.json` (keep 5). History is persisted only
 on request (ADR-0008 clarification).
+
+Media live in the project's `media_dir` (default `media/`) beside the file
+and are named relative to it. A project saved for the first time takes its
+unsaved recordings and imports from the scratch folder; one saved as into
+another folder gets a copy of its media folder there (the old project keeps
+its own; a different file of the same name already there refuses the save,
+`media.conflict`). With the app's copy-imports setting on (the GUI's
+default), item.add copies an imported audio file into the media folder (a
+same-named file with other bytes gets `-2`, `-3`…; the same bytes are
+reused) instead of naming it where it is. The GUI gives each project a
+folder of its own (gui.md §4.11).
 
 The engine app writes the autosaves from its service tick (engine.md §6),
 only when the head changed since the last one and 60 s have passed, and

@@ -1,4 +1,5 @@
 #include "supple/engine/app.h"
+#include "media_files.h"
 #include "runtime_protection.h"
 #include "supple/model/numeric.h"
 
@@ -418,7 +419,8 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
 
 // --- project files ----------------------------------------------------------------------
 
-Status EngineApp::replaceProject(model::Session session, fs::path path) {
+Status EngineApp::replaceProject(model::Session session, fs::path path,
+                                 const std::function<Status()>& prepare) {
     Backend* running = engine_ ? backend_ : nullptr;
     const auto config = engine_ ? engine_->config() : BackendConfig{};
     // Preserve the caller's Automatic/explicit choice, not the resolved count:
@@ -465,9 +467,10 @@ Status EngineApp::replaceProject(model::Session session, fs::path path) {
     autosaveMarked_ = !projectPath_.empty();
     autosaveMs_ = clockMs();
     autosaveVersion_ = head().version;
+    const Status prepared = prepare ? prepare() : Status{};
     if (running) SUPPLE_TRY(startEngine(*running, config, settings));
     headChanged();
-    return {};
+    return prepared;
 }
 
 Status EngineApp::newProject(model::Project project) {
@@ -491,10 +494,15 @@ Status EngineApp::save(const fs::path& where) {
         return Error("project.recording", "a recording is running", {},
                      "stop it before the project's first save (its files move then)");
     auto publish = [&] { return writeFileAtomic(path, model::serializeProject(head())); };
-    if (fromScratch)
-        SUPPLE_TRY(moveScratchMedia(path.parent_path() / head().project->mediaDir, publish));
-    else
+    const fs::path media = path.parent_path() / head().project->mediaDir;
+    if (fromScratch) {
+        SUPPLE_TRY(moveScratchMedia(media, publish));
+    } else {
+        // Saved as into another folder: that folder gets its own copy of the
+        // media (the old project keeps its files).
+        if (!projectPath_.empty()) SUPPLE_TRY(detail::copyFolder(mediaDir(), media));
         SUPPLE_TRY(publish());
+    }
     projectPath_ = path;
     autosaveMarked_ = true;  // the file itself is the newest copy
     autosaveMs_ = clockMs();
@@ -511,38 +519,61 @@ Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warn
     return replaceProject(std::move(*s), path);
 }
 
-Result<std::string> EngineApp::templateText() {
+Status EngineApp::writeTemplate(const fs::path& folder) {
     std::vector<model::Id> running;
     for (const auto& e : head().fx) running.push_back(e.id);
     captureFxStates(running);
     SUPPLE_TRY(model::checkInvariants(head()));
     const model::Session& s = head();
-    // Recordings are named relative to the project's media folder; a
-    // template lives elsewhere, so it names them absolutely.
-    bool relative = false;
-    for (const auto& e : s.media) relative = relative || !fs::path(e.value->path).is_absolute();
-    if (!relative) return model::serializeProject(s);
-    if (projectPath_.empty())
-        return Error("template.media", "the unsaved project's recordings have no permanent place",
-                     {}, "save the project first, then save the template");
     model::EditTxn txn(s, s.version);
-    const fs::path media = mediaDir();
-    for (const auto& e : s.media)
-        if (const fs::path p = e.value->path; !p.is_absolute())
-            txn.modify<model::MediaSource>(e.id, [&](model::MediaSource& m) {
-                m.path = (media / p).lexically_normal().string();
-            });
+    for (const auto& e : s.media) {
+        fs::path file = e.value->path;
+        if (file.is_relative()) {  // as plans find it
+            const fs::path inMedia = mediaDir() / file;
+            file = fs::exists(inMedia) ? inMedia : projectDir() / file;
+        }
+        auto name = detail::copyIntoFolder(file, folder / "media");
+        if (!name) return std::move(name).error();
+        txn.modify<model::MediaSource>(e.id, [&](model::MediaSource& m) { m.path = *name; });
+    }
+    model::Project project = txn.project();
+    project.mediaDir = "media";
+    txn.setProject(std::move(project));
     auto copy = txn.commit();
     if (!copy) return std::move(copy).error();
-    return model::serializeProject(*copy);
+    return writeFileAtomic(folder / "project.json", model::serializeProject(*copy));
 }
 
 Status EngineApp::openTemplate(const fs::path& where, std::vector<schema::Warning>* warnings) {
-    auto text = readTextFile(resolve(where), std::size_t(1) << 30);
+    const fs::path path = resolve(where);
+    std::error_code ec;
+    const bool folder = fs::is_directory(path, ec);
+    auto text = readTextFile(folder ? path / "project.json" : path, std::size_t(1) << 30);
     if (!text) return std::move(text).error();
     auto s = model::parseProject(*text, warnings);
     if (!s) return std::move(s).error();
-    return replaceProject(std::move(*s), {});
+    if (!folder) return replaceProject(std::move(*s), {});  // an older template: absolute paths
+    const fs::path from = path / s->project->mediaDir;
+    if (options_.scratchDir.empty()) {
+        // No folder for an unsaved project (a headless engine): the copies go
+        // to <workdir>/media, named absolutely.
+        const fs::path to = options_.workdir / "media";
+        model::EditTxn txn(*s, s->version);
+        for (const auto& e : s->media) {
+            if (fs::path(e.value->path).is_absolute()) continue;
+            auto name = detail::copyIntoFolder(from / e.value->path, to);
+            if (!name) return std::move(name).error();
+            txn.modify<model::MediaSource>(
+                e.id, [&](model::MediaSource& m) { m.path = (to / *name).string(); });
+        }
+        auto copy = txn.commit();
+        if (!copy) return std::move(copy).error();
+        return replaceProject(std::move(*copy), {});
+    }
+    // The new project's folder is emptied when the old project goes, so the
+    // copies are made after that, with the names the template gives them.
+    return replaceProject(std::move(*s), {},
+                          [this, from] { return detail::copyFolder(from, mediaDir()); });
 }
 
 // --- branches ----------------------------------------------------------------------------

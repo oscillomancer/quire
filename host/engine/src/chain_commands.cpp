@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <tuple>
 
 #include "supple/base/files.h"
@@ -566,11 +567,62 @@ Result<fs::path> projectTemplateDir(const EngineApp& app) {
                  "set XDG_CONFIG_HOME or AppOptions::projectTemplateDir");
 }
 
-Result<fs::path> projectTemplatePath(const EngineApp& app, const std::string& name) {
+// A template is a folder, <dir>/<name>/project.json with media/; an older one
+// is a single file, <dir>/<name>.json, with absolute media paths.
+struct TemplateLocation {
+    fs::path folder, legacy;
+    bool folderExists() const {
+        std::error_code ec;
+        return fs::is_regular_file(folder / "project.json", ec);
+    }
+    bool legacyExists() const {
+        std::error_code ec;
+        return fs::is_regular_file(legacy, ec);
+    }
+};
+
+Result<TemplateLocation> projectTemplateAt(const EngineApp& app, const std::string& name) {
     SUPPLE_TRY(validName(name));
+    if (name.front() == '.')
+        return Error("chain.name", "a template name cannot start with a dot", "/name",
+                     "use a name that starts with a letter or digit");
     auto dir = projectTemplateDir(app);
     if (!dir) return std::move(dir).error();
-    return *dir / (name + ".json");
+    return TemplateLocation{*dir / name, *dir / (name + ".json")};
+}
+
+// Writes the template into a staging folder, then puts it in place (a
+// replaced template is removed only once the new one is there).
+Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool replace) {
+    if ((at.folderExists() || at.legacyExists()) && !replace)
+        return Error("template.exists",
+                     "a project template named " + at.folder.filename().string() + " exists",
+                     "/name", "choose another name or set replace: true");
+    static std::atomic<unsigned> serial{0};
+    const std::string tag = std::to_string(::getpid()) + "-" + std::to_string(serial.fetch_add(1));
+    const fs::path staging = at.folder.parent_path() / ".staging";
+    const fs::path fresh = staging / ("new-" + tag), old = staging / ("old-" + tag);
+    std::error_code ec;
+    fs::create_directories(staging, ec);
+    if (auto written = app.writeTemplate(fresh); !written) {
+        fs::remove_all(fresh, ec);
+        return written;
+    }
+    const bool moved = fs::exists(at.folder, ec);
+    if (moved) fs::rename(at.folder, old, ec);
+    if (!ec) fs::rename(fresh, at.folder, ec);
+    if (ec) {
+        const std::string why = ec.message();
+        std::error_code ignored;
+        if (moved && !fs::exists(at.folder, ignored)) fs::rename(old, at.folder, ignored);
+        fs::remove_all(fresh, ignored);
+        return Error("template.write", "cannot save " + at.folder.string() + ": " + why, "/name",
+                     "check the templates folder's permissions and free space");
+    }
+    fs::remove_all(old, ec);
+    fs::remove(at.legacy, ec);
+    fs::remove(staging, ec);  // only when empty
+    return {};
 }
 
 struct NameArgs {
@@ -602,9 +654,9 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
         c.summary = "Save the whole project as a named project template.";
         c.description =
             "Writes the project as it is now (tracks, FX and their states, routing, items, "
-            "settings; not the history) to the user's templates directory. The project keeps its "
-            "own file. Recordings are referenced by absolute path, not copied, so an unsaved "
-            "project with recordings must be saved first. replace: true overwrites a name.";
+            "settings; not the history) to a folder of its own in the user's templates "
+            "directory, with a copy of every audio file it uses. The project keeps its own file. "
+            "replace: true replaces a template of that name.";
         c.tags = {"project", "presets"};
         c.args = schema::object<ProjectTemplateSaveArgs>("project_template_save_args")
                      .field("name", &ProjectTemplateSaveArgs::name, schema::string().minLength(1))
@@ -614,19 +666,18 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
         c.result = schema::object<PathResult>("project_template_save_result")
                        .field("path", &PathResult::path, schema::string())
                        .build();
-        c.errors = {
-            {"chain.exists", "the name already exists", "choose another name or set replace: true"},
-            {"template.media", "an unsaved project has recordings", "save the project first"}};
+        c.errors = {{"template.exists", "the name already exists",
+                     "choose another name or set replace: true"},
+                    {"media.missing", "an audio file the project uses is gone",
+                     "restore it, or remove the items that use it"}};
         c.examples = {
             {"Save the band setup", j(R"({"name":"Band"})"), j(R"({"path":"<any>"})"), "song"}};
         c.run = [](const ProjectTemplateSaveArgs& a, cmd::Context& ctx) -> Result<PathResult> {
             auto& app = ctx.service<EngineApp>();
-            auto path = projectTemplatePath(app, a.name);
-            if (!path) return std::move(path).error();
-            auto text = app.templateText();
-            if (!text) return std::move(text).error();
-            SUPPLE_TRY(writePreset(*path, *text, a.replace));
-            return PathResult{path->string()};
+            auto at = projectTemplateAt(app, a.name);
+            if (!at) return std::move(at).error();
+            SUPPLE_TRY(publishProjectTemplate(app, *at, a.replace));
+            return PathResult{at->folder.string()};
         };
         registry.add(std::move(c));
     }
@@ -638,8 +689,8 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
         c.summary = "Start a new, unsaved project from a project template.";
         c.description =
             "Replaces the current project and its history, like project.new: unsaved changes are "
-            "lost, so save first. The new project has no file until project.save {path}; the "
-            "template itself is never changed.";
+            "lost, so save first. The new project has no file until project.save {path} and "
+            "gets its own copy of the template's audio; the template itself is never changed.";
         c.tags = {"project", "presets"};
         c.args = schema::object<NameArgs>("project_template_load_args")
                      .field("name", &NameArgs::name, schema::string().minLength(1))
@@ -651,14 +702,13 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
                        j(R"({"name":"<any>"})"), "song_with_project_template"}};
         c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<ProjectTemplateLoadResult> {
             auto& app = ctx.service<EngineApp>();
-            auto path = projectTemplatePath(app, a.name);
-            if (!path) return std::move(path).error();
-            std::error_code ec;
-            if (!fs::is_regular_file(*path, ec))
+            auto at = projectTemplateAt(app, a.name);
+            if (!at) return std::move(at).error();
+            if (!at->folderExists() && !at->legacyExists())
                 return Error("template.unknown", "no project template " + a.name, "/name",
                              "use project.template.list to find a saved name");
             std::vector<schema::Warning> warnings;
-            SUPPLE_TRY(app.openTemplate(*path, &warnings));
+            SUPPLE_TRY(app.openTemplate(at->folderExists() ? at->folder : at->legacy, &warnings));
             for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
             return ProjectTemplateLoadResult{app.head().project->name};
         };
@@ -687,10 +737,22 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
             ProjectTemplateListResult result;
             std::error_code ec;
             if (!fs::exists(*dir, ec)) return result;
+            std::set<std::string> folders;
             for (const auto& e : fs::directory_iterator(*dir, ec)) {
+                const std::string name = e.path().filename().string();
                 std::error_code kind;
-                if (!e.is_regular_file(kind) || e.path().extension() != ".json") continue;
-                result.templates.push_back({e.path().stem().string(), e.path().string()});
+                if (name.front() == '.') continue;  // .staging
+                if (e.is_directory(kind) && fs::is_regular_file(e.path() / "project.json", kind)) {
+                    folders.insert(name);
+                    result.templates.push_back({name, e.path().string()});
+                }
+            }
+            for (const auto& e : fs::directory_iterator(*dir, ec)) {  // older single files
+                std::error_code kind;
+                const std::string stem = e.path().stem().string();
+                if (e.is_regular_file(kind) && e.path().extension() == ".json" &&
+                    stem.front() != '.' && !folders.contains(stem))
+                    result.templates.push_back({stem, e.path().string()});
             }
             std::sort(result.templates.begin(), result.templates.end(),
                       [](const auto& x, const auto& y) { return x.name < y.name; });
@@ -716,10 +778,20 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
         c.examples = {{"Delete the band setup", j(R"({"name":"Band"})"), j(R"({"path":"<any>"})"),
                        "song_with_project_template"}};
         c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<PathResult> {
-            auto path = projectTemplatePath(ctx.service<EngineApp>(), a.name);
-            if (!path) return std::move(path).error();
-            SUPPLE_TRY(removeNamed(*path, "template.unknown", "project template"));
-            return PathResult{path->string()};
+            auto at = projectTemplateAt(ctx.service<EngineApp>(), a.name);
+            if (!at) return std::move(at).error();
+            if (!at->folderExists()) {
+                SUPPLE_TRY(removeNamed(at->legacy, "template.unknown", "project template"));
+                return PathResult{at->legacy.string()};
+            }
+            std::error_code ec;
+            fs::remove_all(at->folder, ec);
+            if (ec)
+                return Error("template.unknown",
+                             "cannot delete " + at->folder.string() + ": " + ec.message(), "/name",
+                             "check the templates folder's permissions");
+            fs::remove(at->legacy, ec);
+            return PathResult{at->folder.string()};
         };
         registry.add(std::move(c));
     }

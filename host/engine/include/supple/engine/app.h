@@ -208,12 +208,21 @@ class EngineApp : public cmd::Host {
     Status open(const std::filesystem::path& path,
                 std::vector<schema::Warning>* warnings = nullptr);  // replaces the history
     Status newProject(model::Project project);
-    // A project template (project.template.*): the head as a project file
-    // whose media paths are absolute, so it opens from anywhere; and a new,
-    // unsaved project made from such a file (it never becomes the project path).
-    Result<std::string> templateText();
+    // A project template (project.template.*): `folder` receives project.json
+    // (the head, without history) and media/ with a copy of every audio file
+    // the head uses, named relative to it. openTemplate starts a new, unsaved
+    // project from such a folder, its media copied into the new project's own
+    // (or from an older single-file template); the template never becomes the
+    // project path.
+    Status writeTemplate(const std::filesystem::path& folder);
     Status openTemplate(const std::filesystem::path& path,
                         std::vector<schema::Warning>* warnings = nullptr);
+    // On (the GUI's preference), item.add copies an imported audio file into
+    // the project's media folder and names the copy; off, the project names
+    // the file where it is. A project without a folder (a headless engine's
+    // unsaved one) always names the original.
+    void setCopyImportedMedia(bool on) { copyImports_ = on; }
+    bool copyImportedMedia() const { return copyImports_; }
     std::uint64_t projectGeneration() const {
         return projectGeneration_.load(std::memory_order_acquire);
     }
@@ -413,7 +422,11 @@ class EngineApp : public cmd::Host {
     void autosave();
     void maybeAutosave();  // autosave() when the head changed and an interval passed
 
-    Status replaceProject(model::Session session, std::filesystem::path path);
+    // `prepare` runs once the new project is in place, before the engine
+    // starts on it (a template's media copied into its folder).
+    Status replaceProject(model::Session session, std::filesystem::path path,
+                          const std::function<Status()>& prepare = {});
+    bool copyImports_ = false;
     AppOptions options_;
     std::atomic<std::uint64_t> projectGeneration_{0};
     cmd::Dispatcher* commands_ = nullptr;
