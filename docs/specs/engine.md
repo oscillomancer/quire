@@ -306,7 +306,7 @@ touch the signal, so renders stay bit-identical.
 Everything in this cycle is `SUPPLE_RT` and runs under rtsan in the `rtsan`
 preset's engine tests (with the dummy backend).
 
-### 2.4 Floating-point environment (ADR-0025)
+### 2.4 Floating-point environment and first touch (ADR-0025)
 
 `detail::processNode` scopes `dsp::DenormalGuard` around each node: its
 input sums, delays, Console 9 stages, faders, oversampling, meters and every
@@ -328,6 +328,16 @@ offline post-processing (normalization, limiter, dither, encoding) keep the
 thread's environment in every executor. A value that underflows inside a node
 becomes zero; normal-range results are unchanged. The guard is SSE2-only;
 other architectures keep their default environment.
+
+Audio sample buffers (node and stage buffers, delays, the render-ahead and
+frontier rings) are zero-filled on the main thread when a plan or ring is
+built, which commits their pages before any callback uses them. Owned audio
+threads (live helpers, background workers, including an offline render's, the
+renderer and the bridge's audio threads) call `rt::prefaultStack()` once
+before their first job: it touches the 128 KiB of stack below the caller and
+does nothing when less than 512 KiB remains. The device callback's thread is
+not ours and is left alone. Reserved event and voice capacity is committed on
+first use, and no plug-in code runs early to warm it.
 
 ## 3. Offline rendering
 

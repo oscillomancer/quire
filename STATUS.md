@@ -33,7 +33,7 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   FX on armed channels, monitored and recorded; plugins keep
   running while the transport is stopped; smooth plan swaps (10 ms ramps);
   every node, plug-ins and bridged plug-ins included, runs with FTZ/DAZ in
-  every executor (ADR-0025).
+  every executor, and owned audio threads prefault their stacks (ADR-0025).
 - **Strips and routing** (ADR-0019 to ADR-0022): typed channel, buss and
   master strips with Console 9 summing (switchable, level-matched); routes
   with taps, channel maps, mono and polarity; sidechain keys; up to 128

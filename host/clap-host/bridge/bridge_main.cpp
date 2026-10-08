@@ -23,6 +23,7 @@
 
 #include "../src/bridge_protocol.h"
 #include "../src/scan.h"
+#include "supple/base/rt.h"
 #include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -286,7 +287,10 @@ struct Bridge {
                     return fail(st.error());
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
-                audio = std::thread([&slot, first] { slot.audioLoop(first); });
+                audio = std::thread([&slot, first] {
+                    rt::prefaultStack();  // ADR-0025
+                    slot.audioLoop(first);
+                });
                 // The widths the plug-in settled on (a VST3 may adapt a layout
                 // at activation): the host re-maps when they differ.
                 Writer w;

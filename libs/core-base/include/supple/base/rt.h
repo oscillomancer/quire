@@ -59,6 +59,10 @@ struct ScopedSanctionedSyscall {
 void wake(std::atomic<std::uint32_t>& word) SUPPLE_RT;
 // Idle helpers only: blocks until the word differs, including spurious wakes.
 void wait(std::atomic<std::uint32_t>& word, std::uint32_t seen);
+// Owned audio threads, once before their first job (ADR-0025): commits the
+// 128 KiB of stack below the caller, so DSP does not first-touch it while
+// timed. Does nothing when less than 512 KiB of stack remains. Not real-time.
+void prefaultStack();
 inline void relax() SUPPLE_RT {
 #if defined(__x86_64__) || defined(__i386__)
     __builtin_ia32_pause();
