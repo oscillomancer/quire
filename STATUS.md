@@ -72,8 +72,11 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
   light, preferences. Projects and renders default to
-  `~/Documents/<slug>-media` (the render folder is choosable); FX chain
-  presets and project templates are saved, loaded and deleted in the app.
+  `~/Documents/<slug>-media` (the render folder is choosable), each project
+  in a folder of its own with its own media; imports are copied into the
+  project by default, and Save as into another folder copies the media. FX
+  chain presets and project templates (with a copy of their audio) are
+  saved, loaded and deleted in the app.
 - **Agents**: the MCP server for the running app or a headless engine; the
   agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
   included) working on `agent/...` branches with diff, A/B and

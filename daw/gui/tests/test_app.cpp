@@ -609,8 +609,8 @@ TEST_CASE(
     CHECK_FALSE(files.dirty());
     a.key("Ctrl+T");
     CHECK(files.dirty());
-    files.saveAs(a.dir / "song");  // the extension is added
-    CHECK(std::filesystem::exists(a.dir / "song.json"));
+    files.saveAs(a.dir / "song");  // the extension is added, in a folder of its own
+    CHECK(std::filesystem::exists(a.dir / "song" / "song.json"));
     CHECK_FALSE(files.dirty());
 
     // Import: one file onto the selected track; several onto new tracks, one undo step.
@@ -644,10 +644,36 @@ TEST_CASE(
     REQUIRE(a.root->click("file.confirm.discard"));
     CHECK(went);
 
-    files.openPath(a.dir / "song.json");
+    files.openPath(a.dir / "song" / "song.json");
     CHECK_FALSE(files.dirty());
-    CHECK(a.app->projectPath() == a.dir / "song.json");
+    CHECK(a.app->projectPath() == a.dir / "song" / "song.json");
     CHECK(a.app->head().items.size() == 0);  // saved before the imports
+}
+
+TEST_CASE("save as gives each project a folder of its own") {
+    namespace fs = std::filesystem;
+    const fs::path home = "/home/u/Documents/media";
+    CHECK(gui::projectFolderPath(home / "Song", {}) == home / "Song" / "Song.json");
+    CHECK(gui::projectFolderPath(home / "Song.json", {}) == home / "Song" / "Song.json");
+    // Inside the project's own folder already: as chosen.
+    CHECK(gui::projectFolderPath(home / "Song" / "Song.json", {}) == home / "Song" / "Song.json");
+    App a;
+    if (!a.ok) return;
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](std::function<void()> f) { f(); });
+    files.saveAs(a.dir / "Song");
+    REQUIRE(a.app->projectPath() == a.dir / "Song" / "Song.json");
+    // A new name chosen from inside it goes beside it, not inside.
+    CHECK(gui::projectFolderPath(a.dir / "Song" / "Mix", a.app->projectPath()) ==
+          a.dir / "Mix" / "Mix.json");
+    files.saveAs(a.dir / "Song" / "Mix.json");
+    CHECK(a.app->projectPath() == a.dir / "Mix" / "Mix.json");
+    // Saving as onto another existing project is refused.
+    std::string error;
+    a.actions->onError = [&](const std::string& message) { error = message; };
+    files.saveAs(a.dir / "Song");
+    CHECK(error.find("already exists") != std::string::npos);
+    CHECK(a.app->projectPath() == a.dir / "Mix" / "Mix.json");
 }
 
 TEST_CASE("file actions: project templates save, start a new project and delete") {
@@ -664,7 +690,7 @@ TEST_CASE("file actions: project templates save, start a new project and delete"
     CHECK(a.root->focused()->id() == "file.template.name");
     a.root->text("Band");
     REQUIRE(a.root->click("file.template.commit"));
-    CHECK(std::filesystem::exists(dir / "Band.json"));
+    CHECK(std::filesystem::exists(dir / "Band" / "project.json"));
     CHECK_FALSE(a.root->popupOpen());
     CHECK(a.app->projectPath().empty());
     REQUIRE(a.actions->run("ui.file.template.save"));
@@ -710,8 +736,8 @@ TEST_CASE("file actions: project templates save, start a new project and delete"
     a.root->frame(false);
     REQUIRE(a.root->click("file.template.context"));  // its one item, Delete
     a.root->frame(false);
-    CHECK_FALSE(std::filesystem::exists(dir / "Band.json"));
-    CHECK(std::filesystem::exists(dir / "Spare.json"));
+    CHECK_FALSE(std::filesystem::exists(dir / "Band" / "project.json"));
+    CHECK(std::filesystem::exists(dir / "Spare" / "project.json"));
     list = dynamic_cast<ui::List*>(a.root->find("file.template.list"));
     REQUIRE(list);
     CHECK(list->count() == 1);

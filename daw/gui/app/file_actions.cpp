@@ -204,9 +204,27 @@ void FileActions::openPath(const std::filesystem::path& path) {
     }
 }
 
+std::filesystem::path projectFolderPath(std::filesystem::path chosen,
+                                        const std::filesystem::path& current) {
+    namespace fs = std::filesystem;
+    if (chosen.extension().empty()) chosen += ".json";
+    const fs::path stem = chosen.stem();
+    fs::path base = chosen.parent_path();
+    if (base.filename() == stem) return chosen;  // already the project's own folder
+    // From inside the current project's folder, a new name goes beside it.
+    std::error_code ec;
+    if (!current.empty() && fs::equivalent(base, current.parent_path(), ec))
+        base = base.parent_path();
+    return base / stem / chosen.filename();
+}
+
 void FileActions::saveAs(const std::filesystem::path& path) {
-    std::filesystem::path p = path;
-    if (p.extension().empty()) p += ".json";
+    const std::filesystem::path p = projectFolderPath(path, app_.projectPath());
+    std::error_code ec;
+    if (std::filesystem::exists(p, ec) && p != app_.projectPath()) {
+        showError("save as: " + p.string() + " already exists; choose another name");
+        return;
+    }
     json::Value args = json::Value::object();
     args["path"] = p.string();
     if (exec("project.save", std::move(args))) markSaved();
@@ -272,7 +290,7 @@ void FileActions::saveTemplate(const std::string& name) {
         return;
     }
     if (!status) return showError("project.template.save: " + saved.error().message);
-    if (saved.error().code == "chain.exists") {
+    if (saved.error().code == "template.exists") {
         replaceTemplate_ = name;
         status->setText("\"" + name + "\" exists. Save again to replace it.");
     } else {

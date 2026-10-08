@@ -11,7 +11,7 @@
 namespace supple::gui {
 namespace {
 
-constexpr const char* kSchema = "supple.preferences/1.3";
+constexpr const char* kSchema = "supple.preferences/1.4";
 
 Error threadLimitError() {
     return Error("preferences.audio_threads", "audio processing thread limit is out of range",
@@ -75,7 +75,8 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
     if (!schema || !schema->isString() ||
         (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0" &&
          schema->asString() != "supple.preferences/1.1" &&
-         schema->asString() != "supple.preferences/1.2"))
+         schema->asString() != "supple.preferences/1.2" &&
+         schema->asString() != "supple.preferences/1.3"))
         return Error("preferences.schema", file.string() + " is not a " + kSchema + " document",
                      "/schema");
     if (const json::Value* m = doc->find("default_monitor")) {
@@ -106,6 +107,12 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
                          "/prevent_deep_idle", "use true or false");
         out.preventDeepIdle = v->asBool();
     }
+    if (const auto* v = doc->find("copy_imported_media")) {
+        if (!v->isBool())
+            return Error("preferences.copy_imported_media", "copy_imported_media must be a boolean",
+                         "/copy_imported_media", "use true or false");
+        out.copyImports = v->asBool();
+    }
     if (const auto* v = doc->find("render_directory")) {
         if (!v->isString() || !std::filesystem::path(v->asString()).is_absolute())
             return Error("preferences.render_directory",
@@ -125,6 +132,7 @@ Status Preferences::save(const std::filesystem::path& file) const {
     doc["prevent_deep_idle"] = preventDeepIdle;
     doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
     if (!renderDirectory.empty()) doc["render_directory"] = renderDirectory.string();
+    doc["copy_imported_media"] = copyImports;
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     return writeFileAtomic(file, json::writeCanonical(doc) + "\n");
@@ -142,6 +150,7 @@ PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, Mou
     (void)app_.setMemoryLock(prefs_.lockMemory);
     (void)app_.setPreventDeepIdle(prefs_.preventDeepIdle);
     if (!prefs_.renderDirectory.empty()) app_.setRendersDir(prefs_.renderDirectory);
+    app_.setCopyImportedMedia(prefs_.copyImports);
 }
 
 bool PreferencesDialog::isOpen() const { return root_.find("prefs") != nullptr; }
@@ -272,6 +281,18 @@ void PreferencesDialog::open() {
         latencyNote_[i] = &label;
     }
 
+    auto& imports = row(*form, "prefs.imports", "Copy imported audio into project");
+    imports_ = &imports.emplace<ui::Button>("prefs.imports.set", "On", [this] {
+        if (auto result = setCopyImports(!prefs_.copyImports); !result && onError)
+            onError("preferences: " + result.error().toString());
+    });
+    imports_->layout.width = ui::SizeRule::fraction();
+    imports_->layout.height = ui::SizeRule::fixed(26);
+    form->emplace<ui::Label>("prefs.imports.note",
+                             "On: the project keeps working if the original file moves or goes.",
+                             ui::Font::Ui, "small", "ink-quiet")
+        .layout.height = ui::SizeRule::fixed(20);
+
     auto& mouse = row(*form, "prefs.mouse", "Mouse modifiers");
     mouse
         .emplace<ui::Button>("prefs.mouse.open", "Edit mouse modifiers…", [this] { mouse_.open(); })
@@ -284,6 +305,7 @@ void PreferencesDialog::open() {
         memoryNote_.fill(nullptr);
         latency_ = nullptr;
         latencyNote_.fill(nullptr);
+        imports_ = nullptr;
     });
     refresh();
 }
@@ -317,6 +339,7 @@ void protectionNote(const std::array<ui::Label*, 4>& labels,
 
 void PreferencesDialog::refresh() {
     if (latency_) latency_->setText(prefs_.preventDeepIdle ? "On" : "Off");
+    if (imports_) imports_->setText(prefs_.copyImports ? "On" : "Off");
     protectionNote(latencyNote_, app_.cpuIdleLatencyStatus(), "Requested: 20 µs");
     if (memory_) memory_->setText(prefs_.lockMemory ? "On" : "Off");
     protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked");
@@ -364,6 +387,16 @@ Status PreferencesDialog::setPreventDeepIdle(bool requested) {
     auto applied = app_.setPreventDeepIdle(requested);
     refresh();
     return applied;
+}
+
+Status PreferencesDialog::setCopyImports(bool on) {
+    auto next = prefs_;
+    next.copyImports = on;
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    prefs_ = next;
+    app_.setCopyImportedMedia(on);
+    refresh();
+    return {};
 }
 
 Status PreferencesDialog::setRenderDirectory(const std::filesystem::path& dir) {

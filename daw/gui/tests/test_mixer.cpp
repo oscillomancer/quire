@@ -917,7 +917,7 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded->audioThreads == limit);
         auto before = readFile(file);
         REQUIRE(before);
-        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.3") !=
+        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.4") !=
               std::string::npos);
         REQUIRE(loaded->save(file));
         CHECK(readFile(file).value() == *before);
@@ -1056,7 +1056,7 @@ TEST_CASE("preferences: both protection booleans survive canonical round trip an
     Fixture f;
     REQUIRE(f.ok);
     const auto file = f.dir / "preferences.json";
-    for (const char* version : {"1.0", "1.1", "1.2", "1.3"}) {
+    for (const char* version : {"1.0", "1.1", "1.2", "1.3", "1.4"}) {
         REQUIRE(writeFileAtomic(
             file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
         auto loaded = gui::Preferences::load(file);
@@ -1064,6 +1064,7 @@ TEST_CASE("preferences: both protection booleans survive canonical round trip an
         CHECK_FALSE(loaded->lockMemory);
         CHECK_FALSE(loaded->preventDeepIdle);
         CHECK(loaded->renderDirectory.empty());
+        CHECK(loaded->copyImports);  // on unless a file says otherwise
     }
     for (bool memory : {false, true})
         for (bool idle : {false, true}) {
@@ -1092,6 +1093,33 @@ TEST_CASE("preferences: both protection booleans survive canonical round trip an
         CHECK(loaded.error().path == "/prevent_deep_idle");
         CHECK(loaded.error().hint == "use true or false");
     }
+}
+
+TEST_CASE("preferences: copying imported audio is on by default, saved and applied") {
+    Fixture f;
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    CHECK(f.app->copyImportedMedia());
+    prefs.open();
+    f.root->frame(false);
+    CHECK(f.node("prefs.imports.set")->valueText() == "On");
+    REQUIRE(f.root->click("prefs.imports.set"));
+    CHECK_FALSE(f.app->copyImportedMedia());
+    CHECK(f.node("prefs.imports.set")->valueText() == "Off");
+    auto loaded = gui::Preferences::load(file);
+    REQUIRE(loaded);
+    CHECK_FALSE(loaded->copyImports);
+    const auto bytes = readFile(file).value();
+    REQUIRE(loaded->save(file));
+    CHECK(readFile(file).value() == bytes);
+    REQUIRE(
+        writeFileAtomic(file, R"({"schema":"supple.preferences/1.4","copy_imported_media":1})"));
+    auto bad = gui::Preferences::load(file);
+    REQUIRE_FALSE(bad);
+    CHECK(bad.error().path == "/copy_imported_media");
 }
 
 TEST_CASE("preferences: the render folder is saved, applied to the app and round-trips") {

@@ -458,12 +458,21 @@ project's own file, else in the media folder `~/Documents/<slug>-media`
 same media folder unless the render dialog chose another (§4.8); under
 `--workdir` (tests) they go to `<workdir>/renders`.
 
+**Each project has a folder of its own**: Save as of `<folder>/<name>` saves
+`<folder>/<name>/<name>.json`, with the project's `media/` beside it, unless
+the chosen folder already is `<name>`; a new name chosen from inside the
+current project's folder goes beside that folder, not inside it. Saving as
+onto another existing project is refused with a message. With **Copy
+imported audio into project** on (Preferences, the default), imports keep
+their own copy in the project's media folder (session-model.md §5.3).
+
 **Project templates** are whole projects kept by name in
-`<config>/<slug>/templates/<name>.json` (project.template.*): File > Save
-template… asks for a name (a name in use asks once more, then replaces it);
-File > Load template… lists them, a click starts a new, unsaved project from
-one (after the unsaved-changes question), and a right click offers Delete.
-Templates name recordings by absolute path; the media are not copied.
+`<config>/<slug>/templates/<name>/` with a copy of their audio
+(project.template.*): File > Save template… asks for a name (a name in use
+asks once more, then replaces it); File > Load template… lists them, a click
+starts a new, unsaved project from one (after the unsaved-changes question)
+with its own copy of the template's audio, and a right click offers
+Delete.
 
 ## 5. Agent panel (`daw/agent-panel`)
 
@@ -540,7 +549,7 @@ Templates name recordings by absolute path; the media are not copied.
   (`project_cursor`, the default, or `mouse_pointer`).
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
-  auto; `preferences.json`, supple.preferences/1.3, sets
+  auto; `preferences.json`, supple.preferences/1.4, sets
   `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
   wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
   modifiers. **Audio processing threads** is an advanced live/background
@@ -553,7 +562,7 @@ Templates name recordings by absolute path; the media are not copied.
   on the next engine start; changing it never restarts playback immediately.
   The limit applies independently to each pool, not total process threads;
   offline export keeps its separate thread setting. Version 1.0 files remain readable; missing `audio_threads`
-  means 0, and saves write canonical 1.3. Invalid types/ranges return
+  means 0, and saves write canonical 1.4. Invalid types/ranges return
   `preferences.audio_threads` at `/audio_threads` with a corrective hint;
   a failed save leaves the effective and displayed thread setting unchanged.
   **Lock process memory (mlockall)** is off by default, saved as the boolean
@@ -596,6 +605,11 @@ Templates name recordings by absolute path; the media are not copied.
   1.0–1.2 files) it means the default media folder; anything other than an
   absolute path reports `preferences.render_directory` at
   `/render_directory`.
+  **Copy imported audio into project** (1.4): On by default, saved as the
+  boolean `copy_imported_media` (absent, and in older files, means true;
+  other types report `preferences.copy_imported_media`) and applied to
+  `EngineApp::setCopyImportedMedia` at once. A note says the project then
+  keeps working if the original file moves or is deleted.
 
 
 

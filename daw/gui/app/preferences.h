@@ -1,6 +1,7 @@
 // Preferences (Edit > Preferences…): app-wide settings, never project state.
-// The monitoring mode, audio thread limit, opt-in process controls and render
-// folder are saved to <config>/<slug>/preferences.json (supple.preferences/1.3); the wheel zoom
+// The monitoring mode, audio thread limit, opt-in process controls, render
+// folder and import copying are saved to <config>/<slug>/preferences.json
+// (supple.preferences/1.4); the wheel zoom
 // anchor lives in the mouse map (mouse.json) and is offered here too, with a
 // way into the full mouse modifiers dialog.
 #pragma once
@@ -23,6 +24,7 @@ struct Preferences {
     bool lockMemory = false;
     bool preventDeepIdle = false;
     std::filesystem::path renderDirectory{};  // empty: the app's default (mediaHome())
+    bool copyImports = true;  // imported audio is copied into the project's media folder
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Preferences> load(const std::filesystem::path& file);  // absent: defaults
     Status save(const std::filesystem::path& file) const;
@@ -39,6 +41,7 @@ class PreferencesDialog {
     void setDefaultMonitor(model::Monitor m);  // applied at once and saved
     Status setMemoryLock(bool requested);
     Status setPreventDeepIdle(bool requested);
+    Status setCopyImports(bool on);
     void refresh();  // open dialog only; also called by the existing GUI tick
     Status setAudioThreads(unsigned limit);  // saved; next engine start
     // The render dialog's folder choice: saved, and renders go there at once.
@@ -60,6 +63,7 @@ class PreferencesDialog {
     ui::Button* memory_ = nullptr;
     std::array<ui::Label*, 4> memoryNote_{};
     ui::Button* latency_ = nullptr;
+    ui::Button* imports_ = nullptr;
     std::array<ui::Label*, 4> latencyNote_{};
 };
 

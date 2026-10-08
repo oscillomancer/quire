@@ -40,6 +40,12 @@ class DialogLifetime {
 // ~/Documents/<slug>-media (empty without HOME).
 std::filesystem::path mediaHome();
 
+// Where Save as puts a project: a folder of its own named after it, with its
+// own media folder — <chosen folder>/<name>/<name>.json — unless the chosen
+// folder already is <name>; from inside `current`'s folder, beside it.
+std::filesystem::path projectFolderPath(std::filesystem::path chosen,
+                                        const std::filesystem::path& current);
+
 class FileActions {
   public:
     using Post = std::function<void(std::function<void()>)>;
@@ -52,7 +58,7 @@ class FileActions {
     void confirmDiscard(const std::string& what, std::function<void()> then);
     // For tests: what a dialog would have returned.
     void openPath(const std::filesystem::path& path);
-    void saveAs(const std::filesystem::path& path);
+    void saveAs(const std::filesystem::path& path);  // in projectFolderPath()
     void import(const std::vector<std::filesystem::path>& files);
     // Project templates (File > Save template… / Load template…): a name
     // prompt, and a list where a click starts a new project from a template
