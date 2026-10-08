@@ -136,6 +136,32 @@ TEST_CASE("effect render with input audio and a targeted parameter event") {
     CHECK(bad.error().code == "render.input_rate");
 }
 
+#if defined(__SSE2__)
+TEST_CASE("a chain renders with FTZ and DAZ, as in a session (ADR-0025)" *
+          doctest::description("rt")) {
+    auto edge = make("com.suppleaudio.test.edge");
+    const std::uint8_t probe[4] = {50, 0, 0, 0};  // the underflow probe
+    REQUIRE(edge->loadState(probe).ok());
+    host::Instance* chain[] = {edge.get()};
+    audio::AudioData in;
+    in.sampleRate = 48000;
+    in.channels.assign(2, std::vector<float>(400));
+    for (std::size_t i = 0; i < 400; ++i)
+        for (auto& c : in.channels) c[i] = i % 4 == 0 ? 1e-7f : i % 4 == 1 ? 1e-9f : -1e-40f;
+    RenderRequest req;
+    req.input = &in;
+    RenderSettings s;
+    s.tailLimitSeconds = 0.0;
+    auto r = render(chain, s, req);
+    REQUIRE(r);
+    REQUIRE(r->audio.frames() == 400);
+    std::size_t wrong = 0;  // exact above 2^-26, flushed below
+    for (const auto& c : r->audio.channels)
+        for (std::size_t i = 0; i < 400; ++i) wrong += c[i] != (i % 4 == 0 ? 1e-7f : 0.0f);
+    CHECK(wrong == 0);
+}
+#endif
+
 TEST_CASE("layout and settings validation") {
     auto sine = make("com.suppleaudio.test.sine");
     auto gain = make("com.suppleaudio.test.gain");

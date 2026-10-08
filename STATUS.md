@@ -31,7 +31,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
-  running while the transport is stopped; smooth plan swaps (10 ms ramps).
+  running while the transport is stopped; smooth plan swaps (10 ms ramps);
+  every node, plug-ins and bridged plug-ins included, runs with FTZ/DAZ in
+  every executor (ADR-0025).
 - **Strips and routing** (ADR-0019 to ADR-0022): typed channel, buss and
   master strips with Console 9 summing (switchable, level-matched); routes
   with taps, channel maps, mono and polarity; sidechain keys; up to 128
@@ -91,6 +93,8 @@ Engine and hosting:
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
   A serial plug-in chain cannot benefit, and a stalled helper stalls its cycle.
+- The FTZ/DAZ policy exists on x86-64 (SSE2) only; plug-in lifecycle calls
+  run in the thread's own floating-point environment.
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.

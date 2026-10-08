@@ -11,6 +11,7 @@
 #include <set>
 
 #include "supple/clap/semantic_params.h"
+#include "supple/dsp/dsp.h"
 
 namespace supple::engine::detail {
 
@@ -1830,6 +1831,9 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
 // One block of every node, in order. Returns false on a plugin error.
 bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                  const host::Transport& transport, const void* self) SUPPLE_RT {
+    // ADR-0025: FTZ/DAZ for the whole node, on whichever thread runs it; the
+    // thread's own MXCSR is back when the node returns.
+    dsp::DenormalGuard denormals;
     Node& node = p.nodes[index];
     forEachStage(node, [](Stage& st) {
         st.outEvents.clear();

@@ -5,7 +5,7 @@ supple_add_library(clap-host
 
 # The plugin bridge: hosts dedicated or shared isolated plugin instances (ADR-0013).
 add_executable(${PRODUCT_SLUG}-bridge bridge/bridge_main.cpp)
-target_link_libraries(${PRODUCT_SLUG}-bridge PRIVATE supple::clap-host)
+target_link_libraries(${PRODUCT_SLUG}-bridge PRIVATE supple::clap-host supple::core-dsp)
 supple_target_defaults(${PRODUCT_SLUG}-bridge)
 
 if(SUPPLE_BUILD_TESTS)

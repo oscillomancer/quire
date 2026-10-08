@@ -582,7 +582,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
 // and delays, compiles events and clips.
 Status prepare(Plan& p, const Session& s);
 // Audio thread: one block of node `index` at plan sample `pos` (its sources
-// must have been processed for this block).
+// must have been processed for this block). The node, its plug-ins included,
+// runs with FTZ/DAZ set; the caller's MXCSR is restored (ADR-0025).
 // `self`: with several executors, only stages whose instance this executor
 // owns are processed (the rest pass through); null: no ownership check.
 bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t frames,

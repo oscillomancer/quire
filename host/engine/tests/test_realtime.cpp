@@ -2,12 +2,19 @@
 #include <doctest/doctest.h>
 #include "supple/engine/bench_probe.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <future>
+#include <limits>
+#include <optional>
 #include <semaphore>
 #include <thread>
+#if defined(__SSE2__)
+#include <xmmintrin.h>
+#endif
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -3830,3 +3837,268 @@ TEST_CASE("live multiprocessing: scheduling failure is serial and survives plan 
     engine.stop();
     CHECK(engine.processErrors() == 0);
 }
+
+// --- floating-point environment (ADR-0025) ----------------------------------------------
+
+namespace {
+
+// One track's fixture: S1 a sine; S2 tiny normal values on both sides of the
+// probe's 2^-26 threshold; S3 values near FLT_MIN, which the strip's gains
+// take below it; S4 subnormal samples; S5 a decay through every range.
+constexpr std::size_t kTinySegment = 4800, kTinyDecay = 8000;
+constexpr std::size_t kTinyFixture = 4 * kTinySegment + kTinyDecay;
+constexpr std::size_t kTinySpacing = 36000;  // items at 0, 0.75 and 1.5 s
+constexpr double kTinyBeat = 24000.0;        // frames per beat at 120 BPM
+constexpr std::size_t kTinyFrames = 2 * kTinySpacing + 28800;
+constexpr double kTinySeconds = 2.25;
+
+std::vector<float> tinySignal() {
+    std::vector<float> x(kTinyFixture);
+    const float s2[] = {1e-9f, -1e-9f, 1e-7f, -1e-7f};
+    const float s3[] = {1.5e-38f, -1.5e-38f, 4e-38f, -4e-38f};
+    const float s4[] = {std::numeric_limits<float>::denorm_min(), -1e-40f, 1e-39f, -1e-39f};
+    for (std::size_t i = 0; i < kTinySegment; ++i) {
+        x[i] = static_cast<float>(0.25 *
+                                  std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000.0));
+        x[kTinySegment + i] = s2[i % 4];
+        x[2 * kTinySegment + i] = s3[i % 4];
+        x[3 * kTinySegment + i] = s4[i % 4];
+    }
+    for (std::size_t n = 0; n < kTinyDecay; ++n)
+        x[4 * kTinySegment + n] =
+            static_cast<float>((n % 2 ? -0.5 : 0.5) * std::pow(0.98, double(n)));
+    return x;
+}
+
+std::filesystem::path tinyMedia(const char* name) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-engine-fp-" + std::string(name) + "-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(dir);
+    audio::AudioData data;
+    data.sampleRate = 48000;
+    data.channels.assign(2, tinySignal());
+    REQUIRE(audio::writeWav(dir / "media" / "tiny.wav", data).ok());
+    return dir;
+}
+
+// Linear strips (Console 9 off) keep tiny values visible. Plain plays the
+// fixture with no FX, Probe through the edge fixture's underflow probe, and
+// Bridged through a dedicated-isolation probe; each at its own time, so each
+// part of the master output is one track's path. `live`: Plain and Probe are
+// armed and monitored (silent inputs), so the callback runs them.
+model::Session tinySignalSession(bool bridged, bool live) {
+    model::EditTxn t(model::Session::create({.console9 = false}), 1);
+    const Id media = t.create(model::MediaSource{"tiny.wav", "", "wav", 48000, 2,
+                                                 static_cast<std::int64_t>(kTinyFixture)});
+    const char* names[] = {"Plain", "Probe", "Bridged"};
+    for (std::size_t k = 0; k < (bridged ? 3u : 2u); ++k) {
+        model::Track tr;
+        tr.name = names[k];
+        tr.parent = kMaster;
+        const Id track = t.create(tr);
+        t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(track); });
+        if (k > 0) {
+            model::FxInstance fx;
+            fx.plugin.id = "com.suppleaudio.test.edge";
+            fx.state = "sha256:underflow-probe";
+            if (k == 2) fx.isolation = model::Isolation::Dedicated;
+            const Id f = t.create(fx);
+            t.modify<model::Track>(track, [&](model::Track& x) { x.chain.push_back(f); });
+        }
+        model::Take take;
+        take.source = media;
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = track;
+        item.position = static_cast<double>(k * kTinySpacing) / kTinyBeat;  // in beats
+        item.length = 28800.0 / kTinyBeat;
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
+        if (live && k < 2) {
+            model::Route route;
+            route.from.hwChannels = std::vector<int>{1, 2};
+            route.to.track = track;
+            const Id input = t.create(route);
+            t.modify<model::Track>(track, [&](model::Track& x) {
+                x.record.input = input;
+                x.record.armed = true;
+                x.record.monitor = model::Monitor::On;
+            });
+        }
+    }
+    t.putBlob("sha256:underflow-probe",
+              std::make_shared<const model::Blob>(model::Blob{{50, 0, 0, 0}}));
+    return t.commit().value();
+}
+
+OfflineResult renderTiny(const model::Session& s, const std::filesystem::path& dir,
+                         unsigned threads, std::optional<Id> track = {}) {
+    auto pool = makePool();
+    auto r = renderOffline(
+        s, pool,
+        {.endSeconds = kTinySeconds, .projectDir = dir, .threads = threads, .track = track});
+    REQUIRE(r);
+    CHECK(r->outputLatency == 0);
+    REQUIRE(r->audio.frames() >= kTinyFrames);
+    return std::move(r).value();
+}
+
+// Plays the session from 0 through a manual device whose callbacks run on
+// this thread; `beforeStop` runs on it before the engine stops.
+std::vector<std::vector<float>> playTiny(const model::Session& s, const std::filesystem::path& dir,
+                                         const EngineOptions& options, std::uint32_t block,
+                                         const std::function<void()>& beforeStop = {}) {
+    auto pool = makePool();
+    MediaCache media;
+    const auto frames = static_cast<std::int64_t>(kTinySeconds * 48000);
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = frames});
+    Engine engine(pool, media, options);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = block, .inputs = 2}));
+    REQUIRE(engine.load(s, dir));
+    engine.play();
+    if (options.anticipative)
+        runAhead(engine, backend, frames / block, block);
+    else
+        backend.run(frames / block);
+    if (beforeStop) beforeStop();
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+    CHECK(engine.anticipationMisses() == 0);
+    CHECK(engine.outputLatency() == 0);
+    return backend.capture().channels;
+}
+
+#if defined(__SSE2__)
+std::size_t subnormals(const std::vector<float>& v) {
+    return static_cast<std::size_t>(std::count_if(
+        v.begin(), v.end(), [](float x) { return std::fpclassify(x) == FP_SUBNORMAL; }));
+}
+#endif
+
+}  // namespace
+
+TEST_CASE("tiny signals and long decays render identically in every executor and the bridge" *
+          doctest::description("rt")) {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    const auto dir = tinyMedia("executors");
+    const auto full = tinySignalSession(true, false);
+    const auto reference = renderTiny(full, dir, 1);
+
+#if defined(__SSE2__)
+    // The policy, in the reference: nothing subnormal leaves a node, and the
+    // probe (in process and bridged) ran with FTZ/DAZ. It equals the plain
+    // path where its intermediate stays normal and is zero elsewhere, while
+    // the plain path keeps tiny normal values.
+    const auto x = tinySignal();
+    for (const auto& y : reference.audio.channels) {
+        CHECK(subnormals(y) == 0);
+        CHECK(y[kTinySegment] != 0.0f);  // 1e-9 through linear strips alone
+        std::size_t sourceSubnormalsHeard = 0;
+        for (std::size_t i = 3 * kTinySegment; i < 4 * kTinySegment; ++i)
+            sourceSubnormalsHeard += y[i] != 0.0f;
+        CHECK(sourceSubnormalsHeard == 0);
+        for (std::size_t probe : {kTinySpacing, 2 * kTinySpacing}) {
+            INFO("probe at " << probe);
+            std::size_t wrong = 0, flushed = 0;
+            for (std::size_t i = 0; i < kTinyFixture; ++i) {
+                const bool normal = std::fabs(x[i]) >= 0x1p-26f;
+                const float expected = normal ? y[i] : 0.0f;
+                wrong += y[probe + i] != expected;
+                flushed += !normal && y[i] != 0.0f;
+            }
+            CHECK(wrong == 0);
+            CHECK(flushed > 2000);  // the probe flushed what the plain path kept
+        }
+    }
+    // The offline stem decoder runs under the same policy as the graph.
+    std::optional<Id> plain;
+    for (const auto& entry : full.tracks)
+        if (entry.value->name == "Plain") plain = entry.id;
+    REQUIRE(plain);
+    const auto stem = renderTiny(full, dir, 1, plain);
+    for (const auto& y : stem.audio.channels) CHECK(subnormals(y) == 0);
+#endif
+
+    const auto threaded = renderTiny(full, dir, 4);
+    for (unsigned c = 0; c < 2; ++c)
+        CHECK(maxDiff(threaded.audio.channels[c], 0, reference.audio.channels[c], kTinyFrames) ==
+              0.0);
+
+    // Rendered ahead, serially and with background workers (the bridge runs there).
+    for (int workers : {0, 3}) {
+        INFO("anticipative, workers " << workers);
+        const auto heard = playTiny(full, dir, {.workers = workers}, 128);
+        for (unsigned c = 0; c < 2; ++c)
+            CHECK(maxDiff(heard[c], 0, reference.audio.channels[c], kTinyFrames) == 0.0);
+    }
+    // In the callback, serially and with live helpers. A bridged stage passes
+    // through on a callback node by contract, so these sessions have none.
+    const auto callbackSession = tinySignalSession(false, false);
+    const auto callbackReference = renderTiny(callbackSession, dir, 1);
+    for (unsigned c = 0; c < 2; ++c)
+        CHECK(maxDiff(callbackReference.audio.channels[c], 0, reference.audio.channels[c],
+                      2 * kTinySpacing) == 0.0);
+    for (int workers : {0, 3})
+        for (std::uint32_t block : {128u, 64u}) {
+            INFO("in the callback, workers " << workers << ", block " << block);
+            const auto heard =
+                playTiny(callbackSession, dir, {.anticipative = false, .workers = workers}, block);
+            for (unsigned c = 0; c < 2; ++c)
+                CHECK(maxDiff(heard[c], 0, callbackReference.audio.channels[c], kTinyFrames) ==
+                      0.0);
+        }
+    // Live nodes on the callback and its helpers, the rest (and the bridge)
+    // rendered ahead.
+    const auto live = tinySignalSession(true, true);
+    const auto liveReference = renderTiny(live, dir, 1);
+    for (unsigned c = 0; c < 2; ++c)
+        CHECK(maxDiff(liveReference.audio.channels[c], 0, reference.audio.channels[c],
+                      kTinyFrames) == 0.0);
+    const auto heard = playTiny(live, dir, {.workers = 3}, 128);
+    for (unsigned c = 0; c < 2; ++c)
+        CHECK(maxDiff(heard[c], 0, liveReference.audio.channels[c], kTinyFrames) == 0.0);
+    std::filesystem::remove_all(dir);
+}
+
+#if defined(__SSE2__)
+TEST_CASE("the device thread's MXCSR is restored after every node" * doctest::description("rt")) {
+    struct ScopedMxcsr {
+        unsigned saved = _mm_getcsr();
+        explicit ScopedMxcsr(unsigned value) { _mm_setcsr(value); }
+        ~ScopedMxcsr() { _mm_setcsr(saved); }
+        ScopedMxcsr(const ScopedMxcsr&) = delete;
+        ScopedMxcsr& operator=(const ScopedMxcsr&) = delete;
+    };
+    constexpr unsigned kControl = 0xffc0;  // without the sticky exception flags
+    const auto dir = tinyMedia("mxcsr");
+    const auto callbackSession = tinySignalSession(false, false);
+    const auto liveSession = tinySignalSession(false, true);
+    const auto callbackReference = renderTiny(callbackSession, dir, 1);
+    const auto liveReference = renderTiny(liveSession, dir, 1);
+    // The measured callback (FTZ and DAZ clear), then FTZ alone: whatever the
+    // device thread brings, it gets back, and the output does not depend on it.
+    for (unsigned before : {0x1f80u, 0x9f80u})
+        for (int variant = 0; variant < 3; ++variant) {
+            INFO("MXCSR " << before << ", variant " << variant);
+            const bool live = variant == 2;
+            const EngineOptions options =
+                live ? EngineOptions{.workers = 3}
+                     : EngineOptions{.anticipative = false, .workers = variant == 0 ? 0 : 3};
+            unsigned during = 0, after = 0;
+            std::vector<std::vector<float>> heard;
+            {
+                ScopedMxcsr device(before);
+                heard = playTiny(live ? liveSession : callbackSession, dir, options, 128,
+                                 [&] { during = _mm_getcsr(); });
+                after = _mm_getcsr();  // after the backend's final, zero-frame callback
+            }
+            CHECK((during & kControl) == before);
+            CHECK((after & kControl) == before);
+            const auto& reference = live ? liveReference : callbackReference;
+            for (unsigned c = 0; c < 2; ++c)
+                CHECK(maxDiff(heard[c], 0, reference.audio.channels[c], kTinyFrames) == 0.0);
+        }
+    std::filesystem::remove_all(dir);
+}
+#endif

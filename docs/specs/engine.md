@@ -246,7 +246,7 @@ acknowledge a newer generation. This extends existing plan reclamation and
 ownership tokens to every helper. There is no late-output discard, timeout or
 rerun: a late helper makes its cycle late. A processing error still joins all
 work before silencing/counting the failed segment; it never cancels in-flight
-plug-in state. Summation order and numeric policy
+plug-in state. Summation order and numeric policy (§2.4)
 remain identical to offline processing. Synchronous bridge stages still pass
 through, including on helpers.
 
@@ -306,6 +306,29 @@ touch the signal, so renders stay bit-identical.
 Everything in this cycle is `SUPPLE_RT` and runs under rtsan in the `rtsan`
 preset's engine tests (with the dummy backend).
 
+### 2.4 Floating-point environment (ADR-0025)
+
+`detail::processNode` scopes `dsp::DenormalGuard` around each node: its
+input sums, delays, Console 9 stages, faders, oversampling, meters and every
+in-process plug-in `process()` run with FTZ and DAZ added to the executing
+thread's MXCSR, which is restored when the node returns. Every executor runs
+nodes only through `processNode`: the device callback (serial or with live
+helpers), the live helpers, the anticipative renderer, background workers and
+offline renders. Each node therefore computes under the same environment in
+real time and offline, whatever thread runs it, and the device callback's
+thread (owned by JACK/PipeWire) leaves every node with its own MXCSR. A
+plug-in that changes MXCSR in `process()` affects at most the rest of its node.
+The bridge applies the same flags around each bridged `process()` (§5), the
+offline stem decoder around its decode (§3), and the plug-in sandbox around
+each render block.
+
+Plug-in lifecycle calls (`start/stop_processing`, `reset`, parameter flush
+outside `process()`), transport computation, copies, the metronome and
+offline post-processing (normalization, limiter, dither, encoding) keep the
+thread's environment in every executor. A value that underflows inside a node
+becomes zero; normal-range results are unchanged. The guard is SSE2-only;
+other architectures keep their default environment.
+
 ## 3. Offline rendering
 
 - Runs a **separate plan instance** with its **own plugin instances**
@@ -329,6 +352,8 @@ preset's engine tests (with the dummy backend).
   audio-file encoder); file
   naming per session-model §7.3; a job
   queue; results reported as files + analysis summaries.
+- A post-fader stem of a channel or buss is decoded outside the graph, under
+  the same floating-point environment as the graph's nodes (§2.4).
 - Through-master stems use playback's solo signal-path rules: retain the
   selected strip, its upstream contributors and its path through parents and
   ordinary sends to the master. Ignore other pre-existing solos and solo-defeat;
@@ -414,6 +439,9 @@ instance).
   the plug-in settled on (a VST3 may adapt its buses), and a mismatch
   re-activates once at those widths, so an isolated plug-in exposes the same
   layout as an in-process one.
+- The bridge's audio thread sets FTZ and DAZ around each `process()` and
+  restores its MXCSR afterwards (§2.4), so a bridged plug-in computes as an
+  in-process one does.
 - The current bridge is synchronous and runs only offline or on rendered-ahead
   nodes. A stage on a device-callback node (including a take FX stage) passes
   through with its compensated delay; the callback calls neither processing nor

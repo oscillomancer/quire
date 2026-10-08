@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "supple/clap/semantic_params.h"
+#include "supple/dsp/dsp.h"
 #include "supple/time/timeline.h"
 
 namespace supple::engine {
@@ -475,11 +476,13 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                                                       : selected->post;
                 std::copy_n(tap.l.begin(), n, outL.begin() + pos);
                 std::copy_n(tap.r.begin(), n, outR.begin() + pos);
-                if (decodeStem)
+                if (decodeStem) {
+                    dsp::DenormalGuard denormals;  // as the graph's own decode (ADR-0025)
                     for (std::uint32_t i = 0; i < n; ++i)
                         stemDecoder.sample(tap.l[i], tap.r[i],
                                            outL[static_cast<std::size_t>(pos) + i],
                                            outR[static_cast<std::size_t>(pos) + i]);
+                }
                 if (opt.progressFlag)
                     opt.progressFlag->store(opt.progressBase + opt.progressScale *
                                                                    static_cast<double>(pos + n) /

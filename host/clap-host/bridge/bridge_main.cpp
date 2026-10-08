@@ -23,6 +23,7 @@
 
 #include "../src/bridge_protocol.h"
 #include "../src/scan.h"
+#include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
 
@@ -100,7 +101,11 @@ struct BridgeInstance {
                     b.transport = hdr->hasTransport ? &hdr->transport : nullptr;
                     b.steadyTime = hdr->steadyTime;
                     OutputEvents sink{std::span<OutputEvent>(outEvents, kMaxOutEvents)};
-                    result = instance->process(b, &sink) ? 1 : 0;
+                    {
+                        // The engine's environment for every node (ADR-0025).
+                        dsp::DenormalGuard denormals;
+                        result = instance->process(b, &sink) ? 1 : 0;
+                    }
                     hdr->outEventCount = static_cast<std::uint32_t>(sink.count);
                     hdr->outEventsDropped = static_cast<std::uint32_t>(sink.dropped);
                     break;
