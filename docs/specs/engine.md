@@ -539,8 +539,9 @@ instance).
   open editor. Its timeout is the nearest plug-in timer deadline, rounded up
   to milliseconds (0 when due), or -1 when there are no timers; no fixed idle
   cap remains. A parked relay translates audio-safe atomic/`rt::wake`
-  notifications into eventfd writes (sandbox spec §1). It drains/rearms the
-  wake before servicing every instance, before each poll, so neither
+  notifications into eventfd writes (`supple::MainThreadWake` in core-base;
+  core-base spec, ADR-0029; subscription in sandbox spec §1). It drains/rearms
+  the wake before servicing every instance, before each poll, so neither
   concurrent requests nor a busy control socket starve main-thread work.
   Parent death is the control socket's HUP/EOF, including when no instances
   remain. The wire protocol is unchanged; notifications and editor requests

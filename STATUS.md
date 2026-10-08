@@ -69,8 +69,8 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   embedded in process and from bridges, editor windows that remember their
   place per effect, plugin state saved with the project. Bridge main loops
   park until socket/descriptor/request activity or the nearest plug-in timer;
-  CLAP/VST3 requests use an audio-safe coalesced wake relay, and timers run
-  without an open editor.
+  CLAP/VST3 requests use core-base's audio-safe coalesced wake relay
+  (ADR-0029), and timers run without an open editor.
 - **GUI** (`specs/gui.md`): arrange view, track panel, mixer, FX chains and
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable

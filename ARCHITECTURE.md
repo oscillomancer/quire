@@ -48,7 +48,7 @@ for free, and guarantees that anything a human can do an agent can do.
 
 | Layer | Component | Role | Spec / ADR |
 |---|---|---|---|
-| base | `libs/core-base` | `Error`, `Result<T>`, `SUPPLE_RT`, RT primitives | ADR-0003 |
+| base | `libs/core-base` | `Error`, `Result<T>`, `SUPPLE_RT`, RT primitives | ADR-0003, `specs/core-base.md` |
 | data | `libs/core-json` | JSON value, precise-error parser, canonical writer, JSON Pointer, merge patch | ADR-0009, `specs/core-json.md` |
 | data | `libs/core-schema` | typed schema DSL: JSON ⇄ C++ binding, validation with hints, JSON Schema export | `specs/core-json.md` |
 | params | `libs/core-params` | semantic parameter definitions, units, curves, text I/O, normalization | ADR-0010, `specs/core-params.md` |
@@ -108,6 +108,11 @@ host, daw or plugins; plugins use only header-light libs.
   analysis jobs, renders. Playback media is decoded and resampled into an
   in-memory cache when a plan is compiled; a background, disk-backed cache is
   planned.
+
+`core-base` provides `supple::MainThreadWake`, a coalesced notification relay
+(ADR-0029). Producers publish atomics and wake a private futex; its parked
+non-RT thread writes a pollable eventfd. The bridge uses it for plug-in main
+requests. App service scheduling still uses its existing timers.
 
 Model → audio: immutable `RenderPlan` swapped with an atomic pointer;
 parameter changes and transport commands via bounded SPSC queues. Audio →

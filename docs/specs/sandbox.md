@@ -86,7 +86,8 @@ thread synchronously: audio-thread log calls go to a lock-free ring),
 host side (records `changed` flags). `request_restart`/`request_process`/
 `request_callback` set flags the app services on the main thread.
 
-Local instances can install the internal bridge relay with
+Local instances can install core-base's `supple::MainThreadWake` (public
+header `supple/base/main_thread_wake.h`, core-base spec, ADR-0029) with
 `setMainThreadWake(MainThreadWake&)` on main; it has no effect on remote
 proxies. The relay must outlive the instance and all plug-in callback threads.
 Installation also signals requests made during initialization. CLAP callbacks

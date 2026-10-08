@@ -1,4 +1,4 @@
-#include "main_thread_wake.h"
+#include "supple/base/main_thread_wake.h"
 
 #include <sys/eventfd.h>
 #include <unistd.h>
@@ -7,7 +7,7 @@
 
 #include "supple/base/thread.h"
 
-namespace supple::host {
+namespace supple {
 
 static_assert(std::atomic<bool>::is_always_lock_free);
 static_assert(std::atomic<MainThreadWake*>::is_always_lock_free);
@@ -34,7 +34,7 @@ void MainThreadWake::notify() SUPPLE_RT {
 }
 
 void MainThreadWake::relay() {
-    nameThread("bridge-wake");
+    nameThread("main-wake");
     std::uint32_t seen = 0;
     for (;;) {
         rt::wait(sequence_, seen);
@@ -61,4 +61,4 @@ bool MainThreadWake::drain() {
     return true;
 }
 
-}  // namespace supple::host
+}  // namespace supple

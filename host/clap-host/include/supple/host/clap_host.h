@@ -28,9 +28,11 @@
 #include "supple/clap/semantic_params.h"
 #include "supple/json/value.h"
 
-namespace supple::host {
+namespace supple {
+class MainThreadWake;
+}
 
-class MainThreadWake;  // internal bridge notification relay
+namespace supple::host {
 
 struct PluginInfo {
     std::string id, name, vendor, version, description;
@@ -309,7 +311,7 @@ class Instance {
     // Handles request_callback, request_restart (while active), pending flushes
     // and due timers. Returns true if anything was done.
     bool serviceMainThread();
-    // Bridge-local hook (no effect on remote proxies). Install on main; the
+    // Local-instance hook (no effect on remote proxies). Install on main; the
     // relay must outlive the instance and every plug-in callback thread.
     // Requests publish their flags before notifying, including from audio.
     void setMainThreadWake(MainThreadWake& wake);

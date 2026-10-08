@@ -1,37 +1,14 @@
-// Bridge-local main-thread notification. Audio producers only publish atomics
-// and wake a private futex; a parked relay makes the request pollable.
+// Internal plug-in timer helpers; the shared notification relay is in core-base.
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <limits>
-#include <thread>
 
-#include "supple/base/rt.h"
+#include "supple/base/main_thread_wake.h"
 
 namespace supple::host {
-
-class MainThreadWake {
-  public:
-    MainThreadWake();
-    ~MainThreadWake();
-    MainThreadWake(const MainThreadWake&) = delete;
-    MainThreadWake& operator=(const MainThreadWake&) = delete;
-    int fd() const { return fd_; }
-    void notify() SUPPLE_RT;
-    // Main thread, before servicing requests: acquire producers' publications
-    // and allow the next request to notify. False if no relay event was ready.
-    bool drain();
-
-  private:
-    int fd_ = -1;
-    std::atomic<bool> pending_{false}, quit_{false};
-    std::atomic<std::uint32_t> sequence_{0};
-    std::thread relay_;
-    void relay();
-};
 
 // Round up so a sub-millisecond remainder does not busy-poll before the
 // deadline. Saturate before narrowing: CLAP timer periods are uint32_t.

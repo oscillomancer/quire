@@ -1,5 +1,5 @@
 supple_add_library(clap-host
-  SOURCES src/main_thread_wake.cpp src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
+  SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
 
