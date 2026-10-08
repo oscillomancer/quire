@@ -274,7 +274,8 @@ actionable warning. No affinity or system configuration is changed; externally
 changing CPU affinity while running requires an engine restart. The backend
 stops before helpers are destroyed. `Engine::liveHelpers()` reports enabled
 capacity; `engine.start`/`engine.status` expose `live_helpers` and `warnings`
-(including plan and scheduling warnings), zero/empty when stopped. These are
+(including plan and scheduling warnings), zero/empty when stopped apart from
+optional process-control failures described below. These are
 capacity, not a count of participants in every segment. Automatic enables this
 path; Audio processing threads Limit 1 disables it on next start.
 
@@ -890,3 +891,106 @@ too, since nothing may load in that thread; without the bridge the job fails
 with `host.scan.unsupervised`), and the model thread installs the new pair
 when the job is done. A background scan still running is returned instead of
 a second one.
+
+### Initial engine-start failure (2026-10-08)
+
+A failed initial plan load stops and releases the engine/backend before
+`EngineApp::startEngine` returns its error, including with a caller-supplied
+backend. A corrected session can start again without an intervening stop.
+
+
+## Optional host-process controls (2026-10-08)
+
+`EngineApp::setMemoryLock(bool)` changes an app-wide, default-off request.
+Loaded Preferences apply before startup; setters apply immediately on the
+model thread while running or store intent while stopped. After a successful
+backend start, numeric validation and initial plan load, the app acquires its
+requested controls. Initial allocation/setup is not protected. An acquisition
+failure warns but does not prevent usable audio from starting. There is no
+retry loop; the next successful start or explicit re-enable retries.
+`haltEngine()` stops the backend and processing workers before releasing the
+controls. Project replacement/device recovery release and reapply them.
+Transport stop/pause keeps them: the engine still processes monitored inputs.
+The helper destructor also releases acquired controls. No control operation
+runs on an audio path, and offline rendering acquires no separate request.
+
+### Memory locking
+
+Use `mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT)` with no fallback.
+CURRENT covers existing mappings and FUTURE covers later in-process plug-ins,
+sample libraries and heap/stack mappings. ONFAULT locks resident pages and
+marks untouched pages for locking when populated instead of committing
+untouched stacks/arenas. It does not prefault memory or eliminate cold-page
+faults. The request covers the entire host process, including GUI/media and
+in-process plug-ins; shared/dedicated bridges and scanner processes are
+excluded. Host-side shared mappings do not protect bridge heaps/stacks.
+
+Read `RLIMIT_MEMLOCK` for failure diagnostics without changing it. ENOMEM and
+EPERM include the account's allowance and suggest disabling the option,
+reducing mapped memory or asking an administrator to review the allowance;
+EINVAL reports unsupported flags. Unlimited allowance is not unlimited RAM.
+Future allocation or stack expansion can fail under the policy; stack failure
+can terminate the process. Large sample libraries may fail to load.
+
+Disabling/stopping calls `munlockall` only after our successful acquisition.
+It also removes locks made by in-process plug-ins/libraries. Locks do not
+stack, and prior independent lock ownership cannot be restored: opting in
+accepts this process-wide cleanup behavior. Default-off and failed acquisition
+never unlock another plug-in's locks. A failed unlock retains active ownership
+and its error for a later cleanup attempt. In-process third-party locking
+calls can alter the policy; status reports our last successful operation.
+
+### Status and test seam
+
+`engine.start`/`engine.status` add `memory_lock`: `{requested, active, error?}`.
+The optional typed error has `code`, `message`, `path`, `hint`, and numeric
+`errno`. Codes are `engine.memory_lock`/`engine.memory_unlock`, path
+`/lock_memory`. Intent and cleanup errors remain visible while stopped;
+requested=true/active=false without an error means pending while stopped.
+Failures also appear in `warnings` alongside existing engine warnings.
+AppOptions may inject `RuntimeProtectionOps` for deterministic lifecycle/error
+coverage. Default wrappers call Linux libc; these operations are model-thread
+only. Tests fake memory locking instead of locking the runner's address space.
+
+
+### CPU idle latency (2026-10-08)
+
+`EngineApp::setPreventDeepIdle(bool)` changes the separate default-off
+request. Open `/dev/cpu_dma_latency` with `O_WRONLY | O_CLOEXEC`, write one
+native `int32_t` of `kCpuIdleLatencyUs = 20` microseconds and retain the fd
+while enabled and the engine runs. C1-class exits are typically a few µs;
+deep states take roughly 100 µs to over 1 ms, a substantial part of a
+64-frame period. This fixed small threshold permits shallow idle instead
+of the zero-latency POLL-only constraint on the measured workstation.
+There is no runtime sysfs/topology read to choose the value, frequency lock
+or guarantee of a particular C-state residency on arbitrary hardware.
+
+The request affects system idle while held and may increase power, heat and
+fan activity. Quire offers this owned, close-scoped QoS request instead of
+locking CPU frequency: governor/EPP changes are privileged and system-wide.
+The request leaves frequency policy alone and never escalates privileges.
+
+Retry EINTR on open/write; a zero/short write fails with EIO and is never
+completed with partial integer writes. Every failed write closes its fd.
+Disable, stop, project/device restart and destruction close the acquired
+fd exactly once. Closing removes only this request, without reading or
+restoring a remembered global QoS value. On Linux close is not retried even
+on EINTR: the descriptor is already released and may have been reused.
+CLOEXEC excludes child bridge/scanner processes from retaining the fd.
+
+`engine.start`/`engine.status` add `cpu_idle_latency` with the same typed
+`{requested, active, error?}` structure as memory_lock. Failures use
+`engine.cpu_idle_latency`, path `/prevent_deep_idle`, with numeric errno and
+a corrective hint. EACCES/EPERM explain that the account needs membership
+in a group with device write access (commonly audio; policy varies);
+ENOENT/ENODEV report that the device is unavailable. Acquisition failure
+keeps intent enabled and audio usable; close failure records an error with
+active=false because the descriptor has been released.
+
+Tests inject open/write/close operations for all lifecycle and error paths.
+The real libc write/close path is exercised against a temporary file through
+an injected open. Automated validation never writes to the real device.
+User-only acceptance: enable/disable and engine-stop/restart/exit cleanup
+with the real device, plus repeated sparse/dense 64/128-frame sessions,
+actual granted period, callback tails/xruns and power/thermal/fan behavior.
+No latency benefit is claimed without those measurements.

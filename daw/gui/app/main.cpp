@@ -894,6 +894,7 @@ int main(int argc, char** argv) {
             meterFeed.poll();
             fxWindow.tick();
             renderDialog.tick();
+            if (preferences.isOpen()) preferences.refresh();
         });
         // --action: after the first tick has read the project's UI state.
         for (const auto& spec : std::exchange(o.actions, {})) {

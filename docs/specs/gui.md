@@ -515,7 +515,7 @@ leave the head version unchanged.
   (`project_cursor`, the default, or `mouse_pointer`).
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
-  auto; `preferences.json`, supple.preferences/1.1, sets
+  auto; `preferences.json`, supple.preferences/1.2, sets
   `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
   wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
   modifiers. **Audio processing threads** is an advanced live/background
@@ -527,9 +527,41 @@ leave the head version unchanged.
   on the next engine start; changing it never restarts playback immediately.
   The limit applies independently to each pool, not total process threads;
   offline export keeps its separate thread setting. Version 1.0 files remain readable; missing `audio_threads`
-  means 0, and saves write canonical 1.1. Invalid types/ranges return
+  means 0, and saves write canonical 1.2. Invalid types/ranges return
   `preferences.audio_threads` at `/audio_threads` with a corrective hint;
   a failed save leaves the effective and displayed thread setting unchanged.
+  **Lock process memory (mlockall)** is off by default, saved as the boolean
+  `lock_memory`. Both 1.0 and 1.1 files remain readable; an absent field means
+  false. Other types return `preferences.lock_memory`, `/lock_memory`, and
+  "use true or false". The option applies on successful engine start or
+  immediately when toggled while running. A failed save preserves the previous
+  choice, following the existing audio-thread setter. A failed OS application
+  keeps the saved/requested choice On with a failed effective note and errno
+  plus a corrective hint. The row uses the same small grey left-column label
+  and wide right-column On/Off button as the other preferences. Its two short
+  caution lines explain RAM pressure, sample-library/stack failure, host-only
+  scope and that turning it off also drops plug-in locks (engine.md, Optional
+  host-process controls). The status note appears only for pending intent
+  ("Applies when the engine starts"), effective locking ("Locked") or failure;
+  Off has no duplicate note or reserved space. Notes refresh on opening/toggling
+  and the existing GUI model-service tick; the dialog height follows visible
+  content. Canonical 1.2 saves
+  preserve existing monitoring/thread values; no project format changes.
+  **Keep CPUs out of deep idle** is separately off by
+  default, persisted as boolean `prevent_deep_idle` in the same canonical
+  1.2 file. Missing fields (including in 1.0/1.1 files) mean false; invalid
+  types report `preferences.prevent_deep_idle` at `/prevent_deep_idle` with
+  "use true or false". It uses the same save/intent/effective-state pattern
+  as memory locking. The active note says "Requested: 20 µs"; failures show
+  errno and a corrective hint; Off has no status note. This row uses the same
+  label/button columns as the others. Its single small caution line says the
+  request affects system idle while the engine runs and may increase power,
+  heat and fan noise. Disable or
+  engine stop releases only the owned request; transport stop retains it.
+  Notes refresh through the existing GUI service flow. No preference test
+  opens the actual latency device for writing.
+
+
 
 ## 7. Visual identity
 

@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-07. This file describes the present: what works, what is
+Updated 2026-10-08. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -29,6 +29,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   parking (ADR-0023), a separate live callback fork-join pool (ADR-0024)
   with FIFO JACK helpers, a claim-based lifetime join that does not wait for
   unclaimed helpers, and an Automatic/limit audio-thread preference;
+  an opt-in host-process memory-lock preference with effective status and
+  actionable OS failures (bridges excluded; cleanup also drops plug-in locks);
+  a separate default-off 20 µs CPU idle-latency request with close-based
+  cleanup and permission diagnostics (real-device validation is user-only);
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep

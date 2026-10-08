@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <filesystem>
 #include <string>
@@ -51,7 +52,7 @@ struct Fixture {
     std::vector<std::string> editors, errors;  // ui.fx.editor calls; reported errors
     bool ok = false;
 
-    Fixture() {
+    Fixture(std::shared_ptr<engine::RuntimeProtectionOps> operations = {}) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-mixer-test-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
@@ -68,6 +69,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.runtimeProtectionOps = std::move(operations);
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
@@ -915,7 +917,7 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded->audioThreads == limit);
         auto before = readFile(file);
         REQUIRE(before);
-        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.1") !=
+        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.2") !=
               std::string::npos);
         REQUIRE(loaded->save(file));
         CHECK(readFile(file).value() == *before);
@@ -942,4 +944,209 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded.error().path == "/audio_threads");
         CHECK_FALSE(loaded.error().hint.empty());
     }
+}
+
+TEST_CASE(
+    "preferences: memory policy defaults, migration, boolean types and canonical round trip") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    for (const char* version : {"1.0", "1.1", "1.2"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK_FALSE(loaded->lockMemory);
+    }
+    for (bool requested : {false, true}) {
+        gui::Preferences values;
+        values.lockMemory = requested;
+        values.audioThreads = 3;
+        REQUIRE(values.save(file));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK(loaded->lockMemory == requested);
+        CHECK(loaded->audioThreads == 3);
+        const auto bytes = readFile(file).value();
+        REQUIRE(loaded->save(file));
+        CHECK(readFile(file).value() == bytes);
+    }
+    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string(R"({"schema":"supple.preferences/1.2","lock_memory":)") + bad + "}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == "/lock_memory");
+        CHECK(loaded.error().hint == "use true or false");
+    }
+}
+
+TEST_CASE(
+    "preferences: memory toggle shows intent and effective failure, and follows save-error "
+    "pattern") {
+    auto ops = std::make_shared<engine::RuntimeProtectionOps>();
+    int lockError = EPERM, locks = 0, unlocks = 0;
+    ops->lockMemory = [&](int) {
+        ++locks;
+        errno = lockError;
+        return lockError ? -1 : 0;
+    };
+    ops->unlockMemory = [&] {
+        ++unlocks;
+        return 0;
+    };
+    ops->memoryLimit = [](rlimit* limit) {
+        limit->rlim_cur = 0;
+        return 0;
+    };
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    Fixture f(ops);
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    prefs.open();
+    f.root->frame(false);
+    const float offHeight = f.node("prefs")->bounds().h;
+    CHECK(offHeight < 400);
+    CHECK_FALSE(f.node("prefs.memory.note.0")->visible);
+    CHECK_FALSE(f.node("prefs.latency.note.0")->visible);
+    for (const char* id : {"prefs.memory.set", "prefs.latency.set"}) {
+        CHECK(f.node(id)->bounds().x == f.node("prefs.threads.set")->bounds().x);
+        CHECK(f.node(id)->bounds().w == f.node("prefs.threads.set")->bounds().w);
+    }
+    REQUIRE(f.root->click("prefs.memory.set"));
+    CHECK(prefs.preferences().lockMemory);
+    CHECK(f.node("prefs.memory.set")->valueText() == "On");
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Applies when the engine starts");
+    CHECK(locks == 0);
+    f.root->frame(false);
+    const float pendingHeight = f.node("prefs")->bounds().h;
+    CHECK(pendingHeight > offHeight);
+    CHECK(f.node("prefs.memory.note.0")->visible);
+    CHECK_FALSE(f.node("prefs.memory.note.1")->visible);
+    REQUIRE(f.app->startEngine(backend, {}, {.anticipative = false, .workers = 0}));
+    prefs.refresh();
+    CHECK(f.node("prefs.memory.note.0")->valueText().find("errno") != std::string::npos);
+    CHECK(gui::Preferences::load(file)->lockMemory);
+    f.root->frame(false);
+    CHECK(f.node("prefs")->bounds().h > pendingHeight);
+    REQUIRE(prefs.setMemoryLock(false));
+    f.root->frame(false);
+    CHECK_FALSE(f.node("prefs.memory.note.0")->visible);
+    CHECK(f.node("prefs")->bounds().h == offHeight);
+    lockError = 0;
+    REQUIRE(prefs.setMemoryLock(true));
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Locked");
+    f.root->frame(false);
+    CHECK(f.node("prefs")->bounds().h == pendingHeight);
+    f.app->stopEngine();
+    prefs.refresh();
+    CHECK(f.node("prefs.memory.note.0")->valueText() == "Applies when the engine starts");
+    CHECK(unlocks == 1);
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setMemoryLock(false));
+    CHECK(prefs.preferences().lockMemory);
+    CHECK(f.app->memoryLockStatus().requested);
+}
+
+TEST_CASE("preferences: both protection booleans survive canonical round trip and old schemas") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    for (const char* version : {"1.0", "1.1", "1.2"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK_FALSE(loaded->lockMemory);
+        CHECK_FALSE(loaded->preventDeepIdle);
+    }
+    for (bool memory : {false, true})
+        for (bool idle : {false, true}) {
+            gui::Preferences values;
+            values.lockMemory = memory;
+            values.preventDeepIdle = idle;
+            values.audioThreads = 3;
+            values.defaultMonitor = model::Monitor::Auto;
+            REQUIRE(values.save(file));
+            auto loaded = gui::Preferences::load(file);
+            REQUIRE(loaded);
+            CHECK(loaded->lockMemory == memory);
+            CHECK(loaded->preventDeepIdle == idle);
+            CHECK(loaded->audioThreads == 3);
+            CHECK(loaded->defaultMonitor == model::Monitor::Auto);
+            const auto bytes = readFile(file).value();
+            REQUIRE(loaded->save(file));
+            CHECK(readFile(file).value() == bytes);
+        }
+    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
+        REQUIRE(writeFileAtomic(
+            file,
+            std::string(R"({"schema":"supple.preferences/1.2","prevent_deep_idle":)") + bad + "}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == "/prevent_deep_idle");
+        CHECK(loaded.error().hint == "use true or false");
+    }
+}
+
+TEST_CASE(
+    "preferences: CPU idle toggle persists failures and refreshes effective lifecycle status") {
+    auto ops = std::make_shared<engine::RuntimeProtectionOps>();
+    int openError = EACCES, opens = 0, closes = 0;
+    ops->openLatency = [&](const char*, int) {
+        ++opens;
+        errno = openError;
+        return openError ? -1 : 73;
+    };
+    ops->writeLatency = [](int, const void*, std::size_t size) -> ssize_t {
+        return static_cast<ssize_t>(size);
+    };
+    ops->closeLatency = [&](int) {
+        ++closes;
+        return 0;
+    };
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    Fixture f(ops);
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    prefs.open();
+    f.root->frame(false);
+    const float offHeight = f.node("prefs")->bounds().h;
+    CHECK_FALSE(f.node("prefs.latency.note.0")->visible);
+    REQUIRE(f.root->click("prefs.latency.set"));
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Applies when the engine starts");
+    CHECK(opens == 0);
+    REQUIRE(f.app->startEngine(backend, {}, {.anticipative = false, .workers = 0}));
+    prefs.refresh();
+    CHECK(f.node("prefs.latency.note.0")->valueText().find("errno 13") != std::string::npos);
+    CHECK(gui::Preferences::load(file)->preventDeepIdle);
+    REQUIRE(prefs.setPreventDeepIdle(false));
+    f.root->frame(false);
+    CHECK_FALSE(f.node("prefs.latency.note.0")->visible);
+    CHECK(f.node("prefs")->bounds().h == offHeight);
+    CHECK_FALSE(prefs.setPreventDeepIdle(true));
+    CHECK(gui::Preferences::load(file)->preventDeepIdle);
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.node("prefs.latency.set")->valueText() == "On");
+    REQUIRE(prefs.setPreventDeepIdle(false));
+    openError = 0;
+    REQUIRE(prefs.setPreventDeepIdle(true));
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Requested: 20 µs");
+    f.app->stopEngine();
+    prefs.refresh();
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Applies when the engine starts");
+    CHECK(closes == 1);
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setPreventDeepIdle(false));
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.app->cpuIdleLatencyStatus().requested);
 }

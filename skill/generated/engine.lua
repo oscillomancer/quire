@@ -135,6 +135,8 @@ q = nil
 ---@field anticipation_misses integer
 ---@field live_helpers integer
 ---@field warnings string[]
+---@field memory_lock table
+---@field cpu_idle_latency table
 ---@field meter_drops table
 ---@field failed_fx string[]
 ---@field dropped integer
@@ -157,6 +159,8 @@ q = nil
 ---@field anticipation_misses integer
 ---@field live_helpers integer
 ---@field warnings string[]
+---@field memory_lock table
+---@field cpu_idle_latency table
 ---@field meter_drops table
 ---@field failed_fx string[]
 ---@field dropped integer
