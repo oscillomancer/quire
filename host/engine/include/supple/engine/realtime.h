@@ -270,7 +270,7 @@ struct EngineOptions {
     bool anticipative = true;
     std::uint32_t renderBlock = 1024;  // frames per anticipative block (64 .. 8192)
     double renderAheadMs = 200.0;      // how far ahead of the playhead
-    int workers = -1;                  // helpers per pool; -1: every core but three
+    int workers = -1;                  // helpers per pool; -1: every allowed CPU but three
     BenchProbe* benchProbe = nullptr;  // benchmark only; preallocated, outlives stop()
     // The renderer's and background pool's scheduling (engine.md §2.2,
     // ADR-0026). Auto: real-time below a real-time callback, else normal. The

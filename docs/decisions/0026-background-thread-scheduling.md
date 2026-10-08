@@ -155,4 +155,6 @@ audio, with FIFO 10 it is ordinary tasks, for up to about one render job.
   p99 by 2% (14.3 against 14.6 ms), with equal headroom. Affinity stays as
   inherited.
 - Restricting the whole default pool to six CPUs tripped the CPU cap: the
-  engine warned, stayed at normal priority, and missed as normal does.
+  engine warned, stayed at normal priority, and missed as normal does. Since
+  then the default pools size from the allowed CPU mask, so a restricted
+  process no longer trips the cap by default.

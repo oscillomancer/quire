@@ -73,7 +73,8 @@ class Workers {
     Workers& operator=(const Workers&) = delete;
 
     unsigned helpers() const { return static_cast<unsigned>(threads_.size()); }
-    // The default helper count: every core but two, less the caller.
+    // The default helper count: every CPU the calling thread may use but two,
+    // less the caller.
     static unsigned defaultHelpers();
     // Main thread: every helper's scheduling (ADR-0026), stopping at the first
     // failure; the first helper's (None without helpers).

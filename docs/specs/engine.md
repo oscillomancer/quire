@@ -194,8 +194,9 @@ editor/automation eligibility preferences remain planned (ADR-0014).
 
 ### 2.2 Worker pool
 
-The background/offline pool has `max(0, cores − 3)` helper threads by default;
-its submitting thread also executes tasks. `EngineOptions::workers` can
+The background/offline pool has `max(0, cpus − 3)` helper threads by default,
+where `cpus` counts the CPUs in the calling thread's affinity mask (taskset,
+cpusets), not every online core; its submitting thread also executes tasks. `EngineOptions::workers` can
 override the helper count. A bounded MPMC ready queue and atomic dependency
 counters distribute nodes; input summation stays in fixed graph order.
 ADR-0023 bounds each run to the smaller of the configured capacity and a
@@ -216,7 +217,7 @@ start, including project replacement and device recovery, maps a nonzero limit t
 options request automatic workers; explicit `EngineOptions::workers` takes
 precedence. Both live and background pools use this capacity independently; it is not a
 total process thread limit. Already running pools and offline export's
-`threads` option are unchanged. Automatic retains the hardware-derived capacity and graph-aware
+`threads` option are unchanged. Automatic retains the CPU-mask-derived capacity and graph-aware
 participation; an explicit limit is also graph-bounded.
 
 DSP tasks are RT-safe; ADR-0013 separately permits synchronous bridge futex
@@ -733,7 +734,7 @@ harness. See the tooling README for schemas, limits and invocation details.
   joins the renderer first; it stops every plugin as it ends. With
   `anticipative = false` the old in-callback renderer runs (the reference,
   and the base for live nodes).
-- **Worker pool** (`workers.{h,cpp}`): helper threads (every core but three,
+- **Worker pool** (`workers.{h,cpp}`): helper threads (every allowed CPU but three,
   plus the submitting thread) run one render block as a DAG over the plan's
   nodes: per-node atomic counts of unfinished sources, a bounded Vyukov MPMC
   ready queue, the submitter helps; graph-bounded participation and idle

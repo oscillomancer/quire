@@ -4287,6 +4287,51 @@ TEST_CASE("forced background policies apply for benchmarks, within the same chec
     engine.stop();
 }
 
+TEST_CASE("under a restricted CPU mask the default pools fit it and stay real-time") {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    REQUIRE(::sched_getaffinity(0, sizeof(all), &all) == 0);
+    std::vector<int> cpus;
+    for (int c = 0; c < CPU_SETSIZE; ++c)
+        if (CPU_ISSET(c, &all)) cpus.push_back(c);
+    if (cpus.size() < 4) {
+        MESSAGE("fewer than four allowed CPUs: no smaller mask to try");
+        return;
+    }
+    // One CPU fewer than allowed, as taskset or a cpuset would give. Sized
+    // from every online core, the default pool would exceed the cap.
+    const std::size_t n = cpus.size() - 1;
+    auto pool = makePool();
+    MediaCache media;
+    bool restricted = false, started = false, elevated = false, capWarning = true;
+    unsigned live = 0;
+    ThreadPolicy renderer, background;
+    std::thread([&] {
+        cpu_set_t some;
+        CPU_ZERO(&some);
+        for (std::size_t i = 0; i < n; ++i) CPU_SET(cpus[i], &some);
+        restricted = ::sched_setaffinity(0, sizeof(some), &some) == 0;
+        ReportingBackend backend({Kind::Fifo, 83});
+        Engine engine(pool, media);  // default (Automatic) pools
+        started = engine.start(backend, {.blockSize = 128}).ok();
+        if (!started) return;
+        live = engine.liveHelpers();
+        renderer = engine.scheduling().renderer;
+        background = engine.scheduling().background;
+        capWarning = warnsNormal(engine, "allowed CPUs");
+        elevated = mayElevate(static_cast<int>(n) - 2, Engine::kBackgroundPriority);
+        engine.stop();
+    }).join();
+    REQUIRE(restricted);
+    REQUIRE(started);
+    CHECK(live <= n - 1);
+    CHECK_FALSE(capWarning);
+    if (elevated) {
+        CHECK(renderer == ThreadPolicy{Kind::Fifo, Engine::kBackgroundPriority});
+        CHECK(background == renderer);
+    }
+}
+
 TEST_CASE("background elevation refusals keep every background thread normal and warn") {
     auto pool = makePool();
     MediaCache media;
