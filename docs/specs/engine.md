@@ -842,3 +842,9 @@ too, since nothing may load in that thread; without the bridge the job fails
 with `host.scan.unsupervised`), and the model thread installs the new pair
 when the job is done. A background scan still running is returned instead of
 a second one.
+
+### Initial engine-start failure (2026-10-08)
+
+A failed initial plan load stops and releases the engine/backend before
+`EngineApp::startEngine` returns its error, including with a caller-supplied
+backend. A corrected session can start again without an intervening stop.

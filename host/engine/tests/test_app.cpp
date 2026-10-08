@@ -3035,3 +3035,33 @@ TEST_CASE("device recovery preserves an Automatic thread preference on a supplie
     app->stopEngine();
     fake.reset();
 }
+
+TEST_CASE("failed initial load rolls back a supplied backend and permits another start") {
+    Root root;
+    auto app = makeApp(root.path);
+    const auto good = app->head();
+    auto bad = good;
+    bad.version = app->versions().nextVersion();
+    // Inject an invalid graph below the model boundary to force an initial-load error.
+    model::IdMap<model::Route>::Builder routes(bad.routes);
+    model::Route route;
+    route.from.track = model::Id{model::Kind::Track, 0};
+    route.to.track = route.from.track;
+    const model::Id id{model::Kind::Route, 1};
+    routes.put(id, bad.version, std::make_shared<const model::Route>(route));
+    bad.routes = routes.build();
+    REQUIRE(app->versions().commit(std::move(bad), {}, {}, {}));
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    const auto failed = app->startEngine(backend, {}, {.anticipative = false});
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().code == "engine.cycle");
+    CHECK_FALSE(app->engine());
+    CHECK_FALSE(app->backend());
+    CHECK_FALSE(app->engineStatus().running);
+    auto repaired = good;
+    repaired.version = app->versions().nextVersion();
+    REQUIRE(app->versions().commit(std::move(repaired), {}, {}, {}));
+    REQUIRE(app->startEngine(backend, {}, {.anticipative = false}));
+    CHECK(app->engineStatus().running);
+    app->stopEngine();
+}

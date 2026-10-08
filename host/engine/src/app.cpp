@@ -722,8 +722,12 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
         engine_->setLoop(loop_.start, loop_.end, loop_.enabled);
     engine_->setMetronome(metronome_.enabled, metronome_.volumeDb);
     auto loaded = engine_->load(head(), projectDir());
-    if (loaded) loadedHead_ = versions_->head();
-    return loaded;
+    if (!loaded) {
+        haltEngine();
+        return loaded;
+    }
+    loadedHead_ = versions_->head();
+    return {};
 }
 
 Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative) {
