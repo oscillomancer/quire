@@ -321,6 +321,72 @@ TEST_CASE(
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(playhead)));
 }
 
+TEST_CASE("zooming back in returns the anchor to where the timeline's start pulled it from") {
+    Gl& g = gl();
+    if (!g.ok) return;
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    views::ArrangeView* arrange = mount(root);
+    views::Viewport v;
+    v.startSeconds = 40;
+    v.pixelsPerSecond = 40;
+    arrange->setFollow(views::Follow::Off);
+    arrange->setViewport(v);
+    arrange->setPlayhead(50);
+    root.damageAll();
+    root.frame(false);
+    const float cursorX = arrange->playheadX();
+    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {600, 300}};
+    // Out until the start is a wall: the cursor slides left.
+    wheel.wheelY = -1;
+    for (int i = 0; i < 10; ++i) root.pointer(wheel);
+    CHECK(arrange->viewport().startSeconds == 0);
+    CHECK(arrange->playheadX() < cursorX - 50);
+    // Back in step by step: the cursor moves right again, never past where it was,
+    // and is back there at the scale it started from.
+    wheel.wheelY = 1;
+    float last = arrange->playheadX();
+    for (int i = 0; i < 10; ++i) {
+        root.pointer(wheel);
+        CHECK(arrange->playheadX() >= last - 0.01f);
+        CHECK(arrange->playheadX() <= cursorX + 0.01f);
+        last = arrange->playheadX();
+    }
+    CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(40));
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
+    // The keys hold the same anchor.
+    for (int i = 0; i < 10; ++i) REQUIRE(arrange->onKey({SDLK_MINUS}));
+    for (int i = 0; i < 10; ++i) REQUIRE(arrange->onKey({SDLK_EQUALS}));
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
+    // Anything else that moves the view in time starts afresh: out to the
+    // wall again, a scroll right and back, and the cursor stays where it now is.
+    wheel.wheelY = -1;
+    for (int i = 0; i < 10; ++i) root.pointer(wheel);
+    const float pulled = arrange->playheadX();
+    REQUIRE(pulled < cursorX - 50);
+    ui::PointerEvent scroll{ui::PointerEvent::Type::Wheel, {600, 300}};
+    scroll.mods = ui::kShift;
+    scroll.wheelY = -1;
+    root.pointer(scroll);
+    REQUIRE(arrange->viewport().startSeconds > 0);
+    scroll.wheelY = 1;
+    root.pointer(scroll);
+    REQUIRE(arrange->viewport().startSeconds == doctest::Approx(0));
+    REQUIRE(arrange->playheadX() == doctest::Approx(static_cast<double>(pulled)));
+    wheel.wheelY = 1;
+    root.pointer(wheel);
+    CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(pulled)).epsilon(0.001));
+    // The pointer anchor too: the time under a still pointer comes back to it.
+    REQUIRE(arrange->gestures().mouse.set("wheel.zoom", 0, "mouse_pointer"));
+    arrange->setViewport(v);
+    const double underPointer = arrange->timeAt(600);
+    wheel.wheelY = -1;
+    for (int i = 0; i < 10; ++i) root.pointer(wheel);
+    CHECK(arrange->viewport().startSeconds == 0);
+    wheel.wheelY = 1;
+    for (int i = 0; i < 10; ++i) root.pointer(wheel);
+    CHECK(arrange->timeAt(600) == doctest::Approx(underPointer).epsilon(0.001));
+}
+
 TEST_CASE("the wheel zoom anchor is a single setting that the mouse file keeps") {
     views::MouseMap m;
     const views::MouseMap::Context* c = views::MouseMap::context("wheel.zoom");

@@ -281,7 +281,12 @@ cancels the gesture. Wheel zoom holds the **project cursor** (the playhead,
 the transport position the position display shows) still by default, or the
 mouse pointer when the mouse setting `wheel.zoom` is `mouse_pointer` (Edit >
 Mouse modifiers, or View > Wheel zoom anchor); a cursor outside the visible
-lanes falls back to the pointer. Keyboard zoom anchors at the playhead. Horizontal zoom is continuous;
+lanes falls back to the pointer. Keyboard zoom anchors at the playhead. The
+timeline's start stops the view, so zooming out near it pulls the anchor left
+on screen; zooming back in returns it to where it was, as each step holds
+the anchor where the first step of the run found it. The run ends when anything
+else moves the view in time (a scroll, follow, the scrollbar), the cursor
+moves, or (with the pointer anchor) the pointer moves. Horizontal zoom is continuous;
 vertical track height per track and global.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction; dragging the left edge out past a

@@ -148,6 +148,7 @@ class ArrangeView : public ui::Node {
     void clampScroll();
     void applyFollow();
     void syncScrollbars();
+    void zoomBy(double factor, double seconds, float offset, bool cursor);
 
     peaks::PeakService& peaks_;
     Resolve resolve_;
@@ -157,6 +158,16 @@ class ArrangeView : public ui::Node {
     Viewport view_;
     Transport transport_;
     double playhead_ = 0;
+    // The last horizontal zoom step's anchor (zoomBy): the time held, where on
+    // the lanes it was held, and the offset given for it (the pointer's, for a
+    // pointer anchor). Any other move in time clears it.
+    struct ZoomHold {
+        double seconds = 0;
+        float offset = 0;
+        float given = 0;
+        bool cursor = false;
+    };
+    std::optional<ZoomHold> zoomHold_;
     Follow follow_ = Follow::Page;
     Lanes* lanes_ = nullptr;
     TcpPanel* tcp_ = nullptr;

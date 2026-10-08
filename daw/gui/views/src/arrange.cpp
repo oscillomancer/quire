@@ -1130,10 +1130,14 @@ void ArrangeView::setPunchRange(double start, double end, bool on) {
 
 void ArrangeView::setViewport(const Viewport& v) {
     const float scrolledFrom = view_.scrollY;
+    const Viewport from = view_;
     view_ = v;
     view_.pixelsPerSecond = std::clamp(view_.pixelsPerSecond, 0.01, 200000.0);
     view_.startSeconds = std::max(0.0, view_.startSeconds);
     clampScroll();
+    // A move in time other than a zoom step's lets go of the zoom anchor (zoomBy).
+    if (view_.startSeconds != from.startSeconds || view_.pixelsPerSecond != from.pixelsPerSecond)
+        zoomHold_.reset();
     if (tcp_ && view_.scrollY != scrolledFrom) tcp_->scrolled();  // the tracks follow the lanes
     syncScrollbars();
     damageViews();
@@ -1266,19 +1270,40 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         // cursor outside the lanes' view has nothing to hold still: zoom at the
         // pointer then, as the cursor would otherwise slide out of reach.
         const ui::Rect lanes = lanesRect();
-        float anchorX = e.pos.x;
+        const double factor = std::pow(1.25, static_cast<double>(e.wheelY));
         if (gestures_->mouse.behaviour("wheel.zoom", e.mods) == "project_cursor") {
             const float cursorX = playheadX();
-            if (cursorX >= lanes.x && cursorX <= lanes.right()) anchorX = cursorX;
+            if (cursorX >= lanes.x && cursorX <= lanes.right()) {
+                zoomBy(factor, playhead_, cursorX - lanes.x, true);
+                return true;
+            }
         }
-        const double keep = static_cast<double>(anchorX - lanes.x) / v.pixelsPerSecond;
-        const double anchor = v.startSeconds + keep;
-        v.pixelsPerSecond *= std::pow(1.25, static_cast<double>(e.wheelY));
-        v.pixelsPerSecond = std::clamp(v.pixelsPerSecond, 0.01, 200000.0);
-        v.startSeconds = std::max(0.0, anchor - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
+        zoomBy(factor, timeAt(e.pos.x), e.pos.x - lanes.x, false);
+        return true;
     }
     setViewport(v);
     return true;
+}
+
+// Horizontal zoom by `factor`, holding `seconds` at `offset` design units
+// into the lanes. The timeline's start is a wall: zooming out with the anchor
+// near it pulls the anchor left on screen. While nothing but zooming has moved
+// the view in time since and the anchor is the same (the same cursor time, or
+// a pointer that has not moved), a step keeps the place the anchor first held
+// rather than where the wall pushed it, so zooming back in brings it back to
+// where it was (as REAPER does).
+void ArrangeView::zoomBy(double factor, double seconds, float offset, bool cursor) {
+    const float given = offset;
+    if (zoomHold_ && zoomHold_->cursor == cursor &&
+        (cursor ? zoomHold_->seconds == seconds : zoomHold_->given == given)) {
+        seconds = zoomHold_->seconds;
+        offset = zoomHold_->offset;
+    }
+    Viewport v = view_;
+    v.pixelsPerSecond = std::clamp(v.pixelsPerSecond * factor, 0.01, 200000.0);
+    v.startSeconds = std::max(0.0, seconds - static_cast<double>(offset) / v.pixelsPerSecond);
+    setViewport(v);
+    zoomHold_ = ZoomHold{seconds, offset, given, cursor};
 }
 
 // Only the view's own zoom; Home/End belong to the keymap
@@ -1288,25 +1313,13 @@ bool ArrangeView::onKey(const ui::KeyEvent& e) {
     switch (e.key) {
         case SDLK_PLUS:
         case SDLK_EQUALS:
-        case SDLK_KP_PLUS: {
-            Viewport v = view_;
-            const double keep = playhead_ - v.startSeconds;
-            v.pixelsPerSecond = std::clamp(v.pixelsPerSecond * zoom, 0.01, 200000.0);
-            v.startSeconds =
-                std::max(0.0, playhead_ - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
-            setViewport(v);
+        case SDLK_KP_PLUS:
+            zoomBy(zoom, playhead_, playheadX() - lanesRect().x, true);
             return true;
-        }
         case SDLK_MINUS:
-        case SDLK_KP_MINUS: {
-            Viewport v = view_;
-            const double keep = playhead_ - v.startSeconds;
-            v.pixelsPerSecond = std::clamp(v.pixelsPerSecond / zoom, 0.01, 200000.0);
-            v.startSeconds =
-                std::max(0.0, playhead_ - keep * (view_.pixelsPerSecond / v.pixelsPerSecond));
-            setViewport(v);
+        case SDLK_KP_MINUS:
+            zoomBy(1 / zoom, playhead_, playheadX() - lanesRect().x, true);
             return true;
-        }
         default:
             return false;
     }
