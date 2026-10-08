@@ -3,6 +3,8 @@
 #pragma once
 
 #include <sys/resource.h>
+#include <sys/types.h>
+#include <cstddef>
 
 #include <cstdint>
 #include <functional>
@@ -10,6 +12,9 @@
 #include <string>
 
 namespace supple::engine {
+
+// Permit shallow idle without deep-state exit delays. Fixed policy; no sysfs reads.
+inline constexpr std::int32_t kCpuIdleLatencyUs = 20;
 
 struct RuntimeProtectionError {
     std::string code, message, path, hint;
@@ -28,6 +33,9 @@ struct RuntimeProtectionOps {
     std::function<int(int)> lockMemory;
     std::function<int()> unlockMemory;
     std::function<int(rlimit*)> memoryLimit;
+    std::function<int(const char*, int)> openLatency;
+    std::function<ssize_t(int, const void*, std::size_t)> writeLatency;
+    std::function<int(int)> closeLatency;
 };
 
 }  // namespace supple::engine

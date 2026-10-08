@@ -12,7 +12,11 @@ class RuntimeProtection {
   public:
     explicit RuntimeProtection(std::shared_ptr<RuntimeProtectionOps> ops);
     ~RuntimeProtection();
+    RuntimeProtection(const RuntimeProtection&) = delete;
+    RuntimeProtection& operator=(const RuntimeProtection&) = delete;
     Status setMemoryLock(bool requested, bool running);
+    Status setPreventDeepIdle(bool requested, bool running);
+    const RuntimeProtectionStatus& cpuIdleLatency() const { return latency_; }
     void start();
     void stop();
     const RuntimeProtectionStatus& memoryLock() const { return memory_; }
@@ -20,8 +24,12 @@ class RuntimeProtection {
   private:
     Status applyMemory();
     Status releaseMemory();
+    Status applyLatency();
+    Status releaseLatency();
     std::shared_ptr<RuntimeProtectionOps> ops_;
     RuntimeProtectionStatus memory_;
+    RuntimeProtectionStatus latency_;
+    int latencyFd_ = -1;
 };
 
 }  // namespace supple::engine::detail

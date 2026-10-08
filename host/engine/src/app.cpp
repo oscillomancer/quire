@@ -689,6 +689,14 @@ const RuntimeProtectionStatus& EngineApp::memoryLockStatus() const {
     return protections_->memoryLock();
 }
 
+Status EngineApp::setPreventDeepIdle(bool requested) {
+    return protections_->setPreventDeepIdle(requested, engine_ && backend_);
+}
+
+const RuntimeProtectionStatus& EngineApp::cpuIdleLatencyStatus() const {
+    return protections_->cpuIdleLatency();
+}
+
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
     return startEngine(backend, config, EngineOptions{});
 }
@@ -1007,6 +1015,10 @@ EngineStatus EngineApp::engineStatus() {
     checkFailures();
     EngineStatus st;
     st.memoryLock = protections_->memoryLock();
+    st.cpuIdleLatency = protections_->cpuIdleLatency();
+    if (st.cpuIdleLatency.error)
+        st.warnings.push_back(st.cpuIdleLatency.error->message + "; " +
+                              st.cpuIdleLatency.error->hint);
     if (st.memoryLock.error)
         st.warnings.push_back(st.memoryLock.error->message + "; " + st.memoryLock.error->hint);
     st.dropped = static_cast<std::int64_t>(outputDrops_ + consumerDrops_);

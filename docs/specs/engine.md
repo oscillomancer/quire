@@ -264,7 +264,8 @@ actionable warning. No affinity or system configuration is changed; externally
 changing CPU affinity while running requires an engine restart. The backend
 stops before helpers are destroyed. `Engine::liveHelpers()` reports enabled
 capacity; `engine.start`/`engine.status` expose `live_helpers` and `warnings`
-(including plan and scheduling warnings), zero/empty when stopped. These are
+(including plan and scheduling warnings), zero/empty when stopped apart from
+optional process-control failures described below. These are
 capacity, not a count of participants in every segment. Automatic enables this
 path; Audio processing threads Limit 1 disables it on next start.
 
@@ -902,3 +903,46 @@ Failures also appear in `warnings` alongside existing engine warnings.
 AppOptions may inject `RuntimeProtectionOps` for deterministic lifecycle/error
 coverage. Default wrappers call Linux libc; these operations are model-thread
 only. Tests fake memory locking instead of locking the runner's address space.
+
+
+### CPU idle latency (2026-10-08)
+
+`EngineApp::setPreventDeepIdle(bool)` changes the separate default-off
+request. Open `/dev/cpu_dma_latency` with `O_WRONLY | O_CLOEXEC`, write one
+native `int32_t` of `kCpuIdleLatencyUs = 20` microseconds and retain the fd
+while enabled and the engine runs. C1-class exits are typically a few µs;
+deep states take roughly 100 µs to over 1 ms, a substantial part of a
+64-frame period. This fixed small threshold permits shallow idle instead
+of the zero-latency POLL-only constraint on the measured workstation.
+There is no runtime sysfs/topology read to choose the value, frequency lock
+or guarantee of a particular C-state residency on arbitrary hardware.
+
+The request affects system idle while held and may increase power, heat and
+fan activity. Quire offers this owned, close-scoped QoS request instead of
+locking CPU frequency: governor/EPP changes are privileged and system-wide.
+The request leaves frequency policy alone and never escalates privileges.
+
+Retry EINTR on open/write; a zero/short write fails with EIO and is never
+completed with partial integer writes. Every failed write closes its fd.
+Disable, stop, project/device restart and destruction close the acquired
+fd exactly once. Closing removes only this request, without reading or
+restoring a remembered global QoS value. On Linux close is not retried even
+on EINTR: the descriptor is already released and may have been reused.
+CLOEXEC excludes child bridge/scanner processes from retaining the fd.
+
+`engine.start`/`engine.status` add `cpu_idle_latency` with the same typed
+`{requested, active, error?}` structure as memory_lock. Failures use
+`engine.cpu_idle_latency`, path `/prevent_deep_idle`, with numeric errno and
+a corrective hint. EACCES/EPERM explain that the account needs membership
+in a group with device write access (commonly audio; policy varies);
+ENOENT/ENODEV report that the device is unavailable. Acquisition failure
+keeps intent enabled and audio usable; close failure records an error with
+active=false because the descriptor has been released.
+
+Tests inject open/write/close operations for all lifecycle and error paths.
+The real libc write/close path is exercised against a temporary file through
+an injected open. Automated validation never writes to the real device.
+User-only acceptance: enable/disable and engine-stop/restart/exit cleanup
+with the real device, plus repeated sparse/dense 64/128-frame sessions,
+actual granted period, callback tails/xruns and power/thermal/fan behavior.
+No latency benefit is claimed without those measurements.

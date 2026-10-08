@@ -1031,3 +1031,97 @@ TEST_CASE(
     CHECK(prefs.preferences().lockMemory);
     CHECK(f.app->memoryLockStatus().requested);
 }
+
+TEST_CASE("preferences: both protection booleans survive canonical round trip and old schemas") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    for (const char* version : {"1.0", "1.1", "1.2"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK_FALSE(loaded->lockMemory);
+        CHECK_FALSE(loaded->preventDeepIdle);
+    }
+    for (bool memory : {false, true})
+        for (bool idle : {false, true}) {
+            gui::Preferences values;
+            values.lockMemory = memory;
+            values.preventDeepIdle = idle;
+            values.audioThreads = 3;
+            values.defaultMonitor = model::Monitor::Auto;
+            REQUIRE(values.save(file));
+            auto loaded = gui::Preferences::load(file);
+            REQUIRE(loaded);
+            CHECK(loaded->lockMemory == memory);
+            CHECK(loaded->preventDeepIdle == idle);
+            CHECK(loaded->audioThreads == 3);
+            CHECK(loaded->defaultMonitor == model::Monitor::Auto);
+            const auto bytes = readFile(file).value();
+            REQUIRE(loaded->save(file));
+            CHECK(readFile(file).value() == bytes);
+        }
+    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
+        REQUIRE(writeFileAtomic(
+            file,
+            std::string(R"({"schema":"supple.preferences/1.2","prevent_deep_idle":)") + bad + "}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().path == "/prevent_deep_idle");
+        CHECK(loaded.error().hint == "use true or false");
+    }
+}
+
+TEST_CASE(
+    "preferences: CPU idle toggle persists failures and refreshes effective lifecycle status") {
+    auto ops = std::make_shared<engine::RuntimeProtectionOps>();
+    int openError = EACCES, opens = 0, closes = 0;
+    ops->openLatency = [&](const char*, int) {
+        ++opens;
+        errno = openError;
+        return openError ? -1 : 73;
+    };
+    ops->writeLatency = [](int, const void*, std::size_t size) -> ssize_t {
+        return static_cast<ssize_t>(size);
+    };
+    ops->closeLatency = [&](int) {
+        ++closes;
+        return 0;
+    };
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    Fixture f(ops);
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    prefs.open();
+    f.root->frame(false);
+    REQUIRE(f.root->click("prefs.latency.set"));
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Applies when engine starts");
+    CHECK(opens == 0);
+    REQUIRE(f.app->startEngine(backend, {}, {.anticipative = false, .workers = 0}));
+    prefs.refresh();
+    CHECK(f.node("prefs.latency.note.0")->valueText().find("errno 13") != std::string::npos);
+    CHECK(gui::Preferences::load(file)->preventDeepIdle);
+    REQUIRE(prefs.setPreventDeepIdle(false));
+    CHECK_FALSE(prefs.setPreventDeepIdle(true));
+    CHECK(gui::Preferences::load(file)->preventDeepIdle);
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.node("prefs.latency.set")->valueText() == "On");
+    REQUIRE(prefs.setPreventDeepIdle(false));
+    openError = 0;
+    REQUIRE(prefs.setPreventDeepIdle(true));
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Requested: 20 µs");
+    f.app->stopEngine();
+    prefs.refresh();
+    CHECK(f.node("prefs.latency.note.0")->valueText() == "Applies when engine starts");
+    CHECK(closes == 1);
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setPreventDeepIdle(false));
+    CHECK(prefs.preferences().preventDeepIdle);
+    CHECK(f.app->cpuIdleLatencyStatus().requested);
+}

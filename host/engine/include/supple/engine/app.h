@@ -76,6 +76,7 @@ struct EngineStatus {
     std::int64_t liveHelpers = 0;
     std::vector<std::string> warnings;
     RuntimeProtectionStatus memoryLock;
+    RuntimeProtectionStatus cpuIdleLatency;
     MeterDrops meterDrops;                       // meter entries dropped by a full ring
     std::vector<std::string> failedFx;           // isolated instances whose bridge crashed or hung
     std::int64_t dropped = 0, voiceDropped = 0;  // plug-in output/voice transport
@@ -250,6 +251,8 @@ class EngineApp : public cmd::Host {
     // Saved intent; applies now if running, otherwise on successful start.
     Status setMemoryLock(bool requested);
     const RuntimeProtectionStatus& memoryLockStatus() const;
+    Status setPreventDeepIdle(bool requested);
+    const RuntimeProtectionStatus& cpuIdleLatencyStatus() const;
     void stopEngine();
     Engine* engine() { return engine_.get(); }
     const Backend* backend() const { return backend_; }  // null while stopped

@@ -543,6 +543,18 @@ leave the head version unchanged.
   failure, bridge exclusion and that disabling/stopping also drops plug-in
   locks (engine.md, Optional host-process controls). Canonical 1.2 saves
   preserve existing monitoring/thread values; no project format changes.
+  **Keep CPUs out of deep idle while the engine runs** is separately off by
+  default, persisted as boolean `prevent_deep_idle` in the same canonical
+  1.2 file. Missing fields (including in 1.0/1.1 files) mean false; invalid
+  types report `preferences.prevent_deep_idle` at `/prevent_deep_idle` with
+  "use true or false". It uses the same save/intent/effective-state pattern
+  as memory locking. The active note says "Requested: 20 µs"; failures show
+  errno and a corrective hint. A caution says the request affects system
+  idle while held and may increase power, heat and fan noise. Disable or
+  engine stop releases only the owned request; transport stop retains it.
+  Notes refresh through the existing GUI service flow. No preference test
+  opens the actual latency device for writing.
+
 
 
 ## 7. Visual identity

@@ -207,6 +207,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("live_helpers", &EngineStatus::liveHelpers, schema::integer())
         .field("warnings", &EngineStatus::warnings, schema::arrayOf(schema::string()))
         .field("memory_lock", &EngineStatus::memoryLock, runtimeProtectionSchema())
+        .field("cpu_idle_latency", &EngineStatus::cpuIdleLatency, runtimeProtectionSchema())
         .field("meter_drops", &EngineStatus::meterDrops, meterDropsSchema())
         .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
         .field("dropped", &EngineStatus::dropped, schema::integer())
@@ -3531,7 +3532,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "follows the app's Audio processing threads preference (Automatic by default); "
             "live helpers join each callback with no added latency. memory_lock reports the "
             "default-off host-process memory policy: requested, active, and a structured OS "
-            "error on failure. A protection failure does not prevent audio startup.";
+            "error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS "
+            "request, released on engine stop. A protection failure does not prevent audio "
+            "startup.";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
@@ -3551,6 +3554,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>", "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
+                     "cpu_idle_latency": {"requested": false, "active": false},
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
                      "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
              "empty"}};
@@ -3635,7 +3639,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
             "never audio. dropped/voice_dropped count lost plug-in output/voice records. "
             "memory_lock reports requested/active and an optional OS error with errno and a "
-            "corrective hint, including while stopped. Bridges are excluded. "
+            "corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency "
+            "reports the owned 20 microsecond request with the same status/error fields; it "
+            "affects system idle while held and leaves CPU frequency policy unchanged. "
             "live_helpers is the enabled live helper capacity; warnings includes scheduling "
             "fallback "
             "and plan warnings with corrective actions. failed_errors adds structured code, "
@@ -3651,6 +3657,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0, "live_helpers": 0, "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
+                     "cpu_idle_latency": {"requested": false, "active": false},
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
                      "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
                        "empty"}};

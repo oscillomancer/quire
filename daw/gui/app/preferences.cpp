@@ -99,6 +99,12 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
                          "use true or false");
         out.lockMemory = v->asBool();
     }
+    if (const auto* v = doc->find("prevent_deep_idle")) {
+        if (!v->isBool())
+            return Error("preferences.prevent_deep_idle", "prevent_deep_idle must be a boolean",
+                         "/prevent_deep_idle", "use true or false");
+        out.preventDeepIdle = v->asBool();
+    }
     return out;
 }
 
@@ -108,6 +114,7 @@ Status Preferences::save(const std::filesystem::path& file) const {
     doc["schema"] = kSchema;
     doc["default_monitor"] = monitorName(defaultMonitor);
     doc["lock_memory"] = lockMemory;
+    doc["prevent_deep_idle"] = preventDeepIdle;
     doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -124,6 +131,7 @@ PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, Mou
     if (!app_.setAudioThreadLimit(prefs_.audioThreads))
         prefs_.audioThreads = app_.audioThreadLimit();
     (void)app_.setMemoryLock(prefs_.lockMemory);
+    (void)app_.setPreventDeepIdle(prefs_.preventDeepIdle);
 }
 
 bool PreferencesDialog::isOpen() const { return root_.find("prefs") != nullptr; }
@@ -133,7 +141,7 @@ void PreferencesDialog::open() {
     auto form = std::make_unique<ui::Node>("prefs");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(800);
-    form->layout.height = ui::SizeRule::fixed(410);
+    form->layout.height = ui::SizeRule::fixed(570);
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 6;
     auto& header = form->emplace<ui::Node>("prefs.header");
@@ -230,6 +238,30 @@ void PreferencesDialog::open() {
         memoryNote_[i] = &label;
     }
 
+    auto& latency = form->emplace<ui::Node>("prefs.latency");
+    latency.layout.dir = ui::Layout::Dir::Row;
+    latency.layout.height = ui::SizeRule::fixed(26);
+    latency
+        .emplace<ui::Label>("prefs.latency.label",
+                            "Keep CPUs out of deep idle while the engine runs")
+        .layout.width = ui::SizeRule::fraction();
+    latency_ = &latency.emplace<ui::Button>("prefs.latency.set", "Off", [this] {
+        if (auto result = setPreventDeepIdle(!prefs_.preventDeepIdle); !result && onError)
+            onError("preferences: " + result.error().toString());
+    });
+    form->emplace<ui::Label>(
+            "prefs.latency.caution",
+            "Affects system idle while held; may increase power, heat and fan noise.", ui::Font::Ui,
+            "small", "ink-quiet")
+        .layout.height = ui::SizeRule::fixed(20);
+    for (std::size_t i = 0; i < latencyNote_.size(); ++i) {
+        auto& label = form->emplace<ui::Label>("prefs.latency.note." + std::to_string(i), "",
+                                               ui::Font::Ui, "small", "ink-quiet");
+        label.layout.width = ui::SizeRule::fraction();
+        label.layout.height = ui::SizeRule::fixed(18);
+        latencyNote_[i] = &label;
+    }
+
     auto& mouse = row(*form, "prefs.mouse", "Mouse modifiers");
     mouse
         .emplace<ui::Button>("prefs.mouse.open", "Edit mouse modifiers…", [this] { mouse_.open(); })
@@ -240,6 +272,8 @@ void PreferencesDialog::open() {
         threads_ = nullptr;
         memory_ = nullptr;
         memoryNote_.fill(nullptr);
+        latency_ = nullptr;
+        latencyNote_.fill(nullptr);
     });
     refresh();
 }
@@ -267,6 +301,8 @@ void protectionNote(const std::array<ui::Label*, 4>& labels,
 }  // namespace
 
 void PreferencesDialog::refresh() {
+    if (latency_) latency_->setText(prefs_.preventDeepIdle ? "On" : "Off");
+    protectionNote(latencyNote_, app_.cpuIdleLatencyStatus(), "Requested: 20 µs");
     if (memory_) memory_->setText(prefs_.lockMemory ? "On" : "Off");
     protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked (host process only)");
     if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
@@ -301,6 +337,16 @@ Status PreferencesDialog::setMemoryLock(bool requested) {
     if (!file_.empty()) SUPPLE_TRY(next.save(file_));
     prefs_ = next;
     auto applied = app_.setMemoryLock(requested);
+    refresh();
+    return applied;
+}
+
+Status PreferencesDialog::setPreventDeepIdle(bool requested) {
+    auto next = prefs_;
+    next.preventDeepIdle = requested;
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    prefs_ = next;
+    auto applied = app_.setPreventDeepIdle(requested);
     refresh();
     return applied;
 }
