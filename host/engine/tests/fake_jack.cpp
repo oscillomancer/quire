@@ -68,6 +68,10 @@ std::atomic<Frames> g_rate{48000};
 std::atomic<Frames> g_staleRate{0};
 std::atomic<bool> g_stalled{false}, g_stallAck{false}, g_failOpen{false};
 std::atomic<std::uint64_t> g_cycles{0};
+// Set as the first cycle begins: from then on the rate is the real one (a
+// client that has entered its first process call reads the settled rate,
+// even before g_cycles counts that cycle).
+std::atomic<bool> g_started{false};
 std::atomic<Frames> g_bufferSizeRequest{0};
 std::atomic<int> g_connections{0};
 std::atomic<bool> g_failCapture{false};
@@ -106,9 +110,10 @@ void run(Client* c) {
             }
             g_midiQueue.clear();
         }
-        if (const Frames stale = g_staleRate.load(); stale && g_cycles.load() == 0 && c->sampleRate)
+        if (const Frames stale = g_staleRate.load(); stale && !g_started.load() && c->sampleRate)
             for (Frames r : {g_rate.load(), stale, g_rate.load()})
                 c->sampleRate(r, c->sampleRateArg);
+        g_started = true;
         c->process(n, c->processArg);
         for (Port* p : c->ports) {
             if (!p->output) continue;
@@ -149,6 +154,7 @@ Client* jack_client_open(const char* name, int, int* status, ...) {
     g_latencyEnv = env ? env : "";
     g_appliedPeriod = g_period.load();
     g_cycles = 0;
+    g_started = false;
     g_connections = 0;
     g_bufferSizeRequest = 0;
     g_client = new Client;
@@ -246,7 +252,7 @@ void jack_port_get_latency_range(Port* p, int mode, Frames* range) {
 
 Frames jack_get_sample_rate(Client*) {
     const Frames stale = g_staleRate.load();
-    return stale && g_cycles.load() == 0 ? stale : g_rate.load();
+    return stale && !g_started.load() ? stale : g_rate.load();
 }
 
 Frames jack_get_buffer_size(Client*) { return g_appliedPeriod.load(); }
