@@ -511,6 +511,40 @@ Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warn
     return replaceProject(std::move(*s), path);
 }
 
+Result<std::string> EngineApp::templateText() {
+    std::vector<model::Id> running;
+    for (const auto& e : head().fx) running.push_back(e.id);
+    captureFxStates(running);
+    SUPPLE_TRY(model::checkInvariants(head()));
+    const model::Session& s = head();
+    // Recordings are named relative to the project's media folder; a
+    // template lives elsewhere, so it names them absolutely.
+    bool relative = false;
+    for (const auto& e : s.media) relative = relative || !fs::path(e.value->path).is_absolute();
+    if (!relative) return model::serializeProject(s);
+    if (projectPath_.empty())
+        return Error("template.media", "the unsaved project's recordings have no permanent place",
+                     {}, "save the project first, then save the template");
+    model::EditTxn txn(s, s.version);
+    const fs::path media = mediaDir();
+    for (const auto& e : s.media)
+        if (const fs::path p = e.value->path; !p.is_absolute())
+            txn.modify<model::MediaSource>(e.id, [&](model::MediaSource& m) {
+                m.path = (media / p).lexically_normal().string();
+            });
+    auto copy = txn.commit();
+    if (!copy) return std::move(copy).error();
+    return model::serializeProject(*copy);
+}
+
+Status EngineApp::openTemplate(const fs::path& where, std::vector<schema::Warning>* warnings) {
+    auto text = readTextFile(resolve(where), std::size_t(1) << 30);
+    if (!text) return std::move(text).error();
+    auto s = model::parseProject(*text, warnings);
+    if (!s) return std::move(s).error();
+    return replaceProject(std::move(*s), {});
+}
+
 // --- branches ----------------------------------------------------------------------------
 
 Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const model::Session& base,
@@ -2358,6 +2392,10 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
+    if (fixture == "song_with_project_template") {
+        run("project.template.save", R"({"name":"Band"})");
+        return;
+    }
     if (fixture == "song_with_chain" || fixture == "song_with_saved_chain" ||
         fixture == "song_with_saved_template") {
         run("fx.add",

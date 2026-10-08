@@ -770,6 +770,8 @@ struct ChainFixture {
         AppOptions options;
         options.workdir = dir;
         options.chainDir = dir / "chains";
+        options.templateDir = dir / "track-templates";
+        options.projectTemplateDir = dir / "templates";
         options.pluginPath = {FIXTURE_CLAP_PATH};
         auto result = EngineApp::create(options, {.console9 = false});
         REQUIRE(result);
@@ -992,6 +994,88 @@ TEST_CASE("FX chain presets reject invalid names, overwrites and invalid loads a
     REQUIRE(writeFileAtomic(f.dir / "chains/broken.json", "{}"));
     auto listed = f.run("fx.chain.list");
     CHECK(listed["chains"].size() == 1);
+}
+
+TEST_CASE("fx.chain.delete removes only the named preset file") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone"})");
+    f.run("fx.chain.save", R"({"track":"tr_1","name":"Keep"})");
+    const auto before = f.history();
+    auto deleted = f.run("fx.chain.delete", R"({"name":"Tone"})");
+    CHECK(deleted["path"].asString() == (f.dir / "chains" / "Tone.json").string());
+    CHECK_FALSE(fs::exists(f.dir / "chains" / "Tone.json"));
+    auto listed = f.run("fx.chain.list");
+    REQUIRE(listed["chains"].size() == 1);
+    CHECK(listed["chains"].asArray()[0]["name"].asString() == "Keep");
+    CHECK(f.history() == before);  // a file action, not an edit
+    CHECK(f.app->head().tracks.find(*model::Id::parse("tr_1"))->chain.size() == 1);
+    auto again = f.bus->execute({"fx.chain.delete", j(R"({"name":"Tone"})"), kOrigin});
+    REQUIRE_FALSE(again);
+    CHECK(again.error().code == "chain.unknown");
+    auto escape = f.bus->execute({"fx.chain.delete", j(R"({"name":"../Keep"})"), kOrigin});
+    REQUIRE_FALSE(escape);
+    CHECK(escape.error().code == "chain.name");
+    CHECK(fs::exists(f.dir / "chains" / "Keep.json"));
+}
+
+TEST_CASE("project templates save the whole project and start new unsaved projects from it") {
+    ChainFixture f;
+    f.run("project.set", R"({"name":"Band"})");
+    f.run("track.add", R"({"name":"Drums"})");
+    f.run("track.add", R"({"name":"Bass"})");
+    f.run("fx.add", R"({"track":"tr_2","plugin":"Test Gain","patch":{"params":{"gain":-6}}})");
+    auto saved = f.run("project.template.save", R"({"name":"Band setup"})");
+    const fs::path file = f.dir / "templates" / "Band setup.json";
+    CHECK(saved["path"].asString() == file.string());
+    CHECK(f.app->projectPath().empty());  // the project keeps (no) file of its own
+    auto exists = f.bus->execute({"project.template.save", j(R"({"name":"Band setup"})"), kOrigin});
+    REQUIRE_FALSE(exists);
+    CHECK(exists.error().code == "chain.exists");
+    f.run("project.template.save", R"({"name":"Band setup","replace":true})");
+    auto listed = f.run("project.template.list");
+    REQUIRE(listed["templates"].size() == 1);
+    CHECK(listed["templates"].asArray()[0]["name"].asString() == "Band setup");
+
+    REQUIRE(f.app->save(f.dir / "song.json"));
+    f.run("track.add", R"({"name":"Extra"})");
+    auto loaded = f.run("project.template.load", R"({"name":"Band setup"})");
+    CHECK(loaded["name"].asString() == "Band");
+    CHECK(f.app->projectPath().empty());
+    CHECK(f.app->head().tracks.size() == 3);  // master, Drums, Bass
+    CHECK(f.app->head().fx.size() == 1);
+    auto missing = f.bus->execute({"project.template.load", j(R"({"name":"Nope"})"), kOrigin});
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().code == "template.unknown");
+
+    f.run("project.template.delete", R"({"name":"Band setup"})");
+    CHECK_FALSE(fs::exists(file));
+    CHECK(f.run("project.template.list")["templates"].size() == 0);
+    auto gone = f.bus->execute({"project.template.delete", j(R"({"name":"Band setup"})"), kOrigin});
+    REQUIRE_FALSE(gone);
+    CHECK(gone.error().code == "template.unknown");
+}
+
+TEST_CASE("project templates name a saved project's recordings absolutely") {
+    ChainFixture f;
+    f.app->setupFixture(*f.bus, "song_with_audio");  // media/tone.wav, imported absolutely
+    REQUIRE(f.app->save(f.dir / "song.json"));
+    // A recording is named relative to the project's media folder.
+    auto text = readTextFile(f.dir / "song.json");
+    REQUIRE(text);
+    const std::string absolute = (f.dir / "media" / "tone.wav").string();
+    const auto at = text->find(absolute);
+    REQUIRE(at != std::string::npos);
+    text->replace(at, absolute.size(), "tone.wav");
+    REQUIRE(writeFileAtomic(f.dir / "song.json", *text));
+    REQUIRE(f.app->open(f.dir / "song.json"));
+    f.run("project.template.save", R"({"name":"With audio"})");
+    auto saved = readTextFile(f.dir / "templates" / "With audio.json");
+    REQUIRE(saved);
+    CHECK(saved->find(absolute) != std::string::npos);
+    f.run("project.template.load", R"({"name":"With audio"})");
+    CHECK(f.app->head().media.begin()->value->path == absolute);
 }
 
 TEST_CASE("FX chain opaque states have content hashes across SHA-256 block boundaries") {
@@ -1949,6 +2033,7 @@ TEST_CASE("track templates preserve channel count and accept legacy stereo templ
     AppOptions options;
     options.workdir = dir.path;
     options.templateDir = dir.path / "templates";
+    options.projectTemplateDir = dir.path / "project-templates";
     options.pluginPath = {FIXTURE_CLAP_PATH};
     auto created = EngineApp::create(options, {.console9 = false});
     REQUIRE(created);

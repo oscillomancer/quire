@@ -541,6 +541,190 @@ void registerTemplateCommands(cmd::Registry& registry) {
     }
 }
 
+// Removes a saved preset or template file by name (fx.chain.delete,
+// project.template.delete); the file's own directory is never removed.
+Status removeNamed(const fs::path& path, const char* code, const std::string& what) {
+    std::error_code ec;
+    if (!fs::is_regular_file(fs::symlink_status(path, ec)))
+        return Error(code, "no saved " + what + " " + path.stem().string(), "/name",
+                     "use a name the list command returns");
+    if (!fs::remove(path, ec) || ec)
+        return Error(code, "cannot delete " + path.string() + ": " + ec.message(), "/name",
+                     "check the directory permissions");
+    return {};
+}
+
+// --- project templates ----------------------------------------------------------------------
+
+Result<fs::path> projectTemplateDir(const EngineApp& app) {
+    if (!app.options().projectTemplateDir.empty()) return app.options().projectTemplateDir;
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
+        return fs::path(xdg) / product::kSlug / "templates";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return fs::path(home) / ".config" / product::kSlug / "templates";
+    return Error("template.directory", "no configuration directory", {},
+                 "set XDG_CONFIG_HOME or AppOptions::projectTemplateDir");
+}
+
+Result<fs::path> projectTemplatePath(const EngineApp& app, const std::string& name) {
+    SUPPLE_TRY(validName(name));
+    auto dir = projectTemplateDir(app);
+    if (!dir) return std::move(dir).error();
+    return *dir / (name + ".json");
+}
+
+struct NameArgs {
+    std::string name;
+};
+struct ProjectTemplateSaveArgs {
+    std::string name;
+    bool replace = false;
+};
+struct PathResult {
+    std::string path;
+};
+struct ProjectTemplateLoadResult {
+    std::string name;
+};
+struct ProjectTemplateEntry {
+    std::string name, path;
+};
+struct ProjectTemplateListResult {
+    std::vector<ProjectTemplateEntry> templates;
+};
+
+void registerProjectTemplateCommands(cmd::Registry& registry) {
+    {
+        cmd::Command<ProjectTemplateSaveArgs, PathResult> c;
+        c.name = "project.template.save";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Save the whole project as a named project template.";
+        c.description =
+            "Writes the project as it is now (tracks, FX and their states, routing, items, "
+            "settings; not the history) to the user's templates directory. The project keeps its "
+            "own file. Recordings are referenced by absolute path, not copied, so an unsaved "
+            "project with recordings must be saved first. replace: true overwrites a name.";
+        c.tags = {"project", "presets"};
+        c.args = schema::object<ProjectTemplateSaveArgs>("project_template_save_args")
+                     .field("name", &ProjectTemplateSaveArgs::name, schema::string().minLength(1))
+                     .field("replace", &ProjectTemplateSaveArgs::replace, schema::boolean())
+                     .defaultValue(false)
+                     .build();
+        c.result = schema::object<PathResult>("project_template_save_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {
+            {"chain.exists", "the name already exists", "choose another name or set replace: true"},
+            {"template.media", "an unsaved project has recordings", "save the project first"}};
+        c.examples = {
+            {"Save the band setup", j(R"({"name":"Band"})"), j(R"({"path":"<any>"})"), "song"}};
+        c.run = [](const ProjectTemplateSaveArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto& app = ctx.service<EngineApp>();
+            auto path = projectTemplatePath(app, a.name);
+            if (!path) return std::move(path).error();
+            auto text = app.templateText();
+            if (!text) return std::move(text).error();
+            SUPPLE_TRY(writePreset(*path, *text, a.replace));
+            return PathResult{path->string()};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<NameArgs, ProjectTemplateLoadResult> c;
+        c.name = "project.template.load";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Start a new, unsaved project from a project template.";
+        c.description =
+            "Replaces the current project and its history, like project.new: unsaved changes are "
+            "lost, so save first. The new project has no file until project.save {path}; the "
+            "template itself is never changed.";
+        c.tags = {"project", "presets"};
+        c.args = schema::object<NameArgs>("project_template_load_args")
+                     .field("name", &NameArgs::name, schema::string().minLength(1))
+                     .build();
+        c.result = schema::object<ProjectTemplateLoadResult>("project_template_load_result")
+                       .field("name", &ProjectTemplateLoadResult::name, schema::string())
+                       .build();
+        c.examples = {{"Start from the band setup", j(R"({"name":"Band"})"),
+                       j(R"({"name":"<any>"})"), "song_with_project_template"}};
+        c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<ProjectTemplateLoadResult> {
+            auto& app = ctx.service<EngineApp>();
+            auto path = projectTemplatePath(app, a.name);
+            if (!path) return std::move(path).error();
+            std::error_code ec;
+            if (!fs::is_regular_file(*path, ec))
+                return Error("template.unknown", "no project template " + a.name, "/name",
+                             "use project.template.list to find a saved name");
+            std::vector<schema::Warning> warnings;
+            SUPPLE_TRY(app.openTemplate(*path, &warnings));
+            for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
+            return ProjectTemplateLoadResult{app.head().project->name};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<NoArgs, ProjectTemplateListResult> c;
+        c.name = "project.template.list";
+        c.kind = cmd::Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List saved project templates by name and path.";
+        c.tags = {"project", "presets"};
+        c.args = schema::object<NoArgs>("project_template_list_args").build();
+        auto entry = schema::object<ProjectTemplateEntry>("project_template_entry")
+                         .field("name", &ProjectTemplateEntry::name, schema::string())
+                         .field("path", &ProjectTemplateEntry::path, schema::string())
+                         .build();
+        c.result =
+            schema::object<ProjectTemplateListResult>("project_template_list_result")
+                .field("templates", &ProjectTemplateListResult::templates, schema::arrayOf(entry))
+                .build();
+        c.examples = {{"None yet", j("{}"), j(R"({"templates":[]})"), "empty"}};
+        c.run = [](const NoArgs&, cmd::Context& ctx) -> Result<ProjectTemplateListResult> {
+            auto dir = projectTemplateDir(ctx.service<EngineApp>());
+            if (!dir) return std::move(dir).error();
+            ProjectTemplateListResult result;
+            std::error_code ec;
+            if (!fs::exists(*dir, ec)) return result;
+            for (const auto& e : fs::directory_iterator(*dir, ec)) {
+                std::error_code kind;
+                if (!e.is_regular_file(kind) || e.path().extension() != ".json") continue;
+                result.templates.push_back({e.path().stem().string(), e.path().string()});
+            }
+            std::sort(result.templates.begin(), result.templates.end(),
+                      [](const auto& x, const auto& y) { return x.name < y.name; });
+            return result;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<NameArgs, PathResult> c;
+        c.name = "project.template.delete";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Delete a saved project template by name.";
+        c.tags = {"project", "presets"};
+        c.args = schema::object<NameArgs>("project_template_delete_args")
+                     .field("name", &NameArgs::name, schema::string().minLength(1))
+                     .build();
+        c.result = schema::object<PathResult>("project_template_delete_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {{"template.unknown", "no template has that name",
+                     "use a name from project.template.list"}};
+        c.examples = {{"Delete the band setup", j(R"({"name":"Band"})"), j(R"({"path":"<any>"})"),
+                       "song_with_project_template"}};
+        c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto path = projectTemplatePath(ctx.service<EngineApp>(), a.name);
+            if (!path) return std::move(path).error();
+            SUPPLE_TRY(removeNamed(*path, "template.unknown", "project template"));
+            return PathResult{path->string()};
+        };
+        registry.add(std::move(c));
+    }
+}
+
 }  // namespace
 
 void registerChainCommands(cmd::Registry& registry) {
@@ -726,6 +910,33 @@ void registerChainCommands(cmd::Registry& registry) {
         registry.add(std::move(c));
     }
     {
+        cmd::Command<NameArgs, PathResult> c;
+        c.name = "fx.chain.delete";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Delete a saved FX chain preset by name.";
+        c.description =
+            "Removes the preset file from the user's chains directory. Tracks that loaded it keep "
+            "their effects.";
+        c.tags = {"fx", "presets"};
+        c.args = schema::object<NameArgs>("fx_chain_delete_args")
+                     .field("name", &NameArgs::name, schema::string().minLength(1))
+                     .build();
+        c.result = schema::object<PathResult>("fx_chain_delete_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {{"chain.unknown", "no preset has that name", "use a name from fx.chain.list"}};
+        c.examples = {{"Delete the bass chain", j(R"({"name":"Bass"})"), j(R"({"path":"<any>"})"),
+                       "song_with_saved_chain"}};
+        c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto path = namedPath(ctx.service<EngineApp>(), a.name);
+            if (!path) return std::move(path).error();
+            SUPPLE_TRY(removeNamed(*path, "chain.unknown", "chain preset"));
+            return PathResult{path->string()};
+        };
+        registry.add(std::move(c));
+    }
+    {
         cmd::Command<CopyArgs, CopyResult> c;
         c.name = "fx.copy";
         c.kind = cmd::Kind::Edit;
@@ -798,5 +1009,6 @@ void registerChainCommands(cmd::Registry& registry) {
         registry.add(std::move(c));
     }
     registerTemplateCommands(registry);
+    registerProjectTemplateCommands(registry);
 }
 }  // namespace supple::engine

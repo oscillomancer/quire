@@ -118,6 +118,7 @@ TEST_CASE(
         options.workdir = dir;
         options.chainDir = dir / "chains";
         options.templateDir = dir / "templates";
+        options.projectTemplateDir = dir / "project-templates";
         options.pluginPath = {FIXTURE_CLAP_PATH};
         options.runtimeProtectionOps = fake.ops;
         auto created = EngineApp::create(options, {.console9 = false});
@@ -212,6 +213,7 @@ std::unique_ptr<EngineApp> latencyApp(const ProtectionRoot& root, const LatencyO
     options.workdir = root.path;
     options.chainDir = root.path / "chains";
     options.templateDir = root.path / "templates";
+    options.projectTemplateDir = root.path / "project-templates";
     options.pluginPath = {FIXTURE_CLAP_PATH};
     options.runtimeProtectionOps = fake.ops;
     auto app = EngineApp::create(options, {.console9 = false});

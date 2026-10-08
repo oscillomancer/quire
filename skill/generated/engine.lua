@@ -219,6 +219,12 @@ q = nil
 ---@field semantic boolean
 ---@field chain string[]
 
+---@class Quire.fx_chain_delete_args
+---@field name string
+
+---@class Quire.fx_chain_delete_result
+---@field path string
+
 ---@class Quire.fx_chain_list_result
 ---@field chains table[]
 
@@ -549,6 +555,28 @@ q = nil
 ---@field history_budget_bytes? integer Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it.
 ---@field render? any
 ---@field timebase? "time"|"beats"|"beats_position"
+
+---@class Quire.project_template_delete_args
+---@field name string
+
+---@class Quire.project_template_delete_result
+---@field path string
+
+---@class Quire.project_template_list_result
+---@field templates table[]
+
+---@class Quire.project_template_load_args
+---@field name string
+
+---@class Quire.project_template_load_result
+---@field name string
+
+---@class Quire.project_template_save_args
+---@field name string
+---@field replace? boolean (default: false)
+
+---@class Quire.project_template_save_result
+---@field path string
 
 ---@class Quire.region_add_args
 ---@field start? number
@@ -1024,6 +1052,7 @@ q = nil
 ---@field set fun(args: Quire.fx_set_args): table Set instance options: bypass, offline, wet (%), label, isolation, pins.
 
 ---@class Quire.fx.chain
+---@field delete fun(args: Quire.fx_chain_delete_args): Quire.fx_chain_delete_result Delete a saved FX chain preset by name.
 ---@field list fun(): Quire.fx_chain_list_result List saved FX chain presets by name, path and effect count.
 ---@field load fun(args: Quire.fx_chain_load_args): Quire.fx_chain_load_result Append or replace a track's FX chain from a preset in one undo step.
 ---@field save fun(args: Quire.fx_chain_save_args): Quire.fx_chain_save_result Save an ordered FX chain as a named preset.
@@ -1085,6 +1114,12 @@ q = nil
 ---@field recoverable fun(): Quire.project_recoverable_result List recordings a crash left out of the project.
 ---@field save fun(args?: Quire.project_save_args): Quire.project_save_result Save the project (canonical JSON) to its file or a new path.
 ---@field set fun(args?: Quire.project_set_args): table Change project metadata (name, title, author, notes, Console 9, timebase).
+
+---@class Quire.project.template
+---@field delete fun(args: Quire.project_template_delete_args): Quire.project_template_delete_result Delete a saved project template by name.
+---@field list fun(): Quire.project_template_list_result List saved project templates by name and path.
+---@field load fun(args: Quire.project_template_load_args): Quire.project_template_load_result Start a new, unsaved project from a project template.
+---@field save fun(args: Quire.project_template_save_args): Quire.project_template_save_result Save the whole project as a named project template.
 
 ---@class Quire.region
 ---@field add fun(args?: Quire.region_add_args): Quire.region_add_result Add a named region in beats.

@@ -43,7 +43,9 @@ struct AppOptions {
     host::HostIdentity identity;
     std::filesystem::path chainDir;     // empty = the user config directory / <slug> / chains
     std::filesystem::path templateDir;  // empty = … / <slug> / track-templates
-    std::filesystem::path workdir;      // renders are written to <workdir>/renders
+    std::filesystem::path projectTemplateDir;  // empty = … / <slug> / templates
+    std::filesystem::path workdir;
+    std::filesystem::path rendersDir;  // empty = <workdir>/renders; setRendersDir changes it
     // An unsaved project's own folder (the GUI's, one per run): its media (the
     // recordings) live in <scratchDir>/<media_dir> until the first save moves
     // them beside the project file; clearScratch() deletes it when the
@@ -206,6 +208,12 @@ class EngineApp : public cmd::Host {
     Status open(const std::filesystem::path& path,
                 std::vector<schema::Warning>* warnings = nullptr);  // replaces the history
     Status newProject(model::Project project);
+    // A project template (project.template.*): the head as a project file
+    // whose media paths are absolute, so it opens from anywhere; and a new,
+    // unsaved project made from such a file (it never becomes the project path).
+    Result<std::string> templateText();
+    Status openTemplate(const std::filesystem::path& path,
+                        std::vector<schema::Warning>* warnings = nullptr);
     std::uint64_t projectGeneration() const {
         return projectGeneration_.load(std::memory_order_acquire);
     }
@@ -226,7 +234,12 @@ class EngineApp : public cmd::Host {
     Result<OfflineResult> renderMix(const OfflineSettings& settings);
     Result<OfflineResult> renderSession(const model::Session& session,
                                         const OfflineSettings& settings);
-    std::filesystem::path rendersDir() const { return options_.workdir / "renders"; }
+    // Where renders are written. Set on the command thread (the GUI's folder
+    // choice); an empty path restores the default, <workdir>/renders.
+    std::filesystem::path rendersDir() const {
+        return options_.rendersDir.empty() ? options_.workdir / "renders" : options_.rendersDir;
+    }
+    void setRendersDir(std::filesystem::path dir) { options_.rendersDir = std::move(dir); }
     std::string rememberRender(const std::filesystem::path& path);
     std::string reserveRenderId();
     void publishRender(std::string id, const std::filesystem::path& path);

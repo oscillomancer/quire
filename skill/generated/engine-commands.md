@@ -2196,6 +2196,61 @@ Result:
 
 ```
 
+## `fx.chain.delete@1`
+
+Delete a saved FX chain preset by name.
+
+Removes the preset file from the user's chains directory. Tracks that loaded it keep their effects.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_chain_delete_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `chain.unknown`: no preset has that name Hint: use a name from fx.chain.list
+
+### Examples
+
+**Delete the bass chain** (`song_with_saved_chain`)
+
+```json
+{
+  "name": "Bass"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
 ## `fx.chain.list@1`
 
 List saved FX chain presets by name, path and effect count.
@@ -5399,6 +5454,231 @@ Result:
 
 ```json
 {}
+
+```
+
+## `project.template.delete@1`
+
+Delete a saved project template by name.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_template_delete_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `template.unknown`: no template has that name Hint: use a name from project.template.list
+
+### Examples
+
+**Delete the band setup** (`song_with_project_template`)
+
+```json
+{
+  "name": "Band"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
+## `project.template.list@1`
+
+List saved project templates by name and path.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_template_list_result",
+  "properties": {
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "project_template_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["templates"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**None yet** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "templates": []
+}
+
+```
+
+## `project.template.load@1`
+
+Start a new, unsaved project from a project template.
+
+Replaces the current project and its history, like project.new: unsaved changes are lost, so save first. The new project has no file until project.save {path}; the template itself is never changed.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_template_load_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Start from the band setup** (`song_with_project_template`)
+
+```json
+{
+  "name": "Band"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "<any>"
+}
+
+```
+
+## `project.template.save@1`
+
+Save the whole project as a named project template.
+
+Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to the user's templates directory. The project keeps its own file. Recordings are referenced by absolute path, not copied, so an unsaved project with recordings must be saved first. replace: true overwrites a name.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `replace` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "project_template_save_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `chain.exists`: the name already exists Hint: choose another name or set replace: true
+- `template.media`: an unsaved project has recordings Hint: save the project first
+
+### Examples
+
+**Save the band setup** (`song`)
+
+```json
+{
+  "name": "Band"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
 
 ```
 

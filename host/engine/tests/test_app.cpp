@@ -42,6 +42,7 @@ std::unique_ptr<EngineApp> makeApp(const fs::path& dir) {
     o.workdir = dir;
     o.chainDir = dir / "chains";  // never the user's config
     o.templateDir = dir / "templates";
+    o.projectTemplateDir = dir / "project-templates";
     o.pluginPath = {kFixture};
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
@@ -869,6 +870,7 @@ TEST_CASE("an unsaved project records into its scratch folder; the first save mo
         o.scratchDir = scratch;
         o.chainDir = root.path / "chains";
         o.templateDir = root.path / "templates";
+        o.projectTemplateDir = root.path / "project-templates";
         o.pluginPath = {kFixture};
         auto app = EngineApp::create(o, {.console9 = false});
         REQUIRE(app);

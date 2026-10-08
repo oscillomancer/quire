@@ -127,6 +127,14 @@ in their `track` object and pass it to `track.add` when loaded. The optional
 field defaults to stereo (2) for older templates. Its strip-type bounds match
 `track.add`; FX pins retain their saved channel assignments.
 
+Presets and templates live in the user's configuration folder: FX chain
+presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, track templates
+in `track-templates`, and project templates in `templates`. A project
+template is an ordinary project file (§5) of the head, without history,
+whose media sources are absolute paths; project.template.load opens it as a
+new project with no file. fx.chain.delete and project.template.delete remove
+a file by name; none of these file actions changes the history.
+
 ### 1.5 Items and takes
 
 **Item** `it_*`: `track`, `lane` (null = main lane), `position` (in the
@@ -453,7 +461,10 @@ Schemas are written per command in code (ADR-0007); this is the inventory
 and naming. All `edit` unless marked (q) query or (a) action.
 
 - **project**: `project.new` (a), `project.open` (a), `project.save` (a),
-  `project.get` (q), `project.set`, `project.describe` (q).
+  `project.get` (q), `project.set`, `project.describe` (q); templates
+  `project.template.save` (a), `project.template.load {name}` (a, a new
+  unsaved project), `project.template.list` (q), `project.template.delete`
+  (a).
 - **session**: `session.describe {scope, detail}` (q), `session.query
   {kind, filter, fields}` (q), `session.get {id, fields}` (q).
 - **tempo/meter**: `tempo.set {points}`, `tempo.add`, `tempo.remove`,
@@ -479,7 +490,9 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
   `fx.param.get` (q), `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
-  `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`,
+  `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`, chain presets
+  `fx.chain.save` (a), `fx.chain.load`, `fx.chain.list` (q),
+  `fx.chain.delete` (a),
   `fx.state.capture` (internal, from plugin notifications), `plugin.list`
   (q), `plugin.scan` (a).
 - **routes**: `route.add {from, to, tap, channels, …}`, `route.remove`,
