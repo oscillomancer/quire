@@ -684,6 +684,14 @@ int main(int argc, char** argv) {
         for (model::Id id : all) uiState.selectedItems.push_back(id.str());
         uiState.tracksFocused = false;
     });
+    appActions.addUi("ui.item.takes", "Item: show all takes (toggle)", [&] {
+        views::TrackLayout& layout = shell.arrange()->trackLayout();
+        for (const std::string& text : uiState.selectedItems)
+            if (const auto id = model::Id::parse(text))
+                layout.setTakesExpanded(*id, !layout.takesExpanded(*id));
+    });
+    appActions.addUi("ui.keys.reset", "Edit: reset key bindings to the defaults\u2026",
+                     [&] { gui::openKeymapReset(root, appActions); });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",

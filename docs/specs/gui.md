@@ -534,7 +534,16 @@ Delete.
   context-dependent arguments resolve from the selection ("selected
   tracks") at invocation.
 - **Actions list** (`?`): fuzzy search over names, descriptions and
-  commands; shows bound keys; runs, binds, adds to toolbar/menu.
+  commands; shows bound keys; runs, binds (Ctrl+B, then the chord), adds to
+  toolbar/menu (Ctrl+T, Ctrl+M). Its keys work with the focus on the search
+  field or on the list (after a click on a row), where typing goes on
+  searching. A new binding goes to `global`; an `arrange` binding on the same
+  keys gives way (the arrange view looks there first), and the hint names
+  the action that had them. **Reset keys…** (also the action
+  `ui.keys.reset`) asks first, then restores every default binding and saves
+  a keymap file without changes. Selected-item actions cover the take
+  features: explode onto tracks or in sequence, render with FX as a new take
+  or in place, delete the heard take, show all takes (`ui.item.takes`).
 - **Keymaps:** per context section (global, arrange, MIDI editor, mixer,
   text field), chords allowed, conflicts shown in the editor. A key looks in
   `text` while a text field has focus, in `midi` or `mixer` while the focus

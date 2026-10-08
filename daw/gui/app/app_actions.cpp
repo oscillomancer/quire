@@ -140,6 +140,35 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                         obj({{"item", "$each.item"}, {"at", "$playhead.beats"}})));
     registry_.add(bound("item.remove:selected", "Item: remove selected", "item.remove",
                         obj({{"item", "$each.item"}})));
+    // Takes of the selected items (the item menu has the same, gui.md §4.3).
+    registry_.add(bound("item.explode-takes:tracks", "Item: explode takes onto new tracks",
+                        "item.explode-takes", obj({{"item", "$each.item"}, {"mode", "tracks"}})));
+    registry_.add(bound("item.explode-takes:serial", "Item: explode takes in sequence",
+                        "item.explode-takes", obj({{"item", "$each.item"}, {"mode", "serial"}})));
+    registry_.add(bound("item.apply-fx:take", "Item: render with FX as a new take", "item.apply-fx",
+                        obj({{"item", "$each.item"}, {"mode", "take"}})));
+    registry_.add(bound("item.apply-fx:replace", "Item: render with FX in place (MIDI to audio)",
+                        "item.apply-fx", obj({{"item", "$each.item"}, {"mode", "replace"}})));
+    actions::Action dropTake;
+    dropTake.id = "take.remove:active";
+    dropTake.name = "Item: delete the heard take";
+    dropTake.description = "Delete each selected item's heard take (an item goes with its last).";
+    dropTake.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        if (ui_.selectedItems.empty()) return Error("action.selection", "select items first");
+        return dispatcher_.transact("Delete take", kOrigin, [&]() -> Result<json::Value> {
+            const model::Session s = app_.head();
+            for (const std::string& text : ui_.selectedItems) {
+                const auto id = model::Id::parse(text);
+                const model::Item* it = id ? s.items.find(*id) : nullptr;
+                if (!it || !it->activeTake) continue;
+                auto r = dispatcher_.execute(
+                    {"take.remove", obj({{"take", it->activeTake->str()}}), kOrigin});
+                if (!r) return r;
+            }
+            return json::Value::object();
+        });
+    };
+    registry_.add(dropTake);
     actions::Action removeTracks;
     removeTracks.id = "track.remove:selected";
     removeTracks.name = "Track: remove selected";
@@ -257,6 +286,12 @@ bool AppActions::key(int keycode, unsigned mods, bool typing,
         return true;
     }
     return keymap_.pending() || wasPending;
+}
+
+Status AppActions::resetKeymap() {
+    keymap_ = actions::Keymap::defaults();
+    keymap_.clearPending();
+    return keymapFile_.empty() ? Status{} : keymap_.save(keymapFile_);
 }
 
 std::string AppActions::keysFor(std::string_view action) const {

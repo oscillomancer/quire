@@ -59,25 +59,26 @@ class ActionsPanel : public ui::Node {
         search_ = &emplace<ui::TextField>("actions.search", "", "Search actions…");
         list_ = &emplace<ui::List>("actions.results");
         capture_ = &emplace<KeyCapture>([this](std::optional<actions::Chord> c) { captured(c); });
-        hint_ = &emplace<ui::Label>("actions.hint", chrome_ ? kChromeHint : kHint, ui::Font::Ui,
-                                    "caption", "ink-quiet");
+        auto& footer = emplace<ui::Node>("actions.footer");
+        footer.layout.dir = ui::Layout::Dir::Row;
+        footer.layout.height = ui::SizeRule::fixed(24);
+        footer.layout.gap = 8;
+        footer.layout.align = ui::Layout::Align::Center;
+        hint_ = &footer.emplace<ui::Label>("actions.hint", chrome_ ? kChromeHint : kHint,
+                                           ui::Font::Ui, "caption", "ink-quiet");
         hint_->layout.width = ui::SizeRule::fraction();
+        footer.emplace<ui::Button>("actions.keys.reset", "Reset keys\u2026", [this] {
+            openKeymapReset(root_, actions_, [this] {
+                hint_->setText("Key bindings reset to the defaults");
+                list_->invalidate();
+                root_.focus(search_);
+            });
+        });
         search_->onChange = [this](const std::string& q) { filter(q); };
         search_->onSubmit = [this](const std::string&) { activate(); };
         search_->onOtherKey = [this](const ui::KeyEvent& e) {
-            if (e.key == SDLK_B && (e.mods & ui::kCtrl)) {
-                startCapture();
-                return true;
-            }
-            if (e.key == SDLK_T && (e.mods & ui::kCtrl) && chrome_) {
-                toggleToolbar();
-                return true;
-            }
-            if (e.key == SDLK_M && (e.mods & ui::kCtrl) && chrome_) {
-                openMenuChoice();
-                return true;
-            }
-            return list_->onKey(e);  // Up/Down/PgUp/PgDn/Home/End move the selection
+            // Up/Down/PgUp/PgDn/Home/End move the selection.
+            return shortcut(e) || list_->onKey(e);
         };
         list_->rowHeight = 30;
         list_->onActivate = [this](std::size_t) { activate(); };
@@ -101,8 +102,32 @@ class ActionsPanel : public ui::Node {
     }
 
     void paint(ui::Canvas&) override {}
+    // The panel's keys work wherever its focus is (the search field, or the
+    // list after a click on a row); typing goes on searching.
+    bool onKey(const ui::KeyEvent& e) override { return shortcut(e); }
+    bool onText(std::string_view text) override {
+        root_.focus(search_);
+        return search_->onText(text);
+    }
 
   private:
+    bool shortcut(const ui::KeyEvent& e) {
+        if (!(e.mods & ui::kCtrl)) return false;
+        if (e.key == SDLK_B) {
+            startCapture();
+            return true;
+        }
+        if (e.key == SDLK_T && chrome_) {
+            toggleToolbar();
+            return true;
+        }
+        if (e.key == SDLK_M && chrome_) {
+            openMenuChoice();
+            return true;
+        }
+        return false;
+    }
+
     static constexpr const char* kHint = "Enter run · Ctrl+B bind a key · Esc close";
     static constexpr const char* kChromeHint =
         "Enter run · Ctrl+B bind a key · Ctrl+T toolbar · Ctrl+M menu · Esc close";
@@ -189,8 +214,19 @@ class ActionsPanel : public ui::Node {
             return;
         }
         actions::Binding b{{*chord}, "global", capturing_};
+        // The main window looks in "arrange" before "global": a default there
+        // on the same keys would hide the new binding, so it gives way.
+        std::string replaced;
+        for (const actions::Binding& other : actions_.keymap().bindings())
+            if (other.keys == b.keys && other.action != capturing_ &&
+                (other.section == "arrange" || other.section == "global"))
+                replaced = other.action;
+        const std::vector<actions::Binding> all = actions_.keymap().bindings();
+        for (const actions::Binding& other : all)
+            if (other.keys == b.keys && other.section == "arrange") actions_.keymap().unbind(other);
         actions_.keymap().bind(b);
         std::string note = actions::describe(*chord) + " → " + capturing_;
+        if (!replaced.empty()) note += " (was " + replaced + ")";
         if (auto saved = actions_.keymap().save(actions_.keymapFile()); !saved)
             note += " (not saved: " + saved.error().message + ")";
         for (const auto& [x, y] : actions_.keymap().conflicts())
@@ -242,6 +278,32 @@ void openActionPrompt(ui::Root& root, AppActions& actions, const actions::Action
         (void)runner->run(act, values);
     };
     for (ui::TextField* f : *fields) f->onSubmit = submit;
+    root.openPopup(std::move(form), {}, ui::Placement::Center);
+}
+
+void openKeymapReset(ui::Root& root, AppActions& actions, std::function<void()> done) {
+    auto form = std::make_unique<ui::Node>("keys.reset");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(420);
+    form->layout.height = ui::SizeRule::content();
+    form->layout.padding = ui::Insets::all(14);
+    form->layout.gap = 10;
+    form->emplace<ui::Label>("keys.reset.title", "Reset every key binding to the defaults?",
+                             ui::Font::UiBold, "body");
+    form->emplace<ui::Label>("keys.reset.text", "Your own bindings and removals are lost.",
+                             ui::Font::Ui, "small", "ink-quiet");
+    auto& row = form->emplace<ui::Node>("keys.reset.buttons");
+    row.layout.dir = ui::Layout::Dir::Row;
+    row.layout.height = ui::SizeRule::fixed(28);
+    row.layout.gap = 8;
+    row.emplace<ui::Button>("keys.reset.confirm", "Reset", [&root, &actions, done] {
+        auto after = done;  // closePopup destroys this button and its closure
+        root.closePopup();
+        if (auto reset = actions.resetKeymap(); !reset && actions.onError)
+            actions.onError("keys: " + reset.error().message);
+        if (after) after();
+    });
+    row.emplace<ui::Button>("keys.reset.cancel", "Cancel", [&root] { root.closePopup(); });
     root.openPopup(std::move(form), {}, ui::Placement::Center);
 }
 

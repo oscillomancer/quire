@@ -743,6 +743,68 @@ TEST_CASE("file actions: project templates save, start a new project and delete"
     CHECK(list->count() == 1);
 }
 
+TEST_CASE("actions list: keys after a click on a row, overriding defaults, and a reset") {
+    App a;
+    if (!a.ok) return;
+    gui::Chrome chrome(*a.root, *a.actions, gui::ChromeLayout::defaults(), {});
+    auto clickFirstRow = [&] {
+        a.root->frame(false);
+        auto* list = a.root->find("actions.results");
+        REQUIRE(list);
+        const ui::Point p{list->bounds().x + 40, list->bounds().y + 10};
+        a.root->pointer({ui::PointerEvent::Type::Down, p, 1});
+        a.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+        a.root->frame(false);
+        REQUIRE(a.root->focused() == list);  // the click took the focus off the search
+    };
+    // Ctrl+B with the list focused: bind F6.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.type("add master");
+    clickFirstRow();
+    a.key("Ctrl+B");
+    a.key("F6");
+    CHECK(a.actions->keysFor("track.add:master") == "F6");
+    // Typing with the list focused goes on searching.
+    a.type("x");
+    CHECK(dynamic_cast<ui::TextField*>(a.root->find("actions.search"))->text() == "add masterx");
+    a.key("Escape");
+    // Ctrl+M with the list focused lists the menus.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.type("add buss");
+    clickFirstRow();
+    a.key("Ctrl+M");
+    CHECK(a.root->find("actions.menus"));
+    a.root->closePopups();
+    // A key an arrange default uses (S splits items) goes to the new action,
+    // in the arrange view too.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.type("add master");
+    a.key("Ctrl+B");
+    a.key("S");
+    a.key("Escape");
+    CHECK(a.actions->keysFor("item.split:playhead").empty());
+    const std::size_t masters = a.tracks("master");
+    CHECK(a.actions->key(SDLK_S, 0, false, {"arrange", "global"}));
+    CHECK(a.tracks("master") == masters + 1);
+    // Reset keys…: asks first; Cancel keeps them, Reset restores the defaults.
+    gui::openActionsList(*a.root, *a.actions, &chrome);
+    a.root->frame(false);  // a new popup has bounds after a frame
+    REQUIRE(a.root->click("actions.keys.reset"));
+    a.root->frame(false);
+    REQUIRE(a.root->find("keys.reset"));
+    REQUIRE(a.root->click("keys.reset.cancel"));
+    CHECK(a.actions->keysFor("track.add:master") == "F6");
+    REQUIRE(a.root->click("actions.keys.reset"));
+    a.root->frame(false);
+    REQUIRE(a.root->click("keys.reset.confirm"));
+    CHECK(a.actions->keysFor("track.add:master").empty());
+    CHECK(a.actions->keysFor("item.split:playhead") == "S");
+    auto saved = actions::Keymap::load(a.actions->keymapFile());
+    REQUIRE(saved);
+    CHECK(saved->bindings() == actions::Keymap::defaults().bindings());
+    CHECK(a.root->find("actions"));  // the list stays open
+}
+
 TEST_CASE("an action binds the selected tracks ($selection.track)") {
     App a;
     if (!a.ok) {

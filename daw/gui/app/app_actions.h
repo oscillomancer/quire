@@ -41,6 +41,8 @@ class AppActions {
 
     actions::ActionRegistry& registry() { return registry_; }
     actions::Keymap& keymap() { return keymap_; }
+    // Every binding back to the defaults; the keymap file then holds no changes.
+    Status resetKeymap();
     UiState& ui() { return ui_; }
     const std::filesystem::path& keymapFile() const { return keymapFile_; }
     actions::Context context(std::vector<std::string> sections = {"arrange", "global"}) const;
