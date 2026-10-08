@@ -1,5 +1,8 @@
 #include <doctest/doctest.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -8,6 +11,7 @@
 
 #include <supple/base/handoff.h>
 #include <supple/base/rng.h>
+#include <supple/base/rt.h>
 #include <supple/base/spsc.h>
 
 using supple::Rng;
@@ -186,3 +190,42 @@ TEST_CASE("RT primitives are real-time safe" * doctest::description("rt")) {
     for (int i = 0; i < 100; ++i) total += rtWork(ring, handoff, rng);
     CHECK(total > 0);
 }
+
+// ASan's fake stacks keep large locals off the thread stack: nothing to observe.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SUPPLE_TEST_FAKE_STACKS 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define SUPPLE_TEST_FAKE_STACKS 1
+#endif
+#ifndef SUPPLE_TEST_FAKE_STACKS
+TEST_CASE("prefaultStack commits the stack below its caller") {
+    constexpr std::size_t kFailed = SIZE_MAX;
+    std::size_t pages = 0, before = kFailed, after = kFailed;
+    std::thread([&] {
+        const auto page = static_cast<std::uintptr_t>(::sysconf(_SC_PAGESIZE));
+        const auto here = reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0));
+        // Well inside the 128 KiB below this frame, clear of the calls made here.
+        const std::uintptr_t high = (here - 16 * 1024) & ~(page - 1);
+        const std::uintptr_t low = high - 96 * 1024;
+        pages = static_cast<std::size_t>((high - low) / page);
+        std::vector<unsigned char> state(pages);
+        const auto resident = [&] {
+            if (::mincore(reinterpret_cast<void*>(low), high - low, state.data()) != 0)
+                return kFailed;
+            return static_cast<std::size_t>(
+                std::count_if(state.begin(), state.end(), [](unsigned char s) { return s & 1; }));
+        };
+        // Drop the pages first, so the check sees what prefaulting commits.
+        if (::madvise(reinterpret_cast<void*>(low), high - low, MADV_DONTNEED) != 0) return;
+        before = resident();
+        supple::rt::prefaultStack();
+        after = resident();
+    }).join();
+    REQUIRE(pages > 0);
+    CHECK(before == 0);
+    CHECK(after == pages);
+}
+#endif

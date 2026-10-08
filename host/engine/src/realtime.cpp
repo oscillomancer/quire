@@ -249,7 +249,10 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         loopR_ = t.loop;
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
-        renderer_ = std::thread([this, first] { rendererLoop(first); });
+        renderer_ = std::thread([this, first] {
+            rt::prefaultStack();  // ADR-0025
+            rendererLoop(first);
+        });
     }
     return okStatus();
 }

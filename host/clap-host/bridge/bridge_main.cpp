@@ -23,6 +23,8 @@
 
 #include "../src/bridge_protocol.h"
 #include "../src/scan.h"
+#include "supple/base/rt.h"
+#include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
 
@@ -100,7 +102,11 @@ struct BridgeInstance {
                     b.transport = hdr->hasTransport ? &hdr->transport : nullptr;
                     b.steadyTime = hdr->steadyTime;
                     OutputEvents sink{std::span<OutputEvent>(outEvents, kMaxOutEvents)};
-                    result = instance->process(b, &sink) ? 1 : 0;
+                    {
+                        // The engine's environment for every node (ADR-0025).
+                        dsp::DenormalGuard denormals;
+                        result = instance->process(b, &sink) ? 1 : 0;
+                    }
                     hdr->outEventCount = static_cast<std::uint32_t>(sink.count);
                     hdr->outEventsDropped = static_cast<std::uint32_t>(sink.dropped);
                     break;
@@ -281,7 +287,10 @@ struct Bridge {
                     return fail(st.error());
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
-                audio = std::thread([&slot, first] { slot.audioLoop(first); });
+                audio = std::thread([&slot, first] {
+                    rt::prefaultStack();  // ADR-0025
+                    slot.audioLoop(first);
+                });
                 // The widths the plug-in settled on (a VST3 may adapt a layout
                 // at activation): the host re-maps when they differ.
                 Writer w;

@@ -2,7 +2,7 @@ supple_add_library(sandbox
   SOURCES src/render.cpp src/session.cpp src/commands.cpp src/analysis_commands.cpp src/optimize.cpp
   DEPS supple::clap-host supple::audio-file supple::core-json supple::midi
        supple::notation supple::command-bus supple::lua-bus supple::semantic-params-abi
-       supple::core-analysis supple::optimize supple::core-params)
+       supple::core-analysis supple::core-dsp supple::optimize supple::core-params)
 
 if(SUPPLE_BUILD_TESTS)
   supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp

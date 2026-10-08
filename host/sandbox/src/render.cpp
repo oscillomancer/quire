@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "supple/base/rt.h"
+#include "supple/dsp/dsp.h"
 
 namespace supple::sandbox {
 
@@ -81,6 +82,9 @@ void renderLoop(Job& j) SUPPLE_RT {
         return j.tailEnd >= 0 ? std::min(j.maxTotal, j.tailEnd) : j.maxTotal;
     };
     while (pos < endNow()) {
+        // Each block runs as an engine node does (ADR-0025), so a chain
+        // renders here as it does in a session.
+        dsp::DenormalGuard denormals;
         const std::int64_t end = endNow();
         const auto n = static_cast<std::uint32_t>(std::min<std::int64_t>(s.blockSize, end - pos));
         // Chain input for this block.

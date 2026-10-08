@@ -85,7 +85,11 @@ host, daw or plugins; plugins use only header-light libs.
   internal blocks, into lock-free ring buffers the RT thread consumes. DSP
   tasks follow the RT rules, with the background-only bridge exception below.
   The background pool serves anticipative and offline work. A separate live
-  pool helps the callback with a fork-join per segment (ADR-0024).
+  pool helps the callback with a fork-join per segment (ADR-0024). Every
+  executor runs each node, plug-ins included, with FTZ and DAZ set and the
+  thread's MXCSR restored afterwards, so a node computes alike on any thread,
+  in real time and offline; owned audio threads prefault their stacks before
+  their first job (ADR-0025).
 - **Model thread** — the only writer of the session. Runs the command bus,
   compiles versions into `RenderPlan`s, reclaims retired plans, services
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns

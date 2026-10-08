@@ -13,7 +13,9 @@
 //     bytes 1..3 = reported tail in samples (little endian; mode 20: twice
 //     that once it has processed a block). Loading state
 //     calls request_flush; param 7 ("Flushes") reads back how many times
-//     params.flush has been called.
+//     params.flush has been called. Byte 0 = 50: an underflow probe, out =
+//     (in · 2^-100) · 2^100, exact for |in| >= 2^-26 and zero below it when
+//     process() runs with FTZ/DAZ (ADR-0025).
 #include <clap/clap.h>
 
 #include <algorithm>
@@ -1014,9 +1016,14 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_pro
         }
         p->out_events->try_push(p->out_events, &end.header);
     }
+    // Mode 50: the scaled-down intermediate is subnormal for |x| < 2^-26, so
+    // the output shows this thread's FP environment in normal-range audio.
+    const bool probe = E(pl)->config[0] == 50;
     for (uint32_t c = 0; c < 2; ++c)
-        for (uint32_t i = 0; i < p->frames_count; ++i)
-            p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i];
+        for (uint32_t i = 0; i < p->frames_count; ++i) {
+            const float x = p->audio_inputs[0].data32[c][i];
+            p->audio_outputs[0].data32[c][i] = probe ? x * 0x1p-100f * 0x1p100f : x;
+        }
     return E(pl)->config[0] == 11 ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
 

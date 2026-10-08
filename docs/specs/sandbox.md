@@ -121,7 +121,9 @@ resampler), then runs the chain offline:
 - set the transport (tempo, meter; playing = true; bar/beat positions
   advanced per block);
 - process fixed-size blocks (the last block may be short); note events and
-  param events land at their exact sample offsets within blocks;
+  param events land at their exact sample offsets within blocks; each
+  block's chain runs with FTZ and DAZ set, as an engine node does (engine
+  spec §2.4, ADR-0025), so a chain renders here as it does in a session;
 - after the input ends, continue for the tail: until the chain's reported
   tail elapses or output stays below −120 dBFS for 200 ms, capped at the
   tail limit. The reported tail is read again after every block, so a tail

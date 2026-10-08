@@ -93,7 +93,11 @@ Workers::Workers(unsigned helpers) : Workers(helpers, Hooks{}) {}
 Workers::Workers(unsigned helpers, Hooks hooks)
     : slots_(std::make_unique<Slot[]>(helpers)), hooks_(hooks) {
     threads_.reserve(helpers);
-    for (unsigned i = 0; i < helpers; ++i) threads_.emplace_back([this, i] { loop(i); });
+    for (unsigned i = 0; i < helpers; ++i)
+        threads_.emplace_back([this, i] {
+            rt::prefaultStack();  // ADR-0025
+            loop(i);
+        });
 }
 
 Workers::~Workers() {
