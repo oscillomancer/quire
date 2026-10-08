@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sched.h>
 #include <spawn.h>
 #include <sys/mman.h>
@@ -25,6 +26,7 @@
 #include <vector>
 #include "../src/bridge_client.h"
 #include "../src/bridge_protocol.h"
+#include "../src/main_thread_wake.h"
 
 #include <supple/clap/semantic_params.h>
 #include <supple/host/clap_host.h>
@@ -2116,4 +2118,168 @@ TEST_CASE("a VST3 that settles on another layout is served it, in process or iso
         p.stopProcessing();
         p.deactivate();
     }
+}
+
+namespace {
+void rtMainRequests(const clap_host_t* host, const clap_host_params_t* params,
+                    const clap_host_tail_t* tail, const clap_host_gui_t* gui) SUPPLE_RT {
+    host->request_callback(host);
+    host->request_restart(host);
+    host->request_process(host);
+    params->request_flush(host);
+    tail->changed(host);
+    gui->request_resize(host, 500, 300);
+    gui->request_show(host);
+    gui->request_hide(host);
+}
+
+void drainWake(MainThreadWake& wake) {
+    pollfd fd{wake.fd(), POLLIN, 0};
+    int result;
+    do {
+        result = ::poll(&fd, 1, -1);
+    } while (result < 0 && errno == EINTR);
+    REQUIRE(result == 1);
+    REQUIRE(wake.drain());
+}
+}  // namespace
+
+TEST_CASE("CLAP main-thread requests publish before waking and deferred restart wakes at stop") {
+    MainThreadWake wake;
+    REQUIRE(wake.fd() >= 0);
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    auto& instance = **made;
+    instance.setMainThreadWake(wake);
+    drainWake(wake);
+    REQUIRE(instance.activate(48000, 1, 64));
+    REQUIRE(instance.startProcessing());
+    const auto* plugin = instance.raw();
+    const auto* host =
+        static_cast<const clap_host_t*>(plugin->get_extension(plugin, "supple.test.edge-host"));
+    REQUIRE(host);
+    const auto* params =
+        static_cast<const clap_host_params_t*>(host->get_extension(host, CLAP_EXT_PARAMS));
+    const auto* tail =
+        static_cast<const clap_host_tail_t*>(host->get_extension(host, CLAP_EXT_TAIL));
+    const auto* gui = static_cast<const clap_host_gui_t*>(host->get_extension(host, CLAP_EXT_GUI));
+    rtMainRequests(host, params, tail, gui);
+    drainWake(wake);
+    CHECK(instance.serviceMainThread());  // callback delivered without an editor
+    CHECK_FALSE(instance.serviceMainThread());
+    CHECK(instance.restartPending());
+    CHECK(instance.needsAudioFlush());
+    CHECK(instance.takeProcessRequest());
+    CHECK(instance.takeNotifications().tailChanged);
+    const auto requests = instance.takeEditorRequests();
+    CHECK(requests.resize);
+    CHECK(requests.width == 500);
+    CHECK(requests.height == 300);
+    CHECK(requests.show);
+    CHECK(requests.hide);
+    instance.stopProcessing();
+    drainWake(wake);  // no timer or host control call is needed to rearm restart
+    CHECK(instance.serviceMainThread());
+    CHECK_FALSE(instance.restartPending());
+    instance.deactivate();
+    // Main-only notifications still wake, and their flags remain for Service.
+    const auto* state =
+        static_cast<const clap_host_state_t*>(host->get_extension(host, CLAP_EXT_STATE));
+    const auto* latency =
+        static_cast<const clap_host_latency_t*>(host->get_extension(host, CLAP_EXT_LATENCY));
+    state->mark_dirty(host);
+    latency->changed(host);
+    params->rescan(host, CLAP_PARAM_RESCAN_VALUES);
+    drainWake(wake);
+    const auto notes = instance.takeNotifications();
+    CHECK(notes.stateDirty);
+    CHECK(notes.latencyChanged);
+    CHECK(notes.paramsRescan);
+}
+
+TEST_CASE("bridge services audio callbacks and closed-editor timers without a Service request") {
+    const auto info = find("com.suppleaudio.test.edge");
+    for (std::uint8_t mode : {42, 43}) {
+        int sockets[2], receipts[2];
+        REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+        struct Close {
+            int socket, child, read = -1, write = -1;
+            ~Close() {
+                for (int fd : {socket, child, read, write})
+                    if (fd >= 0) ::close(fd);
+            }
+        } close{sockets[0], sockets[1]};
+        REQUIRE(::pipe2(receipts, O_CLOEXEC) == 0);
+        close.read = receipts[0];
+        close.write = receipts[1];
+        posix_spawn_file_actions_t actions;
+        REQUIRE(posix_spawn_file_actions_init(&actions) == 0);
+        struct Destroy {
+            posix_spawn_file_actions_t* actions;
+            ~Destroy() { posix_spawn_file_actions_destroy(actions); }
+        } destroy{&actions};
+        constexpr int receiptFd = 198;
+        REQUIRE(posix_spawn_file_actions_adddup2(&actions, sockets[1], bridge::kControlFd) == 0);
+        REQUIRE(posix_spawn_file_actions_adddup2(&actions, receipts[1], receiptFd) == 0);
+        std::string executable = BRIDGE_PATH;
+        char* argv[] = {executable.data(), nullptr};
+        pid_t pid;
+        REQUIRE(::posix_spawn(&pid, executable.c_str(), &actions, nullptr, argv, environ) == 0);
+        auto process = BridgeTestAccess::adopt(sockets[0], pid);
+        close.socket = -1;
+        ::close(close.child);
+        close.child = -1;
+        ::close(close.write);
+        close.write = -1;
+        auto made = Instance::create(info, {}, true, process);
+        REQUIRE(made);
+        auto& instance = **made;
+        REQUIRE(instance.loadState(std::array<std::uint8_t, 4>{mode, receiptFd, 0, 0}));
+        CHECK_FALSE(instance.editorOpen());
+        if (mode == 42) {
+            REQUIRE(instance.activate(48000, 1, 64));
+            REQUIRE(instance.startProcessing());
+            Buffers buffer(64);
+            REQUIRE(instance.process(buffer.block(64)));
+        }
+        // Only the child's main-thread callback/timer can write this receipt.
+        // No socket request or elapsed-time assertion helps service that work.
+        char receipt = 0;
+        ssize_t read;
+        do {
+            read = ::read(close.read, &receipt, 1);
+        } while (read < 0 && errno == EINTR);
+        REQUIRE(read == 1);
+        CHECK(receipt == (mode == 42 ? 'm' : 't'));
+        if (mode == 42) instance.stopProcessing();
+    }
+}
+
+TEST_CASE("VST3 restart notifications wake main and rearm after processing stops") {
+    MainThreadWake wake;
+    REQUIRE(wake.fd() >= 0);
+    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(found);
+    const auto info = std::find_if(found->begin(), found->end(), [](const auto& plugin) {
+        return plugin.name == "Test VST3 Latency";
+    });
+    REQUIRE(info != found->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    instance.setMainThreadWake(wake);
+    drainWake(wake);
+    REQUIRE(instance.activate(48000, 1, 64));
+    REQUIRE(instance.startProcessing());
+    REQUIRE(instance.setParam(1, 1));
+    drainWake(wake);
+    CHECK(instance.serviceMainThread());
+    CHECK(instance.restartPending());
+    CHECK(instance.takeNotifications().latencyChanged);
+    instance.stopProcessing();
+    drainWake(wake);
+    CHECK(instance.serviceMainThread());
+    CHECK_FALSE(instance.restartPending());
+    CHECK(instance.latency() == 64);
+    instance.deactivate();
 }

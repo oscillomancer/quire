@@ -534,6 +534,17 @@ instance).
   the plug-in settled on (a VST3 may adapt its buses), and a mismatch
   re-activates once at those widths, so an isolated plug-in exposes the same
   layout as an in-process one.
+- The bridge main loop polls its control socket, a coalesced main-thread
+  request eventfd and every registered CLAP/VST3 descriptor, even without an
+  open editor. Its timeout is the nearest plug-in timer deadline, rounded up
+  to milliseconds (0 when due), or -1 when there are no timers; no fixed idle
+  cap remains. A parked relay translates audio-safe atomic/`rt::wake`
+  notifications into eventfd writes (sandbox spec §1). It drains/rearms the
+  wake before servicing every instance, before each poll, so neither
+  concurrent requests nor a busy control socket starve main-thread work.
+  Parent death is the control socket's HUP/EOF, including when no instances
+  remain. The wire protocol is unchanged; notifications and editor requests
+  still reach the host through its existing control requests.
 - The bridge's audio thread sets FTZ and DAZ around each `process()` and
   restores its MXCSR afterwards (§2.4), so a bridged plug-in computes as an
   in-process one does.

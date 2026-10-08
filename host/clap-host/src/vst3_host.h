@@ -36,6 +36,8 @@ class Vst3Instance {
     bool process(const ProcessBlock& block, OutputEvents* out) SUPPLE_RT;
     void flushParams() SUPPLE_RT;
     void reset() SUPPLE_RT;
+    void setMainThreadWake(MainThreadWake& wake);
+    void notifyMain() SUPPLE_RT;
     bool serviceMainThread();  // also runs the editor's due run-loop timers
     // kLatencyChanged: the plug-in must be deactivated and reactivated (the
     // Instance does it once processing has stopped).

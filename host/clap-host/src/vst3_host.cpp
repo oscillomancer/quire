@@ -1,4 +1,5 @@
 #include "vst3_host.h"
+#include "main_thread_wake.h"
 #include "pending_edits.h"
 
 #include <algorithm>
@@ -115,18 +116,25 @@ class FixedChanges
 
 class Handler : public Steinberg::U::Implements<Steinberg::U::Directly<vst::IComponentHandler>> {
   public:
+    std::atomic<MainThreadWake*> mainWake{nullptr};
+    void notifyMain() SUPPLE_RT {
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
+    }
     std::atomic<Steinberg::int32> restart{0};
     std::atomic<bool> edited{false};
     // An edit from the plug-in's editor (main thread): forwarded to the processor.
     std::function<bool(vst::ParamID, vst::ParamValue)> edit;
     Steinberg::tresult PLUGIN_API beginEdit(vst::ParamID) override { return kResultOk; }
     Steinberg::tresult PLUGIN_API performEdit(vst::ParamID id, vst::ParamValue value) override {
+        const bool accepted = edit && edit(id, value);
         edited = true;
-        return edit && edit(id, value) ? kResultOk : kResultFalse;
+        notifyMain();
+        return accepted ? kResultOk : kResultFalse;
     }
     Steinberg::tresult PLUGIN_API endEdit(vst::ParamID) override { return kResultOk; }
     Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
-        restart.fetch_or(flags, std::memory_order_relaxed);
+        restart.fetch_or(flags, std::memory_order_release);
+        notifyMain();
         return kResultOk;
     }
 };
@@ -144,6 +152,7 @@ class PlugFrame : public Steinberg::U::Implements<
     };
     std::vector<std::pair<Steinberg::Linux::IEventHandler*, int>> handlers;
     std::vector<Timer> timers;
+    std::atomic<MainThreadWake*> mainWake{nullptr};
     std::atomic<bool> resize{false};
     std::atomic<std::uint64_t> size{0};
 
@@ -154,6 +163,7 @@ class PlugFrame : public Steinberg::U::Implements<
                        static_cast<std::uint32_t>(std::max(0, r->getHeight())),
                    std::memory_order_release);
         resize = true;
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         // The window follows on the UI loop's next pass; the view takes the
         // size now (the common host behaviour).
         return view->onSize(r);
@@ -1011,6 +1021,15 @@ bool Vst3Instance::process(const ProcessBlock& block, OutputEvents* out) SUPPLE_
     return ok;
 }
 
+void Vst3Instance::setMainThreadWake(MainThreadWake& wake) {
+    state_->handler->mainWake.store(&wake, std::memory_order_release);
+    state_->frame->mainWake.store(&wake, std::memory_order_release);
+}
+
+void Vst3Instance::notifyMain() SUPPLE_RT {
+    if (state_->restartWanted.load()) state_->handler->notifyMain();
+}
+
 bool Vst3Instance::serviceMainThread() {
     const auto flags = state_->handler->restart.exchange(0);
     if (flags & vst::kLatencyChanged) {
@@ -1135,10 +1154,7 @@ int Vst3Instance::nextTimerMs() const {
     if (timers.empty()) return -1;
     auto next = timers.front().next;
     for (const auto& t : timers) next = std::min(next, t.next);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        next - std::chrono::steady_clock::now())
-                        .count();
-    return static_cast<int>(std::max<std::int64_t>(0, ms));
+    return timerTimeout(next, std::chrono::steady_clock::now());
 }
 
 bool Vst3Instance::takeEdited() { return state_->handler->edited.exchange(false); }

@@ -86,6 +86,36 @@ thread synchronously: audio-thread log calls go to a lock-free ring),
 host side (records `changed` flags). `request_restart`/`request_process`/
 `request_callback` set flags the app services on the main thread.
 
+Local instances can install the internal bridge relay with
+`setMainThreadWake(MainThreadWake&)` on main; it has no effect on remote
+proxies. The relay must outlive the instance and all plug-in callback threads.
+Installation also signals requests made during initialization. CLAP callbacks
+publish their request/notification flags before notifying: callback, restart,
+process, flush, dirty state, rescan/clear, latency/tail/semantic changes, GUI
+requests and queued log lines. VST3 component-handler restart/edit and frame
+resize requests use the same relay. Stopping processing signals a restart
+that had to wait for audio to stop. The hook is optional: in-process callers
+retain their existing main-thread servicing contract.
+
+The relay coalesces notifications until main drains them. Producers exchange
+an atomic pending bit; the first producer advances a private futex sequence
+with release ordering and calls only `rt::wake` (ADR-0024). A parked,
+non-audio relay thread observes that sequence with acquire and writes a
+nonblocking eventfd watched by the bridge. Main reads the eventfd, exchanges
+pending to false with acquire/release **before** servicing work, then drains
+request flags. Coalesced publications are acquired by that exchange; a request
+after it schedules another pass, including requests raised while servicing.
+The relay captures the sequence before writing the eventfd, so a drain/new
+request racing that write cannot be mistaken for a request already signalled.
+There are no writes, locks, allocations or waits on the audio producer path.
+Teardown joins the relay after destroying all instances.
+
+`nextTimerMs()` returns -1 without local timers, 0 when due, otherwise the
+nearest remaining duration rounded up to milliseconds and saturated at
+`INT_MAX`. Timers and registered descriptors remain serviceable with no editor
+open; registrations are main-thread operations, so the loop rebuilds its
+watches and deadlines after callbacks and control requests.
+
 Thread discipline follows CLAP: create/activate/params-info/state/GUI on the
 main thread; `process` on one audio thread. The sandbox's audio thread is
 simply the render thread (offline), but the RT rules still hold and the

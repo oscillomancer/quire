@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "../src/bridge_protocol.h"
+#include "../src/main_thread_wake.h"
 #include "../src/scan.h"
 #include "supple/base/rt.h"
 #include "supple/base/thread.h"
@@ -175,6 +176,7 @@ struct BridgeInstance {
 
 struct Bridge {
     int sock = kControlFd;
+    MainThreadWake wake;  // outlives every instance and its callback threads
     std::map<std::uint32_t, std::unique_ptr<BridgeInstance>> instances;
     std::uint32_t nextId = 1;
     std::uint32_t replyId = 0;
@@ -231,6 +233,7 @@ struct Bridge {
             if (!made) return fail(made.error());
             auto slot = std::make_unique<BridgeInstance>();
             slot->instance = std::move(*made);
+            slot->instance->setMainThreadWake(wake);
             const std::uint32_t newId = nextId++;
             Writer w;
             w.u32(newId);
@@ -519,16 +522,28 @@ int main(int argc, char** argv) {
     Bridge b;
     for (int i = 1; i + 1 < argc; ++i)
         if (std::string(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);
+    if (b.wake.fd() < 0) {
+        std::perror("bridge main-thread eventfd");
+        return 1;
+    }
     std::vector<pollfd> polled;
     std::vector<std::uint32_t> owners;  // the instance of each editor descriptor
     for (;;) {
-        // The control socket, and the descriptors open editors watch
-        // (clap.posix-fd-support / the VST3 run loop) with their timers.
-        polled.assign(1, pollfd{b.sock, POLLIN, 0});
-        owners.assign(1, 0);
-        int timeout = 10;
+        // Clear the coalesced wake before consuming work: a request made
+        // during servicing must schedule another pass. Servicing before every
+        // poll also prevents a busy control socket from starving callbacks.
+        (void)b.wake.drain();
         for (auto& [id, slot] : b.instances) {
-            if (!slot->instance->editorOpen()) continue;
+            (void)id;
+            std::lock_guard lock(slot->lifecycle);
+            (void)slot->instance->serviceMainThread();
+        }
+        // Timers and descriptors may be registered without an open editor.
+        // Host death arrives as control-socket HUP; no periodic probe is needed.
+        polled = {{b.sock, POLLIN, 0}, {b.wake.fd(), POLLIN, 0}};
+        owners.assign(2, 0);
+        int timeout = -1;
+        for (auto& [id, slot] : b.instances) {
             for (const auto& [fd, flags] : slot->instance->watchedFds()) {
                 short events = 0;
                 if (flags & CLAP_POSIX_FD_READ) events |= POLLIN;
@@ -536,30 +551,26 @@ int main(int argc, char** argv) {
                 polled.push_back(pollfd{fd, events, 0});
                 owners.push_back(id);
             }
-            const int due = slot->instance->nextTimerMs();
-            if (due >= 0) timeout = std::min(timeout, due);
+            timeout = nearestTimeout(timeout, slot->instance->nextTimerMs());
         }
         const int ready = ::poll(polled.data(), polled.size(), timeout);
-        for (std::size_t i = 1; ready > 0 && i < polled.size(); ++i) {
+        if (ready < 0) {
+            if (errno == EINTR) continue;  // rebuild deadlines and service work
+            break;
+        }
+        for (std::size_t i = 2; ready > 0 && i < polled.size(); ++i) {
             if (!polled[i].revents) continue;
             const auto it = b.instances.find(owners[i]);
             if (it == b.instances.end()) continue;
             std::uint32_t flags = 0;
             if (polled[i].revents & POLLIN) flags |= CLAP_POSIX_FD_READ;
             if (polled[i].revents & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
-            if (polled[i].revents & (POLLERR | POLLHUP)) flags |= CLAP_POSIX_FD_ERROR;
+            if (polled[i].revents & (POLLERR | POLLHUP | POLLNVAL)) flags |= CLAP_POSIX_FD_ERROR;
             std::lock_guard lock(it->second->lifecycle);
             it->second->instance->onFd(polled[i].fd, flags);
         }
-        if (!(polled[0].revents & (POLLIN | POLLHUP | POLLERR))) {
-            // idle: the plugin's own main-thread work (timers, callbacks)
-            for (auto& [id, slot] : b.instances) {
-                (void)id;
-                std::lock_guard lock(slot->lifecycle);
-                (void)slot->instance->serviceMainThread();
-            }
-            continue;
-        }
+        if (polled[0].revents & POLLNVAL) break;
+        if (!(polled[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
         std::uint32_t op = 0;
         std::uint32_t id = 0;
         std::vector<std::uint8_t> payload;

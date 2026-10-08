@@ -30,6 +30,8 @@
 
 namespace supple::host {
 
+class MainThreadWake;  // internal bridge notification relay
+
 struct PluginInfo {
     std::string id, name, vendor, version, description;
     // CLAP by default; VST3 class ids use vst3:<32 hex digits>.
@@ -307,6 +309,10 @@ class Instance {
     // Handles request_callback, request_restart (while active), pending flushes
     // and due timers. Returns true if anything was done.
     bool serviceMainThread();
+    // Bridge-local hook (no effect on remote proxies). Install on main; the
+    // relay must outlive the instance and every plug-in callback thread.
+    // Requests publish their flags before notifying, including from audio.
+    void setMainThreadWake(MainThreadWake& wake);
     // The plug-in asked to be deactivated and reactivated (CLAP request_restart,
     // a VST3 latency change), and the restart waits for processing to stop:
     // the engine takes the instance off its executors, the next
@@ -373,7 +379,7 @@ class Instance {
     std::vector<std::pair<int, std::uint32_t>> watchedFds() const;
     void onFd(int fd, std::uint32_t flags);
     // Milliseconds until the next plugin timer is due (-1: none): the UI
-    // loop's deadline while editors are open.
+    // loop's deadline, including timers registered without an open editor.
     int nextTimerMs() const;
 
     // Log lines the plugin wrote (from any thread), drained on the main thread.

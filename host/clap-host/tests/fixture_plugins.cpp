@@ -17,6 +17,7 @@
 //     (in · 2^-100) · 2^100, exact for |in| >= 2^-26 and zero below it when
 //     process() runs with FTZ/DAZ (ADR-0025).
 #include <clap/clap.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -657,7 +658,7 @@ struct Edge {
     // (both allowed by CLAP), so each byte is atomic.
     std::atomic<std::uint8_t> config[4] = {0, 0, 0, 0};
     std::atomic<int> flushes{0};
-    int timerCalls = 0, activations = 0;
+    int timerCalls = 0, activations = 0, mainCalls = 0;
     std::atomic<int> processCalls{0};
     std::atomic<bool> removed{false};
     std::atomic<bool> processing{false};
@@ -787,7 +788,7 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     if (is->read(is, buf, 4) != 4) return false;
     for (std::size_t i = 0; i < 4; ++i) E(pl)->config[i].store(buf[i]);
     if (buf[0] >= 30) E(pl)->editorValue = buf[1];
-    if (buf[0] == 2) {
+    if (buf[0] == 2 || buf[0] == 43) {
         const auto* timer = static_cast<const clap_host_timer_support_t*>(
             E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_TIMER_SUPPORT));
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[0]);
@@ -890,6 +891,10 @@ void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
     const auto* timer = static_cast<const clap_host_timer_support_t*>(
         edge.host->get_extension(edge.host, CLAP_EXT_TIMER_SUPPORT));
     ++edge.timerCalls;
+    if (edge.config[0] == 43) {
+        const char done = 't';
+        (void)::write(edge.config[1], &done, 1);  // main-thread timer receipt
+    }
     timer->unregister_timer(edge.host, id);
     if (edge.timerCalls == 1) {
         timer->unregister_timer(edge.host, edge.timers[1]);
@@ -927,10 +932,18 @@ void edgeMarkDirty(const clap_plugin_t* pl, std::uint8_t value) {
 }
 const EdgeControl kEdgeControl = {edgeRequestProcess, edgeRescan, edgeClear, edgeRestart,
                                   edgeMarkDirty};
+void CLAP_ABI edgeMain(const clap_plugin_t* pl) {
+    ++E(pl)->mainCalls;
+    if (E(pl)->config[0] == 42) {
+        const char done = 'm';
+        (void)::write(E(pl)->config[1], &done, 1);  // main-thread callback receipt
+    }
+}
 uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) { return E(pl)->config[0] == 5 ? 64 : 0; }
 const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
 
-const void* CLAP_ABI edgeExt(const clap_plugin_t*, const char* id) {
+const void* CLAP_ABI edgeExt(const clap_plugin_t* pl, const char* id) {
+    if (!std::strcmp(id, "supple.test.edge-host")) return E(pl)->host;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     if (!std::strcmp(id, "supple.test.edge-control")) return &kEdgeControl;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kEdgeLatency;
@@ -952,6 +965,7 @@ bool CLAP_ABI edgeStart(const clap_plugin_t* pl) {
 void CLAP_ABI edgeStop(const clap_plugin_t* pl) { E(pl)->processing = false; }
 clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_process_t* p) {
     const auto calls = ++E(pl)->processCalls;
+    if (E(pl)->config[0] == 42) E(pl)->host->request_callback(E(pl)->host);
     edgeHostInput(pl, p->in_events);
     if (E(pl)->config[0] >= 30) edgeEditorOutput(pl, p->out_events, false);
     clap_event_param_value_t param{};
@@ -1348,6 +1362,7 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
     if (!std::strcmp(id, edgeDescriptor()->id)) {
         const clap_plugin_t* p =
             make<Edge>(host, edgeDescriptor(), edgeActivate, edgeProcess, edgeExt);
+        const_cast<clap_plugin_t*>(p)->on_main_thread = edgeMain;
         const_cast<clap_plugin_t*>(p)->start_processing = edgeStart;
         const_cast<clap_plugin_t*>(p)->stop_processing = edgeStop;
         return p;

@@ -1,5 +1,5 @@
 supple_add_library(clap-host
-  SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
+  SOURCES src/main_thread_wake.cpp src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
 
@@ -17,7 +17,7 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(clap-host-fixtures)
   target_compile_options(clap-host-fixtures PRIVATE -Wno-old-style-cast)
 
-  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp tests/test_scan.cpp LABELS rt)
+  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp tests/test_scan.cpp tests/test_main_thread_wake.cpp LABELS rt)
   add_dependencies(clap-host.tests clap-host-fixtures ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")

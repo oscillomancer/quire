@@ -1,6 +1,7 @@
 #include "supple/host/clap_host.h"
 
 #include "bridge_client.h"
+#include "main_thread_wake.h"
 #include "pending_edits.h"
 #include "scan.h"
 #include "vst3_host.h"
@@ -121,6 +122,10 @@ constexpr std::size_t kMaxInputEvents = 8192;
 
 struct Instance::HostState {
     Instance* owner = nullptr;
+    std::atomic<MainThreadWake*> mainWake{nullptr};
+    void notifyMain() SUPPLE_RT {
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
+    }
     clap_host_t host{};
     std::string name, vendor, url, version;
     std::thread::id mainThread = std::this_thread::get_id();
@@ -190,12 +195,19 @@ struct HostCallbacks {
 
     // clap_host
     static const void* CLAP_ABI getExtension(const clap_host_t*, const char* id);
-    static void CLAP_ABI requestRestart(const clap_host_t* h) { S(h)->restartRequested = true; }
+    static void CLAP_ABI requestRestart(const clap_host_t* h) {
+        S(h)->restartRequested = true;
+        S(h)->notifyMain();
+    }
     static void CLAP_ABI requestProcess(const clap_host_t* h) {
         S(h)->processRequested.store(true, std::memory_order_release);
         S(h)->owner->notifyAudio();
+        S(h)->notifyMain();
     }
-    static void CLAP_ABI requestCallback(const clap_host_t* h) { S(h)->callbackRequested = true; }
+    static void CLAP_ABI requestCallback(const clap_host_t* h) {
+        S(h)->callbackRequested = true;
+        S(h)->notifyMain();
+    }
 
     // clap.log
     static void CLAP_ABI log(const clap_host_t* h, clap_log_severity severity, const char* msg) {
@@ -215,10 +227,12 @@ struct HostCallbacks {
             put(msg);
             line.text[n] = 0;
             S(h)->audioLog.push(line);  // dropped when full
+            S(h)->notifyMain();
             return;
         }
         std::lock_guard lock(S(h)->logMutex);
         S(h)->log.push_back(std::string("[") + sev + "] " + (msg ? msg : ""));
+        S(h)->notifyMain();
     }
 
     // clap.thread-check
@@ -232,27 +246,40 @@ struct HostCallbacks {
         S(h)->paramsClear.clear();  // a later rescan re-enables earlier clears
         S(h)->rescanFlags.fetch_or(flags);
         S(h)->rescanned = true;
+        S(h)->notifyMain();
     }
     static void CLAP_ABI paramsClear(const clap_host_t* h, clap_id id,
                                      clap_param_clear_flags flags) {
         S(h)->paramsClear.push_back({id, flags});
+        S(h)->notifyMain();
     }
     static void CLAP_ABI paramsRequestFlush(const clap_host_t* h) {
         S(h)->flushRequested.store(true, std::memory_order_release);
         S(h)->owner->notifyAudio();
+        S(h)->notifyMain();
     }
 
     // clap.state
-    static void CLAP_ABI stateMarkDirty(const clap_host_t* h) { S(h)->stateDirty = true; }
+    static void CLAP_ABI stateMarkDirty(const clap_host_t* h) {
+        S(h)->stateDirty = true;
+        S(h)->notifyMain();
+    }
 
     // clap.latency, clap.tail
-    static void CLAP_ABI latencyChanged(const clap_host_t* h) { S(h)->latencyChanged = true; }
-    static void CLAP_ABI tailChanged(const clap_host_t* h) { S(h)->tailChanged = true; }
+    static void CLAP_ABI latencyChanged(const clap_host_t* h) {
+        S(h)->latencyChanged = true;
+        S(h)->notifyMain();
+    }
+    static void CLAP_ABI tailChanged(const clap_host_t* h) {
+        S(h)->tailChanged = true;
+        S(h)->notifyMain();
+    }
 
     // clap.audio-ports, clap.note-ports
     static bool CLAP_ABI audioPortsRescanSupported(const clap_host_t*, uint32_t) { return false; }
     static void CLAP_ABI audioPortsRescan(const clap_host_t* h, uint32_t) {
         S(h)->restartRequested = true;
+        S(h)->notifyMain();
     }
     static uint32_t CLAP_ABI noteDialects(const clap_host_t*) {
         return CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
@@ -283,17 +310,23 @@ struct HostCallbacks {
         auto* s = S(h);
         s->guiSize.store((std::uint64_t(width) << 32) | height, std::memory_order_release);
         s->guiResize = true;
+        s->notifyMain();
         return true;  // applied by the window owner on its next loop pass
     }
     static bool CLAP_ABI guiRequestShow(const clap_host_t* h) {
         S(h)->guiShow = true;
+        S(h)->notifyMain();
         return true;
     }
     static bool CLAP_ABI guiRequestHide(const clap_host_t* h) {
         S(h)->guiHide = true;
+        S(h)->notifyMain();
         return true;
     }
-    static void CLAP_ABI guiClosed(const clap_host_t* h, bool) { S(h)->guiClosed = true; }
+    static void CLAP_ABI guiClosed(const clap_host_t* h, bool) {
+        S(h)->guiClosed = true;
+        S(h)->notifyMain();
+    }
 
     // clap.posix-fd-support (main thread)
     static bool CLAP_ABI registerFd(const clap_host_t* h, int fd, clap_posix_fd_flags_t flags) {
@@ -321,6 +354,7 @@ struct HostCallbacks {
     // com.suppleaudio.semantic-params
     static void CLAP_ABI semanticChanged(const clap_host_t* h, uint32_t) {
         S(h)->semanticChanged = true;
+        S(h)->notifyMain();
     }
 
     // Event lists
@@ -1099,6 +1133,7 @@ void Instance::stopProcessing() SUPPLE_RT {
     if (vst3_) {
         if (processing_) vst3_->stopProcessing();
         processing_ = false;
+        vst3_->notifyMain();
         return;
     }
     if (remote_) {
@@ -1110,6 +1145,7 @@ void Instance::stopProcessing() SUPPLE_RT {
     AudioThreadScope scope;
     plugin_->stop_processing(plugin_);
     processing_ = false;
+    if (hostState_->restartRequested.load()) hostState_->notifyMain();
 }
 
 void Instance::reset() SUPPLE_RT {
@@ -1432,6 +1468,13 @@ bool Instance::restartPending() const {
     return active_ && hostState_->restartRequested.load();
 }
 
+void Instance::setMainThreadWake(MainThreadWake& wake) {
+    if (remote_) return;
+    if (vst3_) vst3_->setMainThreadWake(wake);
+    if (hostState_) hostState_->mainWake.store(&wake, std::memory_order_release);
+    wake.notify();  // also service requests made during initialization
+}
+
 bool Instance::serviceMainThread() {
     if (vst3_) {
         bool did = vst3_->serviceMainThread();
@@ -1640,8 +1683,7 @@ int Instance::nextTimerMs() const {
     const auto now = std::chrono::steady_clock::now();
     auto next = hostState_->timers.front().next;
     for (const auto& t : hostState_->timers) next = std::min(next, t.next);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count();
-    return static_cast<int>(std::max<std::int64_t>(0, ms));
+    return timerTimeout(next, now);
 }
 
 bool Instance::processRequested() const SUPPLE_RT {
