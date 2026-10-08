@@ -779,6 +779,9 @@ int main(int argc, char** argv) {
         for (const auto& [track, h] : a.trackLayout().heights())
             heights[track.str()] = static_cast<double>(h);
         v["track_heights"] = std::move(heights);
+        json::Value expanded = json::Value::array();  // "Show all takes"
+        for (model::Id item : a.trackLayout().expandedItems()) expanded.push_back(item.str());
+        v["expanded_takes"] = std::move(expanded);
         return v;
     };
     auto arrangeLoad = [&](const json::Value& v) {
@@ -803,6 +806,12 @@ int main(int argc, char** argv) {
             }
         if (const json::Value* f = v.find("follow"); f && f->isString())
             if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
+        a.trackLayout().clearTakesExpanded();
+        if (const json::Value* ex = v.find("expanded_takes"); ex && ex->isArray())
+            for (const json::Value& item : ex->asArray())
+                if (const auto id =
+                        item.isString() ? model::Id::parse(item.asString()) : std::nullopt)
+                    a.trackLayout().setTakesExpanded(*id, true);
     };
     uiFile.add("arrange", arrangeSave, arrangeLoad);
     // Named screensets (gap log #38): panels + the arrange view, by name.

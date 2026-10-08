@@ -100,9 +100,19 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
                     before->plugin.format != after->plugin.format ||
                     before->plugin.version != after->plugin.version;
     }
+    // An expanded item that changed may hold another number of takes now.
+    bool heights = false;
+    if (!expanded_.empty())
+        for (auto id : changedObjects(session_.items, session.items, changes))
+            heights |= expanded_.contains(id);
     session_ = session;
     indexed_ = session.version;
-    if (!geometry) return false;
+    if (!geometry) {
+        if (!heights) return false;
+        pruneExpanded();
+        rebuildGeometry();
+        return true;
+    }
     ++rebuilds_;
     rows_.clear();
     trackRows_.clear();
@@ -149,8 +159,31 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
     // Drop overrides for tracks that are gone (they would never be read again).
     for (auto it = heights_.begin(); it != heights_.end();)
         it = session_.tracks.contains(it->first) ? std::next(it) : heights_.erase(it);
+    pruneExpanded();
     rebuildGeometry();
     return true;
+}
+
+void TrackLayout::setTakesExpanded(model::Id item, bool on) {
+    const model::Item* it = session_.items.find(item);
+    if (on && (!it || it->takes.size() < 2)) return;
+    if (on ? !expanded_.insert(item).second : expanded_.erase(item) == 0) return;
+    rebuildGeometry();
+}
+
+void TrackLayout::clearTakesExpanded() {
+    if (expanded_.empty()) return;
+    expanded_.clear();
+    rebuildGeometry();
+}
+
+bool TrackLayout::pruneExpanded() {
+    const auto before = expanded_.size();
+    std::erase_if(expanded_, [&](model::Id id) {
+        const model::Item* it = session_.items.find(id);
+        return !it || it->takes.size() < 2;
+    });
+    return expanded_.size() != before;
 }
 
 std::optional<std::size_t> TrackLayout::indexOf(model::Id track) const {
@@ -203,9 +236,19 @@ void TrackLayout::rebuildGeometry() {
     yOffsets_.clear();
     rowHeights_.reserve(rows_.size());
     yOffsets_.reserve(rows_.size());
+    // Rows holding an expanded item: a lane per take, each as tall as the row.
+    std::map<model::Id, float> spread;
+    for (model::Id id : expanded_)
+        if (const model::Item* it = session_.items.find(id)) {
+            const float lanes = static_cast<float>(it->takes.size()) * baseHeight(it->track);
+            spread[it->track] = std::max(spread[it->track], kTakeBar + lanes);
+        }
     float y = 0;
     for (const TrackRow& r : rows_) {
-        const float h = r.env ? envHeight() : baseHeight(r.track);
+        float h = r.env ? envHeight() : baseHeight(r.track);
+        if (!r.env)
+            if (const auto found = spread.find(r.track); found != spread.end())
+                h = std::max(h, found->second);
         yOffsets_.push_back(y);
         rowHeights_.push_back(h);
         y += h;

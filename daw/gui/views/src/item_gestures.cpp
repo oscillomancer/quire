@@ -167,6 +167,17 @@ class Ghost : public ui::Node {
                         }
                 break;
             }
+            case ItemGestures::Drag::TakeOut:
+                if (anchor && st.takeLane < anchor->takes.size())
+                    if (auto r = rectFor(*anchor, st.deltaBeats, st.deltaRows, 0, 0)) {
+                        c.fillRect(*r, t.color("focus").withAlpha(0.25f));
+                        c.strokeRect(*r, t.color("focus"), 1.5f);
+                        const model::Take* tk = s.takes.find(anchor->takes[st.takeLane]);
+                        c.text({r->x + 4, r->y + 1, std::max(0.0f, r->w - 8), 14},
+                               tk && !tk->name.empty() ? tk->name : std::string("Take"),
+                               ui::Font::Ui, t.type("caption"), t.color("ink"));
+                    }
+                break;
             case ItemGestures::Drag::TrimLeft:
                 if (anchor)
                     if (auto r = rectFor(*anchor, 0, 0, 0, st.deltaBeats)) {
@@ -598,6 +609,19 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 state_ = State{};
                 return true;
             }
+            // Ctrl below the name bar of an item with several takes: that take
+            // comes out on its own (the lane under the pointer, else the heard one).
+            const model::Item* pressed = itemOf(s, h->item);
+            if ((e.mods & ui::kCtrl) && pressed && pressed->takes.size() > 1 &&
+                e.pos.y >= h->rect.y + 15 && (h->zone == Drag::Move || h->zone == Drag::Comp)) {
+                state_.drag = Drag::TakeOut;
+                std::size_t heard = 0;
+                for (std::size_t k = 0; k < pressed->takes.size(); ++k)
+                    if (pressed->activeTake == pressed->takes[k]) heard = k;
+                state_.takeLane = h->takeLane.value_or(heard);
+                if (root_) root_->capture(&view_);
+                return true;
+            }
             state_.drag = h->zone;
             if (h->takeLane) state_.takeLane = *h->takeLane;
             // The mouse map says what this press does with these modifiers.
@@ -678,6 +702,18 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                          !view_.trackLayout().rows()[static_cast<std::size_t>(target)].env;
                 }
                 state_.deltaRows = ok ? dr : 0;
+                break;
+            }
+            case Drag::TakeOut: {
+                if (!anchor) break;
+                state_.deltaBeats =
+                    std::max(snap(startBeat(s, *anchor) + raw, free_), 0.0) - startBeat(s, *anchor);
+                const auto row = view_.trackLayout().indexOf(anchor->track);
+                const auto target = rowAt(e.pos.y);
+                const auto& rows = view_.trackLayout().rows();
+                if (row && target && !rows[*target].env &&
+                    rows[*target].type == model::StripType::Channel)
+                    state_.deltaRows = static_cast<int>(*target) - static_cast<int>(*row);
                 break;
             }
             case Drag::TrimLeft:
@@ -814,8 +850,9 @@ void ItemGestures::openItemMenu(ui::Point at) {
         items.push_back(std::move(m));
     }
     // The active take's own chain and envelopes (gap log #22).
-    const model::Item* item =
-        itemOf(s, state_.anchor.kind == model::Kind::Item ? state_.anchor : selection_.front());
+    const model::Id itemId =
+        state_.anchor.kind == model::Kind::Item ? state_.anchor : selection_.front();
+    const model::Item* item = itemOf(s, itemId);
     if (item && item->activeTake) {
         const model::Id take = *item->activeTake;
         items.push_back(rule);
@@ -860,6 +897,76 @@ void ItemGestures::openItemMenu(ui::Point at) {
                                  {{command, std::move(args)}});
                     !r && onError)
                     onError(r.error());
+            };
+            items.push_back(std::move(m));
+        }
+    }
+    if (item && item->activeTake) {
+        // The take under the pointer (a take lane), else the heard one.
+        model::Id take = *item->activeTake;
+        if (const auto h = hit(at); h && h->item == itemId && h->takeLane)
+            take = item->takes[*h->takeLane];
+        const model::Take* tk = s.takes.find(take);
+        const std::string name = tk && !tk->name.empty() ? tk->name : take.str();
+        items.push_back(rule);
+        if (item->takes.size() > 1) {
+            ui::MenuItem all;
+            all.label = "Show all takes";
+            all.checked = view_.trackLayout().takesExpanded(itemId);
+            all.run = [this, itemId, on = !all.checked] {
+                view_.trackLayout().setTakesExpanded(itemId, on);
+            };
+            items.push_back(std::move(all));
+            for (auto [label, mode] : {std::pair{"Explode takes onto new tracks", "tracks"},
+                                       {"Explode takes in sequence on this track", "serial"}}) {
+                ui::MenuItem m;
+                m.label = label;
+                m.run = [this, itemId, mode = std::string(mode)] {
+                    if (!run) return;
+                    json::Value args = json::Value::object();
+                    args["item"] = itemId.str();
+                    args["mode"] = mode;
+                    if (auto r = run("Explode takes", {{"item.explode-takes", std::move(args)}});
+                        !r && onError)
+                        onError(r.error());
+                };
+                items.push_back(std::move(m));
+            }
+            ui::MenuItem drop;
+            drop.label = "Delete take \u201c" + name + "\u201d";
+            drop.run = [this, take] {
+                if (!run) return;
+                json::Value args = json::Value::object();
+                args["take"] = take.str();
+                if (auto r = run("Delete take", {{"take.remove", std::move(args)}}); !r && onError)
+                    onError(r.error());
+            };
+            items.push_back(std::move(drop));
+        }
+        // Render through the FX (MIDI through the track's instrument): that
+        // take is heard first when it is not.
+        const bool midi = isMidi(tk);
+        for (auto [label, mode] :
+             {std::pair{midi ? "Convert to audio" : "Render with FX, replacing the audio",
+                        "replace"},
+              {midi ? "Render to audio as a new take" : "Render with FX as a new take", "take"}}) {
+            ui::MenuItem m;
+            m.label = label;
+            m.enabled = tk && tk->source.has_value();
+            m.run = [this, itemId, take, heard = *item->activeTake, mode = std::string(mode)] {
+                if (!run) return;
+                std::vector<EditStep> steps;
+                if (take != heard) {
+                    json::Value pick = json::Value::object();
+                    pick["item"] = itemId.str();
+                    pick["take"] = take.str();
+                    steps.push_back({"take.activate", std::move(pick)});
+                }
+                json::Value args = json::Value::object();
+                args["item"] = itemId.str();
+                args["mode"] = mode;
+                steps.push_back({"item.apply-fx", std::move(args)});
+                if (auto r = run("Render item", steps); !r && onError) onError(r.error());
             };
             items.push_back(std::move(m));
         }
@@ -933,6 +1040,30 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         activate["item"] = target;
         steps.push_back({"take.activate", std::move(activate)});
         runSteps("Comp take", steps);
+        return;
+    }
+    if (state_.drag == Drag::TakeOut) {
+        if (!moved_ || !anchor || anchor->locked || state_.takeLane >= anchor->takes.size() || !run)
+            return;
+        const auto row = view_.trackLayout().indexOf(anchor->track);
+        if (!row) return;
+        const auto target =
+            static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*row) + state_.deltaRows);
+        if (target >= view_.trackLayout().rowCount()) return;
+        json::Value args = json::Value::object();
+        args["take"] = anchor->takes[state_.takeLane].str();
+        args["track"] = view_.trackLayout().rows()[target].track.str();
+        args["position"] = startBeat(s, *anchor) + state_.deltaBeats;
+        auto r = run("Take out take", {{"take.extract", std::move(args)}});
+        if (!r) {
+            if (onError) onError(r.error());
+            return;
+        }
+        if (const json::Value* made = r->find("item"); made && made->isString())
+            if (auto id = model::Id::parse(made->asString())) {
+                selection_ = {*id};
+                changed();
+            }
         return;
     }
     // A click on a fade handle with the cycle_shape modifier (Ctrl) cycles its shape.
@@ -1154,6 +1285,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
             return;
         }
         case Drag::Comp:
+        case Drag::TakeOut:
         case Drag::EnvPoint:
         case Drag::AutoItemMove:
         case Drag::AutoItemLength:

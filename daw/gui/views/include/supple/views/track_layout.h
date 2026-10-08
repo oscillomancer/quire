@@ -80,6 +80,14 @@ class TrackLayout {
     bool hasTrackHeight(model::Id track) const { return heights_.count(track) != 0; }
     // The explicit per-track overrides, by track (saving UI state).
     const std::map<model::Id, float>& heights() const { return heights_; }
+    // "Show all takes" (gui.md §4.3): an item whose takes are spread out
+    // vertically, each in a lane as tall as its track's row; the row grows to
+    // hold them. An item that goes or keeps fewer than two takes drops out.
+    static constexpr float kTakeBar = 17;  // the item's name bar above its take lanes
+    void setTakesExpanded(model::Id item, bool on);
+    bool takesExpanded(model::Id item) const { return expanded_.contains(item); }
+    const std::set<model::Id>& expandedItems() const { return expanded_; }
+    void clearTakesExpanded();
     float heightOf(std::size_t row) const { return rowHeights_[row]; }
     float yOf(std::size_t row) const { return yOffsets_[row]; }  // content space
     float contentHeight() const { return contentHeight_; }
@@ -104,6 +112,8 @@ class TrackLayout {
     std::map<model::Id, std::size_t> trackRows_, envRows_;
     std::set<model::Id> scaledEnvs_;
     std::map<model::Id, float> heights_;
+    std::set<model::Id> expanded_;
+    bool pruneExpanded();  // true when one went
     float globalHeight_ = kDefaultHeight;
     std::vector<float> rowHeights_;
     std::vector<float> yOffsets_;

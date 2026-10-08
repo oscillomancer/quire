@@ -91,6 +91,21 @@ class LaneLabels : public ui::Node {
                     c.strokeRect({r.x + 6, r.y + 6, 5, 6}, ink, 1.0f);
                     c.fillRect({r.x + 4, r.y + 12, 9, 7}, ink);
                 }
+                // Each take lane names its take (the heard one brighter).
+                const ui::Rect full = lanes_.itemRect(i, *item);
+                if (Lanes::showsTakeLanes(full, item->takes.size()))
+                    for (std::size_t k = 0; k < item->takes.size(); ++k) {
+                        const ui::Rect lane = Lanes::takeLaneRect(full, item->takes.size(), k);
+                        if (lane.h < 18 || lane.bottom() < bounds().y || lane.y > bounds().bottom())
+                            continue;
+                        const model::Take* tk = s.takes.find(item->takes[k]);
+                        std::string label =
+                            tk && !tk->name.empty() ? tk->name : "Take " + std::to_string(k + 1);
+                        const bool heard = item->activeTake == item->takes[k];
+                        c.text({textX, lane.y + 1, textW + 22, 13}, label, ui::Font::Ui,
+                               t.type("caption"),
+                               t.color(heard ? "ink" : "ink-quiet").withAlpha(alpha));
+                    }
                 if (item->activeTake) paintTakeEnvelopes(c, i, *item);
             }
         }

@@ -9,9 +9,13 @@
 // MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
 // that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
 // an automation lane: click adds a point, drag moves one (snapped; Shift frees), Alt+click deletes
-// one. A right-click on an item (without dragging) opens its menu: Delete, timebase,
-// take FX and take envelopes. Each gesture previews as a ghost on the root's overlay
-// and commits ONE transaction on release.
+// one. Ctrl-drag below the name bar of an item with several takes takes that take (the one under
+// the pointer, else the heard one) out into an item of its own, on any channel. A right-click on
+// an item (without dragging) opens its menu: Delete, timebase, take FX and envelopes, and for
+// several takes: show all takes, explode them onto tracks or along the track, delete the take
+// under the pointer; and rendering the item through its FX (MIDI to audio) in place or as a new
+// take. Each gesture previews as a ghost on the root's overlay and commits ONE transaction on
+// release.
 #pragma once
 
 #include <filesystem>
@@ -121,7 +125,8 @@ class ItemGestures {
         EnvPoint,
         Comp,
         AutoItemMove,
-        AutoItemLength
+        AutoItemLength,
+        TakeOut  // Ctrl-drag on a take: it leaves its item for a place of its own
     };
     struct State {
         Drag drag = Drag::None;
@@ -130,7 +135,7 @@ class ItemGestures {
         int deltaRows = 0;                // move
         double fadeSeconds = 0;           // fade in/out length being drawn
         bool stretch = false;             // Alt on the right edge: length and play rate together
-        std::size_t takeLane = 0;         // comp: the take lane under the press
+        std::size_t takeLane = 0;         // comp / take out: the take (index) under the press
         double compFrom = 0, compTo = 0;  // comp: the range being swiped (beats)
         ui::Rect marquee{};
         std::vector<model::Id> marqueeBase;

@@ -291,6 +291,26 @@ MIDI thumbnails map offset, rate and loop passes
 as playback does. Fade shapes and curve bends share playback's evaluator.
 Automation drawing samples only visible time and bounds loop glyph work;
 plugin automation interpolates in the playback parameter domain (ADR-0010).
+
+**Takes.** An item with several takes shows each in a lane under its name
+bar when the row is tall enough (at least 14 units a lane), the heard one
+lit and each lane named; a click on a lane hears that take, a swipe comps it
+in, and the badge cycles takes. The item menu (right-click) adds, for
+several takes: **Show all takes** (a check; UI state, saved in the project's
+UI file as `expanded_takes`): the item's row grows to the name bar plus one
+lane per take, each as tall as the row's own height, so every take can be
+seen, heard (click) and edited; **Explode takes onto new tracks** and **…in
+sequence on this track** (item.explode-takes, recording order; this ends
+the takes, Show all takes keeps them); and **Delete take "name"** for the
+take under the pointer (else the heard one; take.remove). For any item with
+material: **Convert to audio** / **Render to audio as a new take** on a
+MIDI take, **Render with FX, replacing the audio** / **Render with FX as a
+new take** on an audio take (item.apply-fx through the take and track FX;
+the take under the pointer is heard first). **Ctrl-drag** below the name
+bar of an item with several takes takes that take (the lane under the
+pointer, else the heard one) out into an item of its own, anywhere on any
+channel (take.extract, one undo step; elsewhere Ctrl-drag still copies).
+
 Commands: `item.*`, `take.*`, `fade.*` (as named in session-model §7),
 `envelope.*`, `marker.*`, `region.*`, `tempo.*`, `transport.*`.
 

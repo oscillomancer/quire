@@ -76,7 +76,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
   chain presets and project templates (with a copy of their audio) are
-  saved, loaded and deleted in the app.
+  saved, loaded and deleted in the app. Takes: show all takes in lanes,
+  explode onto tracks or along the track, delete one, Ctrl-drag one out, and
+  render an item through its FX (MIDI to audio) in place or as a new take.
 - **Agents**: the MCP server for the running app or a headless engine; the
   agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
   included) working on `agent/...` branches with diff, A/B and

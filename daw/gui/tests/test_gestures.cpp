@@ -11,8 +11,10 @@
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/engine/app.h"
+#include "supple/gui/png.h"
 #include "supple/gui/window.h"
 #include "supple/peaks/peaks.h"
+#include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
 #include "supple/views/envelope_lane.h"
@@ -847,6 +849,162 @@ TEST_CASE("take comping: click a take lane to hear it, swipe a range to comp it 
     CHECK(*pieces[1]->activeTake == pieces[1]->takes[heard]);
     CHECK(*pieces[2]->activeTake == pieces[2]->takes[other]);
     CHECK(pieces[1]->position == doctest::Approx(pieces[0]->position + pieces[0]->length));
+}
+
+namespace {
+// The generated item with two takes, given two more: four in all.
+model::Id fourTakeItem(Fixture& f) {
+    std::optional<model::Id> it;
+    for (const auto& e : f.app->head().items)
+        if (e.value->takes.size() == 2) it = e.id;
+    REQUIRE(it);
+    for (int k = 0; k < 2; ++k) {
+        json::Value add = json::Value::object();
+        add["item"] = it->str();
+        add["from"] = f.item(*it).takes[0].str();
+        REQUIRE(f.dispatcher->execute({"take.add", std::move(add), kUi}));
+    }
+    f.sync();
+    REQUIRE(f.item(*it).takes.size() == 4);
+    return *it;
+}
+void rightClick(Fixture& f, ui::Point p) {
+    f.pointer(ui::PointerEvent::Type::Down, p, 3);
+    f.pointer(ui::PointerEvent::Type::Up, p, 3);
+    f.sync();
+}
+// Runs the open item menu's row `index` (by activation: a tall menu can be
+// clamped to the window and scroll).
+void pick(Fixture& f, int index) {
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("item.menu"));
+    REQUIRE(menu);
+    REQUIRE(static_cast<std::size_t>(index) < menu->count());
+    auto activate = menu->onActivate;  // closes (destroys) the menu
+    activate(static_cast<std::size_t>(index));
+    f.sync();
+}
+// A point at height `y` inside `it` that no later item on its track covers.
+ui::Point onItem(Fixture& f, model::Id it, float y) {
+    const ui::Rect r = f.rectOf(it);
+    for (float x = r.x + 8; x < r.right() - 8; x += 4)
+        if (const auto h = f.view->gestures().hit({x, y}); h && h->item == it) return {x, y};
+    FAIL("no free point on " << it.str());
+    return {};
+}
+ui::Point laneAt(Fixture& f, model::Id it, std::size_t lane) {
+    const ui::Rect r = f.rectOf(it);
+    const ui::Rect l = views::Lanes::takeLaneRect(r, f.item(it).takes.size(), lane);
+    return onItem(f, it, l.y + l.h / 2);
+}
+// Item menu rows: Delete, rule, four timebases, rule, Take FX, three take
+// envelopes, rule, then (several takes) Show all takes, the two explodes and
+// Delete take, then the two renders.
+constexpr int kShowAll = 12, kExplodeTracks = 13, kExplodeSerial = 14, kDeleteTake = 15;
+}  // namespace
+
+TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id it = fourTakeItem(f);
+    const double bar = static_cast<double>(views::TrackLayout::kTakeBar),
+                 base = static_cast<double>(views::TrackLayout::kDefaultHeight);
+    const ui::Rect compact = f.rectOf(it);
+    CHECK_FALSE(views::Lanes::showsTakeLanes(compact, 4));  // too many for the row
+    rightClick(f, onItem(f, it, compact.y + compact.h / 2));
+    const auto steps = f.steps();
+    pick(f, kShowAll);
+    CHECK(f.view->trackLayout().takesExpanded(it));
+    CHECK(f.steps() == steps);  // a view, not an edit
+    const auto row = *f.view->trackLayout().indexOf(f.item(it).track);
+    views::Viewport vp = f.view->viewport();  // the tall row in sight
+    vp.scrollY = f.view->trackLayout().yOf(row);
+    f.view->setViewport(vp);
+    f.sync();
+    const ui::Rect r = f.rectOf(it);
+    REQUIRE(views::Lanes::showsTakeLanes(r, 4));
+    REQUIRE(f.view->lanesRect().contains(laneAt(f, it, 3)));
+    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+        (void)gui::writePng(std::filesystem::path(out) / "takes-expanded.png", f.root->readBack());
+    CHECK(f.view->trackLayout().heightOf(row) == doctest::Approx(bar + 4 * base));
+    // A click on the third lane hears the third take.
+    f.click(laneAt(f, it, 2));
+    CHECK(*f.item(it).activeTake == f.item(it).takes[2]);
+    // A right-click on the second lane deletes that take.
+    const model::Id second = f.item(it).takes[1];
+    rightClick(f, laneAt(f, it, 1));
+    pick(f, kDeleteTake);
+    REQUIRE(f.item(it).takes.size() == 3);
+    CHECK(std::find(f.item(it).takes.begin(), f.item(it).takes.end(), second) ==
+          f.item(it).takes.end());
+    CHECK(f.view->trackLayout().heightOf(row) == doctest::Approx(bar + 3 * base));
+    // Shown again: the menu entry is checked and hides them.
+    rightClick(f, onItem(f, it, f.rectOf(it).y + 6));
+    pick(f, kShowAll);
+    CHECK_FALSE(f.view->trackLayout().takesExpanded(it));
+    CHECK(f.view->trackLayout().heightOf(row) == doctest::Approx(base));
+}
+
+TEST_CASE("takes: Ctrl-drag takes one out to another track; explode spreads the rest") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id it = fourTakeItem(f);
+    const model::Id heard = *f.item(it).activeTake;
+    const model::Id home = f.item(it).track;
+    const auto row = *f.view->trackLayout().indexOf(home);
+    std::optional<std::size_t> other;
+    for (std::size_t k = 0; k < f.view->trackLayout().rowCount(); ++k)
+        if (k != row && f.view->trackLayout().rows()[k].type == model::StripType::Channel &&
+            !f.view->trackLayout().rows()[k].env)
+            other = k;
+    REQUIRE(other);
+    const ui::Rect r = f.rectOf(it);
+    const ui::Rect target = f.view->rowRect(*other);
+    const std::size_t items = f.app->head().items.size();
+    const auto steps = f.steps();
+    // Compact (no lanes): the heard take comes out.
+    const ui::Point from = onItem(f, it, r.y + r.h - 8);
+    f.drag(from, {from.x + 2 * f.beatPx(), target.y + 10}, ui::kCtrl);
+    CHECK(f.steps() == steps + 1);
+    REQUIRE(f.app->head().items.size() == items + 1);
+    CHECK(f.item(it).takes.size() == 3);
+    const auto sel = f.view->gestures().selection();
+    REQUIRE(sel.size() == 1);
+    CHECK(f.item(sel[0]).takes == std::vector<model::Id>{heard});
+    CHECK(f.item(sel[0]).track == f.view->trackLayout().rows()[*other].track);
+    // Explode the remaining three along the track, in recording order.
+    const auto takes = f.item(it).takes;
+    rightClick(f, onItem(f, it, f.rectOf(it).y + 6));
+    pick(f, kExplodeSerial);
+    CHECK(f.item(it).takes == std::vector<model::Id>{takes[0]});
+    std::vector<const model::Item*> along;
+    for (const auto& e : f.app->head().items)
+        if (e.value->track == home && e.value->takes.size() == 1 &&
+            std::find(takes.begin(), takes.end(), e.value->takes[0]) != takes.end())
+            along.push_back(e.value.get());
+    REQUIRE(along.size() == 3);
+    std::sort(along.begin(), along.end(),
+              [](auto* a, auto* b) { return a->position < b->position; });
+    for (std::size_t k = 0; k < 3; ++k) CHECK(along[k]->takes[0] == takes[k]);
+}
+
+TEST_CASE("takes: explode onto new tracks; render an item with FX as a new take") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id it = fourTakeItem(f);
+    const std::size_t tracks = f.app->head().tracks.size();
+    rightClick(f, onItem(f, it, f.rectOf(it).y + 6));
+    pick(f, kExplodeTracks);
+    CHECK(f.app->head().tracks.size() == tracks + 3);
+    CHECK(f.item(it).takes.size() == 1);
+    // An audio item with one take: the renders are the last two rows.
+    const model::Id audio = f.itemOnRow(0);
+    REQUIRE(f.item(audio).takes.size() == 1);
+    const ui::Rect ra = f.rectOf(audio);
+    rightClick(f, onItem(f, audio, ra.y + ra.h / 2));
+    pick(f, 13);  // Render with FX as a new take
+    REQUIRE(f.item(audio).takes.size() == 2);
+    const model::Take& made = *f.app->head().takes.find(*f.item(audio).activeTake);
+    CHECK(made.name.ends_with("(FX)"));
 }
 
 TEST_CASE("arrange gestures: Ctrl+click on a fade handle cycles the fade's shape") {
