@@ -484,9 +484,14 @@ underrun timestamp changes (multiple events between polls can be undercounted).
   `PIPEWIRE_QUANTUM` is not used because pipewire-jack maps it to
   `node.force-quantum` + `node.force-rate` (the whole graph).
   `forceBufferSize` (`jack_set_buffer_size`) is the opt-in for benchmarks.
-  The granted rate is the engine's rate; a project at another rate plays at
-  the device's (positions are in seconds, media is resampled to the plan's
-  rate, plugins are activated at it; renders stay at the project's rate). Stop:
+  The granted rate is the engine's rate, read once the client has run its
+  first cycle (at most 1 s after activation): before that pipewire-jack
+  reports its default rate or the latency request's denominator, and its
+  rate callback flips while the client joins (a graph a browser started at
+  44.1 kHz reads as 48 kHz). Only a later reported rate that differs from
+  it is a rate change. A project at another rate plays at the device's
+  (positions are in seconds, media is resampled to the plan's rate, plugins
+  are activated at it; renders stay at the project's rate). Stop:
   the next process cycle makes the final zero-frame callback; if the server
   is gone or no cycle comes within 2 s, the client is deactivated and closed
   and the engine stops its plugins on the main thread. Xruns (server

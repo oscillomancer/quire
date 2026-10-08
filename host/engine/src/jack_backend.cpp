@@ -144,13 +144,17 @@ struct JackBackend::Impl {
     std::vector<std::string> midiNames;
     std::vector<MidiInputEvent> periodMidi, blockMidi;  // capacity reserved
     std::atomic<std::uint64_t> midiDropped{0};
-    Frames rate = 0;
+    // The rate the client runs at (read once it processes) and the latest one
+    // the server reported. PipeWire reports a stale rate until the client's
+    // first cycle (its default, or the latency request's denominator, before
+    // activation, and flips during it), so only a later difference counts.
+    std::atomic<Frames> rate{0}, reportedRate{0};
     Callback callback;
 
     std::atomic<int> state{kRunning};
     std::atomic<std::uint32_t> period{0};
     std::atomic<std::uint64_t> xruns{0}, cycles{0};
-    std::atomic<bool> rateChanged{false}, serverGone{false};
+    std::atomic<bool> serverGone{false};
 
     int process(Frames n) SUPPLE_RT {
         std::array<float*, kMaxPorts> out;
@@ -230,8 +234,7 @@ struct JackBackend::Impl {
         return 0;
     }
     static int sampleRateThunk(Frames n, void* self) {
-        auto* me = static_cast<Impl*>(self);
-        if (n != me->rate) me->rateChanged.store(true, std::memory_order_relaxed);
+        static_cast<Impl*>(self)->reportedRate.store(n, std::memory_order_relaxed);
         return 0;
     }
     static void shutdownThunk(void* self) {
@@ -359,7 +362,6 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
             api->free(static_cast<void*>(ports));
         }
     }
-    impl->rate = api->getSampleRate(impl->client);
     if (options_.forceBufferSize && api->getBufferSize(impl->client) != config.blockSize)
         api->setBufferSize(impl->client, config.blockSize);  // granted or not: period is reported
     impl->period = api->getBufferSize(impl->client);
@@ -375,6 +377,15 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
         active_.store(nullptr);
         return fail("could not activate the client");
     }
+    // The rate is settled once the client has run a cycle (a few ms); a server
+    // that does not run us within a second is asked anyway.
+    const auto settle = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (impl->cycles.load(std::memory_order_relaxed) == 0 &&
+           !impl->serverGone.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < settle)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    impl->rate.store(api->getSampleRate(impl->client), std::memory_order_relaxed);
+    impl->reportedRate.store(impl->rate.load(std::memory_order_relaxed), std::memory_order_relaxed);
 
     if (options_.connectOutputs) {
         // Our outputs to the physical playback ports, in order; a device with
@@ -398,7 +409,7 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     for (std::uint32_t k = 0; k < impl->midiInputs; ++k)  // each device into its port
         api->connect(impl->client, midiSources[k].c_str(), api->portName(impl->midiPorts[k]));
     config_ = config;
-    config_.sampleRate = static_cast<double>(impl->rate);
+    config_.sampleRate = static_cast<double>(impl->rate.load(std::memory_order_relaxed));
     impl_ = std::move(impl);
     return okStatus();
 }
@@ -428,7 +439,8 @@ JackBackend::Stats JackBackend::stats() const {
     s.period = m.period.load(std::memory_order_relaxed);
     s.xruns = m.xruns.load(std::memory_order_relaxed);
     s.cycles = m.cycles.load(std::memory_order_relaxed);
-    s.rateChanged = m.rateChanged.load(std::memory_order_relaxed);
+    s.rateChanged =
+        m.reportedRate.load(std::memory_order_relaxed) != m.rate.load(std::memory_order_relaxed);
     s.serverGone = m.serverGone.load(std::memory_order_relaxed);
     if (m.api->portGetLatencyRange && m.outputs > 0 && !s.serverGone) {
         LatencyRange range{0, 0};

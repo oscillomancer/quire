@@ -63,6 +63,9 @@ std::mutex g_mutex;
 Client* g_client = nullptr;
 std::atomic<Frames> g_period{1024}, g_appliedPeriod{1024};
 std::atomic<Frames> g_rate{48000};
+// Like PipeWire: until a client's first cycle it is told this rate (0: off),
+// and its rate callback flips between it and the real one as it starts.
+std::atomic<Frames> g_staleRate{0};
 std::atomic<bool> g_stalled{false}, g_stallAck{false}, g_failOpen{false};
 std::atomic<std::uint64_t> g_cycles{0};
 std::atomic<Frames> g_bufferSizeRequest{0};
@@ -103,6 +106,9 @@ void run(Client* c) {
             }
             g_midiQueue.clear();
         }
+        if (const Frames stale = g_staleRate.load(); stale && g_cycles.load() == 0 && c->sampleRate)
+            for (Frames r : {g_rate.load(), stale, g_rate.load()})
+                c->sampleRate(r, c->sampleRateArg);
         c->process(n, c->processArg);
         for (Port* p : c->ports) {
             if (!p->output) continue;
@@ -193,7 +199,7 @@ int jack_set_buffer_size_callback(Client* c, int (*cb)(Frames, void*), void* arg
 int jack_set_sample_rate_callback(Client* c, int (*cb)(Frames, void*), void* arg) {
     c->sampleRate = cb;
     c->sampleRateArg = arg;
-    if (cb) cb(g_rate.load(), arg);  // like jack2: once, with the current rate
+    if (cb) cb(g_staleRate.load() ? g_staleRate.load() : g_rate.load(), arg);  // like jack2: once
     return 0;
 }
 
@@ -238,7 +244,10 @@ void jack_port_get_latency_range(Port* p, int mode, Frames* range) {
     range[1] = (p->output && mode == 1) ? 512 : 0;
 }
 
-Frames jack_get_sample_rate(Client*) { return g_rate.load(); }
+Frames jack_get_sample_rate(Client*) {
+    const Frames stale = g_staleRate.load();
+    return stale && g_cycles.load() == 0 ? stale : g_rate.load();
+}
 
 Frames jack_get_buffer_size(Client*) { return g_appliedPeriod.load(); }
 
@@ -300,6 +309,7 @@ void fakejack_set_rate(Frames rate) {
     std::lock_guard lock(g_mutex);
     if (g_client && g_client->sampleRate) g_client->sampleRate(rate, g_client->sampleRateArg);
 }
+void fakejack_set_stale_rate(Frames rate) { g_staleRate = rate; }
 void fakejack_xrun() {
     std::lock_guard lock(g_mutex);
     if (g_client && g_client->xrun) g_client->xrun(g_client->xrunArg);

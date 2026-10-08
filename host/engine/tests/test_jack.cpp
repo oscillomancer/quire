@@ -210,6 +210,28 @@ TEST_CASE("the backend reports the graph's rate, not the requested one") {
     fake.reset();
 }
 
+TEST_CASE("a rate PipeWire reports before the first cycle neither sticks nor restarts") {
+    // A 44.1 kHz graph (a browser started it) tells a starting client 48 kHz,
+    // then flips while it activates. Reading that rate made the engine run at
+    // the wrong one and restart for ever, glitching every other client.
+    FakeJack& fake = fakeJack();
+    fake.reset();
+    fake.setRate(44100);
+    fake.setStaleRate(48000);
+    JackBackend backend(fakeOptions());
+    Recorder rec;
+    BackendConfig cfg;
+    cfg.sampleRate = 48000.0;
+    REQUIRE(backend.start(cfg, rec.callback()));
+    CHECK(backend.config().sampleRate == 44100.0);
+    CHECK_FALSE(backend.stats().rateChanged);
+    CHECK_FALSE(backend.status().restartNeeded);
+    fake.setRate(48000);  // a real change later still restarts
+    CHECK(backend.status().restartNeeded);
+    backend.stop();
+    fake.reset();
+}
+
 TEST_CASE("stop closes the client when no cycle comes") {
     FakeJack& fake = fakeJack();
     fake.reset();

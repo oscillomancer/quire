@@ -22,6 +22,8 @@ struct FakeJack {
 
     void (*setPeriod)(std::uint32_t) = fn<void (*)(std::uint32_t)>("fakejack_set_period");
     void (*setRate)(std::uint32_t) = fn<void (*)(std::uint32_t)>("fakejack_set_rate");
+    // PipeWire's start-up: this rate until the first cycle (0: off).
+    void (*setStaleRate)(std::uint32_t) = fn<void (*)(std::uint32_t)>("fakejack_set_stale_rate");
     void (*xrun)() = fn<void (*)()>("fakejack_xrun");
     void (*stall)(int) = fn<void (*)(int)>("fakejack_stall");
     void (*failOpen)(int) = fn<void (*)(int)>("fakejack_fail_open");
@@ -44,6 +46,7 @@ struct FakeJack {
         failCapture(0);
         setInput(0.0f);
         setRate(48000);
+        setStaleRate(0);
         setPeriod(period);
     }
 };
