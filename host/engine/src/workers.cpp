@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <string>
+
+#include "supple/base/thread.h"
 
 namespace supple::engine::detail {
 
@@ -95,6 +98,7 @@ Workers::Workers(unsigned helpers, Hooks hooks)
     threads_.reserve(helpers);
     for (unsigned i = 0; i < helpers; ++i)
         threads_.emplace_back([this, i] {
+            nameThread("audio-bg-" + std::to_string(i + 1));
             rt::prefaultStack();  // ADR-0025
             loop(i);
         });

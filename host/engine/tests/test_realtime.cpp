@@ -6,11 +6,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <limits>
 #include <optional>
 #include <semaphore>
+#include <set>
 #include <thread>
 #if defined(__SSE2__)
 #include <xmmintrin.h>
@@ -4106,3 +4108,35 @@ TEST_CASE("the device thread's MXCSR is restored after every node" * doctest::de
     std::filesystem::remove_all(dir);
 }
 #endif
+namespace {
+std::set<std::string> threadNames() {
+    std::set<std::string> names;
+    for (const auto& task : std::filesystem::directory_iterator("/proc/self/task")) {
+        std::ifstream comm(task.path() / "comm");
+        std::string name;
+        if (std::getline(comm, name)) names.insert(name);
+    }
+    return names;
+}
+}  // namespace
+
+TEST_CASE("the engine's threads carry their role names") {
+    DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
+    auto pool = makePool();
+    MediaCache media;
+    Engine engine(pool, media, {.workers = 2});
+    REQUIRE(engine.start(backend, {.blockSize = 128}));
+    REQUIRE(engine.liveHelpers() == 2);
+    const std::set<std::string> want = {"audio-dummy", "audio-render", "audio-bg-1",
+                                        "audio-bg-2",  "audio-live-1", "audio-live-2"};
+    auto named = [&] {
+        const auto names = threadNames();
+        return std::includes(names.begin(), names.end(), want.begin(), want.end());
+    };
+    // Each thread names itself as it starts; the deadline only bounds a failure.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!named() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(named());
+    engine.stop();
+}

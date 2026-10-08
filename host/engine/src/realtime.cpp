@@ -11,6 +11,8 @@
 #include <set>
 #include <system_error>
 
+#include "supple/base/thread.h"
+
 #include "live_workers.h"
 #include "meters.h"
 #include "plan.h"
@@ -91,6 +93,7 @@ Status DummyBackend::start(const BackendConfig& config, Callback callback) {
     running_ = true;
     if (options_.mode == Mode::Thread) {
         thread_ = std::thread([this] {
+            nameThread("audio-dummy");
             const auto period =
                 std::chrono::duration<double>(config_.blockSize / config_.sampleRate);
             auto next = std::chrono::steady_clock::now();
@@ -250,6 +253,7 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
         renderer_ = std::thread([this, first] {
+            nameThread("audio-render");
             rt::prefaultStack();  // ADR-0025
             rendererLoop(first);
         });

@@ -20,6 +20,7 @@
 #include "plan.h"
 #include "supple/base/environment.h"
 #include "supple/base/files.h"
+#include "supple/base/thread.h"
 #include "supple/engine/jack.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
@@ -52,6 +53,7 @@ class BenchBackend final : public Backend {
         }
         running_ = true;
         thread_ = std::thread([this] {
+            nameThread("audio-paced");
             const auto period = std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(config_.blockSize / config_.sampleRate));
             auto next = Clock::now();

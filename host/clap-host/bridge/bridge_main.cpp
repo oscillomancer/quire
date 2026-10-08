@@ -24,6 +24,7 @@
 #include "../src/bridge_protocol.h"
 #include "../src/scan.h"
 #include "supple/base/rt.h"
+#include "supple/base/thread.h"
 #include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -288,6 +289,7 @@ struct Bridge {
                 }
                 const std::uint32_t first = hdr->request.load(std::memory_order_acquire);
                 audio = std::thread([&slot, first] {
+                    nameThread("audio-bridge");
                     rt::prefaultStack();  // ADR-0025
                     slot.audioLoop(first);
                 });

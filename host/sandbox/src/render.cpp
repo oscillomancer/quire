@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "supple/base/rt.h"
+#include "supple/base/thread.h"
 #include "supple/dsp/dsp.h"
 
 namespace supple::sandbox {
@@ -295,6 +296,7 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     }
 
     std::thread audio([&] {
+        supple::nameThread("audio-offline");
         bool started = true;
         for (host::Instance* in : chain) {
             if (settings.resetBeforeRender) in->reset();

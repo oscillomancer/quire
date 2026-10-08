@@ -224,6 +224,18 @@ helpers. The backend supplies the device callback's scheduling. DSP tasks
 are RT-safe; ADR-0013 separately permits synchronous bridge futex wake/wait
 with a failure deadline on background threads, never in the device callback.
 
+**Thread names.** Every audio thread the host creates names itself when it
+starts (`nameThread`, core-base `supple/base/thread.h`; Linux keeps 15 bytes),
+so `ps -L`, `top -H`, debuggers and profilers tell them apart. The names carry
+the role, never the product: `audio-render` (renderer), `audio-bg-N`
+(background/offline pool helper N, from 1), `audio-live-N` (live helper N),
+`audio-bridge` (a bridge process's per-instance audio thread), `audio-dummy`
+(the dummy backend's thread), `audio-recorder` (recording writer),
+`audio-offline` (offline render thread, engine and sandbox) and `audio-paced`
+(the benchmark's paced device). The JACK callback thread belongs to the JACK
+library (PipeWire's `data-loop.N`) and keeps its name. `pw-top` lists graph
+nodes, not threads; it shows the JACK client name.
+
 **Live pool (ADR-0024).** `LiveWorkers` shares the graph/ready-queue
 representation, but never calls the blocking background executor. Each segment
 publishes its immutable transport, device inputs and frontier buffers, opens

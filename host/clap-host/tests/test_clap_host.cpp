@@ -16,6 +16,8 @@
 #include <cmath>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -1054,6 +1056,39 @@ TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     r.stopProcessing();
     l.stopProcessing();
     CHECK_FALSE(r.failed());
+    r.deactivate();
+}
+
+namespace {
+// The threads of process `pid` with name `name` (by /proc/<pid>/task/<tid>/comm).
+std::vector<pid_t> tasksNamed(int pid, std::string_view name) {
+    std::vector<pid_t> tasks;
+    std::error_code ec;
+    const auto dir = std::filesystem::path("/proc") / std::to_string(pid) / "task";
+    for (const auto& task : std::filesystem::directory_iterator(dir, ec)) {
+        std::ifstream comm(task.path() / "comm");
+        std::string text;
+        if (std::getline(comm, text) && text == name)
+            tasks.push_back(static_cast<pid_t>(std::stol(task.path().filename().string())));
+    }
+    return tasks;
+}
+template <class Predicate>
+bool eventually(Predicate predicate) {  // the deadline only bounds a failure
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!predicate() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return predicate();
+}
+}  // namespace
+
+TEST_CASE("a bridged instance's audio thread is named audio-bridge") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
+    REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
+    Instance& r = **remote;
+    REQUIRE(r.activate(48000, 1, 256).ok());
+    CHECK(eventually([&] { return tasksNamed(r.bridgePid(), "audio-bridge").size() == 1; }));
     r.deactivate();
 }
 

@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "supple/base/files.h"
+#include "supple/base/thread.h"
 #include "supple/json/json.h"
 
 namespace supple::engine::detail {
@@ -310,6 +311,7 @@ void Recorder::updateHeaders() {
 }
 
 void Recorder::writerLoop() {
+    nameThread("audio-recorder");
     std::vector<float> scratch(8192 * 16);
     auto lastHeader = std::chrono::steady_clock::now();
     while (!stop_.load(std::memory_order_acquire)) {

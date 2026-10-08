@@ -33,6 +33,7 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   actionable OS failures (bridges excluded; cleanup also drops plug-in locks);
   a separate default-off 20 µs CPU idle-latency request with close-based
   cleanup and permission diagnostics (real-device validation is user-only);
+  audio threads named by role (`audio-render`, `audio-bg-N` and others);
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
