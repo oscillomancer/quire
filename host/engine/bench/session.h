@@ -8,6 +8,8 @@ Status buildSession(EngineApp& app, json::Value recipe, int tracks);
 Status buildEffectSession(EngineApp& app, const std::string& plugin,
                           const std::filesystem::path& input, int tracks, bool live,
                           int fxPerTrack);
+// Every FX of the session runs in this isolation mode (fx.set isolation).
+Status isolateAll(EngineApp& app, const std::string& isolation);
 // Service one model tick; false if a device restart retired the expected engine.
 bool serviceTick(EngineApp& app, const Engine* expected);
 // REAPER consumes the model's compiled MIDI and CLAP-saved opaque states.
