@@ -43,3 +43,4 @@ current state.
 | [0022](0022-strip-polarity-and-mono.md) | Strip polarity and mono | Accepted |
 | [0023](0023-background-worker-participation.md) | Background worker participation and parking | Accepted |
 | [0024](0024-live-multiprocessing.md) | Live callback multiprocessing | Accepted |
+| [0025](0025-floating-point-environment.md) | Engine floating-point environment and first touch | Accepted |
