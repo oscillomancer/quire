@@ -174,49 +174,41 @@ the RT thread frees memory.
 
 ### 2.1 Live and anticipative regions
 
-A node is **live** when its output this cycle depends on something only
-known now: hardware inputs (armed or input-monitored tracks), the MIDI input
-for a monitored instrument, or a live-flagged track (plugin GUI open —
-configurable, default on; open MIDI editor with preview — configurable). Live
-propagates downstream: any node fed by a live node is live (the master is
-live whenever anything is live). All other nodes are **anticipative**.
+A node is **live** when it consumes monitored hardware audio/MIDI or armed
+audio input (including an input FX chain). Live classification propagates
+downstream, including sends and the master. All other nodes are anticipative.
+Opening a plug-in GUI or MIDI editor does not currently change classification;
+editor/automation eligibility preferences remain planned (ADR-0014).
 
-- **Anticipative nodes** render ahead of the playhead on worker threads into
-  per-node SPSC ring buffers, `render_ahead` long (default **200 ms**,
-  REAPER's default), in larger blocks (default 1024 samples). The RT thread
-  consumes their output at device block size. Edits that reach an
-  anticipative node (parameter changes from the UI) take effect at the
-  render-ahead horizon — like REAPER — unless the node is live-flagged.
-  Seeking or a structural edit flushes the rings and restarts render-ahead
-  from the new position (brief pre-roll; the RT thread outputs silence for
-  a node whose ring is not yet filled, counted as an anticipation miss).
-- **Live nodes** run inside the audio callback at device block size, in
-  topological order, parallelized over the worker pool when
-  `live_multiprocessing` is enabled (default: on when the live region has
-  ≥ 2 independent nodes of meaningful cost).
-
-Eligibility knobs mirror REAPER's (research doc, Addendum 2): anticipate
-tracks without FX (default off: nothing to gain), tracks with open MIDI
-editors (default off), tracks in touch/latch/write automation (default on).
-The current classification of every node is queryable
-(`engine.graph {detail}`) and emitted in engine stats.
+- **Anticipative nodes** run on the renderer and background worker pool in
+  larger blocks (default 1024 samples), up to **200 ms** ahead. A nonsplit
+  graph publishes its master into an SPSC ring; a split graph publishes each
+  renderer-to-live frontier edge into a ring. The callback consumes those
+  buffers at device block size. Parameter edits can take effect at that
+  horizon. A seek/structural edit establishes a new epoch and prerolls;
+  starvation after priming counts as an anticipation miss.
+- **Live nodes** run serially in topological order in the device callback.
+  With anticipation disabled the entire graph runs there serially. Live
+  multiprocessing and its preferences are not implemented yet. Synchronous
+  bridged stages pass through on live nodes, with a warning (§5).
 
 ### 2.2 Worker pool
 
-`N = max(1, cores − 2)` workers by default (10 cores here → 8), each with a
-lock-free work-stealing deque; tasks are `(node, block range)` with atomic
-dependency counters. Workers sleep on a futex when idle; wakes use
-`rt::wake()` (the one sanctioned RT syscall). Anticipative work runs at
-normal-but-elevated priority; live work at RT priority (SCHED_FIFO via rtkit
-if available, reported otherwise — never by changing system config).
+The background/offline pool has `max(0, cores − 3)` helper threads by default;
+its submitting thread also executes tasks. `EngineOptions::workers` can
+override the helper count. A bounded MPMC ready queue and atomic dependency
+counters distribute nodes; input summation stays in fixed graph order.
+Helpers wait using atomic wait/notify between jobs. During a job, idle
+participants briefly spin then yield until the graph completes; the submitter
+waits for participating helpers to leave before reusing its job state.
 
-The RT thread never blocks on a worker: for live parallelism it enqueues
-tasks, then **helps** (pops and runs tasks itself); it spins only on tasks
-already in progress elsewhere, up to a deadline (default 50 % of the block
-period); if a live task misses the deadline the RT thread finishes that
-cycle without it (the node outputs silence for that block, counted as a
-live-scheduling miss — this should never happen in normal operation and is
-a benchmark failure).
+The engine sets no explicit priority or affinity on the renderer or these
+helpers. The backend supplies the device callback's scheduling. DSP tasks
+are RT-safe; ADR-0013 separately permits synchronous bridge futex wake/wait
+with a failure deadline on background threads, never in the device callback.
+A callback wake primitive, RT live helpers and fork/join live scheduling
+require a subsequent implementation and ADR; there is no late-output discard
+path in the current engine.
 
 ### 2.3 The RT cycle
 
@@ -421,7 +413,7 @@ loop are restored; playback stays stopped.
   byte-identical; real-time capture vs offline null.
 - **B5 edit responsiveness:** 1000 random edits via the bus while playing:
   main-thread time per edit (p95 < 2 ms), no xruns, plan swap latency.
-- **B6 isolation:** crash test (§5) + CPU overhead of pipelined bridge vs
+- **B6 isolation:** crash test (§5) + CPU overhead of synchronous background bridge vs
   in-process for 16 instances.
 
 Results are recorded with kernel, PipeWire version, quantum actually
@@ -430,7 +422,8 @@ granted, and CPU governor (read-only facts).
 B1/B2 tooling: [tools/bench/README.md](../../tools/bench/README.md).
 The command-built shared session, paced search and REAPER offline generator
 are dry-verifiable. Real measurements require `SUPPLE_AUDIO_DEVICE_TEST=1`
-exactly; no real-device acceptance numbers have been recorded yet. The
+exactly. Historical device results are in `docs/benchmarks/b1.md` and
+`b2.md`; their recorded revision, settings and duration bound the claims. The
 search retains every trial, independently confirms its candidate, and labels
 a passing search cap as a lower bound. REAPER counts observed audio/media
 underrun timestamp changes (multiple events between polls can be undercounted).

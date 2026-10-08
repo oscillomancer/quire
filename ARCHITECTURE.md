@@ -82,8 +82,10 @@ host, daw or plugins; plugins use only header-light libs.
 - **Worker threads** — execute graph partitions in parallel (lock-free work
   distribution with atomic dependency counters) and anticipative render-ahead
   for tracks that are not live (not armed / not input-monitored), with larger
-  internal blocks, into lock-free ring buffers the RT thread consumes. Same RT
-  rules.
+  internal blocks, into lock-free ring buffers the RT thread consumes. DSP
+  tasks follow the RT rules, with the background-only bridge exception below.
+  The current pool serves anticipative and offline work; live nodes run serially
+  in the callback (ADR-0012/0014).
 - **Model thread** — the only writer of the session. Runs the command bus,
   compiles versions into `RenderPlan`s, reclaims retired plans, services
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns
@@ -108,11 +110,14 @@ model: two kinds of channel, never confused:
 - **Lossy** channels for telemetry only (meters, scopes, analysis frames):
   SPSC rings that drop the newest item on overflow and count drops.
 
-Nothing ever blocks the RT thread. The one sanctioned RT syscall is a
-non-blocking wake (`FUTEX_WAKE` / eventfd write) through a single reviewed
-wrapper `supple::rt::wake()` (rtsan-exempted inside it), used to wake worker
-threads and plugin bridge processes; RT threads never *wait* on anything
-but bounded spins with deadlines.
+The device callback never blocks or calls the synchronous bridge. ADR-0013
+sanctions a narrower exception for background rendering: bridge calls wake a
+child with a futex, spin briefly, then wait with a bounded failure deadline,
+inside `supple::rt::ScopedSanctionedSyscall`. This exception does not authorize
+waits or synchronous bridge calls in the device callback. A nonblocking
+`supple::rt::wake()` wrapper for callback-to-worker notification is a planned
+primitive, not an existing API. The background pool currently uses atomic
+wait/notify between jobs; it does not participate in live callback execution.
 
 **Main-thread budget.** The main thread is the UI thread, the model writer
 and CLAP's plugin main thread (plugin GUIs require it). It stays responsive
