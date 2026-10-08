@@ -192,7 +192,7 @@ void PreferencesDialog::open() {
             threads_->bounds());
     };
     form->emplace<ui::Label>("prefs.threads.note",
-                             "Background rendering; applies on next engine start.", ui::Font::Ui,
+                             "Live and background; applies on next engine start.", ui::Font::Ui,
                              "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
 

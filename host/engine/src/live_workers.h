@@ -1,0 +1,54 @@
+// Callback-only fork-join executor (ADR-0024). The background Workers pool
+// parks within jobs and must never be called from the device callback.
+#pragma once
+
+#include "supple/base/result.h"
+#include "workers.h"
+
+namespace supple::engine {
+class Backend;
+namespace detail {
+
+class LiveWorkers {
+  public:
+    using Fn = Workers::Fn;
+    enum class Event { Join, Leave, Idle, JoinWait };
+    struct Hooks {
+        void (*event)(void*, Event) = nullptr;
+        void* context = nullptr;
+    };
+    explicit LiveWorkers(unsigned helpers);
+    LiveWorkers(unsigned helpers, Hooks hooks);
+    ~LiveWorkers();
+    LiveWorkers(const LiveWorkers&) = delete;
+    LiveWorkers& operator=(const LiveWorkers&) = delete;
+
+    unsigned helpers() const { return static_cast<unsigned>(threads_.size()); }
+    // Main thread, before publication: CPU capacity and backend RT scheduling.
+    static unsigned maxHelpers();
+    Status configure(Backend& backend);
+    // One callback at a time. Every helper has departed when this returns.
+    void run(TaskGraph& graph, Fn fn, void* context) SUPPLE_RT;
+
+  private:
+    void shutDown();
+    void loop(unsigned index);
+    void help(TaskGraph& graph, Fn fn, void* context) SUPPLE_RT;
+    void event(Event e) {
+        if (hooks_.event) hooks_.event(hooks_.context, e);
+    }
+    struct alignas(64) Slot {
+        std::atomic<std::uint32_t> sequence{0};
+    };
+    std::unique_ptr<Slot[]> slots_;
+    std::vector<std::thread> threads_;
+    Hooks hooks_;
+    std::atomic<unsigned> active_{0};
+    std::atomic<bool> quit_{false};
+    TaskGraph* job_ = nullptr;
+    Fn fn_ = nullptr;
+    void* context_ = nullptr;
+};
+
+}  // namespace detail
+}  // namespace supple::engine

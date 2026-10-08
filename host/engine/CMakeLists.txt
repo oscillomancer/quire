@@ -1,7 +1,7 @@
 add_subdirectory(model)
 
 supple_add_library(engine
-  SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/realtime.cpp src/recording.cpp
+  SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
           src/stretch.cpp src/meters.cpp
           src/jack_backend.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
@@ -22,7 +22,7 @@ if(SUPPLE_BUILD_TESTS)
 
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
-                   tests/test_jack.cpp tests/test_workers.cpp tests/test_meters.cpp LABELS rt SPLIT)
+                   tests/test_jack.cpp tests/test_workers.cpp tests/test_live_workers.cpp tests/test_meters.cpp LABELS rt SPLIT)
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   add_dependencies(engine.tests clap-host-fixtures clap-host-vst3-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)

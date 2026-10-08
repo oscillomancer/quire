@@ -84,8 +84,8 @@ host, daw or plugins; plugins use only header-light libs.
   for tracks that are not live (not armed / not input-monitored), with larger
   internal blocks, into lock-free ring buffers the RT thread consumes. DSP
   tasks follow the RT rules, with the background-only bridge exception below.
-  The current pool serves anticipative and offline work; live nodes run serially
-  in the callback (ADR-0012/0014).
+  The background pool serves anticipative and offline work. A separate live
+  pool helps the callback with a fork-join per segment (ADR-0024).
 - **Model thread** — the only writer of the session. Runs the command bus,
   compiles versions into `RenderPlan`s, reclaims retired plans, services
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns
@@ -114,9 +114,11 @@ The device callback never blocks or calls the synchronous bridge. ADR-0013
 sanctions a narrower exception for background rendering: bridge calls wake a
 child with a futex, spin briefly, then wait with a bounded failure deadline,
 inside `supple::rt::ScopedSanctionedSyscall`. This exception does not authorize
-waits or synchronous bridge calls in the device callback. A nonblocking
-`supple::rt::wake()` wrapper for callback-to-worker notification is a planned
-primitive, not an existing API. The background pool currently uses atomic
+waits or synchronous bridge calls in the device callback. ADR-0024 additionally
+sanctions `supple::rt::wake()`, a nonblocking private futex wake for live
+helpers. The callback executes ready nodes and joins using atomics only;
+helpers park between segments, and every helper must depart before plan
+state is reused. A late helper makes the cycle late; no output is discarded. The background pool currently uses atomic
 wait/notify between jobs and when no task is ready. Participation is bounded
 by graph dependencies and departure is joined explicitly (ADR-0023); this pool
 does not participate in live callback execution.

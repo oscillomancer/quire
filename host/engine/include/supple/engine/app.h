@@ -67,6 +67,8 @@ struct EngineStatus {
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;
+    std::int64_t liveHelpers = 0;
+    std::vector<std::string> warnings;
     MeterDrops meterDrops;                       // meter entries dropped by a full ring
     std::vector<std::string> failedFx;           // isolated instances whose bridge crashed or hung
     std::int64_t dropped = 0, voiceDropped = 0;  // plug-in output/voice transport
@@ -233,7 +235,7 @@ class EngineApp : public cmd::Host {
     // On a backend the app owns: "jack" (the audio device, at the graph's
     // rate) or "dummy" (no device, paced like one, at the project's rate).
     Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
-    // App-wide background execution limit, including the submitting renderer.
+    // App-wide execution limit per background/live pool, including its caller.
     // 0: Automatic; 1..64: maximum threads. Applies on the next engine start
     // when EngineOptions::workers is -1; explicit helper counts take precedence.
     unsigned audioThreadLimit() const { return audioThreadLimit_; }

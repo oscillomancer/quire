@@ -518,14 +518,15 @@ leave the head version unchanged.
   auto; `preferences.json`, supple.preferences/1.1, sets
   `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
   wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
-  modifiers. **Audio processing threads** is an advanced background-rendering
-  override: Automatic (default) or a limit, including the renderer. The menu
+  modifiers. **Audio processing threads** is an advanced live/background
+  override: Automatic (default) or a limit per pool including its submitting
+  thread; Limit 1 is serial. The menu
   offers 1, 2, 4, 8, 16, 32 and 64; `audio_threads` accepts any integer 1..64,
   with 0 meaning Automatic. Automatic uses the hardware-derived capacity and
-  graph-aware participation (engine.md §2.2, ADR-0023). A note says it applies
+  graph-aware participation (engine.md §2.2, ADR-0023/0024). A note says it applies
   on the next engine start; changing it never restarts playback immediately.
-  It does not affect live callback execution or offline export's separate
-  thread setting. Version 1.0 files remain readable; missing `audio_threads`
+  The limit applies independently to each pool, not total process threads;
+  offline export keeps its separate thread setting. Version 1.0 files remain readable; missing `audio_threads`
   means 0, and saves write canonical 1.1. Invalid types/ranges return
   `preferences.audio_threads` at `/audio_threads` with a corrective hint;
   a failed save leaves the effective and displayed thread setting unchanged.

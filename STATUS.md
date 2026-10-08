@@ -26,7 +26,8 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   real-time output bit-identical to them; anticipative rendering for
   non-live tracks (ADR-0012) and a live region for monitored tracks
   (ADR-0014); a DAG worker pool with graph-bounded participation and idle
-  parking (ADR-0023), plus an Automatic/limit background-thread preference;
+  parking (ADR-0023), a separate live callback fork-join pool (ADR-0024)
+  with FIFO JACK helpers and an Automatic/limit audio-thread preference;
   plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
@@ -87,8 +88,9 @@ Engine and hosting:
 - Without anticipation, a single Orrery chain can miss deadlines at 64
   frames although average load is low (per-block bursts at chord changes);
   the harness now exposes callback tails for further profiling.
-- Live nodes run in the device callback on one thread (no live
-  multiprocessing).
+- Live multiprocessing requires at least two usable CPUs and successful
+  helper scheduling; otherwise the engine reports a warning and runs serially.
+  A serial plug-in chain cannot benefit, and a stalled helper stalls its cycle.
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.
@@ -140,8 +142,7 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 ## Planned
 
 - Choose a project license before publishing the repository.
-- Profile the 64-frame worst case; a pipelined bridge mode; live
-  multiprocessing.
+- Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload) and a DSP scripting
   language.

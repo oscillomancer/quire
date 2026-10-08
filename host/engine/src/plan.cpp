@@ -1,4 +1,5 @@
 #include "plan.h"
+#include "live_workers.h"
 #include "supple/model/fade_shape.h"
 #include "supple/model/source_mapping.h"
 
@@ -1144,7 +1145,8 @@ Status prepare(Plan& p, const Session& s) {
     };
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         (p.nodes[i].live ? p.liveNodes : p.rendererNodes).push_back(i);
-        task[i] = static_cast<std::uint32_t>(p.rendererNodes.size() - 1);
+        task[i] = static_cast<std::uint32_t>(
+            (p.nodes[i].live ? p.liveNodes : p.rendererNodes).size() - 1);
         forEachStage(p.nodes[i], [&](const Stage& st) {
             if (runs(st.instance))
                 (p.nodes[i].live ? p.liveInstances : p.rendererInstances).push_back(st.instance);
@@ -1157,6 +1159,14 @@ Status prepare(Plan& p, const Session& s) {
     }
     p.rendererGraph = std::make_unique<TaskGraph>();
     p.rendererGraph->build(rdeps);
+    std::vector<std::vector<std::uint32_t>> ldeps;
+    for (std::size_t i : p.liveNodes) {
+        ldeps.emplace_back();
+        for (std::uint32_t d : deps[i])
+            if (p.nodes[d].live) ldeps.back().push_back(task[d]);
+    }
+    p.liveGraph = std::make_unique<TaskGraph>();
+    p.liveGraph->build(ldeps);
     for (auto* list : {&p.rendererInstances, &p.liveInstances}) {
         std::sort(list->begin(), list->end());
         list->erase(std::unique(list->begin(), list->end()), list->end());
@@ -2153,6 +2163,20 @@ void runNode(void* ctx, std::uint32_t task) SUPPLE_RT {
         b->ok.store(false, std::memory_order_relaxed);
 }
 }  // namespace
+
+bool processCallbackBlock(LiveWorkers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
+                          bool playing, bool split, const void* self,
+                          const LoopRange* loop) SUPPLE_RT {
+    host::Transport transport = transportAt(p, pos, loop);
+    transport.playing = playing;
+    BlockRun run{&p, pos, n, &transport, split ? &p.liveNodes : nullptr, self};
+    TaskGraph& graph = split ? *p.liveGraph : *p.graph;
+    if (workers)
+        workers->run(graph, &runNode, &run);
+    else
+        for (std::uint32_t i = 0; i < graph.size(); ++i) runNode(&run, i);
+    return run.ok.load(std::memory_order_relaxed);
+}
 
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
                           const void* self, const LoopRange* loop, bool playing) {

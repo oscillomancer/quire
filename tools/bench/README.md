@@ -75,13 +75,15 @@ noise/tone/burst fixture on each track at −18 dB. The driver generates that
 WAV with `tools/reaper-check/check.py::test_signal`, retaining its hash and the
 module hash. `--live on` arms/monitors all effect tracks; `--fx-per-track N`
 creates a serial chain for comparison with independent tracks. `--workers N`
-controls background helpers (-1 automatic, 0 caller only). Direct `engine-bench`
+controls each pool's helper capacity (-1 automatic, 0 caller only);
+`live_helpers` reports the enabled live capacity after backend setup. Direct `engine-bench`
 use additionally requires `--input WAV` (four seconds, stereo, 48 kHz).
 No third-party binary is copied into or distributed with the repository.
 Stock session export/B2 remains the original MIDI fixture.
 
-B1 run schema **`supple.capacity-run/2.0`** adds `callback` and `render_job`
-objects (samples, dropped, frames, p50/p99/p999/max/mean in microseconds,
+B1 run schema **`supple.capacity-run/2.1`** retains the 2.0 timings and adds
+`live_helpers` (enabled capacity after scheduling setup). The timing fields are
+`callback` and `render_job` objects (samples, dropped, frames, p50/p99/p999/max/mean in microseconds,
 load_percent and over_budget), `ring_low_water_frames`, `ring_observations`,
 output_peak and process CPU/fault deltas. p999 means p99.9; quantiles use nearest
 rank. Empty distributions/unsampled ring watermarks are null, not zero. Whole

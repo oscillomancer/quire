@@ -189,6 +189,8 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
         .field("anticipative", &EngineStatus::anticipative, schema::boolean())
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
+        .field("live_helpers", &EngineStatus::liveHelpers, schema::integer())
+        .field("warnings", &EngineStatus::warnings, schema::arrayOf(schema::string()))
         .field("meter_drops", &EngineStatus::meterDrops, meterDropsSchema())
         .field("failed_fx", &EngineStatus::failedFx, schema::arrayOf(schema::string()))
         .field("dropped", &EngineStatus::dropped, schema::integer())
@@ -3508,9 +3510,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
             "everything in the audio callback. The engine runs at the device's rate (media "
-            "is resampled; renders stay at the project's rate). Background thread capacity "
+            "is resampled; renders stay at the project's rate). Background and live thread "
+            "capacities "
             "follows the app's Audio processing threads preference (Automatic by default); "
-            "live nodes still run serially.";
+            "live helpers join each callback with no added latency.";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
@@ -3528,7 +3531,7 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
-                     "anticipative": true, "anticipation_misses": 0,
+                     "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>", "warnings": [],
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
                      "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
              "empty"}};
@@ -3612,7 +3615,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             "away; engine.stop and engine.start again. meter_drops: meter entries a full ring "
             "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
             "never audio. dropped/voice_dropped count lost plug-in output/voice records. "
-            "failed_errors adds structured code, message, path and hint to each failure. "
+            "live_helpers is the enabled live helper capacity; warnings includes scheduling "
+            "fallback "
+            "and plan warnings with corrective actions. failed_errors adds structured code, "
+            "message, path and hint to each failure. "
             "failed_fx: isolated plugins whose "
             "process crashed or hung (silent now; fx.restart re-creates them).";
         c.tags = {"engine"};
@@ -3622,7 +3628,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
-                     "anticipative": false, "anticipation_misses": 0,
+                     "anticipative": false, "anticipation_misses": 0, "live_helpers": 0, "warnings": [],
                      "meter_drops": {"renderer": 0, "callback": 0}, "failed_fx": [],
                      "dropped": 0, "voice_dropped": 0, "failed_errors": []})"),
                        "empty"}};

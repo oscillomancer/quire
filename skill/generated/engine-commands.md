@@ -967,7 +967,7 @@ Result:
 
 Start real-time playback on the audio device (jack) or without one (dummy).
 
-backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background thread capacity follows the app's Audio processing threads preference (Automatic by default); live nodes still run serially.
+backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1025,6 +1025,15 @@ Kind: `action`. Exposure: `mcp-tool`.
     "anticipation_misses": {
       "type": "integer"
     },
+    "live_helpers": {
+      "type": "integer"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "meter_drops": {
       "type": "object",
       "title": "meter_drops",
@@ -1067,6 +1076,8 @@ Kind: `action`. Exposure: `mcp-tool`.
     "restart_needed",
     "anticipative",
     "anticipation_misses",
+    "live_helpers",
+    "warnings",
     "meter_drops",
     "failed_fx",
     "dropped",
@@ -1113,6 +1124,8 @@ Result:
   "restart_needed": false,
   "anticipative": true,
   "anticipation_misses": 0,
+  "live_helpers": "<any>",
+  "warnings": [],
   "meter_drops": {
     "renderer": 0,
     "callback": 0
@@ -1129,7 +1142,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. live_helpers is the enabled live helper capacity; warnings includes scheduling fallback and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -1184,6 +1197,15 @@ Kind: `query`. Exposure: `mcp-tool`.
     "anticipation_misses": {
       "type": "integer"
     },
+    "live_helpers": {
+      "type": "integer"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "meter_drops": {
       "type": "object",
       "title": "meter_drops",
@@ -1226,6 +1248,8 @@ Kind: `query`. Exposure: `mcp-tool`.
     "restart_needed",
     "anticipative",
     "anticipation_misses",
+    "live_helpers",
+    "warnings",
     "meter_drops",
     "failed_fx",
     "dropped",
@@ -1263,6 +1287,8 @@ Result:
   "restart_needed": false,
   "anticipative": false,
   "anticipation_misses": 0,
+  "live_helpers": 0,
+  "warnings": [],
   "meter_drops": {
     "renderer": 0,
     "callback": 0

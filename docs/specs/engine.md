@@ -187,9 +187,9 @@ editor/automation eligibility preferences remain planned (ADR-0014).
   buffers at device block size. Parameter edits can take effect at that
   horizon. A seek/structural edit establishes a new epoch and prerolls;
   starvation after priming counts as an anticipation miss.
-- **Live nodes** run serially in topological order in the device callback.
-  With anticipation disabled the entire graph runs there serially. Live
-  multiprocessing and its preferences are not implemented yet. Synchronous
+- **Live nodes** run on the callback and its separate bounded live pool
+  (ADR-0024). With anticipation disabled this executor runs the entire graph.
+  Limit 1 processes it serially. Synchronous
   bridged stages pass through on live nodes, with a warning (§5).
 
 ### 2.2 Worker pool
@@ -209,29 +209,71 @@ precedes publication, and the submitter waits for every selected helper's
 departure before reusing job state or returning, including preempted helpers.
 
 `EngineApp::setAudioThreadLimit` sets the app default (0: Automatic, 1..64:
-maximum execution threads including the renderer). Invalid values return
+maximum execution threads per pool including its submitting thread). Invalid values return
 `engine.audio_threads`, path `/audio_threads`, with a corrective hint. The GUI
 persists this as `audio_threads` in preferences (§6 of gui.md). The next engine
 start, including project replacement and device recovery, maps a nonzero limit to `workers = limit - 1` when
 options request automatic workers; explicit `EngineOptions::workers` takes
-precedence. An already running pool and offline export's `threads` option are
-unchanged. Automatic retains the hardware-derived capacity and graph-aware
+precedence. Both live and background pools use this capacity independently; it is not a
+total process thread limit. Already running pools and offline export's
+`threads` option are unchanged. Automatic retains the hardware-derived capacity and graph-aware
 participation; an explicit limit is also graph-bounded.
 
 The engine sets no explicit priority or affinity on the renderer or these
 helpers. The backend supplies the device callback's scheduling. DSP tasks
 are RT-safe; ADR-0013 separately permits synchronous bridge futex wake/wait
 with a failure deadline on background threads, never in the device callback.
-A callback wake primitive, RT live helpers and fork/join live scheduling
-require a subsequent implementation and ADR; there is no late-output discard
-path in the current engine.
+
+**Live pool (ADR-0024).** `LiveWorkers` shares the graph/ready-queue
+representation, but never calls the blocking background executor. Each segment
+publishes its immutable transport, device inputs and frontier buffers, enrolls
+all selected helpers, then advances their private 32-bit sequences and calls
+`rt::wake`. This core-base API issues only `FUTEX_WAKE_PRIVATE` under the scoped
+RTSan exception; its blocking `rt::wait` companion belongs only to idle helpers
+and rechecks the acquire-loaded word after spurious wakes/EINTR. Both require a
+live, naturally aligned lock-free 32-bit atomic and one waiter per word. C++
+release/acquire operations publish the job; futex calls convey no memory order.
+
+The callback helps execute ready nodes and spins on atomics (CPU relax only)
+while work or enrolled departures remain. Helpers spin only within that job and
+park between segments, with no post-cycle spin. Participation uses the chain
+cover, configured capacity and usable CPUs minus one; a chain runs directly
+without queue/wake traffic. The callback joins even a helper preempted before
+reading its notification or after completing DSP. No helper touches the job
+after its departure acknowledgement. Only after join may the callback publish
+meters/plug-in outputs, capture recording, reset/relocate, adopt a plan, or
+acknowledge a newer generation. This extends existing plan reclamation and
+ownership tokens to every helper. There is no late-output discard, timeout or
+rerun: a late helper makes its cycle late. A processing error still joins all
+work before silencing/counting the failed segment; it never cancels in-flight
+plug-in state. Summation order and numeric policy
+remain identical to offline processing. Synchronous bridge stages still pass
+through, including on helpers.
+
+`Backend::liveThreadCapacity()` and `prepareLiveThread(native_handle)` run on
+main after backend start, before publishing the pool to callbacks. Unknown
+backends refuse setup by default; normal/dummy backends explicitly accept
+normal helpers. JACK reads the actual callback thread's policy/priority and
+allowed CPU set through its optional client-thread API and pthread queries.
+Live capacity is capped to CPUs common to callback and caller minus one.
+SCHED_FIFO/RR callbacks require helpers at the same priority with SCHED_FIFO:
+try `jack_acquire_real_time_scheduling`, then pthread scheduling within
+RLIMIT_RTPRIO, and verify the result. Non-RT JACK uses normal helpers. Failed
+setup/capacity disables the pool and retains serial processing with an
+actionable warning. No affinity or system configuration is changed; externally
+changing CPU affinity while running requires an engine restart. The backend
+stops before helpers are destroyed. `Engine::liveHelpers()` reports enabled
+capacity; `engine.start`/`engine.status` expose `live_helpers` and `warnings`
+(including plan and scheduling warnings), zero/empty when stopped. These are
+capacity, not a count of participants in every segment. Automatic enables this
+path; Audio processing threads Limit 1 disables it on next start.
 
 ### 2.3 The RT cycle
 
 1. Pick up a new plan if published (acknowledge epoch).
 2. Drain the model→RT command queue (transport, param events, meters on/off).
 3. Read hardware inputs into HwInput buffers; feed record rings.
-4. Run live nodes serially; pull anticipative outputs from rings.
+4. Pull anticipative outputs from rings; fork/join the live DAG.
 5. Sum into the master, run the master chain (live if anything is live, else
    the master is anticipative too and the RT thread only copies its ring
    output).
@@ -366,7 +408,8 @@ instance).
   extension, GUI create/set_parent with the host's X11 XID, timers).
   Data plane: a `memfd` shared-memory region per instance with input/output
   audio buffers, event arenas and a cycle header; wake via eventfd/futex
-  through `rt::wake()`. The shared memory is laid out for the widths the
+  through the bridge's shared futex wrapper (ADR-0013, distinct from the live
+  pool's private `rt::wake`). The shared memory is laid out for the widths the
   host asks for; the Activate reply (protocol version 9) returns the widths
   the plug-in settled on (a VST3 may adapt its buses), and a mismatch
   re-activates once at those widths, so an isolated plug-in exposes the same
@@ -393,7 +436,7 @@ bus and exposes it through the control protocol (Unix socket), Lua and MCP (prox
 `engine.status` (q: backend, rate, block, load, xruns, anticipation
 misses, meter drops), `engine.graph` (q: nodes, live/anticipative classification,
 latencies, CPU per node), `engine.settings.set {render_ahead_ms,
-worker_threads, live_multiprocessing, automation_resolution, …}`.
+worker_threads, automation_resolution, …}`.
 Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 `meters` (rate-limited, subscribe per track), `fx.failed`,
 `record.progress`.
@@ -475,8 +518,9 @@ It is null when there is no sampled anticipative boundary (including an
 all-live graph); observations and anticipation misses are reported separately.
 
 `tools/bench` accepts 64/128-frame requests. Run JSON is
-`supple.capacity-run/2.0`: `xruns` is a JACK server counter delta or null for
-paced runs; `synthetic_over_budget` and `synthetic_late_wakes` are paced-only
+`supple.capacity-run/2.1`: `xruns` is a JACK server counter delta or null for
+paced runs; `live_helpers` reports enabled live capacity (0: serial);
+`synthetic_over_budget` and `synthetic_late_wakes` are paced-only
 counters (null for JACK). Callback `over_budget` is a duration test, never a
 hardware xrun count. Requested block, granted quantum/rate and
 `requested_settings_granted` are separate. Mismatched grants remain useful
@@ -575,7 +619,7 @@ harness. See the tooling README for schemas, limits and invocation details.
   new epoch. New plans are adopted at the render position (edits are heard
   after the audio already rendered, no gap). The renderer paces itself by
   the frames rendered ahead of the played position and naps otherwise; the
-  callback makes no system call. Misses (no chunk while playing, after the
+  callback never wakes that renderer. Misses (no chunk while playing, after the
   pre-roll) are counted (`engine.status.anticipation_misses`). `stop()`
   joins the renderer first; it stops every plugin as it ends. With
   `anticipative = false` the old in-callback renderer runs (the reference,
@@ -652,7 +696,8 @@ harness. See the tooling README for schemas, limits and invocation details.
   plan compile on the main thread (~0.3 s per source second in a debug
   build); it moves to the background decode with the disk cache.
   `stretch_markers` are not applied yet (the compiler warns).
-- **Not yet:** live multiprocessing, MIDI output ports, crossfades for
+- **Live pool** (`live_workers.{h,cpp}`): callback fork-join as specified in §2.2.
+- **Not yet:** MIDI output ports, crossfades for
   structural changes (inserting or removing plugins). B1/B2 measurements:
   `docs/benchmarks/b1.md`, `b2.md` (tooling: `tools/bench/README.md`).
 

@@ -61,6 +61,8 @@ class JackBackend : public Backend {
     BackendConfig config() const override { return config_; }
     std::string name() const override { return "jack"; }
     bool ownsThread() const override { return true; }
+    unsigned liveThreadCapacity() const override;
+    Status prepareLiveThread(std::thread::native_handle_type thread) override;
     Stats stats() const;
     BackendStatus status() const override;
     std::span<const MidiInputEvent> midiInput() const override;

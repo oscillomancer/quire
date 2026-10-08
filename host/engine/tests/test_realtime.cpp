@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <semaphore>
 #include <thread>
 
 #include <fcntl.h>
@@ -18,6 +19,7 @@
 #include <supple/host/clap_host.h>
 
 #include "fake_jack.h"
+#include "live_workers.h"
 #include "meters.h"
 #include "plan.h"
 #include "recording.h"
@@ -29,6 +31,12 @@ namespace supple::engine {
 // A main-thread transport write stalled halfway (preempted after the odd
 // sequence store), and the executors' view of the epoch.
 struct EngineTestAccess {
+    static void liveHooks(Engine& e, detail::LiveWorkers::Hooks hooks) {
+        e.liveWorkersReady_.store(nullptr);
+        e.liveWorkers_ = std::make_unique<detail::LiveWorkers>(3, hooks);
+        e.liveWorkersReady_.store(e.liveWorkers_.get());
+    }
+    static std::size_t plans(const Engine& e) { return e.plans_.size(); }
     static std::uint64_t beginWrite(Engine& e) {
         const std::uint64_t seq = e.xportSeq_.load();
         e.xportSeq_.store(seq + 1);
@@ -264,7 +272,7 @@ double maxDiff(const std::vector<float>& a, std::size_t aFrom, const std::vector
     return worst;
 }
 
-const EngineOptions kInCallback{.anticipative = false};
+const EngineOptions kInCallback{.anticipative = false, .workers = 0};
 
 // Anticipative: drive a manual backend `cycles` times, letting the renderer
 // keep ahead (a device's callbacks would be paced by its clock).
@@ -3659,4 +3667,166 @@ TEST_CASE("a recording split by a seek, not a loop, has a sidecar its reader acc
     CHECK(side->segments[1].timeline == 48000);
     CHECK(side->loopEnd == 0);
     std::filesystem::remove_all(dir);
+}
+
+namespace {
+model::Session parallelLive(unsigned liveTracks) {
+    auto base = synthSession(-18, "com.suppleaudio.test.gain", 8);
+    model::EditTxn edit(base, 2);
+    auto project = edit.project();
+    project.console9 = true;
+    project.seed = 82735;
+    edit.setProject(project);
+    unsigned count = 0;
+    for (const auto& track : base.tracks) {
+        if (track.id == kMaster || count++ >= liveTracks) continue;
+        model::Route route;
+        route.from.hwChannels = std::vector<int>{1, 2};
+        route.to.track = track.id;
+        const Id input = edit.create(route);
+        edit.modify<model::Track>(track.id, [&](model::Track& tr) {
+            tr.record.input = input;
+            tr.record.armed = true;
+            tr.record.monitor = model::Monitor::On;
+        });
+    }
+    return edit.commit().value();
+}
+}  // namespace
+
+TEST_CASE("live multiprocessing: exact offline output with frontier and all-live graphs" *
+          doctest::description("rt")) {
+    for (unsigned live : {4u, 8u}) {
+        const auto session = parallelLive(live);
+        auto offlinePool = makePool();
+        const auto offline =
+            renderOffline(session, offlinePool, {.startSeconds = 0, .endSeconds = 0.25}).value();
+        for (bool ahead : {false, true})
+            for (int helpers : {0, 1, 2, 7}) {
+                INFO("live " << live << " ahead " << ahead << " helpers " << helpers);
+                auto pool = makePool();
+                MediaCache media;
+                DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 12288});
+                Engine engine(pool, media, {.anticipative = ahead, .workers = helpers});
+                REQUIRE(engine.start(backend, {.blockSize = 128, .inputs = 2}));
+                CHECK(engine.liveHelpers() ==
+                      std::min(static_cast<unsigned>(helpers), detail::LiveWorkers::maxHelpers()));
+                REQUIRE(engine.load(session));
+                engine.play();
+                if (ahead)
+                    runAhead(engine, backend, 96, 128);
+                else
+                    backend.run(96);
+                engine.stop();
+                CHECK(engine.processErrors() == 0);
+                CHECK(engine.anticipationMisses() == 0);
+                CHECK(engine.lastStopOnAudioThread());
+                for (unsigned c = 0; c < 2; ++c)
+                    CHECK(maxDiff(backend.capture().channels[c], engine.outputLatency(),
+                                  offline.audio.channels[c], 12000) == 0.0);
+            }
+    }
+}
+
+TEST_CASE("live multiprocessing: delayed departure protects plans during transport edits" *
+          doctest::description("rt")) {
+    // Same sequence with and without preemption must have exactly the same state
+    // and audio. The gate is released by the test, never by an elapsed deadline.
+    for (bool ahead : {false, true}) {
+        audio::AudioData reference;
+        for (bool delayed : {false, true}) {
+            struct Gate {
+                std::atomic<bool> enabled{false}, claimed{false}, joining{false};
+                std::binary_semaphore entered{0}, resume{0};
+            } gate;
+            auto pool = makePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 128 * 12});
+            Engine engine(pool, media, {.anticipative = ahead, .workers = 3});
+            REQUIRE(engine.start(backend, {.blockSize = 128, .inputs = 2}));
+            EngineTestAccess::liveHooks(engine,
+                                        {[](void* p, detail::LiveWorkers::Event event) {
+                                             auto& g = *static_cast<Gate*>(p);
+                                             if (event == detail::LiveWorkers::Event::Leave &&
+                                                 g.enabled.load() && !g.claimed.exchange(true)) {
+                                                 g.entered.release();
+                                                 g.resume.acquire();
+                                             }
+                                             if (event == detail::LiveWorkers::Event::JoinWait)
+                                                 g.joining = true;
+                                         },
+                                         &gate});
+            auto session = parallelLive(8);
+            REQUIRE(engine.load(session));
+            engine.play();
+            if (ahead) REQUIRE(engine.awaitRendered(4096));
+            backend.run(1);
+            // Stall a helper with completed DSP but retained job/plan ownership.
+            gate.enabled = delayed;
+            gate.joining = false;
+            std::atomic<bool> returned{false};
+            std::thread cycle([&] {
+                backend.run(1);
+                returned = true;
+            });
+            if (delayed) {
+                gate.entered.acquire();
+                while (!gate.joining.load()) std::this_thread::yield();
+                CHECK_FALSE(returned.load());
+            } else
+                cycle.join();
+            engine.pause();
+            engine.seek(0.125);
+            engine.setLoop(0.125, 0.129, true);  // non-block-aligned wrap
+            model::EditTxn edit(session, 3);
+            edit.modify<model::Track>(Id{model::Kind::Track, 1},
+                                      [](model::Track& t) { t.volumeDb = -21; });
+            REQUIRE(engine.load(edit.commit().value()));
+            engine.service();
+            if (delayed) {
+                CHECK(EngineTestAccess::plans(engine) >= 2);
+                CHECK_FALSE(returned.load());
+                gate.resume.release();
+                cycle.join();
+            }
+            if (ahead) REQUIRE(engine.awaitPlan());
+            backend.run(1);  // acknowledge pause/seek/plan
+            if (ahead) REQUIRE(engine.awaitRendered(0));
+            engine.play();
+            if (ahead) REQUIRE(engine.awaitRendered(4096));
+            backend.run(9);
+            engine.stop();
+            CHECK(engine.lastStopOnAudioThread());
+            CHECK(engine.processErrors() == 0);
+            if (!delayed)
+                reference = backend.capture();
+            else
+                CHECK(backend.capture().channels == reference.channels);
+        }
+    }
+}
+
+TEST_CASE("live multiprocessing: scheduling failure is serial and survives plan reloads") {
+    struct RefusingBackend : DummyBackend {
+        RefusingBackend() : DummyBackend({.mode = Mode::Manual, .captureFrames = 256}) {}
+        Status prepareLiveThread(std::thread::native_handle_type) override {
+            return Error("engine.live_threads", "test denied scheduling", {},
+                         "test corrective hint");
+        }
+    } backend;
+    auto pool = makePool();
+    MediaCache media;
+    Engine engine(pool, media, {.anticipative = false, .workers = 1});
+    REQUIRE(engine.start(backend, {.blockSize = 128}));
+    CHECK(engine.liveHelpers() == 0);
+    REQUIRE(engine.load(parallelLive(8)));
+    REQUIRE(engine.warnings().size() == 1);
+    CHECK(engine.warnings()[0].find("test corrective hint") != std::string::npos);
+    engine.play();
+    backend.run(1);
+    REQUIRE(engine.load(parallelLive(4)));
+    CHECK(engine.warnings().size() == 1);
+    backend.run(1);
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
 }

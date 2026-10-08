@@ -2,6 +2,11 @@
 #include "supple/engine/jack.h"
 
 #include <dlfcn.h>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/resource.h>
+#include <cerrno>
+#include <cstring>
 
 #include <algorithm>
 #include <array>
@@ -37,6 +42,8 @@ struct MidiEvent {  // jack_midi_event_t
 };
 
 struct Api {
+    pthread_t (*clientThreadId)(JackClient*) = nullptr;
+    int (*acquireRealtime)(pthread_t, int) = nullptr;
     JackClient* (*clientOpen)(const char*, int, int*, ...) = nullptr;
     int (*clientClose)(JackClient*) = nullptr;
     int (*activate)(JackClient*) = nullptr;
@@ -103,6 +110,8 @@ Result<const Api*> loadApi(const std::string& library) {
     bind(h, "jack_connect", api.connect, missing);
     bind(h, "jack_free", api.free, missing);
     std::string optional;  // latency reporting is informational
+    bind(h, "jack_client_thread_id", api.clientThreadId, optional);
+    bind(h, "jack_acquire_real_time_scheduling", api.acquireRealtime, optional);
     bind(h, "jack_port_get_latency_range", api.portGetLatencyRange, optional);
     bind(h, "jack_midi_get_event_count", api.midiGetEventCount, optional);
     bind(h, "jack_midi_event_get", api.midiEventGet, optional);
@@ -476,6 +485,50 @@ std::span<const MidiInputEvent> JackBackend::midiInput() const {
 
 std::vector<std::string> JackBackend::midiPorts() const {
     return impl_ ? impl_->midiNames : std::vector<std::string>{};
+}
+
+unsigned JackBackend::liveThreadCapacity() const {
+    if (!impl_ || !impl_->api->clientThreadId) return 0;
+    cpu_set_t callback, caller, common;
+    CPU_ZERO(&callback);
+    CPU_ZERO(&caller);
+    const auto thread = impl_->api->clientThreadId(impl_->client);
+    if (!thread || ::pthread_getaffinity_np(thread, sizeof(callback), &callback) != 0 ||
+        ::sched_getaffinity(0, sizeof(caller), &caller) != 0)
+        return 0;
+    CPU_AND(&common, &callback, &caller);
+    const int count = CPU_COUNT(&common);
+    return count > 1 ? static_cast<unsigned>(count - 1) : 0;
+}
+
+Status JackBackend::prepareLiveThread(std::thread::native_handle_type thread) {
+    auto fail = [](int error) -> Status {
+        return Error("engine.live_threads",
+                     "live helper scheduling failed: " + std::string(std::strerror(error)), {},
+                     "use Audio processing threads Limit 1, or grant this process RT scheduling "
+                     "at the JACK callback priority and restart the engine");
+    };
+    if (!impl_ || !impl_->api->clientThreadId) return fail(ENOSYS);
+    const auto callback = impl_->api->clientThreadId(impl_->client);
+    int policy = 0;
+    sched_param params{};
+    if (!callback) return fail(ESRCH);
+    if (const int error = ::pthread_getschedparam(callback, &policy, &params)) return fail(error);
+    if (policy == SCHED_OTHER) return okStatus();  // non-RT JACK server / test backend
+    if (policy != SCHED_FIFO && policy != SCHED_RR) return fail(ENOTSUP);
+    const int priority = params.sched_priority;
+    int error =
+        impl_->api->acquireRealtime ? impl_->api->acquireRealtime(thread, priority) : ENOSYS;
+    if (error != 0) {
+        rlimit limit{};
+        if (::getrlimit(RLIMIT_RTPRIO, &limit) != 0) return fail(errno);
+        if (limit.rlim_cur < static_cast<rlim_t>(priority)) return fail(EPERM);
+        error = ::pthread_setschedparam(thread, SCHED_FIFO, &params);
+        if (error != 0) return fail(error);
+    }
+    if (const int result = ::pthread_getschedparam(thread, &policy, &params)) return fail(result);
+    if (policy != SCHED_FIFO || params.sched_priority != priority) return fail(EPERM);
+    return okStatus();
 }
 
 }  // namespace supple::engine

@@ -36,7 +36,7 @@ class ReadyQueue {
 };
 
 // The dependency structure of a plan's nodes and the per-run counters.
-// Built on the main thread; run by one Workers::run at a time.
+// Built on main; used by one background or live run at a time.
 struct TaskGraph {
     std::vector<std::uint32_t> preds;              // how many tasks each waits for
     std::vector<std::vector<std::uint32_t>> succ;  // the tasks waiting for each

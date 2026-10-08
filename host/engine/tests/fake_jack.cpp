@@ -361,3 +361,5 @@ float fakejack_output_peak(const char* port) {
 }
 
 }  // extern "C"
+
+extern "C" pthread_t jack_client_thread_id(Client* c) { return c->thread.native_handle(); }

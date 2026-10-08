@@ -133,6 +133,8 @@ q = nil
 ---@field restart_needed boolean
 ---@field anticipative boolean
 ---@field anticipation_misses integer
+---@field live_helpers integer
+---@field warnings string[]
 ---@field meter_drops table
 ---@field failed_fx string[]
 ---@field dropped integer
@@ -153,6 +155,8 @@ q = nil
 ---@field restart_needed boolean
 ---@field anticipative boolean
 ---@field anticipation_misses integer
+---@field live_helpers integer
+---@field warnings string[]
 ---@field meter_drops table
 ---@field failed_fx string[]
 ---@field dropped integer

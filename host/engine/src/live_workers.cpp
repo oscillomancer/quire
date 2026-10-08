@@ -1,0 +1,106 @@
+#include "live_workers.h"
+
+#include <sched.h>
+#include <algorithm>
+
+#include "supple/engine/realtime.h"
+
+namespace supple::engine::detail {
+
+LiveWorkers::LiveWorkers(unsigned helpers) : LiveWorkers(helpers, Hooks{}) {}
+LiveWorkers::LiveWorkers(unsigned helpers, Hooks hooks)
+    : slots_(std::make_unique<Slot[]>(helpers)), hooks_(hooks) {
+    threads_.reserve(helpers);
+    try {
+        for (unsigned i = 0; i < helpers; ++i) threads_.emplace_back([this, i] { loop(i); });
+    } catch (...) {
+        shutDown();  // even a partially constructed pool must reap its threads
+        throw;
+    }
+}
+
+LiveWorkers::~LiveWorkers() { shutDown(); }
+
+void LiveWorkers::shutDown() {
+    // The backend must be stopped before destroying the pool.
+    quit_.store(true, std::memory_order_release);
+    for (unsigned i = 0; i < helpers(); ++i) {
+        slots_[i].sequence.fetch_add(1, std::memory_order_release);
+        rt::wake(slots_[i].sequence);
+    }
+    for (auto& thread : threads_) thread.join();
+}
+
+unsigned LiveWorkers::maxHelpers() {
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (::sched_getaffinity(0, sizeof(allowed), &allowed) != 0) return 0;
+    const int count = CPU_COUNT(&allowed);
+    return count > 1 ? static_cast<unsigned>(count - 1) : 0;
+}
+
+Status LiveWorkers::configure(Backend& backend) {
+    for (auto& thread : threads_) SUPPLE_TRY(backend.prepareLiveThread(thread.native_handle()));
+    return okStatus();
+}
+
+void LiveWorkers::help(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {
+    while (g.remaining.load(std::memory_order_acquire) != 0) {
+        std::uint32_t task = 0;
+        if (!g.ready.pop(task)) {
+            rt::relax();
+            continue;
+        }
+        fn(context, task);
+        for (std::uint32_t next : g.succ[task])
+            if (g.pending[next].fetch_sub(1, std::memory_order_acq_rel) == 1) g.ready.push(next);
+        g.remaining.fetch_sub(1, std::memory_order_acq_rel);
+    }
+}
+
+void LiveWorkers::run(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {
+    const auto n = g.size();
+    if (n == 0) return;
+    const unsigned selected = std::min(helpers(), g.parallelism - 1);
+    if (selected == 0) {
+        for (std::uint32_t i = 0; i < n; ++i) fn(context, i);
+        return;
+    }
+    for (std::uint32_t i = 0; i < n; ++i) g.pending[i].store(g.preds[i], std::memory_order_relaxed);
+    g.remaining.store(n, std::memory_order_relaxed);
+    for (std::uint32_t i = 0; i < n; ++i)
+        if (g.preds[i] == 0) g.ready.push(i);
+    job_ = &g;
+    fn_ = fn;
+    context_ = context;
+    // Account for even a helper preempted before it reads its notification.
+    active_.store(selected, std::memory_order_relaxed);
+    for (unsigned i = 0; i < selected; ++i) {
+        slots_[i].sequence.fetch_add(1, std::memory_order_release);
+        rt::wake(slots_[i].sequence);
+    }
+    help(g, fn, context);
+    while (active_.load(std::memory_order_acquire) != 0) {
+        event(Event::JoinWait);
+        rt::relax();
+    }
+}
+
+void LiveWorkers::loop(unsigned index) {
+    auto& sequence = slots_[index].sequence;
+    std::uint32_t seen = 0;
+    for (;;) {
+        event(Event::Idle);
+        rt::wait(sequence, seen);
+        seen = sequence.load(std::memory_order_acquire);
+        if (quit_.load(std::memory_order_acquire)) return;
+        event(Event::Join);
+        help(*job_, fn_, context_);
+        event(Event::Leave);
+        // No job/graph/context access after acknowledgement; the callback can
+        // already be publishing a new job or reclaiming the old plan.
+        active_.fetch_sub(1, std::memory_order_acq_rel);
+    }
+}
+
+}  // namespace supple::engine::detail

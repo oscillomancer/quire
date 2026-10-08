@@ -18,7 +18,7 @@ namespace supple::gui {
 
 struct Preferences {
     model::Monitor defaultMonitor = model::Monitor::On;
-    unsigned audioThreads = 0;  // Automatic; otherwise limit 1..64, including renderer
+    unsigned audioThreads = 0;  // Automatic; otherwise limit 1..64, including each executor
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Preferences> load(const std::filesystem::path& file);  // absent: defaults
     Status save(const std::filesystem::path& file) const;

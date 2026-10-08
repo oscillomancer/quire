@@ -5,8 +5,8 @@
 // and stops removed ones; retired plans and unused instances are freed on the
 // main thread (service()). Transport commands travel on a wait-free queue.
 //
-// This first cut runs every node inside the audio callback (no anticipative
-// processing yet). Its output is bit-identical to the offline renderer for
+// Anticipative nodes render ahead; callback-owned nodes use a separate live
+// fork-join pool (ADR-0024). Output is bit-identical to the offline renderer for
 // block-size-invariant plugins; it lags the render position by the plan's
 // output latency (the transport reports the render position).
 #pragma once
@@ -36,6 +36,7 @@ namespace detail {
 struct Plan;
 struct ChunkRing;
 class Workers;
+class LiveWorkers;
 class Recorder;
 }  // namespace detail
 
@@ -157,6 +158,14 @@ class Backend {
     // True when callbacks run on a thread of the backend's own (a device);
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
+    // Main thread after start(), before live jobs: configure an idle helper.
+    // Normal/dummy backends keep normal scheduling. RT backends MUST override
+    // this and refuse unsafe scheduling/capacity (engine then runs serially).
+    virtual unsigned liveThreadCapacity() const { return 64; }
+    virtual Status prepareLiveThread(std::thread::native_handle_type) {
+        return Error("engine.live_threads", "backend does not support live helper scheduling", {},
+                     "use Audio processing threads Limit 1 or a backend supporting live helpers");
+    }
     virtual BackendStatus status() const { return {config().blockSize, 0, 0, 0, false, {}}; }
     // MIDI (ADR-0016). Inside the callback only: this cycle's device events,
     // sorted by frame (at most kMaxMidiInputEvents; more are dropped).
@@ -198,6 +207,7 @@ class DummyBackend : public Backend {
     BackendConfig config() const override { return config_; }
     std::string name() const override { return "dummy"; }
     bool ownsThread() const override { return options_.mode == Mode::Thread; }
+    Status prepareLiveThread(std::thread::native_handle_type) override { return okStatus(); }
     std::span<const MidiInputEvent> midiInput() const override { return midi_; }
     std::vector<std::string> midiPorts() const override { return options_.midiPorts; }
 
@@ -254,7 +264,7 @@ struct EngineOptions {
     bool anticipative = true;
     std::uint32_t renderBlock = 1024;  // frames per anticipative block (64 .. 8192)
     double renderAheadMs = 200.0;      // how far ahead of the playhead
-    int workers = -1;                  // helper threads; -1: every core but three
+    int workers = -1;                  // helpers per pool; -1: every core but three
     BenchProbe* benchProbe = nullptr;  // benchmark only; preallocated, outlives stop()
 };
 
@@ -339,6 +349,7 @@ class Engine {
     }
     bool awaitRendererHeld(double timeoutSeconds = 10.0);
     const EngineOptions& options() const { return options_; }
+    unsigned liveHelpers() const;  // main thread: enabled capacity, 0 when serial
 
     // Main thread, regularly: frees retired plans; once the newest plan is
     // live, destroys instances whose fx left the session.
@@ -537,6 +548,9 @@ class Engine {
     // Seek and pause bump epoch_; the callback drops chunks of older epochs.
     std::unique_ptr<detail::ChunkRing> ring_;
     std::unique_ptr<detail::Workers> workers_;
+    std::unique_ptr<detail::LiveWorkers> liveWorkers_;
+    std::atomic<detail::LiveWorkers*> liveWorkersReady_{nullptr};
+    std::string liveWorkerWarning_;
     std::thread renderer_;
     std::atomic<bool> rendererQuit_{false}, hold_{false}, holdSeen_{false};
     std::int64_t aheadFrames_ = 0;                 // render-ahead target

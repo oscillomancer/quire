@@ -101,3 +101,15 @@ latency and remains a separate design.
 
 JACK thread setup follows its public [client-thread API documentation](https://jackaudio.org/api/group__ClientThreads.html).
 No third-party implementation source was consulted.
+
+## Implementation (2026-10-08)
+
+`LiveWorkers` implements the separate callback executor; core-base supplies
+`rt::wake`/`rt::wait`. JACK prepares idle helpers after backend start and before
+atomic pool publication. The existing Audio processing threads preference
+controls both pools; `engine.status` exposes enabled live capacity and warnings.
+Exact-output, forced-interleaving, RTSan and TSan checks pass. Repeated four/eight
+live Ferric measurements show a substantial callback improvement; a short
+128-frame JACK trial has zero xruns with FIFO-83 helpers. Serial-chain overload
+and occasional paced parallel tails remain; Automatic enables live processing,
+with no claim of a universal latency improvement or long-run stability.

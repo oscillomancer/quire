@@ -9,7 +9,9 @@
 #include <limits>
 #include <numbers>
 #include <set>
+#include <system_error>
 
+#include "live_workers.h"
 #include "meters.h"
 #include "plan.h"
 #include "recording.h"
@@ -160,6 +162,8 @@ Engine::Engine(InstancePool& plugins, MediaCache& media, EngineOptions options)
 
 Engine::~Engine() { stop(); }
 
+unsigned Engine::liveHelpers() const { return liveWorkers_ ? liveWorkers_->helpers() : 0; }
+
 Status Engine::start(Backend& backend, const BackendConfig& config) {
     if (backend_)
         return Error("engine.running", "the engine is already running", {},
@@ -198,6 +202,33 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     }
     config_ = backend.config();  // what the device granted (e.g. its rate)
     backend_ = &backend;
+    liveWorkerWarning_.clear();
+    const unsigned requested = options_.workers < 0
+                                   ? detail::Workers::defaultHelpers()
+                                   : static_cast<unsigned>(std::min(options_.workers, 64));
+    const unsigned helpers =
+        std::min({requested, detail::LiveWorkers::maxHelpers(), backend.liveThreadCapacity()});
+    if (helpers > 0) {
+        try {
+            liveWorkers_ = std::make_unique<detail::LiveWorkers>(helpers);
+        } catch (const std::system_error& error) {
+            liveWorkerWarning_ =
+                "live helper creation failed: " + std::string(error.what()) +
+                "; using serial processing; lower Audio processing threads and restart the engine";
+        }
+        if (liveWorkers_)
+            if (auto configured = liveWorkers_->configure(backend); !configured) {
+                liveWorkerWarning_ = configured.error().message + "; " + configured.error().hint;
+                liveWorkers_.reset();
+            }
+    } else if (requested > 0) {
+        liveWorkerWarning_ =
+            "live multiprocessing unavailable: fewer than two usable CPUs or "
+            "backend scheduling information unavailable; using serial processing; "
+            "check the backend and process CPU allowance, then restart the engine";
+    }
+    // Callbacks already exist, but cannot see a partially configured pool.
+    liveWorkersReady_.store(liveWorkers_.get(), std::memory_order_release);
     if (options_.anticipative) {
         aheadFrames_ = std::max<std::int64_t>(
             2 * options_.renderBlock,
@@ -235,6 +266,8 @@ void Engine::stop() {
     }
     recorder_.store(nullptr, std::memory_order_release);
     backend_->stop();
+    liveWorkersReady_.store(nullptr, std::memory_order_release);
+    liveWorkers_.reset();
     if (recorderOwned_) (void)recorderOwned_->finish(readLoop());  // no callback now: keep files
     recorderOwned_.reset();
     // A backend that broke its stop() contract has already joined its
@@ -359,6 +392,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     }
     outputLatency_ = static_cast<std::uint32_t>(plan->outputLatency);
     warnings_ = plan->warnings;
+    if (!liveWorkerWarning_.empty()) warnings_.push_back(liveWorkerWarning_);
     // Metering (P5.3c): every strip of this plan gets its bank slot here, on
     // the main thread — never while an audio side reads it — and the lists the
     // executors iterate are built from the slots.
@@ -893,7 +927,8 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         // Stopped: plugins keep running (monitored input is heard, editors
         // answer, a sampler loads what its editor picked: it does so only in
         // process()), nothing plays.
-        if (detail::processBlock(*plan, pos_, frames, false)) {
+        if (detail::processCallbackBlock(liveWorkersReady_.load(std::memory_order_acquire), *plan,
+                                         pos_, frames, false, false, &processing_)) {
             publishPluginOutputs(*plan, false, rtEpoch_, pos_, rtStream_.load());
             const detail::Node& master = plan->nodes[plan->mainMaster];
             std::copy_n(master.post.l.begin(), frames, out[0]);
@@ -926,7 +961,8 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         const float* const* ins = in ? inAt.data() : nullptr;
         plan->deviceIn = ins;  // monitored input for this part of the cycle
         plan->deviceMidiOffset = midiBase + done;
-        if (!detail::processBlock(*plan, pos_, k, true, &loopC_)) {
+        if (!detail::processCallbackBlock(liveWorkersReady_.load(std::memory_order_acquire), *plan,
+                                          pos_, k, true, false, &processing_, &loopC_)) {
             ok = false;
             break;
         }
@@ -1451,10 +1487,8 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     p.deviceRecording = recorder_.load() != nullptr;
     p.deviceMidi = midiSource_->midiInput();
     p.deviceMidiOffset = offset;
-    host::Transport t = detail::transportAt(p, livePos_, &loopC_);
-    t.playing = playing;
-    bool ok = true;
-    for (std::size_t i : p.liveNodes) ok = detail::processNode(p, i, livePos_, k, t, self) && ok;
+    const bool ok = detail::processCallbackBlock(liveWorkersReady_.load(std::memory_order_acquire),
+                                                 p, livePos_, k, playing, true, self, &loopC_);
     if (!ok) processErrors_.fetch_add(1);
     publishPluginOutputs(p, false, rtEpoch_, livePos_, liveStream_);
     // Metering (P5.3c): the callback measures the live nodes it just played, at

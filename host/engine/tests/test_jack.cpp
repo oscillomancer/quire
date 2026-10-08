@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 #include <supple/base/environment.h>
 
+#include <pthread.h>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -385,4 +386,27 @@ TEST_CASE("bench callback probe measures complete JACK periods, not engine chunk
     CHECK(rec.frames.load() == rec.calls.load() * 64);
     CHECK(fake.bufferSizeRequest() == 0);
     fake.reset();
+}
+
+TEST_CASE("JACK live helper setup needs a started backend and accepts non-RT test threads") {
+    FakeJack& fake = fakeJack();
+    fake.reset();
+    JackBackend backend(fakeOptions());
+    CHECK(backend.liveThreadCapacity() == 0);
+    auto unavailable = backend.prepareLiveThread(::pthread_self());
+    REQUIRE_FALSE(unavailable);
+    CHECK(unavailable.error().code == "engine.live_threads");
+    CHECK_FALSE(unavailable.error().hint.empty());
+    Recorder rec;
+    REQUIRE(backend.start(BackendConfig{}, rec.callback()));
+    // The fake JACK callback is normal scheduling. The calling test thread is
+    // a normal helper stand-in; setup must not promote it or require RT rights.
+    int beforePolicy = 0, afterPolicy = 0;
+    sched_param before{}, after{};
+    REQUIRE(::pthread_getschedparam(::pthread_self(), &beforePolicy, &before) == 0);
+    REQUIRE(backend.prepareLiveThread(::pthread_self()));
+    REQUIRE(::pthread_getschedparam(::pthread_self(), &afterPolicy, &after) == 0);
+    CHECK(afterPolicy == beforePolicy);
+    CHECK(after.sched_priority == before.sched_priority);
+    backend.stop();
 }

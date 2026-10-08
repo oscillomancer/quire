@@ -536,7 +536,7 @@ struct Plan {
     // nothing is live) with their task graph, the callback's live nodes (in
     // order), each side's instances (sorted), and the frontier edges.
     std::vector<std::size_t> rendererNodes, liveNodes;
-    std::unique_ptr<TaskGraph> rendererGraph;
+    std::unique_ptr<TaskGraph> rendererGraph, liveGraph;
     std::vector<host::Instance*> rendererInstances, liveInstances;
     // Metering (P5.3c): the metered nodes each executor measures, filled with
     // the slots by the engine's load() on the main thread, so an executor
@@ -595,6 +595,11 @@ bool processBlock(Plan& p, std::int64_t pos, std::uint32_t frames, bool playing 
 // The same on the worker pool (the caller helps): bit-identical results.
 // Not SUPPLE_RT itself (it wakes the helpers); every node task is.
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t frames);
+// Callback fork-join; split selects the live subgraph, otherwise all nodes.
+// Transport/device input and buffers stay immutable until all helpers depart.
+bool processCallbackBlock(LiveWorkers* workers, Plan& p, std::int64_t pos, std::uint32_t frames,
+                          bool playing, bool split, const void* self,
+                          const LoopRange* loop = nullptr) SUPPLE_RT;
 // The renderer's nodes only (rendererGraph), serially without helpers.
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t frames,
                           const void* self, const LoopRange* loop = nullptr, bool playing = true);

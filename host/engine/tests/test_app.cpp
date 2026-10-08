@@ -2973,7 +2973,7 @@ TEST_CASE("automation timebases preserve plugin output positions through branch 
     CHECK(app->head().envelopes.find(env)->points.back().pos == doctest::Approx(128.0 / 48000));
 }
 
-TEST_CASE("background thread preference applies at next start and explicit options win") {
+TEST_CASE("audio thread preference applies at next start and explicit options win") {
     Root root;
     auto app = makeApp(root.path);
     DummyBackend backend({.mode = DummyBackend::Mode::Manual});
@@ -2995,8 +2995,10 @@ TEST_CASE("background thread preference applies at next start and explicit optio
     app->stopEngine();
     REQUIRE(app->startEngine(backend, {}, {.workers = 0}));
     CHECK(app->engine()->options().workers == 0);
+    CHECK(app->engineStatus().liveHelpers == 0);
     REQUIRE(app->newProject({.console9 = false}));
-    CHECK(app->engine()->options().workers == 0);  // explicit stays explicit
+    CHECK(app->engine()->options().workers == 0);
+    CHECK(app->engineStatus().liveHelpers == 0);  // explicit stays explicit
     app->stopEngine();
     REQUIRE(app->setAudioThreadLimit(0));
     REQUIRE(app->startEngine(backend, {}));
@@ -3009,6 +3011,7 @@ TEST_CASE("background thread preference applies at next start and explicit optio
     cmd::Dispatcher bus(registry, *app);
     REQUIRE(bus.execute({"engine.start", j(R"({"backend":"dummy"})"), kTest}));
     CHECK(app->engine()->options().workers == 0);
+    CHECK(app->engineStatus().liveHelpers == 0);
     REQUIRE(bus.execute({"engine.stop", j("{}"), kTest}));
 }
 

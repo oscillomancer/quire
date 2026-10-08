@@ -99,6 +99,12 @@ class BenchBackend final : public Backend {
     BackendConfig config() const override { return config_; }
     std::string name() const override { return jack_ ? "jack" : "paced"; }
     bool ownsThread() const override { return true; }
+    unsigned liveThreadCapacity() const override {
+        return jack_ ? jack_->liveThreadCapacity() : Backend::liveThreadCapacity();
+    }
+    Status prepareLiveThread(std::thread::native_handle_type thread) override {
+        return jack_ ? jack_->prepareLiveThread(thread) : okStatus();
+    }
     BackendStatus status() const override {
         return jack_ ? jack_->status() : BackendStatus{.period = config_.blockSize};
     }
@@ -358,7 +364,7 @@ int main(int argc, char** argv) {
     const auto after = backend.status();
     const double rate = backend.config().sampleRate;
     auto result = json::Value::object();
-    result["schema"] = "supple.capacity-run/2.0";
+    result["schema"] = "supple.capacity-run/2.1";
     result["tracks"] = tracks;
     result["workload"] = pluginFile.empty() ? "stock" : "effect";
     result["plugin_file"] = pluginFile;
@@ -368,6 +374,7 @@ int main(int argc, char** argv) {
     result["fx_per_track"] = pluginFile.empty() ? 3 : fxPerTrack;
     result["fx_count"] = (*app)->head().fx.size();
     result["workers"] = workers;
+    result["live_helpers"] = engine->liveHelpers();
     result["device"] = device;
     result["anticipative"] = anticipative;
     result["seconds"] = measured;
