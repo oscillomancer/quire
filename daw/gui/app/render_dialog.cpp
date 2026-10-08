@@ -114,7 +114,7 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     page_ = page.get();
     page->layout.dir = ui::Layout::Dir::Column;
     page->layout.width = ui::SizeRule::fixed(780);
-    page->layout.height = ui::SizeRule::fixed(670);
+    page->layout.height = ui::SizeRule::fixed(706);
     page->layout.padding = ui::Insets::all(12);
     page->layout.gap = 8;
     auto& header = page->emplace<ui::Node>("render.header");
@@ -140,6 +140,21 @@ std::unique_ptr<ui::Node> RenderDialog::buildPage() {
     sourceLabel_ = &sources.emplace<ui::Label>("render.source", "Source: master mix",
                                                ui::Font::Mono, "caption", "ink-quiet");
     sourceLabel_->layout.width = ui::SizeRule::fraction();
+
+    // Where the files go: any folder, chosen in the system's dialog.
+    auto& folder = page->emplace<ui::Node>("render.folder.row");
+    folder.layout.dir = ui::Layout::Dir::Row;
+    folder.layout.height = ui::SizeRule::fixed(28);
+    folder.layout.gap = 6;
+    folder.layout.align = ui::Layout::Align::Center;
+    folder.emplace<ui::Label>("render.folder.label", "Folder", ui::Font::Ui, "caption", "ink-quiet")
+        .layout.width = ui::SizeRule::fixed(90);
+    folder_ = &folder.emplace<ui::Label>("render.folder", "", ui::Font::Mono, "caption", "ink");
+    folder_->layout.width = ui::SizeRule::fraction();
+    folder.emplace<ui::Button>("render.folder.choose", "Choose folder…", [this] {
+        if (auto choose = onChooseFolder) choose();
+    });
+    showFolder();
 
     auto field = [&](const char* label, const char* id, const std::string& value, float width,
                      const std::string& placeholder,
@@ -244,6 +259,7 @@ void RenderDialog::open() {
     root_.openPopup(std::move(page), {}, ui::Placement::Center, [this] {
         page_ = nullptr;
         sourceLabel_ = nullptr;
+        folder_ = nullptr;
         status_ = nullptr;
         previewBlock_ = nullptr;
         resultsBlock_ = nullptr;
@@ -288,6 +304,23 @@ void RenderDialog::setSource(Source source) {
     markDirty();
     root_.relayout();
     root_.damageAll();
+}
+
+void RenderDialog::showFolder() {
+    if (!folder_) return;
+    std::string text = app_.rendersDir().string();
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        const std::string prefix = std::string(home) + "/";
+        if (text.starts_with(prefix)) text = "~/" + text.substr(prefix.size());
+    }
+    folder_->setText(text);
+    root_.damageAll();
+    markDirty();  // the preview's paths change with it
+}
+
+const std::string& RenderDialog::folderText() const {
+    static const std::string none;
+    return folder_ ? folder_->text() : none;
 }
 
 const std::string& RenderDialog::pattern() const { return pattern_; }

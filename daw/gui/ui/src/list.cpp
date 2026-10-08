@@ -176,6 +176,14 @@ std::optional<std::size_t> List::rowAt(Point p) const {
 bool List::onPointer(const PointerEvent& e) {
     switch (e.type) {
         case PointerEvent::Type::Down: {
+            if (e.button == 3 && onContext) {
+                const auto row = rowAt(e.pos);
+                if (!row) return true;
+                auto context = onContext;
+                select(*row, true);
+                context(*row, e.pos);
+                return true;
+            }
             if (e.button != 1) return false;
             const auto row = rowAt(e.pos);
             if (!row) return true;

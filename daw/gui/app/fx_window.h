@@ -97,6 +97,7 @@ class FxWindow {
     void addFx(const std::string& pluginId);
     void addFxTo(model::Id track, const std::string& pluginId);
     void promptSaveChain();
+    void hideSavePrompt();
     void saveChain();
     void loadChainMenu(bool replace);
     void choosePresetChain(bool input);
@@ -126,6 +127,7 @@ class FxWindow {
     std::set<std::string> failed_;  // engine.status failed_fx
     double failureCheckMs_ = -1e9;
     std::string presetChain_ = "main";
+    bool chainMenuOpen_ = false;  // the Load chain… menu is showing
     ui::Button* presetChainButton_ = nullptr;
     ui::Node* savePrompt_ = nullptr;
     ui::TextField* saveName_ = nullptr;

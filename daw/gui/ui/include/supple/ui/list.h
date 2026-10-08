@@ -40,6 +40,8 @@ class List : public Node {
     std::function<void(Canvas&, std::size_t row, const Rect& r, bool selected)> paintRow;
     std::function<void(std::size_t)> onSelect;    // selection moved (click, keys)
     std::function<void(std::size_t)> onActivate;  // Enter, double click
+    // A right press on a row: it is selected first; `at` is the press point.
+    std::function<void(std::size_t, Point at)> onContext;
 
     void setCount(std::size_t count);
     std::size_t count() const { return count_; }

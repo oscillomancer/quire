@@ -650,6 +650,73 @@ TEST_CASE(
     CHECK(a.app->head().items.size() == 0);  // saved before the imports
 }
 
+TEST_CASE("file actions: project templates save, start a new project and delete") {
+    App a;
+    if (!a.ok) return;
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](std::function<void()> f) { f(); });
+    const auto dir = a.dir / "config" / std::string(product::kSlug) / "templates";
+    a.key("Ctrl+T");
+    const std::size_t tracks = a.tracks();
+    // File > Save template…: a name, then Save. A taken name asks once more.
+    REQUIRE(a.actions->run("ui.file.template.save"));
+    a.root->frame(false);
+    CHECK(a.root->focused()->id() == "file.template.name");
+    a.root->text("Band");
+    REQUIRE(a.root->click("file.template.commit"));
+    CHECK(std::filesystem::exists(dir / "Band.json"));
+    CHECK_FALSE(a.root->popupOpen());
+    CHECK(a.app->projectPath().empty());
+    REQUIRE(a.actions->run("ui.file.template.save"));
+    a.root->frame(false);
+    a.root->text("Band");
+    REQUIRE(a.root->click("file.template.commit"));
+    REQUIRE(a.root->popupOpen());
+    auto* status = dynamic_cast<ui::Label*>(a.root->find("file.template.status"));
+    REQUIRE(status);
+    CHECK(status->text() == "\"Band\" exists. Save again to replace it.");
+    REQUIRE(a.root->click("file.template.commit"));
+    CHECK_FALSE(a.root->popupOpen());
+    files.saveAs(a.dir / "other");  // keeps the template untouched
+    REQUIRE(a.actions->run("ui.file.template.save"));
+    a.root->frame(false);
+    a.root->text("Spare");
+    a.root->key(SDLK_RETURN);
+
+    // File > Load template…: a click starts a new, unsaved project from it.
+    a.key("Ctrl+T");
+    CHECK(a.tracks() == tracks + 1);
+    REQUIRE(a.actions->run("ui.file.template.load"));
+    a.root->frame(false);
+    auto* list = dynamic_cast<ui::List*>(a.root->find("file.template.list"));
+    REQUIRE(list);
+    CHECK(list->count() == 2);
+    a.root->frame(false);
+    const ui::Rect r = list->bounds();
+    const ui::Point first{r.x + 10, r.y + 8};
+    a.root->pointer({ui::PointerEvent::Type::Down, first, 1});
+    a.root->pointer({ui::PointerEvent::Type::Up, first, 1});
+    a.root->frame(false);
+    REQUIRE(a.root->click("file.confirm.discard"));  // the unsaved Ctrl+T
+    CHECK(a.tracks() == tracks);
+    CHECK(a.app->projectPath().empty());
+    CHECK_FALSE(files.dirty());
+
+    // A right click deletes one (here "Band", the first).
+    REQUIRE(a.actions->run("ui.file.template.load"));
+    a.root->frame(false);
+    a.root->pointer({ui::PointerEvent::Type::Down, first, 3});
+    a.root->pointer({ui::PointerEvent::Type::Up, first, 3});
+    a.root->frame(false);
+    REQUIRE(a.root->click("file.template.context"));  // its one item, Delete
+    a.root->frame(false);
+    CHECK_FALSE(std::filesystem::exists(dir / "Band.json"));
+    CHECK(std::filesystem::exists(dir / "Spare.json"));
+    list = dynamic_cast<ui::List*>(a.root->find("file.template.list"));
+    REQUIRE(list);
+    CHECK(list->count() == 1);
+}
+
 TEST_CASE("an action binds the selected tracks ($selection.track)") {
     App a;
     if (!a.ok) {

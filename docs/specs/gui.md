@@ -361,7 +361,12 @@ effect's editor reopens where it was last, at its last size when it is
 resizable (a plug-in may adjust the size it is offered); placements are kept
 per effect in the UI file's `plugin_windows` section (`{fx id: {x, y, width,
 height}}`), so they survive closing the project. A position no longer on any
-display (a monitor that is gone) is not used. Commands: `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
+display (a monitor that is gone) is not used. The header's **Save chain…**
+shows a name field for a chain preset (fx.chain.save) and **Load chain…** a
+menu of saved presets (fx.chain.list; a click appends, Shift replaces);
+pressing either button again while its field or menu shows closes it. A right
+click on a preset in the menu offers Delete (fx.chain.delete). Commands:
+`fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix
 
@@ -421,7 +426,10 @@ GUI-only. A nonempty invalid numeric field blocks preview, queue insertion
 and rendering with a field diagnostic. Cancelled jobs remain labelled
 cancelled and retain any partial result files returned by the engine.
 The Add-to-project checkbox reflects its stored flag whenever the dialog
-opens. The dialog tracks one render or queue job at a time; a second launch
+opens. A Folder row shows where the files go (`~` for the home folder) and
+**Choose folder…** opens the system's folder dialog; the choice applies at
+once and is kept as the `render_directory` preference (default: the media
+folder, §4.11). The dialog tracks one render or queue job at a time; a second launch
 is refused with a status message while it tracks that job.
 
 ### 4.9 Recording
@@ -439,6 +447,23 @@ attributed.
 The history panel refreshes on changes to the project generation, head
 version, branch list or current branch name, including branch changes that
 leave the head version unchanged.
+
+### 4.11 Project files, folders and templates
+
+File > New, Open…, Save, Save as… and Import audio… use the system's file
+dialogs (asynchronous; results run on the UI thread), and ask Save / Don't
+save / Cancel before unsaved changes are lost. Open and Save as start in the
+project's own file, else in the media folder `~/Documents/<slug>-media`
+(created on demand); any other folder can be browsed to. Renders go to the
+same media folder unless the render dialog chose another (§4.8); under
+`--workdir` (tests) they go to `<workdir>/renders`.
+
+**Project templates** are whole projects kept by name in
+`<config>/<slug>/templates/<name>.json` (project.template.*): File > Save
+template… asks for a name (a name in use asks once more, then replaces it);
+File > Load template… lists them, a click starts a new, unsaved project from
+one (after the unsaved-changes question), and a right click offers Delete.
+Templates name recordings by absolute path; the media are not copied.
 
 ## 5. Agent panel (`daw/agent-panel`)
 
@@ -515,7 +540,7 @@ leave the head version unchanged.
   (`project_cursor`, the default, or `mouse_pointer`).
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
-  auto; `preferences.json`, supple.preferences/1.2, sets
+  auto; `preferences.json`, supple.preferences/1.3, sets
   `EngineApp::defaultMonitor`, so the agents' track.add follows it too), the
   wheel zoom anchor (kept in `mouse.json`), and a way into the mouse
   modifiers. **Audio processing threads** is an advanced live/background
@@ -528,7 +553,7 @@ leave the head version unchanged.
   on the next engine start; changing it never restarts playback immediately.
   The limit applies independently to each pool, not total process threads;
   offline export keeps its separate thread setting. Version 1.0 files remain readable; missing `audio_threads`
-  means 0, and saves write canonical 1.2. Invalid types/ranges return
+  means 0, and saves write canonical 1.3. Invalid types/ranges return
   `preferences.audio_threads` at `/audio_threads` with a corrective hint;
   a failed save leaves the effective and displayed thread setting unchanged.
   **Lock process memory (mlockall)** is off by default, saved as the boolean
@@ -542,25 +567,35 @@ leave the head version unchanged.
   and wide right-column On/Off button as the other preferences. Its two short
   caution lines explain RAM pressure, sample-library/stack failure, host-only
   scope and that turning it off also drops plug-in locks (engine.md, Optional
-  host-process controls). The status note appears only for pending intent
+  host-process controls); a third says how to grant the permission it needs
+  (an unlimited memlock limit for the audio group in
+  `/etc/security/limits.d/`, and membership of that group). The status note appears only for pending intent
   ("Applies when the engine starts"), effective locking ("Locked") or failure;
   Off has no duplicate note or reserved space. Notes refresh on opening/toggling
   and the existing GUI model-service tick; the dialog height follows visible
-  content. Canonical 1.2 saves
+  content. Canonical saves
   preserve existing monitoring/thread values; no project format changes.
   **Keep CPUs out of deep idle** is separately off by
   default, persisted as boolean `prevent_deep_idle` in the same canonical
-  1.2 file. Missing fields (including in 1.0/1.1 files) mean false; invalid
+  file. Missing fields (including in 1.0/1.1 files) mean false; invalid
   types report `preferences.prevent_deep_idle` at `/prevent_deep_idle` with
   "use true or false". It uses the same save/intent/effective-state pattern
   as memory locking. The active note says "Requested: 20 µs"; failures show
   errno and a corrective hint; Off has no status note. This row uses the same
   label/button columns as the others. Its single small caution line says the
   request affects system idle while the engine runs and may increase power,
-  heat and fan noise. Disable or
+  heat and fan noise; a second says how to grant write access to
+  `/dev/cpu_dma_latency` (a udev rule giving the audio group read/write, and
+  membership of that group). Disable or
   engine stop releases only the owned request; transport stop retains it.
   Notes refresh through the existing GUI service flow. No preference test
   opens the actual latency device for writing.
+  **Render folder** (1.3): the render dialog's folder choice (§4.8), an
+  absolute path saved as the optional string `render_directory` and applied
+  to `EngineApp::setRendersDir` at once and on every start. Absent (and in
+  1.0–1.2 files) it means the default media folder; anything other than an
+  absolute path reports `preferences.render_directory` at
+  `/render_directory`.
 
 
 

@@ -3,9 +3,14 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 
+#include "supple/product.h"
+#include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/scroll_view.h"
+#include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
 
 namespace supple::gui {
@@ -30,7 +35,75 @@ void SDLCALL onDialog(void* userdata, const char* const* files, int) {
 const SDL_DialogFileFilter kProjectFilter[] = {{"Projects", "json"}, {"All files", "*"}};
 const SDL_DialogFileFilter kAudioFilter[] = {{"Audio", "wav;flac;mp3"}, {"All files", "*"}};
 
+// The saved project templates: a click starts a new project from one, a right
+// click offers to delete it (`remove` is true when the file is gone).
+class TemplateList : public ui::List {
+  public:
+    TemplateList(ui::Root& root, std::vector<std::string> names,
+                 std::function<void(const std::string&)> load,
+                 std::function<bool(const std::string&)> remove)
+        : List("file.template.list"),
+          root_(root),
+          names_(std::move(names)),
+          load_(std::move(load)),
+          remove_(std::move(remove)) {
+        rowHeight = 28;
+        layout.width = ui::SizeRule::fixed(360);
+        layout.height = ui::SizeRule::fixed(
+            rowHeight * static_cast<float>(std::min<std::size_t>(names_.size(), 12)));
+        setCount(names_.size());
+        paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
+            c.text({r.x + 8, r.y, r.w - 16, r.h}, names_[i], ui::Font::Ui, c.theme().type("small"),
+                   c.theme().color("ink"));
+        };
+        onActivate = [this](std::size_t i) {
+            auto callback = load_;
+            const std::string name = names_[i];
+            root_.closePopup();  // destroys this list: nothing after but the callback
+            callback(name);
+        };
+        onContext = [this](std::size_t i, ui::Point at) {
+            ui::MenuItem item;
+            item.label = "Delete \"" + names_[i] + "\"";
+            item.run = [this, i] {
+                if (!remove_(names_[i])) return;
+                names_.erase(names_.begin() + static_cast<std::ptrdiff_t>(i));
+                select(std::nullopt);
+                setCount(names_.size());
+                root_.relayout();
+                root_.damageAll();
+                if (names_.empty()) root_.closePopup();  // destroys this list
+            };
+            root_.openPopup(ui::makeMenu("file.template.context", {std::move(item)},
+                                         [this] { root_.closePopup(); }),
+                            ui::Rect{at.x, at.y, 0, 0}, ui::Placement::Below);
+        };
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Up && e.button == 1 && selected()) {
+            if (bounds().contains(e.pos)) {
+                auto activate = onActivate;
+                activate(*selected());
+            }
+            return true;
+        }
+        return List::onPointer(e);
+    }
+
+  private:
+    ui::Root& root_;
+    std::vector<std::string> names_;
+    std::function<void(const std::string&)> load_;
+    std::function<bool(const std::string&)> remove_;
+};
+
 }  // namespace
+
+std::filesystem::path mediaHome() {
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return {};
+    return std::filesystem::path(home) / "Documents" / (std::string(product::kSlug) + "-media");
+}
 
 DialogLifetime::~DialogLifetime() {
     std::lock_guard lock(state_->mutex);
@@ -76,7 +149,9 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
         confirmDiscard("Open another project?", [this] {
             auto* req = new DialogRequest{
                 dialogs_.guard(post_, [this](auto paths) { openPath(paths.front()); })};
-            SDL_ShowOpenFileDialog(onDialog, req, window_, kProjectFilter, 2, nullptr, false);
+            const std::string start = dialogStart();
+            SDL_ShowOpenFileDialog(onDialog, req, window_, kProjectFilter, 2,
+                                   start.empty() ? nullptr : start.c_str(), false);
         });
     });
     actions_.addUi("ui.file.save", "File: save", [this] {
@@ -86,10 +161,12 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     actions_.addUi("ui.file.save_as", "File: save as…", [this] {
         auto* req =
             new DialogRequest{dialogs_.guard(post_, [this](auto paths) { saveAs(paths.front()); })};
-        const std::string here = app_.projectPath().empty() ? "" : app_.projectPath().string();
+        const std::string start = dialogStart();
         SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
-                               here.empty() ? nullptr : here.c_str());
+                               start.empty() ? nullptr : start.c_str());
     });
+    actions_.addUi("ui.file.template.save", "File: save template…", [this] { openSaveTemplate(); });
+    actions_.addUi("ui.file.template.load", "File: load template…", [this] { openTemplateList(); });
     actions_.addUi("ui.file.import", "File: import audio…", [this] {
         auto* req = new DialogRequest{dialogs_.guard(post_, [this](auto paths) { import(paths); })};
         SDL_ShowOpenFileDialog(onDialog, req, window_, kAudioFilter, 2, nullptr, true);
@@ -133,6 +210,122 @@ void FileActions::saveAs(const std::filesystem::path& path) {
     json::Value args = json::Value::object();
     args["path"] = p.string();
     if (exec("project.save", std::move(args))) markSaved();
+}
+
+std::string FileActions::dialogStart() const {
+    if (!app_.projectPath().empty()) return app_.projectPath().string();
+    const std::filesystem::path home = mediaHome();
+    if (home.empty()) return {};
+    std::error_code ec;
+    std::filesystem::create_directories(home, ec);  // a dialog cannot start in a missing folder
+    return ec ? std::string() : home.string() + "/";
+}
+
+void FileActions::chooseFolder(const std::filesystem::path& start,
+                               std::function<void(std::filesystem::path)> done) {
+    auto* req = new DialogRequest{
+        dialogs_.guard(post_, [done = std::move(done)](auto paths) { done(paths.front()); })};
+    std::error_code ec;
+    std::string where;
+    if (!start.empty() && std::filesystem::is_directory(start, ec)) where = start.string() + "/";
+    SDL_ShowOpenFolderDialog(onDialog, req, window_, where.empty() ? nullptr : where.c_str(),
+                             false);
+}
+
+void FileActions::openSaveTemplate() {
+    if (root_.popupOpen()) root_.closePopups();
+    replaceTemplate_.clear();
+    auto form = std::make_unique<ui::Node>("file.template.save");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(420);
+    form->layout.height = ui::SizeRule::content();
+    form->layout.padding = ui::Insets::all(14);
+    form->layout.gap = 8;
+    form->emplace<ui::Label>("file.template.title", "Save project template", ui::Font::UiBold,
+                             "body");
+    auto& row = form->emplace<ui::Node>("file.template.row");
+    row.layout.dir = ui::Layout::Dir::Row;
+    row.layout.height = ui::SizeRule::fixed(28);
+    row.layout.gap = 8;
+    auto& name = row.emplace<ui::TextField>("file.template.name", "", "Template name");
+    name.layout.width = ui::SizeRule::fraction();
+    name.onSubmit = [this](const std::string& text) { saveTemplate(text); };
+    name.onCancel = [this] { root_.closePopup(); };
+    row.emplace<ui::Button>("file.template.commit", "Save",
+                            [this, &name] { saveTemplate(name.text()); });
+    row.emplace<ui::Button>("file.template.cancel", "Cancel", [this] { root_.closePopup(); });
+    form->emplace<ui::Label>("file.template.status", "", ui::Font::Ui, "small", "ink-quiet")
+        .layout.height = ui::SizeRule::fixed(18);
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
+    root_.focus(&name);
+}
+
+void FileActions::saveTemplate(const std::string& name) {
+    auto* status = dynamic_cast<ui::Label*>(root_.find("file.template.status"));
+    json::Value args = json::Value::object();
+    args["name"] = name;
+    args["replace"] = !name.empty() && name == replaceTemplate_;
+    auto saved = dispatcher_.execute({"project.template.save", std::move(args), kOrigin});
+    if (saved) {
+        replaceTemplate_.clear();
+        if (root_.find("file.template.save")) root_.closePopup();
+        return;
+    }
+    if (!status) return showError("project.template.save: " + saved.error().message);
+    if (saved.error().code == "chain.exists") {
+        replaceTemplate_ = name;
+        status->setText("\"" + name + "\" exists. Save again to replace it.");
+    } else {
+        status->setText(saved.error().message);
+    }
+    root_.damageAll();
+}
+
+void FileActions::openTemplateList() {
+    if (root_.popupOpen()) root_.closePopups();
+    auto listed = exec("project.template.list", json::Value::object());
+    if (!listed) return;
+    std::vector<std::string> names;
+    for (const json::Value& t : (*listed)["templates"].asArray())
+        names.push_back(t.find("name")->asString());
+    auto form = std::make_unique<ui::Node>("file.templates");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(384);
+    form->layout.height = ui::SizeRule::content();
+    form->layout.padding = ui::Insets::all(12);
+    form->layout.gap = 8;
+    form->emplace<ui::Label>("file.templates.title", "Load project template", ui::Font::UiBold,
+                             "body");
+    if (names.empty())
+        form->emplace<ui::Label>("file.templates.none",
+                                 "No templates yet: File > Save template… saves one.", ui::Font::Ui,
+                                 "small", "ink-quiet");
+    else
+        form->emplace<TemplateList>(
+            root_, std::move(names),
+            [this](const std::string& name) {
+                confirmDiscard("Start a new project from \"" + name + "\"?",
+                               [this, name] { loadTemplate(name); });
+            },
+            [this](const std::string& name) {
+                json::Value args = json::Value::object();
+                args["name"] = name;
+                return exec("project.template.delete", std::move(args)).ok();
+            });
+    if (form->find("file.template.list"))
+        form->emplace<ui::Label>("file.templates.hint", "Right-click a template to delete it.",
+                                 ui::Font::Ui, "caption", "ink-quiet");
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
+}
+
+void FileActions::loadTemplate(const std::string& name) {
+    json::Value args = json::Value::object();
+    args["name"] = name;
+    if (exec("project.template.load", std::move(args))) {
+        ui_.selectedTracks.clear();
+        ui_.selectedItems.clear();
+        markSaved();
+    }
 }
 
 void FileActions::import(const std::vector<std::filesystem::path>& files) {
@@ -188,7 +381,9 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
                 saveAs(paths.front());
                 if (!dirty()) (*keep)();
             })};
-            SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2, nullptr);
+            const std::string start = dialogStart();
+            SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
+                                   start.empty() ? nullptr : start.c_str());
             return;
         }
         if (exec("project.save", json::Value::object())) {

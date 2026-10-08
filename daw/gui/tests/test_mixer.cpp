@@ -917,7 +917,7 @@ TEST_CASE("preferences: background thread limits, legacy loading and canonical r
         CHECK(loaded->audioThreads == limit);
         auto before = readFile(file);
         REQUIRE(before);
-        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.2") !=
+        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.3") !=
               std::string::npos);
         REQUIRE(loaded->save(file));
         CHECK(readFile(file).value() == *before);
@@ -1009,7 +1009,7 @@ TEST_CASE(
     prefs.open();
     f.root->frame(false);
     const float offHeight = f.node("prefs")->bounds().h;
-    CHECK(offHeight < 400);
+    CHECK(offHeight < 460);  // no space reserved for empty notes
     CHECK_FALSE(f.node("prefs.memory.note.0")->visible);
     CHECK_FALSE(f.node("prefs.latency.note.0")->visible);
     for (const char* id : {"prefs.memory.set", "prefs.latency.set"}) {
@@ -1056,13 +1056,14 @@ TEST_CASE("preferences: both protection booleans survive canonical round trip an
     Fixture f;
     REQUIRE(f.ok);
     const auto file = f.dir / "preferences.json";
-    for (const char* version : {"1.0", "1.1", "1.2"}) {
+    for (const char* version : {"1.0", "1.1", "1.2", "1.3"}) {
         REQUIRE(writeFileAtomic(
             file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
         auto loaded = gui::Preferences::load(file);
         REQUIRE(loaded);
         CHECK_FALSE(loaded->lockMemory);
         CHECK_FALSE(loaded->preventDeepIdle);
+        CHECK(loaded->renderDirectory.empty());
     }
     for (bool memory : {false, true})
         for (bool idle : {false, true}) {
@@ -1090,6 +1091,38 @@ TEST_CASE("preferences: both protection booleans survive canonical round trip an
         REQUIRE_FALSE(loaded);
         CHECK(loaded.error().path == "/prevent_deep_idle");
         CHECK(loaded.error().hint == "use true or false");
+    }
+}
+
+TEST_CASE("preferences: the render folder is saved, applied to the app and round-trips") {
+    Fixture f;
+    REQUIRE(f.ok);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "preferences.json";
+    const auto folder = f.dir / "my renders";
+    {
+        gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+        CHECK_FALSE(prefs.setRenderDirectory("relative/renders"));
+        REQUIRE(prefs.setRenderDirectory(folder));
+        CHECK(f.app->rendersDir() == folder);
+    }
+    auto loaded = gui::Preferences::load(file);
+    REQUIRE(loaded);
+    CHECK(loaded->renderDirectory == folder);
+    const auto bytes = readFile(file).value();
+    REQUIRE(loaded->save(file));
+    CHECK(readFile(file).value() == bytes);
+    f.app->setRendersDir({});
+    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *loaded, {});
+    CHECK(f.app->rendersDir() == folder);  // a loaded choice applies at once
+    for (const char* bad : {"1", "\"relative\"", "null"}) {
+        REQUIRE(writeFileAtomic(
+            file,
+            std::string(R"({"schema":"supple.preferences/1.3","render_directory":)") + bad + "}"));
+        auto rejected = gui::Preferences::load(file);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().path == "/render_directory");
     }
 }
 

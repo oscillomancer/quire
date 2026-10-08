@@ -59,6 +59,11 @@ class RenderDialog {
     void runQueue();
     std::vector<std::string> resultFiles() const { return resultFiles_; }
     void setField(const std::string& id, const std::string& text);  // tests/scripts
+    // The Folder… button: the app opens the system's folder dialog and, once
+    // the renders folder changed, calls showFolder().
+    std::function<void()> onChooseFolder;
+    void showFolder();  // the renders folder, as the dialog shows it
+    const std::string& folderText() const;
 
   private:
     std::unique_ptr<ui::Node> buildPage();
@@ -89,6 +94,7 @@ class RenderDialog {
 
     ui::Node* page_ = nullptr;
     ui::Label* sourceLabel_ = nullptr;
+    ui::Label* folder_ = nullptr;
     ui::Label* status_ = nullptr;
     ui::TextBlock* previewBlock_ = nullptr;
     ui::TextBlock* resultsBlock_ = nullptr;

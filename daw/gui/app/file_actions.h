@@ -1,7 +1,7 @@
-// The File actions (new, open, save, save as, import audio) with the system's
-// file dialogs (SDL3: the desktop portal or a native dialog, asynchronous —
-// the UI thread never waits on them) and a confirmation before unsaved
-// changes are discarded. Every change goes through the bus.
+// The File actions (new, open, save, save as, project templates, import
+// audio) with the system's file dialogs (SDL3: the desktop portal or a native
+// dialog, asynchronous — the UI thread never waits on them) and a confirmation
+// before unsaved changes are discarded. Every change goes through the bus.
 #pragma once
 
 #include <filesystem>
@@ -36,6 +36,10 @@ class DialogLifetime {
     std::shared_ptr<State> state_ = std::make_shared<State>();
 };
 
+// Where projects and renders go unless the user picks another folder:
+// ~/Documents/<slug>-media (empty without HOME).
+std::filesystem::path mediaHome();
+
 class FileActions {
   public:
     using Post = std::function<void(std::function<void()>)>;
@@ -50,8 +54,20 @@ class FileActions {
     void openPath(const std::filesystem::path& path);
     void saveAs(const std::filesystem::path& path);
     void import(const std::vector<std::filesystem::path>& files);
+    // Project templates (File > Save template… / Load template…): a name
+    // prompt, and a list where a click starts a new project from a template
+    // and a right click offers to delete it.
+    void openSaveTemplate();
+    void openTemplateList();
+    void saveTemplate(const std::string& name);  // the prompt's Save
+    void loadTemplate(const std::string& name);  // after confirmDiscard
+    // The system's folder dialog, starting at `start`; `done` runs on the UI
+    // thread with the chosen folder.
+    void chooseFolder(const std::filesystem::path& start,
+                      std::function<void(std::filesystem::path)> done);
 
   private:
+    std::string dialogStart() const;  // the project's file, else mediaHome()
     Result<json::Value> exec(const std::string& command, json::Value args);
     void markSaved();
     void showError(const std::string& message);
@@ -66,6 +82,7 @@ class FileActions {
     std::uint64_t savedVersion_ = 0;
     std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     std::string savedBranch_;
+    std::string replaceTemplate_;  // a name that exists: Save again replaces it
 };
 
 }  // namespace supple::gui

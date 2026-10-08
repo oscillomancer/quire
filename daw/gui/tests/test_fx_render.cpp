@@ -160,6 +160,16 @@ struct Fixture {
         root->text(text);
         frame();
     }
+    // A press and release of `button` on the first row of a list.
+    void pressFirstRow(const std::string& id, int button) {
+        frame();
+        auto* node = root->find(id);
+        REQUIRE(node);
+        const ui::Point at{node->bounds().x + 10, node->bounds().y + 8};
+        root->pointer({ui::PointerEvent::Type::Down, at, button});
+        root->pointer({ui::PointerEvent::Type::Up, at, button});
+        frame();
+    }
     void key(const char* chord) {
         const auto c = actions::parseChord(chord);
         REQUIRE(c);
@@ -554,7 +564,8 @@ TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog
     f.frame();
     f.snapshot("fx-params.png");
 
-    f.fx->close();  // a clean render-dialog golden
+    f.fx->close();                     // a clean render-dialog golden
+    f.app->setRendersDir("/renders");  // the folder row shows the same text on every machine
     f.render->open();
     f.render->setField("render.pattern", "{project}-{track_number:02}-{track|lower}");
     f.render->refreshPreview();
@@ -887,6 +898,76 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     f.type("Input");
     f.key("Return");
     CHECK(f.fxStatus() == "Saved Input");
+}
+
+TEST_CASE("FX chain preset buttons toggle their popups; a right click deletes a preset") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) {
+        MESSAGE("skipped: no GUI or stock plugins");
+        return;
+    }
+    const auto track = f.addTrack("Source");
+    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}})));
+    REQUIRE(f.fx->open(track));
+    for (const char* name : {"Keep", "Drop"}) {
+        REQUIRE(f.run("fx.chain.save", f.args({{"track", track.str()}, {"name", name}})));
+    }
+    // Save chain… shows its name field; pressed again, hides it.
+    REQUIRE(f.click("fx.chain.save"));
+    CHECK(f.root->find("fx.chain.prompt")->visible);
+    REQUIRE(f.click("fx.chain.save"));
+    CHECK_FALSE(f.root->find("fx.chain.prompt")->visible);
+    // Load chain… opens one menu; pressed again, closes it (never a second).
+    REQUIRE(f.click("fx.chain.load"));
+    REQUIRE(f.root->find("fx.chain.menu"));
+    REQUIRE(f.click("fx.chain.load"));
+    CHECK_FALSE(f.root->find("fx.chain.menu"));
+    CHECK(f.root->find("fx"));  // the FX window itself stays
+    REQUIRE(f.click("fx.chain.load"));
+    REQUIRE(f.click("fx.chain.load"));
+    REQUIRE(f.click("fx.chain.load"));
+    CHECK(f.root->find("fx.chain.menu"));
+    // Sorted by name: Drop first. A right click offers to delete it.
+    const auto before = f.historyCount();
+    f.pressFirstRow("fx.chain.menu", 3);
+    REQUIRE(f.click("fx.chain.menu.context"));  // its one item, Delete
+    CHECK_FALSE(std::filesystem::exists(f.dir / "chains" / "Drop.json"));
+    CHECK(std::filesystem::exists(f.dir / "chains" / "Keep.json"));
+    CHECK(f.historyCount() == before);
+    CHECK(f.fxStatus() == "Deleted Drop");
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("fx.chain.menu"));
+    REQUIRE(menu);
+    CHECK(menu->count() == 1);
+    // Deleting the last one closes the menu.
+    f.pressFirstRow("fx.chain.menu", 3);
+    REQUIRE(f.click("fx.chain.menu.context"));
+    CHECK_FALSE(f.root->find("fx.chain.menu"));
+    CHECK_FALSE(std::filesystem::exists(f.dir / "chains" / "Keep.json"));
+}
+
+TEST_CASE("the render dialog shows the renders folder and follows a new choice") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no GUI");
+        return;
+    }
+    int asked = 0;
+    f.render->onChooseFolder = [&] {
+        ++asked;
+        f.app->setRendersDir(f.dir / "elsewhere");
+        f.render->showFolder();
+    };
+    f.render->open();
+    f.frame();
+    CHECK(f.render->folderText().ends_with("/renders"));
+    REQUIRE(f.click("render.folder.choose"));
+    CHECK(asked == 1);
+    CHECK(f.render->folderText().ends_with("/elsewhere"));
+    auto dry = f.run("render.dry-run", f.args({{"operation", "mix"}, {"end_beat", 4.0}}));
+    REQUIRE(dry);
+    REQUIRE((*dry)["files"].size() == 1);
+    CHECK(std::filesystem::path((*dry)["files"].asArray()[0].find("path")->asString())
+              .parent_path() == f.dir / "elsewhere");
 }
 
 TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input chain") {

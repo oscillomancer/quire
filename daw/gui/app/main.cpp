@@ -289,6 +289,9 @@ int main(int argc, char** argv) {
                       : !o.project.empty() ? o.project.parent_path()
                                            : fs::current_path();
     options.scratchDir = scratchFolder(o);
+    // Renders go to the user's media folder (or the folder chosen in the render
+    // dialog, a preference); under --workdir (tests) to <workdir>/renders.
+    if (o.workdir.empty()) options.rendersDir = gui::mediaHome();
     auto app = engine::EngineApp::create(options);
     if (!app) {
         std::fprintf(stderr, "%s\n", app.error().toString().c_str());
@@ -534,6 +537,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
     appActions.addUi("ui.preferences", "Edit: preferences…", [&] { preferences.open(); });
+    renderDialog.onChooseFolder = [&] {
+        fileActions.chooseFolder((*app)->rendersDir(), [&](const fs::path& dir) {
+            if (auto set = preferences.setRenderDirectory(dir); !set)
+                std::fprintf(stderr, "preferences: %s\n", set.error().toString().c_str());
+            renderDialog.showFolder();
+        });
+    };
     {
         views::ItemGestures& g = shell.arrange()->gestures();
         g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };

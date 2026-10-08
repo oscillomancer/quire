@@ -71,7 +71,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
-  light, preferences.
+  light, preferences. Projects and renders default to
+  `~/Documents/<slug>-media` (the render folder is choosable); FX chain
+  presets and project templates are saved, loaded and deleted in the app.
 - **Agents**: the MCP server for the running app or a headless engine; the
   agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
   included) working on `agent/...` branches with diff, A/B and

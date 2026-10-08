@@ -1,6 +1,6 @@
 // Preferences (Edit > Preferences…): app-wide settings, never project state.
-// The monitoring mode, audio thread limit and opt-in process controls are saved to
-// <config>/<slug>/preferences.json (supple.preferences/1.2); the wheel zoom
+// The monitoring mode, audio thread limit, opt-in process controls and render
+// folder are saved to <config>/<slug>/preferences.json (supple.preferences/1.3); the wheel zoom
 // anchor lives in the mouse map (mouse.json) and is offered here too, with a
 // way into the full mouse modifiers dialog.
 #pragma once
@@ -22,6 +22,7 @@ struct Preferences {
     unsigned audioThreads = 0;  // Automatic; otherwise limit 1..64, including each executor
     bool lockMemory = false;
     bool preventDeepIdle = false;
+    std::filesystem::path renderDirectory{};  // empty: the app's default (mediaHome())
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Preferences> load(const std::filesystem::path& file);  // absent: defaults
     Status save(const std::filesystem::path& file) const;
@@ -40,6 +41,8 @@ class PreferencesDialog {
     Status setPreventDeepIdle(bool requested);
     void refresh();  // open dialog only; also called by the existing GUI tick
     Status setAudioThreads(unsigned limit);  // saved; next engine start
+    // The render dialog's folder choice: saved, and renders go there at once.
+    Status setRenderDirectory(const std::filesystem::path& dir);
     void setZoomAnchor(const std::string& behaviour);
     const Preferences& preferences() const { return prefs_; }
     std::function<void(const std::string&)> onError;

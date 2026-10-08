@@ -11,7 +11,7 @@
 namespace supple::gui {
 namespace {
 
-constexpr const char* kSchema = "supple.preferences/1.2";
+constexpr const char* kSchema = "supple.preferences/1.3";
 
 Error threadLimitError() {
     return Error("preferences.audio_threads", "audio processing thread limit is out of range",
@@ -74,7 +74,8 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
     const json::Value* schema = doc->isObject() ? doc->find("schema") : nullptr;
     if (!schema || !schema->isString() ||
         (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0" &&
-         schema->asString() != "supple.preferences/1.1"))
+         schema->asString() != "supple.preferences/1.1" &&
+         schema->asString() != "supple.preferences/1.2"))
         return Error("preferences.schema", file.string() + " is not a " + kSchema + " document",
                      "/schema");
     if (const json::Value* m = doc->find("default_monitor")) {
@@ -105,6 +106,13 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
                          "/prevent_deep_idle", "use true or false");
         out.preventDeepIdle = v->asBool();
     }
+    if (const auto* v = doc->find("render_directory")) {
+        if (!v->isString() || !std::filesystem::path(v->asString()).is_absolute())
+            return Error("preferences.render_directory",
+                         "render_directory must be an absolute path", "/render_directory",
+                         "choose the folder again in the render dialog, or remove the field");
+        out.renderDirectory = v->asString();
+    }
     return out;
 }
 
@@ -116,6 +124,7 @@ Status Preferences::save(const std::filesystem::path& file) const {
     doc["lock_memory"] = lockMemory;
     doc["prevent_deep_idle"] = preventDeepIdle;
     doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
+    if (!renderDirectory.empty()) doc["render_directory"] = renderDirectory.string();
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     return writeFileAtomic(file, json::writeCanonical(doc) + "\n");
@@ -132,6 +141,7 @@ PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, Mou
         prefs_.audioThreads = app_.audioThreadLimit();
     (void)app_.setMemoryLock(prefs_.lockMemory);
     (void)app_.setPreventDeepIdle(prefs_.preventDeepIdle);
+    if (!prefs_.renderDirectory.empty()) app_.setRendersDir(prefs_.renderDirectory);
 }
 
 bool PreferencesDialog::isOpen() const { return root_.find("prefs") != nullptr; }
@@ -220,8 +230,10 @@ void PreferencesDialog::open() {
     });
     memory_->layout.width = ui::SizeRule::fraction();
     memory_->layout.height = ui::SizeRule::fixed(26);
-    for (const auto& text : {"Uses RAM; large sample libraries or stack growth can fail.",
-                             "Host process only; turning it off also unlocks plug-in locks."}) {
+    for (const auto& text :
+         {"Uses RAM; large sample libraries or stack growth can fail.",
+          "Host process only; turning it off also unlocks plug-in locks.",
+          "To allow: add \"@audio - memlock unlimited\" to /etc/security/limits.d/, join audio."}) {
         auto& label = form->emplace<ui::Label>(
             "prefs.memory.caution." + std::to_string(form->children().size()), text, ui::Font::Ui,
             "small", "ink-quiet");
@@ -245,6 +257,11 @@ void PreferencesDialog::open() {
     form->emplace<ui::Label>(
             "prefs.latency.caution",
             "While the engine runs, affects system idle; may increase power, heat and fan noise.",
+            ui::Font::Ui, "small", "ink-quiet")
+        .layout.height = ui::SizeRule::fixed(20);
+    form->emplace<ui::Label>(
+            "prefs.latency.permission",
+            "To allow: a udev rule giving group audio rw on /dev/cpu_dma_latency; join audio.",
             ui::Font::Ui, "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
     for (std::size_t i = 0; i < latencyNote_.size(); ++i) {
@@ -347,6 +364,18 @@ Status PreferencesDialog::setPreventDeepIdle(bool requested) {
     auto applied = app_.setPreventDeepIdle(requested);
     refresh();
     return applied;
+}
+
+Status PreferencesDialog::setRenderDirectory(const std::filesystem::path& dir) {
+    if (!dir.is_absolute())
+        return Error("preferences.render_directory", "render_directory must be an absolute path",
+                     "/render_directory", "choose a folder in the render dialog");
+    auto next = prefs_;
+    next.renderDirectory = dir;
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    prefs_ = next;
+    app_.setRendersDir(dir);
+    return {};
 }
 
 void PreferencesDialog::setZoomAnchor(const std::string& behaviour) {
