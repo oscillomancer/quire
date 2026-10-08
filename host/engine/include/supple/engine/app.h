@@ -233,6 +233,11 @@ class EngineApp : public cmd::Host {
     // On a backend the app owns: "jack" (the audio device, at the graph's
     // rate) or "dummy" (no device, paced like one, at the project's rate).
     Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
+    // App-wide background execution limit, including the submitting renderer.
+    // 0: Automatic; 1..64: maximum threads. Applies on the next engine start
+    // when EngineOptions::workers is -1; explicit helper counts take precedence.
+    unsigned audioThreadLimit() const { return audioThreadLimit_; }
+    Status setAudioThreadLimit(unsigned limit);
     void stopEngine();
     Engine* engine() { return engine_.get(); }
     const Backend* backend() const { return backend_; }  // null while stopped
@@ -350,6 +355,7 @@ class EngineApp : public cmd::Host {
 
   private:
     model::Monitor defaultMonitor_ = model::Monitor::On;
+    unsigned audioThreadLimit_ = 0;
     void finalizeRecordingHash(model::Id source, model::MediaSource expected, RecordedTake take,
                                std::string hash, std::string branch, std::uint64_t generation);
     void startPlaying(int countInBars);  // engine play(), after a count-in when > 0

@@ -184,42 +184,45 @@ InstancePool makeVstPool() {
 }
 
 // A track playing a sine instrument: notes on beats 0, 1, 2, 3 (quarter notes).
-model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr) {
+model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr,
+                            unsigned tracks = 1) {
     model::EditTxn t(model::Session::create({.console9 = false}), 1);
-    model::Track tr;
-    tr.name = "Synth";
-    tr.parent = kMaster;
-    tr.volumeDb = volumeDb;
-    const Id track = t.create(tr);
-    t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(track); });
-    for (const char* plugin : {"com.suppleaudio.test.sine", extraFx}) {
-        if (!plugin) continue;
-        model::FxInstance fx;
-        fx.plugin.id = plugin;
-        if (std::string(plugin) == "com.suppleaudio.test.gain")
-            fx.patch =
-                json::parse(
-                    R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
-                    .value();
-        const Id f = t.create(fx);
-        t.modify<model::Track>(track, [&](model::Track& x) { x.chain.push_back(f); });
+    for (unsigned channel = 0; channel < tracks; ++channel) {
+        model::Track tr;
+        tr.name = "Synth";
+        tr.parent = kMaster;
+        tr.volumeDb = volumeDb;
+        const Id track = t.create(tr);
+        t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(track); });
+        for (const char* plugin : {"com.suppleaudio.test.sine", extraFx}) {
+            if (!plugin) continue;
+            model::FxInstance fx;
+            fx.plugin.id = plugin;
+            if (std::string(plugin) == "com.suppleaudio.test.gain")
+                fx.patch =
+                    json::parse(
+                        R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
+                        .value();
+            const Id f = t.create(fx);
+            t.modify<model::Track>(track, [&](model::Track& x) { x.chain.push_back(f); });
+        }
+        model::MidiSource src;
+        src.sequence.ppq = 960;
+        src.sequence.length = 4 * 960;
+        for (int i = 0; i < 4; ++i)
+            src.sequence.notes.push_back(
+                {i * 960, 480, 0, static_cast<std::uint8_t>(60 + 4 * i), 100, 0});
+        const Id mi = t.create(src);
+        model::Take take;
+        take.source = mi;
+        const Id tk = t.create(take);
+        model::Item item;
+        item.track = track;
+        item.length = 4.0;
+        item.takes = {tk};
+        item.activeTake = tk;
+        t.create(item);
     }
-    model::MidiSource src;
-    src.sequence.ppq = 960;
-    src.sequence.length = 4 * 960;
-    for (int i = 0; i < 4; ++i)
-        src.sequence.notes.push_back(
-            {i * 960, 480, 0, static_cast<std::uint8_t>(60 + 4 * i), 100, 0});
-    const Id mi = t.create(src);
-    model::Take take;
-    take.source = mi;
-    const Id tk = t.create(take);
-    model::Item item;
-    item.track = track;
-    item.length = 4.0;
-    item.takes = {tk};
-    item.activeTake = tk;
-    t.create(item);
     return t.commit().value();
 }
 
@@ -279,11 +282,12 @@ void runAhead(Engine& engine, DummyBackend& backend, std::int64_t cycles, std::u
 
 TEST_CASE("real-time output equals the offline render (any block size)" *
           doctest::description("rt")) {
-    for (const EngineOptions& options :
-         {kInCallback, EngineOptions{.workers = 0}, EngineOptions{.workers = 3}})
+    for (const EngineOptions& options : {kInCallback, EngineOptions{.workers = 0},
+                                         EngineOptions{.workers = 1}, EngineOptions{.workers = 7}})
         for (const char* extra : {static_cast<const char*>(nullptr), "com.suppleaudio.test.gain"}) {
             INFO("anticipative " << options.anticipative << ", workers " << options.workers);
-            model::Session s = synthSession(-3.0, extra);
+            // Eight independent roots exercise every requested execution thread.
+            model::Session s = synthSession(-18.0, extra, 8);
             model::EditTxn mode(s, 2);
             auto project = mode.project();
             project.console9 = true;

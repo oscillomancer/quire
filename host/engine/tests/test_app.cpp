@@ -12,6 +12,7 @@
 #include <supple/base/files.h>
 #include <supple/base/sha256.h>
 #include <supple/engine/app.h>
+#include <supple/engine/jack.h>
 #include <supple/host/clap_host.h>
 #include <supple/model/schemas.h>
 
@@ -2970,4 +2971,64 @@ TEST_CASE("automation timebases preserve plugin output positions through branch 
     call("track.set", R"({"track":"tr_1","name":"Unrelated"})");
     call("branch.merge", R"({"from":"timed"})");
     CHECK(app->head().envelopes.find(env)->points.back().pos == doctest::Approx(128.0 / 48000));
+}
+
+TEST_CASE("background thread preference applies at next start and explicit options win") {
+    Root root;
+    auto app = makeApp(root.path);
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(app->setAudioThreadLimit(2));
+    REQUIRE(app->startEngine(backend, {}));
+    CHECK(app->engine()->options().workers == 1);
+    REQUIRE(app->setAudioThreadLimit(8));
+    CHECK(app->engine()->options().workers == 1);  // no mid-job resize
+    auto invalid = app->setAudioThreadLimit(65);
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().path == "/audio_threads");
+    CHECK_FALSE(invalid.error().hint.empty());
+    CHECK(app->audioThreadLimit() == 8);
+    REQUIRE(app->newProject({.console9 = false}));  // this restarts the engine too
+    CHECK(app->engine()->options().workers == 7);
+    app->stopEngine();
+    REQUIRE(app->startEngine(backend, {}));
+    CHECK(app->engine()->options().workers == 7);
+    app->stopEngine();
+    REQUIRE(app->startEngine(backend, {}, {.workers = 0}));
+    CHECK(app->engine()->options().workers == 0);
+    REQUIRE(app->newProject({.console9 = false}));
+    CHECK(app->engine()->options().workers == 0);  // explicit stays explicit
+    app->stopEngine();
+    REQUIRE(app->setAudioThreadLimit(0));
+    REQUIRE(app->startEngine(backend, {}));
+    CHECK(app->engine()->options().workers == -1);
+    app->stopEngine();
+    // engine.start (including the GUI's startup) uses the same app default.
+    REQUIRE(app->setAudioThreadLimit(1));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    REQUIRE(bus.execute({"engine.start", j(R"({"backend":"dummy"})"), kTest}));
+    CHECK(app->engine()->options().workers == 0);
+    REQUIRE(bus.execute({"engine.stop", j("{}"), kTest}));
+}
+
+TEST_CASE("device recovery preserves an Automatic thread preference on a supplied backend") {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);
+    Root root;
+    auto app = makeApp(root.path);
+    JackBackend backend({.library = FakeJack::kPath});
+    app->setFixedClock(1'000'000);
+    REQUIRE(app->setAudioThreadLimit(2));
+    REQUIRE(app->startEngine(backend, {}));
+    CHECK(app->engine()->options().workers == 1);
+    REQUIRE(app->setAudioThreadLimit(4));
+    fake.setRate(44100);
+    app->tick();
+    CHECK_FALSE(app->engine());
+    app->tick();
+    REQUIRE(app->engine());
+    CHECK(app->engine()->options().workers == 3);
+    app->stopEngine();
+    fake.reset();
 }

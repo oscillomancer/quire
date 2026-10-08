@@ -25,7 +25,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 - **Engine** (`specs/engine.md`): deterministic offline renders with
   real-time output bit-identical to them; anticipative rendering for
   non-live tracks (ADR-0012) and a live region for monitored tracks
-  (ADR-0014); a DAG worker pool; plugin delay compensation (with per-FX
+  (ADR-0014); a DAG worker pool with graph-bounded participation and idle
+  parking (ADR-0023), plus an Automatic/limit background-thread preference;
+  plugin delay compensation (with per-FX
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
   running while the transport is stopped; smooth plan swaps (10 ms ramps).

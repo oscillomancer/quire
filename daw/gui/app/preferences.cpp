@@ -11,7 +11,16 @@
 namespace supple::gui {
 namespace {
 
-constexpr const char* kSchema = "supple.preferences/1.0";
+constexpr const char* kSchema = "supple.preferences/1.1";
+
+Error threadLimitError() {
+    return Error("preferences.audio_threads", "audio processing thread limit is out of range",
+                 "/audio_threads", "use 0 for Automatic or an integer from 1 to 64");
+}
+
+std::string threadLabel(unsigned limit) {
+    return limit == 0 ? "Automatic" : "Limit: " + std::to_string(limit);
+}
 
 const char* monitorName(model::Monitor m) {
     return m == model::Monitor::Off ? "off" : m == model::Monitor::On ? "on" : "auto";
@@ -63,7 +72,8 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
         json::parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
     if (!doc) return std::move(doc).error();
     const json::Value* schema = doc->isObject() ? doc->find("schema") : nullptr;
-    if (!schema || !schema->isString() || schema->asString() != kSchema)
+    if (!schema || !schema->isString() ||
+        (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0"))
         return Error("preferences.schema", file.string() + " is not a " + kSchema + " document",
                      "/schema");
     if (const json::Value* m = doc->find("default_monitor")) {
@@ -78,13 +88,19 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
             return Error("preferences.default_monitor", "default_monitor is off, on or auto",
                          "/default_monitor");
     }
+    if (const auto* v = doc->find("audio_threads")) {
+        if (!v->isInt() || v->asInt() < 0 || v->asInt() > 64) return threadLimitError();
+        out.audioThreads = static_cast<unsigned>(v->asInt());
+    }
     return out;
 }
 
 Status Preferences::save(const std::filesystem::path& file) const {
+    if (audioThreads > 64) return threadLimitError();
     json::Value doc = json::Value::object();
     doc["schema"] = kSchema;
     doc["default_monitor"] = monitorName(defaultMonitor);
+    doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     return writeFileAtomic(file, json::writeCanonical(doc) + "\n");
@@ -95,6 +111,10 @@ PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, Mou
                                      std::filesystem::path file)
     : root_(root), app_(app), mouse_(mouse), map_(map), prefs_(prefs), file_(std::move(file)) {
     app_.setDefaultMonitor(prefs_.defaultMonitor);
+    // Loaded preferences are validated; callers constructing a struct directly
+    // still cannot pass an invalid engine setting.
+    if (!app_.setAudioThreadLimit(prefs_.audioThreads))
+        prefs_.audioThreads = app_.audioThreadLimit();
 }
 
 bool PreferencesDialog::isOpen() const { return root_.find("prefs") != nullptr; }
@@ -103,8 +123,8 @@ void PreferencesDialog::open() {
     if (root_.popupOpen()) root_.closePopups();
     auto form = std::make_unique<ui::Node>("prefs");
     form->layout.dir = ui::Layout::Dir::Column;
-    form->layout.width = ui::SizeRule::fixed(500);
-    form->layout.height = ui::SizeRule::fixed(150);
+    form->layout.width = ui::SizeRule::fixed(540);
+    form->layout.height = ui::SizeRule::fixed(208);
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 6;
     auto& header = form->emplace<ui::Node>("prefs.header");
@@ -151,6 +171,31 @@ void PreferencesDialog::open() {
             zoom_->bounds());
     };
 
+    auto& threads = row(*form, "prefs.threads", "Audio processing threads");
+    threads_ = &threads.emplace<ui::Button>("prefs.threads.set", "");
+    threads_->layout.width = ui::SizeRule::fraction();
+    threads_->layout.height = ui::SizeRule::fixed(26);
+    threads_->onClick = [this] {
+        std::vector<ui::MenuItem> items;
+        for (unsigned limit : {0u, 1u, 2u, 4u, 8u, 16u, 32u, 64u}) {
+            ui::MenuItem item;
+            item.label = threadLabel(limit);
+            item.checked = prefs_.audioThreads == limit;
+            item.run = [this, limit] {
+                if (auto result = setAudioThreads(limit); !result && onError)
+                    onError("preferences: " + result.error().toString());
+            };
+            items.push_back(std::move(item));
+        }
+        root_.openPopup(
+            ui::makeMenu("prefs.threads.menu", std::move(items), [this] { root_.closePopup(); }),
+            threads_->bounds());
+    };
+    form->emplace<ui::Label>("prefs.threads.note",
+                             "Background rendering; applies on next engine start.", ui::Font::Ui,
+                             "small", "ink-quiet")
+        .layout.height = ui::SizeRule::fixed(20);
+
     auto& mouse = row(*form, "prefs.mouse", "Mouse modifiers");
     mouse
         .emplace<ui::Button>("prefs.mouse.open", "Edit mouse modifiers…", [this] { mouse_.open(); })
@@ -158,11 +203,13 @@ void PreferencesDialog::open() {
     root_.openPopup(std::move(form), {}, ui::Placement::Center, [this] {
         monitor_ = nullptr;
         zoom_ = nullptr;
+        threads_ = nullptr;
     });
     refresh();
 }
 
 void PreferencesDialog::refresh() {
+    if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
     if (monitor_) monitor_->setText(monitorLabel(prefs_.defaultMonitor));
     if (zoom_) zoom_->setText(zoomLabel(map_.behaviour("wheel.zoom", 0)));
 }
@@ -174,6 +221,18 @@ void PreferencesDialog::setDefaultMonitor(model::Monitor m) {
         if (auto saved = prefs_.save(file_); !saved && onError)
             onError("preferences: " + saved.error().toString());
     refresh();
+}
+
+Status PreferencesDialog::setAudioThreads(unsigned limit) {
+    if (limit > 64) return threadLimitError();
+    auto next = prefs_;
+    next.audioThreads = limit;
+    // A failed save leaves both the displayed and effective preference intact.
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    SUPPLE_TRY(app_.setAudioThreadLimit(limit));
+    prefs_ = next;
+    refresh();
+    return {};
 }
 
 void PreferencesDialog::setZoomAnchor(const std::string& behaviour) {

@@ -419,7 +419,9 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
 Status EngineApp::replaceProject(model::Session session, fs::path path) {
     Backend* running = engine_ ? backend_ : nullptr;
     const auto config = engine_ ? engine_->config() : BackendConfig{};
-    const auto settings = engine_ ? engine_->options() : EngineOptions{};
+    // Preserve the caller's Automatic/explicit choice, not the resolved count:
+    // a project replacement also starts a new engine with the current preference.
+    const auto settings = engine_ ? restartOptions_ : EngineOptions{};
     if (engine_) {
         auto stopped = transport("stop");
         if (!stopped) return stopped.error();
@@ -668,6 +670,14 @@ void EngineApp::stopJobs() {
 
 // --- real-time engine -----------------------------------------------------------------------
 
+Status EngineApp::setAudioThreadLimit(unsigned limit) {
+    if (limit > 64)
+        return Error("engine.audio_threads", "audio processing thread limit is out of range",
+                     "/audio_threads", "use 0 for Automatic or an integer from 1 to 64");
+    audioThreadLimit_ = limit;
+    return {};
+}
+
 Status EngineApp::startEngine(Backend& backend, const BackendConfig& config) {
     return startEngine(backend, config, EngineOptions{});
 }
@@ -677,7 +687,10 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     if (engine_)
         return Error("engine.running", "the engine is already running", {},
                      "use engine.stop before changing the backend or starting another engine");
-    engine_ = std::make_unique<Engine>(*pool_, media_, options);
+    auto effective = options;
+    if (effective.workers < 0 && audioThreadLimit_ > 0)
+        effective.workers = static_cast<int>(audioThreadLimit_ - 1);
+    engine_ = std::make_unique<Engine>(*pool_, media_, effective);
     auto st = engine_->start(backend, config);
     if (!st) {
         engine_.reset();
@@ -702,7 +715,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     backend_ = &backend;
     restartBackend_ = &backend;  // a caller-supplied backend: reuse it
     restartConfig_ = engine_->config();
-    restartOptions_ = options;
+    restartOptions_ = options;  // preserve Automatic for a later device/project restart
     restarting_ = false;
     playStart_ = 0.0;
     if (loop_.enabled || loop_.end > loop_.start)

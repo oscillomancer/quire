@@ -3508,7 +3508,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
             "everything in the audio callback. The engine runs at the device's rate (media "
-            "is resampled; renders stay at the project's rate).";
+            "is resampled; renders stay at the project's rate). Background thread capacity "
+            "follows the app's Audio processing threads preference (Automatic by default); "
+            "live nodes still run serially.";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,

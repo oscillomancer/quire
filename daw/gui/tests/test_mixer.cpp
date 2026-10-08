@@ -17,10 +17,12 @@
 #include "meter_feed.h"
 #include "mixer.h"
 #include "preferences.h"
+#include "supple/base/files.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
 #include "supple/ui/controls.h"
+#include "supple/ui/list.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
@@ -879,4 +881,65 @@ TEST_CASE("audit3: mixer resnapshots identical IDs and versions in a replacement
     auto* fader = dynamic_cast<ui::Fader*>(f.node("mixer.fader." + track));
     REQUIRE(fader);
     CHECK(fader->value() == -20);
+}
+
+TEST_CASE("preferences: background thread limits, legacy loading and canonical round trip") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    REQUIRE(
+        writeFileAtomic(file, R"({"schema":"supple.preferences/1.0","default_monitor":"off"})"));
+    auto legacy = gui::Preferences::load(file);
+    REQUIRE(legacy);
+    CHECK(legacy->audioThreads == 0);
+    CHECK(legacy->defaultMonitor == model::Monitor::Off);
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, *legacy, file);
+    prefs.open();
+    f.root->frame(false);
+    CHECK(f.node("prefs.threads.set")->valueText() == "Automatic");
+    REQUIRE(f.root->click("prefs.threads.set"));
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("prefs.threads.menu"));
+    REQUIRE(menu);
+    auto activate = menu->onActivate;  // activation closes/destroys the menu
+    activate(3);                       // Limit: 4
+    CHECK(f.app->audioThreadLimit() == 4);
+    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
+
+    for (unsigned limit : {1u, 2u, 4u, 8u, 64u, 0u}) {
+        REQUIRE(prefs.setAudioThreads(limit));
+        CHECK(f.app->audioThreadLimit() == limit);
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE(loaded);
+        CHECK(loaded->audioThreads == limit);
+        auto before = readFile(file);
+        REQUIRE(before);
+        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.1") !=
+              std::string::npos);
+        REQUIRE(loaded->save(file));
+        CHECK(readFile(file).value() == *before);
+    }
+    REQUIRE(prefs.setAudioThreads(4));
+    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
+    CHECK_FALSE(prefs.setAudioThreads(65));
+    CHECK(f.app->audioThreadLimit() == 4);
+    CHECK(gui::Preferences::load(file)->audioThreads == 4);
+    // Failed persistence cannot change the displayed or effective setting.
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setAudioThreads(8));
+    CHECK(f.app->audioThreadLimit() == 4);
+    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
+    std::filesystem::remove(file);
+    for (const char* bad : {"-1", "65", "1.5", "true", "null", "\"4\""}) {
+        REQUIRE(writeFileAtomic(
+            file,
+            std::string(R"({"schema":"supple.preferences/1.1","audio_threads":)") + bad + "}"));
+        auto loaded = gui::Preferences::load(file);
+        REQUIRE_FALSE(loaded);
+        CHECK(loaded.error().code == "preferences.audio_threads");
+        CHECK(loaded.error().path == "/audio_threads");
+        CHECK_FALSE(loaded.error().hint.empty());
+    }
 }

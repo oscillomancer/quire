@@ -1,4 +1,4 @@
-// Internal: the engine's worker pool (ADR-0012, engine.md §2.2). It runs a
+// Internal: the engine's worker pool (ADR-0012/0023, engine.md §2.2). It runs a
 // task graph — one render block of a plan, one task per node — on its
 // threads and the submitting thread together: a task starts once the tasks
 // it depends on have finished; ready tasks wait in a bounded lock-free queue.
@@ -43,6 +43,9 @@ struct TaskGraph {
     std::unique_ptr<std::atomic<std::uint32_t>[]> pending;
     ReadyQueue ready;
     std::atomic<std::uint32_t> remaining{0};
+    // Size of a disjoint dependency-chain cover: a conservative upper bound
+    // on simultaneous tasks, computed once when the graph is built.
+    unsigned parallelism = 0;
 
     // `deps[i]` lists the tasks task i reads from; every one must be < i.
     void build(const std::vector<std::vector<std::uint32_t>>& deps);
@@ -54,7 +57,15 @@ class Workers {
     using Fn = void (*)(void* ctx, std::uint32_t task);
 
     // `helpers` threads besides the caller (0: the caller runs everything).
+    // Internal deterministic scheduling seam; null in production. Hooks may
+    // block in tests, including immediately before an atomic wait.
+    enum class Event { Join, Leave, Wait, JoinWait };
+    struct Hooks {
+        void (*event)(void*, Event) = nullptr;
+        void* context = nullptr;
+    };
     explicit Workers(unsigned helpers);
+    Workers(unsigned helpers, Hooks hooks);
     ~Workers();
     Workers(const Workers&) = delete;
     Workers& operator=(const Workers&) = delete;
@@ -64,18 +75,33 @@ class Workers {
     static unsigned defaultHelpers();
 
     // Runs every task of `g` (fn(ctx, task) on any of the threads) and
-    // returns when all have finished. One run at a time.
+    // returns when all selected helpers have left. One run at a time.
+    // Background/offline only: scheduling may block, never call from RT.
     void run(TaskGraph& g, Fn fn, void* ctx);
 
   private:
-    void loop();
-    static void help(TaskGraph& g, Fn fn, void* ctx);
+    void loop(unsigned index);
+    void help(TaskGraph& g, Fn fn, void* ctx);
+    void event(Event e) {
+        if (hooks_.event) hooks_.event(hooks_.context, e);
+    }
+
+    struct alignas(64) Slot {
+        // Native futex-sized values give each idle helper its own wait address
+        // on Linux, avoiding shared wait-table wakeups for larger atomics.
+        // A selected slot must acknowledge before it can advance again, so a
+        // waiter cannot miss a full sequence wrap.
+        std::atomic<std::uint32_t> sequence{0};
+    };
 
     std::vector<std::thread> threads_;
-    std::atomic<std::uint64_t> jobSeq_{0};  // bumped per run; helpers wait on it
-    std::atomic<std::uint64_t> doneSeq_{0};
-    std::atomic<unsigned> active_{0};  // helpers inside the current run
+    std::unique_ptr<Slot[]> slots_;
+    // Enrollment is complete BEFORE any helper can read the job. run() cannot
+    // return (or publish another graph) until every selected slot acknowledges.
+    std::atomic<unsigned> active_{0};
+    std::atomic<std::uint64_t> workSequence_{0};
     std::atomic<bool> quit_{false};
+    Hooks hooks_;
     TaskGraph* job_ = nullptr;
     Fn fn_ = nullptr;
     void* ctx_ = nullptr;

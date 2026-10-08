@@ -117,7 +117,9 @@ inside `supple::rt::ScopedSanctionedSyscall`. This exception does not authorize
 waits or synchronous bridge calls in the device callback. A nonblocking
 `supple::rt::wake()` wrapper for callback-to-worker notification is a planned
 primitive, not an existing API. The background pool currently uses atomic
-wait/notify between jobs; it does not participate in live callback execution.
+wait/notify between jobs and when no task is ready. Participation is bounded
+by graph dependencies and departure is joined explicitly (ADR-0023); this pool
+does not participate in live callback execution.
 
 **Main-thread budget.** The main thread is the UI thread, the model writer
 and CLAP's plugin main thread (plugin GUIs require it). It stays responsive

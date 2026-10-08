@@ -3,19 +3,7 @@
 #include <algorithm>
 #include <bit>
 
-#if defined(__x86_64__) || defined(__i386__)
-#include <immintrin.h>
-#endif
-
 namespace supple::engine::detail {
-
-namespace {
-inline void cpuRelax() SUPPLE_RT {
-#if defined(__x86_64__) || defined(__i386__)
-    _mm_pause();
-#endif
-}
-}  // namespace
 
 // --- ReadyQueue ------------------------------------------------------------------------
 
@@ -81,21 +69,39 @@ void TaskGraph::build(const std::vector<std::vector<std::uint32_t>>& deps) {
         preds[i] = static_cast<std::uint32_t>(d.size());
         for (std::uint32_t from : d) succ[from].push_back(static_cast<std::uint32_t>(i));
     }
+    // Greedily extend disjoint chains along real dependency edges. At most
+    // one member of each chain can execute at a time. This upper bound cannot
+    // hide parallel work at unequal depths (unlike a largest-level heuristic).
+    std::vector<bool> covered(n, false);
+    parallelism = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!covered[i]) ++parallelism;
+        for (auto next : succ[i])
+            if (!covered[next]) {
+                covered[next] = true;
+                break;
+            }
+    }
     pending = std::make_unique<std::atomic<std::uint32_t>[]>(std::max<std::size_t>(n, 1));
     ready.init(n);
 }
 
 // --- Workers ---------------------------------------------------------------------------
 
-Workers::Workers(unsigned helpers) {
+Workers::Workers(unsigned helpers) : Workers(helpers, Hooks{}) {}
+
+Workers::Workers(unsigned helpers, Hooks hooks)
+    : slots_(std::make_unique<Slot[]>(helpers)), hooks_(hooks) {
     threads_.reserve(helpers);
-    for (unsigned i = 0; i < helpers; ++i) threads_.emplace_back([this] { loop(); });
+    for (unsigned i = 0; i < helpers; ++i) threads_.emplace_back([this, i] { loop(i); });
 }
 
 Workers::~Workers() {
     quit_.store(true);
-    jobSeq_.fetch_add(1);
-    jobSeq_.notify_all();
+    for (unsigned i = 0; i < helpers(); ++i) {
+        slots_[i].sequence.fetch_add(1);
+        slots_[i].sequence.notify_one();
+    }
     for (auto& t : threads_) t.join();
 }
 
@@ -105,59 +111,78 @@ unsigned Workers::defaultHelpers() {
 }
 
 void Workers::help(TaskGraph& g, Fn fn, void* ctx) {
-    unsigned idle = 0;
-    while (g.remaining.load(std::memory_order_acquire) > 0) {
+    for (;;) {
+        // Observe the event BEFORE checking either predicate. Publication
+        // between a failed pop and wait then changes the value, preventing a
+        // lost wake, including when an MPMC producer has reserved but not yet
+        // published its cell. That producer signals after publishing.
+        const auto seen = workSequence_.load(std::memory_order_acquire);
+        if (g.remaining.load(std::memory_order_acquire) == 0) return;
         std::uint32_t t = 0;
         if (!g.ready.pop(t)) {
-            // Every ready task is taken; the rest wait on tasks in progress.
-            if (++idle < 64)
-                cpuRelax();
-            else
-                std::this_thread::yield();
+            event(Event::Wait);
+            workSequence_.wait(seen, std::memory_order_acquire);
             continue;
         }
-        idle = 0;
         fn(ctx, t);
+        bool published = false;
         for (std::uint32_t s : g.succ[t])
-            if (g.pending[s].fetch_sub(1, std::memory_order_acq_rel) == 1) g.ready.push(s);
-        g.remaining.fetch_sub(1, std::memory_order_acq_rel);
+            if (g.pending[s].fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                g.ready.push(s);  // capacity >= graph size; each task is queued once
+                published = true;
+            }
+        const bool finished = g.remaining.fetch_sub(1, std::memory_order_acq_rel) == 1;
+        if (published || finished) {
+            workSequence_.fetch_add(1, std::memory_order_release);
+            workSequence_.notify_all();
+        }
     }
 }
 
 void Workers::run(TaskGraph& g, Fn fn, void* ctx) {
     const std::uint32_t n = g.size();
     if (n == 0) return;
+    const unsigned selected = std::min(helpers(), g.parallelism - 1);
+    if (selected == 0) {
+        // Indices are topological. A serial graph needs neither wakeups nor
+        // dependency/queue atomics, even if the pool has many sleeping helpers.
+        for (std::uint32_t i = 0; i < n; ++i) fn(ctx, i);
+        return;
+    }
     for (std::uint32_t i = 0; i < n; ++i) g.pending[i].store(g.preds[i], std::memory_order_relaxed);
     g.remaining.store(n, std::memory_order_relaxed);
     for (std::uint32_t i = 0; i < n; ++i)
         if (g.preds[i] == 0) g.ready.push(i);
-    if (threads_.empty()) {
-        help(g, fn, ctx);
-        return;
-    }
     job_ = &g;
     fn_ = fn;
     ctx_ = ctx;
-    const std::uint64_t seq = jobSeq_.fetch_add(1) + 1;  // publishes job_, fn_, ctx_
-    jobSeq_.notify_all();
+    active_.store(selected, std::memory_order_relaxed);
+    for (unsigned i = 0; i < selected; ++i) {
+        slots_[i].sequence.fetch_add(1, std::memory_order_release);
+        slots_[i].sequence.notify_one();
+    }
     help(g, fn, ctx);
-    // Helpers that joined this run must leave it before the graph can go.
-    doneSeq_.store(seq);
-    while (active_.load() != 0) cpuRelax();
+    // Includes helpers preempted before joining or after finishing DSP.
+    // No graph or job pointer can be reclaimed while one is still enrolled.
+    for (unsigned active = active_.load(std::memory_order_acquire); active != 0;
+         active = active_.load(std::memory_order_acquire)) {
+        event(Event::JoinWait);
+        active_.wait(active, std::memory_order_acquire);
+    }
 }
 
-void Workers::loop() {
-    std::uint64_t seen = 0;
+void Workers::loop(unsigned index) {
+    auto& sequence = slots_[index].sequence;
+    std::uint32_t seen = 0;
     for (;;) {
-        jobSeq_.wait(seen);
-        const std::uint64_t seq = jobSeq_.load();
+        sequence.wait(seen, std::memory_order_acquire);
+        seen = sequence.load(std::memory_order_acquire);
         if (quit_.load()) return;
-        seen = seq;
-        // Join only a run that is still current and not finished (the
-        // submitter sets doneSeq_ then waits for active_ to drain).
-        active_.fetch_add(1);
-        if (jobSeq_.load() == seq && doneSeq_.load() != seq) help(*job_, fn_, ctx_);
-        active_.fetch_sub(1);
+        event(Event::Join);
+        help(*job_, fn_, ctx_);
+        event(Event::Leave);
+        // Nothing after this release touches the graph or published job.
+        if (active_.fetch_sub(1, std::memory_order_acq_rel) == 1) active_.notify_one();
     }
 }
 

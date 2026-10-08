@@ -2,6 +2,10 @@
 
 **Status:** Accepted, 2026-09-26. Spec: `docs/specs/engine.md` §2.
 
+**Amendment, 2026-10-07:** [ADR-0023](0023-background-worker-participation.md)
+refines §6: graph-bounded participation, parking within jobs, explicit join
+ownership and the app thread-limit preference.
+
 ## Context
 
 The engine runs every node inside the audio callback, on one core. Phase 4

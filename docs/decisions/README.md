@@ -41,3 +41,4 @@ current state.
 | [0020](0020-auxiliary-channels.md) | Auxiliary channels and plug-in pins | Accepted |
 | [0021](0021-multi-out-instruments.md) | Multi-output plug-ins | Accepted |
 | [0022](0022-strip-polarity-and-mono.md) | Strip polarity and mono | Accepted |
+| [0023](0023-background-worker-participation.md) | Background worker participation and parking | Accepted |

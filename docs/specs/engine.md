@@ -198,9 +198,25 @@ The background/offline pool has `max(0, cores − 3)` helper threads by default;
 its submitting thread also executes tasks. `EngineOptions::workers` can
 override the helper count. A bounded MPMC ready queue and atomic dependency
 counters distribute nodes; input summation stays in fixed graph order.
-Helpers wait using atomic wait/notify between jobs. During a job, idle
-participants briefly spin then yield until the graph completes; the submitter
-waits for participating helpers to leave before reusing its job state.
+ADR-0023 bounds each run to the smaller of the configured capacity and a
+conservative graph-width bound: a greedy disjoint dependency-chain cover.
+Only selected helpers are notified through individual sequence slots. Chains
+run serially on the submitter without queue operations. During parallel jobs,
+participants park when no work is ready; successor publication and final
+completion advance an atomic event, observed before checking either predicate
+to prevent missed wakes. There is no application spin/yield loop. Enrollment
+precedes publication, and the submitter waits for every selected helper's
+departure before reusing job state or returning, including preempted helpers.
+
+`EngineApp::setAudioThreadLimit` sets the app default (0: Automatic, 1..64:
+maximum execution threads including the renderer). Invalid values return
+`engine.audio_threads`, path `/audio_threads`, with a corrective hint. The GUI
+persists this as `audio_threads` in preferences (§6 of gui.md). The next engine
+start, including project replacement and device recovery, maps a nonzero limit to `workers = limit - 1` when
+options request automatic workers; explicit `EngineOptions::workers` takes
+precedence. An already running pool and offline export's `threads` option are
+unchanged. Automatic retains the hardware-derived capacity and graph-aware
+participation; an explicit limit is also graph-bounded.
 
 The engine sets no explicit priority or affinity on the renderer or these
 helpers. The backend supplies the device callback's scheduling. DSP tasks
@@ -215,7 +231,7 @@ path in the current engine.
 1. Pick up a new plan if published (acknowledge epoch).
 2. Drain the model→RT command queue (transport, param events, meters on/off).
 3. Read hardware inputs into HwInput buffers; feed record rings.
-4. Run live nodes (with worker help); pull anticipative outputs from rings.
+4. Run live nodes serially; pull anticipative outputs from rings.
 5. Sum into the master, run the master chain (live if anything is live, else
    the master is anticipative too and the RT thread only copies its ring
    output).
@@ -567,7 +583,8 @@ harness. See the tooling README for schemas, limits and invocation details.
 - **Worker pool** (`workers.{h,cpp}`): helper threads (every core but three,
   plus the submitting thread) run one render block as a DAG over the plan's
   nodes: per-node atomic counts of unfinished sources, a bounded Vyukov MPMC
-  ready queue, the submitter helps; idle helpers park on an atomic wait.
+  ready queue, the submitter helps; graph-bounded participation and idle
+  parking follow ADR-0023. The submitter joins every enrolled helper.
   `processNode` is the unit (a node sums its inputs in the fixed order and
   processes its own edges, items and chain), so results are bit-identical
   for any thread count — the offline renderer uses the pool too (B4 test:
