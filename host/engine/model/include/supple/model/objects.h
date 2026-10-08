@@ -186,6 +186,36 @@ struct PinMap {
     bool empty() const { return in.empty() && out.empty() && key.empty(); }
 };
 
+// MIDI learn (ADR-0027): a controller message that drives a parameter. The
+// device is an input port's name, matched like a MIDI route's (a
+// case-insensitive substring; empty: any device).
+enum class ControlKind : std::uint8_t { Cc, Note, PitchBend, Program };
+// How a CC's value moves the parameter: to the knob's position (absolute),
+// by signed steps in one of three encoder conventions (relative 1: 127 = -1,
+// 1 = +1; relative 2: 63 = -1, 65 = +1; relative 3: 65 = -1, 1 = +1), or
+// flipping it on each press (toggle: a value above 0).
+enum class ControlMode : std::uint8_t { Absolute, Relative1, Relative2, Relative3, Toggle };
+
+struct MidiControl {
+    ControlKind kind = ControlKind::Cc;
+    int channel = 1;  // 1..16
+    int number = 0;   // the CC, note or program number (0..127); 0 for pitch bend
+    std::string device;
+    bool operator==(const MidiControl&) const = default;
+};
+
+struct ParamLearn {
+    std::string param;  // a semantic key, or a plain parameter's id
+    MidiControl control;
+    ControlMode mode = ControlMode::Absolute;
+    bool softTakeover = false;  // absolute: follow only once the knob reaches the value
+    // Enable only while the effect's track is selected, while its window or
+    // editor has the focus, or while one of them shows (a window app; a
+    // headless engine has neither, so such a binding waits).
+    bool whenSelected = false, whenFocused = false, whenVisible = false;
+    bool operator==(const ParamLearn&) const = default;
+};
+
 struct FxInstance {
     PluginRef plugin;
     PinMap pins;
@@ -202,6 +232,7 @@ struct FxInstance {
     std::optional<json::Value> patch;
     std::optional<std::string> state;  // "sha256:<hex>" into Session::blobs
     std::map<std::uint32_t, double> params;
+    std::vector<ParamLearn> learn;  // MIDI learn, one per parameter (ADR-0027)
 };
 
 enum class Tap : std::uint8_t { PostFader, PreFader, PreFx };

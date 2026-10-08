@@ -431,6 +431,9 @@ Status EngineApp::replaceProject(model::Session session, fs::path path,
         if (!stopped) return stopped.error();
     }
     projectGeneration_.fetch_add(1, std::memory_order_acq_rel);
+    // A control still moving belongs to the old project's effects.
+    learnCommits_.clear();
+    learnState_.clear();
     if (commands_) {
         const auto jobs = commands_->jobs().list();
         for (const auto& job : jobs.find("jobs")->asArray())
@@ -483,6 +486,7 @@ fs::path EngineApp::resolve(const fs::path& path) const {
 
 Status EngineApp::save(const fs::path& where) {
     const fs::path path = resolve(where);
+    if (!txn_) commitLearned(true);  // a control just moved: its values in the file
     // What running plug-ins hold now (a sampler's loaded files), as hosts
     // save it, whether or not they said it changed.
     std::vector<model::Id> running;
@@ -893,6 +897,7 @@ void EngineApp::tick() {
     if (engine_) {
         engine_->service();
         consumePluginOutputs();
+        pollControl();
         captureFxStates(engine_->takeDirtyStates());
         // Failures reach subscribers without a client asking.
         checkFailures();
@@ -2481,6 +2486,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
     }
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.sine"})");
     run("fx.add", R"({"track": "tr_1", "plugin": "com.suppleaudio.test.gain"})");
+    if (fixture == "song_with_learn")  // + fx_2 gain on CC 21, channel 1
+        run("fx.learn.set",
+            R"({"fx": "fx_2", "param": "gain", "midi": {"kind": "cc", "channel": 1, "number": 21}})");
     if (fixture == "song_with_env" || fixture == "song_with_autoitem")  // + en_1: fx_2 gain
         run("env.add",
             R"({"fx": "fx_2", "param": "gain", "points": [{"beat": 0, "value": -12}, {"beat": 4, "value": 0}]})");

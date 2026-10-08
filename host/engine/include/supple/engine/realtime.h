@@ -128,6 +128,18 @@ inline bool routeMidi(const MidiInputEvent& e, std::uint64_t ports, int fromChan
     out[2] = e.size > 2 ? e.bytes[2] : 0;
     return true;
 }
+// A device's control message for MIDI learn (ADR-0027): a note, a CC, a
+// program change or a pitch bend, as heard, in arrival order.
+struct ControlMidiEvent {
+    std::uint16_t port = 0;  // index into Backend::midiPorts()
+    std::uint8_t bytes[3] = {0, 0, 0};
+};
+// Note off/on, CC, program change and pitch bend; not aftertouch or system.
+inline bool isControlMidi(std::uint8_t status) {
+    const std::uint8_t kind = status & 0xf0;
+    return kind == 0x80 || kind == 0x90 || kind == 0xb0 || kind == 0xc0 || kind == 0xe0;
+}
+
 // The ports a route's device name selects: a case-insensitive substring of
 // the port name; "" or "*" selects every port.
 std::uint64_t midiPortMask(const std::vector<std::string>& ports, std::string_view device);
@@ -330,6 +342,12 @@ class Engine {
     // count ends. The clicks sound with the metronome off too (at its level).
     // pause() cancels it. Live output only.
     void playCountIn(std::int64_t frames, std::int64_t beatFrames, int beatsPerBar);
+    // Main thread (one consumer): the control messages the devices sent since
+    // the last call (ADR-0027), oldest first, appended to `out`; at most
+    // kControlRing are held between calls (more are counted as dropped).
+    void takeControlMidi(std::vector<ControlMidiEvent>& out);
+    std::uint64_t controlMidiDrops() const { return controlDrops_.load(); }
+    static constexpr std::size_t kControlRing = 1024;
     // The backend's MIDI input ports (ADR-0016); empty when stopped.
     std::vector<std::string> midiPorts() const {
         return backend_ ? backend_->midiPorts() : std::vector<std::string>{};
@@ -508,6 +526,10 @@ class Engine {
     void publishPluginOutputs(detail::Plan& plan, bool renderer, std::uint64_t epoch,
                               std::int64_t pos, std::int64_t stream) SUPPLE_RT;
 
+    void pushControlMidi() SUPPLE_RT;
+    std::unique_ptr<SpscRing<ControlMidiEvent, kControlRing>> controlMidi_ =
+        std::make_unique<SpscRing<ControlMidiEvent, kControlRing>>();
+    std::atomic<std::uint64_t> controlDrops_{0};
     using OutputQueue = SpscRing<PluginOutput, 4096>;
     std::unique_ptr<OutputQueue> rendererOutputs_, callbackOutputs_;
     std::vector<PluginOutput> idleOutputs_;  // bounded main-thread queue

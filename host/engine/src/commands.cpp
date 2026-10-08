@@ -26,6 +26,7 @@ void registerExtraCommands(cmd::Registry& registry);
 void registerMidiCommands(cmd::Registry& registry);
 void registerChainCommands(cmd::Registry& registry);
 void registerTakeCommands(cmd::Registry& registry);
+void registerLearnCommands(cmd::Registry& registry);
 
 using cmd::Command;
 using cmd::Context;
@@ -814,6 +815,7 @@ void registerEngineCommands(cmd::Registry& registry) {
     registerMidiCommands(registry);
     registerChainCommands(registry);
     registerTakeCommands(registry);
+    registerLearnCommands(registry);
     lua::registerScriptCommands(registry);
     // ---------------------------------------------------------------- project.get
     {

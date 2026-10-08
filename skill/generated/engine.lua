@@ -273,6 +273,30 @@ q = nil
 ---@field latency_samples? integer The instance's reported latency, in samples
 ---@field params_total? integer Plain parameters matching; at most 512 are listed.
 
+---@class Quire.fx_learn_list_args
+---@field fx? string
+
+---@class Quire.fx_learn_list_result
+---@field learn any
+
+---@class Quire.fx_learn_remove_args
+---@field fx string
+---@field param string
+
+---@class Quire.fx_learn_set_args
+---@field fx string
+---@field param string A semantic key, or a plain parameter's id or name (fx.describe)
+---@field midi table
+---@field mode? "absolute"|"relative1"|"relative2"|"relative3"|"toggle"
+---@field soft_takeover? boolean
+---@field when_selected? boolean
+---@field when_focused? boolean
+---@field when_visible? boolean
+
+---@class Quire.fx_learn_set_result
+---@field param string
+---@field control string
+
 ---@class Quire.fx_move_args
 ---@field fx string
 ---@field track? string
@@ -1088,6 +1112,11 @@ q = nil
 ---@field list fun(): Quire.fx_chain_list_result List saved FX chain presets by name, path and effect count.
 ---@field load fun(args: Quire.fx_chain_load_args): Quire.fx_chain_load_result Append or replace a track's FX chain from a preset in one undo step.
 ---@field save fun(args: Quire.fx_chain_save_args): Quire.fx_chain_save_result Save an ordered FX chain as a named preset.
+
+---@class Quire.fx.learn
+---@field list fun(args?: Quire.fx_learn_list_args): Quire.fx_learn_list_result List the MIDI controller bindings of plugin parameters.
+---@field remove fun(args: Quire.fx_learn_remove_args): table Remove a plugin parameter's MIDI controller binding.
+---@field set fun(args: Quire.fx_learn_set_args): Quire.fx_learn_set_result Let a MIDI controller (CC, note, pitch bend) move a plugin parameter.
 
 ---@class Quire.fx.param
 ---@field get fun(args: Quire.fx_param_get_args): Quire.fx_param_get_result Read one saved plugin parameter by semantic key or numeric CLAP id.

@@ -15,6 +15,9 @@ schema::Schema<StripType> stripTypeSchema();
 schema::Schema<RoutePan> routePanSchema();
 schema::Schema<Timebase> timebaseSchema();            // time | beats | beats_position
 schema::Schema<PinMap> pinMapSchema();                // {in, out, key}: 1-based track channels
+schema::Schema<MidiControl> midiControlSchema();      // {kind, channel, number, device}
+schema::Schema<ControlMode> controlModeSchema();      // absolute | relative1..3 | toggle
+schema::Schema<ParamLearn> paramLearnSchema();        // {param, midi, mode, …} (ADR-0027)
 schema::Schema<TrackTimebase> trackTimebaseSchema();  // project | time | beats | beats_position
 schema::Schema<ItemTimebase> itemTimebaseSchema();    // track | time | beats | beats_position
 schema::Schema<Id> idSchema();                        // "tr_3"

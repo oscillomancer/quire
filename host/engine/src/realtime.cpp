@@ -884,6 +884,7 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         }
         return;
     }
+    pushControlMidi();
     // The play request first, then a count-in request (playCountIn stores them
     // in the other order), so this cycle cannot play past a count it missed.
     want_ = wantPlaying_.load(std::memory_order_acquire);
@@ -916,6 +917,25 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
         return;
     }
     cycleBody(in, out, frames, 0);
+}
+
+// Each callback's device control messages, once, for MIDI learn (ADR-0027).
+void Engine::pushControlMidi() SUPPLE_RT {
+    if (!midiSource_) return;
+    for (const MidiInputEvent& e : midiSource_->midiInput()) {
+        if (e.size == 0 || !isControlMidi(e.bytes[0])) continue;
+        ControlMidiEvent c;
+        c.port = e.port;
+        c.bytes[0] = e.bytes[0];
+        c.bytes[1] = e.size > 1 ? e.bytes[1] : 0;
+        c.bytes[2] = e.size > 2 ? e.bytes[2] : 0;
+        if (!controlMidi_->push(c)) controlDrops_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void Engine::takeControlMidi(std::vector<ControlMidiEvent>& out) {
+    ControlMidiEvent e;
+    while (controlMidi_->pop(e)) out.push_back(e);
 }
 
 void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t frames,

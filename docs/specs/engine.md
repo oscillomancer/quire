@@ -563,6 +563,19 @@ kind, block and options, retried with backoff for up to 30 s and finally
 reported as `engine.error {reason, error}`. The transport position and the
 loop are restored; playback stays stopped.
 
+The tick also polls the devices' **control messages** for MIDI learn
+(ADR-0027): each callback copies its notes, CCs, program changes and pitch
+bends into a 1024-entry SPSC ring (`Engine::takeControlMidi`; overflow
+counted, `controlMidiDrops`), and `EngineApp::pollControl` drains it, hands
+the messages to `onControl` (the window app's action bindings and learn
+dialog) and moves the plug-in parameters learned for them (fx `learn`): a
+semantic parameter through `fx.param.set` with one gesture per movement, a
+plain one on the running instance at once and into the project when the
+control has rested for 300 ms (as an edit in the plug-in's own editor).
+Nothing moves while `setLearning(true)` (a learn dialog listens); bindings
+with `when_*` conditions ask `learnGate` and wait without one. The window app
+also polls every 10 ms while anything is bound.
+
 ## 7. Benchmarks (acceptance, `docs/benchmarks/`)
 
 - **B1 capacity:** generated session: N tracks, each an Orrery instance

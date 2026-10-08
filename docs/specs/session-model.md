@@ -201,7 +201,14 @@ parallel with the previous instance in the chain, outputs summed), `pdc`
 **state**: for plugins with the semantic extension, `patch` (canonical patch
 JSON, diffable); otherwise `state` = blob ref (content hash) plus `params`
 (last known CLAP values by param id, for display/diff only — the blob is
-authoritative).
+authoritative). `learn` (ADR-0027, omitted when empty): MIDI learn, one
+binding per parameter, sorted by `param` — `{param (semantic key, or a
+plain parameter's id as text), midi: {kind: cc|note|pitch_bend|program,
+channel 1..16, number 0..127 (0 for pitch_bend), device (a substring of the
+MIDI input's name; empty: any)}, mode: absolute|relative1|relative2|
+relative3|toggle, soft_takeover, when_selected, when_focused,
+when_visible}` (defaults omitted). It is copied with the effect (fx.copy,
+chain presets, templates).
 
 Chains are arrays of fx ids on tracks (`chain`, `input_chain`), takes
 (`chain`) and the master's monitoring chain (`project.monitor_chain`, not
@@ -515,7 +522,10 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `fx.param.get` (q), `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
   `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`, chain presets
   `fx.chain.save` (a), `fx.chain.load`, `fx.chain.list` (q),
-  `fx.chain.delete` (a),
+  `fx.chain.delete` (a), MIDI learn `fx.learn.set {fx, param, midi, mode?,
+  soft_takeover?, when_selected?, when_focused?, when_visible?}` (one per
+  parameter; a plain parameter by id or name), `fx.learn.remove {fx, param}`,
+  `fx.learn.list {fx?}` (q),
   `fx.state.capture` (internal, from plugin notifications), `plugin.list`
   (q), `plugin.scan` (a).
 - **routes**: `route.add {from, to, tap, channels, …}`, `route.remove`,

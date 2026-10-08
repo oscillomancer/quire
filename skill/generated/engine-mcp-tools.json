@@ -1976,6 +1976,152 @@
     }
   },
   {
+    "name": "fx_learn_list",
+    "title": "List the MIDI controller bindings of plugin parameters.",
+    "description": "List the MIDI controller bindings of plugin parameters. Every effect's, or one effect's (fx). control names the message in words. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_learn_list_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_learn_list",
+      "properties": {
+        "learn": {}
+      },
+      "required": ["learn"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_learn_remove",
+    "title": "Remove a plugin parameter's MIDI controller binding.",
+    "description": "Remove a plugin parameter's MIDI controller binding.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_learn_remove_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "param": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["fx", "param"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "fx_learn_set",
+    "title": "Let a MIDI controller (CC, note, pitch bend) move a plugin parameter.",
+    "description": "Let a MIDI controller (CC, note, pitch bend) move a plugin parameter. One binding per parameter (a new one replaces it). midi.device: a substring of the MIDI input's name (empty: any). mode for a CC: absolute, relative1 (127 = -1, 1 = +1), relative2 (63 = -1, 65 = +1), relative3 (65 = -1, 1 = +1) or toggle (above 0 flips it). soft_takeover: an absolute control acts once it reaches the value. when_selected / when_focused / when_visible: only while the effect's track is selected, or its window or editor has the focus or shows (the GUI). See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_learn_set_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "param": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A semantic key, or a plain parameter's id or name (fx.describe)"
+        },
+        "midi": {
+          "type": "object",
+          "title": "midi_control",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["cc", "note", "pitch_bend", "program"]
+            },
+            "channel": {
+              "type": "integer",
+              "minimum": 1.0,
+              "maximum": 16.0
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 0.0,
+              "maximum": 127.0,
+              "default": 0
+            },
+            "device": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "required": ["kind", "channel"],
+          "additionalProperties": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["absolute", "relative1", "relative2", "relative3", "toggle"]
+        },
+        "soft_takeover": {
+          "type": "boolean"
+        },
+        "when_selected": {
+          "type": "boolean"
+        },
+        "when_focused": {
+          "type": "boolean"
+        },
+        "when_visible": {
+          "type": "boolean"
+        }
+      },
+      "required": ["fx", "param", "midi"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_learn_set_result",
+      "properties": {
+        "param": {
+          "type": "string"
+        },
+        "control": {
+          "type": "string"
+        }
+      },
+      "required": ["param", "control"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "fx_move",
     "title": "Move a plugin within a track chain or to another track.",
     "description": "Move a plugin within a track chain or to another track. Works on the track's chain, on its input chain (an input-chain effect stays on its track) and on a take's chain (take FX stay on their take: index only). See describe for errors and examples.",

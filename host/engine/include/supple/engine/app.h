@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "supple/cmd/bus.h"
+#include "supple/engine/midi_control.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/realtime.h"
 #include "supple/engine/runtime_protection.h"
@@ -353,6 +354,28 @@ class EngineApp : public cmd::Host {
     // project when its head changed and an autosave interval has passed.
     void tick();
 
+    // --- MIDI learn (ADR-0027) --------------------------------------------------------
+    // A device's control message and the name of its input port.
+    struct ControlEvent {
+        ControlMidiEvent midi;
+        std::string device;
+    };
+    // Takes the control messages the devices sent since the last call, hands
+    // them to onControl, then moves the plug-in parameters learned for them
+    // (fx `learn`): a semantic one through fx.param.set (one undo step per
+    // movement, recorded by touch/latch envelopes), a plain one on the running
+    // instance at once and into the project when the control rests. While
+    // learning() it moves nothing. tick() calls it; the window app calls it
+    // more often, so a knob answers within a frame.
+    void pollControl();
+    std::function<void(const std::vector<ControlEvent>&)> onControl;
+    // Whether a binding with `when_*` conditions may act now: the window app
+    // knows the selection and its windows. Unset (headless), such bindings wait.
+    std::function<bool(model::Id fx, const model::ParamLearn& learn)> learnGate;
+    void setLearning(bool on) { learning_ = on; }
+    bool learning() const { return learning_; }
+    bool hasLearn() const;  // any effect of the head has a learned parameter
+
     // Where autosaves go, next to the project file (<file>-data); empty when
     // the project has no file yet.
     std::filesystem::path autosaveDir() const;
@@ -383,7 +406,7 @@ class EngineApp : public cmd::Host {
                  cmd::Kind kind) override;
     // Example fixtures: empty, saved, song (tr_1 "Bass"), song_with_item
     // (+ it_1: a MIDI bar), song_with_fx (+ fx_1 sine, fx_2 gain), song_with_env (+ en_1
-    // on fx_2 gain), song_undone,
+    // on fx_2 gain), song_with_learn (song_with_fx + fx_2 gain on CC 21), song_undone,
     // engine_running (the dummy backend), engine_armed (+ tr_1 armed),
     // recording_interrupted (tr_1 + rec/Vocal-1.wav left by a crash), meter_change
     // (3/4 from bar 9), song_with_audio (tr_1 + it_1/tk_1 audio), song_with_autoitem (song_with_env
@@ -484,6 +507,23 @@ class EngineApp : public cmd::Host {
     bool captureFxState(model::Id fx);
     void captureFxStates(const std::vector<model::Id>& fx);
     Status commitOutputGesture(const OutputKey& key, const OutputGesture& gesture);
+    // MIDI learn (learn.cpp).
+    struct LearnState {
+        Takeover takeover;
+        std::uint64_t lastMs = 0, serial = 0;
+    };
+    std::map<std::pair<model::Id, std::string>, LearnState> learnState_;
+    struct LearnCommit {  // a plain parameter set on the running instance
+        double value = 0;
+        std::uint64_t lastMs = 0;
+        bool live = false;  // false: no running instance, commit through fx.param.set
+    };
+    std::map<OutputKey, LearnCommit> learnCommits_;
+    std::vector<ControlMidiEvent> controlTaken_;
+    bool learning_ = false;
+    void applyLearn(const std::vector<ControlEvent>& events);
+    // Commits the plain parameters that rested (all of them: `all`).
+    void commitLearned(bool all);
     void recordAutomationAt(model::Id object, const std::string& param, double value,
                             double seconds);
     void beginAutomationPass(double seconds);

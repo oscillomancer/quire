@@ -45,3 +45,4 @@ current state.
 | [0024](0024-live-multiprocessing.md) | Live callback multiprocessing | Accepted |
 | [0025](0025-floating-point-environment.md) | Engine floating-point environment and first touch | Accepted |
 | [0026](0026-background-thread-scheduling.md) | Background audio thread scheduling | Accepted |
+| [0027](0027-midi-learn.md) | MIDI learn: controllers drive parameters and actions | Accepted |

@@ -2591,6 +2591,178 @@ Result:
 
 ```
 
+## `fx.learn.list@1`
+
+List the MIDI controller bindings of plugin parameters.
+
+Every effect's, or one effect's (fx). control names the message in words.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_learn_list",
+  "properties": {
+    "learn": {}
+  },
+  "required": ["learn"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Every binding** (`song_with_learn`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "learn": [
+    {
+      "fx": "fx_2",
+      "param": "gain",
+      "midi": {
+        "kind": "cc",
+        "channel": 1,
+        "number": 21
+      },
+      "control": "CC 21 · ch 1"
+    }
+  ]
+}
+
+```
+
+## `fx.learn.remove@1`
+
+Remove a plugin parameter's MIDI controller binding.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `param` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Free the gain** (`song_with_learn`)
+
+```json
+{
+  "fx": "fx_2",
+  "param": "gain"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `fx.learn.set@1`
+
+Let a MIDI controller (CC, note, pitch bend) move a plugin parameter.
+
+One binding per parameter (a new one replaces it). midi.device: a substring of the MIDI input's name (empty: any). mode for a CC: absolute, relative1 (127 = -1, 1 = +1), relative2 (63 = -1, 65 = +1), relative3 (65 = -1, 1 = +1) or toggle (above 0 flips it). soft_takeover: an absolute control acts once it reaches the value. when_selected / when_focused / when_visible: only while the effect's track is selected, or its window or editor has the focus or shows (the GUI).
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `param` | string |  |  |  | A semantic key, or a plain parameter's id or name (fx.describe) |
+| `midi` | object |  |  |  |  |
+| `mode` | string |  |  |  |  |
+| `soft_takeover` | boolean |  |  |  |  |
+| `when_selected` | boolean |  |  |  |  |
+| `when_focused` | boolean |  |  |  |  |
+| `when_visible` | boolean |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_learn_set_result",
+  "properties": {
+    "param": {
+      "type": "string"
+    },
+    "control": {
+      "type": "string"
+    }
+  },
+  "required": ["param", "control"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Gain on CC 21** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "param": "gain",
+  "midi": {
+    "kind": "cc",
+    "channel": 1,
+    "number": 21
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "param": "gain",
+  "control": "CC 21 · ch 1"
+}
+
+```
+
 ## `fx.move@1`
 
 Move a plugin within a track chain or to another track.

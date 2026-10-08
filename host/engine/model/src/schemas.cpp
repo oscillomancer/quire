@@ -739,6 +739,48 @@ Schema<PinMap> pinMapSchema() {
     return b.build();
 }
 
+Schema<MidiControl> midiControlSchema() {
+    const MidiControl d;
+    auto b = schema::object<MidiControl>("midi_control");
+    b.field("kind", &MidiControl::kind,
+            en<ControlKind>({{ControlKind::Cc, "cc"},
+                             {ControlKind::Note, "note"},
+                             {ControlKind::PitchBend, "pitch_bend"},
+                             {ControlKind::Program, "program"}}));
+    b.field("channel", &MidiControl::channel, intS().range(1, 16));
+    b.field("number", &MidiControl::number, intS().range(0, 127));
+    dflt(b, d.number);
+    b.field("device", &MidiControl::device, str());
+    dflt(b, d.device);
+    return b.build();
+}
+
+Schema<ControlMode> controlModeSchema() {
+    return en<ControlMode>({{ControlMode::Absolute, "absolute"},
+                            {ControlMode::Relative1, "relative1"},
+                            {ControlMode::Relative2, "relative2"},
+                            {ControlMode::Relative3, "relative3"},
+                            {ControlMode::Toggle, "toggle"}});
+}
+
+Schema<ParamLearn> paramLearnSchema() {
+    const ParamLearn d;
+    auto b = schema::object<ParamLearn>("param_learn");
+    b.field("param", &ParamLearn::param, str());
+    b.field("midi", &ParamLearn::control, midiControlSchema());
+    b.field("mode", &ParamLearn::mode, controlModeSchema());
+    dflt(b, d.mode);
+    b.field("soft_takeover", &ParamLearn::softTakeover, boolean());
+    dflt(b, d.softTakeover);
+    b.field("when_selected", &ParamLearn::whenSelected, boolean());
+    dflt(b, d.whenSelected);
+    b.field("when_focused", &ParamLearn::whenFocused, boolean());
+    dflt(b, d.whenFocused);
+    b.field("when_visible", &ParamLearn::whenVisible, boolean());
+    dflt(b, d.whenVisible);
+    return b.build();
+}
+
 template <>
 const Schema<FxInstance>& schemaOf<FxInstance>() {
     static const Schema<FxInstance> s = [] {
@@ -787,6 +829,8 @@ const Schema<FxInstance>& schemaOf<FxInstance>() {
         b.field("state", &FxInstance::state, str());
         b.field("params", &FxInstance::params, paramValuesSchema());
         dflt(b, d.params);
+        b.field("learn", &FxInstance::learn, schema::arrayOf(paramLearnSchema()));
+        dflt(b, d.learn);
         return b.build();
     }();
     return s;
