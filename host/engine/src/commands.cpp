@@ -25,6 +25,7 @@ namespace supple::engine {
 void registerExtraCommands(cmd::Registry& registry);
 void registerMidiCommands(cmd::Registry& registry);
 void registerChainCommands(cmd::Registry& registry);
+void registerTakeCommands(cmd::Registry& registry);
 
 using cmd::Command;
 using cmd::Context;
@@ -812,6 +813,7 @@ void registerEngineCommands(cmd::Registry& registry) {
     registerExtraCommands(registry);
     registerMidiCommands(registry);
     registerChainCommands(registry);
+    registerTakeCommands(registry);
     lua::registerScriptCommands(registry);
     // ---------------------------------------------------------------- project.get
     {
@@ -1847,30 +1849,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             SUPPLE_TRY(checkUnlocked(s, *id));
             model::EditTxn& t = app.txn();
-            for (Id tk : s.items.find(*id)->takes) {
-                const model::Take* take = s.takes.find(tk);
-                if (take) {
-                    for (Id f : take->chain) t.remove<model::FxInstance>(f);
-                    if (take->source && take->source->kind == model::Kind::Midi) {
-                        const model::MidiSource* m = s.midi.find(*take->source);
-                        bool shared = false;
-                        for (const auto& other : s.takes)
-                            if (other.id != tk && other.value->source == take->source) {
-                                shared = true;
-                                break;
-                            }
-                        if (m && !m->pooled && !shared) t.remove<model::MidiSource>(*take->source);
-                    }
-                }
-                t.remove<model::Take>(tk);
-            }
-            // Envelopes on its takes and their take FX.
-            std::set<Id> gone(s.items.find(*id)->takes.begin(), s.items.find(*id)->takes.end());
-            for (Id tk : s.items.find(*id)->takes)
-                if (const model::Take* take = s.takes.find(tk))
-                    gone.insert(take->chain.begin(), take->chain.end());
-            for (const auto& e : s.envelopes)
-                if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
+            for (Id tk : s.items.find(*id)->takes) removeTakeObjects(t, s, tk);
             t.remove<model::Item>(*id);
             return Empty{};
         };

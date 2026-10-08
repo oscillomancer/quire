@@ -3347,6 +3347,66 @@ Result:
 
 ```
 
+## `item.apply-fx@1`
+
+Render an item through its take and track FX into a new audio take.
+
+Renders the heard take alone (other items on the track silent) through its take FX and the track's main chain, before the fader and pan, over the item's span: MIDI becomes audio through the track's instrument. The file goes to the project's media folder. mode take: a new take, heard, beside the old one (MIDI stays a take). mode replace: the new take takes the old one's place. The item's fades and gain still apply when it plays; the track FX still process the result, so bypass or move them if they should not apply twice.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `mode` | string |  |  | "take" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "item_apply_fx_result",
+  "properties": {
+    "take": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["take", "source", "path"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**MIDI through the instrument, as a new take** (`song_with_fx`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "take": "<any>",
+  "source": "<any>",
+  "path": "<any>"
+}
+
+```
+
 ## `item.duplicate@1`
 
 Copy an item and its takes to a new beat position (default: immediately after).
@@ -3395,6 +3455,88 @@ Result:
 ```json
 {
   "id": "it_2"
+}
+
+```
+
+## `item.explode-takes@1`
+
+Spread an item's takes onto new tracks, or one after another on its track.
+
+In recording order. mode tracks: the first take stays on the item's track and each other take gets a new channel right below it (named after the take) at the same time. mode serial: the takes follow each other on the item's own track, each as long as the item. Every take becomes a one-take item with its FX and envelopes.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `item` | string |  |  |  |  |
+| `mode` | string |  |  | "tracks" |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "item_explode_takes_result",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["items", "tracks"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Takes onto tracks** (`song_with_takes`)
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "items": ["it_1", "<any>", "<any>"],
+  "tracks": ["<any>", "<any>"]
+}
+
+```
+
+**Takes one after another** (`song_with_takes`)
+
+```json
+{
+  "item": "it_1",
+  "mode": "serial"
+}
+
+```
+
+Result:
+
+```json
+{
+  "items": ["it_1", "<any>", "<any>"],
+  "tracks": []
 }
 
 ```
@@ -7146,6 +7288,61 @@ Result:
 
 ```
 
+## `take.extract@1`
+
+Take a take out of its item into an item of its own on any channel.
+
+The new item copies the old one's length, fades, gain and timebase and starts at position (beats; default: where the item starts). The take keeps its FX and envelopes. The only take of an item moves the item itself.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `track` | string |  |  |  |  |
+| `position` | number |  | 0.0.. |  | Beats. |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "take_extract_result",
+  "properties": {
+    "item": {
+      "type": "string"
+    }
+  },
+  "required": ["item"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Move take 2 to beat 8** (`song_with_takes`)
+
+```json
+{
+  "take": "tk_2",
+  "track": "tr_1",
+  "position": 8
+}
+
+```
+
+Result:
+
+```json
+{
+  "item": "it_2"
+}
+
+```
+
 ## `take.list@1`
 
 List the takes of an item and identify its active take.
@@ -7268,6 +7465,61 @@ Result:
 ```json
 {
   "takes": "<any>"
+}
+
+```
+
+## `take.remove@1`
+
+Delete a take from its item (the item goes with its last take).
+
+The take's FX, envelopes and unshared MIDI go with it. When it was the heard take, the next take is heard (else the previous one). item_removed: it was the item's only take, so the item was removed too.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "take_remove_result",
+  "properties": {
+    "item": {
+      "type": "string"
+    },
+    "item_removed": {
+      "type": "boolean"
+    }
+  },
+  "required": ["item", "item_removed"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Delete the second take** (`song_with_takes`)
+
+```json
+{
+  "take": "tk_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "item": "it_1",
+  "item_removed": false
 }
 
 ```

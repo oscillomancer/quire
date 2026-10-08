@@ -150,7 +150,8 @@ item's timebase domain), `length`, `timebase` (`track` = inherit), `loop`
 the overlap), `takes` [tk id], `active_take`, `snap_offset`, `group`,
 `color`, `notes`. A `locked` item refuses every command that would change or
 remove it, its takes or its MIDI (`item.set`, `item.move`, `item.split`,
-`item.remove`, `take.add`, `take.set`, `take.activate`, `midi.edit`,
+`item.remove`, `take.add`, `take.set`, `take.activate`, `take.remove`,
+`take.extract`, `item.explode-takes`, `item.apply-fx`, `midi.edit`,
 `midi.write`) with `item.locked`, until `item.set {locked: false}`; copying
 it is allowed.
 
@@ -492,7 +493,13 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
   `item.remove`, `item.move`, `item.set`, `item.split {at}`,
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,
-  `take.set`, `take.activate`.
+  `take.set`, `take.activate`, `take.remove` (the item goes with its last
+  take), `take.extract {take, track, position}` (into an item of its own),
+  `item.explode-takes {item, mode: tracks|serial}` (recording order: the
+  first take stays, the others on new channels below or one after another),
+  `item.apply-fx {item, mode: take|replace}` (the heard take rendered through
+  its take FX and the track's main chain, pre-fader, over the item's span,
+  into an audio file in the media folder: a new heard take or in its place).
 - **MIDI**: `midi.write {item | {track, at}, notation, replace: bool}`,
   `midi.get {item, format: notation|events}` (q), `midi.edit {item, ops:
   [{select: {pitch, range, channel}, set|shift|transpose|quantize|velocity}]}`,

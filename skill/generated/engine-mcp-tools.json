@@ -2542,6 +2542,50 @@
     }
   },
   {
+    "name": "item_apply-fx",
+    "title": "Render an item through its take and track FX into a new audio take.",
+    "description": "Render an item through its take and track FX into a new audio take. Renders the heard take alone (other items on the track silent) through its take FX and the track's main chain, before the fader and pan, over the item's span: MIDI becomes audio through the track's instrument. The file goes to the project's media folder. mode take: a new take, heard, beside the old one (MIDI stays a take). mode replace: the new take takes the old one's place. The item's fades and gain still apply when it plays; the track FX still process the result, so bypass or move them if they should not apply twice. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_apply_fx_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^(take|replace)$",
+          "default": "take"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "item_apply_fx_result",
+      "properties": {
+        "take": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": ["take", "source", "path"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "item_duplicate",
     "title": "Copy an item and its takes to a new beat position (default: immediately after).",
     "description": "Copy an item and its takes to a new beat position (default: immediately after).  See describe for errors and examples.",
@@ -2570,6 +2614,53 @@
         }
       },
       "required": ["id"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "item_explode-takes",
+    "title": "Spread an item's takes onto new tracks, or one after another on its track.",
+    "description": "Spread an item's takes onto new tracks, or one after another on its track. In recording order. mode tracks: the first take stays on the item's track and each other take gets a new channel right below it (named after the take) at the same time. mode serial: the takes follow each other on the item's own track, each as long as the item. Every take becomes a one-take item with its FX and envelopes. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_explode_takes_args",
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^(tracks|serial)$",
+          "default": "tracks"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "item_explode_takes_result",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["items", "tracks"],
       "additionalProperties": false
     },
     "annotations": {
@@ -5392,6 +5483,48 @@
     }
   },
   {
+    "name": "take_extract",
+    "title": "Take a take out of its item into an item of its own on any channel.",
+    "description": "Take a take out of its item into an item of its own on any channel. The new item copies the old one's length, fades, gain and timebase and starts at position (beats; default: where the item starts). The take keeps its FX and envelopes. The only take of an item moves the item itself. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_extract_args",
+      "properties": {
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$"
+        },
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0.0,
+          "description": "Beats."
+        }
+      },
+      "required": ["take", "track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "take_extract_result",
+      "properties": {
+        "item": {
+          "type": "string"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "take_list",
     "title": "List the takes of an item and identify its active take.",
     "description": "List the takes of an item and identify its active take.  See describe for errors and examples.",
@@ -5495,6 +5628,42 @@
     },
     "annotations": {
       "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "take_remove",
+    "title": "Delete a take from its item (the item goes with its last take).",
+    "description": "Delete a take from its item (the item goes with its last take). The take's FX, envelopes and unshared MIDI go with it. When it was the heard take, the next take is heard (else the previous one). item_removed: it was the item's only take, so the item was removed too. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "take_remove_args",
+      "properties": {
+        "take": {
+          "type": "string",
+          "pattern": "^tk_[0-9]+$"
+        }
+      },
+      "required": ["take"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "take_remove_result",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "item_removed": {
+          "type": "boolean"
+        }
+      },
+      "required": ["item", "item_removed"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": false
     }

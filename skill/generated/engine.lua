@@ -363,12 +363,29 @@ q = nil
 ---@field length number
 ---@field warnings? string[]
 
+---@class Quire.item_apply_fx_args
+---@field item string
+---@field mode? string (default: "take")
+
+---@class Quire.item_apply_fx_result
+---@field take string
+---@field source string
+---@field path string
+
 ---@class Quire.item_duplicate_args
 ---@field item string
 ---@field to? number
 
 ---@class Quire.item_duplicate_result
 ---@field id string
+
+---@class Quire.item_explode_takes_args
+---@field item string
+---@field mode? string (default: "tracks")
+
+---@class Quire.item_explode_takes_result
+---@field items string[]
+---@field tracks string[]
 
 ---@class Quire.item_move_args
 ---@field item string Item id, e.g. "it_1".
@@ -786,11 +803,26 @@ q = nil
 ---@class Quire.take_add_result
 ---@field id string
 
+---@class Quire.take_extract_args
+---@field take string
+---@field track string
+---@field position? number Beats.
+
+---@class Quire.take_extract_result
+---@field item string
+
 ---@class Quire.take_list_args
 ---@field item string
 
 ---@class Quire.take_list_result
 ---@field takes table[]
+
+---@class Quire.take_remove_args
+---@field take string
+
+---@class Quire.take_remove_result
+---@field item string
+---@field item_removed boolean
 
 ---@class Quire.take_set_args
 ---@field take string
@@ -1073,7 +1105,9 @@ q = nil
 
 ---@class Quire.item
 ---@field add fun(args: Quire.item_add_args): Quire.item_add_result Add an item on a track: MIDI written in notation, or an audio file.
+---@field ["apply-fx"] fun(args: Quire.item_apply_fx_args): Quire.item_apply_fx_result Render an item through its take and track FX into a new audio take.
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
+---@field ["explode-takes"] fun(args: Quire.item_explode_takes_args): Quire.item_explode_takes_result Spread an item's takes onto new tracks, or one after another on its track.
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
 ---@field paste fun(args: Quire.item_paste_args): Quire.item_paste_result Copy items as they were in a version (a clipboard) to tracks and beats.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
@@ -1159,7 +1193,9 @@ q = nil
 ---@class Quire.take
 ---@field activate fun(args: Quire.take_activate_args): table Choose the take heard from an item.
 ---@field add fun(args: Quire.take_add_args): Quire.take_add_result Add a take to an item, optionally copied from another take of that item.
+---@field extract fun(args: Quire.take_extract_args): Quire.take_extract_result Take a take out of its item into an item of its own on any channel.
 ---@field list fun(args: Quire.take_list_args): Quire.take_list_result List the takes of an item and identify its active take.
+---@field remove fun(args: Quire.take_remove_args): Quire.take_remove_result Delete a take from its item (the item goes with its last take).
 ---@field set fun(args: Quire.take_set_args): table Set take gain, pan, channel mode, name, source offset, or playrate and pitch.
 
 ---@class Quire.tempo

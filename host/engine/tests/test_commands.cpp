@@ -1205,6 +1205,152 @@ TEST_CASE("save as into another folder copies the project's media there") {
     CHECK(f.app->projectPath() == f.dir / "b" / "b.json");
 }
 
+namespace {
+using model::Id;
+// tr_1 "Bass" with it_1: a MIDI item of four beats with takes tk_1..tk_4.
+void fourTakes(ChainFixture& f) {
+    f.run("track.add", R"({"name":"Bass"})");
+    f.run("item.add", R"({"track":"tr_1","bar":1,"notation":"voice bass; 1: C2:q r:q C2:q r:q"})");
+    for (int k = 0; k < 3; ++k) f.run("take.add", R"({"item":"it_1","from":"tk_1"})");
+    for (int k = 1; k <= 4; ++k) {
+        json::Value set = json::Value::object();
+        set["take"] = "tk_" + std::to_string(k);
+        set["name"] = "pass " + std::to_string(k);
+        f.run("take.set", json::write(set).value());
+    }
+}
+std::vector<std::string> takesOf(ChainFixture& f, const char* item) {
+    std::vector<std::string> out;
+    for (Id tk : f.app->head().items.find(*Id::parse(item))->takes) out.push_back(tk.str());
+    return out;
+}
+}  // namespace
+
+TEST_CASE("take.remove deletes one take; the heard one moves on; the last takes the item") {
+    ChainFixture f;
+    fourTakes(f);
+    f.run("take.activate", R"({"item":"it_1","take":"tk_2"})");
+    f.run("fx.add", R"({"take":"tk_2","plugin":"Test Gain"})");  // fx_1, a take FX
+    f.run("env.add", R"({"fx":"fx_1","param":"gain","points":[{"beat":0,"value":-6}]})");
+    const auto before = f.history();
+    auto removed = f.run("take.remove", R"({"take":"tk_2"})");
+    CHECK_FALSE(removed["item_removed"].asBool());
+    CHECK(f.history() == before + 1);
+    CHECK(takesOf(f, "it_1") == std::vector<std::string>{"tk_1", "tk_3", "tk_4"});
+    CHECK(f.app->head().items.find(*Id::parse("it_1"))->activeTake->str() == "tk_3");
+    CHECK_FALSE(f.app->head().takes.find(*Id::parse("tk_2")));
+    CHECK(f.app->head().fx.size() == 0);         // its FX went with it
+    CHECK(f.app->head().envelopes.size() == 0);  // and the FX's envelope
+    f.run("take.remove", R"({"take":"tk_4"})");  // the last one heard: the one before
+    f.run("take.activate", R"({"item":"it_1","take":"tk_3"})");
+    f.run("take.remove", R"({"take":"tk_3"})");
+    CHECK(f.app->head().items.find(*Id::parse("it_1"))->activeTake->str() == "tk_1");
+    CHECK(f.run("take.remove", R"({"take":"tk_1"})")["item_removed"].asBool());
+    CHECK(f.app->head().items.size() == 0);
+    REQUIRE(f.run("history.undo").isObject());
+    CHECK(f.app->head().items.size() == 1);
+    f.run("item.set", R"({"item":"it_1","locked":true})");
+    auto locked = f.bus->execute({"take.remove", j(R"({"take":"tk_1"})"), kOrigin});
+    REQUIRE_FALSE(locked);
+    CHECK(locked.error().code == "item.locked");
+}
+
+TEST_CASE("take.extract moves a take into an item of its own on any channel") {
+    ChainFixture f;
+    fourTakes(f);
+    f.run("track.add", R"({"name":"Other"})");
+    auto out = f.run("take.extract", R"({"take":"tk_3","track":"tr_2","position":8})");
+    const auto made = *Id::parse(out["item"].asString());
+    const model::Item& item = *f.app->head().items.find(made);
+    CHECK(item.track.str() == "tr_2");
+    CHECK(item.takes == std::vector<Id>{*Id::parse("tk_3")});
+    CHECK(model::itemSpan(f.app->head(), item).startBeat == doctest::Approx(8));
+    CHECK(model::itemEndBeat(f.app->head(), item) == doctest::Approx(12));  // the item's length
+    CHECK(takesOf(f, "it_1") == std::vector<std::string>{"tk_1", "tk_2", "tk_4"});
+    // An item's only take moves the item itself.
+    auto alone = f.run("take.extract", R"({"take":"tk_3","track":"tr_1","position":16})");
+    CHECK(alone["item"] == out["item"]);
+    CHECK(f.app->head().items.find(made)->track.str() == "tr_1");
+    f.run("track.add", R"({"name":"Bus","type":"buss"})");
+    auto buss = f.bus->execute({"take.extract", j(R"({"take":"tk_2","track":"tr_3"})"), kOrigin});
+    REQUIRE_FALSE(buss);
+    CHECK(buss.error().code == "track.strip_type");
+}
+
+TEST_CASE("item.explode-takes spreads takes onto tracks or along the track, in order") {
+    {
+        ChainFixture f;
+        fourTakes(f);
+        f.run("track.add", R"({"name":"After"})");
+        auto out = f.run("item.explode-takes", R"({"item":"it_1"})");
+        REQUIRE(out["tracks"].size() == 3);
+        const model::Session s = f.app->head();
+        const auto& order = s.tracks.find(model::kMaster)->children;
+        std::vector<std::string> names;
+        for (Id t : order) names.push_back(s.tracks.find(t)->name);
+        CHECK(names == std::vector<std::string>{"Bass", "pass 2", "pass 3", "pass 4", "After"});
+        for (std::size_t k = 0; k < 4; ++k) {
+            const model::Item& it = *s.items.find(*Id::parse(out["items"].asArray()[k].asString()));
+            CHECK(it.takes.size() == 1);
+            CHECK(it.takes[0].str() == "tk_" + std::to_string(k + 1));
+            CHECK(model::itemSpan(s, it).startBeat == doctest::Approx(0));
+        }
+    }
+    {
+        ChainFixture f;
+        fourTakes(f);
+        auto out = f.run("item.explode-takes", R"({"item":"it_1","mode":"serial"})");
+        CHECK(out["tracks"].size() == 0);
+        const model::Session s = f.app->head();
+        for (std::size_t k = 0; k < 4; ++k) {
+            const model::Item& it = *s.items.find(*Id::parse(out["items"].asArray()[k].asString()));
+            CHECK(it.track.str() == "tr_1");
+            CHECK(it.takes[0].str() == "tk_" + std::to_string(k + 1));
+            CHECK(model::itemSpan(s, it).startBeat ==
+                  doctest::Approx(4.0 * static_cast<double>(k)));
+        }
+        auto single = f.bus->execute({"item.explode-takes", j(R"({"item":"it_1"})"), kOrigin});
+        REQUIRE_FALSE(single);
+        CHECK(single.error().code == "take.single");
+    }
+}
+
+TEST_CASE("item.apply-fx renders an item through its FX into a new take or in its place") {
+    ChainFixture f(true);
+    f.app->setCopyImportedMedia(true);
+    writeTone(f.dir / "tone.wav", 0.5f);
+    f.run("track.add", R"({"name":"Gtr"})");
+    json::Value add = json::Value::object();
+    add["track"] = "tr_1";
+    add["position"] = 0.0;
+    add["length"] = 2.0;
+    add["audio_file"] = (f.dir / "tone.wav").string();
+    f.run("item.add", json::write(add).value());
+    add["position"] = 2.0;  // a neighbour on the track, not in the render
+    f.run("item.add", json::write(add).value());
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","patch":{"params":{"gain":-6}}})");
+    f.run("item.set", R"({"item":"it_1","gain_db":-12})");  // stays for playback
+    auto out = f.run("item.apply-fx", R"({"item":"it_1"})");
+    const fs::path file = out["path"].asString();
+    CHECK(file.parent_path() == f.dir / "scratch" / "media");
+    auto audio = audio::readAudio(file);
+    REQUIRE(audio);
+    CHECK(audio->frames() == 48000);  // two beats at 120 bpm
+    float peak = 0;
+    for (const auto& ch : audio->channels)
+        for (float v : ch) peak = std::max(peak, std::fabs(v));
+    CHECK(peak == doctest::Approx(0.5 * std::pow(10.0, -6.0 / 20.0)).epsilon(0.01));
+    CHECK(takesOf(f, "it_1").size() == 2);
+    const model::Item& it = *f.app->head().items.find(*Id::parse("it_1"));
+    CHECK(it.activeTake->str() == out["take"].asString());
+    CHECK(it.gainDb == -12);
+    // replace: the new take takes the heard one's place.
+    auto again = f.run("item.apply-fx", R"({"item":"it_2","mode":"replace"})");
+    CHECK(takesOf(f, "it_2") == std::vector<std::string>{again["take"].asString()});
+    REQUIRE(f.app->save(f.dir / "song" / "song.json"));  // the render moves with the media
+    CHECK(fs::exists(f.dir / "song" / "media" / file.filename()));
+}
+
 TEST_CASE("FX chain opaque states have content hashes across SHA-256 block boundaries") {
     ChainFixture f;
     f.run("track.add", R"({"name":"Source"})");
