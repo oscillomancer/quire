@@ -42,3 +42,4 @@ current state.
 | [0021](0021-multi-out-instruments.md) | Multi-output plug-ins | Accepted |
 | [0022](0022-strip-polarity-and-mono.md) | Strip polarity and mono | Accepted |
 | [0023](0023-background-worker-participation.md) | Background worker participation and parking | Accepted |
+| [0024](0024-live-multiprocessing.md) | Live callback multiprocessing | Accepted |

@@ -6,6 +6,9 @@
 refines §6: graph-bounded participation, parking within jobs, explicit join
 ownership and the app thread-limit preference.
 
+**Amendment, 2026-10-07:** [ADR-0024](0024-live-multiprocessing.md) defines
+live callback fork-join, helper scheduling and the nonblocking wake exception.
+
 ## Context
 
 The engine runs every node inside the audio callback, on one core. Phase 4

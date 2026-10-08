@@ -3,6 +3,9 @@
 **Status:** Accepted, 2026-09-26 (dedicated and shared bridge modes implemented). Spec: `docs/specs/engine.md` §5,
 `docs/specs/session-model.md` §1.7 (`FxInstance.isolation`).
 
+**Amendment, 2026-10-07:** [ADR-0024](0024-live-multiprocessing.md) defines
+live callback fork-join, helper scheduling and the nonblocking wake exception.
+
 ## Context
 
 Phase 4 acceptance: a crashing test plugin in an isolation mode does not take
