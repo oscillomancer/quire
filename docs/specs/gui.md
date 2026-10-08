@@ -284,7 +284,9 @@ Mouse modifiers, or View > Wheel zoom anchor); a cursor outside the visible
 lanes falls back to the pointer. Keyboard zoom anchors at the playhead. Horizontal zoom is continuous;
 vertical track height per track and global.
 Left trim shifts every take's source offset by the trimmed duration times
-its play rate, in the same transaction. Clipboard track offsets are in
+its play rate, in the same transaction; dragging the left edge out past a
+take's material (down to the timeline's start) and slipping its material
+later both leave silence first (a negative offset), audio and MIDI alike. Clipboard track offsets are in
 channel order; pasting skips envelope rows and reports items dropped for
 lack of a target channel. Project replacement clears the item clipboard.
 MIDI thumbnails map offset, rate and loop passes

@@ -1188,6 +1188,49 @@ TEST_CASE("left trim moves every take offset at its own play rate in one undo st
         CHECK(f.app->head().takes.find(take)->startOffset == before.takes.find(take)->startOffset);
 }
 
+TEST_CASE("the left edge extends an item before its material; slip goes both ways") {
+    Fixture f;
+    REQUIRE(f.ok);
+    for (bool midi : {false, true}) {
+        CAPTURE(midi);
+        model::Id id = f.itemOnRow(0, midi);
+        // Somewhere with room before it: two bars in, the offset at zero.
+        REQUIRE(f.dispatcher->execute(
+            {"item.move", json::parse(R"({"item":")" + id.str() + R"(","position":8})").value(),
+             kUi}));
+        REQUIRE(f.dispatcher->execute(
+            {"take.set",
+             json::parse(R"({"take":")" + f.item(id).activeTake->str() + R"(","start_offset":0})")
+                 .value(),
+             kUi}));
+        f.sync();
+        const auto before = f.app->head();
+        const double start = model::itemSpan(before, f.item(id)).startBeat;
+        const double end = model::itemEndBeat(before, f.item(id));
+        auto rect = f.rectOf(id);
+        // The left edge two beats earlier: longer, starting earlier, the
+        // material where it was (silence first).
+        const auto steps = f.steps();
+        f.drag({rect.x + 2, rect.y + rect.h / 2},
+               {rect.x + 2 - 2 * f.beatPx(), rect.y + rect.h / 2});
+        REQUIRE(f.steps() == steps + 1);
+        const model::Session& s = f.app->head();
+        CHECK(model::itemSpan(s, f.item(id)).startBeat == doctest::Approx(start - 2));
+        CHECK(model::itemEndBeat(s, f.item(id)) == doctest::Approx(end));
+        const double offset = s.takes.find(*f.item(id).activeTake)->startOffset;
+        CHECK(offset < 0);
+        CHECK(offset ==
+              doctest::Approx(
+                  midi ? -2.0 : -(s.timeMap->secondsAt(start) - s.timeMap->secondsAt(start - 2))));
+        // Slip right: the material moves later under the item (silence first).
+        rect = f.rectOf(id);
+        const ui::Point mid{rect.x + rect.w / 2, rect.y + rect.h / 2};
+        f.drag(mid, {mid.x + f.beatPx(), mid.y}, ui::kAlt);
+        REQUIRE(f.steps() == steps + 2);
+        CHECK(f.app->head().takes.find(*f.item(id).activeTake)->startOffset < offset);
+    }
+}
+
 TEST_CASE("clipboard channel offsets skip envelope rows and report missing targets") {
     Fixture f;
     REQUIRE(f.ok);

@@ -717,10 +717,10 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                 break;
             }
             case Drag::TrimLeft:
-                if (anchor)
+                if (anchor)  // out to the timeline's start, in to the minimum length
                     state_.deltaBeats =
-                        std::min(snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor),
-                                 lengthBeats(s, *anchor) - kMinLength);
+                        std::clamp(snap(startBeat(s, *anchor) + raw, free_) - startBeat(s, *anchor),
+                                   -startBeat(s, *anchor), lengthBeats(s, *anchor) - kMinLength);
                 break;
             case Drag::TrimRight:
                 if (anchor) {
@@ -1185,7 +1185,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         }
         case Drag::TrimLeft: {
             if (!anchor || anchor->locked || state_.deltaBeats == 0) return;
-            double d = state_.deltaBeats;
+            const double d = state_.deltaBeats;
             auto offsetFor = [&](const model::Take& take, double delta) {
                 const double rate = take.playrate > 0 ? take.playrate : 1.0;
                 return take.startOffset +
@@ -1194,26 +1194,16 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                                             s.timeMap->secondsAt(startBeat(s, *anchor))) *
                            rate;
             };
-            for (auto id : anchor->takes)
-                if (const auto* take = s.takes.find(id); take && offsetFor(*take, d) < 0) {
-                    const double rate = take->playrate > 0 ? take->playrate : 1.0;
-                    const double limit =
-                        isMidi(take)
-                            ? -take->startOffset / rate
-                            : s.timeMap->beatAt(s.timeMap->secondsAt(startBeat(s, *anchor)) -
-                                                take->startOffset / rate) -
-                                  startBeat(s, *anchor);
-                    d = std::max(d, limit);
-                }
+            // Extending before a take's material starts gives it silence
+            // first (a negative offset), as slipping does.
             std::vector<EditStep> steps;
             for (auto id : anchor->takes)
                 if (const auto* take = s.takes.find(id)) {
                     json::Value targs = json::Value::object();
                     targs["take"] = id.str();
-                    targs["start_offset"] = std::max(0.0, offsetFor(*take, d));
+                    targs["start_offset"] = offsetFor(*take, d);
                     steps.push_back({"take.set", std::move(targs)});
                 }
-            if (d == 0) return;
             json::Value args = json::Value::object();
             args["item"] = state_.anchor.str();
             args["position"] = startBeat(s, *anchor) + d;
@@ -1270,7 +1260,8 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                                    rate;
             json::Value args = json::Value::object();
             args["take"] = anchor->activeTake->str();
-            args["start_offset"] = std::max(0.0, take->startOffset - shift);
+            // Past the source's start is silence first (a negative offset).
+            args["start_offset"] = take->startOffset - shift;
             runSteps("Slip item", {{"take.set", std::move(args)}});
             return;
         }
