@@ -36,12 +36,14 @@ bool draggingSlider(const ui::Node& node) {
     return false;
 }
 
-// A chain row: paints its selection, selects the effect on a left press,
-// and reorders by dragging (onDrag) or with Alt+Up / Alt+Down (fx.move).
+// A chain row: paints its selection, selects the effect on a left press
+// (with the press's modifiers and click count), and reorders by dragging
+// (onDrag) or with Alt+Up / Alt+Down (fx.move).
 class Row : public ui::Node {
   public:
     enum class Phase { Move, Drop, Cancel };
-    Row(std::string id, std::function<void()> onSelect, std::function<void(int)> onMove = {})
+    Row(std::string id, std::function<void(unsigned mods, int clicks)> onSelect,
+        std::function<void(int)> onMove = {})
         : Node(std::move(id)), onSelect_(std::move(onSelect)), onMove_(std::move(onMove)) {
         interactive = true;
         focusable = true;
@@ -67,7 +69,8 @@ class Row : public ui::Node {
         if (e.type == T::Down && e.button == 1) {
             pressAt_ = e.pos;
             moving_ = false;
-            if (auto callback = onSelect_) callback();  // may rebuild the rows: nothing after
+            if (auto callback = onSelect_)
+                callback(e.mods, e.clicks);  // may rebuild the rows: nothing after
             return true;
         }
         if (e.type == T::Move && onDrag && pressAt_) {
@@ -113,7 +116,7 @@ class Row : public ui::Node {
     }
 
   private:
-    std::function<void()> onSelect_;
+    std::function<void(unsigned, int)> onSelect_;
     std::function<void(int)> onMove_;
     std::optional<ui::Point> pressAt_;
     bool moving_ = false;
@@ -317,6 +320,7 @@ Status FxWindow::open(model::Id track) {
     pendingChain_ = "main";
     take_.reset();
     selected_ = {};
+    picked_.clear();
     tab_ = Tab::Chain;
     presetChain_ = "main";
     if (presetChainButton_) presetChainButton_->setText("Main chain");
@@ -404,7 +408,10 @@ void FxWindow::addFxTo(model::Id track, const std::string& pluginId) {
     }
     if (!page_ || track_ != track || take_) return;
     if (const json::Value* made = result->find("fx"); made && made->isString())
-        if (auto made_id = model::Id::parse(made->asString())) selected_ = *made_id;
+        if (auto made_id = model::Id::parse(made->asString())) {
+            selected_ = *made_id;
+            picked_.clear();
+        }
     setStatus("added " + pluginId);
     refresh();
 }
@@ -533,6 +540,8 @@ void FxWindow::tick() {
 
 void FxWindow::select(model::Id fx) {
     selected_ = fx;
+    anchor_ = fx;
+    picked_.clear();
     const auto input = inputChain();
     choosePresetChain(std::find(input.begin(), input.end(), fx) != input.end());
     if (tab_ == Tab::Params)
@@ -545,6 +554,98 @@ void FxWindow::select(model::Id fx) {
                         row->id() == "fx.row." + fx.str() || row->id() == "ifx.row." + fx.str();
         root_.damageAll();
     }
+}
+
+bool FxWindow::picked(model::Id fx) const {
+    return fx == selected_ || picked_.count(fx.str()) != 0;
+}
+
+std::vector<model::Id> FxWindow::selection() const {
+    std::vector<model::Id> out;
+    for (const model::Id& fx : rowOrder())
+        if (picked(fx)) out.push_back(fx);
+    return out;
+}
+
+// The rows top to bottom: the input chain, then the chain (a take: its chain).
+std::vector<model::Id> FxWindow::rowOrder() const {
+    std::vector<model::Id> order = take_ ? std::vector<model::Id>{} : inputChain();
+    for (const model::Id& fx : chain()) order.push_back(fx);
+    return order;
+}
+
+std::vector<model::Id> FxWindow::targets(model::Id fx) const {
+    const std::vector<model::Id> all = selection();
+    if (all.size() > 1 && picked(fx)) return all;
+    return {fx};
+}
+
+Status FxWindow::setEach(model::Id fx, const char* field, bool value) {
+    const std::vector<model::Id> each = targets(fx);
+    auto set = dispatcher_.transact(
+        std::string(field) == "bypass" ? "Bypass effects" : "Offline effects", kUiOrigin,
+        [&]() -> Result<json::Value> {
+            for (const model::Id& one : each) {
+                json::Value args = json::Value::object();
+                args["fx"] = one.str();
+                args[field] = value;
+                SUPPLE_TRY(dispatcher_.execute({"fx.set", std::move(args), kUiOrigin}));
+            }
+            return json::Value::object();
+        });
+    if (!set) {
+        setStatus(std::string("fx.set: ") + set.error().message);
+        return std::move(set).error();
+    }
+    return {};
+}
+
+// A press on a row: alone it selects the effect (a double click also opens
+// its editor, only that one); Ctrl adds or takes it out of the selection;
+// Shift selects every row from the last one clicked.
+void FxWindow::press(model::Id fx, unsigned mods, int clicks) {
+    const bool ctrl = (mods & ui::kCtrl) != 0, shift = (mods & ui::kShift) != 0;
+    if (!ctrl && !shift) {
+        if (clicks >= 2) {
+            if (selected_ != fx || !picked_.empty()) select(fx);
+            if (hooks_.openEditor)
+                if (auto opened = hooks_.openEditor(fx); !opened)
+                    setStatus("editor: " + opened.error().message);
+            return;
+        }
+        select(fx);
+        return;
+    }
+    if (shift && hasSelected()) {
+        const std::vector<model::Id> order = rowOrder();
+        const model::Id from = anchor_.n != 0 ? anchor_ : selected_;
+        auto a = std::find(order.begin(), order.end(), from);
+        auto b = std::find(order.begin(), order.end(), fx);
+        if (a != order.end() && b != order.end()) {
+            if (a > b) std::swap(a, b);
+            picked_.clear();
+            for (auto it = a; it <= b; ++it) picked_.insert(it->str());
+        }
+        selected_ = fx;
+    } else {
+        if (picked_.empty() && hasSelected()) picked_.insert(selected_.str());
+        if (picked_.erase(fx.str()) != 0) {
+            if (selected_ == fx) selected_ = picked_.empty() ? model::Id{} : selection().front();
+        } else {
+            picked_.insert(fx.str());
+            selected_ = fx;
+        }
+        anchor_ = fx;
+    }
+    if (body_)
+        for (const auto& child : body_->children())
+            if (auto* row = dynamic_cast<Row*>(child.get())) {
+                const std::string& rid = row->id();
+                const auto dot = rid.rfind('.');
+                const auto id = model::Id::parse(rid.substr(dot + 1));
+                row->selected = id && picked(*id);
+            }
+    root_.damageAll();
 }
 
 void FxWindow::showChainTab() {
@@ -578,6 +679,10 @@ void FxWindow::refresh() {
                               : "FX: " + trackName);
     body_->clear();
     if (hasSelected() && !app_.head().fx.find(selected_)) selected_ = {};
+    for (auto it = picked_.begin(); it != picked_.end();) {
+        const auto id = model::Id::parse(*it);
+        it = id && app_.head().fx.find(*id) ? std::next(it) : picked_.erase(it);
+    }
     if (!hasSelected()) {
         const auto main = chain(), input = inputChain();
         if (!main.empty())
@@ -638,10 +743,10 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
     const std::string prefix = input ? "ifx." : "fx.";
     const std::string id = fx.str();
     auto& row = body.emplace<Row>(
-        prefix + "row." + id, [this, fx] { select(fx); },
+        prefix + "row." + id, [this, fx](unsigned mods, int clicks) { press(fx, mods, clicks); },
         input ? std::function<void(int)>{}
               : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
-    row.selected = selected_ == fx;
+    row.selected = picked(fx);
     if (!input)  // drag the row to reorder the chain
         row.onDrag = [this, fx](Row::Phase phase, ui::Point p) {
             dragRow(fx, static_cast<int>(phase), p);
@@ -670,19 +775,15 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
                     refresh();
                 }
             });
+        // Bypass, offline and remove act on every selected effect when the
+        // row is one of several selected (gui.md §4.5).
         l1.emplace<ui::Button>(prefix + "bypass." + id, inst->bypass ? "bypassed" : "bypass",
                                [this, fx, bypass = inst->bypass] {
-                                   json::Value args = json::Value::object();
-                                   args["fx"] = fx.str();
-                                   args["bypass"] = !bypass;
-                                   if (dispatch("fx.set", std::move(args))) refresh();
+                                   if (setEach(fx, "bypass", !bypass)) refresh();
                                });
         l1.emplace<ui::Button>(prefix + "offline." + id, inst->offline ? "offlined" : "offline",
                                [this, fx, offline = inst->offline] {
-                                   json::Value args = json::Value::object();
-                                   args["fx"] = fx.str();
-                                   args["offline"] = !offline;
-                                   if (dispatch("fx.set", std::move(args))) refresh();
+                                   if (setEach(fx, "offline", !offline)) refresh();
                                });
         l1.emplace<ui::Button>(prefix + "editor." + id, "UI", [this, fx] {
             if (hooks_.openEditor) {
@@ -695,12 +796,26 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
             showParamsTab();
         });
         l1.emplace<ui::Button>(prefix + "remove." + id, "Remove", [this, fx] {
-            json::Value args = json::Value::object();
-            args["fx"] = fx.str();
-            if (dispatch("fx.remove", std::move(args))) {
-                if (selected_ == fx) selected_ = {};
-                refresh();
+            const std::vector<model::Id> each = targets(fx);
+            auto removed = dispatcher_.transact(
+                each.size() > 1 ? "Remove effects" : "Remove effect", kUiOrigin,
+                [&]() -> Result<json::Value> {
+                    for (const model::Id& one : each) {
+                        json::Value args = json::Value::object();
+                        args["fx"] = one.str();
+                        SUPPLE_TRY(dispatcher_.execute({"fx.remove", std::move(args), kUiOrigin}));
+                    }
+                    return json::Value::object();
+                });
+            if (!removed) {
+                setStatus("fx.remove: " + removed.error().message);
+                return;
             }
+            for (const model::Id& one : each) {
+                picked_.erase(one.str());
+                if (selected_ == one) selected_ = {};
+            }
+            refresh();
         });
     }
     {
@@ -946,7 +1061,10 @@ void FxWindow::addFx(const std::string& pluginId) {
         return;
     }
     if (const json::Value* made = result->find("fx"); made && made->isString())
-        if (auto id = model::Id::parse(made->asString())) selected_ = *id;
+        if (auto id = model::Id::parse(made->asString())) {
+            selected_ = *id;
+            picked_.clear();
+        }
     setStatus("added " + pluginId);
     refresh();
 }

@@ -75,7 +75,12 @@ class FxWindow {
     void openPinsMenu(model::Id fx, const ui::Rect& anchor);
     // Engine-reported failures (engine.status failed_fx), by effect id.
     const std::set<std::string>& failed() const { return failed_; }
-    void select(model::Id fx);
+    void select(model::Id fx);  // alone: any multi-selection ends
+    // Every selected effect, top to bottom (Ctrl/Shift+click select several;
+    // their bypass, offline and remove act on all of them).
+    std::vector<model::Id> selection() const;
+    // A left press on an effect's row (a double click opens its editor).
+    void press(model::Id fx, unsigned mods, int clicks = 1);
     void showParamsTab();
     void showChainTab();
     std::vector<model::Id> chain() const;
@@ -91,6 +96,12 @@ class FxWindow {
     void buildRow(ui::Node& body, model::Id fx, std::size_t index, bool input);
     Status dispatch(const char* command, json::Value args);
     std::string nameOf(model::Id fx) const;
+    bool picked(model::Id fx) const;
+    std::vector<model::Id> rowOrder() const;
+    // The effects a row's bypass/offline/remove act on: the selection when
+    // the row is part of a multi-selection, else the row's alone.
+    std::vector<model::Id> targets(model::Id fx) const;
+    Status setEach(model::Id fx, const char* field, bool value);
     std::string latencyOf(model::Id fx);
     void moveFx(model::Id fx, int delta);
     void dragRow(model::Id fx, int phase, ui::Point p);  // phase: Row::Phase
@@ -111,6 +122,8 @@ class FxWindow {
     ParamPanel params_;
 
     model::Id track_, selected_;
+    model::Id anchor_;               // Shift+click extends from here
+    std::set<std::string> picked_;   // a multi-selection (with selected_), else empty
     std::optional<model::Id> take_;  // set: the window shows that take's chain
     Tab tab_ = Tab::Chain;
     std::string gesture_;  // the active slider drag

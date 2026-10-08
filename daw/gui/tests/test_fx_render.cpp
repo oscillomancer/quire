@@ -527,6 +527,87 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.fx->chain()[0] == fx2);
 }
 
+TEST_CASE(
+    "the FX chain: Ctrl and Shift+click select several for bypass, offline and remove; a double "
+    "click opens one editor") {
+    Fixture f;
+    if (!f.ok) {
+        MESSAGE("skipped: no offscreen GL");
+        return;
+    }
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
+    std::vector<model::Id> opened;
+    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root,
+                                           gui::FxWindow::Hooks{[&](model::Id id) -> Status {
+                                               opened.push_back(id);
+                                               return {};
+                                           }},
+                                           gui::Favourites::defaultFile(gui::test::slug()));
+    const model::Id track = f.addTrack("Keys");
+    std::vector<model::Id> fx;
+    for (const char* name : {"Plumb", "Facet", "Plumb"}) {
+        auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId(name)}}));
+        REQUIRE(made);
+        fx.push_back(*model::Id::parse((*made)["fx"].asString()));
+    }
+    REQUIRE(f.fx->open(track));
+    f.frame();
+    auto press = [&](const model::Id& id, unsigned mods, int clicks = 1) {
+        f.frame();
+        const ui::Rect r = f.root->find("fx.row." + id.str())->bounds();
+        const ui::Point at{r.x + 6, r.y + 8};
+        ui::PointerEvent down{ui::PointerEvent::Type::Down, at, 1, clicks, mods};
+        ui::PointerEvent up{ui::PointerEvent::Type::Up, at, 1, clicks, mods};
+        f.root->pointer(down);
+        f.root->pointer(up);
+        f.frame();
+    };
+    auto inst = [&](const model::Id& id) { return f.app->head().fx.find(id); };
+    press(fx[0], 0);
+    CHECK(f.fx->selection() == std::vector<model::Id>{fx[0]});
+    press(fx[2], ui::kCtrl);
+    CHECK(f.fx->selection() == std::vector<model::Id>{fx[0], fx[2]});
+    // Bypass on a selected row bypasses both, in one undo step.
+    std::size_t before = f.historyCount();
+    REQUIRE(f.click("fx.bypass." + fx[2].str()));
+    CHECK(inst(fx[0])->bypass);
+    CHECK_FALSE(inst(fx[1])->bypass);
+    CHECK(inst(fx[2])->bypass);
+    CHECK(f.historyCount() == before + 1);
+    // On a row outside the selection it acts on that row alone.
+    REQUIRE(f.click("fx.bypass." + fx[1].str()));
+    CHECK(inst(fx[1])->bypass);
+    CHECK(inst(fx[0])->bypass);
+    // Shift extends from the last row clicked (the third) to the first.
+    press(fx[0], ui::kShift);
+    CHECK(f.fx->selection() == fx);
+    REQUIRE(f.click("fx.offline." + fx[1].str()));
+    for (const model::Id& id : fx) CHECK(inst(id)->offline);
+    // Ctrl takes one out again; Remove goes for the other two.
+    press(fx[1], ui::kCtrl);
+    CHECK(f.fx->selection() == std::vector<model::Id>{fx[0], fx[2]});
+    before = f.historyCount();
+    REQUIRE(f.click("fx.remove." + fx[0].str()));
+    CHECK(f.fx->chain() == std::vector<model::Id>{fx[1]});
+    CHECK(f.historyCount() == before + 1);
+    CHECK(f.fx->selection() == std::vector<model::Id>{fx[1]});
+    CHECK(opened.empty());
+    // A double click opens that effect's editor, and only that one.
+    auto more = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Facet")}}));
+    REQUIRE(more);
+    const model::Id fx4 = *model::Id::parse((*more)["fx"].asString());
+    f.fx->refresh();
+    press(fx[1], 0);
+    press(fx4, ui::kCtrl);
+    REQUIRE(f.fx->selection().size() == 2);
+    press(fx4, 0, 2);
+    CHECK(opened == std::vector<model::Id>{fx4});
+    CHECK(f.fx->selection() == std::vector<model::Id>{fx4});
+}
+
 TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {
     Fixture f;
     if (!f.ok) return;

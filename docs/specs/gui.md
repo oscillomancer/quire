@@ -367,7 +367,12 @@ favourites and stock plugins first; the browser also opens on its own from a
 strip's "+", titled with the track and with its own Close), reorder by
 dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
 row too; no arrow buttons), bypass vs offline
-(distinct, `reaper-ux.md` addendum), wet/dry, per-FX latency and CPU, preset
+(distinct, `reaper-ux.md` addendum), a double click on a row opens that
+effect's own GUI, Ctrl+click adds a row to the selection (or takes it out)
+and Shift+click selects the rows from the last one clicked; on a row of a
+multi-selection, bypass, offline and Remove act on every selected effect in
+one undo step (the editor button and a double click open only that row's
+editor), wet/dry, per-FX latency and CPU, preset
 menu, and the plugin's own GUI (embedded X11 child of an SDL window,
 ADR-0005 §2, `clap.timer-support`, resize negotiated from observed
 geometry). For plugins without a GUI — and always as a second tab — a
