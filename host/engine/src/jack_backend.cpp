@@ -1,3 +1,4 @@
+#include "supple/engine/bench_probe.h"
 #include "supple/engine/jack.h"
 
 #include <dlfcn.h>
@@ -150,6 +151,7 @@ struct JackBackend::Impl {
     // activation, and flips during it), so only a later difference counts.
     std::atomic<Frames> rate{0}, reportedRate{0};
     Callback callback;
+    BenchProbe* benchProbe = nullptr;
 
     std::atomic<int> state{kRunning};
     std::atomic<std::uint32_t> period{0};
@@ -157,6 +159,7 @@ struct JackBackend::Impl {
     std::atomic<bool> serverGone{false};
 
     int process(Frames n) SUPPLE_RT {
+        BenchProbe::Timer timer(benchProbe, true, n);
         std::array<float*, kMaxPorts> out;
         std::array<const float*, kMaxPorts> in;
         for (std::uint32_t c = 0; c < outputs; ++c)
@@ -306,6 +309,7 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     auto impl = std::make_unique<Impl>();
     impl->api = api;
     impl->callback = std::move(callback);
+    impl->benchProbe = options_.benchProbe;
     impl->inputs = config.inputs;
     impl->outputs = config.outputs;
     impl->block = config.blockSize;

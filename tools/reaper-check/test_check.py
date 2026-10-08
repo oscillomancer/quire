@@ -99,6 +99,10 @@ class Helpers(unittest.TestCase):
         automated.extend(array("d", [.2 * 10**(-12/20)]) * (check.RATE * 4))
         self.assertAlmostEqual(check.automation_delta(automated, reference), -12, places=8)
 
+    def test_generated_scope_preserves_statements_and_bounds_locals(self):
+        self.assertEqual(check.lua_scope(["local a = 1", "use(a)"]),
+                         ["do", "local a = 1", "use(a)", "end"])
+
     def test_lua_paths_are_literals_not_code(self):
         value = '/a/"; error("injection") -- ]] [=[unicode-音]=]'
         quoted = check.lua_string(value)
@@ -191,6 +195,23 @@ class ProcessIsolation(unittest.TestCase):
         executable.write_text("#!" + sys.executable + "\n" + body)
         executable.chmod(0o700)
         return check.Runner(str(executable), ini, user, logs, .3), user, logs
+
+    def test_audio_child_uses_only_requested_client_latency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = "import os,json\nprint(json.dumps(dict(os.environ)))\n"
+            runner, _, logs = self.fixture(Path(tmp), body)
+            runner.audio, runner.block = True, 128
+            with patch.dict(os.environ, {"SUPPLE_AUDIO_DEVICE_TEST": "1"}, clear=True):
+                runner.run([], "latency")
+                child = json.loads((logs / "latency.log").read_text())
+                self.assertEqual(child["PIPEWIRE_LATENCY"], "128/48000")
+                self.assertNotIn("PIPEWIRE_QUANTUM", child)
+                self.assertNotIn("PIPEWIRE_RATE", child)
+                for name in ("PIPEWIRE_QUANTUM", "PIPEWIRE_RATE"):
+                    with patch.dict(os.environ, {name: "64/48000"}), patch.object(check.subprocess, "Popen") as launch:
+                        with self.assertRaisesRegex(check.CheckError, "unset PIPEWIRE"):
+                            runner.run([], "forced")
+                        launch.assert_not_called()
 
     def test_timeout_kills_parent_and_child(self):
         with tempfile.TemporaryDirectory() as tmp:

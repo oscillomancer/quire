@@ -428,6 +428,50 @@ search retains every trial, independently confirms its candidate, and labels
 a passing search cap as a lower bound. REAPER counts observed audio/media
 underrun timestamp changes (multiple events between polls can be undercounted).
 
+### 7.1 Benchmark-only measurements
+
+`EngineOptions::benchProbe` and `JackOptions::benchProbe` default to null.
+Only `engine-bench` enables these pointers; there is no GUI preference.
+`BenchProbe` owns preallocated, bounded single-producer sample arrays, one for
+the backend and one for the renderer. Allocate it before start, retain it until
+both stop, and inspect it only after producers join. One measurement interval
+per probe; an atomic gate excludes preroll. Newest samples are dropped and
+counted on overflow; a benchmark with dropped samples is invalid. No sorting,
+allocation, formatting or logging occurs on a producer. Disabled probes read
+no clock and allocate no engine storage.
+
+The JACK timer surrounds the whole process callback, including all engine
+chunks and backend bookkeeping in a granted period. Paced timing surrounds
+one synthetic callback. Benchmark input is silence and physical outputs are
+silenced after measuring the pre-output peak. Render-job timing surrounds
+playing `processRendererBlock`, including pool join, excluding ring publication
+and idle/pacing waits. Nearest-rank p50/p99/p99.9/max and mean are in microseconds;
+load divides total time by the captured frame duration. Timing start/end reads
+add measurement overhead. A sample begun before the gate closes may finish
+after it; aggregate status snapshots can differ by one boundary cycle.
+
+Ring low-water is a callback observation before consumption, after priming in
+the current epoch: published renderer stream frames minus consumed stream
+frames, clamped to zero. Publication of the stream counter can lag ring
+publication; this is a conservative observed ahead distance, not an atomic
+snapshot of every frontier ring or an assertion about minimum wake latency.
+It is null when there is no sampled anticipative boundary (including an
+all-live graph); observations and anticipation misses are reported separately.
+
+`tools/bench` accepts 64/128-frame requests. Run JSON is
+`supple.capacity-run/2.0`: `xruns` is a JACK server counter delta or null for
+paced runs; `synthetic_over_budget` and `synthetic_late_wakes` are paced-only
+counters (null for JACK). Callback `over_budget` is a duration test, never a
+hardware xrun count. Requested block, granted quantum/rate and
+`requested_settings_granted` are separate. Mismatched grants remain useful
+fixed-run data but cannot pass a requested-setting capacity search. A model
+tick that retires the engine after device loss aborts the run with
+`bench.device_changed`, cancels automatic restart and never samples the retired
+engine. No forced quantum or rate is applied. Optional third-party effect
+fixtures take an
+installed module path and descriptor ID; binaries are never vendored by the
+harness. See the tooling README for schemas, limits and invocation details.
+
 ## Implementation notes (2026-09-26)
 
 - **Code layout:** `host/engine/src/plan.{h,cpp}` is the shared compiled plan

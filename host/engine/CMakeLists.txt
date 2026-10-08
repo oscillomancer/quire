@@ -37,7 +37,7 @@ endif()
 
 # Capacity benchmark (engine.md §7 B1), with a command-built shared session.
 add_executable(engine-bench bench/engine_bench.cpp bench/session.cpp)
-target_link_libraries(engine-bench PRIVATE supple::engine)
+target_link_libraries(engine-bench PRIVATE supple::engine supple::product-info)
 target_include_directories(engine-bench PRIVATE src)
 supple_target_defaults(engine-bench)
 target_compile_definitions(engine-bench PRIVATE
@@ -51,9 +51,15 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME engine.tests.test_bench COMMAND engine.tests "-sf=*/test_bench.cpp")
   set_tests_properties(engine.tests.test_bench PROPERTIES LABELS "engine;rt" ENVIRONMENT
     "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")
+  add_executable(engine-bench-lua-check bench/lua_check.cpp)
+  target_link_libraries(engine-bench-lua-check PRIVATE supple::lua)
+  supple_target_defaults(engine-bench-lua-check)
+  add_dependencies(engine.tests engine-bench-lua-check)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME engine.bench-tooling COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${PROJECT_SOURCE_DIR}/tools/bench -p "test_*.py")
+  set_tests_properties(engine.bench-tooling PROPERTIES ENVIRONMENT
+    "SUPPLE_BENCH_LUA_CHECK=$<TARGET_FILE:engine-bench-lua-check>")
 endif()
 
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).

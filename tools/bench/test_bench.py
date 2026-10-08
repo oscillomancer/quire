@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import shutil
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -34,10 +36,36 @@ class Bench(unittest.TestCase):
         self.assertEqual(bench.capacity_search(lambda n, c: {"valid": True, "xruns": 1}, 3)["tracks"], 0)
         result = bench.capacity_search(lambda n, c: {"valid": True, "xruns": int(c)}, 3)
         self.assertFalse(result["confirmed"])
-        for key in ("xruns", "media_xruns", "anticipation_misses", "process_errors"):
+        for key in ("xruns", "media_xruns", "anticipation_misses", "process_errors",
+                    "synthetic_over_budget", "synthetic_late_wakes"):
             self.assertFalse(bench.zero_xruns({"valid": True, key: 1}))
         with self.assertRaises(bench.check.CheckError):
             bench.capacity_search(lambda n, c: {"valid": False}, 3)
+
+    def test_synthetic_results_and_ungranted_quantum(self):
+        self.assertTrue(bench.zero_xruns({"valid": True, "xruns": None, "synthetic_over_budget": 0}))
+        with self.assertRaisesRegex(bench.check.CheckError, "not granted"):
+            bench.zero_xruns({"valid": True, "requested_settings_granted": False})
+
+    def test_generated_large_projects_parse_with_bounded_local_lifetimes(self):
+        parser = os.environ.get("SUPPLE_BENCH_LUA_CHECK")
+        command = [parser] if parser else [shutil.which("luac") or "luac", "-p"]
+        entry = {"name": "Test", "plugin": "test.identity", "state": "c3RhdGU="}
+        track = {"name": "track", "volume": .1, "armed": False, "fx": [entry]*3,
+                 "notes": [{"start": 0, "end": 4, "key": 48, "velocity": 90}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "setup.lua"
+            for tracks, chain in ((24, 3), (512, 3), (1, 256)):
+                session = {"pan_law": .707, "loop_seconds": 8, "master": [entry],
+                           "tracks": [dict(track, fx=[entry]*chain)]*tracks}
+                path.write_text(bench.setup_script(session, Path(tmp), Path(tmp)/"config"))
+                result = subprocess.run([*command, str(path)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            # Prove the parser actually diagnoses the original class of failure.
+            path.write_text("\n".join(f"local v{i} = {i}" for i in range(201)))
+            result = subprocess.run([*command, str(path)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("local", result.stderr)
 
     def test_report_deterministic_append_escaping_and_failed_run(self):
         report = {"schema": "supple.capacity-report/1.0", "timestamp": "time", "host": "b1", "device": "paced",

@@ -1,5 +1,8 @@
 // B1 capacity: command-built stock chains, a monitored input and master limiter.
+#include <sys/resource.h>
+#include "measurements.h"
 #include "session.h"
+#include "supple/product.h"
 
 #include <unistd.h>
 #include <algorithm>
@@ -24,58 +27,96 @@
 using namespace supple;
 using namespace supple::engine;
 namespace {
-class PacedBackend final : public Backend {
+// Supplies silent monitored inputs and silences the physical outputs after DSP.
+// JACK owns whole-period timing; the paced thread owns synthetic timing.
+class BenchBackend final : public Backend {
   public:
+    BenchBackend(bool real, BenchProbe* probe) : probe_(probe) {
+        if (real)
+            jack_ = std::make_unique<JackBackend>(
+                JackOptions{.clientName = "supple-capacity-bench", .benchProbe = probe});
+    }
     Status start(const BackendConfig& config, Callback cb) override {
         config_ = config;
         callback_ = std::move(cb);
         input_.assign(config.blockSize, 0.f);
         left_.assign(config.blockSize, 0.f);
         right_.assign(config.blockSize, 0.f);
+        if (jack_) {
+            auto physical = config;
+            physical.inputs = 0;  // no capture device opened
+            auto result = jack_->start(physical, [this](const float* const*, float* const* out,
+                                                        std::uint32_t n) { call(out, n); });
+            config_.sampleRate = jack_->config().sampleRate;
+            return result;
+        }
         running_ = true;
         thread_ = std::thread([this] {
-            const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            const auto period = std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(config_.blockSize / config_.sampleRate));
-            auto next = std::chrono::steady_clock::now();
-            const float* in[2] = {input_.data(), input_.data()};
+            auto next = Clock::now();
             float* out[2] = {left_.data(), right_.data()};
             while (running_.load()) {
-                const auto start = std::chrono::steady_clock::now();
-                callback_(in, out, config_.blockSize);
-                if (std::chrono::steady_clock::now() - start > period) ++late_;
+                const bool take = recording.load(std::memory_order_relaxed);
+                const auto start = Clock::now();
+                call(out, config_.blockSize);
+                const auto elapsed = Clock::now() - start;
+                if (take) {
+                    if (elapsed > period) ++overBudget;
+                    if (probe_)
+                        probe_->callback.append(
+                            std::chrono::duration<double, std::micro>(elapsed).count(),
+                            config_.blockSize);
+                }
                 ++cycles_;
                 next += period;
-                // Count scheduler overruns too, without catching up in a busy loop.
-                const auto now = std::chrono::steady_clock::now();
+                const auto now = Clock::now();
                 if (now > next + period) {
-                    ++late_;
-                    next = now;
+                    if (take) ++lateWakes;
+                    next = now;  // no catch-up busy loop
                 }
                 std::this_thread::sleep_until(next);
             }
-            callback_(in, out, 0);
+            call(out, 0);
         });
         return {};
+    }
+    void call(float* const* out, std::uint32_t n) SUPPLE_RT {
+        const float* in[2] = {input_.data(), input_.data()};
+        callback_(in, out, n);
+        if (recording.load(std::memory_order_relaxed))
+            for (std::uint32_t c = 0; c < 2; ++c)
+                for (std::uint32_t i = 0; i < n; ++i)
+                    peak = std::max(peak, std::abs(static_cast<double>(out[c][i])));
+        if (jack_)
+            for (std::uint32_t c = 0; c < 2; ++c) std::fill_n(out[c], n, 0.f);
     }
     void stop() override {
         running_ = false;
         if (thread_.joinable()) thread_.join();
+        if (jack_) jack_->stop();
     }
     BackendConfig config() const override { return config_; }
-    std::string name() const override { return "paced"; }
+    std::string name() const override { return jack_ ? "jack" : "paced"; }
     bool ownsThread() const override { return true; }
     BackendStatus status() const override {
-        return {.period = config_.blockSize, .xruns = late_.load()};
+        return jack_ ? jack_->status() : BackendStatus{.period = config_.blockSize};
     }
-    std::uint64_t cycles() const { return cycles_.load(); }
-    ~PacedBackend() override { stop(); }
+    std::uint64_t cycles() const { return jack_ ? jack_->stats().cycles : cycles_.load(); }
+    ~BenchBackend() override { stop(); }
+    std::atomic<bool> recording{false};
+    std::uint64_t overBudget = 0, lateWakes = 0;  // read after stop only
+    double peak = 0;
 
   private:
+    using Clock = std::chrono::steady_clock;
+    BenchProbe* probe_;
+    std::unique_ptr<JackBackend> jack_;
     BackendConfig config_;
     Callback callback_;
     std::thread thread_;
     std::atomic<bool> running_{false};
-    std::atomic<std::uint64_t> late_{0}, cycles_{0};
+    std::atomic<std::uint64_t> cycles_{0};
     std::vector<float> input_, left_, right_;
 };
 
@@ -159,7 +200,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::string device = "paced", pluginDir = BENCH_PLUGINS, recipePath = BENCH_RECIPE;
-    std::string output, exportPath;
+    std::string output, exportPath, pluginFile, pluginId, input;
+    int block = 64, workers = -1, fxPerTrack = 1, capacity = 500000;
+    bool live = false, metrics = true;
     int tracks = 2;
     double seconds = 300;
     bool anticipative = true;
@@ -170,6 +213,9 @@ int main(int argc, char** argv) {
                 std::puts(
                     "engine-bench [--device paced|jack] [--tracks N] [--seconds 300] "
                     "[--anticipative on|off] [--plugins DIR] [--output JSON] "
+                    "[--block 64|128] [--workers -1] [--metrics on|off] "
+                    "[--sample-capacity 500000] [--plugin-file PATH --plugin-id ID --input WAV "
+                    "--live on|off --fx-per-track N] "
                     "[--export-session JSON] [--search --max-tracks 256 --report "
                     "docs/benchmarks/b1.md]");
                 return 0;
@@ -180,7 +226,32 @@ int main(int argc, char** argv) {
                 device = value;
             else if (arg == "--plugins")
                 pluginDir = value;
-            else if (arg == "--recipe")
+            else if (arg == "--plugin-file")
+                pluginFile = value;
+            else if (arg == "--plugin-id")
+                pluginId = value;
+            else if (arg == "--input")
+                input = value;
+            else if (arg == "--block" || arg == "--workers" || arg == "--fx-per-track" ||
+                     arg == "--sample-capacity") {
+                std::size_t used;
+                const int number = std::stoi(value, &used);
+                if (used != value.size()) throw std::invalid_argument("invalid integer");
+                if (arg == "--block")
+                    block = number;
+                else if (arg == "--workers")
+                    workers = number;
+                else if (arg == "--fx-per-track")
+                    fxPerTrack = number;
+                else
+                    capacity = number;
+            } else if ((arg == "--live" || arg == "--metrics") &&
+                       (value == "on" || value == "off")) {
+                if (arg == "--live")
+                    live = value == "on";
+                else
+                    metrics = value == "on";
+            } else if (arg == "--recipe")
                 recipePath = value;
             else if (arg == "--output")
                 output = value;
@@ -204,7 +275,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     if ((device != "paced" && device != "jack") || tracks < 1 || tracks > 4096 ||
-        !std::isfinite(seconds) || seconds <= 0) {
+        !std::isfinite(seconds) || seconds <= 0 || (block != 64 && block != 128) || workers < -1 ||
+        workers > 64 || fxPerTrack < 1 || fxPerTrack > 64 || capacity < 1 || capacity > 4000000 ||
+        (pluginFile.empty() && (!pluginId.empty() || !input.empty() || live || fxPerTrack != 1)) ||
+        (!pluginFile.empty() && (pluginId.empty() || input.empty() || !exportPath.empty()))) {
         std::fprintf(stderr, "invalid device, track count or duration\n");
         return 2;
     }
@@ -214,10 +288,13 @@ int main(int argc, char** argv) {
     if (!text) return fail(text.error());
     auto recipe = json::parse(*text);
     if (!recipe) return fail(recipe.error());
-    auto app =
-        EngineApp::create({.pluginPath = {pluginDir}, .workdir = std::filesystem::current_path()});
+    (void)host::locateBridgeExecutable(std::string(product::kSlug) + "-bridge");
+    auto app = EngineApp::create({.pluginPath = {pluginFile.empty() ? pluginDir : pluginFile},
+                                  .workdir = std::filesystem::current_path()});
     if (!app) return fail(app.error());
-    auto built = bench::buildSession(**app, *recipe, tracks);
+    auto built = pluginFile.empty()
+                     ? bench::buildSession(**app, *recipe, tracks)
+                     : bench::buildEffectSession(**app, pluginId, input, tracks, live, fxPerTrack);
     if (!built) return fail(built.error());
     if (!exportPath.empty()) {
         auto exported = bench::exportSession(**app);
@@ -225,27 +302,18 @@ int main(int argc, char** argv) {
         auto st = writeFileAtomic(exportPath, json::writeCanonical(*exported) + "\n");
         return st ? 0 : fail(st.error());
     }
-    PacedBackend paced;
-    std::unique_ptr<JackBackend> jack;
-    Backend* backend = &paced;
-    if (device == "jack") {
-        std::fprintf(stderr,
-                     "JACK benchmark: request 48 kHz/64 (PIPEWIRE_QUANTUM=64/48000 for this "
-                     "process, then jack_set_buffer_size(64)); this changes PipeWire's graph "
-                     "quantum for all clients during the run. Physical stereo capture/playback "
-                     "ports will be connected.\n");
-        std::fflush(stderr);
-        // A user jack.conf may force every JACK client's quantum (node.force-quantum);
-        // pipewire-jack lets this process's environment override it, as B2 does for
-        // REAPER. Set before libjack opens the client; nothing outside the process changes.
-        setenv("PIPEWIRE_QUANTUM", "64/48000", 1);
-        jack = std::make_unique<JackBackend>(
-            JackOptions{.clientName = "supple-capacity-bench", .forceBufferSize = true});
-        backend = jack.get();
-    }
-    auto started =
-        (*app)->startEngine(*backend, {.sampleRate = 48000, .blockSize = 64, .inputs = 2},
-                            {.anticipative = anticipative});
+    // Even inherited forcing variables are rejected: this benchmark requests
+    // client latency only and records whatever period the graph grants.
+    if (device == "jack" && (std::getenv("PIPEWIRE_QUANTUM") || std::getenv("PIPEWIRE_RATE")))
+        return fail(Error("bench.forced_graph", "forced PipeWire quantum/rate in environment", "",
+                          "unset PIPEWIRE_QUANTUM and PIPEWIRE_RATE before benchmarking"));
+    BenchProbe probe(metrics ? static_cast<std::size_t>(capacity) : 0);
+    BenchBackend backend(device == "jack", metrics ? &probe : nullptr);
+    auto started = (*app)->startEngine(
+        backend, {.sampleRate = 48000, .blockSize = static_cast<std::uint32_t>(block), .inputs = 2},
+        {.anticipative = anticipative,
+         .workers = workers,
+         .benchProbe = metrics ? &probe : nullptr});
     if (!started) {
         (*app)->stopEngine();
         return fail(started.error());
@@ -257,36 +325,88 @@ int main(int argc, char** argv) {
     }
     engine->play();
     engine->awaitTransport();
-    // Exclude activation/preroll; measure steady state, including loop wraps.
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    const auto before = backend->status();
+    auto service = [&](double duration) {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(duration);
+        while (std::chrono::steady_clock::now() < end) {
+            if (!bench::serviceTick(**app, engine)) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return true;
+    };
+    auto changedDevice = [&] {
+        (*app)->stopEngine();  // cancel any pending automatic restart
+        return fail(Error("bench.device_changed", "device restart interrupted the measurement", "",
+                          "retry with a stable device; this run has no capacity result"));
+    };
+    // Exclude activation/preroll; keep plug-in main-thread service running.
+    if (!service(1)) return changedDevice();
+    const auto before = backend.status();
     const auto m0 = engine->anticipationMisses(), e0 = engine->processErrors();
-    const auto c0 = jack ? jack->stats().cycles : paced.cycles();
+    const auto c0 = backend.cycles();
+    rusage ru0{}, ru1{};
+    getrusage(RUSAGE_SELF, &ru0);
     const auto begin = std::chrono::steady_clock::now();
-    std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+    probe.recording = true;
+    backend.recording = true;
+    const bool serviced = service(seconds);
+    backend.recording = false;
+    probe.recording = false;
+    if (!serviced) return changedDevice();
     const double measured =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
-    const auto after = backend->status();
+    getrusage(RUSAGE_SELF, &ru1);
+    const auto after = backend.status();
+    const double rate = backend.config().sampleRate;
     auto result = json::Value::object();
-    result["schema"] = "supple.capacity-run/1.0";
+    result["schema"] = "supple.capacity-run/2.0";
     result["tracks"] = tracks;
+    result["workload"] = pluginFile.empty() ? "stock" : "effect";
+    result["plugin_file"] = pluginFile;
+    result["plugin_id"] = pluginId;
+    result["input"] = input;
+    result["live"] = live;
+    result["fx_per_track"] = pluginFile.empty() ? 3 : fxPerTrack;
+    result["fx_count"] = (*app)->head().fx.size();
+    result["workers"] = workers;
     result["device"] = device;
     result["anticipative"] = anticipative;
     result["seconds"] = measured;
-    result["sample_rate"] = backend->config().sampleRate;
+    result["sample_rate"] = rate;
+    result["requested_block"] = block;
     result["quantum"] = after.period;
-    result["xruns"] = after.xruns - before.xruns;
+    result["requested_settings_granted"] =
+        rate == 48000 && after.period == static_cast<std::uint32_t>(block);
+    result["xruns"] = device == "jack" ? json::Value(after.xruns - before.xruns) : json::Value();
     result["anticipation_misses"] = engine->anticipationMisses() - m0;
     result["process_errors"] = engine->processErrors() - e0;
-    result["cycles"] = (jack ? jack->stats().cycles : paced.cycles()) - c0;
+    result["cycles"] = backend.cycles() - c0;
     result["restart_needed"] = after.restartNeeded;
     result["warnings"] = json::Value::array();
     for (const auto& warning : engine->warnings()) result["warnings"].push_back(warning);
-    const bool valid = result["cycles"].asInt() > 0 && !after.restartNeeded &&
-                       backend->config().sampleRate == 48000 && after.period == 64 &&
-                       engine->processErrors() == 0 && engine->warnings().empty();
+    const bool healthy = result["cycles"].asInt() > 0 && !after.restartNeeded &&
+                         engine->processErrors() == 0 && engine->warnings().empty();
+    (*app)->stopEngine();  // joins both producers before inspecting their storage
+    result["metrics_enabled"] = metrics;
+    result["callback"] = metrics ? bench::summarize(probe.callback, rate) : json::Value();
+    result["render_job"] = metrics ? bench::summarize(probe.renderJob, rate) : json::Value();
+    result["ring_low_water_frames"] =
+        probe.aheadObservations ? json::Value(probe.aheadLowWater) : json::Value();
+    result["ring_observations"] = probe.aheadObservations;
+    result["synthetic_over_budget"] =
+        device == "paced" ? json::Value(backend.overBudget) : json::Value();
+    result["synthetic_late_wakes"] =
+        device == "paced" ? json::Value(backend.lateWakes) : json::Value();
+    result["output_peak"] = backend.peak;
+    auto cpu = [](const rusage& r) {
+        return r.ru_utime.tv_sec + r.ru_utime.tv_usec * 1e-6 + r.ru_stime.tv_sec +
+               r.ru_stime.tv_usec * 1e-6;
+    };
+    result["process_cpu_cores"] = (cpu(ru1) - cpu(ru0)) / measured;
+    result["minor_faults"] = ru1.ru_minflt - ru0.ru_minflt;
+    result["major_faults"] = ru1.ru_majflt - ru0.ru_majflt;
+    const bool valid =
+        healthy && backend.peak > 1e-5 && !probe.callback.dropped && !probe.renderJob.dropped;
     result["valid"] = valid;
-    (*app)->stopEngine();
     const auto serialized = json::writeCanonical(result) + "\n";
     if (!output.empty()) {
         auto st = writeFileAtomic(output, serialized);

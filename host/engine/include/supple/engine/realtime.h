@@ -246,6 +246,8 @@ struct TransportState {
     LoopRange loop;
 };
 
+struct BenchProbe;
+
 struct EngineOptions {
     // Render ahead of the playhead on the anticipation thread and the worker
     // pool (ADR-0012). Off: every node runs in the audio callback.
@@ -253,6 +255,7 @@ struct EngineOptions {
     std::uint32_t renderBlock = 1024;  // frames per anticipative block (64 .. 8192)
     double renderAheadMs = 200.0;      // how far ahead of the playhead
     int workers = -1;                  // helper threads; -1: every core but three
+    BenchProbe* benchProbe = nullptr;  // benchmark only; preallocated, outlives stop()
 };
 
 // Output values remain in the host event domain (VST3 normalized). Main-thread

@@ -28,6 +28,7 @@ struct JackOptions {
     bool requestLatency = true;    // ask PipeWire for a period of blockSize
     bool forceBufferSize = false;  // jack_set_buffer_size: the whole graph's period
     double stopTimeoutSeconds = 2.0;
+    BenchProbe* benchProbe = nullptr;  // benchmark only; whole JACK period, outlives stop()
 };
 
 struct JackStats {

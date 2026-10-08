@@ -102,11 +102,12 @@ def changes(before, after):
 
 
 class Runner:
-    def __init__(self, executable, ini, user_config, directory, timeout, *, audio=False):
+    def __init__(self, executable, ini, user_config, directory, timeout, *, audio=False, block=64):
         self.executable, self.ini = executable, ini
         self.user_config, self.directory, self.timeout = user_config, directory, timeout
         self.commands = []
         self.audio = audio
+        self.block = block
 
     def run(self, arguments, label):
         if self.audio and os.environ.get("SUPPLE_AUDIO_DEVICE_TEST") != "1":
@@ -123,9 +124,10 @@ class Runner:
         env["VST_PATH"] = str(self.ini.parent / "unused")
         env["JACK_NO_START_SERVER"] = "1"
         if self.audio:
-            # Private benchmark child only; PipeWire treats this as a graph request.
-            env["PIPEWIRE_QUANTUM"] = "64/48000"
-            env["PIPEWIRE_LATENCY"] = "64/48000"
+            # Ordinary client latency only; never force the shared graph.
+            if "PIPEWIRE_QUANTUM" in env or "PIPEWIRE_RATE" in env:
+                raise CheckError("unset PIPEWIRE_QUANTUM and PIPEWIRE_RATE before benchmarking")
+            env["PIPEWIRE_LATENCY"] = f"{self.block}/48000"
         else:
             env["PIPEWIRE_REMOTE"] = "reaper-check-no-device"
             env["PULSE_SERVER"] = "unix:" + str(self.ini.parent / "no-pulse-server")
@@ -229,6 +231,11 @@ def test_signal(path):
     with wave.open(str(path), "wb") as output:
         output.setparams((2, 2, RATE, 0, "NONE", "not compressed"))
         output.writeframes(pcm.tobytes())
+
+
+def lua_scope(statements):
+    """Bound local lifetimes in generated tracks/FX (Lua limits active locals to 200)."""
+    return ["do", *statements, "end"]
 
 
 def lua_string(value):

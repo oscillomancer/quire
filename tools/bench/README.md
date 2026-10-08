@@ -31,34 +31,75 @@ SUPPLE_AUDIO_DEVICE_TEST=1 python3 tools/bench/run.py b2 --engine build/release/
 
 Both real modes require `SUPPLE_AUDIO_DEVICE_TEST` equal to exactly `1`.
 Unset, empty, `0`, `01`, and all other values refuse before opening a device.
-B1 uses JACK with `forceBufferSize` and sets `PIPEWIRE_QUANTUM=64/48000` in its
-own environment (a user `jack.conf` with `node.force-quantum` otherwise wins:
-on this workstation it forces 128, and the first real run was rejected as
-invalid); it prints before requesting 64 frames for the PipeWire graph,
-affecting other clients while it runs. B2 records JACK
-only in a fresh private REAPER config and requests `PIPEWIRE_QUANTUM=64/48000`
-in that child's environment only. Both validate the **granted** 48 kHz/64
-settings; a different grant, server loss or processing error invalidates the
-trial. Real input/output ports are connected for monitoring/playback. No
-system configuration is written. Quantum restoration is the JACK/PipeWire
-server's behavior, not a system-setting write by this tool.
+Both hosts make an ordinary client latency request at 48 kHz, using `--block
+64` (default) or `--block 128`. Neither forces a graph quantum or rate; inherited
+`PIPEWIRE_QUANTUM` / `PIPEWIRE_RATE` are rejected. A user's JACK configuration
+or another client may determine the granted quantum. JSON records requested
+and actual settings. A different grant is retained as fixed-run data but is
+rejected by a requested-setting capacity search. Server loss, missing signal,
+processing errors, warnings or timing-storage overflow invalidate B1 data.
+B1 supplies silent monitored input, opens no physical capture ports, and
+silences physical outputs after observing the DSP peak. B2's private JACK
+configuration still monitors physical stereo input and plays output; use a
+silent input and an appropriate playback level for a comparable stock trial.
+No system configuration is written. Historical reports using forced 64-frame
+quantum describe the older tooling, not the current request behavior.
 
 Dry verification (no physical audio device):
 
 ```sh
 SUPPLE_AUDIO_DEVICE_TEST=0 build/release/host/engine/engine-bench --device paced --search --anticipative both --seconds .2 --max-tracks 8 --report build/bench/b1-dry.md
 SUPPLE_AUDIO_DEVICE_TEST=0 python3 tools/bench/run.py b2 --engine build/release/host/engine/engine-bench --device offline --tracks 2 --report build/bench/b2-dry.md
-python3 -m unittest discover -s tools/bench -p 'test_*.py' -v
+SUPPLE_BENCH_LUA_CHECK=build/release/host/engine/engine-bench-lua-check python3 -m unittest discover -s tools/bench -p 'test_*.py' -v
 python3 -m unittest discover -s tools/reaper-check -p 'test_*.py' -v
 ```
 
-`paced` supplies silent stereo input on a stand-in thread. Its `xruns` are
-callback/scheduling deadline misses, not hardware xruns; anticipation misses
+`paced` supplies silent stereo input on a stand-in thread. Its `xruns` is null; `synthetic_over_budget` counts callback duration above
+the block deadline, and `synthetic_late_wakes` counts scheduler catch-up resets; anticipation misses
 also fail a trial, including when the monitored/master path is live. B1 and
 B2 exclude activation and a one-second preroll from the measured interval.
 Short dry runs prove operation, **not** five-minute capacity or B1's ≥3×
 target. Debug builds can have no passing N; the search records N=0 and exits
 nonzero. The report marks the device, build facts and exact durations.
+
+For short tail measurements and an optional installed effect module:
+
+```sh
+python3 tools/bench/run.py b1 --engine build/release/host/engine/engine-bench --block 128 --tracks 24 --anticipative on --seconds 12 --report /tmp/stock-tails.md
+python3 tools/bench/run.py b1 --engine build/release/host/engine/engine-bench --block 64 --plugin-file "$HOME/.clap/Ferric.clap" --plugin-id com.suppleaudio.ferric --tracks 4 --live on --anticipative on --seconds 12 --report /tmp/effect-tails.md
+```
+
+The effect mode (B1 only) scans the supplied module, instantiates the requested
+ID with its default state, and plays the same original four-second stereo
+noise/tone/burst fixture on each track at −18 dB. The driver generates that
+WAV with `tools/reaper-check/check.py::test_signal`, retaining its hash and the
+module hash. `--live on` arms/monitors all effect tracks; `--fx-per-track N`
+creates a serial chain for comparison with independent tracks. `--workers N`
+controls background helpers (-1 automatic, 0 caller only). Direct `engine-bench`
+use additionally requires `--input WAV` (four seconds, stereo, 48 kHz).
+No third-party binary is copied into or distributed with the repository.
+Stock session export/B2 remains the original MIDI fixture.
+
+B1 run schema **`supple.capacity-run/2.0`** adds `callback` and `render_job`
+objects (samples, dropped, frames, p50/p99/p999/max/mean in microseconds,
+load_percent and over_budget), `ring_low_water_frames`, `ring_observations`,
+output_peak and process CPU/fault deltas. p999 means p99.9; quantiles use nearest
+rank. Empty distributions/unsampled ring watermarks are null, not zero. Whole
+JACK-period timing includes all engine chunks when granted quantum exceeds
+requested block. Renderer timing includes graph execution/join, not pacing or
+ring copies. The ring metric is the conservative published-minus-consumed
+stream distance sampled before callback consumption after priming; it can lag
+ring publication and is not an exact atomic view of every frontier ring.
+
+`--metrics off` disables probe clocks/storage and reports null timing objects;
+only the benchmark ever enables them. Paced deadline accounting still uses its
+clock with metrics off. Default `--sample-capacity 500000` bounds each series;
+the allowed range is 1..4000000. Overflow counts invalidate a run, so increase
+the bound for long runs. Samples are collected without allocation or logging;
+summaries are computed after stopping. An in-flight sample may complete after
+the gate closes. Process CPU excludes child processes and includes model-thread
+service; the driver retains exact argv and hashes. These short measurements
+do not establish five-minute capacity or a performance improvement.
 
 B2 always generates the project under Dummy audio, closes audio/MIDI, checks
 every loaded CLAP identity and loads its opaque state using `clap_chunk`.
@@ -89,6 +130,11 @@ case. B2 offline mode has no capacity search.
 
 Each invocation gets a fresh `build/bench/<UTC>-<random>/` with per-trial logs,
 JSON, generated scripts, exported session, RPP/WAV and config fingerprints.
+The Lua regression parses 24/512-track projects and a 256-FX chain with the
+vendored Lua parser (CTest supplies its path; direct tests can use system
+`luac -p`), exercising track and FX scopes beyond the 200-active-local limit.
+Build `engine.tests` to also build this test-only parser.
+
 The final `report.json` has schema `supple.capacity-report/1.0`, all trials and
 confirmation flags, exact command arrays, kernel, PipeWire version, CPU and
 all governor values (read-only), revision/dirty status and CLAP artifact

@@ -1,6 +1,7 @@
 #include "session.h"
 #include <cmath>
 #include <numbers>
+#include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 
 namespace supple::engine::bench {
@@ -65,6 +66,63 @@ Status buildSession(EngineApp& app, json::Value recipe, int tracks) {
     SUPPLE_TRY(run("fx.add", master));
     SUPPLE_TRY(run("transport.loop", object(R"({"start_beat":0,"end_beat":16})")));
     return {};
+}
+
+Status buildEffectSession(EngineApp& app, const std::string& plugin,
+                          const std::filesystem::path& input, int tracks, bool live,
+                          int fxPerTrack) {
+    if (tracks < 1 || tracks > 4096 || fxPerTrack < 1 || fxPerTrack > 64)
+        return Error("bench.effect", "invalid track or effect count", "",
+                     "use 1..4096 tracks and 1..64 effects");
+    auto audio = audio::readAudio(input);
+    if (!audio) return audio.error();
+    if (audio->sampleRate != 48000 || audio->channels.size() != 2 || audio->frames() != 192000)
+        return Error("bench.input", "expected four seconds of stereo audio at 48 kHz",
+                     input.string(),
+                     "generate the original fixture with tools/reaper-check/check.py::test_signal");
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, app);
+    auto run = [&](std::string name, json::Value args) {
+        return bus.execute({std::move(name),
+                            std::move(args),
+                            {cmd::Origin::Type::Internal, "capacity-bench", ""}});
+    };
+    for (int i = 0; i < tracks; ++i) {
+        auto args = json::Value::object();
+        args["name"] = "Effect " + std::to_string(i + 1);
+        auto added = run("track.add", args);
+        if (!added) return added.error();
+        const auto track = (*added)["track"];
+        args = json::Value::object();
+        args["track"] = track;
+        args["volume_db"] = -18;
+        if (live) {
+            args["armed"] = true;
+            args["monitor"] = "on";
+            args["record_input"] = object("[1,2]");
+        }
+        SUPPLE_TRY(run("track.set", args));
+        args = json::Value::object();
+        args["track"] = track;
+        args["audio_file"] = std::filesystem::absolute(input).string();
+        SUPPLE_TRY(run("item.add", args));
+        for (int j = 0; j < fxPerTrack; ++j) {
+            args = json::Value::object();
+            args["track"] = track;
+            args["plugin"] = plugin;
+            SUPPLE_TRY(run("fx.add", args));
+        }
+    }
+    SUPPLE_TRY(run("transport.loop", object(R"({"start_beat":0,"end_beat":8})")));
+    return {};
+}
+
+bool serviceTick(EngineApp& app, const Engine* expected) {
+    app.tick();
+    if (app.engine() != expected) return false;
+    (void)app.meters();
+    return true;
 }
 
 Result<json::Value> exportSession(EngineApp& app) {

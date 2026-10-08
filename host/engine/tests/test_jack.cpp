@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include <supple/engine/bench_probe.h>
 #include <supple/engine/jack.h>
 
 #include "fake_jack.h"
@@ -363,4 +364,25 @@ TEST_CASE("JACK rejects an invalid rate before constructing a latency request") 
         CHECK_FALSE(status);
         if (!status) CHECK(status.error().code == "backend.config");
     }
+}
+
+TEST_CASE("bench callback probe measures complete JACK periods, not engine chunks") {
+    FakeJack& fake = fakeJack();
+    fake.reset(128);
+    BenchProbe probe(10000);
+    probe.recording = true;
+    auto options = fakeOptions();
+    options.benchProbe = &probe;
+    JackBackend backend(options);
+    Recorder rec;
+    REQUIRE(backend.start({.blockSize = 64}, rec.callback()));
+    REQUIRE(waitFor([&] { return rec.calls.load() >= 20; }));
+    backend.stop();
+    CHECK(probe.callback.samples().size() == fake.cycles());
+    CHECK(probe.callback.dropped == 0);
+    REQUIRE_FALSE(probe.callback.samples().empty());
+    for (const auto& sample : probe.callback.samples()) CHECK(sample.frames == 128);
+    CHECK(rec.frames.load() == rec.calls.load() * 64);
+    CHECK(fake.bufferSizeRequest() == 0);
+    fake.reset();
 }

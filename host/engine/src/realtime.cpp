@@ -1,4 +1,5 @@
 #include "supple/engine/realtime.h"
+#include "supple/engine/bench_probe.h"
 
 #include <algorithm>
 #include <array>
@@ -1051,6 +1052,10 @@ void Engine::addClicks(const detail::Plan& p, float* const* out, std::uint32_t o
 Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE_RT {
     std::int64_t first = kNothingPlayed;
     const std::uint64_t e = rtEpoch_;  // anticipativeCycle took it with its loop
+    if (options_.benchProbe && rtPrimed_ && wantNow() &&
+        epochDone_.load(std::memory_order_acquire) == e)
+        options_.benchProbe->observeAhead(renderedStream_.load(std::memory_order_acquire) -
+                                          playedStream(e));
     detail::ChunkRing& ring = *ring_;
     while (const detail::Chunk* c = ring.front()) {  // flushed by a seek or pause
         if (c->epoch >= e) break;
@@ -1264,8 +1269,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
             continue;
         }
         const std::uint32_t n = loopR_.until(pos_, block);  // no chunk crosses a loop wrap
-        const bool ok =
-            detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
+        const bool ok = [&] {
+            BenchProbe::Timer timer(options_.benchProbe, false, n);
+            return detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
+        }();
         if (!ok) processErrors_.fetch_add(1);
         publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
         auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
@@ -1416,6 +1423,10 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     // The frontier: what the renderer made for this position. Before its
     // first chunk (pre-roll) time holds still; the monitored input is heard.
     bool playing = wantNow();
+    if (options_.benchProbe && playing && rtPrimed_ && !p.frontier.empty() &&
+        epochDone_.load(std::memory_order_acquire) == rtEpoch_)
+        options_.benchProbe->observeAhead(renderedStream_.load(std::memory_order_acquire) -
+                                          liveStream_);
     if (playing) k = loopC_.until(livePos_, k);  // stop at a loop wrap
     std::uint32_t found = k;
     for (std::size_t j = 0; j < p.frontier.size(); ++j) {

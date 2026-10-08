@@ -1,5 +1,6 @@
 #include <clap/plugin.h>
 #include <doctest/doctest.h>
+#include "supple/engine/bench_probe.h"
 
 #include <array>
 #include <chrono>
@@ -296,7 +297,11 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
             MediaCache media;
             DummyBackend backend(
                 {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
-            Engine engine(rtPool, media, options);
+            BenchProbe probe(10000);
+            probe.recording = true;
+            auto measuredOptions = options;
+            measuredOptions.benchProbe = &probe;
+            Engine engine(rtPool, media, measuredOptions);
             REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
             REQUIRE(engine.load(s).ok());
             engine.play();
@@ -306,6 +311,15 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
                 backend.run((48000 * 2 + 4096) / 128);
             CHECK(engine.anticipationMisses() == 0);
             engine.stop();
+            CHECK(probe.renderJob.dropped == 0);
+            if (options.anticipative) {
+                CHECK_FALSE(probe.renderJob.samples().empty());
+                CHECK(probe.aheadObservations > 0);
+                CHECK(probe.aheadLowWater >= 0);
+            } else {
+                CHECK(probe.renderJob.samples().empty());
+                CHECK(probe.aheadObservations == 0);
+            }
             const std::uint32_t L = engine.outputLatency();
             CHECK(L == (extra ? 64u : 0u));
             CHECK(engine.processErrors() == 0);
@@ -1310,7 +1324,11 @@ TEST_CASE("anticipative monitoring: live input and rendered playback, identical 
         auto pool = makePool();
         MediaCache media;
         DummyBackend backend(rampInput(kCycles * 256));
-        Engine engine(pool, media, options);
+        BenchProbe probe(10000);
+        probe.recording = true;
+        auto measuredOptions = options;
+        measuredOptions.benchProbe = &probe;
+        Engine engine(pool, media, measuredOptions);
         REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
         REQUIRE(engine.load(s).ok());
         engine.play();
@@ -1334,6 +1352,11 @@ TEST_CASE("anticipative monitoring: live input and rendered playback, identical 
         CHECK(vocal > 0.05);
         engine.stop();
         CHECK(engine.lastStopOnAudioThread());
+        if (options.anticipative) {
+            CHECK(probe.aheadObservations > 0);
+            CHECK(probe.aheadLowWater >= 0);
+            CHECK_FALSE(probe.renderJob.samples().empty());
+        }
         const auto& cap = backend.capture();
         double live = 0;
         for (std::size_t i = 60000; i < 70000; ++i)

@@ -36,7 +36,7 @@ def command_output(command):
         return "unavailable: " + str(error)
 
 
-def machine_facts(plugin_dir):
+def machine_facts(plugin_dir, plugin_file=None):
     governors = {}
     for path in sorted(Path("/sys/devices/system/cpu").glob("cpu*/cpufreq/scaling_governor")):
         try:
@@ -54,14 +54,18 @@ def machine_facts(plugin_dir):
             "engine_build": {},
             "dirty": bool(command_output(["git", "-C", str(ROOT), "status", "--porcelain"])),
             "plugins": {name: hashlib.sha256((plugin_dir / name).read_bytes()).hexdigest()
-                        for name in ("Orrery.clap", "Facet.clap", "Ballast.clap")}}
+                        for name in ("Orrery.clap", "Facet.clap", "Ballast.clap")} if plugin_file is None else
+                       {str(plugin_file): hashlib.sha256(plugin_file.read_bytes()).hexdigest()}}
 
 
 def zero_xruns(result):
     if not result.get("valid", False):
         raise check.CheckError("invalid measurement (rate/quantum, missing FX, processing error or stopped device)")
-    return all(result.get(key, 0) == 0 for key in
-               ("xruns", "media_xruns", "anticipation_misses", "process_errors"))
+    if not result.get("requested_settings_granted", True):
+        raise check.CheckError("requested rate/quantum was not granted; no capacity claim")
+    return all(result.get(key) in (None, 0) for key in
+               ("xruns", "media_xruns", "anticipation_misses", "process_errors",
+                "synthetic_over_budget", "synthetic_late_wakes"))
 
 
 def capacity_search(measure, maximum):
@@ -92,7 +96,9 @@ def markdown_row(report):
     capacity = (">=" if search and search["capped"] else "") + str(search["tracks"]) if search else str(run["tracks"])
     fields = [report["timestamp"], report["host"], report["device"], report["anticipative"],
               capacity, search["confirmed"] if search else ("offline" if run.get("offline") else "not searched"), run.get("seconds", "n/a"),
-              run.get("xruns", "n/a"), run.get("media_xruns", "n/a" if run.get("offline") else 0),
+              (run.get("xruns") if run.get("xruns") is not None else "n/a"),
+              run.get("synthetic_over_budget", "n/a"), run.get("synthetic_late_wakes", "n/a"),
+              run.get("media_xruns", "n/a" if run.get("offline") else 0),
               run.get("anticipation_misses", "n/a" if run.get("offline") else 0),
               run.get("sample_rate", 48000), run.get("quantum", "offline"), report["facts"]["kernel"],
               report["facts"]["pipewire"], (", ".join(sorted(set(report["facts"]["governors"].values()))) or "unavailable"),
@@ -104,11 +110,11 @@ def save_report(report, directory, markdown):
     write_json(directory / "report.json", report)
     if not report.get("runs"):
         return
-    header = ("| UTC | host | device | anticipative | N | confirmed | seconds | audio xruns | media xruns | "
+    header = ("| UTC | host | device | anticipative | N | confirmed | seconds | audio xruns | synthetic over-budget | synthetic late wakes | media xruns | "
               "ahead misses | rate | granted quantum | kernel | PipeWire | governor | revision | artifacts |\n" +
-              "|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|---|---|---|---|\n")
+              "|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|\n")
     previous = markdown.read_text() if markdown.exists() else ""
-    text = previous + ("\n" + header if "| UTC | host |" not in previous else "") + markdown_row(report)
+    text = previous + ("\n" + header if header not in previous else "") + markdown_row(report)
     markdown.parent.mkdir(parents=True, exist_ok=True)
     temp = markdown.with_name(markdown.name + ".tmp")
     temp.write_text(text)
@@ -123,16 +129,17 @@ def setup_script(session, folder, cfg):
         lines = []
         for entry in entries:
             base64.b64decode(entry["state"], validate=True)
-            lines += [f"local fx = reaper.TrackFX_AddByName({target},{q('CLAP:' + entry['name'])},false,-1)",
+            lines += check.lua_scope([f"local fx = reaper.TrackFX_AddByName({target},{q('CLAP:' + entry['name'])},false,-1)",
                       "assert(fx >= 0, 'CLAP missing')",
                       f"local _,ident = reaper.TrackFX_GetNamedConfigParm({target},fx,'fx_ident')",
                       f"assert(ident:find({q(entry['plugin'])},1,true), 'unexpected CLAP identity')",
                       f"assert(reaper.TrackFX_SetNamedConfigParm({target},fx,'clap_chunk',{q(entry['state'])}), 'state rejected')",
                       f"local found,saved = reaper.TrackFX_GetNamedConfigParm({target},fx,'clap_chunk')",
                       f"assert(found and saved == {q(entry['state'])}, 'CLAP state readback mismatch')",
-                      "loaded = loaded + 1"]
+                      "loaded = loaded + 1"])
         return lines
     for index, track in enumerate(session["tracks"]):
+        start = len(statements)
         statements += [f"reaper.InsertTrackAtIndex({index},true)", f"local track = reaper.GetTrack(0,{index})",
                        f"reaper.GetSetMediaTrackInfo_String(track,'P_NAME',{q(track['name'])},true)",
                        "reaper.SetMediaTrackInfo_Value(track,'I_NCHAN',2)",
@@ -153,6 +160,7 @@ def setup_script(session, folder, cfg):
                     f"reaper.MIDI_GetPPQPosFromProjQN(take,{note['end']:.17g}),0,{note['key']},{note['velocity']},true))"]
             statements += ["reaper.MIDI_Sort(take)", "reaper.SetMediaItemInfo_Value(item,'D_FADEINLEN',0)",
                            "reaper.SetMediaItemInfo_Value(item,'D_FADEOUTLEN',0)"]
+        statements[start:] = check.lua_scope(statements[start:])
     statements += chain("reaper.GetMasterTrack(0)", session["master"])
     body = "\n  ".join(statements)
     return f"""local folder,resource = {q(folder)}, {q(cfg)}
@@ -190,7 +198,7 @@ reaper.defer(function() reaper.Main_OnCommand(40004,0) end)
 """
 
 
-def measurement_script(folder, cfg, seconds):
+def measurement_script(folder, cfg, seconds, block=64):
     q = check.lua_string
     return f"""local folder,resource = {q(folder)}, {q(cfg)}
 local log = assert(io.open(folder .. '/measurement.tsv','w'))
@@ -240,12 +248,11 @@ local ok,err = xpcall(function()
   assert(os.getenv('SUPPLE_AUDIO_DEVICE_TEST') == '1', 'real audio not opted in')
   reaper.Main_openProject('noprompt:' .. folder .. '/capacity.RPP')
   reaper.Audio_Init()
+  say('requested_block',{block})
   local opened,mode = reaper.GetAudioDeviceInfo('MODE')
   assert(opened and mode:lower():find('jack'), 'expected JACK audio')
   for _,key in ipairs({{'MODE','BSIZE','SRATE','IDENT_IN','IDENT_OUT'}}) do
     local found,value = reaper.GetAudioDeviceInfo(key); say(key,found and value or 'unavailable')
-    if key == 'BSIZE' then assert(tonumber(value) == 64, 'granted block must be 64') end
-    if key == 'SRATE' then assert(tonumber(value) == 48000, 'granted rate must be 48 kHz') end
   end
   say('version',reaper.GetAppVersion())
   -- Play pressed right after Audio_Init is stopped again by the device's own
@@ -284,7 +291,7 @@ def b2_run(args, directory, tracks):
     check.write_json(directory / "suite.config-before.json", before)
     commands = [export_command]
     try:
-        ini = check.private_config(directory, args.plugins, user, block=64)
+        ini = check.private_config(directory, args.plugins, user, block=args.block)
         runner = check.Runner(args.reaper, ini, user, directory, args.timeout)
         script = directory / "setup.lua"
         script.write_text(setup_script(session, directory, ini.parent))
@@ -312,11 +319,11 @@ def b2_run(args, directory, tracks):
         # Separate fresh allowlisted real-device config; setup/render config remains dummy.
         live = directory / "live"
         live.mkdir(mode=0o700)
-        live_ini = check.private_config(live, args.plugins, user, block=64, device="jack")
-        runner = check.Runner(args.reaper, live_ini, user, directory, args.timeout + args.seconds, audio=True)
+        live_ini = check.private_config(live, args.plugins, user, block=args.block, device="jack")
+        runner = check.Runner(args.reaper, live_ini, user, directory, args.timeout + args.seconds, audio=True, block=args.block)
         script = directory / "measure.lua"
-        script.write_text(measurement_script(directory, live_ini.parent, args.seconds))
-        print("REAPER JACK benchmark: private child requests PipeWire quantum 64/48000; stereo input monitoring/output.", flush=True)
+        script.write_text(measurement_script(directory, live_ini.parent, args.seconds, args.block))
+        print(f"REAPER JACK benchmark: ordinary client request 48000/{args.block}; granted settings recorded.", flush=True)
         runner.run([str(script)], "measurement")
         meta = check.read_metadata(directory / "measurement.tsv", "measurement")
         if meta.get("complete") != "1":
@@ -324,6 +331,8 @@ def b2_run(args, directory, tracks):
         return {"tracks": tracks, "valid": True, "seconds": float(meta["seconds"]),
                 "xruns": int(meta["xruns"]), "media_xruns": int(meta["media_xruns"]),
                 "sample_rate": float(meta["SRATE"]), "quantum": int(meta["BSIZE"]),
+                "requested_block": args.block,
+                "requested_settings_granted": float(meta["SRATE"]) == 48000 and int(meta["BSIZE"]) == args.block,
                 "version": meta["version"], "device_info": meta, "commands": commands + runner.commands}
     finally:
         after = check.snapshot(user)
@@ -337,6 +346,14 @@ def main(argv=None):
     parser.add_argument("host", choices=("b1", "b2"))
     parser.add_argument("--engine", type=Path, default=ROOT / "build/dev/host/engine/engine-bench")
     parser.add_argument("--plugins", type=Path)
+    parser.add_argument("--block", type=int, choices=(64, 128), default=64)
+    parser.add_argument("--plugin-file", type=Path, help="B1 only: installed third-party CLAP module")
+    parser.add_argument("--plugin-id", help="descriptor ID within --plugin-file")
+    parser.add_argument("--live", choices=("on", "off"), default="off")
+    parser.add_argument("--fx-per-track", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=-1)
+    parser.add_argument("--metrics", choices=("on", "off"), default="on")
+    parser.add_argument("--sample-capacity", type=int, default=500000)
     parser.add_argument("--recipe", type=Path, default=ROOT / "host/engine/bench/session.json")
     parser.add_argument("--device", choices=("paced", "offline", "jack"))
     parser.add_argument("--anticipative", choices=("on", "off", "both"), default="both")
@@ -358,14 +375,19 @@ def main(argv=None):
         parser.error("B2 needs REAPER; offline mode checks a fixed N, not capacity")
     if not all(math.isfinite(v) and v > 0 for v in (args.seconds, args.timeout)) or not (1 <= args.tracks <= 4096 and 1 <= args.max_tracks <= 4096):
         parser.error("positive finite durations and N in 1..4096 required")
+    if args.plugin_file and (args.host != "b1" or not args.plugin_id):
+        parser.error("--plugin-file requires B1 and --plugin-id")
+    if not args.plugin_file and (args.plugin_id or args.live != "off" or args.fx_per_track != 1):
+        parser.error("effect options require --plugin-file")
+    if args.plugin_file:
+        args.plugin_file = args.plugin_file.resolve()
     args.engine = args.engine.resolve()
     args.plugins = (args.plugins or args.engine.parents[2] / "plugins/clap").resolve()
     args.report = (args.report or ROOT / f"docs/benchmarks/{args.host}.md").resolve()
     directory = (args.output_dir or ROOT / "build/bench" / (time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + "-" + uuid.uuid4().hex[:8])).resolve()
     directory.mkdir(parents=True, mode=0o700, exist_ok=False)
     if args.device == "jack":
-        print("Real-device benchmark: 48 kHz/64, stereo input monitoring/output; "
-              "requesting PipeWire's graph quantum affects other clients during each trial.", flush=True)
+        print(f"Real-device benchmark: client request 48000/{args.block}; no forced quantum/rate.", flush=True)
     modes = [True, False] if args.anticipative == "both" else [args.anticipative == "on"]
     if args.host == "b2":
         modes = ["REAPER default"]
@@ -377,7 +399,7 @@ def main(argv=None):
         mode_dir = directory / str(mode).replace(" ", "-")
         mode_dir.mkdir()
         try:
-            report["facts"] = machine_facts(args.plugins)
+            report["facts"] = machine_facts(args.plugins, args.plugin_file)
             cache = args.engine.parents[2] / "CMakeCache.txt"
             if cache.exists():
                 report["facts"]["engine_build"] = {line.split(":", 1)[0]: line.split("=", 1)[1]
@@ -385,6 +407,13 @@ def main(argv=None):
                     line.startswith(("CMAKE_BUILD_TYPE:", "CMAKE_CXX_COMPILER:", "CMAKE_CXX_FLAGS"))}
             report["facts"]["engine_sha256"] = hashlib.sha256(args.engine.read_bytes()).hexdigest()
             report["facts"]["recipe_sha256"] = hashlib.sha256(args.recipe.read_bytes()).hexdigest()
+            effect_args = []
+            if args.plugin_file:
+                source = mode_dir / "input.wav"
+                check.test_signal(source)
+                report["facts"]["input_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+                effect_args = ["--plugin-file", str(args.plugin_file), "--plugin-id", args.plugin_id,
+                               "--input", str(source), "--live", args.live, "--fx-per-track", str(args.fx_per_track)]
             def measure(n, confirmation):
                 run_dir = mode_dir / f"run-{len(report['runs'])+1}-n{n}"
                 if args.host == "b1":
@@ -392,10 +421,14 @@ def main(argv=None):
                     output = run_dir / "run.json"
                     command = [str(args.engine), "--plugins", str(args.plugins), "--device", args.device,
                                "--tracks", str(n), "--seconds", str(args.seconds), "--anticipative", "on" if mode else "off",
-                               "--output", str(output), "--recipe", str(args.recipe)]
+                               "--output", str(output), "--recipe", str(args.recipe), "--block", str(args.block),
+                               "--workers", str(args.workers), "--metrics", args.metrics,
+                               "--sample-capacity", str(args.sample_capacity), *effect_args]
                     with (run_dir / "console.log").open("w") as log:
-                        subprocess.run(command, check=True, timeout=args.seconds + args.timeout,
-                                       stdout=log, stderr=subprocess.STDOUT)
+                        completed = subprocess.run(command, check=False, timeout=args.seconds + args.timeout,
+                                                   stdout=log, stderr=subprocess.STDOUT)
+                    if not output.exists():
+                        completed.check_returncode()
                     result = json.loads(output.read_text())
                     result["commands"] = [command]
                 else:
@@ -411,7 +444,8 @@ def main(argv=None):
                 if not report["search"]["confirmed"]:
                     status = 1
             else:
-                measure(args.tracks, False)
+                if not measure(args.tracks, False).get("valid"):
+                    status = 1
         except (OSError, ValueError, subprocess.SubprocessError, check.CheckError) as error:
             report["error"] = {"code": "bench.run", "message": str(error), "path": str(mode_dir),
                                "hint": "inspect retained logs; run on an idle machine with the requested build"}

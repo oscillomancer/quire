@@ -73,14 +73,18 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 Benchmarks are in `docs/benchmarks/`: B1, 30 Orrery tracks with EQ and
 compression at 48 kHz and 64 frames without xruns using anticipation
 (`b1.md`); the comparison with REAPER (`b2.md`); GUI cold start and frame
-costs (`gui.md`); Console 9 strip cost (`console9-strips.md`).
+costs (`gui.md`); Console 9 strip cost (`console9-strips.md`). The benchmark
+harness also supports 64/128-frame requests, installed third-party effects,
+whole-callback/render-job tails and an observed ring low-water mark. Timing is
+bench-only; synthetic deadline counts and server xruns are separate. Historical
+capacity reports retain their original revision/settings.
 
 ## Known limits
 
 Engine and hosting:
 - Without anticipation, a single Orrery chain can miss deadlines at 64
   frames although average load is low (per-block bursts at chord changes);
-  not yet profiled.
+  the harness now exposes callback tails for further profiling.
 - Live nodes run in the device callback on one thread (no live
   multiprocessing).
 - There is no pipelined bridge mode, so a bridged plugin on a live
