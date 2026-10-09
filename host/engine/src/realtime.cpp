@@ -659,6 +659,9 @@ bool Engine::awaitRendered(std::int64_t frames, double timeoutSeconds) {
             if (ahead >= goal) return true;
         }
         if (std::chrono::steady_clock::now() > deadline) return false;
+        // A renderer without work (every node live) waits for no consumption:
+        // wake it, so it reports the stream position it keeps ahead.
+        wakeRenderer();
         std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }
