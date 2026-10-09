@@ -12,7 +12,10 @@ namespace supple {
 static_assert(std::atomic<bool>::is_always_lock_free);
 static_assert(std::atomic<MainThreadWake*>::is_always_lock_free);
 
-MainThreadWake::MainThreadWake() : fd_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
+MainThreadWake::MainThreadWake() : MainThreadWake(nullptr, nullptr) {}
+
+MainThreadWake::MainThreadWake(RelayHook hook, void* context)
+    : relayHook_(hook), relayContext_(context), fd_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
     if (fd_ >= 0) relay_ = std::thread([this] { relay(); });
 }
 
@@ -20,6 +23,7 @@ MainThreadWake::~MainThreadWake() {
     quit_.store(true, std::memory_order_release);
     sequence_.fetch_add(1, std::memory_order_release);
     rt::wake(sequence_);
+    observe(RelayStep::Shutdown);
     if (relay_.joinable()) relay_.join();
     if (fd_ >= 0) ::close(fd_);
 }
@@ -38,10 +42,16 @@ void MainThreadWake::relay() {
     std::uint32_t seen = 0;
     for (;;) {
         rt::wait(sequence_, seen);
-        if (quit_.load(std::memory_order_acquire)) return;
+        observe(RelayStep::BeforeCapture);
         // Capture before writing: drain + another notify may race with the
         // write, and the new sequence must produce another event, not be lost.
         seen = sequence_.load(std::memory_order_acquire);
+        observe(RelayStep::AfterCapture);
+        // Capture before checking quit too: otherwise destruction can advance
+        // the sequence after the check, and we would consume its final wake
+        // as an ordinary notification, then park forever on that same word.
+        if (quit_.load(std::memory_order_acquire)) return;
+        observe(RelayStep::BeforeWrite);
         const std::uint64_t one = 1;
         while (::write(fd_, &one, sizeof(one)) < 0 && errno == EINTR) {
         }

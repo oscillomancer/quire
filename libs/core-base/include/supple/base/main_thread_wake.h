@@ -26,6 +26,16 @@ class MainThreadWake {
     bool drain();
 
   private:
+    friend struct MainThreadWakeTestAccess;
+    enum class RelayStep { BeforeCapture, AfterCapture, BeforeWrite, Shutdown };
+    using RelayHook = void (*)(void*, MainThreadWake&, RelayStep);
+    MainThreadWake(RelayHook hook, void* context);
+    // Cold-path scheduling hook for deterministic shutdown interleavings.
+    RelayHook relayHook_ = nullptr;
+    void* relayContext_ = nullptr;
+    void observe(RelayStep step) {
+        if (relayHook_) relayHook_(relayContext_, *this, step);
+    }
     int fd_ = -1;
     std::atomic<bool> pending_{false}, quit_{false};
     std::atomic<std::uint32_t> sequence_{0};
