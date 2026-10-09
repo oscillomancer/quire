@@ -124,9 +124,6 @@ capacity reports retain their original revision/settings.
 
 ## Known limits
 
-- Remote-instance forwarding to the app's event/deadline API is a separate
-  bridge change; local subscriptions and the GUI event loop are wired.
-
 Engine and hosting:
 - Without anticipation, a single Orrery chain can miss deadlines at 64
   frames although average load is low (per-block bursts at chord changes);

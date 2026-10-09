@@ -49,3 +49,4 @@ current state.
 | [0028](0028-renderer-wakeups.md) | Renderer deadlines and event-driven wakes | Accepted |
 | [0029](0029-shared-main-thread-wake.md) | Shared main-thread notification relay | Accepted |
 | [0030](0030-main-thread-scheduling.md) | Main-thread service notifications and deadlines | Accepted |
+| [0031](0031-bridge-parent-notifications.md) | Bridge-to-parent notifications and idle audio parking | Accepted |
