@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "generate.h"
+#include "generated_media.h"
 #include "plugin_scales.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
@@ -64,6 +65,7 @@ struct Fixture {
         engine::registerEngineCommands(registry);
         dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
         app->attachCommands(*dispatcher);
+        gui::test::linkGeneratedMedia(app->mediaDir());
         REQUIRE(gui::generateSession(*dispatcher, app->mediaDir(), 6));
         peaks = std::make_unique<peaks::PeakService>(dir / "cache", [](std::function<void()>) {});
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());

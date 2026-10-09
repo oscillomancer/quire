@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 #include <stb_image.h>
+#include "generated_media.h"
 #include "product_fixture.h"
 
 #include <unistd.h>
@@ -759,6 +760,7 @@ TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog
         MESSAGE("skipped: no stock plugins (a partial build)");
         return;
     }
+    gui::test::linkGeneratedMedia(f.app->mediaDir());
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 2));
     const model::Id track = f.firstChannel();
 
@@ -933,6 +935,7 @@ TEST_CASE(
 TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists its file") {
     Fixture f;
     if (!f.ok) return;
+    gui::test::linkGeneratedMedia(f.app->mediaDir());
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 1));
 
     f.render->open();
@@ -1022,6 +1025,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
 TEST_CASE("the render dialog: FLAC, a second file, and the render queue") {
     Fixture f;
     if (!f.ok) return;
+    gui::test::linkGeneratedMedia(f.app->mediaDir());
     REQUIRE(gui::generateSession(*f.dispatcher, f.app->mediaDir(), 1));
     f.render->open();
     f.render->setField("render.end", "4");

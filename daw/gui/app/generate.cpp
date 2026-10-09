@@ -42,22 +42,30 @@ std::string pattern(int track) {
     return "voice lead\n" + bar + "\n2-8 = 1\n";
 }
 
+std::filesystem::path generatedFile(const std::filesystem::path& mediaDir, int k) {
+    return mediaDir / ("generated-" + std::to_string(k) + ".wav");
+}
+
 }  // namespace
+
+Status writeGeneratedMedia(const std::filesystem::path& mediaDir) {
+    std::error_code ec;
+    std::filesystem::create_directories(mediaDir, ec);
+    for (int k = 0; k < 8; ++k) {
+        const auto path = generatedFile(mediaDir, k);
+        if (std::filesystem::exists(path)) continue;
+        auto wav = audio::encodeWav(variant(k));
+        if (!wav) return std::move(wav).error();
+        if (auto w = writeFileAtomic(path, std::span<const std::uint8_t>(*wav)); !w) return w;
+    }
+    return {};
+}
 
 Status generateSession(cmd::Dispatcher& dispatcher, const std::filesystem::path& mediaDir,
                        int tracks) {
-    std::error_code ec;
-    std::filesystem::create_directories(mediaDir, ec);
+    SUPPLE_TRY(writeGeneratedMedia(mediaDir));
     std::vector<std::filesystem::path> files;
-    for (int k = 0; k < 8; ++k) {
-        const auto path = mediaDir / ("generated-" + std::to_string(k) + ".wav");
-        if (!std::filesystem::exists(path)) {
-            auto wav = audio::encodeWav(variant(k));
-            if (!wav) return std::move(wav).error();
-            if (auto w = writeFileAtomic(path, std::span<const std::uint8_t>(*wav)); !w) return w;
-        }
-        files.push_back(path);
-    }
+    for (int k = 0; k < 8; ++k) files.push_back(generatedFile(mediaDir, k));
     auto run = [&](std::string command, json::Value args) -> Result<json::Value> {
         return dispatcher.execute(
             {std::move(command), std::move(args), {cmd::Origin::Type::Internal, "generate", {}}});

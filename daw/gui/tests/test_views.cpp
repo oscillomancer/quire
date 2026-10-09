@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../app/generate.h"
+#include "generated_media.h"
 #include "meter_feed.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
@@ -83,6 +84,7 @@ struct Session {
         engine::registerEngineCommands(registry);
         dispatcher = std::make_unique<cmd::Dispatcher>(registry, *app);
         app->attachCommands(*dispatcher);
+        gui::test::linkGeneratedMedia(app->mediaDir());
         if (!gui::generateSession(*dispatcher, app->mediaDir(), trackCount)) return false;
         peaks =
             std::make_unique<peaks::PeakService>(dir / "cache", [this](std::function<void()> fn) {

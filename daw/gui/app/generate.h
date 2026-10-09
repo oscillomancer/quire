@@ -12,5 +12,8 @@ namespace supple::gui {
 
 Status generateSession(cmd::Dispatcher& dispatcher, const std::filesystem::path& mediaDir,
                        int tracks);
+// The eight WAVs generateSession uses, written into `mediaDir` unless there
+// already (tests generate them once and link them into each session).
+Status writeGeneratedMedia(const std::filesystem::path& mediaDir);
 
 }  // namespace supple::gui
