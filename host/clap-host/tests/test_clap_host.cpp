@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <sched.h>
 #include <spawn.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -25,6 +26,7 @@
 #include <thread>
 #include <vector>
 #include "../src/bridge_client.h"
+#include "../src/bridge_notifications.h"
 #include "../src/bridge_protocol.h"
 #include "../src/main_thread_wake.h"
 
@@ -39,6 +41,18 @@ using namespace supple::host;
 
 namespace supple::host {
 struct BridgeTestAccess {
+    static std::unique_ptr<RemoteInstance> controlPlane(std::shared_ptr<BridgeProcess> process) {
+        std::unique_ptr<RemoteInstance> instance(new RemoteInstance);
+        instance->process_ = std::move(process);
+        instance->instanceId_ = 1;
+        instance->editorOpen_ = true;
+        instance->process_->members_.push_back(instance.get());
+        return instance;
+    }
+    static void deliver(BridgeProcess& process) {
+        process.ackPending_.store(true, std::memory_order_release);
+        process.delivery_.fetch_add(1, std::memory_order_release);
+    }
     static std::unique_ptr<RemoteInstance> dataPlane(std::shared_ptr<BridgeProcess> process,
                                                      void* arena, bridge::Layout layout) {
         std::unique_ptr<RemoteInstance> instance(new RemoteInstance);
@@ -47,6 +61,9 @@ struct BridgeTestAccess {
         instance->hdr_ = static_cast<bridge::Header*>(arena);
         instance->layout_ = layout;
         return instance;
+    }
+    static bool pendingDirty(const std::shared_ptr<BridgeProcess>& process, std::size_t member) {
+        return process->members_.at(member)->pendingNotes_.stateDirty;
     }
     static std::shared_ptr<BridgeProcess> adopt(int socket, pid_t pid) {
         std::shared_ptr<BridgeProcess> process(new BridgeProcess);
@@ -1505,6 +1522,76 @@ TEST_CASE("bridge rejects undersized shared memory and unexpected descriptors wi
             }
         }
     } cleanup{sockets[0], pid};
+    const int notifications = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    REQUIRE(notifications >= 0);
+    struct CloseNotification {
+        int fd;
+        ~CloseNotification() { ::close(fd); }
+    } closeNotification{notifications};
+    bridge::Writer subscription;
+    subscription.u32(bridge::kVersion);
+    auto rejected = [&](bridge::Op op, const bridge::Writer& request, int fd = -1,
+                        std::uint32_t instanceId = 0) {
+        REQUIRE(bridge::sendFrame(sockets[0], static_cast<std::uint32_t>(op), instanceId,
+                                  request.bytes, fd));
+        std::uint32_t status = 0, id = 0;
+        std::vector<std::uint8_t> payload;
+        REQUIRE(bridge::recvFrame(sockets[0], status, id, payload));
+        REQUIRE(status == static_cast<std::uint32_t>(bridge::Reply::Error));
+        bridge::Reader error(payload.data(), payload.size());
+        const auto detail = error.error();
+        CHECK_FALSE(detail.code.empty());
+        CHECK_FALSE(detail.hint.empty());
+    };
+    rejected(bridge::Op::AckNotifications, {});
+    rejected(bridge::Op::SubscribeNotifications, subscription);  // missing fd
+    rejected(bridge::Op::SubscribeNotifications, subscription, notifications, 2);
+    auto trailing = subscription;
+    trailing.u8(0);
+    rejected(bridge::Op::SubscribeNotifications, trailing, notifications);
+    bridge::Writer wrongVersion;
+    wrongVersion.u32(bridge::kVersion - 1);
+    rejected(bridge::Op::SubscribeNotifications, wrongVersion, notifications);
+    const int blocking = ::eventfd(0, EFD_CLOEXEC);
+    REQUIRE(blocking >= 0);
+    rejected(bridge::Op::SubscribeNotifications, subscription, blocking);
+    ::close(blocking);
+    int pipe[2];
+    REQUIRE(::pipe2(pipe, O_CLOEXEC | O_NONBLOCK) == 0);
+    rejected(bridge::Op::SubscribeNotifications, subscription, pipe[0]);
+    ::close(pipe[0]);
+    ::close(pipe[1]);
+    // Multiple SCM_RIGHTS descriptors must be counted, rejected and closed.
+    std::uint32_t prefix[] = {4, static_cast<std::uint32_t>(bridge::Op::SubscribeNotifications), 0};
+    iovec vectors[] = {{prefix, sizeof(prefix)},
+                       {subscription.bytes.data(), subscription.bytes.size()}};
+    alignas(cmsghdr) char ancillary[CMSG_SPACE(sizeof(int) * 2)]{};
+    msghdr message{};
+    message.msg_iov = vectors;
+    message.msg_iovlen = 2;
+    message.msg_control = ancillary;
+    message.msg_controllen = sizeof(ancillary);
+    auto* header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int) * 2);
+    const int duplicate[] = {notifications, notifications};
+    std::memcpy(CMSG_DATA(header), duplicate, sizeof(duplicate));
+    REQUIRE(::sendmsg(sockets[0], &message, MSG_NOSIGNAL) ==
+            sizeof(prefix) + subscription.bytes.size());
+    std::uint32_t duplicateStatus = 0, duplicateId = 0;
+    std::vector<std::uint8_t> duplicateReply;
+    REQUIRE(bridge::recvFrame(sockets[0], duplicateStatus, duplicateId, duplicateReply));
+    CHECK(duplicateStatus == static_cast<std::uint32_t>(bridge::Reply::Error));
+    REQUIRE(bridge::sendFrame(sockets[0],
+                              static_cast<std::uint32_t>(bridge::Op::SubscribeNotifications), 0,
+                              subscription.bytes, notifications));
+    std::uint32_t subscriptionStatus = 0, subscriptionId = 0;
+    std::vector<std::uint8_t> subscriptionReply;
+    REQUIRE(bridge::recvFrame(sockets[0], subscriptionStatus, subscriptionId, subscriptionReply));
+    REQUIRE(subscriptionStatus == static_cast<std::uint32_t>(bridge::Reply::Ok));
+    rejected(bridge::Op::SubscribeNotifications, subscription,
+             notifications);  // duplicate subscription
     bridge::Writer create;
     create.str(kFixture.string());
     create.str("com.suppleaudio.test.edge");
@@ -1678,7 +1765,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 10);
+    CHECK(bridge::kVersion == 11);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {
@@ -2318,4 +2405,188 @@ TEST_CASE("local timer and descriptor subscription changes wake the main loop wi
     CHECK(instance.watchedFds().empty());
     ::close(pipe[0]);
     ::close(pipe[1]);
+}
+
+TEST_CASE("remote subscribed snapshot consumers skip IPC on unrelated app wakes") {
+    for (bool subscribed : {false, true}) {
+        CAPTURE(subscribed);
+        int sockets[2];
+        REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+        MainThreadWake wake;
+        auto process = BridgeTestAccess::adopt(sockets[0], -1);
+        std::atomic<unsigned> calls{0};
+        struct Peer {
+            int socket;
+            std::thread thread;
+            ~Peer() {
+                ::shutdown(socket, SHUT_RDWR);
+                thread.join();
+                ::close(socket);
+            }
+        } peer{sockets[1], std::thread([&] {
+                   std::uint32_t op = 0, id = 0;
+                   std::vector<std::uint8_t> payload;
+                   while (bridge::recvFrame(sockets[1], op, id, payload)) {
+                       ++calls;
+                       bridge::Writer reply;
+                       switch (static_cast<bridge::Op>(op)) {
+                           case bridge::Op::Service:
+                               reply.bytes.resize(35);  // empty work/notes/log and zero status
+                               break;
+                           case bridge::Op::TakeIdleOutputs:
+                           case bridge::Op::EditorRequests:
+                               reply.bytes.resize(12);  // no idle events or GUI requests
+                               break;
+                           default:
+                               break;  // ACK, SetParam and Destroy have empty success replies
+                       }
+                       if (!bridge::sendFrame(sockets[1], 0, id, reply.bytes)) break;
+                       if (static_cast<bridge::Op>(op) == bridge::Op::Destroy) break;
+                   }
+               })};
+        auto instance = BridgeTestAccess::controlPlane(process);
+        if (subscribed) {
+            instance->setMainThreadWake(wake);
+            drainWake(wake);
+        }
+        Instance::Notifications notes;
+        std::vector<std::string> log;
+        instance->service(notes, log);  // initial snapshot of every registered member
+        CHECK(calls.load() == 3);
+        const auto initial = calls.load();
+        for (int pass = 0; pass < 20; ++pass) {
+            // Model a main pass caused by MIDI, a job, or another instance.
+            instance->service(notes, log);
+            (void)instance->takeIdleOutputs();
+            (void)instance->editorRequests();
+        }
+        CHECK(calls.load() - initial == (subscribed ? 0u : 60u));
+        if (subscribed) {
+            BridgeTestAccess::deliver(*process);
+            instance->service(notes, log);
+            CHECK(calls.load() - initial == 4);  // ACK and the three snapshot pulls
+            (void)instance->takeIdleOutputs();
+            (void)instance->editorRequests();
+            CHECK(calls.load() - initial == 4);
+            REQUIRE(instance->setParam(0, 0.5));  // control change requests a refresh
+            (void)instance->takeIdleOutputs();
+            CHECK(calls.load() - initial == 8);  // SetParam and three pulls
+            instance->service(notes, log);
+            (void)instance->editorRequests();
+            CHECK(calls.load() - initial == 8);
+        }
+    }
+}
+
+TEST_CASE(
+    "remote wake subscriptions snapshot all shared members and deliver callback GUI requests") {
+    setBridgeExecutable(BRIDGE_PATH);
+    MainThreadWake wake;
+    REQUIRE(wake.fd() >= 0);
+    auto process = createBridgeProcess();
+    REQUIRE(process);
+    const auto info = find("com.suppleaudio.test.edge");
+    auto first = Instance::create(info, {}, true, *process);
+    auto second = Instance::create(info, {}, true, *process);
+    REQUIRE(first);
+    REQUIRE(second);
+    (*first)->setMainThreadWake(wake);
+    (*second)->setMainThreadWake(wake);
+    drainWake(wake);
+    (*first)->serviceMainThread();
+    (*second)->serviceMainThread();
+    (void)(*first)->takeNotifications();
+    (void)(*second)->takeNotifications();
+    REQUIRE((*first)->loadState(std::array<std::uint8_t, 4>{44, 0, 0, 0}));
+    REQUIRE((*second)->loadState(std::array<std::uint8_t, 4>{47, 0, 0, 0}));
+    REQUIRE((*first)->openEditor(1234, 1));
+    CHECK((*first)->nextTimerMs() == -1);
+    (void)(*first)->takeEditorRequests();  // consume initial show/resize
+    REQUIRE((*first)->activate(48000, 1, 64));
+    REQUIRE((*first)->startProcessing());
+    Buffers buffer(64);
+    REQUIRE((*first)->process(buffer.block(64)));
+    bool dirty = false, tail = false;
+    std::uint32_t width = 0;
+    while (!dirty || width != 402) {
+        drainWake(wake);
+        (*first)->serviceMainThread();
+        const auto notes = (*first)->takeNotifications();
+        dirty |= notes.stateDirty;
+        tail |= notes.tailChanged;
+        const auto editor = (*first)->takeEditorRequests();
+        if (editor.resize) width = editor.width;
+    }
+    CHECK(tail);
+    CHECK(BridgeTestAccess::pendingDirty(*process, 1));  // other member already snapshotted
+    (*second)->serviceMainThread();
+    CHECK((*second)->takeNotifications().stateDirty);
+    CHECK((*second)->nextTimerMs() == -1);  // closed-editor timer stayed in child
+    (*first)->stopProcessing();
+    (*first)->closeEditor();
+}
+
+TEST_CASE("remote initial snapshots retain idle outputs and state before subscription") {
+    setBridgeExecutable(BRIDGE_PATH);
+    MainThreadWake wake;
+    auto instance = Instance::create(find("com.suppleaudio.test.edge"), {}, true);
+    REQUIRE(instance);
+    REQUIRE((*instance)->loadState(std::array<std::uint8_t, 4>{30, 0, 0, 0}));
+    REQUIRE((*instance)->openEditor(1234, 1));  // inactive flush outputs created in child
+    (*instance)->setMainThreadWake(wake);
+    drainWake(wake);
+    (*instance)->serviceMainThread();
+    const auto outputs = (*instance)->takeIdleOutputs();
+    CHECK_FALSE(outputs.events.empty());
+    const auto editor = (*instance)->takeEditorRequests();
+    CHECK(editor.resize);
+    CHECK(editor.width == 320);
+    (*instance)->closeEditor();
+}
+
+TEST_CASE("parent failure wake works for an alive bridge and subscriber teardown") {
+    setBridgeExecutable(BRIDGE_PATH);
+    MainThreadWake wake;
+    auto process = createBridgeProcess();
+    REQUIRE(process);
+    auto instance = Instance::create(find("com.suppleaudio.test.gain"), {}, true, *process);
+    REQUIRE(instance);
+    (*instance)->setMainThreadWake(wake);
+    drainWake(wake);
+    (*instance)->serviceMainThread();
+    const auto before = (*process)->failed();
+    CHECK_FALSE(before);
+    const auto notifyFailure = [](BridgeProcess& child) SUPPLE_RT { child.fail(-3); };
+    notifyFailure(**process);
+    drainWake(wake);
+    CHECK((*process)->failed());
+    CHECK((*process)->alive());  // no pidfd/HUP event can explain this wake
+    (*instance)->serviceMainThread();
+    instance->reset();  // remove subscription while cached shared process lives
+    (*process)->killBridge();
+}
+
+TEST_CASE("an idle bridge death wakes every subscribed parent relay") {
+    setBridgeExecutable(BRIDGE_PATH);
+    MainThreadWake firstWake, secondWake;
+    auto process = createBridgeProcess();
+    REQUIRE(process);
+    auto first = Instance::create(find("com.suppleaudio.test.gain"), {}, true, *process);
+    auto second = Instance::create(find("com.suppleaudio.test.gain"), {}, true, *process);
+    REQUIRE(first);
+    REQUIRE(second);
+    (*first)->setMainThreadWake(firstWake);
+    (*second)->setMainThreadWake(secondWake);
+    drainWake(firstWake);
+    drainWake(secondWake);
+    (*first)->serviceMainThread();
+    (*second)->serviceMainThread();
+    (*process)->killBridge();
+    while (!(*process)->failed()) drainWake(firstWake);
+    drainWake(secondWake);
+    CHECK((*first)->failed());
+    CHECK((*second)->failed());
+    (*first)->serviceMainThread();
+    // The watcher can report pidfd/HUP before waitpid has a final status.
+    CHECK_FALSE((*process)->failure().empty());
 }

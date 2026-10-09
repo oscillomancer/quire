@@ -4,12 +4,15 @@
 #include <sys/types.h>
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
+#include "supple/base/main_thread_wake.h"
 
 #include "bridge_protocol.h"
 #include "supple/host/clap_host.h"
@@ -22,6 +25,8 @@ struct RemotePorts {
     bool acceptsNotes = false, semantic = false, editor = false;
 };
 
+class RemoteInstance;
+
 class BridgeProcess {
   public:
     static Result<std::shared_ptr<BridgeProcess>> spawn();
@@ -31,7 +36,7 @@ class BridgeProcess {
                                            int timeoutMs = 10000);
     bool failed() const { return failed_.load(); }
     std::string failure() const;
-    void fail(int why);
+    void fail(int why) SUPPLE_RT;
     void reap();  // main thread
     bool alive() const;
     void killBridge();
@@ -43,6 +48,22 @@ class BridgeProcess {
     static constexpr int kHung = -2;
     static constexpr int kProtocolViolation = -3;
     BridgeProcess() = default;
+    Status initializeNotifications();
+    void watch();
+    void notifySubscribers();
+    void subscribe(RemoteInstance& instance, MainThreadWake& wake);
+    void unsubscribe(RemoteInstance& instance);
+    bool refresh();  // main only: ACK before snapshotting every registered member
+    MainThreadWake watcherWake_;
+    int notificationFd_ = -1;
+    std::thread watcher_;
+    std::atomic<bool> watcherQuit_{false}, ackPending_{false};
+    std::atomic<std::uint64_t> delivery_{0};
+    std::uint64_t servedDelivery_ = 0;
+    bool refreshNeeded_ = true;
+    std::vector<RemoteInstance*> members_;  // main only, includes retired instances
+    std::mutex subscribersMutex_;
+    std::map<MainThreadWake*, std::size_t> subscribers_;
     std::atomic<pid_t> pid_{-1};
     int pidfd_ = -1, sock_ = -1;
     std::mutex requests_;  // control calls from instances on the main thread
@@ -58,6 +79,7 @@ class RemoteInstance {
     ~RemoteInstance();
 
     // main thread
+    void setMainThreadWake(MainThreadWake& wake);
     // `settled` receives the widths the plug-in settled on at activation.
     Status activate(double rate, std::uint32_t minFrames, std::uint32_t maxFrames,
                     std::uint32_t inChannels, std::uint32_t outChannels,
@@ -81,7 +103,7 @@ class RemoteInstance {
     Status setPatch(std::string_view json, std::uint32_t mode);
     Result<std::vector<std::uint8_t>> saveState();
     Status loadState(std::span<const std::uint8_t> bytes);
-    // serviceMainThread + notifications + log in one round trip.
+    // Drain retained snapshots; pull on demand only without a wake subscription.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
     bool needsAudioFlush() const { return needsAudioFlush_; }
     bool restartPending() const { return restartPending_; }  // as of the last service()
@@ -112,7 +134,18 @@ class RemoteInstance {
 
   private:
     friend struct BridgeTestAccess;
+    friend class BridgeProcess;
     RemoteInstance() = default;
+    void pullSnapshot();
+    bool pullService();
+    Instance::IdleOutputs pullIdleOutputs();
+    Instance::EditorRequests pullEditorRequests();
+    MainThreadWake* wake_ = nullptr;  // protected by process subscribersMutex_
+    Instance::Notifications pendingNotes_;
+    Instance::IdleOutputs pendingIdle_;
+    Instance::EditorRequests pendingEditor_;
+    std::vector<std::string> pendingLog_;
+    bool pendingWork_ = false, editorOpen_ = false;
     Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w, int fd = -1,
                                            int timeoutMs = 10000);
     bool command(bridge::Cmd cmd) SUPPLE_RT;

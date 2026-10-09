@@ -59,7 +59,7 @@ bool writeAll(int s, const void* data, std::size_t n, int fd, Deadline deadline)
     return true;
 }
 
-bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline) {
+bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline, int* descriptorCount) {
     auto* p = static_cast<std::uint8_t*>(data);
     while (n > 0) {
         if (!ready(s, POLLIN, deadline)) return false;
@@ -67,7 +67,7 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline) {
         msghdr msg{};
         msg.msg_iov = &iov;
         msg.msg_iovlen = 1;
-        alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))];
+        alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 4)];
         if (fd) {
             msg.msg_control = control;
             msg.msg_controllen = sizeof control;
@@ -83,6 +83,7 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline) {
                 if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS) continue;
                 const auto count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
                 for (std::size_t i = 0; i < count; ++i) {
+                    if (descriptorCount) ++*descriptorCount;
                     int received = -1;
                     std::memcpy(&received, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
                     if (*fd < 0)
@@ -91,7 +92,7 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline) {
                         ::close(received);
                 }
             }
-            fd = nullptr;  // only with the first bytes
+            if (msg.msg_flags & MSG_CTRUNC) return false;
         }
         p += r;
         n -= static_cast<std::size_t>(r);
@@ -110,13 +111,16 @@ bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
 }
 
 bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
-               std::vector<std::uint8_t>& payload, int* fd, int timeoutMs) {
-    return recvFrameUntil(socket, head, instance, payload, fd, deadlineAfter(timeoutMs));
+               std::vector<std::uint8_t>& payload, int* fd, int timeoutMs, int* descriptorCount) {
+    return recvFrameUntil(socket, head, instance, payload, fd, deadlineAfter(timeoutMs),
+                          descriptorCount);
 }
 
 bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
-                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline) {
+                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline,
+                    int* descriptorCount) {
     if (fd) *fd = -1;
+    if (descriptorCount) *descriptorCount = 0;
     auto fail = [&] {
         if (fd && *fd >= 0) {
             ::close(*fd);
@@ -125,12 +129,13 @@ bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
         return false;
     };
     std::uint32_t prefix[3] = {0, 0, 0};
-    if (!readAll(socket, prefix, sizeof prefix, fd, deadline)) return fail();
+    if (!readAll(socket, prefix, sizeof prefix, fd, deadline, descriptorCount)) return fail();
     if (prefix[0] > kMaxMessage) return fail();
     head = prefix[1];
     instance = prefix[2];
     payload.resize(prefix[0]);
-    if (prefix[0] && !readAll(socket, payload.data(), payload.size(), nullptr, deadline))
+    if (prefix[0] &&
+        !readAll(socket, payload.data(), payload.size(), fd, deadline, descriptorCount))
         return fail();
     return true;
 }
@@ -165,6 +170,11 @@ bool validRequest(Op op, Reader r) {
     switch (op) {
         case Op::Create:
             for (int i = 0; i < 7; ++i) r.skipString();
+            break;
+        case Op::SubscribeNotifications:
+            r.skip(4);
+            break;
+        case Op::AckNotifications:
             break;
         case Op::Activate:
             r.skip(20);
@@ -295,6 +305,10 @@ bool validReply(Op op, Reader r) {
             }
             break;
         }
+        case Op::SubscribeNotifications:
+            if (r.u32() != kVersion) return false;
+            break;
+        case Op::AckNotifications:
         case Op::Deactivate:
         case Op::SetParam:
         case Op::SetPatch:

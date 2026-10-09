@@ -10,6 +10,9 @@ live callback fork-join, helper scheduling and the nonblocking wake exception.
 gives a bridge's audio thread the engine's background scheduling (protocol
 version 10).
 
+**Amendment, 2026-10-08:** [ADR-0031](0031-bridge-parent-notifications.md)
+adds protocol v11 parent notification/rearm and event-driven idle audio shutdown.
+
 ## Context
 
 Phase 4 acceptance: a crashing test plugin in an isolation mode does not take

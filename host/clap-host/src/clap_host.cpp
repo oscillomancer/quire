@@ -1478,7 +1478,7 @@ bool Instance::restartPending() const {
 }
 
 void Instance::setMainThreadWake(MainThreadWake& wake) {
-    if (remote_) return;
+    if (remote_) return remote_->setMainThreadWake(wake);
     if (vst3_) vst3_->setMainThreadWake(wake);
     if (hostState_) hostState_->mainWake.store(&wake, std::memory_order_release);
     wake.notify();  // also service requests made during initialization
@@ -1547,16 +1547,6 @@ bool Instance::serviceMainThread() {
     return did;
 }
 
-namespace {
-// A bridged editor's requests are asked for this often (a round trip each).
-constexpr int kRemoteEditorPollMs = 30;
-std::int64_t steadyMs() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now().time_since_epoch())
-        .count();
-}
-}  // namespace
-
 bool Instance::hasEditor() const {
     if (vst3_) return vst3_->hasEditor();
     if (remote_) return remoteEditor_ && !remote_->failed();
@@ -1574,10 +1564,7 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
     if (remote_) {
         if (editorOpen_) closeEditor();
         auto size = remote_->openEditor(x11Parent, scale);
-        if (size) {
-            editorOpen_ = true;
-            remotePolledMs_ = steadyMs();
-        }
+        if (size) editorOpen_ = true;
         return size;
     }
     if (editorOpen_) closeEditor();
@@ -1643,9 +1630,6 @@ Instance::EditorRequests Instance::takeEditorRequests() {
     if (vst3_) return vst3_->takeEditorRequests();
     if (remote_) {
         if (!editorOpen_) return {};
-        // A failed bridge answers at once (closed); otherwise not every pass.
-        if (!remote_->failed() && steadyMs() - remotePolledMs_ < kRemoteEditorPollMs) return {};
-        remotePolledMs_ = steadyMs();
         EditorRequests q = remote_->editorRequests();
         if (q.closed) editorOpen_ = false;  // the bridge released it
         return q;
@@ -1683,11 +1667,7 @@ void Instance::onFd(int fd, std::uint32_t flags) {
 
 int Instance::nextTimerMs() const {
     if (vst3_) return vst3_->nextTimerMs();
-    if (remote_) {  // the bridge runs the plug-in's timers; this paces the request polls
-        if (!editorOpen_) return -1;
-        return static_cast<int>(
-            std::max<std::int64_t>(0, kRemoteEditorPollMs - (steadyMs() - remotePolledMs_)));
-    }
+    if (remote_) return -1;  // child deadlines and requests wake the parent relay
     if (!hostState_ || !extTimer_ || hostState_->timers.empty()) return -1;
     const auto now = std::chrono::steady_clock::now();
     auto next = hostState_->timers.front().next;

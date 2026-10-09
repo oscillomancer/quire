@@ -537,15 +537,25 @@ instance).
 - The bridge main loop polls its control socket, a coalesced main-thread
   request eventfd and every registered CLAP/VST3 descriptor, even without an
   open editor. Its timeout is the nearest plug-in timer deadline, rounded up
-  to milliseconds (0 when due), or -1 when there are no timers; no fixed idle
-  cap remains. A parked relay translates audio-safe atomic/`rt::wake`
-  notifications into eventfd writes (`supple::MainThreadWake` in core-base;
-  core-base spec, ADR-0029; subscription in sandbox spec §1). It drains/rearms
-  the wake before servicing every instance, before each poll, so neither
-  concurrent requests nor a busy control socket starve main-thread work.
-  Parent death is the control socket's HUP/EOF, including when no instances
-  remain. The wire protocol is unchanged; notifications and editor requests
-  still reach the host through its existing control requests.
+  to milliseconds (0 when due), or -1 when there are no timers. Core-base's
+  `supple::MainThreadWake` translates atomic/`rt::wake` requests into pollable
+  events (ADR-0029); there is no fixed idle cap.
+- Protocol v11 adds a versioned process-level outward eventfd subscription
+  and acknowledge/rearm (ADR-0031; sandbox spec §1). The child retains new
+  notifications, idle outputs and editor requests and signals once until ACK;
+  unchanged queries/repaint-only timers do not signal. A parked parent watcher
+  forwards these publications and idle bridge death/HUP to the app's existing
+  relay via `Instance::setMainThreadWake`, including remote instances. Main
+  acknowledges before refreshing all shared-process members; per-instance pull
+  operations drain retained proxy snapshots without IPC on unrelated app wakes;
+  subscribed instances refresh only for deliveries or pending control changes.
+  Remote editor polling is removed:
+  remote instances have no parent timer deadline. Failure publications from
+  audio use an internal core-base relay, never fd writes or subscriber locks.
+- A bridge's idle audio thread waits indefinitely on its shared request futex.
+  Control HUP/EOF and explicit shutdown publish quit, advance/wake that word,
+  then join before unmapping; no 100 ms idle wait remains. Audio observes quit
+  before accessing a command. Parent in-flight IPC failure deadlines are unchanged.
 - The bridge's audio thread sets FTZ and DAZ around each `process()` and
   restores its MXCSR afterwards (§2.4), so a bridged plug-in computes as an
   in-process one does.

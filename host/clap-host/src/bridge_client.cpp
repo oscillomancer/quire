@@ -2,11 +2,13 @@
 // bridge process; main-thread calls are control-plane requests, audio-thread
 // calls are commands in shared memory with a futex wake-up and a deadline.
 #include "bridge_client.h"
+#include "bridge_notifications.h"
 
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -16,6 +18,8 @@
 #include <chrono>
 #include <limits>
 #include <mutex>
+#include <system_error>
+#include <utility>
 
 #include "supple/base/rt.h"
 
@@ -106,7 +110,121 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     self->pid_ = pid;
     self->sock_ = sv[0];
     self->pidfd_ = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+    if (auto status = self->initializeNotifications(); !status) return status.error();
     return self;
+}
+
+Status BridgeProcess::initializeNotifications() {
+    if (notificationFd_ >= 0) return okStatus();
+    if (watcherWake_.fd() < 0)
+        return Error("host.bridge", "could not create bridge failure wake", "/notification",
+                     "free file descriptors or use in-process isolation");
+    notificationFd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (notificationFd_ < 0)
+        return Error("host.bridge", "could not create bridge notification eventfd", "/notification",
+                     "free file descriptors or use in-process isolation");
+    Writer w;
+    w.u32(kVersion);
+    auto subscribed = call(Op::SubscribeNotifications, 0, w, notificationFd_);
+    if (!subscribed) {
+        ::close(notificationFd_);
+        notificationFd_ = -1;
+        return subscribed.error();
+    }
+    try {
+        watcher_ = std::thread([this] { watch(); });
+    } catch (const std::system_error& error) {
+        fail(-1);
+        killBridge();
+        ::close(notificationFd_);
+        notificationFd_ = -1;
+        return Error("host.bridge",
+                     "could not start bridge notification watcher: " + std::string(error.what()),
+                     "/notification", "free thread resources or use in-process isolation");
+    }
+    return okStatus();
+}
+
+void BridgeProcess::notifySubscribers() {
+    // Hold lifetime protection through notify; never call service inline.
+    std::lock_guard lock(subscribersMutex_);
+    for (const auto& [wake, count] : subscribers_) {
+        (void)count;
+        wake->notify();
+    }
+}
+
+void BridgeProcess::subscribe(RemoteInstance& instance, MainThreadWake& wake) {
+    std::lock_guard lock(subscribersMutex_);
+    if (instance.wake_ == &wake) return;
+    if (instance.wake_ && --subscribers_[instance.wake_] == 0) subscribers_.erase(instance.wake_);
+    instance.wake_ = &wake;
+    ++subscribers_[&wake];
+    refreshNeeded_ = true;
+    wake.notify();  // retained pre-subscription work and already-failed processes
+}
+
+void BridgeProcess::unsubscribe(RemoteInstance& instance) {
+    std::lock_guard lock(subscribersMutex_);
+    if (instance.wake_ && --subscribers_[instance.wake_] == 0) subscribers_.erase(instance.wake_);
+    instance.wake_ = nullptr;
+}
+
+void BridgeProcess::watch() {
+    nameThread("bridge-parent");
+    bool watchingDeath = true, failureAnnounced = false;
+    for (;;) {
+        pollfd descriptors[] = {{notificationFd_, POLLIN, 0},
+                                {watcherWake_.fd(), POLLIN, 0},
+                                {watchingDeath ? pidfd_ : -1, POLLIN, 0},
+                                {watchingDeath ? sock_ : -1, 0, 0}};
+        const int ready = ::poll(descriptors, 4, -1);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) {
+            fail(-1);
+            delivery_.fetch_add(1, std::memory_order_release);
+            notifySubscribers();
+            return;
+        }
+        bool changed = false;
+        if (descriptors[1].revents) {
+            (void)watcherWake_.drain();
+            changed = failed() && !failureAnnounced;
+        }
+        if (watcherQuit_.load(std::memory_order_acquire)) return;
+        if (descriptors[0].revents & POLLIN) {
+            std::uint64_t count;
+            ssize_t read;
+            do {
+                read = ::read(notificationFd_, &count, sizeof(count));
+            } while (read < 0 && errno == EINTR);
+            if (read == sizeof(count)) {
+                ackPending_.store(true, std::memory_order_release);
+                changed = true;
+            }
+        }
+        if (descriptors[2].revents || descriptors[3].revents) {
+            fail(-1);
+            watchingDeath = false;  // pidfd and HUP stay level-ready
+            changed = true;
+        }
+        if (changed) {
+            failureAnnounced |= failed();
+            delivery_.fetch_add(1, std::memory_order_release);
+            notifySubscribers();
+        }
+    }
+}
+
+bool BridgeProcess::refresh() {
+    const auto delivery = delivery_.load(std::memory_order_acquire);
+    if (!refreshNeeded_ && delivery == servedDelivery_) return false;
+    refreshNeeded_ = false;
+    servedDelivery_ = delivery;  // a delivery during pulls needs another pass
+    if (ackPending_.exchange(false, std::memory_order_acq_rel) && !failed())
+        (void)call(Op::AckNotifications, 0, Writer{});
+    for (auto* member : members_) member->pullSnapshot();
+    return true;
 }
 
 Result<std::shared_ptr<BridgeProcess>> createBridgeProcess() { return BridgeProcess::spawn(); }
@@ -124,6 +242,7 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     }
     std::unique_ptr<RemoteInstance> self(new RemoteInstance());
     self->process_ = std::move(process);
+    if (auto status = self->process_->initializeNotifications(); !status) return status.error();
     Writer w;
     w.str(info.path.string());
     w.str(info.id);
@@ -155,15 +274,25 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
         ports.keyChannels > kMaxChannels)
         return Error("host.layout", "bridge layout exceeds 16 channels", {},
                      "select a layout with at most 16 main and key channels");
+    self->process_->members_.push_back(self.get());
+    self->process_->refreshNeeded_ = true;
     return self;
 }
 
 RemoteInstance::~RemoteInstance() {
+    if (process_) {
+        process_->unsubscribe(*this);
+        std::erase(process_->members_, this);
+    }
     if (process_ && instanceId_ && !failed()) (void)call(Op::Destroy, Writer{}, -1, 2000);
     unmap();
 }
 
 BridgeProcess::~BridgeProcess() {
+    watcherQuit_.store(true, std::memory_order_release);
+    watcherWake_.notify();
+    if (watcher_.joinable()) watcher_.join();
+    if (notificationFd_ >= 0) ::close(notificationFd_);
     if (sock_ >= 0) ::close(sock_);
     if (pid_ > 0) {
         // The bridge exits after its final Destroy or when the socket closes.
@@ -198,7 +327,8 @@ void BridgeProcess::reap() {
     if (::waitpid(pid_, &st, WNOHANG) != pid_) return;
     pid_ = -1;
     const int why = WIFSIGNALED(st) ? WTERMSIG(st) : 0;
-    if (!failed_.exchange(true) || failSignal_.load() == -1) failSignal_.store(why);
+    fail(why);
+    if (failSignal_.load() == -1) failSignal_.store(why);
 }
 
 bool BridgeProcess::alive() const {
@@ -208,8 +338,11 @@ bool BridgeProcess::alive() const {
     return ::poll(&p, 1, 0) == 0;  // readable once the process has exited
 }
 
-void BridgeProcess::fail(int why) {
-    if (!failed_.exchange(true)) failSignal_.store(why);
+void BridgeProcess::fail(int why) SUPPLE_RT {
+    if (!failed_.exchange(true)) {
+        failSignal_.store(why, std::memory_order_release);
+        watcherWake_.notify();
+    }
 }
 
 std::string BridgeProcess::failure() const {
@@ -236,8 +369,9 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
     std::uint32_t status = 0;
     std::vector<std::uint8_t> reply;
     std::uint32_t returnedId = 0;
+    int replyFd = -1;
     if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd, deadline) ||
-        !recvFrameUntil(sock_, status, returnedId, reply, nullptr, deadline)) {
+        !recvFrameUntil(sock_, status, returnedId, reply, &replyFd, deadline)) {
         // Gone, or not answering: either way the instance is lost.
         if (alive()) {
             killBridge();
@@ -250,6 +384,13 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
             }
         }
         return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
+    }
+    if (replyFd >= 0) {
+        ::close(replyFd);
+        killBridge();
+        fail(kProtocolViolation);
+        return Error("bridge.malformed", "unexpected descriptor in bridge reply", "/fd",
+                     "use matching host and bridge builds");
     }
     Reader r(reply.data(), reply.size());
     if (returnedId == instance && status == static_cast<std::uint32_t>(Reply::Error)) {
@@ -267,6 +408,20 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
 
 Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, int fd,
                                                        int timeoutMs) {
+    switch (op) {
+        case Op::Activate:
+        case Op::Deactivate:
+        case Op::SetParam:
+        case Op::SetPatch:
+        case Op::LoadState:
+        case Op::EditorOpen:
+        case Op::EditorResize:
+        case Op::EditorClose:
+            process_->refreshNeeded_ = true;
+            break;
+        default:
+            break;
+    }
     return process_->call(op, instanceId_, w, fd, timeoutMs);
 }
 
@@ -468,7 +623,10 @@ Result<Instance::EditorSize> RemoteInstance::openEditor(unsigned long x11Parent,
     Writer w;
     w.u64(x11Parent);
     w.f64(scale);
-    return editorSize(call(Op::EditorOpen, w));
+    auto result = editorSize(call(Op::EditorOpen, w));
+    editorOpen_ = result.ok();
+    pendingEditor_ = {};
+    return result;
 }
 
 Result<Instance::EditorSize> RemoteInstance::resizeEditor(std::uint32_t width,
@@ -480,10 +638,12 @@ Result<Instance::EditorSize> RemoteInstance::resizeEditor(std::uint32_t width,
 }
 
 void RemoteInstance::closeEditor() {
+    editorOpen_ = false;
+    pendingEditor_ = {};
     if (!failed()) (void)call(Op::EditorClose, Writer{}, -1, 2000);
 }
 
-Instance::EditorRequests RemoteInstance::editorRequests() {
+Instance::EditorRequests RemoteInstance::pullEditorRequests() {
     Instance::EditorRequests q;
     if (failed()) {  // the bridge is gone, and the editor with it
         q.closed = true;
@@ -504,7 +664,9 @@ Instance::EditorRequests RemoteInstance::editorRequests() {
     return q;
 }
 
-bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::string>& log) {
+bool RemoteInstance::pullService() {
+    auto& notes = pendingNotes_;
+    auto& log = pendingLog_;
     if (failed()) {
         process_->reap();
         return false;
@@ -552,7 +714,7 @@ bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::st
     return didWork;
 }
 
-Instance::IdleOutputs RemoteInstance::takeIdleOutputs() {
+Instance::IdleOutputs RemoteInstance::pullIdleOutputs() {
     Instance::IdleOutputs out;
     auto reply = call(Op::TakeIdleOutputs, Writer{});
     if (!reply) return out;
@@ -562,6 +724,44 @@ Instance::IdleOutputs RemoteInstance::takeIdleOutputs() {
     out.events.reserve(count);
     for (std::uint32_t i = 0; i < count; ++i) out.events.push_back(readOutputEvent(r));
     return out;
+}
+
+void RemoteInstance::setMainThreadWake(MainThreadWake& wake) { process_->subscribe(*this, wake); }
+
+void RemoteInstance::pullSnapshot() {
+    pendingWork_ |= pullService();
+    if (failed()) return;
+    mergeIdleOutputs(pendingIdle_, pullIdleOutputs());
+    if (editorOpen_) mergeEditorRequests(pendingEditor_, pullEditorRequests());
+}
+
+bool RemoteInstance::service(Instance::Notifications& notes, std::vector<std::string>& log) {
+    if (!process_->refresh() && !wake_) pendingWork_ |= pullService();
+    auto pending = std::exchange(pendingNotes_, {});
+    if (!mergeNotifications(notes, pending)) {
+        notes.restartError =
+            Error("bridge.notifications_limit", "too many pending parameter clears", "/paramsClear",
+                  "drain notifications before accumulating further parameter clears");
+        pendingWork_ = false;
+    }
+    log.insert(log.end(), pendingLog_.begin(), pendingLog_.end());
+    pendingLog_.clear();
+    return std::exchange(pendingWork_, false);
+}
+
+Instance::IdleOutputs RemoteInstance::takeIdleOutputs() {
+    if (!process_->refresh() && !wake_) mergeIdleOutputs(pendingIdle_, pullIdleOutputs());
+    return std::exchange(pendingIdle_, {});
+}
+
+Instance::EditorRequests RemoteInstance::editorRequests() {
+    if (failed()) {
+        Instance::EditorRequests q;
+        q.closed = true;
+        return q;
+    }
+    if (!process_->refresh() && !wake_) mergeEditorRequests(pendingEditor_, pullEditorRequests());
+    return std::exchange(pendingEditor_, {});
 }
 
 // --- data plane (audio thread) ----------------------------------------------------------

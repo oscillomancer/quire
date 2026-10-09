@@ -34,7 +34,8 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 8: auxiliary output ports (ADR-0021) in Create and the data plane.
 // 9: the Activate reply carries the widths the plug-in settled on.
 // 10: the Header carries the audio thread's scheduling (ADR-0026).
-inline constexpr std::uint32_t kVersion = 10;
+// 11: a versioned outward notification subscription and process-level rearm.
+inline constexpr std::uint32_t kVersion = 11;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 // Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
@@ -73,11 +74,13 @@ enum class Op : std::uint32_t {
     PlainParam,       // id, normalized → plain
     // The plug-in's editor, embedded by the bridge into the host's X11 window
     // (window ids are the X server's, not a process's).
-    EditorOpen,       // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
-    EditorResize,     // u32 width, u32 height → the accepted size (as EditorOpen)
-    EditorClose,      // → ok
-    EditorRequests,   // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
-    TakeIdleOutputs,  // → u64 dropped, u32 count, [OutputEvent]
+    EditorOpen,              // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
+    EditorResize,            // u32 width, u32 height → the accepted size (as EditorOpen)
+    EditorClose,             // → ok
+    EditorRequests,          // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
+    TakeIdleOutputs,         // → u64 dropped, u32 count, [OutputEvent]
+    SubscribeNotifications,  // process id 0: u32 version (+ eventfd) → u32 version
+    AckNotifications,        // process id 0: no payload → ok
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };
@@ -237,9 +240,11 @@ bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
                const std::vector<std::uint8_t>& payload, int fd = -1,
                Deadline deadline = Deadline::max());
 bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
-               std::vector<std::uint8_t>& payload, int* fd = nullptr, int timeoutMs = -1);
+               std::vector<std::uint8_t>& payload, int* fd = nullptr, int timeoutMs = -1,
+               int* descriptorCount = nullptr);
 bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
-                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline);
+                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline,
+                    int* descriptorCount = nullptr);
 
 // --- data plane ---------------------------------------------------------------------
 

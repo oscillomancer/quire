@@ -691,6 +691,10 @@ bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
                                       : static_cast<double>(E(pl)->guiParent);
         return true;
     }
+    if (id == 10) {
+        *out = E(pl)->mainCalls;
+        return true;
+    }
     if (id == 9) {
         *out = E(pl)->timerCalls;
         return true;
@@ -788,7 +792,7 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
     if (is->read(is, buf, 4) != 4) return false;
     for (std::size_t i = 0; i < 4; ++i) E(pl)->config[i].store(buf[i]);
     if (buf[0] >= 30) E(pl)->editorValue = buf[1];
-    if (buf[0] == 2 || buf[0] == 43) {
+    if (buf[0] == 2 || buf[0] == 43 || buf[0] == 47) {
         const auto* timer = static_cast<const clap_host_timer_support_t*>(
             E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_TIMER_SUPPORT));
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[0]);
@@ -891,6 +895,11 @@ void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
     const auto* timer = static_cast<const clap_host_timer_support_t*>(
         edge.host->get_extension(edge.host, CLAP_EXT_TIMER_SUPPORT));
     ++edge.timerCalls;
+    if (edge.config[0] == 47) {
+        const auto* state = static_cast<const clap_host_state_t*>(
+            edge.host->get_extension(edge.host, CLAP_EXT_STATE));
+        state->mark_dirty(edge.host);
+    }
     if (edge.config[0] == 43) {
         const char done = 't';
         (void)::write(edge.config[1], &done, 1);  // main-thread timer receipt
@@ -934,6 +943,19 @@ const EdgeControl kEdgeControl = {edgeRequestProcess, edgeRescan, edgeClear, edg
                                   edgeMarkDirty};
 void CLAP_ABI edgeMain(const clap_plugin_t* pl) {
     ++E(pl)->mainCalls;
+    if (E(pl)->config[0] == 44) {
+        E(pl)->config[3] = 17;
+        const auto* state = static_cast<const clap_host_state_t*>(
+            E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_STATE));
+        state->mark_dirty(E(pl)->host);
+        const auto* gui = static_cast<const clap_host_gui_t*>(
+            E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_GUI));
+        gui->request_resize(E(pl)->host, 400 + E(pl)->mainCalls, 300);
+        const auto* tail = static_cast<const clap_host_tail_t*>(
+            E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_TAIL));
+        tail->changed(E(pl)->host);
+        if (E(pl)->mainCalls == 1) E(pl)->host->request_callback(E(pl)->host);
+    }
     if (E(pl)->config[0] == 42) {
         const char done = 'm';
         (void)::write(E(pl)->config[1], &done, 1);  // main-thread callback receipt
@@ -965,7 +987,8 @@ bool CLAP_ABI edgeStart(const clap_plugin_t* pl) {
 void CLAP_ABI edgeStop(const clap_plugin_t* pl) { E(pl)->processing = false; }
 clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_process_t* p) {
     const auto calls = ++E(pl)->processCalls;
-    if (E(pl)->config[0] == 42) E(pl)->host->request_callback(E(pl)->host);
+    if (E(pl)->config[0] == 42 || E(pl)->config[0] == 44)
+        E(pl)->host->request_callback(E(pl)->host);
     edgeHostInput(pl, p->in_events);
     if (E(pl)->config[0] >= 30) edgeEditorOutput(pl, p->out_events, false);
     clap_event_param_value_t param{};

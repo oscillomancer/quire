@@ -86,10 +86,10 @@ thread synchronously: audio-thread log calls go to a lock-free ring),
 host side (records `changed` flags). `request_restart`/`request_process`/
 `request_callback` set flags the app services on the main thread.
 
-Local instances can install core-base's `supple::MainThreadWake` (public
+Local and remote instances can install core-base's `supple::MainThreadWake` (public
 header `supple/base/main_thread_wake.h`, core-base spec, ADR-0029) with
-`setMainThreadWake(MainThreadWake&)` on main; it has no effect on remote
-proxies. The relay must outlive the instance and all plug-in callback threads.
+`setMainThreadWake(MainThreadWake&)` on main. Remote subscriptions are
+forwarded by their BridgeProcess (ADR-0031). The relay must outlive the instance and all plug-in callback threads.
 Installation also signals requests made during initialization. CLAP callbacks
 publish their request/notification flags before notifying: callback, restart,
 process, flush, dirty state, rescan/clear, latency/tail/semantic changes, GUI
@@ -120,6 +120,71 @@ registration/modification/removal also notify the subscribed relay. Idle output
 publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
+
+### Bridge notifications (protocol v11, ADR-0031)
+
+Before Create, the parent sends process-level `SubscribeNotifications` with
+instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
+`u32 version = 11`; the reply is `u32 version = 11`. The descriptor is checked
+for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
+Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
+wrong versions/instance ids and trailing payloads are rejected with structured
+errors; rejected descriptors are closed. A host/bridge mismatch is detected
+even when no instance is activated. Existing operation numbers are preserved;
+SubscribeNotifications and AckNotifications are appended after TakeIdleOutputs.
+`AckNotifications` uses instance 0, no payload/fd and an empty success reply.
+It requires an established subscription. Replies never carry unsolicited fds
+or asynchronous notification frames. Scan-only mode is unaffected.
+
+The child keeps parent-visible work in per-instance snapshots. On each main
+service pass it captures new notifications, ordered clears, process requests,
+log lines, idle outputs/drop counts and editor requests, plus latency/tail and
+restart/flush-state transitions. Only new captures advance its process-level
+publication generation. Capturing after a callback/timer/fd or Service also
+covers work those operations generate. An unchanged query, a timer that only
+repaints, and old retained flags do not advance the generation. Audio lifecycle
+completion wakes child main; regular audio blocks only need that additional
+wake when serving a pending flush. Process outputs already returned through
+the shared arena remain the parent's audio owner's responsibility.
+
+Child main writes its outward eventfd once for new publications, then latches
+until ACK. ACK acknowledges all publications captured before it and rearms;
+it does not consume the snapshots. The parent's parked process watcher drains
+the outward fd, publishes a pending delivery and calls subscribed app relays'
+notify(). Before pulling snapshots, parent main ACKs the drained delivery and
+refreshes every registered member, including retired/editor instances. Results
+remain in proxy caches until the existing per-instance consumers drain them.
+A publication during/after ACK or during those pulls creates another event.
+Rescans supersede older clears; clear accumulation is bounded at 4096. Idle
+snapshots and proxy output caches each hold 1024 FIFO events, drop newest on
+overflow, and retain the accumulated drop count. Editor resize requests retain
+the latest dimensions while closed/show/hide flags coalesce.
+
+Remote subscription requests an initial snapshot, including work or failure
+that predates subscription. Subscribed service, idle-output and editor-request
+consumers issue no IPC without a new delivery or a pending refresh; unrelated
+app wakes only drain retained snapshots. Without a subscription these consumers
+continue pulling on call. Remote `nextTimerMs()` returns -1: timers run in the child;
+there is no 30 ms editor poll. Editor request reads consume proxy snapshots
+rather than querying the child on each UI frame.
+
+The process watcher also watches pidfd and control HUP/ERR without consuming
+reply bytes. Death disables those level-ready watches after publication.
+Parent-local failure (including invalid process output counts from a still-live
+child) publishes atomic state and notifies an internal core-base relay; only
+the non-audio watcher forwards to the synchronized subscriber registry. Each
+distinct subscribed app relay is notified once per forwarding pass. Removing
+an instance synchronizes with forwarding before its relay may be destroyed;
+a cached shared process can outlive its last subscriber. Stop/join the watcher
+before closing its descriptors; its failure/stop relay outlives that join.
+Channel setup failures are actionable errors, never a periodic-poll fallback.
+
+The child's audio thread parks indefinitely on the shared request futex while
+idle. Main-thread shutdown publishes quit, advances the request word with
+release ordering and wakes it before joining. Audio rechecks quit before
+reading cmd. This covers shutdown before/during parking, including control
+HUP/EOF, without fabricating a processing command. Parent request/done safety
+deadlines and bounded in-flight failure checks are unchanged.
 
 Thread discipline follows CLAP: create/activate/params-info/state/GUI on the
 main thread; `process` on one audio thread. The sandbox's audio thread is
