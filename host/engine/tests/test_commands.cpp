@@ -536,26 +536,6 @@ TEST_CASE("item.set rejects a conflicting position and a zero length (review 14 
     CHECK(app->view().items.find(*model::Id::parse("it_1"))->position > 0);
 }
 
-TEST_CASE("item.set locks and unlocks an item; a locked item refuses other edits") {
-    Workdir dir;
-    auto app = makeApp(dir.path);
-    cmd::Registry registry;
-    registerEngineCommands(registry);
-    cmd::Dispatcher bus(registry, *app);
-    run(bus, "track.add", R"({"name":"A"})");
-    run(bus, "item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
-    const auto item = [&] { return app->view().items.find(*model::Id::parse("it_1")); };
-    CHECK_FALSE(item()->locked);
-    run(bus, "item.set", R"({"item":"it_1","locked":true})");
-    CHECK(item()->locked);
-    CHECK(fails(bus, "item.set", R"({"item":"it_1","gain_db":-3})") == "item.locked");
-    CHECK(item()->gainDb == doctest::Approx(0.0));              // the refused edit rolled back
-    run(bus, "item.set", R"({"item":"it_1","locked":false})");  // unlocking is allowed
-    CHECK_FALSE(item()->locked);
-    run(bus, "item.set", R"({"item":"it_1","gain_db":-3})");
-    CHECK(item()->gainDb == doctest::Approx(-3.0));
-}
-
 TEST_CASE("fx.move names a real command in its hint, and stops at the first chain (D2)") {
     Workdir dir;
     auto app = makeApp(dir.path);

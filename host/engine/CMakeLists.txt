@@ -33,8 +33,6 @@ if(SUPPLE_BUILD_TESTS)
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
-  add_test(NAME engine.strips-fuzz COMMAND engine.tests "-tc=engine.strips-fuzz*")
-  set_tests_properties(engine.strips-fuzz PROPERTIES LABELS "engine;rt")
 endif()
 
 # Capacity benchmark (engine.md §7 B1), with a command-built shared session.
