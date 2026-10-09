@@ -1,6 +1,8 @@
 #include <doctest/doctest.h>
+
 #include <supple/base/environment.h>
 #include <supple/cmd/bus.h>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -30,7 +32,7 @@ struct JobStarted {
 };
 struct FakeHost : Host, RefResolver {
     Toy toy;
-    int wakes = 0;
+    std::atomic<int> wakes{0};  // jobs and posts notify from their own threads
     void workQueued() override { ++wakes; }
     bool failRollback = false, failCapture = false, failRestore = false;
     int before = 0;
