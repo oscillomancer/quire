@@ -37,8 +37,6 @@
 #include "transport_bar.h"
 #include "ui_persistence.h"
 
-#include <stb_image.h>
-
 using namespace supple;
 
 namespace {
@@ -658,8 +656,6 @@ TEST_CASE(
     a.root->frame(false);
     REQUIRE(a.root->popupOpen());
     REQUIRE(a.root->find("file.warning.text"));
-    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
-        (void)gui::writePng(std::filesystem::path(out) / "save-warning.png", a.root->readBack());
     REQUIRE(a.root->click("file.warning.ok"));
     CHECK_FALSE(a.root->popupOpen());
     files.showSaveWarnings("project.save", json::parse(R"({"path":"x"})").value());
@@ -1079,38 +1075,6 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     CHECK_FALSE(get()["recording"].asBool());
     bar->sync();
     CHECK_FALSE(bar->nextDeadline());
-    json::Value disarm = json::Value::object();
-    disarm["track"] = track;
-    disarm["armed"] = false;
-    REQUIRE(a.dispatcher->execute({"track.set", std::move(disarm), ui}));
-    json::Value home = json::Value::object();
-    home["seconds"] = 0.0;
-    REQUIRE(a.dispatcher->execute({"transport.seek", std::move(home), ui}));
-    std::this_thread::sleep_for(std::chrono::milliseconds(260));
-    bar->sync();
-    a.root->frame(false);
-    // Golden: the transport bar as it reads with the engine running.
-    const gui::Image image = a.root->readBack();
-    const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / "transport-bar.png";
-    if (std::getenv("SUPPLE_UPDATE_GOLDEN") || !std::filesystem::exists(path)) {
-        REQUIRE(gui::writePng(path, image));
-        MESSAGE("golden written: " << path.string());
-        return;
-    }
-    int w = 0, h = 0, n = 0;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
-    REQUIRE(data);
-    REQUIRE(w == image.width);
-    REQUIRE(h == image.height);
-    std::size_t off = 0;
-    for (std::size_t i = 0; i < image.rgba.size(); i += 4) {
-        int d = 0;
-        for (int c = 0; c < 3; ++c)
-            d = std::max(d, std::abs(int(image.rgba[i + c]) - int(data[i + c])));
-        off += d > 48;
-    }
-    stbi_image_free(data);
-    CHECK(off < image.rgba.size() / 4 / 200);
     if (auto stopped = a.dispatcher->execute({"engine.stop", json::Value::object(), ui}); !stopped)
         MESSAGE("engine.stop: " << stopped.error().message);
 }

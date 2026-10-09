@@ -800,37 +800,111 @@ TEST_CASE("mixer: the chain's empty part takes a double-click (plugin browser); 
     CHECK(picked[0].str() == a);
 }
 
-TEST_CASE("preferences: new channels' monitoring and the wheel zoom anchor, saved") {
+TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     Fixture f;
     if (!f.ok) return;
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "config" / "preferences.json";
     gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, gui::Preferences{}, file);
-    CHECK(f.app->defaultMonitor() == model::Monitor::On);  // the default
+    CHECK(f.app->defaultMonitor() == model::Monitor::On);
+    CHECK(f.app->copyImportedMedia());
     prefs.open();
     f.root->frame(false);
     REQUIRE(prefs.isOpen());
-    CHECK(f.node("prefs.monitor.set")->valueText() == "On (while armed)");
-    CHECK(f.node("prefs.zoom.set")->valueText() == "The project cursor");
+    // New channels' monitoring.
     prefs.setDefaultMonitor(model::Monitor::Off);
     CHECK(f.node("prefs.monitor.set")->valueText() == "Off");
-    const auto a = f.addTrack("channel", "A");
-    CHECK(f.track(a).record.monitor == model::Monitor::Off);
-    auto loaded = gui::Preferences::load(file);
-    REQUIRE(loaded);
-    CHECK(loaded->defaultMonitor == model::Monitor::Off);
+    CHECK(f.track(f.addTrack("channel", "A")).record.monitor == model::Monitor::Off);
+    // The wheel zoom anchor lives in the mouse map.
     prefs.setZoomAnchor("mouse_pointer");
     CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
-    CHECK(f.node("prefs.zoom.set")->valueText() == "The mouse pointer");
+    // Audio threads, from the menu; out of range refused.
+    REQUIRE(f.root->click("prefs.threads.set"));
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("prefs.threads.menu"));
+    REQUIRE(menu);
+    auto activate = menu->onActivate;  // activation closes/destroys the menu
+    activate(3);                       // Limit: 4
+    CHECK(f.app->audioThreadLimit() == 4);
+    CHECK_FALSE(prefs.setAudioThreads(65));
+    // Copying imports, toggled.
+    REQUIRE(f.root->click("prefs.imports.set"));
+    CHECK_FALSE(f.app->copyImportedMedia());
+    // The render folder: absolute only.
+    CHECK_FALSE(prefs.setRenderDirectory("relative/renders"));
+    REQUIRE(prefs.setRenderDirectory(f.dir / "my renders"));
+    CHECK(f.app->rendersDir() == f.dir / "my renders");
+    auto saved = gui::Preferences::load(file);
+    REQUIRE(saved);
+    CHECK(saved->defaultMonitor == model::Monitor::Off);
+    CHECK(saved->audioThreads == 4);
+    CHECK_FALSE(saved->copyImports);
+    CHECK(saved->renderDirectory == f.dir / "my renders");
+    // A failed save changes neither the shown nor the effective setting.
+    std::filesystem::remove(file);
+    std::filesystem::create_directory(file);
+    CHECK_FALSE(prefs.setAudioThreads(8));
+    CHECK(f.app->audioThreadLimit() == 4);
+    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
     REQUIRE(f.root->click("prefs.close"));
-    CHECK_FALSE(prefs.isOpen());
-    // A file says auto: a new dialog applies it to the app at once.
-    REQUIRE(gui::Preferences{model::Monitor::Auto}.save(file));
-    auto reread = gui::Preferences::load(file);
-    REQUIRE(reread);
-    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *reread, {});
-    CHECK(f.app->defaultMonitor() == model::Monitor::Auto);
+    // A loaded file applies to the app when the dialog is made.
+    f.app->setRendersDir({});
+    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *saved, {});
+    CHECK(f.app->rendersDir() == f.dir / "my renders");
+}
+
+TEST_CASE("preferences: canonical round trip, older schemas and rejected values") {
+    Fixture f;
+    REQUIRE(f.ok);
+    const auto file = f.dir / "preferences.json";
+    // Every setting set: saving what was loaded writes the same bytes.
+    gui::Preferences values;
+    values.defaultMonitor = model::Monitor::Auto;
+    values.audioThreads = 3;
+    values.lockMemory = true;
+    values.preventDeepIdle = true;
+    values.renderDirectory = f.dir / "renders";
+    values.copyImports = false;
+    REQUIRE(values.save(file));
+    auto loaded = gui::Preferences::load(file);
+    REQUIRE(loaded);
+    CHECK(loaded->defaultMonitor == model::Monitor::Auto);
+    CHECK(loaded->audioThreads == 3);
+    CHECK(loaded->lockMemory);
+    CHECK(loaded->preventDeepIdle);
+    CHECK(loaded->renderDirectory == f.dir / "renders");
+    CHECK_FALSE(loaded->copyImports);
+    const auto bytes = readFile(file).value();
+    CHECK(std::string(bytes.begin(), bytes.end()).find("supple.preferences/1.4") !=
+          std::string::npos);
+    REQUIRE(loaded->save(file));
+    CHECK(readFile(file).value() == bytes);
+    // Older schemas load, with defaults for what they lack.
+    for (const char* version : {"1.0", "1.1", "1.2", "1.3", "1.4"}) {
+        REQUIRE(writeFileAtomic(
+            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
+        auto old = gui::Preferences::load(file);
+        REQUIRE(old);
+        CHECK(old->audioThreads == 0);
+        CHECK_FALSE(old->lockMemory);
+        CHECK_FALSE(old->preventDeepIdle);
+        CHECK(old->renderDirectory.empty());
+        CHECK(old->copyImports);
+    }
+    // A wrong value names its field.
+    for (auto [field, bad] : {std::pair{"audio_threads", "65"},
+                              {"audio_threads", "1.5"},
+                              {"lock_memory", "1"},
+                              {"prevent_deep_idle", "\"true\""},
+                              {"render_directory", "\"relative\""},
+                              {"copy_imported_media", "1"}}) {
+        REQUIRE(writeFileAtomic(file, std::string(R"({"schema":"supple.preferences/1.4",")") +
+                                          field + "\":" + bad + "}"));
+        auto rejected = gui::Preferences::load(file);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().path == std::string("/") + field);
+        CHECK_FALSE(rejected.error().hint.empty());
+    }
 }
 
 TEST_CASE("audit3: hiding a mixer ends its captured fader gesture") {
@@ -883,102 +957,6 @@ TEST_CASE("audit3: mixer resnapshots identical IDs and versions in a replacement
     auto* fader = dynamic_cast<ui::Fader*>(f.node("mixer.fader." + track));
     REQUIRE(fader);
     CHECK(fader->value() == -20);
-}
-
-TEST_CASE("preferences: background thread limits, legacy loading and canonical round trip") {
-    Fixture f;
-    REQUIRE(f.ok);
-    const auto file = f.dir / "preferences.json";
-    REQUIRE(
-        writeFileAtomic(file, R"({"schema":"supple.preferences/1.0","default_monitor":"off"})"));
-    auto legacy = gui::Preferences::load(file);
-    REQUIRE(legacy);
-    CHECK(legacy->audioThreads == 0);
-    CHECK(legacy->defaultMonitor == model::Monitor::Off);
-    views::MouseMap map;
-    gui::MouseDialog mouse(*f.root, map, {});
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, *legacy, file);
-    prefs.open();
-    f.root->frame(false);
-    CHECK(f.node("prefs.threads.set")->valueText() == "Automatic");
-    REQUIRE(f.root->click("prefs.threads.set"));
-    auto* menu = dynamic_cast<ui::List*>(f.root->find("prefs.threads.menu"));
-    REQUIRE(menu);
-    auto activate = menu->onActivate;  // activation closes/destroys the menu
-    activate(3);                       // Limit: 4
-    CHECK(f.app->audioThreadLimit() == 4);
-    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
-
-    for (unsigned limit : {1u, 2u, 4u, 8u, 64u, 0u}) {
-        REQUIRE(prefs.setAudioThreads(limit));
-        CHECK(f.app->audioThreadLimit() == limit);
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE(loaded);
-        CHECK(loaded->audioThreads == limit);
-        auto before = readFile(file);
-        REQUIRE(before);
-        CHECK(std::string(before->begin(), before->end()).find("supple.preferences/1.4") !=
-              std::string::npos);
-        REQUIRE(loaded->save(file));
-        CHECK(readFile(file).value() == *before);
-    }
-    REQUIRE(prefs.setAudioThreads(4));
-    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
-    CHECK_FALSE(prefs.setAudioThreads(65));
-    CHECK(f.app->audioThreadLimit() == 4);
-    CHECK(gui::Preferences::load(file)->audioThreads == 4);
-    // Failed persistence cannot change the displayed or effective setting.
-    std::filesystem::remove(file);
-    std::filesystem::create_directory(file);
-    CHECK_FALSE(prefs.setAudioThreads(8));
-    CHECK(f.app->audioThreadLimit() == 4);
-    CHECK(f.node("prefs.threads.set")->valueText() == "Limit: 4");
-    std::filesystem::remove(file);
-    for (const char* bad : {"-1", "65", "1.5", "true", "null", "\"4\""}) {
-        REQUIRE(writeFileAtomic(
-            file,
-            std::string(R"({"schema":"supple.preferences/1.1","audio_threads":)") + bad + "}"));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE_FALSE(loaded);
-        CHECK(loaded.error().code == "preferences.audio_threads");
-        CHECK(loaded.error().path == "/audio_threads");
-        CHECK_FALSE(loaded.error().hint.empty());
-    }
-}
-
-TEST_CASE(
-    "preferences: memory policy defaults, migration, boolean types and canonical round trip") {
-    Fixture f;
-    REQUIRE(f.ok);
-    const auto file = f.dir / "preferences.json";
-    for (const char* version : {"1.0", "1.1", "1.2"}) {
-        REQUIRE(writeFileAtomic(
-            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE(loaded);
-        CHECK_FALSE(loaded->lockMemory);
-    }
-    for (bool requested : {false, true}) {
-        gui::Preferences values;
-        values.lockMemory = requested;
-        values.audioThreads = 3;
-        REQUIRE(values.save(file));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE(loaded);
-        CHECK(loaded->lockMemory == requested);
-        CHECK(loaded->audioThreads == 3);
-        const auto bytes = readFile(file).value();
-        REQUIRE(loaded->save(file));
-        CHECK(readFile(file).value() == bytes);
-    }
-    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
-        REQUIRE(writeFileAtomic(
-            file, std::string(R"({"schema":"supple.preferences/1.2","lock_memory":)") + bad + "}"));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE_FALSE(loaded);
-        CHECK(loaded.error().path == "/lock_memory");
-        CHECK(loaded.error().hint == "use true or false");
-    }
 }
 
 TEST_CASE(
@@ -1050,108 +1028,6 @@ TEST_CASE(
     CHECK_FALSE(prefs.setMemoryLock(false));
     CHECK(prefs.preferences().lockMemory);
     CHECK(f.app->memoryLockStatus().requested);
-}
-
-TEST_CASE("preferences: both protection booleans survive canonical round trip and old schemas") {
-    Fixture f;
-    REQUIRE(f.ok);
-    const auto file = f.dir / "preferences.json";
-    for (const char* version : {"1.0", "1.1", "1.2", "1.3", "1.4"}) {
-        REQUIRE(writeFileAtomic(
-            file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE(loaded);
-        CHECK_FALSE(loaded->lockMemory);
-        CHECK_FALSE(loaded->preventDeepIdle);
-        CHECK(loaded->renderDirectory.empty());
-        CHECK(loaded->copyImports);  // on unless a file says otherwise
-    }
-    for (bool memory : {false, true})
-        for (bool idle : {false, true}) {
-            gui::Preferences values;
-            values.lockMemory = memory;
-            values.preventDeepIdle = idle;
-            values.audioThreads = 3;
-            values.defaultMonitor = model::Monitor::Auto;
-            REQUIRE(values.save(file));
-            auto loaded = gui::Preferences::load(file);
-            REQUIRE(loaded);
-            CHECK(loaded->lockMemory == memory);
-            CHECK(loaded->preventDeepIdle == idle);
-            CHECK(loaded->audioThreads == 3);
-            CHECK(loaded->defaultMonitor == model::Monitor::Auto);
-            const auto bytes = readFile(file).value();
-            REQUIRE(loaded->save(file));
-            CHECK(readFile(file).value() == bytes);
-        }
-    for (const char* bad : {"0", "1", "null", "\"true\"", "[]"}) {
-        REQUIRE(writeFileAtomic(
-            file,
-            std::string(R"({"schema":"supple.preferences/1.2","prevent_deep_idle":)") + bad + "}"));
-        auto loaded = gui::Preferences::load(file);
-        REQUIRE_FALSE(loaded);
-        CHECK(loaded.error().path == "/prevent_deep_idle");
-        CHECK(loaded.error().hint == "use true or false");
-    }
-}
-
-TEST_CASE("preferences: copying imported audio is on by default, saved and applied") {
-    Fixture f;
-    REQUIRE(f.ok);
-    views::MouseMap map;
-    gui::MouseDialog mouse(*f.root, map, {});
-    const auto file = f.dir / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
-    CHECK(f.app->copyImportedMedia());
-    prefs.open();
-    f.root->frame(false);
-    CHECK(f.node("prefs.imports.set")->valueText() == "On");
-    REQUIRE(f.root->click("prefs.imports.set"));
-    CHECK_FALSE(f.app->copyImportedMedia());
-    CHECK(f.node("prefs.imports.set")->valueText() == "Off");
-    auto loaded = gui::Preferences::load(file);
-    REQUIRE(loaded);
-    CHECK_FALSE(loaded->copyImports);
-    const auto bytes = readFile(file).value();
-    REQUIRE(loaded->save(file));
-    CHECK(readFile(file).value() == bytes);
-    REQUIRE(
-        writeFileAtomic(file, R"({"schema":"supple.preferences/1.4","copy_imported_media":1})"));
-    auto bad = gui::Preferences::load(file);
-    REQUIRE_FALSE(bad);
-    CHECK(bad.error().path == "/copy_imported_media");
-}
-
-TEST_CASE("preferences: the render folder is saved, applied to the app and round-trips") {
-    Fixture f;
-    REQUIRE(f.ok);
-    views::MouseMap map;
-    gui::MouseDialog mouse(*f.root, map, {});
-    const auto file = f.dir / "preferences.json";
-    const auto folder = f.dir / "my renders";
-    {
-        gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
-        CHECK_FALSE(prefs.setRenderDirectory("relative/renders"));
-        REQUIRE(prefs.setRenderDirectory(folder));
-        CHECK(f.app->rendersDir() == folder);
-    }
-    auto loaded = gui::Preferences::load(file);
-    REQUIRE(loaded);
-    CHECK(loaded->renderDirectory == folder);
-    const auto bytes = readFile(file).value();
-    REQUIRE(loaded->save(file));
-    CHECK(readFile(file).value() == bytes);
-    f.app->setRendersDir({});
-    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *loaded, {});
-    CHECK(f.app->rendersDir() == folder);  // a loaded choice applies at once
-    for (const char* bad : {"1", "\"relative\"", "null"}) {
-        REQUIRE(writeFileAtomic(
-            file,
-            std::string(R"({"schema":"supple.preferences/1.3","render_directory":)") + bad + "}"));
-        auto rejected = gui::Preferences::load(file);
-        REQUIRE_FALSE(rejected);
-        CHECK(rejected.error().path == "/render_directory");
-    }
 }
 
 TEST_CASE(

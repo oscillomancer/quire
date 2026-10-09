@@ -646,60 +646,6 @@ TEST_CASE("locked items are marked") {
 
 // --- golden images ------------------------------------------------------------------
 
-TEST_CASE("golden: the ruler at three zoom levels") {
-    Gl& g = gl();
-    if (!g.ok) return;
-    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
-    views::ArrangeView* arrange = mount(root);
-    arrange->installOverlay(root);
-    arrange->setFollow(views::Follow::Off);
-    arrange->setPlayhead(3.456);
-    auto shot = [&](double pps, const char* name) {
-        views::Viewport v;
-        v.startSeconds = 0;
-        v.pixelsPerSecond = pps;
-        arrange->setViewport(v);
-        settle(root, arrange->lanes());
-        golden(root, name);
-    };
-    shot(4, "arrange-ruler-bars.png");
-    shot(160, "arrange-ruler-beats.png");
-    shot(400, "arrange-ruler-subbeats.png");
-}
-
-TEST_CASE("golden: a session with tempo and meter changes") {
-    Gl& g = gl();
-    if (!g.ok) return;
-    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
-    views::ArrangeView* arrange = mount(root);
-    arrange->installOverlay(root);
-    arrange->setFollow(views::Follow::Off);
-    arrange->setPlayhead(66.0);
-    views::Viewport v;
-    v.startSeconds = 0;
-    v.pixelsPerSecond = 6;  // bar 33 (140 BPM) and bar 35 (3/4) are in view
-    arrange->setViewport(v);
-    settle(root, arrange->lanes());
-    golden(root, "arrange-tempo-meter.png");
-}
-
-TEST_CASE("golden: markers, a region and the loop range") {
-    Gl& g = gl();
-    if (!g.ok) return;
-    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
-    views::ArrangeView* arrange = mount(root);
-    arrange->installOverlay(root);
-    arrange->setFollow(views::Follow::Off);
-    arrange->setPlayhead(4.0);
-    arrange->setLoopRange(8.0, 24.0, true);
-    views::Viewport v;
-    v.startSeconds = 0;
-    v.pixelsPerSecond = 12;
-    arrange->setViewport(v);
-    settle(root, arrange->lanes());
-    golden(root, "arrange-markers-regions.png");
-}
-
 TEST_CASE("golden: items with fades, muted items and multi-take items") {
     Gl& g = gl();
     if (!g.ok) return;

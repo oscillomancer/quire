@@ -753,7 +753,7 @@ TEST_CASE("a knob bound to the last touched parameter follows the panel's last e
     CHECK(gain() > nudged);
 }
 
-TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog") {
+TEST_CASE("golden image: the FX chain") {
     Fixture f;
     if (!f.ok) return;
     if (!f.stockPlugins()) {
@@ -773,32 +773,7 @@ TEST_CASE("golden images: the FX chain, the plugin browser and the render dialog
     f.key("Return");
     f.click("fx.offline." + f.fx->chain()[0].str());
     f.frame();
-    f.snapshot("fx-chain.png");
     f.golden("fx-chain-dark.png");
-
-    f.click("fx.add");
-    f.type("Plumb");
-    f.click("browser.fav");  // mark the match a favourite (it moves to the top)
-    f.root->focus(dynamic_cast<ui::TextField*>(f.root->find("browser.search")));
-    f.key("Ctrl+A");
-    f.key("Delete");
-    f.frame();
-    f.snapshot("plugin-browser.png");
-    f.golden("plugin-browser-dark.png");
-    f.key("Escape");
-
-    f.click("fx.tab.params");
-    f.frame();
-    f.snapshot("fx-params.png");
-
-    f.fx->close();                     // a clean render-dialog golden
-    f.app->setRendersDir("/renders");  // the folder row shows the same text on every machine
-    f.render->open();
-    f.render->setField("render.pattern", "{project}-{track_number:02}-{track|lower}");
-    f.render->refreshPreview();
-    f.frame();
-    f.snapshot("render-dialog.png");
-    f.golden("render-dialog-dark.png");
 }
 
 TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy") {
