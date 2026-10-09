@@ -25,6 +25,9 @@ struct UiState {
     std::vector<std::string> selectedTracks, selectedItems;
     std::optional<std::string> trackAnchor;  // Shift+click extends from here
     bool tracksFocused = false;  // tracks were selected last (Delete removes them, not items)
+    // An automation lane was pressed last: Delete and the clipboard keys take
+    // its selected points.
+    bool envelopeFocused = false;
 };
 
 // A click on a track in a view that lists `order` (its row or strip order):
