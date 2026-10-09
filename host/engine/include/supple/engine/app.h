@@ -205,7 +205,10 @@ class EngineApp : public cmd::Host {
     Result<std::string> describeFx(const model::FxInstance& fx, bool changedOnly);
 
     // --- project files ------------------------------------------------------------
-    Status save(const std::filesystem::path& path);  // atomic; becomes the project path
+    // Atomic; becomes the project path. `warnings` names each running plug-in
+    // whose state could not be read: the file keeps the state it had before.
+    Status save(const std::filesystem::path& path,
+                std::vector<schema::Warning>* warnings = nullptr);
     Status open(const std::filesystem::path& path,
                 std::vector<schema::Warning>* warnings = nullptr);  // replaces the history
     Status newProject(model::Project project);
@@ -215,7 +218,8 @@ class EngineApp : public cmd::Host {
     // project from such a folder, its media copied into the new project's own
     // (or from an older single-file template); the template never becomes the
     // project path.
-    Status writeTemplate(const std::filesystem::path& folder);
+    Status writeTemplate(const std::filesystem::path& folder,
+                         std::vector<schema::Warning>* warnings = nullptr);
     Status openTemplate(const std::filesystem::path& path,
                         std::vector<schema::Warning>* warnings = nullptr);
     // On (the GUI's preference), item.add copies an imported audio file into
@@ -546,8 +550,10 @@ class EngineApp : public cmd::Host {
     // A running plug-in's state into the model (its blob), when it differs:
     // one coalesced undo step per plug-in. For plug-ins that report a state
     // change their parameters do not show, and for every one before a save.
-    bool captureFxState(model::Id fx);
-    void captureFxStates(const std::vector<model::Id>& fx);
+    // A plug-in that fails to report its state sets `failure` (when given).
+    bool captureFxState(model::Id fx, Error* failure = nullptr);
+    void captureFxStates(const std::vector<model::Id>& fx,
+                         std::vector<schema::Warning>* failures = nullptr);
     Status commitOutputGesture(const OutputKey& key, const OutputGesture& gesture);
     // MIDI learn (learn.cpp).
     struct LearnState {

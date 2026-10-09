@@ -77,6 +77,7 @@ class FileActions {
     Result<json::Value> exec(const std::string& command, json::Value args);
     void markSaved();
     void showError(const std::string& message);
+    void showSaveWarnings(const std::string& command, const json::Value& result);
     ui::Root& root_;
     AppActions& actions_;
     cmd::Dispatcher& dispatcher_;

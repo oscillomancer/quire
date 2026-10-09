@@ -5673,7 +5673,7 @@ Result:
 
 Save the project (canonical JSON) to its file or a new path.
 
-path: where to save (becomes the project's file); omit to save in place.
+path: where to save (becomes the project's file); omit to save in place. warnings: running plug-ins whose current state could not be read; the file keeps the state each had before (fx.restart, then save again, or replace the plug-in).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -5688,10 +5688,30 @@ Kind: `action`. Exposure: `mcp-tool`.
 ```json
 {
   "type": "object",
-  "title": "path",
+  "title": "save_result",
   "properties": {
     "path": {
       "type": "string"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "save_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
     }
   },
   "required": ["path"],
@@ -5943,7 +5963,7 @@ Result:
 
 Save the whole project as a named project template.
 
-Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to a folder of its own in the user's templates directory, with a copy of every audio file it uses. The project keeps its own file. replace: true replaces a template of that name.
+Writes the project as it is now (tracks, FX and their states, routing, items, settings; not the history) to a folder of its own in the user's templates directory, with a copy of every audio file it uses. The project keeps its own file. replace: true replaces a template of that name. warnings: running plug-ins whose current state could not be read; the template has the state each had before.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -5963,6 +5983,26 @@ Kind: `action`. Exposure: `mcp-tool`.
   "properties": {
     "path": {
       "type": "string"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "save_warning",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message", "path"],
+        "additionalProperties": false
+      }
     }
   },
   "required": ["path"],

@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -175,8 +176,40 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
 
 Result<json::Value> FileActions::exec(const std::string& command, json::Value args) {
     auto r = dispatcher_.execute({command, std::move(args), kOrigin});
-    if (!r) showError(command + ": " + r.error().message);
+    if (!r)
+        showError(command + ": " + r.error().message);
+    else if (command == "project.save")
+        showSaveWarnings(command, *r);
     return r;
+}
+
+void FileActions::showSaveWarnings(const std::string& command, const json::Value& result) {
+    // A plug-in whose state could not be read: saved, but with its old state.
+    // Said in a popup: a project that reopens without it is otherwise a surprise.
+    const json::Value* warnings = result.find("warnings");
+    if (!warnings || !warnings->isArray() || warnings->asArray().empty()) return;
+    std::string text;
+    int lines = 0;
+    for (const auto& w : warnings->asArray())
+        if (const json::Value* m = w.find("message"); m && m->isString()) {
+            text += (text.empty() ? "" : "\n") + m->asString();
+            lines += 1 + static_cast<int>(m->asString().size() / 60);
+        }
+    showError(command + ": " + text);
+    auto form = std::make_unique<ui::Node>("file.warning");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(460);
+    form->layout.height = ui::SizeRule::fixed(96 + 16 * std::min(lines, 12));
+    form->layout.padding = ui::Insets::all(14);
+    form->layout.gap = 10;
+    form->emplace<ui::Label>("file.warning.title", "Saved, but a plug-in's state was not",
+                             ui::Font::UiBold, "body");
+    form->emplace<ui::TextBlock>("file.warning.text", text, ui::Font::Ui, "small", "ink-quiet");
+    auto& row = form->emplace<ui::Node>("file.warning.buttons");
+    row.layout.dir = ui::Layout::Dir::Row;
+    row.layout.height = ui::SizeRule::fixed(28);
+    row.emplace<ui::Button>("file.warning.ok", "OK", [this] { root_.closePopup(); });
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
 }
 
 void FileActions::markSaved() {
@@ -287,6 +320,7 @@ void FileActions::saveTemplate(const std::string& name) {
     if (saved) {
         replaceTemplate_.clear();
         if (root_.find("file.template.save")) root_.closePopup();
+        showSaveWarnings("project.template.save", *saved);
         return;
     }
     if (!status) return showError("project.template.save: " + saved.error().message);

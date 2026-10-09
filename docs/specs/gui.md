@@ -540,7 +540,9 @@ leave the head version unchanged.
 
 File > New, Open…, Save, Save as… and Import audio… use the system's file
 dialogs (asynchronous; results run on the UI thread), and ask Save / Don't
-save / Cancel before unsaved changes are lost. Open and Save as start in the
+save / Cancel before unsaved changes are lost. A save (or project template)
+that comes back with warnings (a plug-in whose state could not be read keeps
+its earlier state) opens a popup listing them. Open and Save as start in the
 project's own file, else in the media folder `~/Documents/<slug>-media`
 (created on demand); any other folder can be browsed to. Renders go to the
 same media folder unless the render dialog chose another (§4.8); under

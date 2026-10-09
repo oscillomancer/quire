@@ -593,7 +593,8 @@ Result<TemplateLocation> projectTemplateAt(const EngineApp& app, const std::stri
 
 // Writes the template into a staging folder, then puts it in place (a
 // replaced template is removed only once the new one is there).
-Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool replace) {
+Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool replace,
+                              std::vector<schema::Warning>* warnings) {
     if ((at.folderExists() || at.legacyExists()) && !replace)
         return Error("template.exists",
                      "a project template named " + at.folder.filename().string() + " exists",
@@ -604,7 +605,7 @@ Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool r
     const fs::path fresh = staging / ("new-" + tag), old = staging / ("old-" + tag);
     std::error_code ec;
     fs::create_directories(staging, ec);
-    if (auto written = app.writeTemplate(fresh); !written) {
+    if (auto written = app.writeTemplate(fresh, warnings); !written) {
         fs::remove_all(fresh, ec);
         return written;
     }
@@ -635,6 +636,10 @@ struct ProjectTemplateSaveArgs {
 struct PathResult {
     std::string path;
 };
+struct TemplateSaveResult {
+    std::string path;
+    std::optional<std::vector<schema::Warning>> warnings;  // plug-in states not read
+};
 struct ProjectTemplateLoadResult {
     std::string name;
 };
@@ -647,7 +652,7 @@ struct ProjectTemplateListResult {
 
 void registerProjectTemplateCommands(cmd::Registry& registry) {
     {
-        cmd::Command<ProjectTemplateSaveArgs, PathResult> c;
+        cmd::Command<ProjectTemplateSaveArgs, TemplateSaveResult> c;
         c.name = "project.template.save";
         c.kind = cmd::Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
@@ -656,15 +661,23 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
             "Writes the project as it is now (tracks, FX and their states, routing, items, "
             "settings; not the history) to a folder of its own in the user's templates "
             "directory, with a copy of every audio file it uses. The project keeps its own file. "
-            "replace: true replaces a template of that name.";
+            "replace: true replaces a template of that name. warnings: running plug-ins whose "
+            "current state could not be read; the template has the state each had before.";
         c.tags = {"project", "presets"};
         c.args = schema::object<ProjectTemplateSaveArgs>("project_template_save_args")
                      .field("name", &ProjectTemplateSaveArgs::name, schema::string().minLength(1))
                      .field("replace", &ProjectTemplateSaveArgs::replace, schema::boolean())
                      .defaultValue(false)
                      .build();
-        c.result = schema::object<PathResult>("project_template_save_result")
-                       .field("path", &PathResult::path, schema::string())
+        c.result = schema::object<TemplateSaveResult>("project_template_save_result")
+                       .field("path", &TemplateSaveResult::path, schema::string())
+                       .field("warnings", &TemplateSaveResult::warnings,
+                              schema::arrayOf(
+                                  schema::object<schema::Warning>("save_warning")
+                                      .field("code", &schema::Warning::code, schema::string())
+                                      .field("message", &schema::Warning::message, schema::string())
+                                      .field("path", &schema::Warning::path, schema::string())
+                                      .build()))
                        .build();
         c.errors = {{"template.exists", "the name already exists",
                      "choose another name or set replace: true"},
@@ -672,12 +685,17 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
                      "restore it, or remove the items that use it"}};
         c.examples = {
             {"Save the band setup", j(R"({"name":"Band"})"), j(R"({"path":"<any>"})"), "song"}};
-        c.run = [](const ProjectTemplateSaveArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+        c.run = [](const ProjectTemplateSaveArgs& a,
+                   cmd::Context& ctx) -> Result<TemplateSaveResult> {
             auto& app = ctx.service<EngineApp>();
             auto at = projectTemplateAt(app, a.name);
             if (!at) return std::move(at).error();
-            SUPPLE_TRY(publishProjectTemplate(app, *at, a.replace));
-            return PathResult{at->folder.string()};
+            std::vector<schema::Warning> warnings;
+            SUPPLE_TRY(publishProjectTemplate(app, *at, a.replace, &warnings));
+            for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
+            TemplateSaveResult result{at->folder.string(), {}};
+            if (!warnings.empty()) result.warnings = std::move(warnings);
+            return result;
         };
         registry.add(std::move(c));
     }

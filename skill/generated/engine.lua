@@ -586,6 +586,7 @@ q = nil
 
 ---@class Quire.project_save_result
 ---@field path string
+---@field warnings? table[]
 
 ---@class Quire.project_set_args
 ---@field name? string
@@ -618,6 +619,7 @@ q = nil
 
 ---@class Quire.project_template_save_result
 ---@field path string
+---@field warnings? table[]
 
 ---@class Quire.region_add_args
 ---@field start? number

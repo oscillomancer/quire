@@ -2877,6 +2877,21 @@ TEST_CASE("a plug-in's state change beyond its parameters reaches the project, a
     const auto& saved = reopened->fx.find(fx)->state;
     REQUIRE(saved);
     CHECK(reopened->blobs.at(*saved)->data == std::vector<std::uint8_t>{0, 0, 0, 9});
+    // A state the plug-in cannot report (the fixture refuses with 7 first) is
+    // named in the save's warnings, and the file keeps the state it had.
+    REQUIRE(instance->loadState(std::vector<std::uint8_t>{7, 0, 0, 0}));
+    const auto result = call("project.save", "{}");
+    const json::Value* warnings = result.find("warnings");
+    REQUIRE(warnings);
+    REQUIRE(warnings->size() == 1);
+    const json::Value& warning = warnings->asArray()[0];
+    CHECK(warning.find("code")->asString() == "fx.state");
+    CHECK(warning.find("path")->asString() == "/fx/fx_1");
+    CHECK(blob() == std::vector<std::uint8_t>{0, 0, 0, 9});
+    // The same for a project template.
+    const auto templ = call("project.template.save", R"({"name":"stuck"})");
+    REQUIRE(templ.find("warnings"));
+    CHECK(templ.find("warnings")->size() == 1);
     app->stopEngine();
 }
 

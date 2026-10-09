@@ -495,14 +495,14 @@ fs::path EngineApp::resolve(const fs::path& path) const {
     return path.is_relative() ? options_.workdir / path : path;
 }
 
-Status EngineApp::save(const fs::path& where) {
+Status EngineApp::save(const fs::path& where, std::vector<schema::Warning>* warnings) {
     const fs::path path = resolve(where);
     if (!txn_) commitLearned(true);  // a control just moved: its values in the file
     // What running plug-ins hold now (a sampler's loaded files), as hosts
     // save it, whether or not they said it changed.
     std::vector<model::Id> running;
     for (const auto& e : head().fx) running.push_back(e.id);
-    captureFxStates(running);
+    captureFxStates(running, warnings);
     SUPPLE_TRY(model::checkInvariants(head()));
     const bool fromScratch = projectPath_.empty() && !options_.scratchDir.empty();
     if (fromScratch && engine_ && engine_->recording())
@@ -534,10 +534,10 @@ Status EngineApp::open(const fs::path& where, std::vector<schema::Warning>* warn
     return replaceProject(std::move(*s), path);
 }
 
-Status EngineApp::writeTemplate(const fs::path& folder) {
+Status EngineApp::writeTemplate(const fs::path& folder, std::vector<schema::Warning>* warnings) {
     std::vector<model::Id> running;
     for (const auto& e : head().fx) running.push_back(e.id);
-    captureFxStates(running);
+    captureFxStates(running, warnings);
     SUPPLE_TRY(model::checkInvariants(head()));
     const model::Session& s = head();
     model::EditTxn txn(s, s.version);
@@ -1132,7 +1132,7 @@ fs::path EngineApp::newerAutosave(const fs::path& project) const {
     return best;
 }
 
-bool EngineApp::captureFxState(model::Id id) {
+bool EngineApp::captureFxState(model::Id id, Error* failure) {
     if (txn_ || !pool_) return false;
     const model::FxInstance* fx = head().fx.find(id);
     host::Instance* instance = pool_->find(id);
@@ -1140,7 +1140,11 @@ bool EngineApp::captureFxState(model::Id id) {
     if (!fx || fx->patch || !instance || instance->info().semantic || pool_->failure(id))
         return false;
     auto saved = instance->saveState();
-    if (!saved || saved->empty()) return false;
+    if (!saved) {
+        if (failure) *failure = saved.error();
+        return false;
+    }
+    if (saved->empty()) return false;
     const std::string hash = "sha256:" + sha256Hex(*saved);
     if (fx->state == hash) return false;
     cmd::Origin origin{cmd::Origin::Type::Internal, "plugin", ""};
@@ -1161,8 +1165,21 @@ bool EngineApp::captureFxState(model::Id id) {
     return true;
 }
 
-void EngineApp::captureFxStates(const std::vector<model::Id>& fx) {
-    for (model::Id id : fx) (void)captureFxState(id);
+void EngineApp::captureFxStates(const std::vector<model::Id>& fx,
+                                std::vector<schema::Warning>* failures) {
+    for (model::Id id : fx) {
+        Error failure;
+        if (captureFxState(id, failures ? &failure : nullptr) || failure.code.empty()) continue;
+        const model::Session& s = head();
+        const model::FxInstance* instance = s.fx.find(id);
+        std::string where = instance ? instance->plugin.name : id.str();
+        if (const auto track = model::trackOfFx(s, id))
+            if (const model::Track* t = s.tracks.find(*track)) where += " on " + t->name;
+        failures->push_back({"fx.state",
+                             where + ": its current state could not be read (" + failure.message +
+                                 "); the state saved before is kept",
+                             "/fx/" + id.str()});
+    }
 }
 
 void EngineApp::autosave() {

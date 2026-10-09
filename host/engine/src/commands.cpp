@@ -86,6 +86,14 @@ struct ProjectInfo {
     std::optional<std::vector<schema::Warning>> warnings;
 };
 
+schema::Schema<schema::Warning> warningSchema(std::string_view title) {
+    return schema::object<schema::Warning>(std::string(title))
+        .field("code", &schema::Warning::code, schema::string())
+        .field("message", &schema::Warning::message, schema::string())
+        .field("path", &schema::Warning::path, schema::string())
+        .build();
+}
+
 schema::Schema<ProjectInfo> projectInfoSchema() {
     return schema::object<ProjectInfo>("project_info")
         .field("name", &ProjectInfo::name, schema::string())
@@ -98,12 +106,7 @@ schema::Schema<ProjectInfo> projectInfoSchema() {
         .field("generation", &ProjectInfo::generation, schema::integer())
         .field("recoverable", &ProjectInfo::recoverable, schema::integer())
         .field("autosave_available", &ProjectInfo::autosaveAvailable, schema::boolean())
-        .field("warnings", &ProjectInfo::warnings,
-               schema::arrayOf(schema::object<schema::Warning>("load_warning")
-                                   .field("code", &schema::Warning::code, schema::string())
-                                   .field("message", &schema::Warning::message, schema::string())
-                                   .field("path", &schema::Warning::path, schema::string())
-                                   .build()))
+        .field("warnings", &ProjectInfo::warnings, schema::arrayOf(warningSchema("load_warning")))
         .build();
 }
 
@@ -147,6 +150,10 @@ struct PathArgs {
 };
 struct PathResult {
     std::string path;
+};
+struct SaveResult {
+    std::string path;
+    std::optional<std::vector<schema::Warning>> warnings;  // plug-in states not read
 };
 struct TextResult {
     std::string text;
@@ -938,30 +945,39 @@ void registerEngineCommands(cmd::Registry& registry) {
     }
     // ---------------------------------------------------------------- project.save / project.open
     {
-        Command<PathArgs, PathResult> c;
+        Command<PathArgs, SaveResult> c;
         c.name = "project.save";
         c.kind = Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Save the project (canonical JSON) to its file or a new path.";
-        c.description = "path: where to save (becomes the project's file); omit to save in place.";
+        c.description =
+            "path: where to save (becomes the project's file); omit to save in place. warnings: "
+            "running plug-ins whose current state could not be read; the file keeps the state "
+            "each had before (fx.restart, then save again, or replace the plug-in).";
         c.tags = {"project"};
         c.args = schema::object<PathArgs>("path_args")
                      .field("path", &PathArgs::path, schema::string())
                      .build();
-        c.result = schema::object<PathResult>("path")
-                       .field("path", &PathResult::path, schema::string())
+        c.result = schema::object<SaveResult>("save_result")
+                       .field("path", &SaveResult::path, schema::string())
+                       .field("warnings", &SaveResult::warnings,
+                              schema::arrayOf(warningSchema("save_warning")))
                        .build();
         c.examples = {{"Save next to the work directory",
                        obj(R"({"path": "example-project.json"})"), obj(R"({"path": "<any>"})"),
                        "empty"}};
-        c.run = [](const PathArgs& a, Context& ctx) -> Result<PathResult> {
+        c.run = [](const PathArgs& a, Context& ctx) -> Result<SaveResult> {
             EngineApp& app = A(ctx);
             fs::path p = a.path ? fs::path(*a.path) : app.projectPath();
             if (p.empty())
                 return Error("project.no_path", "the project has no file yet", "/path",
                              "give a path");
-            SUPPLE_TRY(app.save(p));
-            return PathResult{app.projectPath().string()};
+            std::vector<schema::Warning> warnings;
+            SUPPLE_TRY(app.save(p, &warnings));
+            for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
+            SaveResult result{app.projectPath().string(), {}};
+            if (!warnings.empty()) result.warnings = std::move(warnings);
+            return result;
         };
         addChecked(registry, std::move(c));
     }

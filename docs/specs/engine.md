@@ -950,7 +950,10 @@ re-locates the non-live nodes and resets their plugins.
 A plain plugin's state reaches the model when it calls `clap.state
 mark_dirty` (a coalesced "Plug-in state" step per plugin) and, for every
 running plugin, before each save: a sampler's loaded files are saved even
-when it never says so (LSP's multi-samplers do not). An inactive
+when it never says so (LSP's multi-samplers do not). A plugin that cannot
+report its state then keeps the state saved before, and `project.save` /
+`project.template.save` name it in `warnings` (code `fx.state`, path
+`/fx/<id>`); the GUI shows them after a save. An inactive
 instance is activated on main using its last activation configuration; a never
 activated instance is configured by plan preparation. Explicit bypass is kept; queued note/parameter events are still processed with
 compensated dry output so note releases are not lost while bypassed.
