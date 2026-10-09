@@ -1007,12 +1007,6 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     input.push_back(2);
     arm["record_input"] = std::move(input);
     REQUIRE(a.dispatcher->execute({"track.set", std::move(arm), ui}));
-    // An armed track: the bar says where the recording will go, before it starts.
-    std::this_thread::sleep_for(std::chrono::milliseconds(260));  // the ≤ 4 Hz readouts
-    bar->sync();
-    const std::string recPath = a.root->find("transport.recpath")->valueText();
-    CHECK(recPath.rfind("rec: ", 0) == 0);
-    CHECK(recPath.find("/rec", 5) != std::string::npos);
     // The count-in button cycles none, 1, 2, 4 bars (transport.metronome).
     CHECK(a.root->find("transport.count")->valueText() == "count");
     a.root->click("transport.count");
@@ -1077,7 +1071,6 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     std::this_thread::sleep_for(std::chrono::milliseconds(260));
     bar->sync();
     a.root->frame(false);
-    CHECK(a.root->find("transport.recpath")->valueText().empty());
     // Golden: the transport bar as it reads with the engine running.
     const gui::Image image = a.root->readBack();
     const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / "transport-bar.png";

@@ -50,7 +50,6 @@ class TransportBar {
     ui::Label* position_ = nullptr;
     ui::Label* time_ = nullptr;
     ui::Label* engine_ = nullptr;
-    ui::Label* recordPath_ = nullptr;  // where recordings go, while a track is armed
     bool moving_ = false;
     std::optional<std::chrono::steady_clock::time_point> lastStatus_;
 };

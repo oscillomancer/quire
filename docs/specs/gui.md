@@ -523,8 +523,7 @@ is refused with a status message while it tracks that job.
 ### 4.9 Recording
 
 Arm, input and monitor in TCP and mixer; record mode (normal, punch,
-loop takes, ADR-0014/0015) in the transport; the record path is shown before
-recording starts (`reaper-ux.md` §10).
+loop takes, ADR-0014/0015) in the transport.
 
 ### 4.10 Command log and history
 

@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
 #include <string>
 
 #include "supple/time/timeline.h"
@@ -60,20 +59,6 @@ void setIfChanged(ui::Button* button, const std::string& text) {
 }
 
 std::string countText(int bars) { return bars > 0 ? "count " + std::to_string(bars) : "count"; }
-
-// A folder for a narrow label: the home directory as ~, the middle elided.
-std::string shortPath(const std::filesystem::path& path, std::size_t max = 44) {
-    std::string text = path.string();
-    if (const char* home = std::getenv("HOME"); home && *home) {
-        const std::string h = home;
-        if (text.rfind(h + "/", 0) == 0) text = "~" + text.substr(h.size());
-    }
-    if (text.size() > max) {
-        const std::size_t keep = max - 1, head = keep / 3;
-        text = text.substr(0, head) + "\u2026" + text.substr(text.size() - (keep - head));
-    }
-    return text;
-}
 
 }  // namespace
 
@@ -145,8 +130,6 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     meter_->layout.width = ui::SizeRule::fixed(48);
     meter_->layout.height = ui::SizeRule::fixed(22);
     bar->emplace<ui::Node>("transport.spacer");  // takes the rest
-    recordPath_ =
-        &bar->emplace<ui::Label>("transport.recpath", "", ui::Font::Mono, "small", "armed");
     engine_ =
         &bar->emplace<ui::Label>("transport.engine", "", ui::Font::Mono, "small", "ink-quiet");
     return bar;
@@ -167,12 +150,6 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
     const bool moving = info.playing || info.recording;
-    if (event || !lastStatus_ || moving != moving_) {
-        // Where a recording will go, shown before it starts (and during it).
-        bool armed = info.recording;
-        for (const auto& e : s.tracks) armed = armed || e.value->record.armed;
-        setIfChanged(recordPath_, armed ? "rec: " + shortPath(app_.recordDir()) : "");
-    }
     if (engine_ && (!lastStatus_ || moving != moving_ || (!moving && event) ||
                     (moving && now - *lastStatus_ >= std::chrono::milliseconds(250)))) {
         lastStatus_ = now;
